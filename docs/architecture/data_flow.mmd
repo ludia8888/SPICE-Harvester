@@ -1,0 +1,46 @@
+graph TB
+    %% Data Flow Architecture
+    
+    subgraph "Client Layer"
+        Web[Web Application]
+        Mobile[Mobile App]
+        API[External API]
+    end
+    
+    subgraph "API Gateway Layer"
+        BFF[Backend for Frontend]
+        Auth[Authentication]
+        RateLimit[Rate Limiter]
+    end
+    
+    subgraph "Service Layer"
+        OMS[Ontology Management]
+        Query[Query Service]
+        Validator[Validation Service]
+    end
+    
+    subgraph "Data Layer"
+        Terminus[TerminusDB]
+        Cache[Redis Cache]
+        Search[Search Index]
+    end
+    
+    %% Connections
+    Web --> BFF
+    Mobile --> BFF
+    API --> BFF
+    
+    BFF --> Auth
+    BFF --> RateLimit
+    
+    Auth --> OMS
+    Auth --> Query
+    
+    OMS --> Validator
+    Query --> Validator
+    
+    OMS --> Terminus
+    Query --> Terminus
+    Query --> Cache
+    
+    Terminus --> Search

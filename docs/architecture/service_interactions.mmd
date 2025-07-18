@@ -1,0 +1,34 @@
+sequenceDiagram
+    %% Service Interaction Flow
+    
+    participant Client
+    participant BFF as Backend for Frontend
+    participant OMS as Ontology Management Service
+    participant DB as TerminusDB
+    participant Cache as Cache Layer
+    
+    %% Standard Request Flow
+    Client->>BFF: HTTP Request
+    BFF->>BFF: Validate Request
+    BFF->>BFF: Check Permissions
+    
+    alt Cached Response Available
+        BFF->>Cache: Get Cached Data
+        Cache-->>BFF: Return Data
+        BFF-->>Client: Return Response
+    else Fresh Data Needed
+        BFF->>OMS: Forward Request
+        OMS->>OMS: Business Logic
+        OMS->>DB: Query/Update
+        DB-->>OMS: Result
+        OMS-->>BFF: Response
+        BFF->>Cache: Update Cache
+        BFF-->>Client: Formatted Response
+    end
+    
+    %% Error Handling
+    alt Error Occurs
+        OMS-->>BFF: Error Response
+        BFF->>BFF: Format Error
+        BFF-->>Client: Error Details
+    end
