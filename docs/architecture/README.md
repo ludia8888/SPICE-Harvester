@@ -1,0 +1,65 @@
+# SPICE HARVESTER Architecture
+
+> Auto-generated on 2025-07-18 10:27:31
+
+## Overview
+
+This document contains automatically generated architecture diagrams for the SPICE HARVESTER project.
+
+## Class Diagrams
+
+### Backend Classes
+
+```mermaid
+classDiagram
+    %% SPICE HARVESTER Backend Architecture
+    
+    class FastAPIApplication {
+        +FastAPI app
+        +Routers routers
+        +Middleware middleware
+        +startup()
+        +shutdown()
+    }
+    
+    class ProductionModel {
+        +String id
+        +String name
+        +DateTime created_at
+        +Dict metadata
+        +validate()
+        +save()
+    }
+    
+    class TerminusService {
+        +Connection db_connection
+        +create_production()
+        +get_production()
+        +update_production()
+        +delete_production()
+    }
+    
+    class BFFService {
+        +format_response()
+        +handle_errors()
+        +aggregate_data()
+    }
+    
+    class ComplexTypeHandler {
+        +Dict type_registry
+        +validate_type()
+        +serialize()
+        +deserialize()
+    }
+    
+    FastAPIApplication --> TerminusService : uses
+    FastAPIApplication --> BFFService : uses
+    TerminusService --> ProductionModel : manages
+    BFFService --> ComplexTypeHandler : uses
+    ProductionModel --> ComplexTypeHandler : validates with
+```
+
+### Classes Spice Harvester
+
+*Diagram generation pending for Classes Spice Harvester*
+
