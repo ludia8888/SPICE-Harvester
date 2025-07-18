@@ -7,6 +7,7 @@ import sys
 import os
 from typing import Optional, List, Dict, Any
 from fastapi import HTTPException, status
+import httpx
 
 # shared 모듈 경로 추가
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
@@ -341,6 +342,95 @@ class TerminusService:
             
         except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
             raise RuntimeError(f"충돌 상세 정보 조회 실패 ({db_name}): {e}")
+    
+    # 🔥 THINK ULTRA! 고급 관계 관리 메서드들 - OMS 실제 구현 호출
+    
+    async def create_ontology_with_advanced_relationships(
+        self, db_name: str, ontology_data: Dict[str, Any],
+        auto_generate_inverse: bool = True,
+        validate_relationships: bool = True,
+        check_circular_references: bool = True
+    ) -> Dict[str, Any]:
+        """고급 관계 관리 기능을 포함한 온톨로지 생성 - OMS API 호출"""
+        client = get_oms_client()
+        try:
+            response = await client.client.post(
+                f"/api/v1/ontology/{db_name}/create-advanced",
+                json=ontology_data,
+                params={
+                    "auto_generate_inverse": auto_generate_inverse,
+                    "validate_relationships": validate_relationships,
+                    "check_circular_references": check_circular_references
+                }
+            )
+            response.raise_for_status()
+            return response.json()
+        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
+            raise RuntimeError(f"고급 온톨로지 생성 실패 ({db_name}): {e}")
+    
+    async def validate_relationships(self, db_name: str, ontology_data: Dict[str, Any]) -> Dict[str, Any]:
+        """관계 검증 - OMS API 호출"""
+        client = get_oms_client()
+        try:
+            response = await client.client.post(
+                f"/api/v1/ontology/{db_name}/validate-relationships",
+                json=ontology_data
+            )
+            response.raise_for_status()
+            return response.json()
+        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
+            raise RuntimeError(f"관계 검증 실패 ({db_name}): {e}")
+    
+    async def detect_circular_references(
+        self, db_name: str, 
+        include_new_ontology: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """순환 참조 탐지 - OMS API 호출"""
+        client = get_oms_client()
+        try:
+            # OMS는 new_ontology를 body 최상위에서 받음
+            data = include_new_ontology if include_new_ontology else None
+            response = await client.client.post(
+                f"/api/v1/ontology/{db_name}/detect-circular-references",
+                json=data
+            )
+            response.raise_for_status()
+            return response.json()
+        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
+            raise RuntimeError(f"순환 참조 탐지 실패 ({db_name}): {e}")
+    
+    async def analyze_relationship_network(self, db_name: str) -> Dict[str, Any]:
+        """관계 네트워크 분석 - OMS API 호출"""
+        client = get_oms_client()
+        try:
+            response = await client.client.get(
+                f"/api/v1/ontology/{db_name}/analyze-network"
+            )
+            response.raise_for_status()
+            return response.json()
+        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
+            raise RuntimeError(f"관계 네트워크 분석 실패 ({db_name}): {e}")
+    
+    async def find_relationship_paths(
+        self, db_name: str, start_entity: str, 
+        end_entity: Optional[str] = None, **query_params
+    ) -> Dict[str, Any]:
+        """관계 경로 탐색 - OMS API 호출"""
+        client = get_oms_client()
+        try:
+            params = {}
+            if end_entity:
+                params["end_entity"] = end_entity
+            params.update(query_params)  # max_depth, path_type 등
+            
+            response = await client.client.get(
+                f"/api/v1/ontology/{db_name}/relationship-paths/{start_entity}",
+                params=params
+            )
+            response.raise_for_status()
+            return response.json()
+        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
+            raise RuntimeError(f"관계 경로 탐색 실패 ({db_name}): {e}")
 
 
 # JSON-LD 변환기

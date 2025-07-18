@@ -70,6 +70,7 @@ spec2.loader.exec_module(path_module)
 RelationshipPathTracker = path_module.RelationshipPathTracker
 PathQuery = path_module.PathQuery
 RelationshipPath = path_module.RelationshipPath
+PathType = path_module.PathType
 
 logger = logging.getLogger(__name__)
 
@@ -1384,7 +1385,14 @@ class AsyncTerminusService:
         enhanced_data["relationships"] = [rel.dict() for rel in enhanced_relationships]
         
         # 검증 및 순환 참조 정보를 메타데이터에 추가
-        enhanced_data.setdefault("metadata", {}).update({
+        if "metadata" not in enhanced_data:
+            enhanced_data["metadata"] = {}
+        
+        # 메타데이터가 None인 경우 처리
+        if enhanced_data["metadata"] is None:
+            enhanced_data["metadata"] = {}
+            
+        enhanced_data["metadata"].update({
             "relationship_validation": {
                 "validated": validate_relationships,
                 "validation_results": len(validation_results),
@@ -1402,7 +1410,7 @@ class AsyncTerminusService:
         
         # 6. 실제 온톨로지 생성
         try:
-            result = await self.create_ontology(db_name, enhanced_data)
+            result = await self.create_ontology_class(db_name, enhanced_data)
             
             # 캐시 무효화
             if db_name in self._ontology_cache:
@@ -1413,8 +1421,24 @@ class AsyncTerminusService:
             
             logger.info(f"✅ Successfully created ontology with enhanced relationships: {ontology.id}")
             
+            # result가 리스트인 경우 처리
+            if isinstance(result, list):
+                # TerminusDB가 응답을 리스트로 반환하는 경우가 있음
+                result_data = {
+                    "id": enhanced_data.get("id"),
+                    "created": True,
+                    "response": result
+                }
+            elif isinstance(result, dict):
+                result_data = result
+            else:
+                result_data = {
+                    "id": enhanced_data.get("id"),
+                    "created": True
+                }
+            
             return {
-                **result,
+                **result_data,
                 "relationship_enhancements": {
                     "validation_results": validation_results,
                     "cycle_info": cycle_info,
@@ -1497,6 +1521,15 @@ class AsyncTerminusService:
         # 관계 그래프 업데이트
         await self._update_relationship_graphs(db_name)
         
+        # path_type을 PathType enum으로 변환
+        if 'path_type' in query_params:
+            path_type_str = query_params.pop('path_type')
+            try:
+                query_params['path_type'] = PathType(path_type_str)
+            except ValueError:
+                # 잘못된 path_type인 경우 기본값 사용
+                query_params['path_type'] = PathType.SHORTEST
+        
         # 경로 쿼리 생성
         query = PathQuery(
             start_entity=start_entity,
@@ -1524,7 +1557,7 @@ class AsyncTerminusService:
                     "predicates": p.predicates,
                     "length": p.length,
                     "total_weight": p.total_weight,
-                    "path_type": p.path_type.value,
+                    "path_type": p.path_type.value if hasattr(p.path_type, 'value') else p.path_type,
                     "semantic_score": p.semantic_score,
                     "confidence": p.confidence,
                     "readable_path": p.to_readable_string()

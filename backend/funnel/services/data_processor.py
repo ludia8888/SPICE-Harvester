@@ -1,0 +1,234 @@
+"""
+🔥 THINK ULTRA! Funnel Data Processor Service
+Data Connector와 OMS/BFF 사이의 데이터 처리 레이어
+"""
+
+from typing import Dict, Any, List, Optional
+import httpx
+from datetime import datetime
+
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+
+from data_connector.google_sheets.models import GoogleSheetPreviewRequest, GoogleSheetPreviewResponse
+from funnel.services.type_inference import FunnelTypeInferenceService
+from funnel.models import (
+    FunnelPreviewRequest, 
+    FunnelPreviewResponse,
+    DatasetAnalysisRequest,
+    DatasetAnalysisResponse,
+    ColumnAnalysisResult
+)
+
+
+class FunnelDataProcessor:
+    """
+    🔥 THINK ULTRA! 데이터 처리 파이프라인
+    
+    Architecture Flow:
+    1. Data Connector (Google Sheets, CSV, etc.) → Raw Data
+    2. Funnel → Type Inference & Data Processing
+    3. OMS/BFF → Schema Generation & Storage
+    """
+    
+    def __init__(self):
+        self.type_inference_service = FunnelTypeInferenceService
+        
+    async def process_google_sheets_preview(
+        self,
+        sheet_url: str,
+        worksheet_name: Optional[str] = None,
+        api_key: Optional[str] = None,
+        infer_types: bool = True,
+        include_complex_types: bool = False
+    ) -> FunnelPreviewResponse:
+        """
+        Google Sheets 데이터를 처리하고 타입을 추론합니다.
+        
+        Args:
+            sheet_url: Google Sheets URL
+            worksheet_name: 워크시트 이름
+            api_key: Google API 키
+            infer_types: 타입 추론 여부
+            include_complex_types: 복합 타입 검사 여부
+            
+        Returns:
+            타입이 추론된 preview 응답
+        """
+        # 1. Google Sheets connector를 통해 데이터 가져오기
+        preview_request = GoogleSheetPreviewRequest(
+            sheet_url=sheet_url,
+            worksheet_name=worksheet_name,
+            api_key=api_key
+        )
+        
+        # Google Sheets service 호출 (실제로는 의존성 주입으로 처리)
+        # 여기서는 직접 HTTP 요청으로 시뮬레이션
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "http://localhost:8002/api/v1/data-connectors/google-sheets/preview",
+                json=preview_request.dict()
+            )
+            
+            if response.status_code != 200:
+                raise Exception(f"Failed to fetch Google Sheets data: {response.text}")
+            
+            sheets_preview = GoogleSheetPreviewResponse(**response.json())
+        
+        # 2. 타입 추론 수행
+        inferred_schema = None
+        if infer_types and sheets_preview.sample_rows:
+            analysis_results = self.type_inference_service.analyze_dataset(
+                data=sheets_preview.sample_rows,
+                columns=sheets_preview.columns,
+                include_complex_types=include_complex_types
+            )
+            inferred_schema = analysis_results
+        
+        # 3. Funnel response 생성
+        return FunnelPreviewResponse(
+            source_metadata={
+                "type": "google_sheets",
+                "sheet_id": sheets_preview.sheet_id,
+                "sheet_title": sheets_preview.sheet_title,
+                "worksheet_title": sheets_preview.worksheet_title
+            },
+            columns=sheets_preview.columns,
+            sample_data=sheets_preview.sample_rows,
+            inferred_schema=inferred_schema,
+            total_rows=sheets_preview.total_rows,
+            preview_rows=len(sheets_preview.sample_rows)
+        )
+    
+    async def analyze_dataset(
+        self,
+        request: DatasetAnalysisRequest
+    ) -> DatasetAnalysisResponse:
+        """
+        데이터셋을 분석하고 타입을 추론합니다.
+        
+        Args:
+            request: 데이터셋 분석 요청
+            
+        Returns:
+            분석 결과
+        """
+        # 타입 추론 수행
+        analysis_results = self.type_inference_service.analyze_dataset(
+            data=request.data,
+            columns=request.columns,
+            sample_size=request.sample_size,
+            include_complex_types=request.include_complex_types
+        )
+        
+        # 메타데이터 생성
+        metadata = {
+            "total_columns": len(request.columns),
+            "analyzed_rows": min(len(request.data), request.sample_size or len(request.data)),
+            "include_complex_types": request.include_complex_types,
+            "analysis_version": "1.0"
+        }
+        
+        return DatasetAnalysisResponse(
+            columns=analysis_results,
+            analysis_metadata=metadata,
+            timestamp=datetime.utcnow()
+        )
+    
+    def generate_schema_suggestion(
+        self,
+        analysis_results: List[ColumnAnalysisResult],
+        class_name: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        분석 결과를 기반으로 스키마를 제안합니다.
+        
+        Args:
+            analysis_results: 컬럼 분석 결과
+            class_name: 클래스 이름 (선택사항)
+            
+        Returns:
+            OMS에서 사용할 수 있는 스키마 제안
+        """
+        properties = []
+        
+        for result in analysis_results:
+            # 높은 confidence의 타입만 사용
+            if result.inferred_type.confidence >= 0.7:
+                data_type = result.inferred_type.type
+            else:
+                data_type = "xsd:string"  # 기본값
+            
+            property_def = {
+                "name": self._normalize_property_name(result.column_name),
+                "type": data_type,
+                "label": {"ko": result.column_name},
+                "description": {"ko": f"{result.inferred_type.reason} (신뢰도: {result.inferred_type.confidence:.0%})"},
+                "required": result.null_count == 0,  # null이 없으면 필수 필드로 제안
+                "metadata": {
+                    "inferred_confidence": result.inferred_type.confidence,
+                    "unique_ratio": result.unique_count / len(result.sample_values) if result.sample_values else 0,
+                    "null_ratio": result.null_count / (result.null_count + len(result.sample_values)) if result.sample_values else 0
+                }
+            }
+            
+            # 타입별 추가 제약조건
+            if data_type == "xsd:string" and result.unique_count == len(result.sample_values):
+                property_def["constraints"] = {"unique": True}
+            elif data_type in ["xsd:integer", "xsd:decimal"]:
+                if result.sample_values:
+                    numeric_values = []
+                    for val in result.sample_values:
+                        try:
+                            numeric_values.append(float(val))
+                        except:
+                            pass
+                    if numeric_values:
+                        property_def["constraints"] = {
+                            "min": min(numeric_values),
+                            "max": max(numeric_values)
+                        }
+            
+            properties.append(property_def)
+        
+        # 클래스 이름 생성
+        if not class_name:
+            class_name = "GeneratedClass" + datetime.utcnow().strftime("%Y%m%d%H%M%S")
+        
+        return {
+            "id": self._generate_class_id(class_name),
+            "label": {"ko": class_name},
+            "description": {"ko": f"Funnel 서비스에서 자동 생성된 스키마 (컬럼 {len(properties)}개)"},
+            "properties": properties,
+            "metadata": {
+                "generated_by": "funnel",
+                "generation_date": datetime.utcnow().isoformat(),
+                "confidence_scores": {
+                    result.column_name: result.inferred_type.confidence 
+                    for result in analysis_results
+                }
+            }
+        }
+    
+    def _normalize_property_name(self, column_name: str) -> str:
+        """컬럼 이름을 속성 이름으로 정규화"""
+        # 공백을 언더스코어로 변환
+        normalized = column_name.replace(' ', '_').replace('-', '_')
+        # 특수문자 제거
+        normalized = ''.join(c for c in normalized if c.isalnum() or c == '_')
+        # 소문자로 변환
+        normalized = normalized.lower()
+        # 숫자로 시작하면 앞에 'col_' 추가
+        if normalized and normalized[0].isdigit():
+            normalized = 'col_' + normalized
+        # 빈 문자열이면 기본값
+        if not normalized:
+            normalized = 'column'
+        return normalized
+    
+    def _generate_class_id(self, class_name: str) -> str:
+        """클래스 ID 생성"""
+        # CamelCase로 변환
+        parts = class_name.replace('_', ' ').replace('-', ' ').split()
+        return ''.join(word.capitalize() for word in parts)

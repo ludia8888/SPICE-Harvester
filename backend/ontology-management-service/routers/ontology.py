@@ -220,6 +220,45 @@ async def list_ontologies(
             detail=str(e)
         )
 
+@router.get("/analyze-network")
+async def analyze_relationship_network(
+    db_name: str,  # 이미 라우터 경로에서 추출됨
+    terminus: AsyncTerminusService = Depends(get_terminus_service)
+):
+    """
+    🔥 관계 네트워크 종합 분석 엔드포인트
+    
+    전체 관계 네트워크의 건강성과 통계를 분석
+    """
+    try:
+        # 입력 데이터 보안 검증
+        db_name = validate_db_name(db_name)
+        
+        # 데이터베이스 존재 여부 확인
+        await _ensure_database_exists(db_name, terminus)
+        
+        # 네트워크 분석 수행
+        analysis_result = await terminus.analyze_relationship_network(db_name)
+        
+        return {
+            "status": "success",
+            "message": "관계 네트워크 분석이 완료되었습니다",
+            "data": analysis_result
+        }
+        
+    except SecurityViolationError as e:
+        logger.warning(f"Security violation in analyze_relationship_network: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="입력 데이터에 보안 위반이 감지되었습니다"
+        )
+    except Exception as e:
+        logger.error(f"Failed to analyze relationship network: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
 @router.get("/{class_id}", response_model=OntologyResponse)
 async def get_ontology(
     db_name: str,
@@ -513,10 +552,20 @@ async def create_ontology_with_advanced_relationships(
             except Exception as e:
                 logger.warning(f"Failed to register labels for {class_id}: {e}")
         
+        # OntologyResponse를 위한 완전한 데이터 구성
+        response_data = {
+            "id": class_id,
+            "label": ontology_data.get("label"),
+            "description": ontology_data.get("description"),
+            "properties": ontology_data.get("properties", []),
+            "relationships": ontology_data.get("relationships", []),
+            **result  # 추가 메타데이터 포함
+        }
+        
         return OntologyResponse(
             status="success",
             message=f"고급 관계 기능을 포함한 온톨로지 '{class_id}'가 생성되었습니다",
-            data=result
+            data=response_data
         )
         
     except SecurityViolationError as e:
@@ -528,7 +577,9 @@ async def create_ontology_with_advanced_relationships(
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
         logger.error(f"Failed to create ontology with advanced relationships: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
@@ -689,7 +740,9 @@ async def find_relationship_paths(
             detail="입력 데이터에 보안 위반이 감지되었습니다"
         )
     except Exception as e:
+        import traceback
         logger.error(f"Failed to find relationship paths: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
@@ -750,41 +803,3 @@ async def get_reachable_entities(
         )
 
 
-@router.get("/analyze-network")
-async def analyze_relationship_network(
-    db_name: str,
-    terminus: AsyncTerminusService = Depends(get_terminus_service)
-):
-    """
-    🔥 관계 네트워크 종합 분석 엔드포인트
-    
-    전체 관계 네트워크의 건강성과 통계를 분석
-    """
-    try:
-        # 입력 데이터 보안 검증
-        db_name = validate_db_name(db_name)
-        
-        # 데이터베이스 존재 여부 확인
-        await _ensure_database_exists(db_name, terminus)
-        
-        # 네트워크 분석 수행
-        analysis_result = await terminus.analyze_relationship_network(db_name)
-        
-        return {
-            "status": "success",
-            "message": "관계 네트워크 분석이 완료되었습니다",
-            "data": analysis_result
-        }
-        
-    except SecurityViolationError as e:
-        logger.warning(f"Security violation in analyze_relationship_network: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다"
-        )
-    except Exception as e:
-        logger.error(f"Failed to analyze relationship network: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )

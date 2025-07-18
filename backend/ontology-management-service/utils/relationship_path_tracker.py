@@ -216,8 +216,9 @@ class RelationshipPathTracker:
     def find_paths(self, query: PathQuery) -> List[RelationshipPath]:
         """경로 탐색 (쿼리 기반)"""
         
+        path_type_str = query.path_type.value if hasattr(query.path_type, 'value') else query.path_type
         logger.info(f"Finding paths: {query.start_entity} -> {query.end_entity} "
-                   f"(type: {query.path_type.value}, max_depth: {query.max_depth})")
+                   f"(type: {path_type_str}, max_depth: {query.max_depth})")
         
         if query.start_entity not in self.entities:
             logger.warning(f"Start entity '{query.start_entity}' not found in graph")

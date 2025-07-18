@@ -507,6 +507,7 @@ async def create_ontology_with_relationship_validation(
         )
         
         return OntologyResponse(
+            status="success",
             data=ontology_base,
             message=f"고급 관계 기능을 포함한 온톨로지 '{class_id}'가 생성되었습니다"
         )
@@ -642,10 +643,16 @@ async def check_circular_references_bff(
             else:
                 label = getattr(ontology.label, 'en', None) or getattr(ontology.label, 'ko', None) or "TempClass"
             
-            class_id = re.sub(r'[^\w\s]', '', label)
-            class_id = ''.join(word.capitalize() for word in class_id.split())
-            if not class_id or class_id[0].isdigit():
-                class_id = 'TempClass'
+            # 한글이 포함된 경우 처리
+            if any('\u4e00' <= char <= '\u9fff' or '\uac00' <= char <= '\ud7af' for char in label):
+                # 한글이 포함된 경우 기본 ID 사용
+                import time
+                class_id = f"TempClass{int(time.time() * 1000) % 1000000}"
+            else:
+                class_id = re.sub(r'[^\w\s]', '', label)
+                class_id = ''.join(word.capitalize() for word in class_id.split())
+                if not class_id or (class_id and class_id[0].isdigit()):
+                    class_id = 'TempClass'
                 
             ontology_dict["id"] = class_id
             new_ontology_data = ontology_dict

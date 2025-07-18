@@ -1114,12 +1114,19 @@ async def rollback(
 # 라우터 등록
 from routers import database, ontology, query, mapping, health, merge_conflict
 
+# Google Sheets data connector import
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from data_connector.google_sheets.router import router as google_sheets_router
+
 app.include_router(database.router, prefix="/api/v1", tags=["database"])
 app.include_router(ontology.router, prefix="/api/v1", tags=["ontology"])
 app.include_router(query.router, prefix="/api/v1", tags=["query"])
 app.include_router(mapping.router, prefix="/api/v1", tags=["mapping"])
 app.include_router(health.router, prefix="/api/v1", tags=["health"])
 app.include_router(merge_conflict.router, prefix="/api/v1", tags=["merge-conflict"])
+
+# Google Sheets data connector 라우터 등록
+app.include_router(google_sheets_router, prefix="/api/v1", tags=["data-connectors"])
 
 
 if __name__ == "__main__":
