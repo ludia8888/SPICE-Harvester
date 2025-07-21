@@ -10,11 +10,14 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
-COPY requirements.txt .
+COPY funnel/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the entire backend directory (contains all services)
-COPY . .
+# Copy shared modules first
+COPY shared /app/shared
+
+# Copy application code
+COPY funnel /app/funnel
 
 # Expose port
 EXPOSE 8003

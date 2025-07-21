@@ -50,6 +50,7 @@ class DataType(Enum):
     ADDRESS = "address"
     IMAGE = "image"
     FILE = "file"
+    DATE_COMPLEX = "date"  # Complex date type that maps to xsd:dateTime
 
     @classmethod
     def from_python_type(cls, py_type: type) -> "DataType":
@@ -133,14 +134,45 @@ class DataType(Enum):
             cls.ADDRESS.value,
             cls.IMAGE.value,
             cls.FILE.value,
+            cls.DATE_COMPLEX.value,  # DATE is also a complex type that needs conversion
         }
         return data_type.lower() in complex_types
 
     @classmethod
     def get_base_type(cls, data_type: str) -> str:
         """Get base type for complex types"""
-        data_type_lower = data_type.lower()
+        data_type_lower = data_type.lower().strip()
 
+        # 🔥 THINK ULTRA! 복합 타입을 명시적으로 기본 타입으로 매핑
+        complex_type_mapping = {
+            # 문자열 기반 복합 타입들
+            "email": cls.STRING.value,
+            "phone": cls.STRING.value,
+            "address": cls.STRING.value,
+            "url": cls.URI.value,  # 🔥 ULTRA FIX: xsd:anyURI 사용
+            "uri": cls.URI.value,  # 🔥 ULTRA FIX: xsd:anyURI 사용
+            "image": cls.STRING.value,
+            "file": cls.STRING.value,
+            "enum": cls.STRING.value,
+            "uuid": cls.STRING.value,
+            
+            # 날짜/시간 타입
+            "date": cls.DATETIME.value,  # 🔥 FIX: DATE 타입은 xsd:dateTime으로 매핑
+            
+            # 숫자 기반 타입들
+            "money": cls.DECIMAL.value,
+            "coordinate": cls.STRING.value,  # "lat,lng" 형태로 저장
+            
+            # 배열과 객체는 JSON 문자열로 저장
+            "array": cls.STRING.value,
+            "object": cls.STRING.value,
+        }
+        
+        # 정확한 타입 이름 매칭 우선
+        if data_type_lower in complex_type_mapping:
+            return complex_type_mapping[data_type_lower]
+        
+        # 패턴 기반 매칭 (기존 로직 유지)
         if "string" in data_type_lower or "text" in data_type_lower:
             return cls.STRING.value
         elif "int" in data_type_lower or "number" in data_type_lower:
@@ -149,10 +181,13 @@ class DataType(Enum):
             return cls.FLOAT.value
         elif "bool" in data_type_lower:
             return cls.BOOLEAN.value
+        elif "datetime" in data_type_lower:
+            return cls.DATETIME.value
         elif "date" in data_type_lower:
-            return cls.DATE.value
+            return cls.DATETIME.value  # 🔥 FIX: date도 xsd:dateTime으로 매핑
         else:
-            return cls.STRING.value  # Default to string
+            # 모든 알 수 없는 타입은 안전하게 string으로 변환
+            return cls.STRING.value
 
 
 class Cardinality(Enum):

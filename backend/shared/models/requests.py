@@ -13,6 +13,7 @@ class BranchCreateRequest(BaseModel):
 
     branch_name: str = Field(..., description="Branch name")
     description: Optional[str] = Field(None, description="Branch description")
+    from_branch: Optional[str] = Field(None, description="Create from specific branch")
     from_commit: Optional[str] = Field(None, description="Create from specific commit")
 
 

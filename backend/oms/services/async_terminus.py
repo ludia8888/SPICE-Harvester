@@ -166,7 +166,7 @@ class AsyncTerminusService:
         return self._auth_token
 
     async def _make_request(
-        self, method: str, endpoint: str, data: Optional[Dict] = None, params: Optional[Dict] = None
+        self, method: str, endpoint: str, data: Optional[Any] = None, params: Optional[Dict] = None
     ) -> Dict[str, Any]:
         """HTTP 요청 실행"""
         client = await self._get_client()
@@ -179,23 +179,79 @@ class AsyncTerminusService:
         }
 
         try:
+            # 🔥 THINK ULTRA! 요청 정보 상세 로깅
+            logger.info(f"🌐 HTTP {method} {endpoint}")
+            logger.info(f"📦 Headers: {headers}")
+            logger.info(f"📄 JSON data: {json.dumps(data, indent=2, ensure_ascii=False) if data else 'None'}")
+            logger.info(f"🔗 Params: {params}")
+            
+            # 요청 크기 및 데이터 타입 정보
+            if data:
+                logger.info(f"📊 Data type: {type(data)}")
+                if isinstance(data, list):
+                    logger.info(f"📊 Data is list with {len(data)} items")
+                    if data:
+                        logger.info(f"📊 First item type: {type(data[0])}")
+                elif isinstance(data, dict):
+                    logger.info(f"📊 Data is dict with keys: {list(data.keys())}")
+            
             response = await client.request(
                 method=method, url=endpoint, json=data, params=params, headers=headers
             )
+            
+            logger.info(f"📨 Response status: {response.status_code}")
+            logger.info(f"📨 Response headers: {dict(response.headers)}")
+            logger.info(f"📨 Response content type: {response.headers.get('content-type', 'Unknown')}")
+            
             response.raise_for_status()
 
             # TerminusDB 응답이 빈 경우 처리
-            if response.text.strip():
-                return response.json()
+            response_text = response.text.strip()
+            logger.info(f"📨 Response text length: {len(response_text)}")
+            
+            if response_text:
+                # 응답 크기가 클 경우 처음 500자만 로깅
+                if len(response_text) > 500:
+                    logger.info(f"📨 Response text (first 500 chars): {response_text[:500]}...")
+                else:
+                    logger.info(f"📨 Response text: {response_text}")
+                
+                try:
+                    json_response = response.json()
+                    logger.info(f"📨 Parsed JSON response type: {type(json_response)}")
+                    return json_response
+                except json.JSONDecodeError as e:
+                    logger.error(f"❌ Failed to parse JSON response: {e}")
+                    logger.error(f"❌ Raw response: {response_text[:1000]}")
+                    raise
             else:
                 # 빈 응답은 성공적인 작업을 의미할 수 있음 (예: DELETE)
-                # 가짜 성공 응답 대신 빈 dict 반환
+                logger.info("📨 Empty response (might be successful operation)")
                 return {}
 
         except httpx.HTTPStatusError as e:
             error_detail = ""
             try:
                 error_detail = e.response.text
+                logger.error(f"❌ HTTP Error {e.response.status_code} for {method} {endpoint}")
+                logger.error(f"❌ Error response: {error_detail[:1000]}")
+                
+                # JSON 형식의 오류 메시지 파싱 시도
+                try:
+                    error_json = e.response.json()
+                    logger.error(f"❌ Parsed error JSON: {json.dumps(error_json, indent=2, ensure_ascii=False)}")
+                    
+                    # TerminusDB 특정 오류 메시지 추출
+                    if isinstance(error_json, dict):
+                        if "api:error" in error_json:
+                            terminus_error = error_json["api:error"]
+                            logger.error(f"❌ TerminusDB error: {terminus_error}")
+                        if "api:message" in error_json:
+                            terminus_message = error_json["api:message"]
+                            logger.error(f"❌ TerminusDB message: {terminus_message}")
+                except:
+                    pass
+                    
             except AttributeError:
                 # response.text가 없을 수 있음
                 pass
@@ -205,7 +261,9 @@ class AsyncTerminusService:
             if e.response.status_code == 404:
                 raise AsyncOntologyNotFoundError(f"리소스를 찾을 수 없습니다: {endpoint}")
             elif e.response.status_code == 409:
-                raise AsyncDuplicateOntologyError(f"중복된 리소스: {endpoint}")
+                logger.error(f"❌ Duplicate resource conflict for: {endpoint}")
+                logger.error(f"❌ Request data was: {json.dumps(data, indent=2, ensure_ascii=False) if data else 'None'}")
+                raise AsyncDuplicateOntologyError(f"중복된 리소스: {endpoint}. 상세: {error_detail[:200]}")
             else:
                 raise AsyncDatabaseError(
                     f"HTTP 오류 {e.response.status_code}: {e}. 응답: {error_detail}"
@@ -418,22 +476,43 @@ class AsyncTerminusService:
         """온톨로지 클래스 생성"""
         await self.ensure_db_exists(db_name)
 
-        # TerminusDB 스키마 업데이트 엔드포인트
-        endpoint = f"/api/schema/{self.connection_info.account}/{db_name}"
+        # 🔥 THINK ULTRA FIX! Document API 사용 (Schema API 대신)
+        endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
 
-        # JSON-LD 형식으로 스키마 데이터 포맷팅
+        # rdfs:comment를 @documentation으로 변환
+        documentation = {}
+        if "rdfs:comment" in jsonld_data:
+            comment_data = jsonld_data["rdfs:comment"]
+            if isinstance(comment_data, dict) and "@comment" in comment_data:
+                documentation["@comment"] = comment_data["@comment"]
+        
+        if "rdfs:label" in jsonld_data:
+            label_data = jsonld_data["rdfs:label"]
+            if isinstance(label_data, dict) and "en" in label_data:
+                documentation["@description"] = label_data["en"]
+
+        # 최소한의 스키마 구조 (TerminusDB 11.x 호환)
         schema_data = [
             {
                 "@type": "Class",
                 "@id": jsonld_data.get("@id"),
-                "@documentation": jsonld_data.get("rdfs:comment", {}),
-                "rdfs:label": jsonld_data.get("rdfs:label", {}),
-                "@key": {"@type": "Lexical", "@fields": ["@id"]},
+                "@key": {"@type": "Random"}  # 가장 안전한 키 타입
             }
         ]
+        
+        # documentation이 있으면 추가
+        if documentation:
+            schema_data[0]["@documentation"] = documentation
+
+        # Document API 파라미터
+        params = {
+            "graph_type": "schema",
+            "author": self.connection_info.user,
+            "message": f"Creating class {jsonld_data.get('@id')}"
+        }
 
         try:
-            await self._make_request("POST", endpoint, schema_data)
+            await self._make_request("POST", endpoint, schema_data, params)
 
             return {
                 "id": jsonld_data.get("@id"),
@@ -471,14 +550,26 @@ class AsyncTerminusService:
             )
             schema_response.raise_for_status()
             
-            # JSON Lines 형식 파싱
-            schema_text = schema_response.text.strip()
+            # 🔥 THINK ULTRA! JSON Lines 형식 파싱 - 견고한 오류 처리
+            schema_text = schema_response.text.strip() if schema_response.text else ""
+            logger.info(f"🔍 Schema response length: {len(schema_text)} for class {class_id}")
+            
             if schema_text:
-                for line in schema_text.split("\n"):
+                lines = schema_text.split("\n")
+                logger.info(f"🔍 Processing {len(lines)} schema lines for {class_id}")
+                
+                for line_num, line in enumerate(lines, 1):
+                    line = line.strip()
+                    if not line:
+                        continue
+                        
                     try:
                         doc = json.loads(line)
+                        logger.debug(f"🔍 Schema doc {line_num}: @type={doc.get('@type')}, @id={doc.get('@id')}")
+                        
                         if doc.get("@id") == class_id and doc.get("@type") == "Class":
                             result = doc.copy()
+                            logger.info(f"🔍 Found target class: {class_id}")
                             
                             # @documentation에서 기본 레이블과 설명 추출
                             if "@documentation" in doc:
@@ -486,9 +577,16 @@ class AsyncTerminusService:
                                 if isinstance(doc_info, dict):
                                     result["label"] = {"en": doc_info.get("@label", class_id)}
                                     result["description"] = {"en": doc_info.get("@comment", "")}
+                                    logger.debug(f"🔍 Extracted documentation: {doc_info}")
                             break
-                    except json.JSONDecodeError:
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"🔍 JSON parse error in schema line {line_num}: {e}")
                         continue
+                    except Exception as e:
+                        logger.error(f"🔍 Unexpected error in schema line {line_num}: {e}")
+                        continue
+            else:
+                logger.warning(f"🔍 Empty schema response for class {class_id}")
             
             if not result:
                 if raise_if_missing:
@@ -517,17 +615,30 @@ class AsyncTerminusService:
                     logger.info(f"🔍 DEBUG: Instance response text: {instance_text[:500]}...")
                     
                     if instance_text:
-                        # Parse each line (JSON Lines format) to find our metadata
+                        # 🔥 THINK ULTRA! JSON Lines 형식 파싱 - 견고한 메타데이터 처리
+                        lines = instance_text.split("\n")
+                        logger.info(f"🔍 Processing {len(lines)} instance lines for metadata")
+                        
                         metadata_doc = None
-                        for line in instance_text.split("\n"):
-                            if line.strip():
-                                try:
-                                    doc = json.loads(line)
-                                    if doc.get("@id") == metadata_id and doc.get("@type") == "ClassMetadata":
-                                        metadata_doc = doc
-                                        break
-                                except json.JSONDecodeError:
-                                    continue
+                        for line_num, line in enumerate(lines, 1):
+                            line = line.strip()
+                            if not line:
+                                continue
+                                
+                            try:
+                                doc = json.loads(line)
+                                logger.debug(f"🔍 Instance doc {line_num}: @type={doc.get('@type')}, @id={doc.get('@id')}")
+                                
+                                if doc.get("@id") == metadata_id and doc.get("@type") == "ClassMetadata":
+                                    metadata_doc = doc
+                                    logger.info(f"🔍 Found metadata document for {class_id}")
+                                    break
+                            except json.JSONDecodeError as e:
+                                logger.warning(f"🔍 JSON parse error in instance line {line_num}: {e}")
+                                continue
+                            except Exception as e:
+                                logger.error(f"🔍 Unexpected error in instance line {line_num}: {e}")
+                                continue
                         
                         if metadata_doc:
                             logger.info(f"🔍 DEBUG: Found metadata doc: {json.dumps(metadata_doc, indent=2)}")
@@ -536,7 +647,15 @@ class AsyncTerminusService:
                             if "label" in metadata_doc:
                                 label_data = metadata_doc["label"]
                                 logger.info(f"🔍 DEBUG: Found label data: {label_data}")
-                                if isinstance(label_data, list):
+                                # JSON 문자열로 저장된 경우 파싱
+                                if isinstance(label_data, str):
+                                    try:
+                                        result["label"] = json.loads(label_data)
+                                        logger.info(f"🔍 DEBUG: Parsed label from JSON string: {result['label']}")
+                                    except json.JSONDecodeError:
+                                        logger.warning(f"Failed to parse label JSON: {label_data}")
+                                        result["label"] = {"en": label_data}
+                                elif isinstance(label_data, list):
                                     result["label"] = {}
                                     for item in label_data:
                                         if "@language" in item and "@value" in item:
@@ -545,12 +664,22 @@ class AsyncTerminusService:
                                 elif isinstance(label_data, dict) and "@value" in label_data:
                                     lang = label_data.get("@language", "en")
                                     result["label"] = {lang: label_data["@value"]}
+                                elif isinstance(label_data, dict):
+                                    result["label"] = label_data
                             
                             # 다국어 설명 추출
                             if "description" in metadata_doc:
                                 desc_data = metadata_doc["description"]
                                 logger.info(f"🔍 DEBUG: Found description data: {desc_data}")
-                                if isinstance(desc_data, list):
+                                # JSON 문자열로 저장된 경우 파싱
+                                if isinstance(desc_data, str):
+                                    try:
+                                        result["description"] = json.loads(desc_data)
+                                        logger.info(f"🔍 DEBUG: Parsed description from JSON string: {result['description']}")
+                                    except json.JSONDecodeError:
+                                        logger.warning(f"Failed to parse description JSON: {desc_data}")
+                                        result["description"] = {"en": desc_data}
+                                elif isinstance(desc_data, list):
                                     result["description"] = {}
                                     for item in desc_data:
                                         if "@language" in item and "@value" in item:
@@ -559,6 +688,8 @@ class AsyncTerminusService:
                                 elif isinstance(desc_data, dict) and "@value" in desc_data:
                                     lang = desc_data.get("@language", "en")
                                     result["description"] = {lang: desc_data["@value"]}
+                                elif isinstance(desc_data, dict):
+                                    result["description"] = desc_data
                         else:
                             logger.warning(f"🔍 DEBUG: No metadata document found for {metadata_id}")
                     else:
@@ -759,9 +890,10 @@ class AsyncTerminusService:
         try:
             await self.ensure_db_exists(db_name)
 
-            # TerminusDB Document API로 모든 스키마 문서 조회: GET /api/document/<account>/<db>
+            # 🔥 THINK ULTRA FIX! TerminusDB Document API로 모든 스키마 문서 조회
             endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
-            params = {"graph_type": "schema", "type": "Class"}
+            # CRITICAL: TerminusDB는 "type" 파라미터를 지원하지 않음 - 제거
+            params = {"graph_type": "schema"}
 
             # 실제 API 요청
             client = await self._get_client()
@@ -774,31 +906,51 @@ class AsyncTerminusService:
             )
             response.raise_for_status()
 
-            # JSON Lines 형식 파싱 - CRITICAL BUG FIX: 동기화 오류 해결
-            response_text = response.text.strip()
+            # 🔥 THINK ULTRA! JSON Lines 형식 파싱 - 견고한 오류 처리
+            response_text = response.text.strip() if response.text else ""
             ontologies = []
+            
+            logger.info(f"🔍 Raw response text length: {len(response_text)}")
+            logger.info(f"🔍 Raw response preview: {response_text[:200] if response_text else 'EMPTY'}")
 
             if response_text:
-                for line in response_text.split("\n"):
-                    if line.strip():
-                        try:
-                            doc = json.loads(line.strip())
-                            # CRITICAL: 반드시 dict 타입이고 Class 타입인지 확인
-                            if isinstance(doc, dict) and doc.get("@type") == "Class":
-                                # 일관된 데이터 구조로 정규화
-                                normalized_class = {
-                                    "id": doc.get("@id"),
-                                    "type": "Class", 
-                                    "properties": {k: v for k, v in doc.items() if k not in ["@type", "@id"]},
-                                    # 메타데이터 필드 추가
-                                    "@type": doc.get("@type"),
-                                    "@id": doc.get("@id")
-                                }
-                                ontologies.append(normalized_class)
-                        except json.JSONDecodeError as parse_error:
-                            logger.warning(f"Failed to parse JSON line: {line} - Error: {parse_error}")
-                        except Exception as line_error:
-                            logger.error(f"Unexpected error processing line: {line} - Error: {line_error}")
+                lines = response_text.split("\n")
+                logger.info(f"🔍 Total lines to process: {len(lines)}")
+                
+                for line_num, line in enumerate(lines, 1):
+                    line = line.strip()
+                    if not line:
+                        logger.debug(f"🔍 Skipping empty line {line_num}")
+                        continue
+                        
+                    try:
+                        doc = json.loads(line)
+                        logger.debug(f"🔍 Parsed doc {line_num}: @type={doc.get('@type')}, @id={doc.get('@id')}")
+                        
+                        # CRITICAL: 반드시 dict 타입이고 Class 타입인지 확인
+                        if isinstance(doc, dict) and doc.get("@type") == "Class":
+                            # 일관된 데이터 구조로 정규화
+                            normalized_class = {
+                                "id": doc.get("@id"),
+                                "type": "Class", 
+                                "properties": {k: v for k, v in doc.items() if k not in ["@type", "@id", "@key", "@documentation"]},
+                                # 메타데이터 필드 추가
+                                "@type": doc.get("@type"),
+                                "@id": doc.get("@id"),
+                                "@key": doc.get("@key"),
+                                "@documentation": doc.get("@documentation")
+                            }
+                            ontologies.append(normalized_class)
+                            logger.info(f"🔍 Added valid Class: {doc.get('@id')}")
+                        else:
+                            logger.debug(f"🔍 Skipped non-Class doc: {doc.get('@type')} - {doc.get('@id')}")
+                            
+                    except json.JSONDecodeError as parse_error:
+                        logger.warning(f"🔍 Failed to parse JSON line {line_num}: {line[:100]}... - Error: {parse_error}")
+                    except Exception as line_error:
+                        logger.error(f"🔍 Unexpected error processing line {line_num}: {line[:100]}... - Error: {line_error}")
+            else:
+                logger.warning(f"🔍 Empty response from TerminusDB for schema query on {db_name}")
 
             logger.info(
                 f"TerminusDB retrieved {len(ontologies)} ontology classes from database '{db_name}'"
@@ -895,8 +1047,12 @@ class AsyncTerminusService:
             # TerminusDB 실제 브랜치 생성 API: POST /api/db/<account>/<db>/branch/<branch_name>
             endpoint = f"/api/db/{self.connection_info.account}/{db_name}/branch/{branch_name}"
 
-            # 브랜치 생성 요청 데이터
-            data = {"origin": from_branch or "main"}
+            # 🔥 THINK ULTRA FIX: TerminusDB 브랜치 생성 API 필수 파라미터 추가
+            data = {
+                "label": branch_name,  # TerminusDB가 요구하는 필수 label 파라미터
+                "comment": f"Branch {branch_name}",  # 선택적 설명
+                "origin": from_branch or "main"  # 기존 로직 유지
+            }
 
             # TerminusDB에 실제 브랜치 생성 요청
             await self._make_request("POST", endpoint, data)
@@ -1356,9 +1512,10 @@ class AsyncTerminusService:
             metadata_schema = {
                 "@type": "Class",
                 "@id": "ClassMetadata",
+                "@key": {"@type": "ValueHash"},
                 "for_class": {"@type": "Optional", "@class": "xsd:string"},
-                "label": {"@type": "Set", "@class": "sys:JSON"},  # 다국어 레이블을 위한 JSON 배열
-                "description": {"@type": "Set", "@class": "sys:JSON"},  # 다국어 설명을 위한 JSON 배열
+                "label": {"@type": "Optional", "@class": "xsd:string"},  # JSON 문자열로 저장
+                "description": {"@type": "Optional", "@class": "xsd:string"},  # JSON 문자열로 저장
                 "created_at": {"@type": "Optional", "@class": "xsd:dateTime"}
             }
             
@@ -1378,9 +1535,45 @@ class AsyncTerminusService:
         self, db_name: str, class_data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """온톨로지 클래스 생성 (스키마 + 메타데이터를 TerminusDB에 저장)"""
+        # 🔍 DEBUG: 입력 데이터 검증 및 로깅
+        logger.info("=" * 80)
+        logger.info("🚀 CREATE ONTOLOGY CLASS - START")
+        logger.info(f"📊 Database: {db_name}")
+        logger.info(f"📝 Input data: {json.dumps(class_data, indent=2, ensure_ascii=False)}")
+        
         class_id = class_data.get("id")
         if not class_id:
             raise AsyncValidationError("클래스 ID가 필요합니다")
+        
+        # 🔍 DEBUG: 클래스명 검증
+        logger.info(f"🔍 Class ID: '{class_id}'")
+        logger.info(f"🔍 Class ID type: {type(class_id)}")
+        logger.info(f"🔍 Class ID length: {len(class_id)}")
+        
+        # SHA1 해시 생성 과정 로깅
+        import hashlib
+        hash_input = f"{class_id}_{db_name}"
+        sha1_hash = hashlib.sha1(hash_input.encode()).hexdigest()
+        logger.info(f"🔐 SHA1 Hash Input: '{hash_input}'")
+        logger.info(f"🔐 SHA1 Hash Output: '{sha1_hash}'")
+        
+        # 예약어 체크
+        reserved_words = {
+            "Class", "Document", "Property", "Type", "Schema", "Instance",
+            "System", "Admin", "User", "Role", "Permission", "Database",
+            "Query", "Transaction", "Commit", "Rollback", "Index"
+        }
+        if class_id in reserved_words:
+            logger.warning(f"⚠️ Class ID '{class_id}' might be a reserved word!")
+        
+        # TerminusDB 시스템 클래스 확인
+        terminus_system_classes = {
+            "sys:Document", "sys:Class", "sys:Property", "sys:Unit",
+            "sys:JSON", "sys:JSONDocument", "sys:SchemaDocument"
+        }
+        if class_id in terminus_system_classes or class_id.startswith("sys:"):
+            logger.error(f"❌ Class ID '{class_id}' conflicts with TerminusDB system class!")
+            raise AsyncValidationError(f"클래스 ID '{class_id}'는 시스템 예약어입니다")
 
         # 1. 스키마 문서 생성 (@documentation 형식 사용)
         # 안전하게 label과 description 추출
@@ -1399,46 +1592,116 @@ class AsyncTerminusService:
         else:
             desc_text = str(desc_data) if desc_data else f"Class {class_id}"
         
-        # THINK ULTRA FIX: @comment 필드를 안전하게 유지 (TerminusDB v11.x 호환)
-        # 긴 description은 metadata에 저장하고, @comment는 간단하게 유지
-        safe_comment = f"Class {class_id}"
-        
+        # 🔥 THINK ULTRA FIX: TerminusDB v11.x 올바른 JSON-LD 스키마 구조
+        # 1. 기본 클래스 구조
         schema_doc = {
             "@type": "Class", 
             "@id": class_id,
-            "@documentation": {
-                "@comment": safe_comment,
-                "@label": label_text
-            }
+            "@key": {"@type": "Random"}  # 안전한 기본값
         }
+        
+        # 2. 표준 @documentation 구조로 주석 처리
+        if label_text or desc_text:
+            documentation = {}
+            if label_text and label_text != class_id:
+                documentation["@comment"] = label_text  # 간단한 레이블
+            if desc_text and desc_text != f"Class {class_id}":
+                documentation["@description"] = desc_text  # 상세 설명
+            
+            if documentation:
+                schema_doc["@documentation"] = documentation
 
-        # 속성 추가
+        # 3. 🔥 THINK ULTRA FIX! 속성을 클래스에 직접 정의 (TerminusDB v11.x 표준)
+        
         if "properties" in class_data:
             for prop in class_data["properties"]:
                 prop_name = prop.get("name")
                 prop_type = prop.get("type", "xsd:string")
                 if prop_name:
-                    # 🔥 THINK ULTRA! 복합 타입을 기본 타입으로 변환하여 TerminusDB가 이해할 수 있게 함
-                    if DataType.is_complex_type(prop_type):
+                    # 🔥 ULTRA FIX: 대문자 타입을 xsd 타입으로 변환
+                    prop_type_lower = prop_type.lower()
+                    
+                    # 기본 타입 매핑 (대문자로 들어온 타입 처리)
+                    basic_type_mapping = {
+                        "string": "xsd:string",
+                        "integer": "xsd:integer",
+                        "int": "xsd:integer",
+                        "float": "xsd:float",
+                        "double": "xsd:double",
+                        "boolean": "xsd:boolean",
+                        "bool": "xsd:boolean",
+                        "decimal": "xsd:decimal",
+                        "long": "xsd:long",
+                        "text": "xsd:string",
+                    }
+                    
+                    # 🔥 THINK ULTRA! 복합 타입을 기본 타입으로 변환
+                    if DataType.is_complex_type(prop_type) or prop_type_lower in ["date", "money"]:
                         base_type = DataType.get_base_type(prop_type)
-                        schema_doc[prop_name] = base_type
+                        final_type = base_type
                         logger.info(f"🔥 CONVERTED: {prop_type} -> {base_type} for {prop_name}")
+                    elif prop_type_lower in basic_type_mapping:
+                        final_type = basic_type_mapping[prop_type_lower]
+                        logger.info(f"🔥 MAPPED: {prop_type} -> {final_type} for {prop_name}")
+                    elif prop_type.startswith("xsd:"):
+                        # 이미 xsd 타입인 경우 그대로 사용
+                        final_type = prop_type
                     else:
-                        schema_doc[prop_name] = prop_type
+                        # 알 수 없는 타입은 string으로 처리
+                        final_type = "xsd:string"
+                        logger.warning(f"⚠️ Unknown type '{prop_type}' for {prop_name}, using xsd:string")
+                    
+                    # 속성을 클래스 정의에 직접 포함 (TerminusDB v11.x 표준)
+                    # ObjectProperty는 객체 참조용이므로 일반 데이터 타입은 클래스에 직접 정의
+                    schema_doc[prop_name] = {
+                        "@type": "Optional" if not prop.get("required", False) else final_type,
+                        "@class": final_type if not prop.get("required", False) else None
+                    }
+                    
+                    # required 속성 처리
+                    if prop.get("required", False):
+                        schema_doc[prop_name] = final_type
+                    
+                    logger.info(f"🔥 PROPERTY: {prop_name} -> {final_type} (required={prop.get('required', False)})")
+        
+        # 4. 스마트 키 전략 (간단한 Random 키 사용)
+        logger.info(f"🔑 Using Random key for class: {class_id} (safe default)")
 
-        # Document API 엔드포인트
+        # 🔥 THINK ULTRA FIX! Document API 사용 (Schema API는 TerminusDB 11.x에서 문제 있음)
         endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
 
         try:
-            # 1단계: 스키마 그래프에 클래스 생성
-            schema_params = {
+            # Document API 파라미터
+            params = {
                 "graph_type": "schema",
                 "author": self.connection_info.user,
-                "message": f"Creating {class_id} schema",
+                "message": f"Creating {class_id} schema"
             }
-            logger.info(f"Creating schema for class: {class_id}")
-            logger.info(f"Schema document: {json.dumps(schema_doc, indent=2, ensure_ascii=False)}")
-            schema_result = await self._make_request("POST", endpoint, [schema_doc], schema_params)
+            
+            # 기존 클래스 존재 여부 확인
+            logger.info(f"🔍 Checking if class '{class_id}' already exists...")
+            try:
+                existing = await self.get_ontology_class(db_name, class_id, raise_if_missing=False)
+                if existing:
+                    logger.warning(f"⚠️ Class '{class_id}' already exists!")
+                    logger.warning(f"📊 Existing class: {json.dumps(existing, indent=2, ensure_ascii=False)}")
+            except Exception as e:
+                logger.info(f"✅ Class '{class_id}' does not exist (good): {e}")
+            
+            # 🔥 THINK ULTRA! 클래스만 먼저 생성 (속성은 나중에)
+            logger.info(f"📤 Creating schema for class: {class_id}")
+            logger.info(f"📋 Schema document to be sent:")
+            logger.info(json.dumps(schema_doc, indent=2, ensure_ascii=False))
+            logger.info(f"🔗 Full endpoint URL: {self.connection_info.server_url}{endpoint}")
+            logger.info(f"📦 Request parameters: {json.dumps(params, indent=2)}")
+            
+            # 요청 전 최종 확인
+            logger.info(f"🚀 Sending POST request to create class '{class_id}'...")
+            
+            schema_result = await self._make_request("POST", endpoint, [schema_doc], params)
+            
+            logger.info(f"✅ Class creation response received")
+            logger.info(f"📨 Response data: {json.dumps(schema_result, indent=2, ensure_ascii=False)}")
             
             # 2단계: 인스턴스 그래프에 다국어 메타데이터 저장
             if "label" in class_data or "description" in class_data:
@@ -1449,27 +1712,35 @@ class AsyncTerminusService:
                     "created_at": datetime.utcnow().isoformat()
                 }
                 
-                # 다국어 레이블 추가
+                # 다국어 레이블 추가 - JSON 문자열로 저장
                 if "label" in class_data:
                     label_data = class_data["label"]
                     if isinstance(label_data, dict):
-                        metadata_doc["label"] = [
-                            {"@language": lang, "@value": value}
-                            for lang, value in label_data.items()
-                        ]
-                    elif isinstance(label_data, str):
-                        metadata_doc["label"] = {"@language": "en", "@value": label_data}
+                        # MultiLingualText dict를 JSON 문자열로 변환
+                        # Set 타입 제거 및 일반 dict로 정규화
+                        normalized_label = {}
+                        for k, v in label_data.items():
+                            if v and isinstance(v, str):  # 빈 문자열이 아니고 문자열인 경우만
+                                normalized_label[k] = v
+                        if normalized_label:
+                            metadata_doc["label"] = json.dumps(normalized_label, ensure_ascii=False)
+                    elif isinstance(label_data, str) and label_data:
+                        metadata_doc["label"] = json.dumps({"en": label_data}, ensure_ascii=False)
                 
-                # 다국어 설명 추가
+                # 다국어 설명 추가 - JSON 문자열로 저장
                 if "description" in class_data:
                     desc_data = class_data["description"]
                     if isinstance(desc_data, dict):
-                        metadata_doc["description"] = [
-                            {"@language": lang, "@value": value}
-                            for lang, value in desc_data.items()
-                        ]
-                    elif isinstance(desc_data, str):
-                        metadata_doc["description"] = {"@language": "en", "@value": desc_data}
+                        # MultiLingualText dict를 JSON 문자열로 변환
+                        # Set 타입 제거 및 일반 dict로 정규화
+                        normalized_desc = {}
+                        for k, v in desc_data.items():
+                            if v and isinstance(v, str):  # 빈 문자열이 아니고 문자열인 경우만
+                                normalized_desc[k] = v
+                        if normalized_desc:
+                            metadata_doc["description"] = json.dumps(normalized_desc, ensure_ascii=False)
+                    elif isinstance(desc_data, str) and desc_data:
+                        metadata_doc["description"] = json.dumps({"en": desc_data}, ensure_ascii=False)
                 
                 # 인스턴스 그래프에 메타데이터 저장
                 instance_params = {
@@ -1480,13 +1751,43 @@ class AsyncTerminusService:
                 logger.info(f"Creating metadata for class: {class_id}")
                 await self._make_request("POST", endpoint, [metadata_doc], instance_params)
             
+            # 생성 결과 확인
+            logger.info("🔍 Verifying class creation...")
+            try:
+                created_class = await self.get_ontology_class(db_name, class_id, raise_if_missing=False)
+                if created_class:
+                    logger.info(f"✅ Class '{class_id}' successfully created and verified!")
+                    logger.info(f"📊 Created class: {json.dumps(created_class, indent=2, ensure_ascii=False)}")
+                else:
+                    logger.warning(f"⚠️ Class '{class_id}' creation response OK but class not found!")
+            except Exception as verify_error:
+                logger.error(f"❌ Error verifying created class: {verify_error}")
+            
             # 원본 데이터를 포함한 결과 반환
             return_data = class_data.copy()
             return_data["terminus_response"] = schema_result
+            
+            logger.info("🎉 CREATE ONTOLOGY CLASS - COMPLETE")
+            logger.info("=" * 80)
+            
             return return_data
 
+        except AsyncDuplicateOntologyError as e:
+            logger.error(f"❌ Duplicate class error: {e}")
+            logger.error(f"💡 Suggestion: Try using a different class name or check existing classes")
+            raise
         except Exception as e:
-            logger.error(f"클래스 생성 실패: {e}")
+            logger.error(f"❌ Class creation failed: {e}")
+            logger.error(f"❌ Error type: {type(e).__name__}")
+            logger.error(f"❌ Error details: {str(e)}")
+            
+            # 추가 디버깅 정보
+            import traceback
+            logger.error(f"❌ Traceback:\n{traceback.format_exc()}")
+            
+            logger.info("❌ CREATE ONTOLOGY CLASS - FAILED")
+            logger.info("=" * 80)
+            
             raise AsyncDatabaseError(f"클래스 생성 실패: {e}")
 
 

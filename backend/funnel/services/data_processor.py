@@ -8,10 +8,29 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from data_connector.google_sheets.models import (
-    GoogleSheetPreviewRequest,
-    GoogleSheetPreviewResponse,
-)
+# TODO: data_connector 모듈이 구현되면 주석 해제
+# from data_connector.google_sheets.models import (
+#     GoogleSheetPreviewRequest,
+#     GoogleSheetPreviewResponse,
+# )
+
+# 임시 모델 정의
+from pydantic import BaseModel
+from typing import List, Dict, Any, Optional
+
+class GoogleSheetPreviewRequest(BaseModel):
+    sheet_url: str
+    worksheet_name: Optional[str] = None
+    api_key: Optional[str] = None
+
+class GoogleSheetPreviewResponse(BaseModel):
+    sheet_id: str
+    sheet_title: str
+    worksheet_title: str
+    columns: List[str]
+    sample_rows: List[Dict[str, Any]]
+    total_rows: int
+
 from funnel.services.type_inference import FunnelTypeInferenceService
 from shared.config.service_config import ServiceConfig
 from shared.models.type_inference import (

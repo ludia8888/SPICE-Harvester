@@ -9,16 +9,16 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
-COPY requirements.txt .
+COPY oms/requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy shared modules first
-COPY ../shared /app/shared
+COPY shared /app/shared
 
 # Copy application code
-COPY . .
+COPY oms /app/oms
 
 # Create data directory
 RUN mkdir -p /app/data
@@ -34,4 +34,4 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]
+CMD ["uvicorn", "oms.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]
