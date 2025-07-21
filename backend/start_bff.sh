@@ -1,16 +1,16 @@
 #!/bin/bash
 # 🔥 THINK ULTRA!! BFF Startup Script
 
-# Set PYTHONPATH - Include both BFF and shared directories
-export PYTHONPATH="/Users/isihyeon/Desktop/SPICE HARVESTER/backend/backend-for-frontend:/Users/isihyeon/Desktop/SPICE HARVESTER/backend:/Users/isihyeon/Desktop/SPICE HARVESTER/backend/shared:$PYTHONPATH"
+# Get script directory and source unified PYTHONPATH configuration
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+source "$SCRIPT_DIR/setup_pythonpath.sh"
 
-# Change to BFF directory
-cd "/Users/isihyeon/Desktop/SPICE HARVESTER/backend/backend-for-frontend"
+# Configure Python environment (PYTHONPATH + directory change)
+if ! configure_python_environment; then
+    echo "❌ Failed to configure Python environment for BFF" >&2
+    exit 1
+fi
 
-# Debug: Show Python path
-echo "🔥 THINK ULTRA!! PYTHONPATH configured:"
-echo "$PYTHONPATH"
-
-# Start BFF
+# Start BFF using module path
 echo "🔥 THINK ULTRA!! Starting BFF..."
-python -m uvicorn main:app --host 0.0.0.0 --port 8002
+python -m bff.main

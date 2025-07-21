@@ -1,126 +1,255 @@
 """
-Common base models and utilities
+Common data types and enums for SPICE HARVESTER
 """
 
-from pydantic import BaseModel, Field
-from typing import Any, Dict, List, Optional
-from datetime import datetime
+from dataclasses import dataclass
 from enum import Enum
+from typing import Any, Dict, List, Optional, Union
+import logging
+
+logger = logging.getLogger(__name__)
 
 
-class BaseResponse(BaseModel):
-    """기본 응답 모델"""
-    status: str
-    message: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+class DataType(Enum):
+    """Data type enumeration"""
 
-
-class TimestampMixin(BaseModel):
-    """타임스탬프 믹스인"""
-    created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
-    updated_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
-
-
-class PaginationRequest(BaseModel):
-    """페이지네이션 요청"""
-    limit: int = Field(default=100, ge=1, le=1000)
-    offset: int = Field(default=0, ge=0)
-
-
-class PaginationResponse(BaseModel):
-    """페이지네이션 응답"""
-    count: int
-    total: Optional[int] = None
-    limit: int
-    offset: int
-
-
-class DataType(str, Enum):
-    """지원되는 데이터 타입"""
-    # 기본 XSD 타입
     STRING = "xsd:string"
     INTEGER = "xsd:integer"
-    DECIMAL = "xsd:decimal"
+    FLOAT = "xsd:float"
+    DOUBLE = "xsd:double"
     BOOLEAN = "xsd:boolean"
     DATE = "xsd:date"
     DATETIME = "xsd:dateTime"
     URI = "xsd:anyURI"
-    
-    # 🔥 THINK ULTRA! 복합 타입들
-    ARRAY = "custom:array"           # 배열 타입
-    OBJECT = "custom:object"         # 중첩 객체
-    ENUM = "custom:enum"             # 열거형
-    MONEY = "custom:money"           # 통화 타입
-    PHONE = "custom:phone"           # 전화번호
-    EMAIL = "custom:email"           # 이메일
-    COORDINATE = "custom:coordinate" # 좌표 (위도/경도)
-    ADDRESS = "custom:address"       # 주소
-    IMAGE = "custom:image"           # 이미지 URL
-    FILE = "custom:file"             # 파일 첨부
-    
+    DECIMAL = "xsd:decimal"
+    LONG = "xsd:long"
+    SHORT = "xsd:short"
+    BYTE = "xsd:byte"
+    UNSIGNED_INT = "xsd:unsignedInt"
+    UNSIGNED_LONG = "xsd:unsignedLong"
+    UNSIGNED_SHORT = "xsd:unsignedShort"
+    UNSIGNED_BYTE = "xsd:unsignedByte"
+    BASE64_BINARY = "xsd:base64Binary"
+    HEX_BINARY = "xsd:hexBinary"
+    DURATION = "xsd:duration"
+    TIME = "xsd:time"
+    GYEAR = "xsd:gYear"
+    GMONTH = "xsd:gMonth"
+    GDAY = "xsd:gDay"
+    GYEAR_MONTH = "xsd:gYearMonth"
+    GMONTH_DAY = "xsd:gMonthDay"
+
+    # Complex types
+    ARRAY = "array"
+    OBJECT = "object"
+    ENUM = "enum"
+    MONEY = "money"
+    PHONE = "phone"
+    EMAIL = "email"
+    COORDINATE = "coordinate"
+    ADDRESS = "address"
+    IMAGE = "image"
+    FILE = "file"
+
     @classmethod
-    def validate(cls, value: str) -> bool:
-        """데이터 타입 유효성 검증"""
-        return value in [item.value for item in cls]
-    
+    def from_python_type(cls, py_type: type) -> "DataType":
+        """Convert Python type to DataType"""
+        type_mapping = {
+            str: cls.STRING,
+            int: cls.INTEGER,
+            float: cls.FLOAT,
+            bool: cls.BOOLEAN,
+        }
+        return type_mapping.get(py_type, cls.STRING)
+
+    @classmethod
+    def is_numeric(cls, data_type: "DataType") -> bool:
+        """Check if data type is numeric"""
+        numeric_types = {
+            cls.INTEGER,
+            cls.FLOAT,
+            cls.DOUBLE,
+            cls.DECIMAL,
+            cls.LONG,
+            cls.SHORT,
+            cls.BYTE,
+            cls.UNSIGNED_INT,
+            cls.UNSIGNED_LONG,
+            cls.UNSIGNED_SHORT,
+            cls.UNSIGNED_BYTE,
+        }
+        return data_type in numeric_types
+
+    @classmethod
+    def is_temporal(cls, data_type: "DataType") -> bool:
+        """Check if data type is temporal"""
+        temporal_types = {
+            cls.DATE,
+            cls.DATETIME,
+            cls.TIME,
+            cls.DURATION,
+            cls.GYEAR,
+            cls.GMONTH,
+            cls.GDAY,
+            cls.GYEAR_MONTH,
+            cls.GMONTH_DAY,
+        }
+        return data_type in temporal_types
+
+    def validate_value(self, value: Any) -> bool:
+        """Validate if value matches this data type"""
+        if value is None:
+            return True
+
+        try:
+            if self == DataType.STRING:
+                return isinstance(value, str)
+            elif self == DataType.INTEGER:
+                return isinstance(value, int)
+            elif self == DataType.FLOAT or self == DataType.DOUBLE:
+                return isinstance(value, (int, float))
+            elif self == DataType.BOOLEAN:
+                return isinstance(value, bool)
+            elif self == DataType.DECIMAL:
+                return isinstance(value, (int, float))
+            else:
+                # For other types, convert to string and check
+                return isinstance(str(value), str)
+        except Exception as e:
+            logger.debug(f"Failed to validate {self} for value {value}: {e}")
+            return False
+
     @classmethod
     def is_complex_type(cls, data_type: str) -> bool:
-        """복합 타입 여부 확인"""
-        return data_type.startswith("custom:")
-    
+        """Check if data type is complex"""
+        complex_types = {
+            cls.ARRAY.value,
+            cls.OBJECT.value,
+            cls.ENUM.value,
+            cls.MONEY.value,
+            cls.PHONE.value,
+            cls.EMAIL.value,
+            cls.COORDINATE.value,
+            cls.ADDRESS.value,
+            cls.IMAGE.value,
+            cls.FILE.value,
+        }
+        return data_type.lower() in complex_types
+
     @classmethod
     def get_base_type(cls, data_type: str) -> str:
-        """복합 타입의 기본 저장 타입 반환"""
-        base_type_map = {
-            cls.ARRAY.value: cls.STRING.value,  # JSON string으로 저장
-            cls.OBJECT.value: cls.STRING.value,  # JSON string으로 저장
-            cls.ENUM.value: cls.STRING.value,
-            cls.MONEY.value: cls.DECIMAL.value,
-            cls.PHONE.value: cls.STRING.value,
-            cls.EMAIL.value: cls.STRING.value,
-            cls.COORDINATE.value: cls.STRING.value,  # "lat,lng" 형식
-            cls.ADDRESS.value: cls.STRING.value,  # JSON string으로 저장
-            cls.IMAGE.value: cls.URI.value,
-            cls.FILE.value: cls.URI.value
-        }
-        return base_type_map.get(data_type, data_type)
+        """Get base type for complex types"""
+        data_type_lower = data_type.lower()
+
+        if "string" in data_type_lower or "text" in data_type_lower:
+            return cls.STRING.value
+        elif "int" in data_type_lower or "number" in data_type_lower:
+            return cls.INTEGER.value
+        elif "float" in data_type_lower or "decimal" in data_type_lower:
+            return cls.FLOAT.value
+        elif "bool" in data_type_lower:
+            return cls.BOOLEAN.value
+        elif "date" in data_type_lower:
+            return cls.DATE.value
+        else:
+            return cls.STRING.value  # Default to string
 
 
-class Cardinality(str, Enum):
-    """관계의 카디널리티"""
-    ONE = "one"
-    MANY = "many"
+class Cardinality(Enum):
+    """Cardinality enumeration"""
+
     ONE_TO_ONE = "1:1"
     ONE_TO_MANY = "1:n"
     MANY_TO_ONE = "n:1"
     MANY_TO_MANY = "n:n"
+    ONE = "one"
+    MANY = "many"
+
+    @classmethod
+    def is_valid(cls, value: str) -> bool:
+        """Check if value is a valid cardinality"""
+        return value in [c.value for c in cls]
 
 
-class QueryOperator(str, Enum):
-    """쿼리 연산자"""
-    EQUALS = "eq"
-    NOT_EQUALS = "neq"
-    GREATER_THAN = "gt"
-    GREATER_THAN_OR_EQUAL = "gte"
-    LESS_THAN = "lt"
-    LESS_THAN_OR_EQUAL = "lte"
-    IN = "in"
-    NOT_IN = "nin"
-    CONTAINS = "contains"
-    STARTS_WITH = "starts_with"
-    ENDS_WITH = "ends_with"
+@dataclass
+class QueryOperator:
+    """Query operator definition"""
+
+    name: str
+    symbol: str
+    description: str
+    applies_to: List[DataType]
+
+    def can_apply_to(self, data_type: DataType) -> bool:
+        """Check if operator can apply to data type"""
+        return data_type in self.applies_to
 
 
-class ValidationError(BaseModel):
-    """유효성 검증 오류"""
-    field: str
-    message: str
-    code: str
+# Common query operators
+QUERY_OPERATORS = {
+    "eq": QueryOperator(
+        name="equals", symbol="=", description="Equal to", applies_to=list(DataType)
+    ),
+    "ne": QueryOperator(
+        name="not_equals", symbol="!=", description="Not equal to", applies_to=list(DataType)
+    ),
+    "gt": QueryOperator(
+        name="greater_than",
+        symbol=">",
+        description="Greater than",
+        applies_to=[dt for dt in DataType if DataType.is_numeric(dt) or DataType.is_temporal(dt)],
+    ),
+    "gte": QueryOperator(
+        name="greater_than_or_equal",
+        symbol=">=",
+        description="Greater than or equal to",
+        applies_to=[dt for dt in DataType if DataType.is_numeric(dt) or DataType.is_temporal(dt)],
+    ),
+    "lt": QueryOperator(
+        name="less_than",
+        symbol="<",
+        description="Less than",
+        applies_to=[dt for dt in DataType if DataType.is_numeric(dt) or DataType.is_temporal(dt)],
+    ),
+    "lte": QueryOperator(
+        name="less_than_or_equal",
+        symbol="<=",
+        description="Less than or equal to",
+        applies_to=[dt for dt in DataType if DataType.is_numeric(dt) or DataType.is_temporal(dt)],
+    ),
+    "contains": QueryOperator(
+        name="contains",
+        symbol="contains",
+        description="Contains substring",
+        applies_to=[DataType.STRING],
+    ),
+    "starts_with": QueryOperator(
+        name="starts_with",
+        symbol="starts_with",
+        description="Starts with substring",
+        applies_to=[DataType.STRING],
+    ),
+    "ends_with": QueryOperator(
+        name="ends_with",
+        symbol="ends_with",
+        description="Ends with substring",
+        applies_to=[DataType.STRING],
+    ),
+    "in": QueryOperator(
+        name="in", symbol="in", description="In list of values", applies_to=list(DataType)
+    ),
+    "not_in": QueryOperator(
+        name="not_in",
+        symbol="not_in",
+        description="Not in list of values",
+        applies_to=list(DataType),
+    ),
+}
 
 
-class BulkOperationResult(BaseModel):
-    """대량 작업 결과"""
-    successful: int = 0
-    failed: int = 0
-    errors: List[ValidationError] = Field(default_factory=list)
-    results: List[Dict[str, Any]] = Field(default_factory=list)
+# Import the standardized ApiResponse
+from .requests import ApiResponse
+
+# Backward compatibility alias for BaseResponse
+# TODO: Remove this alias after all services migrate to ApiResponse
+BaseResponse = ApiResponse

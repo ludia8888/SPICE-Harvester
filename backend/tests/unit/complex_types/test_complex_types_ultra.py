@@ -5,18 +5,18 @@
 """
 
 import json
-import sys
 import os
 from datetime import datetime
 from decimal import Decimal
 
-# 경로 설정
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'shared'))
-
-from models.common import DataType
-from validators.complex_type_validator import ComplexTypeValidator, ComplexTypeConstraints
-from serializers.complex_type_serializer import ComplexTypeSerializer, ComplexTypeConverter
-
+# No need for sys.path.insert - using proper spice_harvester package imports
+from shared.models.common import DataType
+from shared.validators.complex_type_validator import ComplexTypeValidator, ComplexTypeConstraints
+from shared.serializers.complex_type_serializer import ComplexTypeSerializer
+from shared.validators.phone_validator import PhoneValidator
+from shared.validators.email_validator import EmailValidator
+from shared.validators.url_validator import UrlValidator
+from tests.utils.assertions import assert_equal, assert_contains, assert_type, assert_in_range
 
 class ComplexTypeSystemTester:
     """🔥 THINK ULTRA!! 복합 타입 시스템 테스터"""
@@ -81,7 +81,12 @@ class ComplexTypeSystemTester:
             valid_array, DataType.ARRAY.value, constraints
         )
         
-        assert valid, f"유효한 배열 검증 실패: {msg}"
+        assert_equal(
+            actual=valid,
+            expected=True,
+            field_name="array_validation_result",
+            context={"array": valid_array, "constraints": constraints, "message": msg}
+        )
         print(f"✅ 유효한 배열: {normalized}")
         
         # 크기 제약 위반
@@ -90,7 +95,12 @@ class ComplexTypeSystemTester:
             invalid_array, DataType.ARRAY.value, constraints
         )
         
-        assert not valid, "크기 제약 위반을 탐지하지 못함"
+        assert_equal(
+            actual=valid,
+            expected=False,
+            field_name="array_size_constraint_violation",
+            context={"array": invalid_array, "constraints": constraints, "message": msg}
+        )
         print(f"✅ 크기 제약 탐지: {msg}")
         
         # 직렬화/역직렬화
@@ -100,7 +110,11 @@ class ComplexTypeSystemTester:
             valid_array, DataType.ARRAY.value, constraints
         )
         
-        assert isinstance(serialized, str), "직렬화 결과는 문자열이어야 함"
+        assert_type(
+            value=serialized,
+            expected_type=str,
+            field_name="serialized_array"
+        )
         print(f"✅ 직렬화: {serialized}")
         print(f"✅ 메타데이터: {metadata}")
         
@@ -108,7 +122,12 @@ class ComplexTypeSystemTester:
             serialized, DataType.ARRAY.value, metadata
         )
         
-        assert deserialized == valid_array, "역직렬화 결과가 원본과 다름"
+        assert_equal(
+            actual=deserialized,
+            expected=valid_array,
+            field_name="deserialized_array",
+            context={"original": valid_array, "serialized": serialized}
+        )
         print(f"✅ 역직렬화: {deserialized}")
     
     def test_object_type(self):
@@ -139,7 +158,12 @@ class ComplexTypeSystemTester:
             valid_object, DataType.OBJECT.value, constraints
         )
         
-        assert valid, f"유효한 객체 검증 실패: {msg}"
+        assert_equal(
+            actual=valid,
+            expected=True,
+            field_name="object_validation_result",
+            context={"object": valid_object, "constraints": constraints, "message": msg}
+        )
         print(f"✅ 유효한 객체: {normalized}")
         
         # 필수 필드 누락
@@ -148,7 +172,12 @@ class ComplexTypeSystemTester:
             invalid_object, DataType.OBJECT.value, constraints
         )
         
-        assert not valid, "필수 필드 누락을 탐지하지 못함"
+        assert_equal(
+            actual=valid,
+            expected=False,
+            field_name="object_required_field_validation",
+            context={"object": invalid_object, "constraints": constraints, "message": msg}
+        )
         print(f"✅ 필수 필드 탐지: {msg}")
     
     def test_enum_type(self):
@@ -166,7 +195,12 @@ class ComplexTypeSystemTester:
             "active", DataType.ENUM.value, constraints
         )
         
-        assert valid, f"유효한 enum 검증 실패: {msg}"
+        assert_equal(
+            actual=valid,
+            expected=True,
+            field_name="enum_validation_result",
+            context={"value": "active", "constraints": constraints, "message": msg}
+        )
         print(f"✅ 유효한 enum: {normalized}")
         
         # 무효한 값
@@ -174,7 +208,12 @@ class ComplexTypeSystemTester:
             "unknown", DataType.ENUM.value, constraints
         )
         
-        assert not valid, "무효한 enum 값을 탐지하지 못함"
+        assert_equal(
+            actual=valid,
+            expected=False,
+            field_name="enum_invalid_value_validation",
+            context={"value": "unknown", "constraints": constraints, "message": msg}
+        )
         print(f"✅ 무효한 enum 탐지: {msg}")
     
     def test_money_type(self):
@@ -193,9 +232,24 @@ class ComplexTypeSystemTester:
             "1234.56 USD", DataType.MONEY.value, constraints
         )
         
-        assert valid, f"통화 문자열 검증 실패: {msg}"
-        assert normalized["amount"] == 1234.56
-        assert normalized["currency"] == "USD"
+        assert_equal(
+            actual=valid,
+            expected=True,
+            field_name="money_string_validation_result",
+            context={"value": "1234.56 USD", "constraints": constraints, "message": msg}
+        )
+        assert_equal(
+            actual=normalized["amount"],
+            expected=1234.56,
+            field_name="money_normalized_amount",
+            context={"normalized_data": normalized}
+        )
+        assert_equal(
+            actual=normalized["currency"],
+            expected="USD",
+            field_name="money_normalized_currency",
+            context={"normalized_data": normalized}
+        )
         print(f"✅ 문자열 형식: {normalized}")
         
         # 객체 형식
@@ -204,7 +258,12 @@ class ComplexTypeSystemTester:
             money_obj, DataType.MONEY.value, constraints
         )
         
-        assert valid, f"통화 객체 검증 실패: {msg}"
+        assert_equal(
+            actual=valid,
+            expected=True,
+            field_name="money_object_validation_result",
+            context={"value": money_obj, "constraints": constraints, "message": msg}
+        )
         print(f"✅ 객체 형식: {normalized}")
         
         # 지원하지 않는 통화
@@ -212,7 +271,12 @@ class ComplexTypeSystemTester:
             "100 XYZ", DataType.MONEY.value, constraints
         )
         
-        assert not valid, "지원하지 않는 통화를 탐지하지 못함"
+        assert_equal(
+            actual=valid,
+            expected=False,
+            field_name="money_unsupported_currency_validation",
+            context={"value": "100 XYZ", "constraints": constraints, "message": msg}
+        )
         print(f"✅ 통화 검증: {msg}")
     
     def test_phone_type(self):
@@ -221,22 +285,22 @@ class ComplexTypeSystemTester:
         print("1️⃣ 전화번호 검증 (시뮬레이션)")
         
         # phonenumbers 라이브러리가 없으므로 기본 검증만 수행
-        test_phone = "+1-555-123-4567"
+        test_phone = "+1-212-456-7890"  # 유효한 뉴욕 번호 형식
         
-        # 간단한 형식 검증
-        import re
-        phone_pattern = r'^[\+\d\-\(\)\s]+$'
+        # 중앙화된 PhoneValidator 사용
+        phone_validator = PhoneValidator()
+        result = phone_validator.validate(test_phone)
         
-        if re.match(phone_pattern, test_phone):
-            normalized = {
+        if result.is_valid:
+            normalized = result.normalized_value or {
                 "e164": test_phone.replace("-", "").replace(" ", ""),
                 "international": test_phone,
-                "national": "555-123-4567",
+                "national": "212-456-7890",
                 "region": "US"
             }
             print(f"✅ 전화번호 형식 검증 성공: {normalized}")
         else:
-            raise ValueError("전화번호 형식 검증 실패")
+            raise ValueError(f"전화번호 형식 검증 실패: {result.message}")
     
     def test_email_type(self):
         """EMAIL 타입 테스트 (기본 검증)"""
@@ -246,12 +310,13 @@ class ComplexTypeSystemTester:
         # 간단한 이메일 형식 검증
         test_email = "user@example.com"
         
-        import re
-        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        # 중앙화된 EmailValidator 사용
+        email_validator = EmailValidator()
+        result = email_validator.validate(test_email)
         
-        if re.match(email_pattern, test_email):
+        if result.is_valid:
             parts = test_email.split("@")
-            normalized = {
+            normalized = result.normalized_value or {
                 "email": test_email,
                 "local": parts[0],
                 "domain": parts[1],
@@ -260,7 +325,7 @@ class ComplexTypeSystemTester:
             }
             print(f"✅ 이메일 형식 검증 성공: {normalized}")
         else:
-            raise ValueError("이메일 형식 검증 실패")
+            raise ValueError(f"이메일 형식 검증 실패: {result.message}")
     
     def test_coordinate_type(self):
         """COORDINATE 타입 테스트"""
@@ -277,8 +342,18 @@ class ComplexTypeSystemTester:
         lat = float(parts[0])
         lng = float(parts[1])
         
-        assert -90 <= lat <= 90, "위도 범위 초과"
-        assert -180 <= lng <= 180, "경도 범위 초과"
+        assert_in_range(
+            value=lat,
+            min_value=-90,
+            max_value=90,
+            field_name="latitude"
+        )
+        assert_in_range(
+            value=lng,
+            min_value=-180,
+            max_value=180,
+            field_name="longitude"
+        )
         
         normalized = {
             "latitude": lat,
@@ -300,7 +375,12 @@ class ComplexTypeSystemTester:
         invalid_coord = "91.0,0.0"  # 위도 범위 초과
         try:
             lat = float(invalid_coord.split(",")[0])
-            assert -90 <= lat <= 90
+            assert_in_range(
+                value=lat,
+                min_value=-90,
+                max_value=90,
+                field_name="invalid_latitude_check"
+            )
         except AssertionError:
             print(f"✅ 위도 범위 검증 성공")
     
@@ -335,7 +415,12 @@ class ComplexTypeSystemTester:
         
         # 역직렬화
         deserialized = json.loads(serialized)
-        assert deserialized == address
+        assert_equal(
+            actual=deserialized,
+            expected=address,
+            field_name="address_deserialization",
+            context={"original": address, "serialized": serialized}
+        )
         print(f"✅ 역직렬화 성공")
     
     def test_image_type(self):
@@ -350,15 +435,25 @@ class ComplexTypeSystemTester:
         # 유효한 이미지 URL
         valid_image = "https://example.com/image.jpg"
         
-        # URL 형식 검증
-        import re
-        url_pattern = r'^https?://[\w\-\.]+(:\d+)?(/[\w\-\./?%&=]*)?$'
-        assert re.match(url_pattern, valid_image), "URL 형식 오류"
+        # 중앙화된 UrlValidator 사용
+        url_validator = UrlValidator()
+        result = url_validator.validate(valid_image)
+        assert_equal(
+            actual=result.is_valid,
+            expected=True,
+            field_name="url_validation_result",
+            context={"url": valid_image, "message": result.message}
+        )
         
         # 확장자 검증
         valid_extensions = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"}
         has_valid_ext = any(valid_image.lower().endswith(ext) for ext in valid_extensions)
-        assert has_valid_ext, "유효한 이미지 확장자가 아님"
+        assert_equal(
+            actual=has_valid_ext,
+            expected=True,
+            field_name="image_extension_validation",
+            context={"url": valid_image, "valid_extensions": valid_extensions}
+        )
         
         normalized = {
             "url": valid_image,
@@ -371,7 +466,12 @@ class ComplexTypeSystemTester:
         # 무효한 확장자
         invalid_image = "https://example.com/file.txt"
         has_valid_ext = any(invalid_image.lower().endswith(ext) for ext in valid_extensions)
-        assert not has_valid_ext, "무효한 확장자를 탐지하지 못함"
+        assert_equal(
+            actual=has_valid_ext,
+            expected=False,
+            field_name="invalid_image_extension_validation",
+            context={"url": invalid_image, "valid_extensions": valid_extensions}
+        )
         print(f"✅ 무효한 확장자 탐지 성공")
     
     def test_file_type(self):
@@ -455,19 +555,19 @@ class ComplexTypeSystemTester:
             print("   ⚠️ 일부 복합 타입에 문제가 있습니다.")
         
         # 결과를 JSON 파일로 저장
-        result_file = f"complex_type_test_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        results_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'results')
+        os.makedirs(results_dir, exist_ok=True)
+        result_file = os.path.join(results_dir, f"complex_type_test_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
         with open(result_file, 'w', encoding='utf-8') as f:
             json.dump(self.test_results, f, ensure_ascii=False, indent=2)
         
         print(f"\n📄 상세 결과가 저장되었습니다: {result_file}")
-
 
 def main():
     """메인 테스트 실행"""
     
     tester = ComplexTypeSystemTester()
     tester.run_all_tests()
-
 
 if __name__ == "__main__":
     main()

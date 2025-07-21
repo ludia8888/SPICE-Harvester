@@ -5,19 +5,16 @@
 """
 
 import httpx
+
+# No need for sys.path.insert - using proper spice_harvester package imports
 import asyncio
 import json
 from datetime import datetime
-import sys
 import os
 
-# Add shared to Python path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'shared'))
-
-from models.common import DataType
-from validators.complex_type_validator import ComplexTypeConstraints
-from test_config import TestConfig
-
+from shared.models.common import DataType
+from shared.validators.complex_type_validator import ComplexTypeConstraints
+from tests.test_config import TestConfig
 
 class ProductionRelationshipTest:
     """🔥 THINK ULTRA!! 프로덕션 관계 관리 테스터"""
@@ -548,12 +545,10 @@ class ProductionRelationshipTest:
         
         print(f"\n⏱️  Completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-
 async def main():
     """메인 함수"""
     tester = ProductionRelationshipTest()
     await tester.run_all_tests()
-
 
 if __name__ == "__main__":
     asyncio.run(main())

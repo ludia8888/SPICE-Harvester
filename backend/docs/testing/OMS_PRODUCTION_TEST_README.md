@@ -22,6 +22,7 @@ The test suite covers:
 Run the complete production test suite with automatic service startup:
 
 ```bash
+cd backend/oms
 ./run_production_tests.sh
 ```
 
@@ -37,25 +38,40 @@ This script will:
 
 If you want to run services manually:
 
-1. Start OMS (in SPICE HARVESTER directory):
+1. Start OMS:
 ```bash
-cd /Users/isihyeon/Desktop/SPICE\ HARVESTER/backend/ontology-management-service
-python -m uvicorn main:app --host 0.0.0.0 --port 8000
+cd backend/oms
+python main.py
+# or with custom port
+OMS_PORT=8000 python main.py
 ```
 
-2. Start BFF (in SPICE FOUNDRY directory):
+2. Start BFF:
 ```bash
-cd /Users/isihyeon/Desktop/SPICE\ FOUNDRY/backend/backend-for-frontend
-python -m uvicorn main:app --host 0.0.0.0 --port 8002
+cd backend/bff
+python main.py
+# or with custom port
+BFF_PORT=8002 python main.py
 ```
 
-3. Run tests:
+3. Start Funnel (Type Inference Service):
+```bash
+cd backend/funnel
+python main.py
+# or with custom port
+FUNNEL_PORT=8003 python main.py
+```
+
+4. Run tests:
 ```bash
 # Quick manual test
-./manual_test.py
+python tests/integration/oms/manual_test.py
 
 # Full test suite
-./test_production_ready.py
+python tests/integration/oms/test_production_ready.py
+
+# Or using pytest
+pytest tests/integration/oms/test_production_ready.py -v
 ```
 
 ### Option 3: Start Services Helper
@@ -63,7 +79,8 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8002
 Use the service starter script:
 
 ```bash
-./start_services.py
+cd backend
+python start_services.py
 ```
 
 This will start both services and keep them running until you press Ctrl+C.

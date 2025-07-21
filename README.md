@@ -21,22 +21,31 @@ SPICE HARVESTER는 다음과 같은 기능을 제공하는 정교한 온톨로�
 
 ## 🏗️ 아키텍처
 
-시스템은 세 가지 주요 구성 요소로 이루어져 있습니다:
+시스템은 네 가지 주요 구성 요소로 이루어져 있습니다:
 
 ### 1. 온톨로지 관리 서비스 (OMS)
 - TerminusDB와의 직접 인터페이스
 - 모든 데이터베이스 작업 처리
 - 온톨로지 스키마 및 인스턴스 관리
+- Port: 8000
 
 ### 2. 프론트엔드를 위한 백엔드 (BFF)
 - 프론트엔드 애플리케이션을 위한 API 게이트웨이
 - 인증 및 권한 부여 처리
 - 데이터 변환 및 집계 제공
+- Port: 8001
 
-### 3. 공유 컴포넌트
+### 3. 타입 추론 서비스 (Funnel)
+- 데이터 타입 자동 추론
+- 스키마 제안 및 검증
+- Google Sheets 등 외부 데이터 소스 분석
+- Port: 8003
+
+### 4. 공유 컴포넌트
 - 공통 모델 및 유틸리티
 - 복잡한 타입 시스템
 - 검증 프레임워크
+- 서비스 설정 및 의존성 관리
 
 ## 🚀 시작하기
 
@@ -58,8 +67,9 @@ pip install -r requirements.txt
 docker run -d -p 6363:6363 terminusdb/terminusdb:10.1.8
 
 # 서비스 실행
-cd backend/ontology-management-service && python main.py
-cd backend/backend-for-frontend && python main.py
+cd backend/oms && python main.py
+cd backend/bff && python main.py
+cd backend/funnel && python main.py
 ```
 
 ## 📚 문서

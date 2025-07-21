@@ -1,5 +1,6 @@
 graph TB
     %% Data Flow Architecture
+    %% Last Updated: 2025-07-20
     
     subgraph "Client Layer"
         Web[Web Application]
@@ -8,21 +9,30 @@ graph TB
     end
     
     subgraph "API Gateway Layer"
-        BFF[Backend for Frontend]
+        BFF["Backend for Frontend<br/>(Port 8002)"]
         Auth[Authentication]
         RateLimit[Rate Limiter]
+        CORS[CORS Handler]
     end
     
     subgraph "Service Layer"
-        OMS[Ontology Management]
+        OMS["Ontology Management<br/>(Port 8000)"]
         Query[Query Service]
         Validator[Validation Service]
+        Funnel["Type Inference Service<br/>(Port 8003)"]
     end
     
     subgraph "Data Layer"
-        Terminus[TerminusDB]
+        Terminus["TerminusDB<br/>(Port 6363)"]
         Cache[Redis Cache]
         Search[Search Index]
+        LabelDB[Label Mapping DB]
+    end
+    
+    subgraph "External Sources"
+        GoogleSheets[Google Sheets]
+        CSV[CSV Files]
+        ExtAPI[External APIs]
     end
     
     %% Connections
@@ -32,15 +42,27 @@ graph TB
     
     BFF --> Auth
     BFF --> RateLimit
+    BFF --> CORS
     
     Auth --> OMS
     Auth --> Query
+    Auth --> Funnel
     
     OMS --> Validator
     Query --> Validator
+    Funnel --> Validator
     
     OMS --> Terminus
     Query --> Terminus
     Query --> Cache
+    BFF --> LabelDB
+    
+    Funnel --> GoogleSheets
+    Funnel --> CSV
+    Funnel --> ExtAPI
     
     Terminus --> Search
+    
+    %% Type Inference Flow
+    BFF -.-> Funnel
+    Funnel --> BFF

@@ -1,16 +1,16 @@
 #!/bin/bash
 # 🔥 THINK ULTRA!! OMS Startup Script
 
-# Set PYTHONPATH - Include OMS directory first
-export PYTHONPATH="/Users/isihyeon/Desktop/SPICE HARVESTER/backend/ontology-management-service:/Users/isihyeon/Desktop/SPICE HARVESTER/backend:/Users/isihyeon/Desktop/SPICE HARVESTER/backend/shared:$PYTHONPATH"
+# Get script directory and source unified PYTHONPATH configuration
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+source "$SCRIPT_DIR/setup_pythonpath.sh"
 
-# Change to OMS directory
-cd "/Users/isihyeon/Desktop/SPICE HARVESTER/backend/ontology-management-service"
+# Configure Python environment (PYTHONPATH + directory change)
+if ! configure_python_environment; then
+    echo "❌ Failed to configure Python environment for OMS" >&2
+    exit 1
+fi
 
-# Debug: Show Python path
-echo "🔥 THINK ULTRA!! PYTHONPATH configured:"
-echo "$PYTHONPATH"
-
-# Start OMS
+# Start OMS using module path
 echo "🔥 THINK ULTRA!! Starting OMS..."
-python -m uvicorn main:app --host 0.0.0.0 --port 8000
+python -m oms.main

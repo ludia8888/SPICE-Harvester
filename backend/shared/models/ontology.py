@@ -1,216 +1,400 @@
 """
-Shared ontology models for OMS and BFF
+Ontology models for SPICE HARVESTER
 """
 
-from pydantic import BaseModel, Field, validator, root_validator
-from typing import Dict, List, Optional, Any, Union
+from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
+from typing import Any, Dict, List, Optional, Union
 
-from .common import (
-    BaseResponse, 
-    TimestampMixin, 
-    PaginationRequest, 
-    PaginationResponse,
-    DataType,
-    Cardinality,
-    QueryOperator,
-    ValidationError
-)
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+class Cardinality(Enum):
+    """Cardinality enumeration"""
+
+    ONE_TO_ONE = "1:1"
+    ONE_TO_MANY = "1:n"
+    MANY_TO_ONE = "n:1"
+    MANY_TO_MANY = "n:n"
+    ONE = "one"
+    MANY = "many"
 
 
 class MultiLingualText(BaseModel):
-    """다국어 텍스트 지원"""
+    """Multi-language text support"""
+
     ko: Optional[str] = None
     en: Optional[str] = None
-    ja: Optional[str] = None
-    zh: Optional[str] = None
-    
-    @validator('*')
-    def at_least_one_language(cls, v, values):
-        """최소 하나의 언어는 필수"""
-        if not any(values.values()) and v is None:
-            raise ValueError("최소 하나의 언어로 된 텍스트가 필요합니다")
-        return v
-    
-    def get(self, lang: str, fallback_chain: List[str] = None) -> str:
-        """
-        언어 코드로 텍스트 조회 (fallback 지원)
-        """
-        if hasattr(self, lang) and getattr(self, lang):
-            return getattr(self, lang)
-        
-        if fallback_chain:
-            for fallback_lang in fallback_chain:
-                if hasattr(self, fallback_lang) and getattr(self, fallback_lang):
-                    return getattr(self, fallback_lang)
-        
-        # 기본 fallback: 첫 번째로 발견되는 텍스트
-        for value in self.dict().values():
-            if value:
-                return value
-        
-        return ""
-    
-    @classmethod
-    def from_string(cls, text: str, lang: str = 'ko') -> 'MultiLingualText':
-        """단일 언어 문자열로부터 MultiLingualText 생성"""
-        return cls(**{lang: text})
+
+    def has_any_value(self) -> bool:
+        """Check if has any language value"""
+        return bool(self.ko or self.en)
+
+    def get_value(self, language: str = "en") -> Optional[str]:
+        """Get value for specific language"""
+        if language == "ko":
+            return self.ko or self.en
+        elif language == "en":
+            return self.en or self.ko
+        return self.en or self.ko
+
+    def to_dict(self) -> Dict[str, Optional[str]]:
+        """Convert to dictionary"""
+        return {"ko": self.ko, "en": self.en}
 
 
-class Property(BaseModel):
-    """속성 정의"""
-    name: str = Field(..., description="속성의 내부 ID")
-    type: DataType = Field(..., description="데이터 타입")
-    label: Union[str, MultiLingualText] = Field(..., description="속성 레이블")
-    description: Optional[Union[str, MultiLingualText]] = None
-    required: bool = Field(default=False, description="필수 여부")
-    default: Optional[Any] = None
-    constraints: Optional[Dict[str, Any]] = None
-    
-    @validator('name')
-    def validate_name(cls, v):
-        """속성명 검증"""
-        import re
-        if not re.match(r'^[a-zA-Z][a-zA-Z0-9_]*$', v):
-            raise ValueError("속성명은 영문자로 시작하고 영문, 숫자, 언더스코어만 포함해야 합니다")
-        return v
+class QueryOperator(BaseModel):
+    """Query operator definition"""
 
+    name: str
+    symbol: str
+    description: str
+    applies_to: List[str] = Field(default_factory=list)
 
-class Relationship(BaseModel):
-    """관계 정의"""
-    predicate: str = Field(..., description="관계의 내부 ID")
-    target: str = Field(..., description="대상 클래스 ID")
-    label: Union[str, MultiLingualText] = Field(..., description="관계 레이블")
-    description: Optional[Union[str, MultiLingualText]] = None
-    cardinality: Cardinality = Field(default=Cardinality.MANY)
-    inverse_predicate: Optional[str] = None
-    inverse_label: Optional[Union[str, MultiLingualText]] = None
-    
-    @validator('predicate', 'target')
-    def validate_identifiers(cls, v):
-        """식별자 검증"""
-        import re
-        if not re.match(r'^[a-zA-Z][a-zA-Z0-9_]*$', v):
-            raise ValueError("식별자는 영문자로 시작하고 영문, 숫자, 언더스코어만 포함해야 합니다")
-        return v
+    def can_apply_to(self, data_type: str) -> bool:
+        """Check if operator can apply to data type"""
+        return data_type in self.applies_to
 
 
 class OntologyBase(BaseModel):
-    """온톨로지 기본 모델"""
-    id: str = Field(..., description="클래스 ID")
-    label: Union[str, MultiLingualText] = Field(..., description="클래스 레이블")
-    description: Optional[Union[str, MultiLingualText]] = None
-    properties: List[Property] = Field(default_factory=list)
-    relationships: List[Relationship] = Field(default_factory=list)
-    parent_class: Optional[str] = None
-    abstract: bool = Field(default=False)
-    metadata: Optional[Dict[str, Any]] = None
-    
-    @validator('id')
-    def validate_id(cls, v):
-        """클래스 ID 검증"""
-        import re
-        if not re.match(r'^[A-Z][a-zA-Z0-9]*$', v):
-            raise ValueError("클래스 ID는 대문자로 시작하는 CamelCase여야 합니다")
+    """Base ontology model"""
+
+    id: str = Field(..., description="Ontology identifier")
+    label: MultiLingualText = Field(..., description="Multi-language label")
+    description: Optional[MultiLingualText] = Field(None, description="Multi-language description")
+    created_at: Optional[datetime] = Field(None, description="Creation timestamp")
+    updated_at: Optional[datetime] = Field(None, description="Last update timestamp")
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, v) -> str:
+        """Validate ID format"""
+        if not v or not isinstance(v, str):
+            raise ValueError("ID must be a non-empty string")
         return v
 
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, v) -> 'MultiLingualText':
+        """Validate label has at least one language"""
+        if not v.has_any_value():
+            raise ValueError("Label must have at least one language value")
+        return v
 
-class OntologyCreateRequest(OntologyBase):
-    """온톨로지 생성 요청"""
-    pass
-
-
-class OntologyCreateRequestBFF(BaseModel):
-    """BFF용 온톨로지 생성 요청 - ID 자동 생성"""
-    label: Union[str, MultiLingualText] = Field(..., description="클래스 레이블")
-    description: Optional[Union[str, MultiLingualText]] = None
-    properties: List[Property] = Field(default_factory=list)
-    relationships: List[Relationship] = Field(default_factory=list)
-    parent_class: Optional[str] = None
-    abstract: bool = Field(default=False)
-    metadata: Optional[Dict[str, Any]] = None
-
-
-class OntologyUpdateRequest(BaseModel):
-    """온톨로지 업데이트 요청"""
-    label: Optional[Union[str, MultiLingualText]] = None
-    description: Optional[Union[str, MultiLingualText]] = None
-    properties: Optional[List[Property]] = None
-    relationships: Optional[List[Relationship]] = None
-    parent_class: Optional[str] = None
-    abstract: Optional[bool] = None
-    metadata: Optional[Dict[str, Any]] = None
-    
-    @root_validator(skip_on_failure=True)
-    def at_least_one_field(cls, values):
-        """최소 하나의 필드는 업데이트되어야 함"""
-        if not any(v is not None for v in values.values()):
-            raise ValueError("업데이트할 필드가 최소 하나는 필요합니다")
+    @model_validator(mode="before")
+    @classmethod
+    def set_timestamps(cls, values) -> Any:
+        """Set timestamps if not provided"""
+        if isinstance(values, dict):
+            now = datetime.now()
+            if "created_at" not in values or values["created_at"] is None:
+                values["created_at"] = now
+            if "updated_at" not in values or values["updated_at"] is None:
+                values["updated_at"] = now
         return values
 
 
-class OntologyResponse(BaseResponse, TimestampMixin):
-    """온톨로지 응답"""
-    data: Optional[OntologyBase] = None
+class Relationship(BaseModel):
+    """Relationship model"""
+
+    predicate: str = Field(..., description="Relationship predicate")
+    target: str = Field(..., description="Target class")
+    label: MultiLingualText = Field(..., description="Multi-language label")
+    cardinality: str = Field(default="1:n", description="Relationship cardinality")
+    description: Optional[MultiLingualText] = Field(None, description="Multi-language description")
+    inverse_predicate: Optional[str] = Field(None, description="Inverse relationship predicate")
+    inverse_label: Optional[MultiLingualText] = Field(
+        None, description="Inverse relationship label"
+    )
+
+    @field_validator("cardinality")
+    @classmethod
+    def validate_cardinality(cls, v) -> str:
+        """Validate cardinality format"""
+        valid_cardinalities = ["1:1", "1:n", "n:1", "n:m"]
+        if v not in valid_cardinalities:
+            raise ValueError(f"Invalid cardinality: {v}. Must be one of {valid_cardinalities}")
+        return v
+
+    def is_valid_cardinality(self) -> bool:
+        """Check if cardinality is valid"""
+        valid_cardinalities = ["1:1", "1:n", "n:1", "n:m"]
+        return self.cardinality in valid_cardinalities
 
 
-class QueryFilter(BaseModel):
-    """쿼리 필터 조건"""
-    field: str = Field(..., description="필터할 필드")
-    operator: QueryOperator = Field(default=QueryOperator.EQUALS)
-    value: Any = Field(..., description="비교할 값")
-    
-    @validator('operator', pre=True)
-    def validate_operator(cls, v):
-        """문자열로 입력된 연산자도 허용"""
-        if isinstance(v, str):
-            operator_map = {
-                'eq': QueryOperator.EQUALS,
-                'neq': QueryOperator.NOT_EQUALS,
-                'gt': QueryOperator.GREATER_THAN,
-                'gte': QueryOperator.GREATER_THAN_OR_EQUAL,
-                'lt': QueryOperator.LESS_THAN,
-                'lte': QueryOperator.LESS_THAN_OR_EQUAL,
-                'in': QueryOperator.IN,
-                'nin': QueryOperator.NOT_IN,
-                'contains': QueryOperator.CONTAINS,
-                'starts_with': QueryOperator.STARTS_WITH,
-                'ends_with': QueryOperator.ENDS_WITH
-            }
-            return operator_map.get(v, v)
+class Property(BaseModel):
+    """Property model"""
+
+    name: str = Field(..., description="Property name")
+    type: str = Field(..., description="Property data type")
+    label: MultiLingualText = Field(..., description="Multi-language label")
+    required: bool = Field(default=False, description="Whether property is required")
+    default: Optional[Any] = Field(None, description="Default value")
+    description: Optional[MultiLingualText] = Field(None, description="Multi-language description")
+    constraints: Dict[str, Any] = Field(default_factory=dict, description="Property constraints")
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v) -> str:
+        """Validate property name"""
+        if not v or not isinstance(v, str):
+            raise ValueError("Property name must be a non-empty string")
+        return v
+
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, v) -> str:
+        """Validate property type"""
+        if not v or not isinstance(v, str):
+            raise ValueError("Property type must be a non-empty string")
+        return v
+
+    def validate_value(self, value: Any) -> List[str]:
+        """Validate property value"""
+        errors = []
+
+        if self.required and value is None:
+            errors.append(f"Property '{self.name}' is required")
+
+        if value is not None:
+            if self.type == "xsd:string" and not isinstance(value, str):
+                errors.append(f"Property '{self.name}' must be a string")
+            elif self.type == "xsd:integer" and not isinstance(value, int):
+                errors.append(f"Property '{self.name}' must be an integer")
+            elif self.type == "xsd:boolean" and not isinstance(value, bool):
+                errors.append(f"Property '{self.name}' must be a boolean")
+
+        if self.constraints and value is not None:
+            if "min" in self.constraints and value < self.constraints["min"]:
+                errors.append(f"Property '{self.name}' must be >= {self.constraints['min']}")
+            if "max" in self.constraints and value > self.constraints["max"]:
+                errors.append(f"Property '{self.name}' must be <= {self.constraints['max']}")
+            if "pattern" in self.constraints:
+                import re
+
+                if not re.match(self.constraints["pattern"], str(value)):
+                    errors.append(f"Property '{self.name}' does not match pattern")
+
+        return errors
+
+
+class OntologyCreateRequest(BaseModel):
+    """Request model for creating ontology"""
+
+    id: Optional[str] = Field(None, description="Ontology identifier (auto-generated if not provided)")
+    label: MultiLingualText = Field(..., description="Multi-language label")
+    description: Optional[MultiLingualText] = Field(None, description="Multi-language description")
+    parent_class: Optional[str] = Field(None, description="Parent class identifier")
+    abstract: bool = Field(default=False, description="Whether class is abstract")
+    properties: List[Property] = Field(default_factory=list, description="Class properties")
+    relationships: List[Relationship] = Field(
+        default_factory=list, description="Class relationships"
+    )
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, v) -> str:
+        """Validate ID format"""
+        if not v or not isinstance(v, str):
+            raise ValueError("ID must be a non-empty string")
+        return v
+
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, v) -> 'MultiLingualText':
+        """Validate label has at least one language"""
+        if not v.has_any_value():
+            raise ValueError("Label must have at least one language value")
+        return v
+
+    @field_validator("properties")
+    @classmethod
+    def validate_properties(cls, v) -> List[Any]:
+        """Validate properties don't have duplicate names"""
+        if v:
+            names = [p.name for p in v]
+            if len(names) != len(set(names)):
+                raise ValueError("Properties must have unique names")
+        return v
+
+    @field_validator("relationships")
+    @classmethod
+    def validate_relationships(cls, v) -> List[Any]:
+        """Validate relationships don't have duplicate predicates"""
+        if v:
+            predicates = [r.predicate for r in v]
+            if len(predicates) != len(set(predicates)):
+                raise ValueError("Relationships must have unique predicates")
         return v
 
 
-class QueryRequest(BaseModel):
-    """쿼리 요청 - BFF용 (레이블 기반)"""
-    class_label: str = Field(..., description="조회할 클래스 레이블")
-    filters: Optional[List[QueryFilter]] = Field(default_factory=list)
-    select: Optional[List[str]] = None
-    limit: Optional[int] = Field(default=100, ge=1, le=1000)
-    offset: Optional[int] = Field(default=0, ge=0)
-    order_by: Optional[str] = None
-    order_direction: Optional[str] = Field(default="asc", pattern="^(asc|desc)$")
+class OntologyUpdateRequest(BaseModel):
+    """Request model for updating ontology"""
+
+    label: Optional[MultiLingualText] = Field(None, description="Multi-language label")
+    description: Optional[MultiLingualText] = Field(None, description="Multi-language description")
+    parent_class: Optional[str] = Field(None, description="Parent class identifier")
+    abstract: Optional[bool] = Field(None, description="Whether class is abstract")
+    properties: Optional[List[Property]] = Field(None, description="Class properties")
+    relationships: Optional[List[Relationship]] = Field(None, description="Class relationships")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
+
+    @field_validator("properties")
+    @classmethod
+    def validate_properties(cls, v) -> List[Any]:
+        """Validate properties don't have duplicate names"""
+        if v:
+            names = [p.name for p in v]
+            if len(names) != len(set(names)):
+                raise ValueError("Properties must have unique names")
+        return v
+
+    @field_validator("relationships")
+    @classmethod
+    def validate_relationships(cls, v) -> List[Any]:
+        """Validate relationships don't have duplicate predicates"""
+        if v:
+            predicates = [r.predicate for r in v]
+            if len(predicates) != len(set(predicates)):
+                raise ValueError("Relationships must have unique predicates")
+        return v
+
+    def has_changes(self) -> bool:
+        """Check if request has any changes"""
+        return any(
+            [
+                self.label is not None,
+                self.description is not None,
+                self.parent_class is not None,
+                self.abstract is not None,
+                self.properties is not None,
+                self.relationships is not None,
+                self.metadata is not None,
+            ]
+        )
 
 
-class QueryRequestInternal(BaseModel):
-    """쿼리 요청 - OMS용 (내부 ID 기반)"""
-    class_id: str = Field(..., description="조회할 클래스 ID")
-    filters: Optional[List[QueryFilter]] = Field(default_factory=list)
-    select: Optional[List[str]] = None
-    limit: Optional[int] = Field(default=100, ge=1, le=1000)
-    offset: Optional[int] = Field(default=0, ge=0)
-    order_by: Optional[str] = None
-    order_direction: Optional[str] = Field(default="asc", pattern="^(asc|desc)$")
+class OntologyResponse(OntologyBase):
+    """Response model for ontology operations"""
+
+    parent_class: Optional[str] = Field(None, description="Parent class identifier")
+    abstract: bool = Field(default=False, description="Whether class is abstract")
+    properties: List[Property] = Field(default_factory=list, description="Class properties")
+    relationships: List[Relationship] = Field(
+        default_factory=list, description="Class relationships"
+    )
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+
+    def validate_structure(self) -> List[str]:
+        """Validate ontology structure"""
+        errors = []
+
+        # Check property name uniqueness
+        property_names = [p.name for p in self.properties]
+        if len(property_names) != len(set(property_names)):
+            errors.append("Duplicate property names found")
+
+        # Check relationship predicate uniqueness
+        predicates = [r.predicate for r in self.relationships]
+        if len(predicates) != len(set(predicates)):
+            errors.append("Duplicate relationship predicates found")
+
+        # Validate all relationships have valid cardinalities
+        for rel in self.relationships:
+            if not rel.is_valid_cardinality():
+                errors.append(
+                    f"Invalid cardinality for relationship '{rel.predicate}': {rel.cardinality}"
+                )
+
+        return errors
 
 
-class QueryResponse(BaseResponse, PaginationResponse):
-    """쿼리 응답"""
-    data: List[Dict[str, Any]] = Field(default_factory=list)
+class QueryFilter(BaseModel):
+    """Query filter model"""
+
+    field: str = Field(..., description="Field to filter on")
+    operator: str = Field(..., description="Filter operator")
+    value: Any = Field(..., description="Filter value")
+
+    @field_validator("field")
+    @classmethod
+    def validate_field(cls, v) -> str:
+        """Validate field name"""
+        if not v or not isinstance(v, str):
+            raise ValueError("Field must be a non-empty string")
+        return v
+
+    @field_validator("operator")
+    @classmethod
+    def validate_operator(cls, v) -> str:
+        """Validate operator"""
+        valid_operators = [
+            "eq",
+            "ne",
+            "gt",
+            "ge",
+            "lt",
+            "le",
+            "like",
+            "in",
+            "not_in",
+            "is_null",
+            "is_not_null",
+        ]
+        if v not in valid_operators:
+            raise ValueError(f"Invalid operator: {v}. Must be one of {valid_operators}")
+        return v
 
 
-# 하위 호환성을 위한 별칭
-OntologyCreateInput = OntologyCreateRequest
+class QueryInput(BaseModel):
+    """Query input model"""
+
+    class_label: Optional[str] = Field(None, description="Class label to query")
+    class_id: Optional[str] = Field(None, description="Class ID to query")
+    filters: List[QueryFilter] = Field(default_factory=list, description="Query filters")
+    select: Optional[List[str]] = Field(None, description="Fields to select")
+    limit: Optional[int] = Field(None, description="Maximum number of results")
+    offset: Optional[int] = Field(None, description="Number of results to skip")
+    order_by: Optional[str] = Field(None, description="Field to order by")
+    order_direction: Optional[str] = Field(default="asc", description="Order direction")
+
+    @field_validator("limit")
+    @classmethod
+    def validate_limit(cls, v) -> int:
+        """Validate limit"""
+        if v is not None and (not isinstance(v, int) or v < 0):
+            raise ValueError("Limit must be a non-negative integer")
+        return v
+
+    @field_validator("offset")
+    @classmethod
+    def validate_offset(cls, v) -> int:
+        """Validate offset"""
+        if v is not None and (not isinstance(v, int) or v < 0):
+            raise ValueError("Offset must be a non-negative integer")
+        return v
+
+    @field_validator("order_direction")
+    @classmethod
+    def validate_order_direction(cls, v) -> str:
+        """Validate order direction"""
+        if v not in ["asc", "desc"]:
+            raise ValueError("Order direction must be 'asc' or 'desc'")
+        return v
+
+    @model_validator(mode="after")
+    def validate_class_identifier(self) -> str:
+        """Validate that either class_label or class_id is provided"""
+        if not self.class_label and not self.class_id:
+            raise ValueError("Either class_label or class_id must be provided")
+        return self
+
+
+# BFF aliases - to avoid code duplication
+OntologyCreateRequestBFF = OntologyCreateRequest
 OntologyUpdateInput = OntologyUpdateRequest
-QueryInput = QueryRequest
-PropertyDefinition = Property
-RelationshipDefinition = Relationship
+QueryRequest = QueryInput
+QueryRequestInternal = QueryInput  # Internal query request
+QueryResponse = dict  # Generic dict for query responses

@@ -1,42 +1,35 @@
 """
-Shared models for OMS and BFF services
+Shared model definitions for SPICE HARVESTER
 """
 
-from .ontology import (
-    OntologyBase,
-    OntologyCreateRequest,
-    OntologyUpdateRequest,
-    OntologyResponse,
-    MultiLingualText,
-    Property,
-    Relationship,
-    QueryRequest,
-    QueryResponse,
-    QueryFilter,
-    QueryOperator
-)
-
-from .common import (
-    BaseModel,
-    TimestampMixin,
-    PaginationRequest,
-    PaginationResponse
-)
+from .common import *
+from .config import *
+from .google_sheets import *
+from .ontology import *
 
 __all__ = [
+    # common models
+    "DataType",
+    "Cardinality",
+    "QueryOperator",
+    "QUERY_OPERATORS",
+    # config models
+    "ServiceConfig",
+    # ontology models
+    "MultiLingualText",
+    "QueryFilter",
+    "QueryInput",
+    "QueryOperator",
     "OntologyBase",
-    "OntologyCreateRequest", 
+    "Relationship",
+    "Property",
+    "OntologyCreateRequest",
     "OntologyUpdateRequest",
     "OntologyResponse",
-    "MultiLingualText",
-    "Property",
-    "Relationship",
-    "QueryRequest",
-    "QueryResponse", 
-    "QueryFilter",
-    "QueryOperator",
-    "BaseModel",
-    "TimestampMixin",
-    "PaginationRequest",
-    "PaginationResponse"
+    # google sheets models
+    "GoogleSheetPreviewRequest",
+    "GoogleSheetPreviewResponse",
+    "GoogleSheetError",
+    "GoogleSheetRegisterRequest",
+    "GoogleSheetRegisterResponse",
 ]

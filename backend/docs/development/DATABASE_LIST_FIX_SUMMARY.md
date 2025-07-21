@@ -93,4 +93,4 @@ Created test scripts to verify the fix:
 
 ## Files Modified
 - `/Users/isihyeon/Desktop/SPICE HARVESTER/backend/test_critical_functionality.py`
-- `/Users/isihyeon/Desktop/SPICE HARVESTER/backend/ontology-management-service/services/async_terminus.py`
+- `/Users/isihyeon/Desktop/SPICE HARVESTER/backend/oms/services/async_terminus.py`

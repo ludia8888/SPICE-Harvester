@@ -5,13 +5,8 @@ Google Sheets Connector API 통합 테스트
 import httpx
 import asyncio
 import json
-import sys
-import os
 
-# Add backend to path
-backend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-sys.path.insert(0, backend_path)
-
+# No need for sys.path.insert - using proper spice_harvester package imports
 
 async def test_health_check():
     """헬스 체크 엔드포인트 테스트"""
@@ -39,7 +34,6 @@ async def test_health_check():
         except Exception as e:
             print(f"❌ 예상치 못한 오류: {e}")
             return False
-
 
 async def test_preview_public_sheet():
     """공개 Google Sheet 미리보기 테스트"""
@@ -102,7 +96,6 @@ async def test_preview_public_sheet():
             traceback.print_exc()
             return False
 
-
 async def test_invalid_url():
     """잘못된 URL 테스트"""
     invalid_urls = [
@@ -128,7 +121,6 @@ async def test_invalid_url():
                     
             except Exception as e:
                 print(f"❌ 오류 발생: {e}")
-
 
 async def test_register_sheet():
     """시트 등록 테스트"""
@@ -176,7 +168,6 @@ async def test_register_sheet():
             print(f"❌ 오류 발생: {e}")
             return None
 
-
 async def test_unregister_sheet(sheet_id: str):
     """시트 등록 해제 테스트"""
     if not sheet_id:
@@ -201,7 +192,6 @@ async def test_unregister_sheet(sheet_id: str):
                 
         except Exception as e:
             print(f"❌ 오류 발생: {e}")
-
 
 async def main():
     """모든 테스트 실행"""
@@ -231,7 +221,6 @@ async def main():
     
     print("\n" + "=" * 50)
     print("✅ 모든 테스트 완료!")
-
 
 if __name__ == "__main__":
     asyncio.run(main())

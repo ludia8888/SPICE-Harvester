@@ -20,9 +20,8 @@ import logging
 import random
 import string
 import gc
-import sys
 import tracemalloc
-from test_config import TestConfig
+from tests.test_config import TestConfig
 
 # 성능 테스트 설정
 OMS_BASE_URL = TestConfig.get_oms_base_url()
@@ -32,7 +31,6 @@ MAX_PAYLOAD_SIZE = 10 * 1024 * 1024  # 10MB
 MAX_CONCURRENT_USERS = 100
 
 logger = logging.getLogger(__name__)
-
 
 class ProductionPerformanceTestSuite:
     """프로덕션 레벨 성능 테스트 스위트"""
@@ -656,13 +654,11 @@ class ProductionPerformanceTestSuite:
         else:
             print("🚨 성능 개선 필수")
 
-
 # 성능 테스트 실행 함수
 async def run_production_performance_tests():
     """프로덕션 성능 테스트 실행"""
     test_suite = ProductionPerformanceTestSuite()
     await test_suite.run_comprehensive_performance_tests()
-
 
 if __name__ == "__main__":
     # 실제 성능 테스트 실행

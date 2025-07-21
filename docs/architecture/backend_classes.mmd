@@ -1,5 +1,6 @@
 classDiagram
     %% SPICE HARVESTER Comprehensive Backend Architecture
+    %% Last Updated: 2025-07-20
     
     %% Core Application Layer
     class FastAPIApplication {
@@ -63,12 +64,14 @@ classDiagram
     
     class BackendForFrontend {
         +OMSClient oms_client
+        +FunnelClient funnel_client
         +LabelMapper label_mapper
         +ResponseFormatter formatter
         +aggregate_data() Dict
         +format_response() Response
         +handle_error() ErrorResponse
         +map_labels() Dict
+        +suggest_schema() SchemaResponse
     }
     
     class AsyncTerminusService {
@@ -82,6 +85,34 @@ classDiagram
         +delete_document() bool
     }
     
+    class FunnelService {
+        +TypeInferenceEngine engine
+        +DataProcessor processor
+        +SchemaGenerator generator
+        +analyze_dataset() DatasetAnalysis
+        +infer_types() List~TypeInference~
+        +suggest_schema() SchemaResponse
+        +preview_google_sheets() PreviewResponse
+    }
+    
+    class TypeInferenceEngine {
+        +Dict type_patterns
+        +List inference_rules
+        +infer_column_type() InferredType
+        +calculate_confidence() float
+        +detect_complex_types() List~ComplexType~
+        +validate_inference() bool
+    }
+    
+    class DataProcessor {
+        +GoogleSheetsAdapter sheets_adapter
+        +CSVAdapter csv_adapter
+        +fetch_sample_data() DataFrame
+        +clean_data() DataFrame
+        +analyze_patterns() PatternAnalysis
+        +extract_metadata() Metadata
+    }
+    
     %% Complex Type System
     class ComplexTypeValidator {
         +Dict type_registry
@@ -90,6 +121,11 @@ classDiagram
         +validate_nested() bool
         +register_type() None
         +get_validator() Validator
+        +validate_email() bool
+        +validate_phone() bool
+        +validate_url() bool
+        +validate_money() bool
+        +validate_coordinate() bool
     }
     
     class ComplexTypeSerializer {
@@ -135,16 +171,33 @@ classDiagram
         +sanitize_input() Dict
     }
     
+    class CORSMiddleware {
+        +List allowed_origins
+        +List allowed_methods
+        +bool allow_credentials
+        +configure_auto() None
+        +add_origin() None
+    }
+    
     %% Relationships
     FastAPIApplication --> OntologyManagementService : uses
-    FastAPIApplication --> BackendForFrontend : uses
+    FastAPIApplication --> BackendForFrontend : uses (Port 8002)
+    FastAPIApplication --> FunnelService : uses (Port 8003)
+    FastAPIApplication --> OntologyManagementService : uses (Port 8000)
     OntologyManagementService --> AsyncTerminusService : uses
     OntologyManagementService --> RelationshipManager : uses
     BackendForFrontend --> ComplexTypeSerializer : uses
     BackendForFrontend --> ComplexTypeValidator : uses
+    BackendForFrontend --> FunnelService : calls
+    FunnelService --> TypeInferenceEngine : uses
+    FunnelService --> DataProcessor : uses
+    FunnelService --> ComplexTypeValidator : uses
+    TypeInferenceEngine --> ComplexTypeValidator : uses
+    DataProcessor --> TypeInferenceEngine : feeds data
     Production --> Relationship : has many
     Ontology --> Production : defines
     RelationshipManager --> Relationship : manages
     FastAPIApplication --> RBACMiddleware : applies
     FastAPIApplication --> ValidationMiddleware : applies
+    FastAPIApplication --> CORSMiddleware : applies
     MultilingualText --> ComplexTypeValidator : validated by

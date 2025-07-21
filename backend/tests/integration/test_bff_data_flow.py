@@ -8,7 +8,6 @@ import httpx
 import json
 import time
 
-
 async def test_bff_data_flow():
     """Debug BFF data flow"""
     bff_url = "http://localhost:8002"
@@ -92,7 +91,6 @@ async def test_bff_data_flow():
         # Cleanup
         print(f"\n6. Cleaning up test database: {test_db}")
         await client.delete(f"{oms_url}/api/v1/database/{test_db}")
-
 
 if __name__ == "__main__":
     asyncio.run(test_bff_data_flow())

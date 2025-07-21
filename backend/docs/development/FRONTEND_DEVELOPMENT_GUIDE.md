@@ -3,14 +3,15 @@
 ## 📋 목차
 1. [시스템 개요](#시스템-개요)
 2. [아키텍처 구조](#아키텍처-구조)
-3. [API 엔드포인트](#api-엔드포인트)
-4. [데이터 타입 시스템](#데이터-타입-시스템)
-5. [복합 데이터 타입](#복합-데이터-타입)
-6. [관계 관리 시스템](#관계-관리-시스템)
-7. [요청/응답 스키마](#요청응답-스키마)
-8. [에러 처리](#에러-처리)
-9. [실제 사용 예시](#실제-사용-예시)
-10. [테스트 가이드](#테스트-가이드)
+3. [🌐 CORS 설정](#cors-설정)
+4. [API 엔드포인트](#api-엔드포인트)
+5. [데이터 타입 시스템](#데이터-타입-시스템)
+6. [복합 데이터 타입](#복합-데이터-타입)
+7. [관계 관리 시스템](#관계-관리-시스템)
+8. [요청/응답 스키마](#요청응답-스키마)
+9. [에러 처리](#에러-처리)
+10. [실제 사용 예시](#실제-사용-예시)
+11. [테스트 가이드](#테스트-가이드)
 
 ---
 
@@ -26,8 +27,9 @@
 - **다국어 지원**: 한국어/영어 레이블 및 설명 지원
 
 ### 백엔드 서비스
-- **OMS (Ontology Management Service)**: 포트 8000
-- **BFF (Backend for Frontend)**: 포트 8002
+- **OMS (Ontology Management Service)**: 포트 8000 - 내부 ID 기반 관리
+- **BFF (Backend for Frontend)**: 포트 8002 - 사용자 친화적 레이블 기반
+- **Funnel (Type Inference Service)**: 포트 8003 - 자동 스키마 제안
 - **TerminusDB**: 포트 6363 (내부 그래프 데이터베이스)
 
 ---
@@ -35,16 +37,18 @@
 ## 아키텍처 구조
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Frontend      │    │   BFF (8002)    │    │   OMS (8000)    │
-│   (React/D3.js)   │◄──►│   User-facing   │◄──►│   Internal API  │
-│                 │    │   API           │    │                 │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-                                                       │
-                                              ┌─────────────────┐
-                                              │  TerminusDB     │
-                                              │  (6363)         │
-                                              └─────────────────┘
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Frontend      │    │   BFF (8002)    │    │   OMS (8000)    │    │  Funnel (8003)  │
+│   (React/D3.js)   │◄──►│   User-facing   │◄──►│   Internal API  │    │ Type Inference  │
+│                 │    │   API           │    │                 │    │                 │
+└─────────────────┘    └─────────────────┘    └─────────────────┘    └─────────────────┘
+                                │                         │                         │
+                                └─────────────────────────┼─────────────────────────┘
+                                                          ▼
+                                                  ┌─────────────────┐
+                                                  │  TerminusDB     │
+                                                  │  (6363)         │
+                                                  └─────────────────┘
 ```
 
 ### 권장 프론트엔드 아키텍처
@@ -67,7 +71,9 @@ src/
 │   ├── api.js
 │   ├── ontologyService.js
 │   ├── complexTypeService.js
-│   └── relationshipService.js
+│   ├── relationshipService.js
+│   ├── googleSheetsService.js
+│   └── typeInferenceService.js
 ├── types/
 │   ├── ontology.ts
 │   ├── complexTypes.ts
@@ -79,11 +85,67 @@ src/
 
 ---
 
+## 🌐 CORS 설정
+
+### 🚀 즉시 시작하기
+
+SPICE HARVESTER는 **자동 CORS 설정**을 지원합니다. 별도 설정 없이 일반적인 프론트엔드 개발 포트에서 바로 사용할 수 있습니다:
+
+```bash
+# 설정 없이 바로 사용 가능한 포트들:
+npm start          # React (http://localhost:3000)
+npm run dev        # Vite (http://localhost:5173)
+ng serve           # Angular (http://localhost:4200)
+npm run serve      # Vue.js (http://localhost:8080)
+```
+
+### 📋 지원되는 포트 (자동 설정)
+
+- **React**: 3000, 3001, 3002
+- **Vite**: 5173, 5174
+- **Angular**: 4200, 4201
+- **Vue.js**: 8080, 8081, 8082
+- **기타**: 모든 localhost 포트 (HTTP/HTTPS)
+
+### 🔧 커스텀 설정
+
+특별한 포트나 도메인이 필요한 경우:
+
+```bash
+# .env 파일 생성
+cp .env.example .env
+
+# 커스텀 origin 추가
+CORS_ORIGINS=["http://localhost:3000", "http://localhost:YOUR_PORT"]
+```
+
+### 🧪 CORS 테스트
+
+```bash
+# 모든 서비스의 CORS 설정 테스트
+python test_cors_configuration.py
+
+# 개별 서비스 CORS 설정 확인
+curl http://localhost:8002/debug/cors  # BFF
+curl http://localhost:8000/debug/cors  # OMS
+curl http://localhost:8003/debug/cors  # Funnel
+```
+
+### 📖 상세 가이드
+
+CORS 설정에 대한 자세한 내용은 다음 문서를 참고하세요:
+
+- **📋 완전한 가이드**: [CORS 설정 가이드](./CORS_CONFIGURATION_GUIDE.md)
+- **🚀 빠른 시작**: [CORS 빠른 시작](../../CORS_QUICK_START.md)
+
+---
+
 ## API 엔드포인트
 
 ### 기본 URL
 - **BFF (권장)**: `http://localhost:8002`
 - **OMS (내부용)**: `http://localhost:8000`
+- **Funnel (타입 추론)**: `http://localhost:8003`
 
 ### 🔑 인증 헤더
 ```javascript
@@ -259,6 +321,63 @@ GET /api/v1/ontology/{db_name}/reachable-entities/{start_entity}?max_depth=3
 #### 관계 네트워크 분석
 ```http
 GET /api/v1/ontology/{db_name}/analyze-network
+```
+
+### 4. Google Sheets 연동 및 타입 추론
+
+#### Google Sheets 미리보기
+```http
+POST /api/v1/database/{db_name}/preview-google-sheets
+Content-Type: application/json
+
+{
+  "sheet_url": "https://docs.google.com/spreadsheets/d/1dniTdsPGWbah3NY_m3sMpuyYCR0UVbCYl9TaZJAvZEw",
+  "worksheet_name": "Product List"
+}
+```
+
+#### 데이터에서 스키마 제안
+```http
+POST /api/v1/database/{db_name}/suggest-schema-from-data
+Content-Type: application/json
+
+{
+  "data": [
+    ["Name", "Price", "Email", "Phone"],
+    ["Product A", "10000", "admin@example.com", "010-1234-5678"],
+    ["Product B", "20000", "support@example.com", "02-555-1234"]
+  ],
+  "class_name": "Product",
+  "include_complex_types": true
+}
+```
+
+#### Google Sheets에서 스키마 제안
+```http
+POST /api/v1/database/{db_name}/suggest-schema-from-google-sheets
+Content-Type: application/json
+
+{
+  "sheet_url": "https://docs.google.com/spreadsheets/d/1dniTdsPGWbah3NY_m3sMpuyYCR0UVbCYl9TaZJAvZEw",
+  "worksheet_name": "Product List",
+  "class_name": "Product",
+  "api_key": "AIzaSyC..." // 선택사항
+}
+```
+
+#### Google Sheets 커넥터 설정
+```http
+POST /api/v1/connectors/google/preview
+Content-Type: application/json
+
+{
+  "mode": "URL",
+  "url": "https://docs.google.com/spreadsheets/d/1dniTdsPGWbah3NY_m3sMpuyYCR0UVbCYl9TaZJAvZEw",
+  "data_config": {
+    "headers": 1,
+    "sheet_name": "Product List"
+  }
+}
 ```
 
 ---
@@ -938,6 +1057,56 @@ const setupOntologySystem = async () => {
 
   } catch (error) {
     console.error('❌ 오류 발생:', error);
+  }
+};
+
+// 5. Google Sheets 연동 워크플로우
+const createOntologyFromGoogleSheets = async () => {
+  try {
+    // Google Sheets 데이터 미리보기
+    const previewResponse = await fetch('/api/v1/google-sheets/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sheet_url: 'https://docs.google.com/spreadsheets/d/1dniTdsPGWbah3NY_m3sMpuyYCR0UVbCYl9TaZJAvZEw/edit',
+        worksheet_name: 'Product List'
+      })
+    });
+    
+    const previewData = await previewResponse.json();
+    console.log('📊 Google Sheets 데이터 미리보기:', previewData);
+
+    // 스키마 제안 받기
+    const schemaResponse = await fetch('/api/v1/database/my_database/suggest-schema-from-google-sheets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sheet_url: 'https://docs.google.com/spreadsheets/d/1dniTdsPGWbah3NY_m3sMpuyYCR0UVbCYl9TaZJAvZEw/edit',
+        worksheet_name: 'Product List',
+        class_name: 'Product'
+      })
+    });
+    
+    const suggestedSchema = await schemaResponse.json();
+    console.log('🎯 제안된 스키마:', suggestedSchema);
+
+    // 제안된 스키마로 온톨로지 생성
+    const createResponse = await fetch('/api/v1/ontology/my_database/create-advanced', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...suggestedSchema.suggested_schema,
+        auto_generate_inverse: true,
+        validate_relationships: true
+      })
+    });
+    
+    const result = await createResponse.json();
+    console.log('✅ Google Sheets 기반 온톨로지 생성 완료:', result);
+    
+    return result;
+  } catch (error) {
+    console.error('❌ Google Sheets 연동 오류:', error);
   }
 };
 ```
@@ -1937,6 +2106,108 @@ export const validatePhone = (phone, constraints) => {
   
   return { valid: true };
 };
+```
+
+### 4. 서비스 구현 예시
+
+```javascript
+// services/googleSheetsService.js
+import { apiClient } from './api';
+
+export const googleSheetsService = {
+  // Google Sheets 데이터 미리보기
+  async previewSheet(sheetUrl, worksheetName) {
+    return apiClient.post('/api/v1/google-sheets/preview', {
+      sheet_url: sheetUrl,
+      worksheet_name: worksheetName
+    });
+  },
+
+  // Google Sheets에서 스키마 제안 받기
+  async suggestSchemaFromSheet(dbName, sheetConfig) {
+    return apiClient.post(`/api/v1/database/${dbName}/suggest-schema-from-google-sheets`, {
+      sheet_url: sheetConfig.sheetUrl,
+      worksheet_name: sheetConfig.worksheetName,
+      class_name: sheetConfig.className,
+      header_row: sheetConfig.headerRow || 1,
+      start_row: sheetConfig.startRow || 2
+    });
+  },
+
+  // Google Sheets 커넥터 설정
+  async configureConnector(dbName, connectorConfig) {
+    return apiClient.post(`/api/v1/database/${dbName}/google-sheets/connector`, {
+      sheet_url: connectorConfig.sheetUrl,
+      worksheet_name: connectorConfig.worksheetName,
+      ontology_class: connectorConfig.ontologyClass,
+      mapping: connectorConfig.mapping,
+      sync_mode: connectorConfig.syncMode || 'manual'
+    });
+  }
+};
+
+// services/typeInferenceService.js
+import { apiClient } from './api';
+
+export const typeInferenceService = {
+  // 데이터에서 스키마 제안 받기
+  async suggestSchemaFromData(dbName, data) {
+    return apiClient.post(`/api/v1/database/${dbName}/suggest-schema`, {
+      sample_data: data.sampleData,
+      class_name: data.className,
+      analyze_relationships: data.analyzeRelationships || false,
+      include_complex_types: data.includeComplexTypes || true
+    });
+  },
+
+  // 타입 추론 분석
+  async analyzeDataTypes(data) {
+    return apiClient.post('/api/v1/type-inference/analyze', {
+      data: data
+    });
+  },
+
+  // 복합 타입 감지
+  async detectComplexTypes(values) {
+    return apiClient.post('/api/v1/type-inference/detect-complex-types', {
+      values: values
+    });
+  }
+};
+
+// 통합 사용 예시
+async function createOntologyFromExternalData() {
+  try {
+    // 1. Google Sheets 데이터 가져오기
+    const sheetData = await googleSheetsService.previewSheet(
+      'https://docs.google.com/spreadsheets/d/your-sheet-id',
+      'Products'
+    );
+
+    // 2. 타입 추론 실행
+    const typeAnalysis = await typeInferenceService.analyzeDataTypes(
+      sheetData.data.rows
+    );
+
+    // 3. 스키마 제안 받기
+    const suggestedSchema = await googleSheetsService.suggestSchemaFromSheet('mydb', {
+      sheetUrl: 'https://docs.google.com/spreadsheets/d/your-sheet-id',
+      worksheetName: 'Products',
+      className: 'Product'
+    });
+
+    // 4. 온톨로지 생성
+    const ontology = await ontologyService.createOntology('mydb', 
+      suggestedSchema.data.suggested_schema
+    );
+
+    console.log('✅ 온톨로지 생성 완료:', ontology);
+    return ontology;
+  } catch (error) {
+    console.error('❌ 오류 발생:', error);
+    throw error;
+  }
+}
 ```
 
 ---

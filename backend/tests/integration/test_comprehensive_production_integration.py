@@ -17,7 +17,7 @@ from typing import Dict, List, Any
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
-from test_config import TestConfig
+from tests.test_config import TestConfig
 
 # 테스트 설정
 OMS_BASE_URL = TestConfig.get_oms_base_url()
@@ -26,7 +26,6 @@ TEST_TIMEOUT = 30
 MAX_CONCURRENT_REQUESTS = 50
 
 logger = logging.getLogger(__name__)
-
 
 class ProductionIntegrationTestSuite:
     """프로덕션 레벨 통합 테스트 스위트"""
@@ -528,13 +527,11 @@ class ProductionIntegrationTestSuite:
         else:
             print("🚀 프로덕션 배포 준비 완료!")
 
-
 # 테스트 실행 함수
 async def run_production_integration_tests():
     """프로덕션 통합 테스트 실행"""
     test_suite = ProductionIntegrationTestSuite()
     await test_suite.run_comprehensive_tests()
-
 
 if __name__ == "__main__":
     # 실제 테스트 실행

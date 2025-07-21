@@ -29,10 +29,15 @@ backend/
 │   └── serializers/
 │       └── complex_type_serializer.py   # 직렬화/역직렬화
 │
-├── test_complex_validator_ultra.py      # 단위 테스트
-├── test_complex_types_terminus_integration.py  # TerminusDB 통합 테스트
-├── test_complex_types_bff_integration.py      # BFF end-to-end 테스트
-└── run_complex_types_tests.py          # 테스트 러너
+└── tests/
+    ├── unit/complex_types/
+    │   ├── test_complex_types_ultra.py      # 단위 테스트
+    │   └── test_complex_validator_ultra.py  # 검증기 테스트
+    ├── integration/
+    │   ├── test_complex_types_terminus_integration.py  # TerminusDB 통합 테스트
+    │   └── test_complex_types_bff_integration.py      # BFF end-to-end 테스트
+    └── runners/
+        └── run_complex_types_tests.py          # 테스트 러너
 ```
 
 ## 테스트 실행 방법
@@ -40,21 +45,33 @@ backend/
 ### 1. 전체 테스트 실행
 
 ```bash
+# 서비스 시작 (새 터미널에서)
+cd backend
+./start_test_services.sh
+
 # 모든 테스트를 순차적으로 실행
-python run_complex_types_tests.py
+cd backend
+python tests/runners/run_complex_types_tests.py
 ```
 
 ### 2. 개별 테스트 실행
 
 ```bash
 # 단위 테스트만 실행
-python test_complex_validator_ultra.py
+cd backend
+python tests/unit/complex_types/test_complex_validator_ultra.py
+# or
+pytest tests/unit/complex_types/test_complex_types_ultra.py -v
 
 # TerminusDB 통합 테스트만 실행
-python test_complex_types_terminus_integration.py
+python tests/integration/test_complex_types_terminus_integration.py
+# or
+pytest tests/integration/test_complex_types_terminus_integration.py -v
 
 # BFF 통합 테스트만 실행
-python test_complex_types_bff_integration.py
+python tests/integration/test_complex_types_bff_integration.py
+# or
+pytest tests/integration/test_complex_types_bff_integration.py -v
 ```
 
 ### 3. 서비스 실행 필요
@@ -63,14 +80,18 @@ python test_complex_types_bff_integration.py
 
 ```bash
 # Terminal 1: OMS 서비스
-cd backend/ontology-management-service
+cd backend/oms
 python main.py
 
 # Terminal 2: BFF 서비스
-cd backend/backend-for-frontend
+cd backend/bff
 python main.py
 
-# Terminal 3: TerminusDB (Docker)
+# Terminal 3: Funnel 서비스 (타입 추론)
+cd backend/funnel
+python main.py
+
+# Terminal 4: TerminusDB (Docker)
 docker-compose up terminusdb
 ```
 
@@ -193,6 +214,24 @@ pip install phonenumbers email-validator --break-system-packages
 2. GraphQL 스키마에 복합 타입 반영
 3. UI 컴포넌트에서 복합 타입 입력 지원
 4. 복합 타입 데이터 쿼리 및 필터링
+
+## 최근 개선 사항 (2025-07-20)
+
+### 코드 수정
+1. **test_config.py**: ServiceConfig를 사용하여 포트 설정 자동화
+2. **run_complex_types_tests.py**: 
+   - 테스트 파일 경로 자동 해결
+   - PYTHONPATH 자동 설정
+   - 파일 존재 여부 검증 추가
+
+### 발견된 버그들
+테스트 실행 중 다음 버그들이 발견됨:
+- **ARRAY 타입**: 타입 불일치 검증 실패 (배열 내 타입 검사 필요)
+- **MONEY 타입**: 지원하지 않는 통화 거부 실패
+- **PHONE 타입**: 미국 전화번호 검증 실패
+- **EMAIL 타입**: 기본 이메일 검증 실패
+
+**현재 성공률**: 60% (10개 중 6개 통과)
 
 ## 🔥 THINK ULTRA!!
 

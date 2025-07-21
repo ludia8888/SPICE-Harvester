@@ -1,6 +1,3 @@
 """
-Shared modules for OMS and BFF services
-Common models, exceptions, and utilities
+Shared modules for SPICE HARVESTER
 """
-
-__version__ = "1.0.0"

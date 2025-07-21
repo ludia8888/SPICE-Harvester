@@ -3,21 +3,14 @@ Google Sheets Connector 간단한 테스트
 """
 
 import pytest
-import sys
-import os
 
-# 절대 경로로 backend 디렉토리 추가
-backend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-sys.path.insert(0, backend_path)
-
-# 이제 import
+# No need for sys.path.insert - using proper spice_harvester package imports
 from data_connector.google_sheets.utils import (
     extract_sheet_id,
     extract_gid,
     normalize_sheet_data,
     calculate_data_hash
 )
-
 
 def test_extract_sheet_id():
     """Sheet ID 추출 테스트"""
@@ -30,7 +23,6 @@ def test_extract_sheet_id():
     assert extract_sheet_id(url2) == "1-_aB3c"
     
     print("✅ Sheet ID 추출 테스트 통과")
-
 
 def test_extract_gid():
     """GID 추출 테스트"""
@@ -47,7 +39,6 @@ def test_extract_gid():
     assert extract_gid(url3) is None
     
     print("✅ GID 추출 테스트 통과")
-
 
 def test_normalize_sheet_data():
     """시트 데이터 정규화 테스트"""
@@ -73,7 +64,6 @@ def test_normalize_sheet_data():
     
     print("✅ 데이터 정규화 테스트 통과")
 
-
 def test_data_hash():
     """데이터 해시 테스트"""
     data1 = [["A", "B"], ["1", "2"]]
@@ -91,10 +81,8 @@ def test_data_hash():
     
     print("✅ 데이터 해시 테스트 통과")
 
-
 if __name__ == "__main__":
     print("🧪 Google Sheets Connector 유틸리티 테스트 시작")
-    print(f"📁 Backend 경로: {backend_path}")
     
     try:
         test_extract_sheet_id()

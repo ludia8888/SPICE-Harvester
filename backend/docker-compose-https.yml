@@ -1,0 +1,141 @@
+version: '3.8'
+
+services:
+  # TerminusDB
+  terminusdb:
+    image: terminusdb/terminusdb:v11.1.14
+    container_name: spice_terminusdb
+    environment:
+      - TERMINUSDB_ADMIN_PASS=${TERMINUSDB_ADMIN_PASS:-admin123}
+      - TERMINUSDB_SERVER_NAME=${TERMINUSDB_SERVER_NAME:-SpiceTerminusDB}
+      - TERMINUSDB_AUTOLOGIN=false
+      - USE_HTTPS=${USE_HTTPS:-true}
+      - SSL_CERT_PATH=/ssl/terminusdb/server.crt
+      - SSL_KEY_PATH=/ssl/terminusdb/server.key
+    ports:
+      - "6363:6363"
+    volumes:
+      - terminusdb_data:/app/terminusdb/storage
+      - ./ssl:/ssl:ro
+    networks:
+      - spice_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-k", "https://localhost:6363/api/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # OMS (Ontology Management Service)
+  oms:
+    build:
+      context: .
+      dockerfile: ./oms/Dockerfile
+    container_name: spice_oms
+    environment:
+      - TERMINUS_SERVER_URL=${TERMINUS_SERVER_URL:-https://terminusdb:6363}
+      - TERMINUS_USER=${TERMINUS_USER:-admin}
+      - TERMINUS_ACCOUNT=${TERMINUS_ACCOUNT:-admin}
+      - TERMINUS_KEY=${TERMINUS_KEY:-admin123}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - USE_HTTPS=${USE_HTTPS:-true}
+      - SSL_CERT_PATH=/ssl/oms/server.crt
+      - SSL_KEY_PATH=/ssl/oms/server.key
+      - SSL_CA_PATH=/ssl/ca.crt
+      - VERIFY_SSL=${VERIFY_SSL:-false}
+    ports:
+      - "8000:8000"
+    depends_on:
+      terminusdb:
+        condition: service_healthy
+    networks:
+      - spice_network
+    volumes:
+      - ./ssl:/ssl:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-k", "https://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # BFF (Backend for Frontend)
+  bff:
+    build:
+      context: .
+      dockerfile: ./bff/Dockerfile
+    container_name: spice_bff
+    environment:
+      - OMS_BASE_URL=${OMS_BASE_URL:-https://oms:8000}
+      - FUNNEL_BASE_URL=${FUNNEL_BASE_URL:-https://funnel:8003}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - USE_HTTPS=${USE_HTTPS:-true}
+      - SSL_CERT_PATH=/ssl/bff/server.crt
+      - SSL_KEY_PATH=/ssl/bff/server.key
+      - SSL_CA_PATH=/ssl/ca.crt
+      - VERIFY_SSL=${VERIFY_SSL:-false}
+    ports:
+      - "8002:8002"
+    depends_on:
+      oms:
+        condition: service_healthy
+      funnel:
+        condition: service_healthy
+    networks:
+      - spice_network
+    volumes:
+      - bff_data:/app/data
+      - ./ssl:/ssl:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-k", "https://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Funnel (Type Inference Service)
+  funnel:
+    build:
+      context: .
+      dockerfile: ./funnel/Dockerfile
+    container_name: spice_funnel
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - USE_HTTPS=${USE_HTTPS:-true}
+      - SSL_CERT_PATH=/ssl/funnel/server.crt
+      - SSL_KEY_PATH=/ssl/funnel/server.key
+      - SSL_CA_PATH=/ssl/ca.crt
+      - VERIFY_SSL=${VERIFY_SSL:-false}
+    ports:
+      - "8003:8003"
+    networks:
+      - spice_network
+    volumes:
+      - ./ssl:/ssl:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-k", "https://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Nginx Reverse Proxy (optional - for production)
+  nginx:
+    image: nginx:alpine
+    container_name: spice_nginx
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/ssl:ro
+    depends_on:
+      - bff
+      - oms
+      - funnel
+    networks:
+      - spice_network
+
+volumes:
+  terminusdb_data:
+  bff_data:
+
+networks:
+  spice_network:
+    driver: bridge

@@ -6,32 +6,27 @@
 
 import asyncio
 import json
-import sys
-import os
 import logging
+import os
 from datetime import datetime
 from typing import Dict, Any, List
-
-# 경로 설정
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'shared'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'ontology-management-service'))
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 모델 및 서비스 임포트
-from models.ontology import OntologyBase, Relationship, MultiLingualText, Cardinality
-from models.config import ConnectionConfig
+# No need for sys.path.insert - using proper spice_harvester package imports
+from shared.models.ontology import OntologyBase, Relationship, MultiLingualText, Cardinality
+from shared.models.config import ConnectionConfig
+from tests.utils.assertions import assert_equal, assert_contains, assert_type, assert_in_range
 
 # 🔥 새로 구현한 관계 관리 컴포넌트들
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'ontology-management-service'))
 try:
-    from services.relationship_manager import RelationshipManager
-    from validators.relationship_validator import RelationshipValidator, ValidationSeverity
-    from utils.circular_reference_detector import CircularReferenceDetector
-    from utils.relationship_path_tracker import RelationshipPathTracker, PathQuery
-    from services.async_terminus import AsyncTerminusService
+    from oms.services.relationship_manager import RelationshipManager
+    from oms.validators.relationship_validator import RelationshipValidator, ValidationSeverity
+    from oms.utils.circular_reference_detector import CircularReferenceDetector
+    from oms.utils.relationship_path_tracker import RelationshipPathTracker, PathQuery
+    from oms.services.async_terminus import AsyncTerminusService
 except ImportError as e:
     logger.warning(f"Import warning: {e}")
     # 폴백 - 직접 클래스 정의
@@ -86,7 +81,6 @@ except ImportError as e:
             self.end_entity = end_entity
             self.max_depth = max_depth
             self.path_type = path_type
-
 
 class RelationshipSystemTester:
     """🔥 THINK ULTRA! 관계 시스템 종합 테스터"""
@@ -163,12 +157,37 @@ class RelationshipSystemTester:
         )
         
         # 검증
-        assert forward_rel.predicate == "hasEmployee"
-        assert forward_rel.cardinality == "1:n"
+        assert_equal(
+            actual=forward_rel.predicate,
+            expected="hasEmployee",
+            field_name="forward_relationship.predicate",
+            context={"relationship_type": "forward"}
+        )
+        assert_equal(
+            actual=forward_rel.cardinality,
+            expected="1:n",
+            field_name="forward_relationship.cardinality",
+            context={"relationship_type": "forward"}
+        )
         if inverse_rel is not None:
-            assert inverse_rel.predicate == "worksFor"
-            assert inverse_rel.cardinality == "n:1" 
-            assert inverse_rel.target == "Company"
+            assert_equal(
+                actual=inverse_rel.predicate,
+                expected="worksFor",
+                field_name="inverse_relationship.predicate",
+                context={"relationship_type": "inverse"}
+            )
+            assert_equal(
+                actual=inverse_rel.cardinality,
+                expected="n:1",
+                field_name="inverse_relationship.cardinality",
+                context={"relationship_type": "inverse"}
+            )
+            assert_equal(
+                actual=inverse_rel.target,
+                expected="Company",
+                field_name="inverse_relationship.target",
+                context={"relationship_type": "inverse"}
+            )
             print("✅ 역관계 생성 확인됨")
         else:
             print("✅ 폴백 모드에서 실행 중 (역관계 = None)")
@@ -662,19 +681,23 @@ class RelationshipSystemTester:
             print("   ⚠️ 일부 기능에 문제가 있습니다.")
         
         # 상세 결과를 JSON 파일로 저장
+        # Save to tests/results directory
+        results_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'results')
+        os.makedirs(results_dir, exist_ok=True)
+        
         result_file = f"relationship_test_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        with open(result_file, 'w', encoding='utf-8') as f:
+        result_filepath = os.path.join(results_dir, result_file)
+        
+        with open(result_filepath, 'w', encoding='utf-8') as f:
             json.dump(self.results, f, ensure_ascii=False, indent=2)
         
-        print(f"\n📄 상세 결과가 저장되었습니다: {result_file}")
-
+        print(f"\n📄 상세 결과가 저장되었습니다: {result_filepath}")
 
 async def main():
     """메인 테스트 실행"""
     
     tester = RelationshipSystemTester()
     await tester.run_all_tests()
-
 
 if __name__ == "__main__":
     asyncio.run(main())

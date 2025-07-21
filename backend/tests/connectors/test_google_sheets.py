@@ -6,12 +6,8 @@ import pytest
 import httpx
 from datetime import datetime
 from unittest.mock import Mock, patch, AsyncMock
-import sys
-import os
 
-# Add parent directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-
+# No need for sys.path.insert - using proper spice_harvester package imports
 from data_connector.google_sheets.service import GoogleSheetsService
 from data_connector.google_sheets.models import (
     GoogleSheetPreviewRequest,
@@ -25,7 +21,6 @@ from data_connector.google_sheets.utils import (
     normalize_sheet_data,
     calculate_data_hash
 )
-
 
 class TestGoogleSheetsUtils:
     """유틸리티 함수 테스트"""
@@ -79,7 +74,6 @@ class TestGoogleSheetsUtils:
         columns2, rows2 = normalize_sheet_data([])
         assert columns2 == []
         assert rows2 == []
-
 
 class TestGoogleSheetsService:
     """Google Sheets 서비스 테스트"""
@@ -211,7 +205,6 @@ class TestGoogleSheetsService:
         # 다른 데이터는 다른 해시
         assert hash1 != hash3
 
-
 class TestGoogleSheetsRouter:
     """API 라우터 테스트"""
     
@@ -219,7 +212,7 @@ class TestGoogleSheetsRouter:
     def client(self):
         """테스트 클라이언트"""
         from fastapi.testclient import TestClient
-        from connectors.google_sheets.router import router
+        from data_connector.google_sheets.router import router
         from fastapi import FastAPI
         
         app = FastAPI()

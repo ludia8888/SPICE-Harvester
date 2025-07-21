@@ -1,66 +1,119 @@
 """
-공통 설정 모델
-모든 서비스에서 사용하는 설정 데이터 클래스
+Configuration models for SPICE HARVESTER
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
-import sys
-import os
-
-# 공통 직렬화 유틸리티 import
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'utils'))
-from serialization import SerializableMixin
+from datetime import datetime
+from typing import Any, Dict, Optional
 
 
 @dataclass
-class ConnectionConfig(SerializableMixin):
-    """데이터베이스 연결 설정 - 모든 서비스 공통"""
-    
-    server_url: str = "http://localhost:6363"
-    user: str = "admin"
-    account: str = "admin"
-    key: str = ""  # Never hardcode credentials - use environment variables
+class ConnectionConfig:
+    """Database connection configuration"""
+
+    server_url: str
+    user: str
+    key: str
+    account: str
     timeout: int = 30
-    
-    # Connection pool settings
-    use_pool: bool = False
-    pool_size: int = 10
-    pool_timeout: int = 30
-    
-    # Retry settings
-    retry_attempts: int = 3
+    database: Optional[str] = None
+    retries: int = 3
     retry_delay: float = 1.0
-    
-    # to_dict() method는 SerializableMixin에서 자동 제공됨
-    
-    def to_terminus_format(self) -> Dict[str, Any]:
-        """TerminusDB 클라이언트 형식으로 변환"""
+    ssl_verify: bool = True
+    headers: Dict[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Post-initialization validation"""
+        if not self.server_url:
+            raise ValueError("server_url is required")
+        if not self.user:
+            raise ValueError("user is required")
+        if not self.key:
+            raise ValueError("key is required")
+        if not self.account:
+            raise ValueError("account is required")
+        if self.timeout <= 0:
+            raise ValueError("timeout must be positive")
+        if self.retries < 0:
+            raise ValueError("retries must be non-negative")
+        if self.retry_delay < 0:
+            raise ValueError("retry_delay must be non-negative")
+
+    @classmethod
+    def from_env(cls) -> "ConnectionConfig":
+        """Create ConnectionConfig from environment variables"""
+        import os
+
+        # Get environment variables with defaults
+        server_url = os.getenv("TERMINUS_SERVER_URL", "http://terminusdb:6363")
+        user = os.getenv("TERMINUS_USER", "admin")
+        key = os.getenv("TERMINUS_KEY", os.getenv("TERMINUSDB_ADMIN_PASS", "admin123"))
+        account = os.getenv("TERMINUS_ACCOUNT", "admin")
+        timeout = int(os.getenv("TERMINUS_TIMEOUT", "30"))
+        database = os.getenv("TERMINUS_DATABASE")
+        retries = int(os.getenv("TERMINUS_RETRY_ATTEMPTS", "3"))
+        retry_delay = float(os.getenv("TERMINUS_RETRY_DELAY", "1.0"))
+        ssl_verify = os.getenv("TERMINUS_SSL_VERIFY", "true").lower() == "true"
+
+        return cls(
+            server_url=server_url,
+            user=user,
+            key=key,
+            account=account,
+            timeout=timeout,
+            database=database,
+            retries=retries,
+            retry_delay=retry_delay,
+            ssl_verify=ssl_verify,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary"""
         return {
             "server_url": self.server_url,
             "user": self.user,
+            "key": self.key,
             "account": self.account,
-            "key": self.key
+            "timeout": self.timeout,
+            "database": self.database,
+            "retries": self.retries,
+            "retry_delay": self.retry_delay,
+            "ssl_verify": self.ssl_verify,
+            "headers": self.headers,
         }
-    
-    @classmethod
-    def from_env(cls) -> 'ConnectionConfig':
-        """환경 변수에서 설정 로드"""
-        import os
-        return cls(
-            server_url=os.getenv("TERMINUS_SERVER_URL", "http://localhost:6363"),
-            user=os.getenv("TERMINUS_USER", "admin"),
-            account=os.getenv("TERMINUS_ACCOUNT", "admin"),
-            key=os.getenv("TERMINUS_KEY", ""),  # No default - must be set via env var
-            timeout=int(os.getenv("TERMINUS_TIMEOUT", "30")),
-            use_pool=os.getenv("TERMINUS_USE_POOL", "false").lower() == "true",
-            pool_size=int(os.getenv("TERMINUS_POOL_SIZE", "10")),
-            pool_timeout=int(os.getenv("TERMINUS_POOL_TIMEOUT", "30")),
-            retry_attempts=int(os.getenv("TERMINUS_RETRY_ATTEMPTS", "3")),
-            retry_delay=float(os.getenv("TERMINUS_RETRY_DELAY", "1.0"))
-        )
 
 
-# 하위 호환성을 위한 별칭
-ConnectionInfo = ConnectionConfig
-AsyncConnectionInfo = ConnectionConfig
+@dataclass
+class AsyncConnectionInfo:
+    """Async connection information"""
+
+    config: ConnectionConfig
+    connected_at: Optional[datetime] = None
+    last_used: Optional[datetime] = None
+    active_connections: int = 0
+    max_connections: int = 10
+
+    def __post_init__(self) -> None:
+        """Post-initialization setup"""
+        if self.connected_at is None:
+            self.connected_at = datetime.now()
+        if self.last_used is None:
+            self.last_used = datetime.now()
+
+    def mark_used(self) -> None:
+        """Mark connection as used"""
+        self.last_used = datetime.now()
+
+    def can_create_connection(self) -> bool:
+        """Check if new connection can be created"""
+        return self.active_connections < self.max_connections
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary"""
+        return {
+            "config": self.config.to_dict(),
+            "connected_at": self.connected_at.isoformat() if self.connected_at else None,
+            "last_used": self.last_used.isoformat() if self.last_used else None,
+            "active_connections": self.active_connections,
+            "max_connections": self.max_connections,
+        }

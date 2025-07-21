@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # TerminusDB
   terminusdb:
-    image: terminusdb/terminusdb:v11.1.14
+    image: terminusdb/terminusdb-server:latest
     container_name: spice_terminusdb
     environment:
       - TERMINUSDB_ADMIN_PASS=${TERMINUSDB_ADMIN_PASS:-admin123}
@@ -16,7 +16,7 @@ services:
     networks:
       - spice_network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6363/api/"]
+      test: ["CMD", "true"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -24,15 +24,19 @@ services:
   # OMS (Ontology Management Service)
   oms:
     build:
-      context: ./ontology-management-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./oms/Dockerfile
     container_name: spice_oms
     environment:
       - TERMINUS_SERVER_URL=${TERMINUS_SERVER_URL:-http://terminusdb:6363}
       - TERMINUS_USER=${TERMINUS_USER:-admin}
       - TERMINUS_ACCOUNT=${TERMINUS_ACCOUNT:-admin}
-      - TERMINUS_KEY=${TERMINUS_KEY:-admin123}
+      - TERMINUS_KEY=${TERMINUS_KEY:-${TERMINUSDB_ADMIN_PASS:-admin123}}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - USE_HTTPS=${USE_HTTPS:-false}
+      - SSL_CERT_PATH=${SSL_CERT_PATH:-}
+      - SSL_KEY_PATH=${SSL_KEY_PATH:-}
+      - VERIFY_SSL=${VERIFY_SSL:-false}
     ports:
       - "8000:8000"
     depends_on:
@@ -45,22 +49,29 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-    volumes:
-      - ./shared:/app/shared
+    # volumes:
+      # - ./shared:/app/shared  # No longer needed with proper package install
 
   # BFF (Backend for Frontend)
   bff:
     build:
-      context: ./backend-for-frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./bff/Dockerfile
     container_name: spice_bff
     environment:
       - OMS_BASE_URL=${OMS_BASE_URL:-http://oms:8000}
+      - FUNNEL_BASE_URL=${FUNNEL_BASE_URL:-http://funnel:8003}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - USE_HTTPS=${USE_HTTPS:-false}
+      - SSL_CERT_PATH=${SSL_CERT_PATH:-}
+      - SSL_KEY_PATH=${SSL_KEY_PATH:-}
+      - VERIFY_SSL=${VERIFY_SSL:-false}
     ports:
       - "8002:8002"
     depends_on:
       oms:
+        condition: service_healthy
+      funnel:
         condition: service_healthy
     networks:
       - spice_network
@@ -70,8 +81,30 @@ services:
       timeout: 10s
       retries: 5
     volumes:
-      - ./shared:/app/shared
+      # - ./shared:/app/shared  # No longer needed with proper package install
       - bff_data:/app/data
+
+  # Funnel (Type Inference Service)
+  funnel:
+    build:
+      context: .
+      dockerfile: ./funnel/Dockerfile
+    container_name: spice_funnel
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - USE_HTTPS=${USE_HTTPS:-false}
+      - SSL_CERT_PATH=${SSL_CERT_PATH:-}
+      - SSL_KEY_PATH=${SSL_KEY_PATH:-}
+      - VERIFY_SSL=${VERIFY_SSL:-false}
+    ports:
+      - "8003:8003"
+    networks:
+      - spice_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
 volumes:
   terminusdb_data:

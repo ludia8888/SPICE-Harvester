@@ -5,19 +5,16 @@ BFF를 통한 복합 타입 end-to-end 테스트
 """
 
 import httpx
+
+# No need for sys.path.insert - using proper spice_harvester package imports
 import asyncio
 import json
 from datetime import datetime
-import sys
 import os
 
-# Add shared to Python path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'shared'))
-
-from models.common import DataType
-from validators.complex_type_validator import ComplexTypeConstraints
-from test_config import TestConfig
-
+from shared.models.common import DataType
+from shared.validators.complex_type_validator import ComplexTypeConstraints
+from tests.test_config import TestConfig
 
 class ComplexTypesBFFIntegrationTest:
     """🔥 THINK ULTRA!! 복합 타입 BFF 통합 테스터"""
@@ -608,19 +605,19 @@ class ComplexTypesBFFIntegrationTest:
             print("   ⚠️ 일부 BFF 통합 테스트에 문제가 있습니다.")
         
         # Save results
-        result_file = f"bff_integration_test_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        results_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'results')
+        os.makedirs(results_dir, exist_ok=True)
+        result_file = os.path.join(results_dir, f"bff_integration_test_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
         with open(result_file, 'w', encoding='utf-8') as f:
             json.dump(self.test_results, f, ensure_ascii=False, indent=2)
         
         print(f"\n📄 상세 결과가 저장되었습니다: {result_file}")
-
 
 async def main():
     """메인 테스트 실행"""
     
     tester = ComplexTypesBFFIntegrationTest()
     await tester.run_all_tests()
-
 
 if __name__ == "__main__":
     asyncio.run(main())

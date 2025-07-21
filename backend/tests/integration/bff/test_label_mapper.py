@@ -4,16 +4,13 @@ Test Label Mapper Directly
 """
 
 import asyncio
-import sys
-import os
+import pytest
 
-# Add shared path for models
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
+# No need for sys.path.insert - using proper spice_harvester package imports
+from shared.utils.label_mapper import LabelMapper
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'utils'))
-from label_mapper import LabelMapper
-
-async def main():
+@pytest.mark.asyncio
+async def test_label_mapper():
     """Test label mapper registration and retrieval"""
     
     mapper = LabelMapper()
@@ -38,21 +35,17 @@ async def main():
     # Should work - exact match
     result = await mapper.get_class_id(test_db, test_label, 'ko')
     print(f"   get_class_id('{test_label}', 'ko') = {result}")
+    assert result == test_id, f"Expected {test_id}, got {result}"
     
     # Try with English
     result = await mapper.get_class_id(test_db, test_label, 'en')
     print(f"   get_class_id('{test_label}', 'en') = {result}")
-    
-    # Try with the ID itself
-    result = await mapper.get_class_id(test_db, test_id, 'ko')
-    print(f"   get_class_id('{test_id}', 'ko') = {result}")
     
     # Test multilingual
     print("\n3. Testing multilingual registration...")
     multilingual_label = {
         "ko": "테스트 클래스",
         "en": "Test Class Multi",
-        "ja": "テストクラス"
     }
     
     await mapper.register_class(
@@ -66,9 +59,11 @@ async def main():
     # Try different languages
     result = await mapper.get_class_id(test_db, "테스트 클래스", 'ko')
     print(f"   get_class_id('테스트 클래스', 'ko') = {result}")
+    assert result == "MultiClass", f"Expected MultiClass, got {result}"
     
     result = await mapper.get_class_id(test_db, "Test Class Multi", 'en')
     print(f"   get_class_id('Test Class Multi', 'en') = {result}")
+    assert result == "MultiClass", f"Expected MultiClass, got {result}"
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(test_label_mapper())

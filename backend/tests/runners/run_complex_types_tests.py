@@ -9,7 +9,7 @@ import sys
 import time
 from datetime import datetime
 import json
-
+import os
 
 class ComplexTypesTestRunner:
     """🔥 THINK ULTRA!! 복합 타입 테스트 러너"""
@@ -42,23 +42,27 @@ class ComplexTypesTestRunner:
             print("  - OMS: http://localhost:8000")
             print("  - BFF: http://localhost:8002")
         
+        # Use unified PYTHONPATH configuration to get project root
+        from shared.utils.pythonpath_setup import detect_backend_directory
+        project_root = str(detect_backend_directory())
+        
         # Define test files to run
         test_files = [
             {
                 "name": "ComplexTypeValidator Unit Tests",
-                "file": "test_complex_validator_ultra.py",
+                "file": os.path.join(project_root, "tests", "unit", "complex_types", "test_complex_validator_ultra.py"),
                 "description": "복합 타입 검증기 단위 테스트",
                 "requires_services": False
             },
             {
                 "name": "TerminusDB Integration Tests",
-                "file": "test_complex_types_terminus_integration.py",
+                "file": os.path.join(project_root, "tests", "integration", "test_complex_types_terminus_integration.py"),
                 "description": "TerminusDB와의 실제 통합 테스트",
                 "requires_services": True
             },
             {
                 "name": "BFF Integration Tests",
-                "file": "test_complex_types_bff_integration.py",
+                "file": os.path.join(project_root, "tests", "integration", "test_complex_types_bff_integration.py"),
                 "description": "BFF를 통한 end-to-end 테스트",
                 "requires_services": True
             }
@@ -90,6 +94,20 @@ class ComplexTypesTestRunner:
             print(f"📄 File: {test['file']}")
             print(f"📝 {test['description']}")
             print("=" * 70)
+            
+            # Check if test file exists
+            if not os.path.exists(test['file']):
+                print(f"❌ ERROR: Test file not found: {test['file']}")
+                self.test_results["tests"].append({
+                    "name": test['name'],
+                    "file": test['file'],
+                    "success": False,
+                    "duration": 0,
+                    "output": f"Test file not found: {test['file']}"
+                })
+                self.test_results["summary"]["total"] += 1
+                self.test_results["summary"]["failed"] += 1
+                continue
             
             result = self.run_test(test['file'])
             
@@ -155,12 +173,23 @@ class ComplexTypesTestRunner:
         start_time = time.time()
         
         try:
+            # Use unified PYTHONPATH configuration
+            from shared.utils.pythonpath_setup import configure_python_environment
+            
+            if not configure_python_environment(verbose=False):
+                raise RuntimeError("Failed to configure Python environment for test")
+            
+            # Set up environment with properly configured PYTHONPATH
+            env = os.environ.copy()
+            # PYTHONPATH is already set by configure_python_environment
+            
             # Run the test
             result = subprocess.run(
                 [sys.executable, test_file],
                 capture_output=True,
                 text=True,
-                timeout=300  # 5 minute timeout
+                timeout=300,  # 5 minute timeout
+                env=env
             )
             
             duration = time.time() - start_time
@@ -173,17 +202,21 @@ class ComplexTypesTestRunner:
             
         except subprocess.TimeoutExpired:
             duration = time.time() - start_time
+            test_name = os.path.basename(test_file)
+            error_msg = f"Test timeout after 300 seconds: {test_name}\nOperation: Running {test_file}"
             return {
                 "success": False,
                 "duration": duration,
-                "output": "Test timed out after 5 minutes"
+                "output": error_msg
             }
         except Exception as e:
             duration = time.time() - start_time
+            test_name = os.path.basename(test_file)
+            error_msg = f"Test execution error: {test_name}\nFile: {test_file}\nError: {str(e)}"
             return {
                 "success": False,
                 "duration": duration,
-                "output": f"Error running test: {str(e)}"
+                "output": error_msg
             }
     
     def print_summary(self):
@@ -234,13 +267,17 @@ class ComplexTypesTestRunner:
         self.test_results["end_time"] = datetime.now().isoformat()
         self.test_results["total_duration"] = self.get_total_duration()
         
-        filename = f"complex_types_test_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        # Save to tests/results directory
+        results_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'results')
+        os.makedirs(results_dir, exist_ok=True)
         
-        with open(filename, 'w', encoding='utf-8') as f:
+        filename = f"complex_types_test_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        filepath = os.path.join(results_dir, filename)
+        
+        with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(self.test_results, f, ensure_ascii=False, indent=2)
         
-        print(f"\n📄 Detailed results saved to: {filename}")
-
+        print(f"\n📄 Detailed results saved to: {filepath}")
 
 def main():
     """Main entry point"""
@@ -252,7 +289,6 @@ def main():
         sys.exit(1)
     else:
         sys.exit(0)
-
 
 if __name__ == "__main__":
     main()

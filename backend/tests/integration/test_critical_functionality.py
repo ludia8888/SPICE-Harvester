@@ -17,8 +17,7 @@ import httpx
 import json
 import time
 from datetime import datetime
-from test_config import TestConfig
-
+from tests.test_config import TestConfig
 
 class CriticalFunctionalityTest:
     """핵심 기능 실제 동작 테스트"""
@@ -533,12 +532,10 @@ class CriticalFunctionalityTest:
         
         print(f"  종합 성공률: {overall_success_rate:.1%}")
 
-
 async def main():
     """메인 실행 함수"""
     test = CriticalFunctionalityTest()
     await test.run_all_critical_tests()
-
 
 if __name__ == "__main__":
     asyncio.run(main())

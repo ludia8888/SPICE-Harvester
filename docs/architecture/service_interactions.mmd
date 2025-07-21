@@ -1,28 +1,42 @@
 sequenceDiagram
     %% Service Interaction Flow
+    %% Last Updated: 2025-07-20
     
     participant Client
-    participant BFF as Backend for Frontend
-    participant OMS as Ontology Management Service
-    participant DB as TerminusDB
+    participant BFF as Backend for Frontend (8002)
+    participant OMS as Ontology Management Service (8000)
+    participant Funnel as Funnel Service (8003)
+    participant DB as TerminusDB (6363)
     participant Cache as Cache Layer
+    participant ExtData as External Data Source
     
     %% Standard Request Flow
     Client->>BFF: HTTP Request
     BFF->>BFF: Validate Request
     BFF->>BFF: Check Permissions
+    BFF->>BFF: CORS Validation
     
     alt Cached Response Available
         BFF->>Cache: Get Cached Data
         Cache-->>BFF: Return Data
         BFF-->>Client: Return Response
     else Fresh Data Needed
-        BFF->>OMS: Forward Request
-        OMS->>OMS: Business Logic
-        OMS->>DB: Query/Update
-        DB-->>OMS: Result
-        OMS-->>BFF: Response
+        alt Ontology Operation
+            BFF->>OMS: Forward Request
+            OMS->>OMS: Business Logic
+            OMS->>DB: Query/Update
+            DB-->>OMS: Result
+            OMS-->>BFF: Response
+        else Type Inference Operation
+            BFF->>Funnel: Request Schema Inference
+            Funnel->>ExtData: Fetch Sample Data
+            ExtData-->>Funnel: Raw Data
+            Funnel->>Funnel: Analyze & Infer Types
+            Funnel->>Funnel: Detect Complex Types
+            Funnel-->>BFF: Suggested Schema
+        end
         BFF->>Cache: Update Cache
+        BFF->>BFF: Label Mapping
         BFF-->>Client: Formatted Response
     end
     
@@ -32,3 +46,14 @@ sequenceDiagram
         BFF->>BFF: Format Error
         BFF-->>Client: Error Details
     end
+    
+    %% Schema Suggestion Flow
+    note over Client,ExtData: Schema Suggestion from Google Sheets
+    Client->>BFF: Request Schema from Sheet URL
+    BFF->>Funnel: Forward to Type Inference
+    Funnel->>ExtData: Fetch Google Sheet Data
+    ExtData-->>Funnel: Sheet Data
+    Funnel->>Funnel: Analyze Column Types
+    Funnel->>Funnel: Detect Patterns (EMAIL, PHONE, etc.)
+    Funnel-->>BFF: Schema with Complex Types
+    BFF-->>Client: Schema Suggestion

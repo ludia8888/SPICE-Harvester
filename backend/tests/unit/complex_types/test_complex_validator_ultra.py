@@ -5,18 +5,15 @@
 """
 
 import json
-import sys
 import os
 from datetime import datetime
 from decimal import Decimal
 
-# 경로 설정
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'shared'))
-
-from models.common import DataType
-from validators.complex_type_validator import ComplexTypeValidator, ComplexTypeConstraints
-from serializers.complex_type_serializer import ComplexTypeSerializer, ComplexTypeConverter
-
+# No need for sys.path.insert - using proper spice_harvester package imports
+from shared.models.common import DataType
+from shared.validators.complex_type_validator import ComplexTypeValidator, ComplexTypeConstraints
+from shared.serializers.complex_type_serializer import ComplexTypeSerializer
+from tests.utils.assertions import assert_equal, assert_contains, assert_type, assert_in_range
 
 class ComplexValidatorTester:
     """🔥 THINK ULTRA!! ComplexTypeValidator 완전 테스터"""
@@ -94,10 +91,20 @@ class ComplexValidatorTester:
             )
             
             if expected_valid:
-                assert valid, f"{desc} 검증 실패: {msg}"
+                assert_equal(
+                    actual=valid,
+                    expected=True,
+                    field_name=f"{desc}_validation",
+                    context={"value": valid_value, "constraints": constraints, "message": msg}
+                )
                 print(f"  ✅ {desc}: {normalized}")
             else:
-                assert not valid, f"{desc} 검증이 실패해야 함"
+                assert_equal(
+                    actual=valid,
+                    expected=False,
+                    field_name=f"{desc}_validation_should_fail",
+                    context={"value": invalid_value, "constraints": constraints, "message": msg}
+                )
                 print(f"  ✅ {desc} 거부됨: {msg}")
         
         # 2. 유니크 제약
@@ -109,7 +116,12 @@ class ComplexValidatorTester:
         valid, msg, _ = ComplexTypeValidator.validate(
             [1, 2, 3, 2], DataType.ARRAY.value, unique_constraints
         )
-        assert not valid, "중복 항목을 탐지하지 못함"
+        assert_equal(
+            actual=valid,
+            expected=False,
+            field_name="duplicate_detection",
+            context={"array": [1, 2, 2, 3], "constraint": "uniqueItems"}
+        )
         print(f"  ✅ 중복 탐지: {msg}")
         
         # 3. 복합 타입 배열
@@ -124,7 +136,12 @@ class ComplexValidatorTester:
         valid, msg, normalized = ComplexTypeValidator.validate(
             email_array, DataType.ARRAY.value, email_array_constraints
         )
-        assert valid, f"이메일 배열 검증 실패: {msg}"
+        assert_equal(
+            actual=valid,
+            expected=True,
+            field_name="email_array_validation",
+            context={"emails": emails, "message": msg}
+        )
         print(f"  ✅ 이메일 배열: {normalized}")
         
         # 4. JSON 문자열 배열
@@ -133,8 +150,18 @@ class ComplexValidatorTester:
         valid, msg, normalized = ComplexTypeValidator.validate(
             json_array, DataType.ARRAY.value, constraints
         )
-        assert valid, f"JSON 배열 파싱 실패: {msg}"
-        assert normalized == [1, 2, 3], "JSON 파싱 결과 불일치"
+        assert_equal(
+            actual=valid,
+            expected=True,
+            field_name="json_array_parsing",
+            context={"json_array": json_array, "message": msg}
+        )
+        assert_equal(
+            actual=normalized,
+            expected=[1, 2, 3],
+            field_name="json_parsing_result",
+            context={"json_array": json_array}
+        )
         print(f"  ✅ JSON 배열 파싱: {normalized}")
     
     def test_object_complete(self):
@@ -168,7 +195,12 @@ class ComplexValidatorTester:
         valid, msg, normalized = ComplexTypeValidator.validate(
             valid_user, DataType.OBJECT.value, constraints
         )
-        assert valid, f"유효한 객체 검증 실패: {msg}"
+        assert_equal(
+            actual=valid,
+            expected=True,
+            field_name="valid_object_validation",
+            context={"object": person, "message": msg}
+        )
         print(f"  ✅ 유효한 사용자 객체: {json.dumps(normalized, ensure_ascii=False, indent=2)}")
         
         # 필수 필드 누락
@@ -178,7 +210,12 @@ class ComplexValidatorTester:
         valid, msg, _ = ComplexTypeValidator.validate(
             invalid_user, DataType.OBJECT.value, constraints
         )
-        assert not valid, "필수 필드 누락을 탐지하지 못함"
+        assert_equal(
+            actual=valid,
+            expected=False,
+            field_name="required_field_missing_detection",
+            context={"object": incomplete_person, "message": msg}
+        )
         print(f"  ✅ 필수 필드 누락 탐지: {msg}")
         
         # 추가 속성 거부
@@ -192,7 +229,12 @@ class ComplexValidatorTester:
         valid, msg, _ = ComplexTypeValidator.validate(
             extra_field_user, DataType.OBJECT.value, constraints
         )
-        assert not valid, "추가 속성을 탐지하지 못함"
+        assert_equal(
+            actual=valid,
+            expected=False,
+            field_name="additional_property_detection",
+            context={"object": extra_props, "message": msg}
+        )
         print(f"  ✅ 추가 속성 거부: {msg}")
         
         # 중첩 객체
@@ -215,7 +257,12 @@ class ComplexValidatorTester:
         valid, msg, normalized = ComplexTypeValidator.validate(
             nested_object, DataType.OBJECT.value, nested_constraints
         )
-        assert valid, f"중첩 객체 검증 실패: {msg}"
+        assert_equal(
+            actual=valid,
+            expected=True,
+            field_name="nested_object_validation",
+            context={"object": nested_obj, "message": msg}
+        )
         print(f"  ✅ 중첩 객체: {json.dumps(normalized, ensure_ascii=False, indent=2)}")
     
     def test_enum_complete(self):
@@ -301,7 +348,12 @@ class ComplexValidatorTester:
             )
             
             if expected:
-                assert valid, f"{desc} 검증 실패: {msg}"
+                assert_equal(
+                    actual=valid,
+                    expected=True,
+                    field_name=f"{desc}_validation",
+                    context={"value": valid_value, "constraints": constraints, "message": msg}
+                )
                 print(f"  ✅ {desc}: {normalized['formatted']}")
             else:
                 assert not valid, f"{desc}를 거부해야 함"
@@ -365,7 +417,7 @@ class ComplexValidatorTester:
             default_region="US"
         )
         
-        us_phone = "+1-555-123-4567"
+        us_phone = "+1-415-555-0132"  # Valid test number (555-01XX range)
         valid, msg, normalized = ComplexTypeValidator.validate(
             us_phone, DataType.PHONE.value, us_constraints
         )
@@ -410,7 +462,12 @@ class ComplexValidatorTester:
             )
             
             if expected:
-                assert valid, f"{desc} 검증 실패: {msg}"
+                assert_equal(
+                    actual=valid,
+                    expected=True,
+                    field_name=f"{desc}_validation",
+                    context={"value": valid_value, "constraints": constraints, "message": msg}
+                )
                 print(f"  ✅ {desc}: {normalized.get('email', email)}")
             else:
                 assert not valid, f"{desc}를 거부해야 함"
@@ -584,7 +641,12 @@ class ComplexValidatorTester:
             )
             
             if expected:
-                assert valid, f"{desc} 검증 실패: {msg}"
+                assert_equal(
+                    actual=valid,
+                    expected=True,
+                    field_name=f"{desc}_validation",
+                    context={"value": valid_value, "constraints": constraints, "message": msg}
+                )
                 print(f"  ✅ {desc}: {normalized['extension']}")
             else:
                 assert not valid, f"{desc}를 거부해야 함"
@@ -731,19 +793,19 @@ class ComplexValidatorTester:
             print("   ⚠️ 일부 검증 기능에 문제가 있습니다.")
         
         # 결과를 JSON 파일로 저장
-        result_file = f"complex_validator_test_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        results_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'results')
+        os.makedirs(results_dir, exist_ok=True)
+        result_file = os.path.join(results_dir, f"complex_validator_test_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
         with open(result_file, 'w', encoding='utf-8') as f:
             json.dump(self.test_results, f, ensure_ascii=False, indent=2)
         
         print(f"\n📄 상세 결과가 저장되었습니다: {result_file}")
-
 
 def main():
     """메인 테스트 실행"""
     
     tester = ComplexValidatorTester()
     tester.run_all_tests()
-
 
 if __name__ == "__main__":
     main()

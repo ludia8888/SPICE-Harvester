@@ -4,18 +4,19 @@
 
 1. [System Architecture](#system-architecture)
 2. [Services Overview](#services-overview)
-3. [Complex Data Types System](#complex-data-types-system)
-4. [Version Control System](#version-control-system)
-5. [Security & Validation](#security--validation)
-6. [Label Mapping System](#label-mapping-system)
-7. [Merge Conflict Resolution](#merge-conflict-resolution)
-8. [Database Management](#database-management)
-9. [Query System](#query-system)
-10. [Authentication & Authorization](#authentication--authorization)
-11. [Error Handling](#error-handling)
-12. [WebSocket & Real-time Features](#websocket--real-time-features)
-13. [Testing & Development](#testing--development)
-14. [Production Deployment](#production-deployment)
+3. [🌐 CORS Configuration](#cors-configuration)
+4. [Complex Data Types System](#complex-data-types-system)
+5. [Version Control System](#version-control-system)
+6. [Security & Validation](#security--validation)
+7. [Label Mapping System](#label-mapping-system)
+8. [Merge Conflict Resolution](#merge-conflict-resolution)
+9. [Database Management](#database-management)
+10. [Query System](#query-system)
+11. [Authentication & Authorization](#authentication--authorization)
+12. [Error Handling](#error-handling)
+13. [WebSocket & Real-time Features](#websocket--real-time-features)
+14. [Testing & Development](#testing--development)
+15. [Production Deployment](#production-deployment)
 
 ---
 
@@ -65,6 +66,61 @@ The SPICE HARVESTER backend follows a **microservices architecture** with two ma
 - **Ontology**: `/api/v1/ontology/{db_name}/`
 - **Version Control**: `/api/v1/version/{db_name}/`
 - **Branch Management**: `/api/v1/branch/{db_name}/`
+
+---
+
+## 🌐 CORS Configuration
+
+### 🚀 Quick Start
+
+SPICE HARVESTER supports **automatic CORS configuration** for all common frontend development ports:
+
+```bash
+# No configuration needed! These ports are automatically allowed in development:
+npm start          # React on http://localhost:3000
+npm run dev        # Vite on http://localhost:5173  
+ng serve           # Angular on http://localhost:4200
+npm run serve      # Vue.js on http://localhost:8080
+```
+
+### 📋 Supported Ports (Auto-configured)
+
+- **React**: 3000, 3001, 3002
+- **Vite**: 5173, 5174
+- **Angular**: 4200, 4201
+- **Vue.js**: 8080, 8081, 8082
+- **Custom**: Any localhost port with HTTP/HTTPS
+
+### 🔧 Custom Configuration
+
+If you need to add custom origins:
+
+```bash
+# Create .env file
+cp .env.example .env
+
+# Add your custom origins
+CORS_ORIGINS=["http://localhost:3000", "http://localhost:YOUR_PORT"]
+```
+
+### 🧪 Testing CORS
+
+```bash
+# Test all services' CORS configuration
+python test_cors_configuration.py
+
+# Check specific service CORS settings
+curl http://localhost:8002/debug/cors  # BFF
+curl http://localhost:8000/debug/cors  # OMS
+curl http://localhost:8003/debug/cors  # Funnel
+```
+
+### 📖 Complete CORS Guide
+
+For detailed CORS configuration, troubleshooting, and production settings:
+
+- **📋 Complete Guide**: [CORS Configuration Guide](./CORS_CONFIGURATION_GUIDE.md)
+- **🚀 Quick Start**: [CORS Quick Start](../../CORS_QUICK_START.md)
 
 ---
 

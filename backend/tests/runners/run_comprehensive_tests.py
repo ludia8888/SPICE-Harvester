@@ -16,12 +16,8 @@ from datetime import datetime
 from pathlib import Path
 
 # 테스트 모듈 import
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'tests', 'integration'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'tests', 'performance'))
-
 from test_comprehensive_production_integration import ProductionIntegrationTestSuite
 from test_production_performance_suite import ProductionPerformanceTestSuite
-
 
 class ComprehensiveTestRunner:
     """종합 테스트 실행기"""
@@ -31,6 +27,8 @@ class ComprehensiveTestRunner:
         self.test_results = {
             "integration_tests": {},
             "performance_tests": {},
+            "funnel_integration_tests": {},
+            "coverage_analysis": {},
             "overall_status": "running",
             "start_time": self.test_start_time.isoformat(),
             "end_time": None,
@@ -40,6 +38,7 @@ class ComprehensiveTestRunner:
         self.services_status = {
             "oms": False,
             "bff": False,
+            "funnel": False,
             "terminusdb": False
         }
     
@@ -48,7 +47,7 @@ class ComprehensiveTestRunner:
         print("🔍 서비스 전제 조건 확인")
         
         # Python 패키지 확인
-        required_packages = ["httpx", "psutil", "asyncio", "statistics"]
+        required_packages = ["httpx", "psutil", "asyncio", "statistics", "pytest"]
         missing_packages = []
         
         for package in required_packages:
@@ -70,6 +69,7 @@ class ComprehensiveTestRunner:
         services_to_check = [
             ("OMS", "localhost", 8000),
             ("BFF", "localhost", 8002),
+            ("Funnel", "localhost", 8003),
             ("TerminusDB", "localhost", 6363)
         ]
         
@@ -86,6 +86,8 @@ class ComprehensiveTestRunner:
                         self.services_status["oms"] = True
                     elif service_name.lower() == "bff":
                         self.services_status["bff"] = True
+                    elif service_name.lower() == "funnel":
+                        self.services_status["funnel"] = True
                     elif service_name.lower() == "terminusdb":
                         self.services_status["terminusdb"] = True
                 else:
@@ -158,27 +160,279 @@ class ComprehensiveTestRunner:
                 "duration": time.time() - performance_start_time
             }
     
+    def run_coverage_analysis(self):
+        """테스트 커버리지 분석 실행"""
+        print("\n" + "="*80)
+        print("📊 테스트 커버리지 분석 시작")
+        print("="*80)
+        
+        coverage_start_time = time.time()
+        
+        try:
+            # 프로젝트 루트 디렉토리 찾기
+            current_dir = Path(__file__).parent.parent.parent
+            coverage_script = current_dir / "run_coverage_report.py"
+            
+            if not coverage_script.exists():
+                raise FileNotFoundError(f"Coverage script not found: {coverage_script}")
+            
+            # 커버리지 분석 실행
+            print("🔍 실행 중: 종합 커버리지 분석...")
+            
+            result = subprocess.run([
+                "python3", str(coverage_script),
+                "--project-root", str(current_dir),
+                "--test-pattern", "tests/",
+                "--include-performance"
+            ], 
+            cwd=current_dir,
+            capture_output=True,
+            text=True,
+            timeout=600  # 10 minute timeout
+            )
+            
+            # 결과 파싱
+            coverage_data = {
+                "status": "completed" if result.returncode == 0 else "failed",
+                "return_code": result.returncode,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "duration": time.time() - coverage_start_time,
+                "overall_coverage": 0.0,
+                "meets_minimum_threshold": False,
+                "grade": "F",
+                "reports_generated": []
+            }
+            
+            # stdout에서 커버리지 정보 추출
+            if result.stdout:
+                lines = result.stdout.split('\n')
+                for line in lines:
+                    if "Overall Coverage:" in line:
+                        # "Overall Coverage: 85.50% (Grade: A) - good" 형식
+                        try:
+                            parts = line.split()
+                            for i, part in enumerate(parts):
+                                if part.endswith('%'):
+                                    coverage_data["overall_coverage"] = float(part.rstrip('%'))
+                                    break
+                            if "(Grade:" in line:
+                                grade_part = line.split("(Grade:")[1].split(")")[0].strip()
+                                coverage_data["grade"] = grade_part
+                        except (ValueError, IndexError):
+                            pass
+                    elif "Meets minimum coverage requirements" in line:
+                        coverage_data["meets_minimum_threshold"] = True
+                    elif "Does not meet minimum coverage requirements" in line:
+                        coverage_data["meets_minimum_threshold"] = False
+                    elif "Reports generated:" in line:
+                        # 다음 몇 라인에서 리포트 파일들 찾기
+                        report_index = lines.index(line)
+                        for report_line in lines[report_index+1:report_index+5]:
+                            if report_line.strip() and ("Raw data:" in report_line or 
+                                                      "Summary:" in report_line or 
+                                                      "Markdown:" in report_line or 
+                                                      "CSV tracking:" in report_line):
+                                coverage_data["reports_generated"].append(report_line.strip())
+            
+            self.test_results["coverage_analysis"] = coverage_data
+            
+            if result.returncode == 0:
+                print(f"✅ 커버리지 분석 완료 ({time.time() - coverage_start_time:.1f}초)")
+                print(f"📊 전체 커버리지: {coverage_data['overall_coverage']:.2f}% (Grade: {coverage_data['grade']})")
+                threshold_status = "✅ 통과" if coverage_data["meets_minimum_threshold"] else "❌ 미달"
+                print(f"🎯 최소 임계값: {threshold_status}")
+            else:
+                print(f"❌ 커버리지 분석 실패 ({time.time() - coverage_start_time:.1f}초)")
+                if result.stderr:
+                    print(f"오류: {result.stderr}")
+            
+        except subprocess.TimeoutExpired:
+            print("❌ 커버리지 분석 시간 초과 (10분)")
+            self.test_results["coverage_analysis"] = {
+                "status": "timeout",
+                "duration": time.time() - coverage_start_time,
+                "error": "Analysis timed out after 10 minutes"
+            }
+        except Exception as e:
+            print(f"❌ 커버리지 분석 실패: {e}")
+            self.test_results["coverage_analysis"] = {
+                "status": "failed",
+                "error": str(e),
+                "duration": time.time() - coverage_start_time
+            }
+    
+    def run_funnel_integration_tests(self):
+        """Funnel 서비스 통합 테스트 실행"""
+        print("\n" + "="*80)
+        print("🔄 Funnel 서비스 통합 테스트 시작")
+        print("="*80)
+        
+        funnel_start_time = time.time()
+        
+        try:
+            # 프로젝트 루트 디렉토리 찾기
+            current_dir = Path(__file__).parent.parent.parent
+            
+            # Funnel 통합 테스트 파일들
+            funnel_test_files = [
+                "tests/integration/test_funnel_service_integration.py",
+                "tests/integration/test_funnel_google_sheets_integration.py", 
+                "tests/integration/test_funnel_schema_generation_integration.py"
+            ]
+            
+            funnel_results = {
+                "status": "completed",
+                "test_results": [],
+                "duration": 0,
+                "total_tests": 0,
+                "passed_tests": 0,
+                "failed_tests": 0
+            }
+            
+            # 각 테스트 파일 실행
+            for test_file in funnel_test_files:
+                test_file_path = current_dir / test_file
+                
+                if not test_file_path.exists():
+                    print(f"  ⚠️  테스트 파일 없음: {test_file}")
+                    continue
+                
+                print(f"🧪 실행 중: {test_file}")
+                
+                try:
+                    # pytest로 개별 테스트 파일 실행
+                    result = subprocess.run([
+                        "python", "-m", "pytest",
+                        str(test_file_path),
+                        "-v",
+                        "--tb=short"
+                    ],
+                    cwd=current_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5분 타임아웃
+                    )
+                    
+                    # 결과 파싱
+                    test_result = {
+                        "test_file": test_file,
+                        "return_code": result.returncode,
+                        "success": result.returncode == 0,
+                        "stdout": result.stdout,
+                        "stderr": result.stderr
+                    }
+                    
+                    # 테스트 결과에서 통계 추출
+                    if result.stdout:
+                        lines = result.stdout.split('\n')
+                        for line in lines:
+                            if "passed" in line or "failed" in line:
+                                # "=== 5 passed, 2 failed in 30.5s ===" 형식 파싱
+                                if "passed" in line:
+                                    try:
+                                        passed_count = int(line.split()[1]) if "passed" in line.split() else 0
+                                        test_result["passed"] = passed_count
+                                        funnel_results["passed_tests"] += passed_count
+                                        funnel_results["total_tests"] += passed_count
+                                    except (ValueError, IndexError):
+                                        pass
+                                
+                                if "failed" in line:
+                                    try:
+                                        failed_count = int(line.split()[1]) if "failed" in line.split() else 0
+                                        test_result["failed"] = failed_count
+                                        funnel_results["failed_tests"] += failed_count
+                                        funnel_results["total_tests"] += failed_count
+                                    except (ValueError, IndexError):
+                                        pass
+                    
+                    funnel_results["test_results"].append(test_result)
+                    
+                    if result.returncode == 0:
+                        print(f"  ✅ {test_file}: 성공")
+                    else:
+                        print(f"  ❌ {test_file}: 실패 ({result.returncode})")
+                        if result.stderr:
+                            print(f"      오류: {result.stderr[:200]}...")
+                
+                except subprocess.TimeoutExpired:
+                    print(f"  ⏰ {test_file}: 타임아웃 (5분)")
+                    funnel_results["test_results"].append({
+                        "test_file": test_file,
+                        "success": False,
+                        "error": "timeout"
+                    })
+                except Exception as e:
+                    print(f"  ❌ {test_file}: 실행 실패 - {e}")
+                    funnel_results["test_results"].append({
+                        "test_file": test_file,
+                        "success": False,
+                        "error": str(e)
+                    })
+            
+            funnel_results["duration"] = time.time() - funnel_start_time
+            self.test_results["funnel_integration_tests"] = funnel_results
+            
+            # 결과 요약
+            success_rate = (funnel_results["passed_tests"] / funnel_results["total_tests"]) if funnel_results["total_tests"] > 0 else 0
+            print(f"\n📊 Funnel 통합 테스트 결과:")
+            print(f"  총 테스트: {funnel_results['total_tests']}")
+            print(f"  성공: {funnel_results['passed_tests']}")
+            print(f"  실패: {funnel_results['failed_tests']}")
+            print(f"  성공률: {success_rate:.1%}")
+            print(f"  소요시간: {funnel_results['duration']:.1f}초")
+            
+            if success_rate >= 0.8:
+                print("✅ Funnel 통합 테스트 완료")
+            else:
+                print("⚠️ Funnel 통합 테스트에서 문제 발견")
+            
+        except Exception as e:
+            print(f"❌ Funnel 통합 테스트 실패: {e}")
+            self.test_results["funnel_integration_tests"] = {
+                "status": "failed",
+                "error": str(e),
+                "duration": time.time() - funnel_start_time
+            }
+    
     def calculate_production_readiness_score(self):
         """프로덕션 준비도 점수 계산"""
         score = 0
         max_score = 100
         
-        # 서비스 가용성 (20점)
-        service_score = sum(self.services_status.values()) / len(self.services_status) * 20
+        # 서비스 가용성 (12점)
+        service_score = sum(self.services_status.values()) / len(self.services_status) * 12
         score += service_score
         
-        # 통합 테스트 결과 (40점)
+        # 통합 테스트 결과 (28점)
         integration_tests = self.test_results.get("integration_tests", {})
         if integration_tests.get("status") == "completed":
             success_rate = integration_tests.get("success_rate", 0)
-            integration_score = success_rate * 40
+            integration_score = success_rate * 28
             score += integration_score
             
             # 보안 위반 차감
             security_violations = len(integration_tests.get("security_violations", []))
             score -= security_violations * 5  # 위반당 5점 차감
         
-        # 성능 테스트 결과 (40점)
+        # Funnel 통합 테스트 결과 (15점)
+        funnel_tests = self.test_results.get("funnel_integration_tests", {})
+        if funnel_tests.get("status") == "completed":
+            total_tests = funnel_tests.get("total_tests", 0)
+            passed_tests = funnel_tests.get("passed_tests", 0)
+            
+            if total_tests > 0:
+                funnel_success_rate = passed_tests / total_tests
+                funnel_score = funnel_success_rate * 15
+                score += funnel_score
+            
+            # Funnel 서비스 중요성으로 인한 가중치
+            if self.services_status.get("funnel", False):
+                # Funnel 서비스가 실행 중이면 보너스 점수
+                score += 2
+        
+        # 성능 테스트 결과 (25점)
         performance_tests = self.test_results.get("performance_tests", {})
         if performance_tests.get("status") == "completed":
             # 성능 임계값 위반 확인
@@ -196,8 +450,32 @@ class ComprehensiveTestRunner:
                     if "error_rate" in results and results["error_rate"] > thresholds.get("max_error_rate", 0.05):
                         performance_violations += 1
             
-            performance_score = max(0, 40 - performance_violations * 5)
+            performance_score = max(0, 25 - performance_violations * 5)
             score += performance_score
+        
+        # 테스트 커버리지 분석 (20점)
+        coverage_analysis = self.test_results.get("coverage_analysis", {})
+        if coverage_analysis.get("status") == "completed":
+            overall_coverage = coverage_analysis.get("overall_coverage", 0)
+            meets_threshold = coverage_analysis.get("meets_minimum_threshold", False)
+            
+            # 커버리지 점수 계산
+            if overall_coverage >= 95:
+                coverage_score = 20  # Excellent
+            elif overall_coverage >= 85:
+                coverage_score = 18  # Good
+            elif overall_coverage >= 75:
+                coverage_score = 15  # Acceptable
+            elif overall_coverage >= 60:
+                coverage_score = 10  # Minimum
+            else:
+                coverage_score = 5   # Below minimum
+            
+            # 최소 임계값 미달 시 추가 차감
+            if not meets_threshold:
+                coverage_score = max(0, coverage_score - 5)
+            
+            score += coverage_score
         
         return min(max_score, max(0, score))
     
@@ -265,6 +543,61 @@ class ComprehensiveTestRunner:
                 max_concurrent = max([performance_results[k].get("concurrent_users", 0) for k in concurrent_tests])
                 print(f"  👥 최대 동시 사용자: {max_concurrent}")
         
+        # Funnel 통합 테스트 결과
+        funnel_tests = self.test_results.get("funnel_integration_tests", {})
+        if funnel_tests.get("status") == "completed":
+            print(f"\n🔄 Funnel 통합 테스트 결과:")
+            print(f"  📊 총 테스트: {funnel_tests.get('total_tests', 0)}")
+            print(f"  ✅ 성공: {funnel_tests.get('passed_tests', 0)}")
+            print(f"  ❌ 실패: {funnel_tests.get('failed_tests', 0)}")
+            
+            if funnel_tests.get("total_tests", 0) > 0:
+                success_rate = funnel_tests.get("passed_tests", 0) / funnel_tests.get("total_tests", 1)
+                print(f"  📈 성공률: {success_rate:.1%}")
+            
+            print(f"  ⏱️ 소요시간: {funnel_tests.get('duration', 0):.1f}초")
+            
+            # 개별 테스트 파일 결과
+            test_results = funnel_tests.get("test_results", [])
+            if test_results:
+                failed_tests = [t for t in test_results if not t.get("success", True)]
+                if failed_tests:
+                    print(f"  실패한 테스트 파일:")
+                    for test in failed_tests:
+                        test_file = test.get("test_file", "unknown")
+                        error = test.get("error", "unknown error")
+                        print(f"    - {test_file}: {error}")
+        elif funnel_tests.get("status") == "failed":
+            print(f"\n🔄 Funnel 통합 테스트 결과:")
+            print(f"  ❌ 실행 실패: {funnel_tests.get('error', 'Unknown error')}")
+        else:
+            print(f"\n🔄 Funnel 통합 테스트:")
+            print(f"  ⚠️ 테스트가 실행되지 않았습니다")
+        
+        # 커버리지 분석 결과
+        coverage_analysis = self.test_results.get("coverage_analysis", {})
+        if coverage_analysis.get("status") == "completed":
+            print(f"\n📊 테스트 커버리지 분석 결과:")
+            print(f"  📈 전체 커버리지: {coverage_analysis.get('overall_coverage', 0):.2f}%")
+            print(f"  🎯 등급: {coverage_analysis.get('grade', 'N/A')}")
+            
+            threshold_status = "✅ 통과" if coverage_analysis.get("meets_minimum_threshold", False) else "❌ 미달"
+            print(f"  🎲 최소 임계값: {threshold_status}")
+            
+            reports_generated = coverage_analysis.get("reports_generated", [])
+            if reports_generated:
+                print(f"  📄 생성된 리포트: {len(reports_generated)}개")
+                print("  📄 HTML 리포트: htmlcov/index.html")
+        elif coverage_analysis.get("status") == "failed":
+            print(f"\n📊 테스트 커버리지 분석 결과:")
+            print(f"  ❌ 분석 실패: {coverage_analysis.get('error', 'Unknown error')}")
+        elif coverage_analysis.get("status") == "timeout":
+            print(f"\n📊 테스트 커버리지 분석 결과:")
+            print(f"  ⏰ 분석 시간 초과 (10분)")
+        else:
+            print(f"\n📊 테스트 커버리지 분석:")
+            print(f"  ⚠️ 분석이 실행되지 않았습니다")
+        
         # 프로덕션 준비도 점수
         readiness_score = self.test_results["production_readiness_score"]
         print(f"\n🎯 프로덕션 준비도 점수: {readiness_score:.1f}/100")
@@ -282,11 +615,17 @@ class ComprehensiveTestRunner:
         print(f"\n💡 권장 사항: {recommendation}")
         
         # JSON 보고서 저장
+        # Save to tests/results directory
+        results_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'results')
+        os.makedirs(results_dir, exist_ok=True)
+        
         report_filename = f"test_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        with open(report_filename, 'w', encoding='utf-8') as f:
+        report_filepath = os.path.join(results_dir, report_filename)
+        
+        with open(report_filepath, 'w', encoding='utf-8') as f:
             json.dump(self.test_results, f, indent=2, ensure_ascii=False)
         
-        print(f"\n📄 상세 보고서 저장: {report_filename}")
+        print(f"\n📄 상세 보고서 저장: {report_filepath}")
         
         return readiness_score >= 80
     
@@ -306,11 +645,16 @@ class ComprehensiveTestRunner:
         # 3. 성능 테스트 실행
         await self.run_performance_tests()
         
-        # 4. 최종 보고서 생성
+        # 4. Funnel 통합 테스트 실행
+        self.run_funnel_integration_tests()
+        
+        # 5. 테스트 커버리지 분석 실행
+        self.run_coverage_analysis()
+        
+        # 6. 최종 보고서 생성
         production_ready = self.generate_final_report()
         
         return production_ready
-
 
 async def main():
     """메인 실행 함수"""
@@ -336,7 +680,6 @@ async def main():
     except Exception as e:
         print(f"\n💥 예상치 못한 오류 발생: {e}")
         sys.exit(3)
-
 
 if __name__ == "__main__":
     asyncio.run(main())

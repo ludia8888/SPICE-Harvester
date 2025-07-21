@@ -15,7 +15,6 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-
 class TestCriticalUserFlows:
     """End-to-end tests for critical user workflows"""
     
@@ -513,7 +512,6 @@ class TestCriticalUserFlows:
         
         logger.info(f"✓ Performance flow completed successfully")
 
-
 class TestCrossServiceIntegration:
     """Integration tests that span multiple services"""
     
@@ -543,7 +541,6 @@ class TestCrossServiceIntegration:
                     await client.delete(f"http://localhost:8000/api/v1/database/{db_name}")
                 except Exception:
                     pass
-
 
 if __name__ == "__main__":
     # Run tests manually

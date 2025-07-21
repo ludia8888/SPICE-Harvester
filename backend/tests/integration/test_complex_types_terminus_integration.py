@@ -5,25 +5,25 @@
 """
 
 import httpx
+
+# No need for sys.path.insert - using proper spice_harvester package imports
 import asyncio
 import json
 from datetime import datetime
-import sys
 import os
 
-# Add shared to Python path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'shared'))
-
-from models.common import DataType
-from validators.complex_type_validator import ComplexTypeConstraints
-from test_config import TestConfig
-
+from shared.models.common import DataType
+from shared.validators.complex_type_validator import ComplexTypeConstraints
+from tests.test_config import TestConfig
+from tests.utils.test_isolation import TestIsolationManager, TestDataBuilder
 
 class ComplexTypesTerminusIntegrationTest:
     """🔥 THINK ULTRA!! 복합 타입 TerminusDB 통합 테스터"""
     
     def __init__(self):
-        self.test_db = "test_complex_types_ultra"
+        self.isolation_manager = TestIsolationManager()
+        self.data_builder = TestDataBuilder(self.isolation_manager)
+        self.test_db = None  # Will be set in setup
         self.test_results = {
             "total": 0,
             "passed": 0,
@@ -76,37 +76,37 @@ class ComplexTypesTerminusIntegrationTest:
     
     async def setup_test_database(self, client: httpx.AsyncClient):
         """테스트 데이터베이스 설정"""
-        print("\n🔧 Setting up test database...")
+        print("\n🔧 Setting up isolated test database...")
         
-        # Delete if exists
-        try:
-            await client.delete(f"{TestConfig.get_oms_base_url()}/api/v1/database/{self.test_db}")
-        except:
-            pass
+        # Generate isolated database name
+        self.test_db = self.isolation_manager.generate_isolated_name("test_complex_types")
         
         # Create new database
         response = await client.post(
             f"{TestConfig.get_oms_base_url()}/api/v1/database/create",
             json={
                 "name": self.test_db,
-                "description": "Complex Types Integration Test Database"
+                "description": f"Isolated Complex Types Test DB - {datetime.now()}"
             }
         )
         
         if response.status_code != 200:
             raise Exception(f"Failed to create database: {response.text}")
         
-        print("✅ Test database created")
+        # Register for cleanup
+        self.isolation_manager.register_database(self.test_db)
+        
+        print(f"✅ Isolated test database created: {self.test_db}")
     
     async def cleanup_test_database(self, client: httpx.AsyncClient):
         """테스트 데이터베이스 정리"""
         print("\n🧹 Cleaning up test database...")
         
-        try:
-            await client.delete(f"{TestConfig.get_oms_base_url()}/api/v1/database/{self.test_db}")
+        # Use isolation manager for cleanup
+        if self.isolation_manager.cleanup_database(self.test_db):
             print("✅ Cleanup completed")
-        except:
-            print("⚠️ Cleanup failed")
+        else:
+            print("⚠️ Cleanup failed - will be retried by isolation manager")
     
     async def test_array_ontology(self, client: httpx.AsyncClient):
         """ARRAY 타입 온톨로지 테스트"""
@@ -316,9 +316,7 @@ class ComplexTypesTerminusIntegrationTest:
                     "type": DataType.EMAIL.value,
                     "label": {"en": "Email Address", "ko": "이메일 주소"},
                     "required": True,
-                    "constraints": ComplexTypeConstraints.email_constraints(
-                        check_deliverability=False
-                    )
+                    "constraints": ComplexTypeConstraints.email_constraints()
                 },
                 {
                     "name": "businessEmail",
@@ -767,19 +765,19 @@ class ComplexTypesTerminusIntegrationTest:
             print("   ⚠️ 일부 통합 테스트에 문제가 있습니다.")
         
         # Save results
-        result_file = f"terminus_integration_test_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        results_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'results')
+        os.makedirs(results_dir, exist_ok=True)
+        result_file = os.path.join(results_dir, f"terminus_integration_test_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
         with open(result_file, 'w', encoding='utf-8') as f:
             json.dump(self.test_results, f, ensure_ascii=False, indent=2)
         
         print(f"\n📄 상세 결과가 저장되었습니다: {result_file}")
-
 
 async def main():
     """메인 테스트 실행"""
     
     tester = ComplexTypesTerminusIntegrationTest()
     await tester.run_all_tests()
-
 
 if __name__ == "__main__":
     asyncio.run(main())

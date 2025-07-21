@@ -4,13 +4,13 @@
 """
 
 import json
-import sys
+
+# No need for sys.path.insert - using proper spice_harvester package imports
 import os
 
 # Import models directly to test
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'shared'))
-from models.common import Cardinality
-from models.ontology import Relationship, MultiLingualText, OntologyBase
+from shared.models.common import Cardinality
+from shared.models.ontology import Relationship, MultiLingualText, OntologyBase
 
 def test_cardinality_enum():
     """카디널리티 Enum 검증"""
@@ -33,7 +33,6 @@ def test_cardinality_enum():
     
     print("\n✅ 모든 카디널리티 타입이 완벽하게 정의되어 있습니다!")
     return True
-
 
 def test_relationship_model():
     """관계 모델 검증"""
@@ -91,7 +90,6 @@ def test_relationship_model():
     
     print("\n✅ 모든 관계 모델이 완벽하게 작동합니다!")
     return True
-
 
 def test_ontology_with_relationships():
     """관계 포함 온톨로지 검증"""
@@ -152,7 +150,6 @@ def test_ontology_with_relationships():
     print("\n✅ 관계 포함 온톨로지가 완벽하게 작동합니다!")
     return True
 
-
 def test_cardinality_validation():
     """카디널리티 검증 로직 테스트"""
     
@@ -199,7 +196,6 @@ def test_cardinality_validation():
     print("\n✅ 카디널리티 검증이 완벽하게 작동합니다!")
     return True
 
-
 def test_real_world_scenarios():
     """실제 사용 시나리오 테스트"""
     
@@ -234,7 +230,6 @@ def test_real_world_scenarios():
     print("\n✅ 모든 실제 시나리오가 지원됩니다!")
     return True
 
-
 def generate_api_examples():
     """API 사용 예시 생성"""
     
@@ -257,7 +252,7 @@ def generate_api_examples():
                 "label": {"ko": "직원번호", "en": "Employee ID"},
                 "required": True,
                 "constraints": {
-                    "pattern": "^EMP\\d{6}$"
+                    "pattern": r"^EMP\d{6}$"
                 }
             }
         ],
@@ -297,7 +292,6 @@ def generate_api_examples():
     print(json.dumps(complete_example, indent=4, ensure_ascii=False))
     
     return True
-
 
 def main():
     """메인 테스트 실행"""
@@ -345,7 +339,6 @@ def main():
     print("\n🚀 결론: SPICE HARVESTER는 엔터프라이즈급 카디널리티 시스템을 완전히 지원합니다!")
     
     return failed == 0
-
 
 if __name__ == "__main__":
     success = main()

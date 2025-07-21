@@ -4,8 +4,11 @@ Tests validation logic, field constraints, and error handling
 """
 
 import pytest
+
+# No need for sys.path.insert - using proper spice_harvester package imports
 from pydantic import ValidationError
-from models.requests import (
+from tests.utils.assertions import assert_equal
+from shared.models.requests import (
     BranchCreateRequest, 
     CheckoutRequest, 
     CommitRequest, 
@@ -15,15 +18,24 @@ from models.requests import (
     ApiResponse
 )
 
-
 class TestBranchCreateRequest:
     """Test BranchCreateRequest validation"""
     
     def test_valid_branch_request(self, sample_branch_data):
         """Test valid branch creation request"""
         request = BranchCreateRequest(**sample_branch_data)
-        assert request.branch_name == "feature-test"
-        assert request.from_branch == "main"
+        assert_equal(
+            actual=request.branch_name,
+            expected="feature-test",
+            field_name="request.branch_name",
+            context={"sample_data": sample_branch_data}
+        )
+        assert_equal(
+            actual=request.from_commit,
+            expected="main",
+            field_name="request.from_commit",
+            context={"sample_data": sample_branch_data}
+        )
     
     def test_branch_name_validation(self):
         """Test branch name validation rules"""
@@ -31,7 +43,12 @@ class TestBranchCreateRequest:
         valid_names = ["main", "feature-branch", "test_branch", "branch-1", "dev/feature"]
         for name in valid_names:
             request = BranchCreateRequest(branch_name=name)
-            assert request.branch_name == name
+            assert_equal(
+                actual=request.branch_name,
+                expected=name,
+                field_name="request.branch_name",
+                context={"valid_name": name}
+            )
         
         # Invalid branch names
         invalid_names = ["", "branch name", "branch@name", "branch#name", "branch!"]
@@ -47,34 +64,62 @@ class TestBranchCreateRequest:
         
         # Valid length
         request = BranchCreateRequest(branch_name="a" * 100)
-        assert len(request.branch_name) == 100
-
+        assert_equal(
+            actual=len(request.branch_name),
+            expected=100,
+            field_name="request.branch_name_length",
+            context={"branch_name": request.branch_name}
+        )
 
 class TestCheckoutRequest:
     """Test CheckoutRequest validation"""
     
     def test_valid_branch_checkout(self):
         """Test valid branch checkout"""
-        request = CheckoutRequest(target="main", type="branch")
-        assert request.target == "main"
-        assert request.type == "branch"
+        request = CheckoutRequest(target="main", target_type="branch")
+        assert_equal(
+            actual=request.target,
+            expected="main",
+            field_name="request.target",
+            context={"checkout_type": "branch"}
+        )
+        assert_equal(
+            actual=request.target_type,
+            expected="branch",
+            field_name="request.target_type",
+            context={"target": "main"}
+        )
     
     def test_valid_commit_checkout(self):
         """Test valid commit checkout"""
-        request = CheckoutRequest(target="abc123def456", type="commit")
-        assert request.target == "abc123def456"
-        assert request.type == "commit"
+        request = CheckoutRequest(target="abc123def456", target_type="commit")
+        assert_equal(
+            actual=request.target,
+            expected="abc123def456",
+            field_name="request.target",
+            context={"checkout_type": "commit"}
+        )
+        assert_equal(
+            actual=request.target_type,
+            expected="commit",
+            field_name="request.target_type",
+            context={"target": "abc123def456"}
+        )
     
     def test_invalid_commit_id(self):
         """Test invalid commit ID validation"""
         with pytest.raises(ValidationError):
-            CheckoutRequest(target="invalid@commit", type="commit")
+            CheckoutRequest(target="invalid@commit", target_type="commit")
     
     def test_default_type(self):
         """Test default checkout type"""
         request = CheckoutRequest(target="main")
-        assert request.type == "branch"
-
+        assert_equal(
+            actual=request.target_type,
+            expected="branch",
+            field_name="request.target_type",
+            context={"description": "default checkout type", "target": "main"}
+        )
 
 class TestCommitRequest:
     """Test CommitRequest validation"""
@@ -82,9 +127,24 @@ class TestCommitRequest:
     def test_valid_commit_request(self, sample_commit_data):
         """Test valid commit request"""
         request = CommitRequest(**sample_commit_data)
-        assert request.message == "Test commit message"
-        assert request.author == "test@example.com"
-        assert request.branch == "feature-test"
+        assert_equal(
+            actual=request.message,
+            expected="Test commit message",
+            field_name="request.message",
+            context={"sample_data": sample_commit_data}
+        )
+        assert_equal(
+            actual=request.author,
+            expected="test@example.com",
+            field_name="request.author",
+            context={"sample_data": sample_commit_data}
+        )
+        assert_equal(
+            actual=request.branch,
+            expected="feature-test",
+            field_name="request.branch",
+            context={"sample_data": sample_commit_data}
+        )
     
     def test_email_validation(self):
         """Test author email validation"""
@@ -92,7 +152,12 @@ class TestCommitRequest:
         valid_emails = ["test@example.com", "user.name@domain.co.uk", "dev+test@company.org"]
         for email in valid_emails:
             request = CommitRequest(message="test", author=email)
-            assert request.author == email
+            assert_equal(
+                actual=request.author,
+                expected=email,
+                field_name="request.author",
+                context={"valid_email": email}
+            )
         
         # Invalid emails that should actually fail (empty string/spaces)
         invalid_emails = ["", "   "]
@@ -110,8 +175,12 @@ class TestCommitRequest:
         
         # Valid length
         request = CommitRequest(message="a" * 500, author="test@example.com")
-        assert len(request.message) == 500
-
+        assert_equal(
+            actual=len(request.message),
+            expected=500,
+            field_name="request.message_length",
+            context={"message_content": "a" * 500}
+        )
 
 class TestMergeRequest:
     """Test MergeRequest validation"""
@@ -119,9 +188,24 @@ class TestMergeRequest:
     def test_valid_merge_request(self, sample_merge_data):
         """Test valid merge request"""
         request = MergeRequest(**sample_merge_data)
-        assert request.source_branch == "feature-test"
-        assert request.target_branch == "main"
-        assert request.strategy == "merge"
+        assert_equal(
+            actual=request.source_branch,
+            expected="feature-test",
+            field_name="request.source_branch",
+            context={"sample_data": sample_merge_data}
+        )
+        assert_equal(
+            actual=request.target_branch,
+            expected="main",
+            field_name="request.target_branch",
+            context={"sample_data": sample_merge_data}
+        )
+        assert_equal(
+            actual=request.strategy,
+            expected="merge",
+            field_name="request.strategy",
+            context={"sample_data": sample_merge_data}
+        )
     
     def test_strategy_validation(self):
         """Test merge strategy validation"""
@@ -132,11 +216,21 @@ class TestMergeRequest:
                 target_branch="main", 
                 strategy=strategy
             )
-            assert request.strategy == strategy
+            assert_equal(
+                actual=request.strategy,
+                expected=strategy,
+                field_name="request.strategy",
+                context={"valid_strategy": strategy}
+            )
         
         # Invalid strategy should use default
         request = MergeRequest(source_branch="feature", target_branch="main")
-        assert request.strategy == "merge"
+        assert_equal(
+            actual=request.strategy,
+            expected="merge",
+            field_name="request.strategy",
+            context={"description": "default strategy when none specified"}
+        )
     
     def test_optional_author_validation(self):
         """Test optional author email validation"""
@@ -146,11 +240,21 @@ class TestMergeRequest:
             target_branch="main",
             author="test@example.com"
         )
-        assert request.author == "test@example.com"
+        assert_equal(
+            actual=request.author,
+            expected="test@example.com",
+            field_name="request.author",
+            context={"description": "merge request with author"}
+        )
         
         # Valid without author
         request = MergeRequest(source_branch="feature", target_branch="main")
-        assert request.author is None
+        assert_equal(
+            actual=request.author,
+            expected=None,
+            field_name="request.author",
+            context={"description": "merge request without author"}
+        )
         
         # Invalid author email (empty string should fail)
         with pytest.raises(ValidationError):
@@ -160,16 +264,30 @@ class TestMergeRequest:
                 author=""
             )
 
-
 class TestRollbackRequest:
     """Test RollbackRequest validation"""
     
     def test_valid_rollback_request(self, sample_rollback_data):
         """Test valid rollback request"""
         request = RollbackRequest(**sample_rollback_data)
-        assert request.target_commit == "abc123def456"
-        assert request.create_branch is True
-        assert request.branch_name == "rollback-test"
+        assert_equal(
+            actual=request.target_commit,
+            expected="abc123def456",
+            field_name="request.target_commit",
+            context={"sample_data": sample_rollback_data}
+        )
+        assert_equal(
+            actual=request.create_branch,
+            expected=True,
+            field_name="request.create_branch",
+            context={"sample_data": sample_rollback_data}
+        )
+        assert_equal(
+            actual=request.branch_name,
+            expected="rollback-test",
+            field_name="request.branch_name",
+            context={"sample_data": sample_rollback_data}
+        )
     
     def test_commit_id_validation(self):
         """Test commit ID validation"""
@@ -177,7 +295,12 @@ class TestRollbackRequest:
         valid_commits = ["abc123", "ABC123DEF456", "1234567890abcdef"]
         for commit in valid_commits:
             request = RollbackRequest(target_commit=commit)
-            assert request.target_commit == commit
+            assert_equal(
+                actual=request.target_commit,
+                expected=commit,
+                field_name="request.target_commit",
+                context={"valid_commit": commit}
+            )
         
         # Invalid commit IDs
         invalid_commits = ["invalid_commit", "commit-123", "abc123@"]
@@ -188,8 +311,12 @@ class TestRollbackRequest:
     def test_default_create_branch(self):
         """Test default value for create_branch"""
         request = RollbackRequest(target_commit="abc123")
-        assert request.create_branch is True
-
+        assert_equal(
+            actual=request.create_branch,
+            expected=True,
+            field_name="request.create_branch",
+            context={"description": "default value for create_branch"}
+        )
 
 class TestDatabaseCreateRequest:
     """Test DatabaseCreateRequest validation"""
@@ -197,8 +324,18 @@ class TestDatabaseCreateRequest:
     def test_valid_database_request(self, sample_database_data):
         """Test valid database creation request"""
         request = DatabaseCreateRequest(**sample_database_data)
-        assert request.name == "test_database"
-        assert request.description == "Test database for unit tests"
+        assert_equal(
+            actual=request.name,
+            expected="test_database",
+            field_name="request.name",
+            context={"sample_data": sample_database_data}
+        )
+        assert_equal(
+            actual=request.description,
+            expected="Test database for unit tests",
+            field_name="request.description",
+            context={"sample_data": sample_database_data}
+        )
     
     def test_database_name_validation(self):
         """Test database name validation rules"""
@@ -206,7 +343,12 @@ class TestDatabaseCreateRequest:
         valid_names = ["test_db", "MyDatabase", "db-1", "database_test"]
         for name in valid_names:
             request = DatabaseCreateRequest(name=name)
-            assert request.name == name
+            assert_equal(
+                actual=request.name,
+                expected=name,
+                field_name="request.name",
+                context={"valid_name": name}
+            )
         
         # Invalid names (must start with letter)
         invalid_names = ["1database", "_database", "-database", "database space"]
@@ -217,7 +359,12 @@ class TestDatabaseCreateRequest:
     def test_description_default(self):
         """Test default description value"""
         request = DatabaseCreateRequest(name="test_db")
-        assert request.description == ""
+        assert_equal(
+            actual=request.description,
+            expected="",
+            field_name="request.description",
+            context={"description": "default description value"}
+        )
     
     def test_name_length_limits(self):
         """Test database name length validation"""
@@ -227,8 +374,12 @@ class TestDatabaseCreateRequest:
         
         # Valid length
         request = DatabaseCreateRequest(name="a" * 50)
-        assert len(request.name) == 50
-
+        assert_equal(
+            actual=len(request.name),
+            expected=50,
+            field_name="request.name_length",
+            context={"name_content": "a" * 50}
+        )
 
 class TestApiResponse:
     """Test ApiResponse model"""
@@ -240,9 +391,24 @@ class TestApiResponse:
             message="Operation completed",
             data={"result": "test"}
         )
-        assert response.status == "success"
-        assert response.message == "Operation completed"
-        assert response.data == {"result": "test"}
+        assert_equal(
+            actual=response.status,
+            expected="success",
+            field_name="response.status",
+            context={"response_type": "success"}
+        )
+        assert_equal(
+            actual=response.message,
+            expected="Operation completed",
+            field_name="response.message",
+            context={"response_type": "success"}
+        )
+        assert_equal(
+            actual=response.data,
+            expected={"result": "test"},
+            field_name="response.data",
+            context={"response_type": "success"}
+        )
     
     def test_error_response(self):
         """Test error response creation"""
@@ -250,16 +416,30 @@ class TestApiResponse:
             status="error",
             message="Operation failed"
         )
-        assert response.status == "error"
-        assert response.message == "Operation failed"
-        assert response.data is None
+        assert_equal(
+            actual=response.status,
+            expected="error",
+            field_name="response.status",
+            context={"response_type": "error"}
+        )
+        assert_equal(
+            actual=response.message,
+            expected="Operation failed",
+            field_name="response.message",
+            context={"response_type": "error"}
+        )
+        assert_equal(
+            actual=response.data,
+            expected=None,
+            field_name="response.data",
+            context={"response_type": "error"}
+        )
     
     def test_status_validation(self):
         """Test status field validation"""
         # Invalid status
         with pytest.raises(ValidationError):
             ApiResponse(status="invalid", message="test")
-
 
 if __name__ == "__main__":
     pytest.main([__file__])

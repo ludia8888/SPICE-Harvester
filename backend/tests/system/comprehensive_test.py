@@ -5,17 +5,14 @@
 """
 
 import sys
+
+# No need for sys.path.insert - using proper spice_harvester package imports
 import os
 import asyncio
 import traceback
 from pathlib import Path
 
-# 경로 설정
 base_dir = Path('/Users/isihyeon/Desktop/SPICE HARVESTER/backend')
-sys.path.insert(0, str(base_dir / 'ontology-management-service'))
-sys.path.insert(0, str(base_dir / 'backend-for-frontend'))
-sys.path.insert(0, str(base_dir / 'shared'))
-
 class ComprehensiveTest:
     def __init__(self):
         self.test_results = []
@@ -39,7 +36,7 @@ class ComprehensiveTest:
         
         # Shared models 테스트
         try:
-            from models.ontology import (
+            from shared.models.ontology import (
                 OntologyCreateRequest, 
                 OntologyUpdateRequest, 
                 OntologyResponse,
@@ -47,40 +44,36 @@ class ComprehensiveTest:
                 QueryResponse,
                 MultiLingualText
             )
-            from models.common import BaseResponse
+            from shared.models.common import BaseResponse
             self.log_test("Shared models import", True)
         except Exception as e:
             self.log_test("Shared models import", False, str(e))
         
         # Shared utils 테스트
         try:
-            from utils.jsonld import JSONToJSONLDConverter
-            from utils.retry import retry, CircuitBreaker
+            from shared.utils.jsonld import JSONToJSONLDConverter
+            from shared.utils.retry import retry, CircuitBreaker
             self.log_test("Shared utils import", True)
         except Exception as e:
             self.log_test("Shared utils import", False, str(e))
         
         # OMS services 테스트
         try:
-            from services.async_terminus import AsyncTerminusService, AsyncConnectionInfo
+            from oms.services.async_terminus import AsyncTerminusService, AsyncConnectionInfo
             self.log_test("OMS async_terminus import", True)
         except Exception as e:
             self.log_test("OMS async_terminus import", False, str(e))
         
         # BFF services 테스트
         try:
-            from services.oms_client import OMSClient
+            from bff.services.oms_client import OMSClient
             self.log_test("BFF oms_client import", True)
         except Exception as e:
             self.log_test("BFF oms_client import", False, str(e))
         
         # BFF utils 테스트
         try:
-            # BFF utils 경로 추가
-            bff_utils_path = str(base_dir / 'backend-for-frontend' / 'utils')
-            if bff_utils_path not in sys.path:
-                sys.path.insert(0, bff_utils_path)
-            from label_mapper import LabelMapper
+            from shared.utils.label_mapper import LabelMapper
             self.log_test("BFF label_mapper import", True)
         except Exception as e:
             self.log_test("BFF label_mapper import", False, str(e))
@@ -90,7 +83,7 @@ class ComprehensiveTest:
         print("\n=== 2. 모델 생성 검증 ===")
         
         try:
-            from models.ontology import OntologyCreateRequest, MultiLingualText
+            from shared.models.ontology import OntologyCreateRequest, MultiLingualText
             
             # 다국어 텍스트 생성
             multilingual_label = MultiLingualText(
@@ -121,7 +114,7 @@ class ComprehensiveTest:
         print("\n=== 3. JSON-LD 변환기 검증 ===")
         
         try:
-            from utils.jsonld import JSONToJSONLDConverter
+            from shared.utils.jsonld import JSONToJSONLDConverter
             
             converter = JSONToJSONLDConverter()
             
@@ -155,7 +148,7 @@ class ComprehensiveTest:
         print("\n=== 4. OMS 클라이언트 검증 ===")
         
         try:
-            from services.oms_client import OMSClient
+            from bff.services.oms_client import OMSClient
             
             # 클라이언트 생성
             client = OMSClient("http://localhost:8001")
@@ -179,7 +172,7 @@ class ComprehensiveTest:
         print("\n=== 5. AsyncTerminusService 검증 ===")
         
         try:
-            from services.async_terminus import AsyncTerminusService, AsyncConnectionInfo
+            from oms.services.async_terminus import AsyncTerminusService, AsyncConnectionInfo
             
             # 연결 정보 생성
             connection_info = AsyncConnectionInfo(
@@ -210,11 +203,7 @@ class ComprehensiveTest:
         print("\n=== 6. LabelMapper 검증 ===")
         
         try:
-            # BFF utils 경로 추가
-            bff_utils_path = str(base_dir / 'backend-for-frontend' / 'utils')
-            if bff_utils_path not in sys.path:
-                sys.path.insert(0, bff_utils_path)
-            from label_mapper import LabelMapper
+            from shared.utils.label_mapper import LabelMapper
             
             # LabelMapper 생성
             mapper = LabelMapper()
@@ -243,8 +232,7 @@ class ComprehensiveTest:
         
         try:
             # OMS 앱 생성 테스트
-            sys.path.insert(0, str(base_dir / 'ontology-management-service'))
-            from main import app as oms_app
+            from oms.main import app as oms_app
             self.log_test("OMS FastAPI app creation", True, f"App title: {oms_app.title}")
             
         except Exception as e:
@@ -252,8 +240,7 @@ class ComprehensiveTest:
         
         try:
             # BFF 앱 생성 테스트
-            sys.path.insert(0, str(base_dir / 'backend-for-frontend'))
-            from main import app as bff_app
+            from bff.main import app as bff_app
             self.log_test("BFF FastAPI app creation", True, f"App title: {bff_app.title}")
             
         except Exception as e:
@@ -264,8 +251,7 @@ class ComprehensiveTest:
         print("\n=== 8. 라우터 Import 검증 ===")
         
         try:
-            sys.path.insert(0, str(base_dir / 'ontology-management-service'))
-            from routers import database, ontology
+            from oms.routers import database, ontology
             self.log_test("OMS routers import", True)
         except Exception as e:
             self.log_test("OMS routers import", False, str(e))

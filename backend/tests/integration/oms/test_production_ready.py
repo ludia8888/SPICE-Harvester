@@ -8,6 +8,7 @@ import asyncio
 import json
 import httpx
 import time
+import os
 from typing import Dict, Any, List
 from datetime import datetime
 
@@ -567,7 +568,9 @@ class ProductionReadinessTest:
                         print(f"    Error: {result['error']}")
                         
         # Save detailed report
-        report_file = f"production_test_report_{int(time.time())}.json"
+        results_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'results')
+        os.makedirs(results_dir, exist_ok=True)
+        report_file = os.path.join(results_dir, f"production_test_report_{int(time.time())}.json")
         with open(report_file, "w") as f:
             json.dump({
                 "summary": {
@@ -617,13 +620,11 @@ class ProductionReadinessTest:
         # Generate final report
         return self.generate_report()
 
-
 async def main():
     """Main test runner"""
     async with ProductionReadinessTest() as tester:
         success = await tester.run_all_tests()
         return 0 if success else 1
-
 
 if __name__ == "__main__":
     exit_code = asyncio.run(main())
