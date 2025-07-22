@@ -373,36 +373,27 @@ async def get_ontology(
         if not display_result.get("label"):
             display_result["label"] = class_label
 
-        # Ensure label and description are in MultiLingualText format
-        from shared.models.ontology import MultiLingualText, OntologyBase
+        # Use simple English strings for labels and descriptions
+        from shared.models.ontology import OntologyBase
         
         label_value = display_result.get("label")
         if isinstance(label_value, str):
-            # Convert string to MultiLingualText object
-            if lang == "ko":
-                label_value = MultiLingualText(ko=label_value)
-            else:
-                label_value = MultiLingualText(en=label_value)
+            # Use string directly
+            label_value = label_value
         elif isinstance(label_value, dict):
-            # Convert dict to MultiLingualText object
-            label_value = MultiLingualText(**label_value)
+            # Extract English label from dict
+            label_value = label_value.get("en", label_value.get("ko", class_label))
         elif not label_value:
             # Fallback to class_label
-            if lang == "ko":
-                label_value = MultiLingualText(ko=class_label)
-            else:
-                label_value = MultiLingualText(en=class_label)
+            label_value = class_label
         
         desc_value = display_result.get("description")
         if isinstance(desc_value, str):
-            # Convert string to MultiLingualText object
-            if lang == "ko":
-                desc_value = MultiLingualText(ko=desc_value)
-            else:
-                desc_value = MultiLingualText(en=desc_value)
+            # Use string directly
+            desc_value = desc_value
         elif isinstance(desc_value, dict):
-            # Convert dict to MultiLingualText object
-            desc_value = MultiLingualText(**desc_value)
+            # Extract English description from dict
+            desc_value = desc_value.get("en", desc_value.get("ko", None))
         else:
             desc_value = None
 

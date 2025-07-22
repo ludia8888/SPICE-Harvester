@@ -340,13 +340,17 @@ def validate_generated_id(id_string: str) -> bool:
 if __name__ == "__main__":
     # 테스트
     test_cases = [
-        {"en": "Simple Product", "ko": "간단한 제품"},
-        {"ko": "제품 관리 시스템"},
-        {"en": "User Management"},
+        "Simple Product",
+        "제품 관리 시스템",
+        "User Management", 
         "Simple String",
         "",
         None,
-        {"en": "Test-Class@123!"},
+        "Test-Class@123!",
+        # 레거시 호환성 테스트
+        {"en": "Simple Product", "ko": "간단한 제품"},
+        {"ko": "제품 관리 시스템"},
+        {"en": "User Management"},
     ]
     
     print("=== ID Generator Tests ===")

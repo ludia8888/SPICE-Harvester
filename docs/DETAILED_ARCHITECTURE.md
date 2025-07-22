@@ -81,8 +81,10 @@ bff/
 **주요 책임**:
 - 온톨로지 CRUD 작업
 - 스키마 버전 관리
-- 관계 관리
+- 관계 관리 및 Property-to-Relationship 자동 변환
 - 복합 타입 검증
+- 고급 제약조건 추출 및 검증
+- TerminusDB v11.x 모든 스키마 타입 지원
 
 **구성요소**:
 ```
@@ -98,12 +100,15 @@ oms/
 │   └── version.py        # 버전 관리
 ├── services/              # 비즈니스 서비스
 │   ├── async_terminus.py # 비동기 데이터베이스 작업
-│   └── relationship_manager.py # 관계 처리
+│   ├── relationship_manager.py # 관계 처리
+│   └── property_to_relationship_converter.py # Property→Relationship 자동 변환
 ├── validators/            # 도메인 검증기
 │   └── relationship_validator.py
 ├── utils/                 # 유틸리티 함수
 │   ├── circular_reference_detector.py
-│   └── relationship_path_tracker.py
+│   ├── relationship_path_tracker.py
+│   ├── constraint_extractor.py # 제약조건 추출 및 검증
+│   └── terminus_schema_types.py # TerminusDB v11.x 스키마 타입 지원
 ├── dependencies.py        # 의존성 주입
 └── exceptions.py          # 예외 처리
 ```
@@ -286,10 +291,23 @@ DELETE /api/v1/{resource}/{id}     # 리소스 삭제
     "@id": "Production",
     "name": "xsd:string",
     "created_at": "xsd:dateTime",
-    "metadata": "sys:JSON",
+    "metadata": "xsd:string", // sys:JSON -> xsd:string으로 변경
     "relationships": {
         "@type": "Set",
         "@class": "Relationship"
+    },
+    // 고급 타입 지원 예시
+    "location": {
+        "@type": "Optional",
+        "@class": "xsd:geoPoint"
+    },
+    "tags": {
+        "@type": "Set",
+        "@class": "xsd:string"
+    },
+    "status": {
+        "@type": "Enum",
+        "@value": ["draft", "published", "archived"]
     }
 }
 ```
@@ -413,6 +431,8 @@ pytest tests/
 4. 머신러닝 통합
 5. 향상된 모니터링 대시보드
 6. 더 많은 데이터 소스 커넥터 (Excel, API 등)
+7. 고급 제약조건 UI 편집기
+8. 스키마 마이그레이션 도구
 
 ### 확장성 로드맵
 1. Kubernetes 배포

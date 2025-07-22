@@ -41,8 +41,7 @@ class ComprehensiveTest:
                 OntologyUpdateRequest, 
                 OntologyResponse,
                 QueryRequest,
-                QueryResponse,
-                MultiLingualText
+                QueryResponse
             )
             from shared.models.common import BaseResponse
             self.log_test("Shared models import", True)
@@ -83,19 +82,13 @@ class ComprehensiveTest:
         print("\n=== 2. 모델 생성 검증 ===")
         
         try:
-            from shared.models.ontology import OntologyCreateRequest, MultiLingualText
-            
-            # 다국어 텍스트 생성
-            multilingual_label = MultiLingualText(
-                ko="사람",
-                en="Person"
-            )
+            from shared.models.ontology import OntologyCreateRequest
             
             # 온톨로지 생성 요청 모델 생성
             ontology_request = OntologyCreateRequest(
                 id="Person",
-                label=multilingual_label,
-                description=MultiLingualText(ko="사람을 나타내는 클래스"),
+                label="Person",
+                description="Class representing a person",
                 properties=[],
                 relationships=[]
             )

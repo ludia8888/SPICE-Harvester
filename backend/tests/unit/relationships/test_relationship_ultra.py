@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # No need for sys.path.insert - using proper spice_harvester package imports
-from shared.models.ontology import OntologyBase, Relationship, MultiLingualText, Cardinality
+from shared.models.ontology import OntologyBase, Relationship, Cardinality
 from shared.models.config import ConnectionConfig
 from tests.utils.assertions import assert_equal, assert_contains, assert_type, assert_in_range
 
@@ -143,10 +143,10 @@ class RelationshipSystemTester:
         company_employee_rel = Relationship(
             predicate="hasEmployee",
             target="Employee",
-            label=MultiLingualText(ko="직원을 고용한다", en="has employee"),
+            label="has employee",
             cardinality="1:n",
             inverse_predicate="worksFor",
-            inverse_label=MultiLingualText(ko="근무한다", en="works for")
+            inverse_label="works for"
         )
         
         # 양방향 관계 생성
@@ -216,7 +216,7 @@ class RelationshipSystemTester:
         valid_relationship = Relationship(
             predicate="hasEmployee",
             target="Employee",
-            label=MultiLingualText(ko="직원을 고용한다"),
+            label="has employee",
             cardinality="1:n"
         )
         
@@ -235,7 +235,7 @@ class RelationshipSystemTester:
             invalid_relationship = Relationship(
                 predicate="validPredicate",  # 유효한 predicate
                 target="Employee",
-                label=MultiLingualText(ko="잘못된 관계"),
+                label="invalid relationship",
                 cardinality="invalid_cardinality"  # 잘못된 카디널리티
             )
             # Should not reach here - Pydantic should reject invalid cardinality
@@ -250,7 +250,7 @@ class RelationshipSystemTester:
         # 온톨로지 전체 검증 테스트
         test_ontology = OntologyBase(
             id="Company",
-            label=MultiLingualText(ko="회사"),
+            label="Company",
             relationships=[valid_relationship]
         )
         
@@ -268,12 +268,12 @@ class RelationshipSystemTester:
         # 순환 참조 없는 온톨로지들 생성
         company = OntologyBase(
             id="Company",
-            label=MultiLingualText(ko="회사"),
+            label="Company",
             relationships=[
                 Relationship(
                     predicate="hasEmployee",
                     target="Employee",
-                    label=MultiLingualText(ko="직원을 고용한다"),
+                    label="has employee",
                     cardinality="1:n"
                 )
             ]
@@ -281,12 +281,12 @@ class RelationshipSystemTester:
         
         employee = OntologyBase(
             id="Employee", 
-            label=MultiLingualText(ko="직원"),
+            label="Employee",
             relationships=[
                 Relationship(
                     predicate="worksFor",
                     target="Company",
-                    label=MultiLingualText(ko="근무한다"),
+                    label="works for",
                     cardinality="n:1"
                 )
             ]
@@ -308,12 +308,12 @@ class RelationshipSystemTester:
         # 자기 참조 테스트
         self_ref_ontology = OntologyBase(
             id="Person",
-            label=MultiLingualText(ko="사람"),
+            label="Person",
             relationships=[
                 Relationship(
                     predicate="knows",
                     target="Person",  # 자기 참조
-                    label=MultiLingualText(ko="알고 있다"),
+                    label="knows",
                     cardinality="n:n"
                 )
             ]
@@ -346,18 +346,18 @@ class RelationshipSystemTester:
         # 복잡한 관계 네트워크 생성
         company = OntologyBase(
             id="Company",
-            label=MultiLingualText(ko="회사"),
+            label="Company",
             relationships=[
                 Relationship(
                     predicate="hasEmployee",
                     target="Employee",
-                    label=MultiLingualText(ko="직원을 고용한다"),
+                    label="has employee",
                     cardinality="1:n"
                 ),
                 Relationship(
                     predicate="hasDepartment",
                     target="Department", 
-                    label=MultiLingualText(ko="부서를 가진다"),
+                    label="has department",
                     cardinality="1:n"
                 )
             ]
@@ -365,12 +365,12 @@ class RelationshipSystemTester:
         
         department = OntologyBase(
             id="Department",
-            label=MultiLingualText(ko="부서"),
+            label="Department",
             relationships=[
                 Relationship(
                     predicate="hasManager",
                     target="Employee",
-                    label=MultiLingualText(ko="매니저를 가진다"),
+                    label="has manager",
                     cardinality="1:1"
                 )
             ]
@@ -378,12 +378,12 @@ class RelationshipSystemTester:
         
         employee = OntologyBase(
             id="Employee",
-            label=MultiLingualText(ko="직원"),
+            label="Employee",
             relationships=[
                 Relationship(
                     predicate="worksFor",
                     target="Company",
-                    label=MultiLingualText(ko="근무한다"),
+                    label="works for",
                     cardinality="n:1"
                 )
             ]
@@ -436,19 +436,19 @@ class RelationshipSystemTester:
         # 1. 복잡한 온톨로지 생성
         university_ontology = OntologyBase(
             id="University",
-            label=MultiLingualText(ko="대학교", en="University"),
+            label="University",
             relationships=[
                 Relationship(
                     predicate="hasStudent",
                     target="Student",
-                    label=MultiLingualText(ko="학생을 가진다"),
+                    label="has student",
                     cardinality="1:n",
                     inverse_predicate="studiesAt"
                 ),
                 Relationship(
                     predicate="hasProfessor",
                     target="Professor",
-                    label=MultiLingualText(ko="교수를 가진다"),
+                    label="has professor",
                     cardinality="1:n",
                     inverse_predicate="teachesAt"
                 )
@@ -494,60 +494,60 @@ class RelationshipSystemTester:
         ecommerce_ontologies = [
             OntologyBase(
                 id="Customer",
-                label=MultiLingualText(ko="고객"),
+                label="Customer",
                 relationships=[
                     Relationship(
                         predicate="placesOrder",
                         target="Order",
-                        label=MultiLingualText(ko="주문한다"),
+                        label="places order",
                         cardinality="1:n"
                     ),
                     Relationship(
                         predicate="hasWishlist",
                         target="Product",
-                        label=MultiLingualText(ko="위시리스트에 추가한다"),
+                        label="has wishlist",
                         cardinality="n:n"
                     )
                 ]
             ),
             OntologyBase(
                 id="Order",
-                label=MultiLingualText(ko="주문"),
+                label="Order",
                 relationships=[
                     Relationship(
                         predicate="contains",
                         target="Product",
-                        label=MultiLingualText(ko="포함한다"),
+                        label="contains",
                         cardinality="1:n"
                     ),
                     Relationship(
                         predicate="placedBy",
                         target="Customer",
-                        label=MultiLingualText(ko="주문한 고객"),
+                        label="placed by",
                         cardinality="n:1"
                     )
                 ]
             ),
             OntologyBase(
                 id="Product",
-                label=MultiLingualText(ko="상품"),
+                label="Product",
                 relationships=[
                     Relationship(
                         predicate="belongsToCategory",
                         target="Category",
-                        label=MultiLingualText(ko="카테고리에 속한다"),
+                        label="belongs to category",
                         cardinality="n:1"
                     )
                 ]
             ),
             OntologyBase(
                 id="Category",
-                label=MultiLingualText(ko="카테고리"),
+                label="Category",
                 relationships=[
                     Relationship(
                         predicate="hasProduct",
                         target="Product",
-                        label=MultiLingualText(ko="상품을 가진다"),
+                        label="has product",
                         cardinality="1:n"
                     )
                 ]
@@ -593,12 +593,12 @@ class RelationshipSystemTester:
         for i in range(10):
             ontology = OntologyBase(
                 id=f"Entity{i}",
-                label=MultiLingualText(ko=f"엔티티{i}"),
+                label=f"Entity{i}",
                 relationships=[
                     Relationship(
                         predicate=f"relatesTo{j}",
                         target=f"Entity{j}",
-                        label=MultiLingualText(ko=f"관계{j}"),
+                        label=f"relates to {j}",
                         cardinality="n:n"
                     )
                     for j in range(i+1, min(i+3, 10))  # 복잡한 관계 네트워크

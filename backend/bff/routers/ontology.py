@@ -225,20 +225,20 @@ async def get_ontology(
             ontology_data["label"] = label or class_label
 
         # Remove extra fields that are not part of OntologyBase
-        # Ensure label and description are in MultiLingualText format
+        # Ensure label and description are simple strings
         label_value = ontology_data.get("label")
-        if isinstance(label_value, str):
-            # Convert string to MultiLingualText format
-            label_value = {lang: label_value}
-        elif not isinstance(label_value, dict):
-            label_value = {"en": str(label_value) if label_value else class_label}
+        if isinstance(label_value, dict):
+            # Extract string from dict (fallback to English if available)
+            label_value = label_value.get(lang) or label_value.get("en") or label_value.get("ko") or class_label
+        elif not isinstance(label_value, str):
+            label_value = str(label_value) if label_value else class_label
         
         desc_value = ontology_data.get("description")
-        if isinstance(desc_value, str):
-            # Convert string to MultiLingualText format
-            desc_value = {lang: desc_value}
-        elif not isinstance(desc_value, dict) and desc_value:
-            desc_value = {"en": str(desc_value)}
+        if isinstance(desc_value, dict):
+            # Extract string from dict (fallback to English if available)
+            desc_value = desc_value.get(lang) or desc_value.get("en") or desc_value.get("ko") or ""
+        elif not isinstance(desc_value, str) and desc_value:
+            desc_value = str(desc_value)
         
         ontology_base_data = {
             "id": ontology_data.get("id"),
@@ -591,16 +591,8 @@ async def validate_ontology_relationships_bff(
         # 임시 ID 생성 (검증용)
         import re
 
-        if isinstance(ontology.label, dict):
-            label = ontology.label.get("en") or ontology.label.get("ko") or "TempClass"
-        elif isinstance(ontology.label, str):
-            label = ontology.label
-        else:
-            label = (
-                getattr(ontology.label, "en", None)
-                or getattr(ontology.label, "ko", None)
-                or "TempClass"
-            )
+        # ontology.label is now a simple string
+        label = ontology.label if isinstance(ontology.label, str) else "TempClass"
 
         class_id = re.sub(r"[^\w\s]", "", label)
         class_id = "".join(word.capitalize() for word in class_id.split())
@@ -694,16 +686,8 @@ async def check_circular_references_bff(
             # 임시 ID 생성
             import re
 
-            if isinstance(ontology.label, dict):
-                label = ontology.label.get("en") or ontology.label.get("ko") or "TempClass"
-            elif isinstance(ontology.label, str):
-                label = ontology.label
-            else:
-                label = (
-                    getattr(ontology.label, "en", None)
-                    or getattr(ontology.label, "ko", None)
-                    or "TempClass"
-                )
+            # ontology.label is now a simple string
+            label = ontology.label if isinstance(ontology.label, str) else "TempClass"
 
             # 한글이 포함된 경우 처리
             if any("\u4e00" <= char <= "\u9fff" or "\uac00" <= char <= "\ud7af" for char in label):

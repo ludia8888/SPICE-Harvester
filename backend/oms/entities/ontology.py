@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from shared.models.ontology import MultiLingualText
+# Using simple strings for labels and descriptions
 
 
 @dataclass
@@ -16,10 +16,10 @@ class Property:
 
     name: str
     type: str
-    label: MultiLingualText
+    label: str
     required: bool = False
     default: Optional[Any] = None
-    description: Optional[MultiLingualText] = None
+    description: Optional[str] = None
     constraints: Dict[str, Any] = field(default_factory=dict)
 
     def validate_value(self, value: Any) -> List[str]:
@@ -59,11 +59,11 @@ class Relationship:
 
     predicate: str
     target: str
-    label: MultiLingualText
+    label: str
     cardinality: str = "1:n"
-    description: Optional[MultiLingualText] = None
+    description: Optional[str] = None
     inverse_predicate: Optional[str] = None
-    inverse_label: Optional[MultiLingualText] = None
+    inverse_label: Optional[str] = None
 
     def is_valid_cardinality(self) -> bool:
         """카디널리티 유효성 확인"""
@@ -76,8 +76,8 @@ class Ontology:
     """온톨로지 엔티티"""
 
     id: str
-    label: MultiLingualText
-    description: Optional[MultiLingualText] = None
+    label: str
+    description: Optional[str] = None
     parent_class: Optional[str] = None
     abstract: bool = False
     properties: List[Property] = field(default_factory=list)
@@ -125,7 +125,7 @@ class Ontology:
         if not self.id:
             errors.append("Ontology ID is required")
 
-        if not self.label or not self.label.has_any_value():
+        if not self.label or (isinstance(self.label, str) and not self.label.strip()):
             errors.append("Ontology label is required")
 
         # 속성 이름 중복 확인
@@ -144,18 +144,18 @@ class Ontology:
         """딕셔너리로 변환"""
         return {
             "id": self.id,
-            "label": self.label.to_dict(),
-            "description": self.description.to_dict() if self.description else None,
+            "label": self.label,
+            "description": self.description,
             "parent_class": self.parent_class,
             "abstract": self.abstract,
             "properties": [
                 {
                     "name": p.name,
                     "type": p.type,
-                    "label": p.label.to_dict(),
+                    "label": p.label,
                     "required": p.required,
                     "default": p.default,
-                    "description": p.description.to_dict() if p.description else None,
+                    "description": p.description,
                     "constraints": p.constraints,
                 }
                 for p in self.properties
@@ -164,11 +164,11 @@ class Ontology:
                 {
                     "predicate": r.predicate,
                     "target": r.target,
-                    "label": r.label.to_dict(),
+                    "label": r.label,
                     "cardinality": r.cardinality,
-                    "description": r.description.to_dict() if r.description else None,
+                    "description": r.description,
                     "inverse_predicate": r.inverse_predicate,
-                    "inverse_label": r.inverse_label.to_dict() if r.inverse_label else None,
+                    "inverse_label": r.inverse_label,
                 }
                 for r in self.relationships
             ],

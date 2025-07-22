@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from shared.models.ontology import Cardinality, MultiLingualText, Relationship
+from shared.models.ontology import Cardinality, Relationship
 
 logger = logging.getLogger(__name__)
 
@@ -186,25 +186,17 @@ class RelationshipManager:
 
     def _generate_inverse_label(
         self,
-        explicit_inverse_label: Optional[MultiLingualText],
-        forward_label: MultiLingualText,
+        explicit_inverse_label: Optional[str],
+        forward_label: str,
         predicate: str,
-    ) -> MultiLingualText:
+    ) -> str:
         """역관계 레이블 생성"""
 
         if explicit_inverse_label:
             return explicit_inverse_label
 
         # 정방향 레이블을 기반으로 역관계 레이블 생성
-        if isinstance(forward_label, str):
-            return MultiLingualText.from_string(self._invert_label_text(forward_label), "ko")
-
-        inverse_texts = {}
-        for lang, text in forward_label.dict().items():
-            if text:
-                inverse_texts[lang] = self._invert_label_text(text)
-
-        return MultiLingualText(**inverse_texts) if inverse_texts else MultiLingualText(ko="역관계")
+        return self._invert_label_text(forward_label) if forward_label else "inverse relationship"
 
     def _invert_label_text(self, text: str) -> str:
         """레이블 텍스트의 역관계 표현 생성"""
@@ -241,29 +233,15 @@ class RelationshipManager:
             return f"inverse of {text}"
 
     def _generate_inverse_description(
-        self, forward_description: Optional[MultiLingualText], source_class: str, target_class: str
-    ) -> Optional[MultiLingualText]:
+        self, forward_description: Optional[str], source_class: str, target_class: str
+    ) -> Optional[str]:
         """역관계 설명 생성"""
 
         if not forward_description:
-            return MultiLingualText(
-                ko=f"{source_class}에서 {target_class}로의 역관계",
-                en=f"Inverse relationship from {source_class} to {target_class}",
-            )
+            return f"Inverse relationship from {source_class} to {target_class}"
 
         # 정방향 설명을 기반으로 역관계 설명 생성
-        if isinstance(forward_description, str):
-            return MultiLingualText.from_string(f"Inverse of: {forward_description}", "en")
-
-        inverse_descriptions = {}
-        for lang, desc in forward_description.dict().items():
-            if desc:
-                if lang == "ko":
-                    inverse_descriptions[lang] = f"역관계: {desc}"
-                else:
-                    inverse_descriptions[lang] = f"Inverse of: {desc}"
-
-        return MultiLingualText(**inverse_descriptions) if inverse_descriptions else None
+        return f"Inverse of: {forward_description}"
 
     def _validate_and_normalize_relationship(self, relationship: Relationship) -> Relationship:
         """관계 검증 및 정규화"""

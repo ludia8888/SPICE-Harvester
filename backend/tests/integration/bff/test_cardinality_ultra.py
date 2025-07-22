@@ -10,7 +10,7 @@ import os
 
 # Import models directly to test
 from shared.models.common import Cardinality
-from shared.models.ontology import Relationship, MultiLingualText, OntologyBase
+from shared.models.ontology import Relationship, OntologyBase
 
 def test_cardinality_enum():
     """카디널리티 Enum 검증"""
@@ -43,29 +43,29 @@ def test_relationship_model():
     company_employee_rel = Relationship(
         predicate="hasEmployee",
         target="Employee", 
-        label=MultiLingualText(ko="직원을 고용한다", en="has employee"),
-        description=MultiLingualText(ko="회사가 직원을 고용하는 관계"),
+        label="has employee",
+        description="Company employs employees",
         cardinality=Cardinality.ONE_TO_MANY,
         inverse_predicate="worksFor",
-        inverse_label=MultiLingualText(ko="회사에서 근무한다", en="works for")
+        inverse_label="works for"
     )
     
     print("   📋 1:n 관계 (회사 ↔ 직원):")
     print(f"      • predicate: {company_employee_rel.predicate}")
     print(f"      • target: {company_employee_rel.target}")
-    print(f"      • label: {company_employee_rel.label.ko}")
+    print(f"      • label: {company_employee_rel.label}")
     print(f"      • cardinality: {company_employee_rel.cardinality}")
     print(f"      • inverse_predicate: {company_employee_rel.inverse_predicate}")
-    print(f"      • inverse_label: {company_employee_rel.inverse_label.ko}")
+    print(f"      • inverse_label: {company_employee_rel.inverse_label}")
     
     # 1:1 관계 예시 (사용자 -> 프로필)
     user_profile_rel = Relationship(
         predicate="hasProfile",
         target="UserProfile",
-        label=MultiLingualText(ko="프로필을 가진다", en="has profile"),
+        label="has profile",
         cardinality=Cardinality.ONE_TO_ONE,
         inverse_predicate="belongsTo",
-        inverse_label=MultiLingualText(ko="소속된다", en="belongs to")
+        inverse_label="belongs to"
     )
     
     print("\n   📋 1:1 관계 (사용자 ↔ 프로필):")
@@ -77,10 +77,10 @@ def test_relationship_model():
     student_course_rel = Relationship(
         predicate="enrollsIn",
         target="Course",
-        label=MultiLingualText(ko="수강한다", en="enrolls in"),
+        label="enrolls in",
         cardinality=Cardinality.MANY_TO_MANY,
         inverse_predicate="hasStudent",
-        inverse_label=MultiLingualText(ko="학생을 가진다", en="has student")
+        inverse_label="has student"
     )
     
     print("\n   📋 n:n 관계 (학생 ↔ 과목):")
@@ -99,43 +99,43 @@ def test_ontology_with_relationships():
     # 회사 온톨로지 (다양한 관계 포함)
     company_ontology = OntologyBase(
         id="Company",
-        label=MultiLingualText(ko="회사", en="Company"),
-        description=MultiLingualText(ko="기업 조직을 나타내는 클래스"),
+        label="Company",
+        description="Corporate organization class",
         properties=[],
         relationships=[
             # 1:n 관계 - 회사는 여러 직원을 가짐
             Relationship(
                 predicate="hasEmployee",
                 target="Employee",
-                label=MultiLingualText(ko="직원을 고용한다", en="has employee"),
+                label="has employee",
                 cardinality=Cardinality.ONE_TO_MANY,
                 inverse_predicate="worksFor",
-                inverse_label=MultiLingualText(ko="근무한다", en="works for")
+                inverse_label="works for"
             ),
             # 1:1 관계 - 회사는 하나의 CEO를 가짐
             Relationship(
                 predicate="hasCEO",
                 target="Employee",
-                label=MultiLingualText(ko="CEO를 가진다", en="has CEO"),
+                label="has CEO",
                 cardinality=Cardinality.ONE_TO_ONE,
                 inverse_predicate="isCEOOf",
-                inverse_label=MultiLingualText(ko="CEO이다", en="is CEO of")
+                inverse_label="is CEO of"
             ),
             # n:n 관계 - 회사는 여러 파트너와 협력
             Relationship(
                 predicate="partnersWithz",
                 target="Company",
-                label=MultiLingualText(ko="파트너십을 가진다", en="partners with"),
+                label="partners with",
                 cardinality=Cardinality.MANY_TO_MANY,
                 inverse_predicate="partnersWithx",
-                inverse_label=MultiLingualText(ko="상호 파트너십", en="mutual partnership")
+                inverse_label="mutual partnership"
             )
         ]
     )
     
     print("   🏢 Company 온톨로지:")
     print(f"      • ID: {company_ontology.id}")
-    print(f"      • Label: {company_ontology.label.ko}")
+    print(f"      • Label: {company_ontology.label}")
     print(f"      • 관계 수: {len(company_ontology.relationships)}")
     
     for i, rel in enumerate(company_ontology.relationships, 1):

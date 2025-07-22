@@ -21,27 +21,7 @@ class Cardinality(Enum):
     MANY = "many"
 
 
-class MultiLingualText(BaseModel):
-    """Multi-language text support"""
-
-    ko: Optional[str] = None
-    en: Optional[str] = None
-
-    def has_any_value(self) -> bool:
-        """Check if has any language value"""
-        return bool(self.ko or self.en)
-
-    def get_value(self, language: str = "en") -> Optional[str]:
-        """Get value for specific language"""
-        if language == "ko":
-            return self.ko or self.en
-        elif language == "en":
-            return self.en or self.ko
-        return self.en or self.ko
-
-    def to_dict(self) -> Dict[str, Optional[str]]:
-        """Convert to dictionary"""
-        return {"ko": self.ko, "en": self.en}
+# MultiLingualText removed - using simple strings for better stability
 
 
 class QueryOperator(BaseModel):
@@ -61,8 +41,8 @@ class OntologyBase(BaseModel):
     """Base ontology model"""
 
     id: str = Field(..., description="Ontology identifier")
-    label: MultiLingualText = Field(..., description="Multi-language label")
-    description: Optional[MultiLingualText] = Field(None, description="Multi-language description")
+    label: str = Field(..., description="English label")
+    description: Optional[str] = Field(None, description="English description")
     created_at: Optional[datetime] = Field(None, description="Creation timestamp")
     updated_at: Optional[datetime] = Field(None, description="Last update timestamp")
 
@@ -76,10 +56,10 @@ class OntologyBase(BaseModel):
 
     @field_validator("label")
     @classmethod
-    def validate_label(cls, v) -> 'MultiLingualText':
-        """Validate label has at least one language"""
-        if not v.has_any_value():
-            raise ValueError("Label must have at least one language value")
+    def validate_label(cls, v) -> str:
+        """Validate label is not empty"""
+        if not v or not isinstance(v, str):
+            raise ValueError("Label must be a non-empty string")
         return v
 
     @model_validator(mode="before")
@@ -100,13 +80,11 @@ class Relationship(BaseModel):
 
     predicate: str = Field(..., description="Relationship predicate")
     target: str = Field(..., description="Target class")
-    label: MultiLingualText = Field(..., description="Multi-language label")
+    label: str = Field(..., description="English label")
     cardinality: str = Field(default="1:n", description="Relationship cardinality")
-    description: Optional[MultiLingualText] = Field(None, description="Multi-language description")
+    description: Optional[str] = Field(None, description="English description")
     inverse_predicate: Optional[str] = Field(None, description="Inverse relationship predicate")
-    inverse_label: Optional[MultiLingualText] = Field(
-        None, description="Inverse relationship label"
-    )
+    inverse_label: Optional[str] = Field(None, description="Inverse relationship label")
 
     @field_validator("cardinality")
     @classmethod
@@ -124,15 +102,23 @@ class Relationship(BaseModel):
 
 
 class Property(BaseModel):
-    """Property model"""
+    """Property model with class reference support"""
 
     name: str = Field(..., description="Property name")
-    type: str = Field(..., description="Property data type")
-    label: MultiLingualText = Field(..., description="Multi-language label")
+    type: str = Field(..., description="Property data type or class reference")
+    label: str = Field(..., description="English label")
     required: bool = Field(default=False, description="Whether property is required")
     default: Optional[Any] = Field(None, description="Default value")
-    description: Optional[MultiLingualText] = Field(None, description="Multi-language description")
+    description: Optional[str] = Field(None, description="English description")
     constraints: Dict[str, Any] = Field(default_factory=dict, description="Property constraints")
+    
+    # 🔥 THINK ULTRA! Class reference support for ObjectProperty conversion
+    linkTarget: Optional[str] = Field(None, description="Target class for object reference (when type is a class)")
+    isRelationship: Optional[bool] = Field(None, description="Whether this property represents a relationship")
+    cardinality: Optional[str] = Field(None, description="Relationship cardinality (1:1, 1:n, n:1, n:m)")
+    
+    # 🔥 THINK ULTRA! Array relationship support
+    items: Optional[Dict[str, Any]] = Field(None, description="Array items definition for array type relationships")
 
     @field_validator("name")
     @classmethod
@@ -177,14 +163,78 @@ class Property(BaseModel):
                     errors.append(f"Property '{self.name}' does not match pattern")
 
         return errors
+    
+    def is_class_reference(self) -> bool:
+        """Check if this property is a class reference (ObjectProperty)"""
+        # 🔥 THINK ULTRA! type="link" 명시적 지원
+        if self.type == "link":
+            return True
+            
+        # 🔥 THINK ULTRA! Array relationship 지원
+        if self.type == "array" and self.items:
+            items_type = self.items.get("type")
+            if items_type == "link" and self.items.get("linkTarget"):
+                return True
+            
+        # 명시적으로 linkTarget이 설정되었거나 isRelationship가 True인 경우
+        if self.linkTarget or self.isRelationship:
+            return True
+        
+        # 🔥 ULTRA! Handle parameterized types like list<string>, set<integer>, etc.
+        type_lower = self.type.lower()
+        if type_lower.startswith(("list<", "set<", "array<", "optional<")) and type_lower.endswith(">"):
+            # These are parameterized basic types, not class references
+            return False
+            
+        # type이 기본 데이터 타입이 아닌 경우 (클래스명일 가능성)
+        basic_types = {
+            "STRING", "INTEGER", "DECIMAL", "BOOLEAN", "DATE", "DATETIME", "TIME", "FLOAT", "DOUBLE", "LONG", "TEXT",
+            "ARRAY", "OBJECT", "ENUM", "EMAIL", "PHONE", "URL", "MONEY", "IP", "UUID",
+            "COORDINATE", "ADDRESS", "NAME", "IMAGE", "FILE", "LINK", "SET", "LIST"  # LINK 추가
+        }
+        
+        # xsd: 프리픽스가 있는 경우는 기본 타입
+        if self.type.startswith("xsd:"):
+            return False
+            
+        # 대문자로 변환하여 기본 타입 목록과 비교
+        return self.type.upper() not in basic_types
+    
+    def to_relationship(self) -> Dict[str, Any]:
+        """Convert property to relationship format"""
+        # 🔥 THINK ULTRA! type="link"일 때 linkTarget 필수 사용
+        if self.type == "link":
+            if not self.linkTarget:
+                raise ValueError(f"Property '{self.name}' with type='link' must have linkTarget")
+            target = self.linkTarget
+            cardinality = self.cardinality or "n:1"  # link는 보통 n:1
+        # 🔥 THINK ULTRA! Array relationship 지원
+        elif self.type == "array" and self.items:
+            items_type = self.items.get("type")
+            if items_type == "link" and self.items.get("linkTarget"):
+                target = self.items["linkTarget"]
+                cardinality = self.cardinality or "1:n"  # array는 보통 1:n
+            else:
+                raise ValueError(f"Property '{self.name}' with type='array' must have items.type='link' and items.linkTarget")
+        else:
+            target = self.linkTarget or self.type
+            cardinality = self.cardinality or "1:n"
+            
+        return {
+            "predicate": self.name,
+            "target": target,
+            "label": self.label,
+            "cardinality": cardinality,
+            "description": self.description
+        }
 
 
 class OntologyCreateRequest(BaseModel):
     """Request model for creating ontology"""
 
     id: Optional[str] = Field(None, description="Ontology identifier (auto-generated if not provided)")
-    label: MultiLingualText = Field(..., description="Multi-language label")
-    description: Optional[MultiLingualText] = Field(None, description="Multi-language description")
+    label: str = Field(..., description="English label")
+    description: Optional[str] = Field(None, description="English description")
     parent_class: Optional[str] = Field(None, description="Parent class identifier")
     abstract: bool = Field(default=False, description="Whether class is abstract")
     properties: List[Property] = Field(default_factory=list, description="Class properties")
@@ -203,10 +253,10 @@ class OntologyCreateRequest(BaseModel):
 
     @field_validator("label")
     @classmethod
-    def validate_label(cls, v) -> 'MultiLingualText':
-        """Validate label has at least one language"""
-        if not v.has_any_value():
-            raise ValueError("Label must have at least one language value")
+    def validate_label(cls, v) -> str:
+        """Validate label is not empty"""
+        if not v or not isinstance(v, str):
+            raise ValueError("Label must be a non-empty string")
         return v
 
     @field_validator("properties")
@@ -233,8 +283,8 @@ class OntologyCreateRequest(BaseModel):
 class OntologyUpdateRequest(BaseModel):
     """Request model for updating ontology"""
 
-    label: Optional[MultiLingualText] = Field(None, description="Multi-language label")
-    description: Optional[MultiLingualText] = Field(None, description="Multi-language description")
+    label: Optional[str] = Field(None, description="English label")
+    description: Optional[str] = Field(None, description="English description")
     parent_class: Optional[str] = Field(None, description="Parent class identifier")
     abstract: Optional[bool] = Field(None, description="Whether class is abstract")
     properties: Optional[List[Property]] = Field(None, description="Class properties")

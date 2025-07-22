@@ -21,9 +21,16 @@
 
 ```
 backend/
+├── oms/
+│   ├── services/
+│   │   └── property_to_relationship_converter.py  # Property→Relationship 변환
+│   └── utils/
+│       ├── constraint_extractor.py              # 제약조건 추출
+│       └── terminus_schema_types.py             # TerminusDB v11.x 타입
 ├── shared/
 │   ├── models/
-│   │   └── common.py                    # DataType enum with complex types
+│   │   ├── common.py                    # DataType enum with complex types
+│   │   └── ontology.py                  # Property.is_class_reference() 메서드
 │   ├── validators/
 │   │   └── complex_type_validator.py    # 복합 타입 검증 로직
 │   └── serializers/
@@ -215,7 +222,28 @@ pip install phonenumbers email-validator --break-system-packages
 3. UI 컴포넌트에서 복합 타입 입력 지원
 4. 복합 타입 데이터 쿼리 및 필터링
 
-## 최근 개선 사항 (2025-07-20)
+## 최근 개선 사항 (2025-07-22)
+
+### 새로운 기능 추가
+1. **Property-to-Relationship 자동 변환**:
+   - 클래스 내부에서 정의한 속성이 다른 클래스를 참조하면 자동으로 관계로 변환
+   - `type="link"` 및 `linkTarget` 지원
+   - Array relationship 지원
+
+2. **고급 제약조건 시스템**:
+   - 값 범위 제약조건: min_value, max_value
+   - 문자열 제약조건: min_length, max_length, pattern, format
+   - 배열/커렉션 제약조건: min_items, max_items, unique_items
+   - 관계 제약조건: min_cardinality, max_cardinality
+   - 기본값 지원: static, computed, timestamp, uuid, sequence, reference
+
+3. **TerminusDB v11.x 스키마 타입 완전 지원**:
+   - OneOfType (Union 타입)
+   - Foreign 키
+   - GeoPoint, GeoTemporalPoint, CoordinatePoint
+   - Enum 타입
+   - Set, List, Array with dimensions
+   - Optional 타입
 
 ### 코드 수정
 1. **test_config.py**: ServiceConfig를 사용하여 포트 설정 자동화

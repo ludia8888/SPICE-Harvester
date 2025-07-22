@@ -16,7 +16,6 @@ __all__ = [
     # config models
     "ServiceConfig",
     # ontology models
-    "MultiLingualText",
     "QueryFilter",
     "QueryInput",
     "QueryOperator",

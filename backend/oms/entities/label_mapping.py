@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from shared.models.ontology import MultiLingualText
+# Using simple strings for labels
 
 
 @dataclass

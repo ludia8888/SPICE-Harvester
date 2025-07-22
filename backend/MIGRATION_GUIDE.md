@@ -3,8 +3,9 @@
 ## 개요
 SPICE HARVESTER 프로젝트는 간결하고 직관적인 구조로 구성되어 있습니다.
 
-> **📌 최종 업데이트: 2025-07-20**  
-> 현재 프로젝트는 플랫 구조로 구성되어 있으며, 모든 sys.path.insert 구문이 제거되었습니다.
+> **📌 최종 업데이트: 2025-07-22**  
+> 현재 프로젝트는 플랫 구조로 구성되어 있으며, 모든 sys.path.insert 구문이 제거되었습니다.  
+> 새로운 기능: Property-to-Relationship 자동 변환, 고급 제약조건 시스템, TerminusDB v11.x 완전 지원
 
 ## 변경 사항
 
@@ -170,8 +171,51 @@ COPY . .
    - 명확한 의존성 관계
    - 표준 Python 패키지 구조
 
-### 9. 참고 자료
+### 9. 최신 기능 추가 (2025-07-22)
+
+#### Property-to-Relationship 자동 변환
+```python
+# OMS에서 자동으로 property를 relationship으로 변환
+from oms.services.property_to_relationship_converter import PropertyToRelationshipConverter
+
+# 클래스 정의에서 type="link" 사용
+{
+    "properties": [{
+        "name": "author",
+        "type": "link",
+        "linkTarget": "Person"  # 자동으로 Person 클래스와의 관계로 변환
+    }]
+}
+```
+
+#### 고급 제약조건 시스템
+```python
+# 제약조건 추출 및 검증
+from oms.utils.constraint_extractor import ConstraintExtractor
+
+constraints = {
+    "min": 0,
+    "max": 100,
+    "pattern": "^[A-Z][a-z]+$",
+    "min_length": 2,
+    "max_length": 50
+}
+```
+
+#### TerminusDB v11.x 스키마 타입
+```python
+# 새로운 스키마 타입 지원
+from oms.utils.terminus_schema_types import TerminusSchemaBuilder
+
+builder = TerminusSchemaBuilder()
+builder.add_enum_property("status", ["draft", "published"])
+builder.add_geopoint_property("location")
+builder.add_one_of_type("value", ["xsd:string", "xsd:integer"])
+```
+
+### 10. 참고 자료
 
 - [Python Packaging User Guide](https://packaging.python.org/)
 - [setuptools Documentation](https://setuptools.pypa.io/)
 - [PEP 517 -- A build-system independent format for source trees](https://www.python.org/dev/peps/pep-0517/)
+- [TerminusDB v11.x Documentation](https://terminusdb.com/docs/)

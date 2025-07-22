@@ -1,7 +1,7 @@
 # SPICE HARVESTER - 현재 아키텍처 상태
 
-> **최종 업데이트**: 2025-07-20  
-> **버전**: 2.0
+> **최종 업데이트**: 2025-07-22  
+> **버전**: 2.1
 
 ## 📁 프로젝트 구조
 
@@ -134,6 +134,9 @@ docker-compose logs -f [service-name]
 - TerminusDB와 직접 통신
 - 복합 타입 검증 및 직렬화
 - 관계 관리 및 순환 참조 감지
+- Property-to-Relationship 자동 변환
+- 고급 제약조건 추출 및 검증
+- TerminusDB v11.x 모든 스키마 타입 지원
 
 ### BFF (Backend for Frontend)
 - **사용자 친화적 레이블** 기반 API

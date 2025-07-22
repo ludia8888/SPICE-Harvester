@@ -17,6 +17,9 @@ SPICE HARVESTER는 다음과 같은 기능을 제공하는 정교한 온톨로�
 - **다국어 지원**: 라벨과 설명에서 여러 언어를 완벽하게 지원
 - **복잡한 데이터 타입**: ARRAY, OBJECT, ENUM, MONEY 등 10개 이상의 복잡한 데이터 타입
 - **관계 관리**: 순환 참조 감지 기능을 갖춘 고급 양방향 관계 처리
+- **Property-to-Relationship 자동 변환**: 클래스 내부 속성을 관계로 자동 변환
+- **고급 제약조건 시스템**: 상세한 제약조건 추출 및 검증 (min/max, pattern, cardinality 등)
+- **TerminusDB v11.x 완전 지원**: OneOfType, Foreign, GeoPoint 등 모든 스키마 타입 지원
 - **프로덕션 준비 완료**: 종합적인 테스트, 보안 기능, 성능 최적화
 
 ## 🏗️ 아키텍처
@@ -27,6 +30,9 @@ SPICE HARVESTER는 다음과 같은 기능을 제공하는 정교한 온톨로�
 - TerminusDB와의 직접 인터페이스
 - 모든 데이터베이스 작업 처리
 - 온톨로지 스키마 및 인스턴스 관리
+- Property-to-Relationship 자동 변환 기능
+- 고급 제약조건 추출 및 검증
+- TerminusDB v11.x 복잡한 스키마 타입 완전 지원
 - Port: 8000
 
 ### 2. 프론트엔드를 위한 백엔드 (BFF)
@@ -70,6 +76,9 @@ docker run -d -p 6363:6363 terminusdb/terminusdb:10.1.8
 cd backend/oms && python main.py
 cd backend/bff && python main.py
 cd backend/funnel && python main.py
+
+# 또는 모든 서비스 한번에 시작
+cd backend && python start_services.py
 ```
 
 ## 📚 문서

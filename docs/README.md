@@ -75,7 +75,7 @@ SPICE HARVESTER 프로젝트 문서에 오신 것을 환영합니다. 이 디렉
 3. 기존 형식 표준 따르기
 4. 생성 및 최종 업데이트 날짜 포함
 
-## 🌟 주요 변경사항 (2025-07-20)
+## 🌟 주요 변경사항 (2025-07-22)
 
 ### 현재 구조
 - **플랫 구조**: `backend/bff/`, `backend/oms/`, `backend/funnel/`, `backend/shared/`
@@ -103,6 +103,9 @@ SPICE HARVESTER 프로젝트 문서에 오신 것을 환영합니다. 이 디렉
 - **복합 타입**: EMAIL, PHONE, URL, MONEY 등 10가지 타입 지원
 - **HTTPS/CORS**: 자동 CORS 설정, HTTPS 지원
 - **포트 관리**: 환경변수 기반 중앙화된 포트 설정
+- **Property-to-Relationship 자동 변환**: 클래스 속성을 관계로 자동 변환
+- **고급 제약조건 시스템**: 상세한 제약조건 추출 및 검증
+- **TerminusDB v11.x 완전 지원**: OneOfType, Foreign, GeoPoint 등 모든 타입
 
 ---
-*최종 업데이트: 2025-07-20*
+*최종 업데이트: 2025-07-22*

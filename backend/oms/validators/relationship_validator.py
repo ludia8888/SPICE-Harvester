@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from shared.models.ontology import Cardinality, MultiLingualText, OntologyBase, Relationship
+from shared.models.ontology import Cardinality, OntologyBase, Relationship
 
 logger = logging.getLogger(__name__)
 
@@ -365,18 +365,16 @@ class RelationshipValidator:
         results = []
 
         if relationship.label:
-            # 다국어 레이블 검증
-            if isinstance(relationship.label, MultiLingualText):
-                label_dict = relationship.label.dict()
-                if not any(label_dict.values()):
-                    results.append(
-                        ValidationResult(
-                            severity=ValidationSeverity.WARNING,
-                            code="EMPTY_MULTILINGUAL_LABEL",
-                            message="All language labels are empty",
-                            field="label",
-                        )
+            # 레이블 검증 - 이제 단순 문자열
+            if isinstance(relationship.label, str) and not relationship.label.strip():
+                results.append(
+                    ValidationResult(
+                        severity=ValidationSeverity.WARNING,
+                        code="EMPTY_LABEL",
+                        message="Label is empty",
+                        field="label",
                     )
+                )
 
         return results
 

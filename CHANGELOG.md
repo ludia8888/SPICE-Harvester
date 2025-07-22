@@ -2,6 +2,33 @@
 
 이 문서는 SPICE HARVESTER 프로젝트의 주요 구조적 변경사항을 추적합니다.
 
+## [2.1.0] - 2025-07-22
+
+### 추가
+- **Property-to-Relationship 자동 변환**: 클래스 속성이 다른 클래스를 참조할 때 자동으로 관계로 변환
+- **고급 제약조건 시스템**: 
+  - 값 범위 (min/max), 문자열 길이, 패턴, 형식 제약조건
+  - 배열/컬렉션 제약조건 (min_items, max_items, unique_items)
+  - 관계 카디널리티 제약조건
+  - 기본값 지원 (static, computed, timestamp, uuid, sequence, reference)
+- **TerminusDB v11.x 완전 지원**:
+  - OneOfType (Union 타입)
+  - Foreign 키
+  - GeoPoint, GeoTemporalPoint
+  - Enum 타입
+  - Set, List, Array (dimensions 지원)
+  - Optional 타입
+
+### 변경사항
+- `sys:JSON` 타입을 `xsd:string`으로 변경 (TerminusDB v11.x 호환성)
+- Property 모델에 `is_class_reference()` 메서드 추가
+- `type="link"` 지원으로 명시적인 클래스 참조
+
+### 추가된 파일
+- `backend/oms/services/property_to_relationship_converter.py`
+- `backend/oms/utils/constraint_extractor.py`
+- `backend/oms/utils/terminus_schema_types.py`
+
 ## [2.0.0] - 2025-07-20
 
 ### 변경사항

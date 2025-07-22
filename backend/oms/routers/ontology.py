@@ -16,7 +16,6 @@ from shared.models.common import BaseResponse
 
 # shared 모델 import
 from shared.models.ontology import (
-    MultiLingualText,
     OntologyBase,
     OntologyCreateRequest,
     OntologyResponse,
@@ -114,25 +113,24 @@ async def create_ontology(
                 logger.warning(f"Failed to register labels for {class_id}: {e}")
                 # 레이블 등록 실패는 온톨로지 생성을 실패시키지 않음
 
-        # 레이블을 MultiLingualText로 변환
+        # 레이블을 간단한 문자열로 처리
         label_data = ontology_data.get(
             "label", ontology_data.get("rdfs:label", ontology_data.get("id"))
         )
         if isinstance(label_data, dict):
-            label = MultiLingualText(**label_data)
-        elif isinstance(label_data, str):
-            label = MultiLingualText(en=label_data)
+            # 딕셔너리에서 적절한 언어의 문자열 추출
+            label = label_data.get("en") or label_data.get("ko") or list(label_data.values())[0] if label_data else ontology_data.get("id", "Unknown")
         else:
-            label = MultiLingualText(en=ontology_data.get("id", "Unknown"))
+            label = str(label_data) if label_data else ontology_data.get("id", "Unknown")
 
-        # 설명을 MultiLingualText로 변환
+        # 설명을 간단한 문자열로 처리
         description_data = ontology_data.get("description", ontology_data.get("rdfs:comment"))
         description = None
         if description_data:
             if isinstance(description_data, dict):
-                description = MultiLingualText(**description_data)
-            elif isinstance(description_data, str):
-                description = MultiLingualText(en=description_data)
+                description = description_data.get("en") or description_data.get("ko") or list(description_data.values())[0] if description_data else None
+            else:
+                description = str(description_data)
 
         # 생성된 온톨로지 데이터를 OntologyResponse 형식으로 직접 변환
         return OntologyResponse(
@@ -573,23 +571,21 @@ async def create_ontology_with_advanced_relationships(
             except Exception as e:
                 logger.warning(f"Failed to register labels for {class_id}: {e}")
 
-        # 레이블을 MultiLingualText로 변환
+        # 레이블을 간단한 문자열로 처리
         label_data = ontology_data.get("label", class_id)
         if isinstance(label_data, dict):
-            label = MultiLingualText(**label_data)
-        elif isinstance(label_data, str):
-            label = MultiLingualText(en=label_data)
+            label = label_data.get("en") or label_data.get("ko") or list(label_data.values())[0] if label_data else class_id or "Unknown"
         else:
-            label = MultiLingualText(en=class_id or "Unknown")
+            label = str(label_data) if label_data else class_id or "Unknown"
 
-        # 설명을 MultiLingualText로 변환
+        # 설명을 간단한 문자열로 처리
         description_data = ontology_data.get("description")
         description = None
         if description_data:
             if isinstance(description_data, dict):
-                description = MultiLingualText(**description_data)
-            elif isinstance(description_data, str):
-                description = MultiLingualText(en=description_data)
+                description = description_data.get("en") or description_data.get("ko") or list(description_data.values())[0] if description_data else None
+            else:
+                description = str(description_data)
 
         # OntologyResponse 를 직접 생성
         return OntologyResponse(

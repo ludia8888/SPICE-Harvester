@@ -2,6 +2,9 @@
 
 This document describes the database management endpoints provided by the Ontology Management Service (OMS).
 
+**Last Updated**: 2025-07-22
+**TerminusDB Version**: v11.x
+
 ## Base URL
 
 ```
@@ -192,6 +195,24 @@ environment:
   - TERMINUS_ACCOUNT=${TERMINUS_ACCOUNT:-admin}
   - TERMINUS_KEY=${TERMINUS_KEY:-${TERMINUSDB_ADMIN_PASS:-admin123}}
 ```
+
+## Schema Management Features (v11.x)
+
+### New Features:
+1. **Property-to-Relationship Conversion**: Automatically converts class properties to relationships when they reference other classes
+2. **Advanced Constraint System**: Supports detailed constraints including min/max values, patterns, cardinality
+3. **Complex Schema Types**: Full support for TerminusDB v11.x types including:
+   - OneOfType (Union types)
+   - Foreign keys
+   - GeoPoint, GeoTemporalPoint
+   - Enum types
+   - Set, List, Array with dimensions
+   - Optional types
+
+### Schema Type Changes:
+- `sys:JSON` is now replaced with `xsd:string` for metadata fields
+- Complex types are fully validated before storage
+- Automatic constraint extraction from schema definitions
 
 ## Usage Examples
 

@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import aiosqlite
 
 # shared 모델 import
-from shared.models.ontology import MultiLingualText, QueryFilter, QueryInput
+from shared.models.ontology import QueryFilter, QueryInput
 
 logger = logging.getLogger(__name__)
 
