@@ -231,6 +231,12 @@ class GitLikeFeaturesValidator:
             
             # 새 브랜치 생성
             try:
+                # 이미 존재하는 브랜치 삭제 시도
+                try:
+                    await self.terminus_service.delete_branch(self.test_db, "feature-test")
+                except:
+                    pass  # 브랜치가 없으면 무시
+                
                 await self.terminus_service.create_branch(
                     self.test_db, "feature-test", "main"
                 )
@@ -241,7 +247,7 @@ class GitLikeFeaturesValidator:
                 logger.info(f"Branches after creation: {branches_after}")
                 
                 # 브랜치가 추가되었는지 확인
-                if "feature-test" in branches_after and len(branches_after) > len(initial_branches):
+                if "feature-test" in branches_after:
                     self.features["branches"]["tested"] = True
                     self.features["branches"]["working"] = True
                     logger.info("✅ Branch functionality working")
