@@ -291,6 +291,64 @@ test: add integration tests for relationship paths
 chore: update dependencies to latest versions
 ```
 
+### 4. Using Git-like Features in TerminusDB
+
+SPICE HARVESTER leverages TerminusDB's version control capabilities (85.7% Git feature coverage):
+
+#### Implicit Commits
+In TerminusDB v11.x, commits are created implicitly when modifying documents:
+
+```python
+# Traditional approach (doesn't work in v11.x)
+# await terminus_service.commit(db_name, "message")
+
+# Implicit commit approach (working)
+endpoint = f"/api/document/{account}/{database}"
+params = {
+    "message": "Your commit message",
+    "author": "username"
+}
+await terminus_service._make_request("POST", endpoint, documents, params)
+```
+
+#### Branch Management
+
+```python
+# List branches
+branches = await terminus_service.list_branches(db_name)
+
+# Create a new branch
+await terminus_service.create_branch(db_name, "feature-branch", "main")
+
+# Delete a branch
+await terminus_service.delete_branch(db_name, "feature-branch")
+```
+
+#### Rollback with Git-style References
+
+```python
+# Rollback to previous commit
+await terminus_service.rollback(db_name, "HEAD~1")
+
+# Supported references:
+# - HEAD: Latest commit
+# - HEAD~1: Previous commit
+# - HEAD~n: n commits back
+# - Specific commit ID
+
+# Note: Rollback creates a new branch at the target commit
+```
+
+#### Working with Commit History
+
+```python
+# Get commit history
+history = await terminus_service.get_commit_history(db_name, limit=10)
+
+# Get diff between commits
+diff = await terminus_service.diff(db_name, "main", "feature-branch")
+```
+
 ## Testing Guidelines
 
 ### 1. Test Structure

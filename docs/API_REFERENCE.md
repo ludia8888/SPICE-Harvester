@@ -405,6 +405,94 @@ POST /branch/{db_name}/checkout
 }
 ```
 
+### Version Control (Git-like Features)
+
+#### Create Commit
+```http
+POST /databases/{db_name}/commit
+```
+
+**Request Body:**
+```json
+{
+  "message": "Commit message",
+  "author": "username"
+}
+```
+
+**Note:** In TerminusDB v11.x, commits are created implicitly when making document changes with commit parameters:
+```http
+POST /api/document/{account}/{database}?message=commit_message&author=username
+```
+
+#### Get Commit History
+```http
+GET /databases/{db_name}/commits
+```
+
+**Query Parameters:**
+- `limit`: Number of commits to retrieve (default: 10)
+- `offset`: Number of commits to skip
+- `branch`: Specific branch (optional)
+
+**Response:**
+```json
+{
+  "commits": [
+    {
+      "id": "commit_hash",
+      "message": "Commit message",
+      "author": "username",
+      "timestamp": "2025-07-23T10:30:00Z",
+      "branch": "main"
+    }
+  ],
+  "total": 100
+}
+```
+
+#### Rollback to Previous Commit
+```http
+POST /databases/{db_name}/rollback
+```
+
+**Request Body:**
+```json
+{
+  "target": "HEAD~1"
+}
+```
+
+**Supported Git-style References:**
+- `HEAD`: Latest commit
+- `HEAD~1`: Previous commit
+- `HEAD~n`: n commits back
+- Specific commit ID
+
+**Note:** TerminusDB v11.x implements rollback by creating a new branch at the target commit.
+
+#### Get Diff Between Commits
+```http
+GET /databases/{db_name}/diff
+```
+
+**Query Parameters:**
+- `from`: Starting commit or branch
+- `to`: Target commit or branch
+
+**Response:**
+```json
+{
+  "changes": [
+    {
+      "type": "added|modified|deleted",
+      "class": "ClassName",
+      "changes": {...}
+    }
+  ]
+}
+```
+
 ## Funnel API Endpoints
 
 ### Data Analysis

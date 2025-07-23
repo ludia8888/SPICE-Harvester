@@ -108,7 +108,13 @@ SPICE HARVESTER is an enterprise-grade ontology management platform built on a m
 **Key Features**:
 - Document-graph hybrid storage
 - ACID transactions
-- Version control for data
+- Git-like version control for data (85.7% feature coverage)
+  - Implicit commit creation with document operations
+  - Branch management (create, list, delete)
+  - Commit history tracking
+  - Git-style reference support (HEAD, HEAD~n)
+  - Rollback via branch creation
+  - Diff between commits/branches
 - WOQL query language
 - JSON-LD schema support
 

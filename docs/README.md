@@ -77,6 +77,13 @@ docs/
 - **Multi-language Support** - Internationalization for global deployments
 - **Security Features** - Input sanitization, authentication, audit logging
 - **TerminusDB v11.x Integration** - Full schema type support
+- **Git-like Version Control** - 85.7% Git feature coverage
+  - Implicit commit creation with data operations
+  - Branch management (create, list, delete)
+  - Commit history tracking
+  - Git-style references (HEAD, HEAD~n)
+  - Rollback via branch creation
+  - Diff between commits/branches
 
 ### Service Configuration
 - **Port Assignments**:

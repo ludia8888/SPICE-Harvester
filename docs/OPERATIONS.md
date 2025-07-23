@@ -461,6 +461,81 @@ docker-compose up -d
 echo "Recovery completed from backup: $BACKUP_TIMESTAMP"
 ```
 
+### Version Control Operations
+
+SPICE HARVESTER utilizes TerminusDB's Git-like version control features for data management and recovery.
+
+#### Using Git-like Features for Data Recovery
+
+```bash
+# List available branches
+curl -X GET http://localhost:8002/api/v1/branch/production/list \
+  -H "X-API-Key: $API_KEY"
+
+# Create a backup branch before risky operations
+curl -X POST http://localhost:8002/api/v1/branch/production/create \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "branch_name": "backup-$(date +%Y%m%d)",
+    "from_branch": "main",
+    "description": "Backup before major update"
+  }'
+
+# Rollback to previous commit using Git-style references
+curl -X POST http://localhost:8002/api/v1/databases/production/rollback \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"target": "HEAD~1"}'
+```
+
+#### Monitoring Version Control Status
+
+```python
+# scripts/check_version_status.py
+import asyncio
+from oms.services.async_terminus import AsyncTerminusService
+from shared.models.config import ConnectionConfig
+
+async def check_version_status(db_name):
+    config = ConnectionConfig(
+        server_url="http://localhost:6363",
+        user="admin",
+        account="admin",
+        key="admin123"
+    )
+    
+    service = AsyncTerminusService(config)
+    await service.connect()
+    
+    # Get current branch
+    current_branch = await service.get_current_branch(db_name)
+    print(f"Current branch: {current_branch}")
+    
+    # Get recent commits
+    history = await service.get_commit_history(db_name, limit=5)
+    print(f"Recent commits: {len(history)}")
+    
+    for commit in history:
+        print(f"  - {commit['id'][:8]}: {commit['message']} by {commit['author']}")
+    
+    # List all branches
+    branches = await service.list_branches(db_name)
+    print(f"Available branches: {branches}")
+    
+    await service.disconnect()
+
+# Run status check
+asyncio.run(check_version_status("production"))
+```
+
+#### Best Practices for Version Control
+
+1. **Regular Commits**: Enable implicit commits for all data modifications
+2. **Branch Strategy**: Create branches for major updates or experiments
+3. **Rollback Planning**: Test rollback procedures in non-production environments
+4. **Commit Messages**: Use descriptive commit messages for better tracking
+
 ## Performance Tuning
 
 ### Python Application Tuning
