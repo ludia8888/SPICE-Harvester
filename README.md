@@ -1,152 +1,283 @@
-# 🌶️ SPICE HARVESTER
+# SPICE HARVESTER
 
-다국어 지원, 복잡한 데이터 타입, 관계 관리 기능을 갖춘 종합적인 온톨로지 관리 시스템입니다.
+An enterprise-grade ontology management platform with comprehensive multi-language support, complex data types, and advanced relationship management capabilities.
 
-## 📋 목차
-- [개요](#개요)
-- [아키텍처](#아키텍처)
-- [시작하기](#시작하기)
-- [문서](#문서)
-- [테스트](#테스트)
-- [배포](#배포)
-- [기여하기](#기여하기)
+## Table of Contents
 
-## 🎯 개요
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Quick Start](#quick-start)
+- [Documentation](#documentation)
+- [Features](#features)
+- [Technology Stack](#technology-stack)
+- [Testing](#testing)
+- [Deployment](#deployment)
+- [Contributing](#contributing)
+- [License](#license)
 
-SPICE HARVESTER는 다음과 같은 기능을 제공하는 정교한 온톨로지 관리 플랫폼입니다:
-- **다국어 지원**: 라벨과 설명에서 여러 언어를 완벽하게 지원
-- **복잡한 데이터 타입**: ARRAY, OBJECT, ENUM, MONEY 등 10개 이상의 복잡한 데이터 타입
-- **관계 관리**: 순환 참조 감지 기능을 갖춘 고급 양방향 관계 처리
-- **Property-to-Relationship 자동 변환**: 클래스 내부 속성을 관계로 자동 변환
-- **고급 제약조건 시스템**: 상세한 제약조건 추출 및 검증 (min/max, pattern, cardinality 등)
-- **TerminusDB v11.x 완전 지원**: OneOfType, Foreign, GeoPoint 등 모든 스키마 타입 지원
-- **프로덕션 준비 완료**: 종합적인 테스트, 보안 기능, 성능 최적화
+## Overview
 
-## 🏗️ 아키텍처
+SPICE HARVESTER is a sophisticated ontology management platform designed for enterprise environments. It provides a complete solution for managing complex data schemas, relationships, and multi-language content with a focus on security, scalability, and developer experience.
 
-시스템은 네 가지 주요 구성 요소로 이루어져 있습니다:
+### Key Capabilities
 
-### 1. 온톨로지 관리 서비스 (OMS)
-- TerminusDB와의 직접 인터페이스
-- 모든 데이터베이스 작업 처리
-- 온톨로지 스키마 및 인스턴스 관리
-- Property-to-Relationship 자동 변환 기능
-- 고급 제약조건 추출 및 검증
-- TerminusDB v11.x 복잡한 스키마 타입 완전 지원
-- Port: 8000
+- **Enterprise Ontology Management**: Complete lifecycle management with version control
+- **Multi-language Support**: Comprehensive internationalization for global deployments
+- **Complex Type System**: Support for 10+ data types including MONEY, EMAIL, PHONE, and custom objects
+- **Advanced Relationship Management**: Bidirectional relationships with circular reference detection
+- **Automatic Type Conversion**: Property-to-Relationship automatic transformation
+- **Type Inference**: Automatic schema generation from external data sources
+- **Security-First Design**: Input sanitization, authentication, and comprehensive audit logging
+- **TerminusDB v11.x Integration**: Full support for all schema types and features
 
-### 2. 프론트엔드를 위한 백엔드 (BFF)
-- 프론트엔드 애플리케이션을 위한 API 게이트웨이
-- 인증 및 권한 부여 처리
-- 데이터 변환 및 집계 제공
-- Port: 8001
+## Architecture
 
-### 3. 타입 추론 서비스 (Funnel)
-- 데이터 타입 자동 추론
-- 스키마 제안 및 검증
-- Google Sheets 등 외부 데이터 소스 분석
-- Port: 8003
+The system follows a microservices architecture with clear separation of concerns:
 
-### 4. 공유 컴포넌트
-- 공통 모델 및 유틸리티
-- 복잡한 타입 시스템
-- 검증 프레임워크
-- 서비스 설정 및 의존성 관리
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Client Applications                       │
+│                (Web UI, Mobile Apps, API Clients)           │
+└─────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  BFF (Backend for Frontend)                  │
+│                       Port: 8002                            │
+│  • User-friendly label-based APIs                          │
+│  • Request orchestration and transformation                │
+│  • Authentication and authorization                        │
+└─────────────────────────────────────────────────────────────┘
+                    │                    │
+                    ▼                    ▼
+┌─────────────────────────┐    ┌─────────────────────────┐
+│   OMS (Ontology Mgmt)   │    │   Funnel (Type Inference)│
+│      Port: 8000        │    │       Port: 8003        │
+│ • Core ontology ops    │    │ • Data analysis         │
+│ • TerminusDB interface │    │ • Type detection        │
+│ • Schema management    │    │ • External integration  │
+└─────────────────────────┘    └─────────────────────────┘
+            │
+            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                        TerminusDB                           │
+│                        Port: 6363                           │
+│              Graph Database & Query Engine                  │
+└─────────────────────────────────────────────────────────────┘
+```
 
-## 🚀 시작하기
+For detailed architecture documentation, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-### 사전 요구 사항
-- Python 3.9+
-- TerminusDB 10.1.8
-- Docker (선택 사항)
+## Quick Start
 
-### 빠른 시작
+### Prerequisites
+
+- Python 3.9 or higher
+- Docker and Docker Compose
+- Git
+- 8GB RAM minimum (16GB recommended)
+
+### Installation
+
 ```bash
-# 저장소 복제
-git clone [repository-url]
-cd SPICE-HARVESTER
+# Clone the repository
+git clone https://github.com/your-org/spice-harvester.git
+cd spice-harvester
 
-# 의존성 설치
+# Set up Python virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+cd backend
 pip install -r requirements.txt
 
-# TerminusDB 시작
-docker run -d -p 6363:6363 terminusdb/terminusdb:10.1.8
+# Set up environment variables
+cp .env.example .env
+# Edit .env with your configuration
 
-# 서비스 실행
-cd backend/oms && python main.py
-cd backend/bff && python main.py
-cd backend/funnel && python main.py
+# Start TerminusDB
+docker-compose up -d terminusdb
 
-# 또는 모든 서비스 한번에 시작
-cd backend && python start_services.py
+# Start all services
+python start_services.py
 ```
 
-## 📚 문서
-
-모든 문서는 `docs/` 디렉토리에 정리되어 있습니다:
-
-- **[개발 가이드](docs/development/)**: 프론트엔드 및 백엔드 개발 가이드
-- **[배포 가이드](docs/deployment/DEPLOYMENT_GUIDE.md)**: 프로덕션 배포 지침
-- **[테스트 문서](docs/testing/)**: 테스트 전략 및 가이드
-- **[보안 문서](docs/security/SECURITY.md)**: 보안 모범 사례
-- **[API 문서](docs/api/)**: API 엔드포인트 및 사용법 *(준비 중)*
-
-전체 문서 색인은 [docs/README.md](docs/README.md)를 참조하세요.
-
-## 🧪 테스트
-
-프로젝트는 포괄적인 테스트 커버리지를 포함합니다:
+### Verify Installation
 
 ```bash
-# 모든 테스트 실행
-cd backend && python tests/runners/run_comprehensive_tests.py
+# Check service health
+curl http://localhost:8002/health  # BFF
+curl http://localhost:8000/health  # OMS
+curl http://localhost:8003/health  # Funnel
 
-# 특정 테스트 스위트 실행
-pytest tests/unit/                    # 유닛 테스트
-pytest tests/integration/              # 통합 테스트
-pytest tests/performance/              # 성능 테스트
+# Run tests
+pytest tests/
 ```
 
-테스트 구성:
-- `tests/unit/`: 개별 컴포넌트에 대한 유닛 테스트
-- `tests/integration/`: 서비스 상호작용에 대한 통합 테스트
-- `tests/performance/`: 성능 및 부하 테스트
-- `tests/system/`: 전체 시스템 테스트
+## Documentation
 
-## 🚢 배포
+Comprehensive documentation is available in the `docs/` directory:
 
-프로덕션 배포에 대해서는 [배포 가이드](docs/deployment/DEPLOYMENT_GUIDE.md)를 참조하세요.
+- **[Architecture Overview](docs/ARCHITECTURE.md)**: System design and component details
+- **[API Reference](docs/API_REFERENCE.md)**: Complete API documentation
+- **[Developer Guide](docs/DEVELOPER_GUIDE.md)**: Development setup and guidelines
+- **[Operations Manual](docs/OPERATIONS.md)**: Deployment and maintenance procedures
+- **[Security Documentation](docs/SECURITY.md)**: Security architecture and best practices
 
-주요 배포 고려사항:
-- 구성에 환경 변수 사용
-- 프로덕션에서 HTTPS 활성화
-- 적절한 로깅 및 모니터링 설정
-- 데이터베이스 백업 구성
+## Features
 
-## 🤝 기여하기
+### Data Type Support
 
-기여를 환영합니다! 다음 가이드라인을 따라주세요:
+The platform supports a comprehensive set of data types:
 
-1. 저장소 포크
-2. 기능 브랜치 생성 (`git checkout -b feature/amazing-feature`)
-3. 변경사항 커밋 (`git commit -m 'Add amazing feature'`)
-4. 브랜치에 푸시 (`git push origin feature/amazing-feature`)
-5. Pull Request 열기
+**Basic Types**:
+- String, Integer, Float, Boolean, Date, DateTime
 
-### 코드 스타일
-- Python 코드는 PEP 8 따르기
-- 적용 가능한 곳에 타입 힌트 사용
-- 새로운 기능에 대한 포괄적인 테스트 작성
-- 필요에 따라 문서 업데이트
+**Complex Types**:
+- `ARRAY<T>`: Arrays with type-safe elements
+- `OBJECT`: Nested objects with schemas
+- `ENUM`: Enumerated values with validation
+- `MONEY`: Currency amounts with precision
+- `EMAIL`: Email addresses with validation
+- `PHONE`: International phone numbers
+- `URL`: Web URLs with validation
+- `COORDINATE`: Geographic coordinates
+- `ADDRESS`: Structured addresses
+- `IMAGE`: Image URLs with validation
+- `FILE`: File references with metadata
 
-## 📄 라이선스
+### Relationship Management
 
-[라이선스 정보 추가 예정]
+- Automatic Property-to-Relationship conversion
+- Bidirectional relationship support
+- Circular reference detection
+- Cardinality enforcement (1:1, 1:n, n:1, n:m)
+- Relationship path analysis
 
-## 🙏 감사의 말
+### Multi-language Support
 
-- FastAPI와 TerminusDB로 구축
-- 현대적인 온톨로지 관리 모범 사례에서 영감을 받음
+- Label and description internationalization
+- Language detection and validation
+- Fallback language support
+- RTL language compatibility
+
+### Security Features
+
+- Input sanitization (SQL/NoSQL injection prevention)
+- API key authentication
+- Role-based access control (planned)
+- Comprehensive audit logging
+- Data encryption at rest (planned)
+
+## Technology Stack
+
+- **Programming Language**: Python 3.9+
+- **Web Framework**: FastAPI 0.100+
+- **Database**: TerminusDB v11.x
+- **Async Operations**: asyncio, httpx
+- **Validation**: Pydantic
+- **Testing**: pytest, pytest-asyncio
+- **Containerization**: Docker, Docker Compose
+
+## Testing
+
+The project includes comprehensive test coverage:
+
+```bash
+# Run all tests
+pytest
+
+# Run specific test categories
+pytest tests/unit/              # Unit tests
+pytest tests/integration/        # Integration tests
+pytest tests/e2e/               # End-to-end tests
+
+# Run with coverage
+pytest --cov=backend --cov-report=html
+
+# Run specific test file
+pytest tests/unit/validators/test_complex_type_validator.py
+```
+
+### Test Categories
+
+- **Unit Tests**: Individual component testing
+- **Integration Tests**: Service interaction testing
+- **E2E Tests**: Complete user scenario testing
+- **Performance Tests**: Load and stress testing
+- **Security Tests**: Vulnerability testing
+
+## Deployment
+
+### Development
+
+```bash
+# Using the start script
+python start_services.py --env development
+
+# Or manually
+python -m oms.main
+python -m bff.main
+python -m funnel.main
+```
+
+### Production
+
+```bash
+# Using Docker Compose
+docker-compose -f docker-compose.prod.yml up -d
+
+# Using Kubernetes (Helm chart available)
+helm install spice-harvester ./helm/spice-harvester
+```
+
+For detailed deployment instructions, see [docs/OPERATIONS.md](docs/OPERATIONS.md).
+
+## Contributing
+
+We welcome contributions! Please follow these guidelines:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make your changes
+4. Add tests for new functionality
+5. Ensure all tests pass (`pytest`)
+6. Update documentation as needed
+7. Commit your changes (`git commit -m 'feat: add amazing feature'`)
+8. Push to the branch (`git push origin feature/amazing-feature`)
+9. Open a Pull Request
+
+### Code Style
+
+- Follow PEP 8 for Python code
+- Use type hints for all functions
+- Write comprehensive docstrings
+- Maintain test coverage above 80%
+
+### Commit Convention
+
+We follow conventional commits:
+- `feat:` New features
+- `fix:` Bug fixes
+- `docs:` Documentation changes
+- `test:` Test additions/updates
+- `refactor:` Code refactoring
+- `chore:` Maintenance tasks
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- Built with [FastAPI](https://fastapi.tiangolo.com/) and [TerminusDB](https://terminusdb.com/)
+- Inspired by modern ontology management best practices
+- Special thanks to all contributors
 
 ---
-*더 많은 정보는 [전체 문서](docs/README.md)를 참조하세요.*
+
+For more information, questions, or support, please:
+- Check the [full documentation](docs/)
+- Open an [issue](https://github.com/your-org/spice-harvester/issues)
+- Contact the development team at dev@spiceharvester.com

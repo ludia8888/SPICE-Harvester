@@ -1,44 +1,79 @@
-# SPICE HARVESTER 변경 로그
+# Changelog
 
-이 문서는 SPICE HARVESTER 프로젝트의 주요 구조적 변경사항을 추적합니다.
+All notable changes to SPICE HARVESTER will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+- Comprehensive enterprise-level documentation suite
+  - Architecture documentation with microservices overview
+  - Complete API reference for all services
+  - Developer guide with onboarding instructions
+  - Operations manual for deployment and maintenance
+  - Security documentation with best practices
+- E2E testing framework simulating real user scenarios
+- Performance optimization guidelines
+- Security monitoring and incident response procedures
+
+### Changed
+- Updated README.md to English with enterprise focus
+- Improved documentation structure and organization
+
+## [2.1.1] - 2025-07-23
+
+### Fixed
+- MONEY type mapping to xsd:decimal for TerminusDB compatibility
+- URL type mapping to xsd:anyURI
+- ARRAY<STRING> parsing with case-insensitive handling
+- SQL injection pattern false positives
+- NoSQL injection detection for @type patterns
+- PATCH endpoint references (changed to PUT for API compatibility)
+
+### Security
+- Improved input sanitization patterns
+- Reduced false positives in security validation
+- Enhanced SQL/NoSQL injection prevention
 
 ## [2.1.0] - 2025-07-22
 
-### 추가
-- **Property-to-Relationship 자동 변환**: 클래스 속성이 다른 클래스를 참조할 때 자동으로 관계로 변환
-- **고급 제약조건 시스템**: 
-  - 값 범위 (min/max), 문자열 길이, 패턴, 형식 제약조건
-  - 배열/컬렉션 제약조건 (min_items, max_items, unique_items)
-  - 관계 카디널리티 제약조건
-  - 기본값 지원 (static, computed, timestamp, uuid, sequence, reference)
-- **TerminusDB v11.x 완전 지원**:
-  - OneOfType (Union 타입)
-  - Foreign 키
+### Added
+- **Property-to-Relationship Automatic Conversion**: Class properties referencing other classes automatically convert to relationships
+- **Advanced Constraint System**:
+  - Value ranges (min/max), string length, patterns, format constraints
+  - Array/collection constraints (min_items, max_items, unique_items)
+  - Relationship cardinality constraints
+  - Default value support (static, computed, timestamp, uuid, sequence, reference)
+- **Full TerminusDB v11.x Support**:
+  - OneOfType (Union types)
+  - Foreign keys
   - GeoPoint, GeoTemporalPoint
-  - Enum 타입
-  - Set, List, Array (dimensions 지원)
-  - Optional 타입
+  - Enum types
+  - Set, List, Array (with dimensions support)
+  - Optional types
 
-### 변경사항
-- `sys:JSON` 타입을 `xsd:string`으로 변경 (TerminusDB v11.x 호환성)
-- Property 모델에 `is_class_reference()` 메서드 추가
-- `type="link"` 지원으로 명시적인 클래스 참조
+### Changed
+- Changed `sys:JSON` type to `xsd:string` (TerminusDB v11.x compatibility)
+- Added `is_class_reference()` method to Property model
+- Support for `type="link"` for explicit class references
 
-### 추가된 파일
+### Added Files
 - `backend/oms/services/property_to_relationship_converter.py`
 - `backend/oms/utils/constraint_extractor.py`
 - `backend/oms/utils/terminus_schema_types.py`
 
 ## [2.0.0] - 2025-07-20
 
-### 변경사항
-- 문서 업데이트: 현재 코드 구조와 일치하도록 모든 문서 갱신
-- BFF 포트 수정: DEPLOYMENT_GUIDE.md에서 8001 → 8002로 수정
-- 새 문서 추가: CURRENT_ARCHITECTURE.md 생성으로 현재 상태 명확화
-- 문서 정리: 오래된 마이그레이션 문서를 archive 폴더로 이동
+### Changed
+- Documentation update: All documents updated to match current code structure
+- BFF port correction: Updated from 8001 to 8002 in DEPLOYMENT_GUIDE.md
+- New documentation: Created CURRENT_ARCHITECTURE.md for clarity
+- Documentation cleanup: Moved old migration documents to archive folder
 
-### 현재 구조
-- **서비스 포트**:
+### Current Structure
+- **Service Ports**:
   - OMS: 8000
   - BFF: 8002
   - Funnel: 8003
@@ -46,53 +81,72 @@
 
 ## [1.5.0] - 2025-07-18
 
-### 추가
-- HTTPS 지원 구현
-- CORS 자동 설정 기능
-- 포트 설정 중앙화 (ServiceConfig)
+### Added
+- HTTPS support implementation
+- Automatic CORS configuration
+- Centralized port configuration (ServiceConfig)
 
-### 변경사항
-- 디렉토리 구조 단순화: `backend/spice_harvester/*` → `backend/*`
-- Import 경로 변경: `from spice_harvester.shared...` → `from shared...`
-- 서비스 이름 간소화:
+### Changed
+- Simplified directory structure: `backend/spice_harvester/*` → `backend/*`
+- Import path changes: `from spice_harvester.shared...` → `from shared...`
+- Service name simplification:
   - `ontology-management-service` → `oms`
   - `backend-for-frontend` → `bff`
 
 ## [1.0.0] - 2025-07-17
 
-### 초기 릴리즈
-- sys.path.insert 제거 완료
-- 표준 Python 패키지 구조 채택
-- 마이크로서비스 아키텍처 구현:
+### Initial Release
+- Removed sys.path.insert completely
+- Adopted standard Python package structure
+- Implemented microservices architecture:
   - OMS (Ontology Management Service)
   - BFF (Backend for Frontend)
   - Funnel (Type Inference Service)
   - Shared Components
 
-### 주요 기능
-- 온톨로지 관리
-- 복합 타입 시스템
-- 관계 관리
-- 다국어 지원
-- Google Sheets 연동
+### Key Features
+- Ontology management
+- Complex type system
+- Relationship management
+- Multi-language support
+- Google Sheets integration
 
 ## [0.1.0] - 2025-07-01
 
-### 프로젝트 시작
-- 초기 프로토타입 개발
-- TerminusDB 통합
-- 기본 CRUD 작업 구현
+### Project Inception
+- Initial prototype development
+- TerminusDB integration
+- Basic CRUD operations implementation
 
 ---
 
-## 버전 관리 정책
+## Version Management Policy
 
-- **Major (X.0.0)**: 구조적 변경, 호환성 깨짐
-- **Minor (0.X.0)**: 새 기능 추가, 하위 호환성 유지
-- **Patch (0.0.X)**: 버그 수정, 문서 업데이트
+- **Major (X.0.0)**: Structural changes, breaking compatibility
+- **Minor (0.X.0)**: New features, backward compatibility maintained
+- **Patch (0.0.X)**: Bug fixes, documentation updates
 
-## 관련 링크
+## Upgrade Notes
 
-- [현재 아키텍처](./docs/CURRENT_ARCHITECTURE.md)
-- [상세 아키텍처](./docs/DETAILED_ARCHITECTURE.md)
-- [배포 가이드](./backend/docs/deployment/DEPLOYMENT_GUIDE.md)
+### From 2.1.0 to 2.1.1
+1. Update type mappings in configuration
+2. Change PATCH endpoints to PUT in client code
+3. Review and update security patterns if customized
+
+### From 2.0.0 to 2.1.0
+1. Database schema migration may be required
+2. Update API clients for new constraint features
+3. Review relationship configurations
+
+### From 1.x to 2.0.0
+1. Update service port configurations
+2. Review documentation for new structure
+3. Update deployment scripts
+
+## Related Links
+
+- [Architecture Overview](./docs/ARCHITECTURE.md)
+- [API Reference](./docs/API_REFERENCE.md)
+- [Developer Guide](./docs/DEVELOPER_GUIDE.md)
+- [Operations Manual](./docs/OPERATIONS.md)
+- [Security Documentation](./docs/SECURITY.md)
