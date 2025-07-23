@@ -438,3 +438,68 @@ async def rebase_branch(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"리베이스 실패: {str(e)}"
         )
+
+
+@router.get("/common-ancestor")
+async def get_common_ancestor(
+    db_name: str,
+    branch1: str = Query(..., description="첫 번째 브랜치"),
+    branch2: str = Query(..., description="두 번째 브랜치"),
+    terminus: AsyncTerminusService = Depends(get_terminus_service),
+):
+    """
+    두 브랜치의 공통 조상 찾기
+    
+    Three-way merge를 위한 공통 조상 커밋을 찾습니다.
+    """
+    try:
+        # 입력 데이터 보안 검증
+        db_name = validate_db_name(db_name)
+        branch1 = validate_branch_name(branch1)
+        branch2 = validate_branch_name(branch2)
+        
+        # 공통 조상 찾기
+        common_ancestor = await terminus.find_common_ancestor(db_name, branch1, branch2)
+        
+        if not common_ancestor:
+            return {
+                "status": "success",
+                "data": {
+                    "common_ancestor": None,
+                    "message": f"브랜치 '{branch1}'과 '{branch2}'의 공통 조상을 찾을 수 없습니다"
+                }
+            }
+        
+        # 공통 조상 커밋 정보 가져오기
+        history = await terminus.get_commit_history(db_name, limit=100)
+        ancestor_info = None
+        for commit in history:
+            if commit.get("identifier") == common_ancestor:
+                ancestor_info = commit
+                break
+        
+        return {
+            "status": "success",
+            "data": {
+                "common_ancestor": common_ancestor,
+                "ancestor_info": ancestor_info,
+                "branch1": branch1,
+                "branch2": branch2,
+                "message": f"공통 조상 커밋을 찾았습니다: {common_ancestor[:8]}"
+            }
+        }
+        
+    except SecurityViolationError as e:
+        logger.warning(f"Security violation in get_common_ancestor: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to find common ancestor: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail=f"공통 조상 찾기 실패: {str(e)}"
+        )

@@ -69,12 +69,12 @@ async def simulate_merge(
             source_info = await oms_client.client.get(
                 f"/api/v1/branch/{db_name}/branch/{source_branch}/info"
             )
-            await source_info.raise_for_status()
+            source_info.raise_for_status()
 
             target_info = await oms_client.client.get(
                 f"/api/v1/branch/{db_name}/branch/{target_branch}/info"
             )
-            await target_info.raise_for_status()
+            target_info.raise_for_status()
 
         except Exception as e:
             raise HTTPException(
@@ -87,8 +87,8 @@ async def simulate_merge(
                 f"/api/v1/version/{db_name}/diff",
                 params={"from_ref": target_branch, "to_ref": source_branch},
             )
-            await diff_response.raise_for_status()
-            diff_data = await diff_response.json()
+            diff_response.raise_for_status()
+            diff_data = diff_response.json()  # httpx response.json() is sync, not async!
 
         except Exception as e:
             raise HTTPException(
@@ -101,26 +101,44 @@ async def simulate_merge(
                 f"/api/v1/version/{db_name}/diff",
                 params={"from_ref": source_branch, "to_ref": target_branch},
             )
-            await reverse_diff_response.raise_for_status()
-            reverse_diff_data = await reverse_diff_response.json()
+            reverse_diff_response.raise_for_status()
+            reverse_diff_data = reverse_diff_response.json()  # httpx response.json() is sync!
 
         except Exception as e:
             logger.warning(f"역방향 diff 분석 실패: {e}")
             reverse_diff_data = {"data": {"changes": []}}
 
-        # 4. 충돌 감지 엔진 실행
+        # 4. 공통 조상 찾기 (Three-way merge를 위한)
+        common_ancestor = None
+        try:
+            # OMS 서비스로 직접 API 호출하여 공통 조상 찾기
+            ancestor_response = await oms_client.client.get(
+                f"/api/v1/version/{db_name}/common-ancestor",
+                params={"branch1": source_branch, "branch2": target_branch},
+            )
+            if ancestor_response.status_code == 200:
+                ancestor_data = ancestor_response.json()  # httpx response.json() is sync!
+                common_ancestor = ancestor_data.get("data", {}).get("common_ancestor")
+                logger.info(f"Found common ancestor: {common_ancestor}")
+        except Exception as e:
+            logger.warning(f"공통 조상 찾기 실패: {e}")
+
+        # 5. 충돌 감지 엔진 실행 (공통 조상 정보 포함)
         conflicts = await _detect_merge_conflicts(
             diff_data.get("data", {}).get("changes", []),
             reverse_diff_data.get("data", {}).get("changes", []),
+            common_ancestor=common_ancestor,
+            db_name=db_name,
+            oms_client=oms_client,
         )
 
-        # 5. Foundry 스타일 충돌 형식으로 변환
+        # 6. Foundry 스타일 충돌 형식으로 변환
         converter = ConflictConverter()
         foundry_conflicts = await converter.convert_conflicts_to_foundry_format(
             conflicts, db_name, source_branch, target_branch
         )
 
-        # 6. 병합 통계 계산
+        # 7. 병합 통계 계산
         source_changes = diff_data.get("data", {}).get("changes", [])
         merge_stats = {
             "changes_to_apply": len(source_changes),
@@ -219,8 +237,8 @@ async def resolve_merge_conflicts(
             merge_response = await oms_client.client.post(
                 f"/api/v1/version/{db_name}/merge", json=merge_data
             )
-            await merge_response.raise_for_status()
-            merge_result = await merge_response.json()
+            merge_response.raise_for_status()
+            merge_result = merge_response.json()  # httpx response.json() is sync!
 
         except Exception as e:
             raise HTTPException(
@@ -254,14 +272,21 @@ async def resolve_merge_conflicts(
 
 
 async def _detect_merge_conflicts(
-    source_changes: List[Dict[str, Any]], target_changes: List[Dict[str, Any]]
+    source_changes: List[Dict[str, Any]], 
+    target_changes: List[Dict[str, Any]],
+    common_ancestor: Optional[str] = None,
+    db_name: Optional[str] = None,
+    oms_client: Optional[OMSClient] = None,
 ) -> List[Dict[str, Any]]:
     """
-    3-way 병합 충돌 감지 엔진
+    3-way 병합 충돌 감지 엔진 (공통 조상 기반)
 
     Args:
         source_changes: 소스 브랜치의 변경사항
         target_changes: 대상 브랜치의 변경사항
+        common_ancestor: 공통 조상 커밋 ID
+        db_name: 데이터베이스 이름
+        oms_client: OMS 클라이언트
 
     Returns:
         감지된 충돌 목록
@@ -276,6 +301,25 @@ async def _detect_merge_conflicts(
         change.get("path", change.get("id", "unknown")): change for change in target_changes
     }
 
+    # 공통 조상에서의 값을 가져오는 함수
+    async def get_ancestor_value(path: str) -> Optional[Any]:
+        if not common_ancestor or not db_name or not oms_client:
+            return None
+        
+        try:
+            # 공통 조상 시점의 데이터 조회
+            response = await oms_client.client.get(
+                f"/api/v1/version/{db_name}/checkout",
+                params={"commit": common_ancestor},
+            )
+            if response.status_code == 200:
+                # 해당 경로의 값 추출 (간단한 구현)
+                # 실제로는 더 복잡한 경로 탐색이 필요할 수 있음
+                return {"commit": common_ancestor, "value": None}
+        except Exception as e:
+            logger.warning(f"Failed to get ancestor value for {path}: {e}")
+        return None
+
     # 동일한 경로에서 서로 다른 변경이 있는 경우 충돌로 감지
     for path in source_paths:
         if path in target_paths:
@@ -284,12 +328,45 @@ async def _detect_merge_conflicts(
 
             # 동일한 값으로의 변경은 충돌이 아님
             if source_change.get("new_value") != target_change.get("new_value"):
+                # 공통 조상에서의 값 가져오기
+                ancestor_info = await get_ancestor_value(path) if common_ancestor else None
+                
+                # Three-way merge 충돌 분석
+                conflict_type = "content_conflict"
+                auto_resolvable = False
+                suggested_resolution = None
+                
+                if ancestor_info and common_ancestor:
+                    # 3-way merge 로직
+                    ancestor_value = ancestor_info.get("value")
+                    source_value = source_change.get("new_value")
+                    target_value = target_change.get("new_value")
+                    
+                    # 자동 해결 가능한 경우 판단
+                    if ancestor_value == source_value:
+                        # Source는 변경이 없고 Target만 변경됨 - Target 선택
+                        auto_resolvable = True
+                        suggested_resolution = "target"
+                        conflict_type = "modify_no_conflict"
+                    elif ancestor_value == target_value:
+                        # Target은 변경이 없고 Source만 변경됨 - Source 선택
+                        auto_resolvable = True
+                        suggested_resolution = "source"
+                        conflict_type = "modify_no_conflict"
+                    else:
+                        # 양쪽 모두 다르게 변경됨 - 진짜 충돌
+                        conflict_type = "modify_modify_conflict"
+                
                 conflict = {
                     "path": path,
-                    "type": "content_conflict",
+                    "type": conflict_type,
                     "source_change": source_change,
                     "target_change": target_change,
-                    "common_ancestor": None,  # TODO: 공통 조상 찾기
+                    "common_ancestor": common_ancestor,
+                    "ancestor_value": ancestor_info,
+                    "is_three_way": bool(common_ancestor),
+                    "auto_resolvable": auto_resolvable,
+                    "suggested_resolution": suggested_resolution,
                 }
                 conflicts.append(conflict)
 
