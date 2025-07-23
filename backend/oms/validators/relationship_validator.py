@@ -53,7 +53,7 @@ class RelationshipValidator:
             ("1:1", "1:1"): True,  # 일대일 ↔ 일대일
             ("1:n", "n:1"): True,  # 일대다 ↔ 다대일
             ("n:1", "1:n"): True,  # 다대일 ↔ 일대다
-            ("n:n", "n:n"): True,  # 다대다 ↔ 다대다
+            ("n:m", "n:m"): True,  # 다대다 ↔ 다대다
             ("one", "many"): True,  # 단일 ↔ 다중
             ("many", "one"): True,  # 다중 ↔ 단일
         }
@@ -62,16 +62,16 @@ class RelationshipValidator:
         self.invalid_combinations = {
             ("1:1", "1:n"),
             ("1:1", "n:1"),
-            ("1:1", "n:n"),
+            ("1:1", "n:m"),
             ("1:n", "1:1"),
             ("1:n", "1:n"),
-            ("1:n", "n:n"),
+            ("1:n", "n:m"),
             ("n:1", "1:1"),
             ("n:1", "n:1"),
-            ("n:1", "n:n"),
-            ("n:n", "1:1"),
-            ("n:n", "1:n"),
-            ("n:n", "n:1"),
+            ("n:1", "n:m"),
+            ("n:m", "1:1"),
+            ("n:m", "1:n"),
+            ("n:m", "n:1"),
         }
 
     def validate_relationship(
@@ -265,7 +265,7 @@ class RelationshipValidator:
         card_str = str(cardinality.value if hasattr(cardinality, "value") else cardinality)
 
         # 유효한 카디널리티 값 체크
-        valid_cardinalities = {"one", "many", "1:1", "1:n", "n:1", "n:n", "n:m"}
+        valid_cardinalities = {"one", "many", "1:1", "1:n", "n:1", "n:m"}
         if card_str not in valid_cardinalities:
             results.append(
                 ValidationResult(
@@ -277,7 +277,7 @@ class RelationshipValidator:
             )
 
         # 권장 카디널리티 체크
-        recommended = {"1:1", "1:n", "n:n"}
+        recommended = {"1:1", "1:n", "n:m"}
         if card_str not in recommended:
             results.append(
                 ValidationResult(

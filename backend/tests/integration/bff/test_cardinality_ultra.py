@@ -24,7 +24,7 @@ def test_cardinality_enum():
         (Cardinality.MANY, "many", "다중 관계"),
         (Cardinality.ONE_TO_ONE, "1:1", "일대일"),
         (Cardinality.ONE_TO_MANY, "1:n", "일대다"),
-        (Cardinality.MANY_TO_MANY, "n:n", "다대다")
+        (Cardinality.MANY_TO_MANY, "n:m", "다대다")
     ]
     
     for enum_val, str_val, description in cardinalities:
@@ -73,7 +73,7 @@ def test_relationship_model():
     print(f"      • cardinality: {user_profile_rel.cardinality}")
     print(f"      • inverse_predicate: {user_profile_rel.inverse_predicate}")
     
-    # n:n 관계 예시 (학생 -> 과목)
+    # n:m 관계 예시 (학생 -> 과목)
     student_course_rel = Relationship(
         predicate="enrollsIn",
         target="Course",
@@ -83,7 +83,7 @@ def test_relationship_model():
         inverse_label="has student"
     )
     
-    print("\n   📋 n:n 관계 (학생 ↔ 과목):")
+    print("\n   📋 n:m 관계 (학생 ↔ 과목):")
     print(f"      • predicate: {student_course_rel.predicate}")
     print(f"      • cardinality: {student_course_rel.cardinality}")
     print(f"      • inverse_predicate: {student_course_rel.inverse_predicate}")
@@ -121,7 +121,7 @@ def test_ontology_with_relationships():
                 inverse_predicate="isCEOOf",
                 inverse_label="is CEO of"
             ),
-            # n:n 관계 - 회사는 여러 파트너와 협력
+            # n:m 관계 - 회사는 여러 파트너와 협력
             Relationship(
                 predicate="partnersWithz",
                 target="Company",
@@ -179,7 +179,7 @@ def test_cardinality_validation():
     
     # 문자열로도 작동하는지 테스트
     print("\n   🔤 문자열 카디널리티 테스트:")
-    string_cardinalities = ["1:1", "1:n", "n:n"]
+    string_cardinalities = ["1:1", "1:n", "n:m"]
     
     for card_str in string_cardinalities:
         try:
@@ -209,8 +209,8 @@ def test_real_world_scenarios():
             {"rel": "hasOffice", "card": "1:1", "desc": "직원 → 사무실"}
         ],
         "📚 교육 관리 시스템": [
-            {"rel": "enrollsIn", "card": "n:n", "desc": "학생 ↔ 과목"},
-            {"rel": "teaches", "card": "n:n", "desc": "교수 ↔ 과목"},
+            {"rel": "enrollsIn", "card": "n:m", "desc": "학생 ↔ 과목"},
+            {"rel": "teaches", "card": "n:m", "desc": "교수 ↔ 과목"},
             {"rel": "belongsTo", "card": "n:1", "desc": "학생 → 학과"},
             {"rel": "hasAdvisor", "card": "n:1", "desc": "학생 → 지도교수"}
         ],
@@ -218,7 +218,7 @@ def test_real_world_scenarios():
             {"rel": "contains", "card": "1:n", "desc": "주문 → 주문항목"},
             {"rel": "hasReview", "card": "1:n", "desc": "상품 → 리뷰"},
             {"rel": "belongsToCategory", "card": "n:1", "desc": "상품 → 카테고리"},
-            {"rel": "addedToWishlist", "card": "n:n", "desc": "고객 ↔ 상품"}
+            {"rel": "addedToWishlist", "card": "n:m", "desc": "고객 ↔ 상품"}
         ]
     }
     
@@ -278,7 +278,7 @@ def generate_api_examples():
                 "predicate": "collaboratesWith",
                 "target": "Employee",
                 "label": {"ko": "협업한다", "en": "collaborates with"},
-                "cardinality": "n:n",
+                "cardinality": "n:m",
                 "inverse_predicate": "collaboratesWith",
                 "inverse_label": {"ko": "상호 협업", "en": "mutual collaboration"}
             }
@@ -323,7 +323,7 @@ def main():
     print("🔥" * 60)
     
     results = [
-        "✅ 모든 카디널리티 타입 (ONE, MANY, 1:1, 1:n, n:n) 완전 지원",
+        "✅ 모든 카디널리티 타입 (ONE, MANY, 1:1, 1:n, n:m) 완전 지원",
         "✅ 역관계 (inverse) 완전 지원",
         "✅ 다국어 관계 레이블 지원",
         "✅ JSON-LD 스키마 변환 지원",

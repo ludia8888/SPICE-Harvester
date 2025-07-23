@@ -63,6 +63,11 @@ async def create_ontology(
     label_mapper=Depends(get_label_mapper),
 ) -> OntologyResponse:
     """내부 ID 기반 온톨로지 생성"""
+    # 🔥 ULTRA DEBUG! OMS received data
+    print(f"🔥🔥🔥 OMS create_ontology called! db_name={db_name}")
+    print(f"🔥🔥🔥 request data: {request}")
+    logger.warning(f"🔥🔥🔥 OMS create_ontology called! db_name={db_name}, request={request}")
+    
     try:
         # 입력 데이터 보안 검증
         db_name = validate_db_name(db_name)
@@ -156,7 +161,12 @@ async def create_ontology(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to create ontology: {e}")
+        import traceback
+        error_msg = f"Failed to create ontology: {e}"
+        traceback_str = traceback.format_exc()
+        logger.error(f"🔥🔥🔥 ERROR in create_ontology: {error_msg}")
+        logger.error(f"🔥🔥🔥 TRACEBACK:\n{traceback_str}")
+        logger.error(f"🔥🔥🔥 ontology_data was: {ontology_data}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 

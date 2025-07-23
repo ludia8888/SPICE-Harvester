@@ -387,7 +387,24 @@ class AsyncTerminusService:
         """사용 가능한 데이터베이스 목록 조회"""
         try:
             endpoint = f"/api/db/{self.connection_info.account}"
-            result = await self._make_request("GET", endpoint)
+            
+            # 🔥 THINK ULTRA! Handle potential TerminusDB descriptor path errors
+            try:
+                result = await self._make_request("GET", endpoint)
+            except Exception as terminus_error:
+                error_msg = str(terminus_error)
+                
+                # Check if this is a "Bad descriptor path" error
+                if "bad descriptor path" in error_msg.lower():
+                    logger.warning(f"⚠️ TerminusDB has bad descriptor path error: {error_msg}")
+                    logger.warning("This indicates stale database references in TerminusDB")
+                    
+                    # Try to continue with empty list or alternative approach
+                    logger.info("Attempting to return empty database list due to TerminusDB internal error")
+                    return []
+                else:
+                    # Re-raise other errors as they might be network/auth issues
+                    raise
 
             # Debug logging to understand TerminusDB response format
             logger.debug(f"TerminusDB list response type: {type(result)}")
@@ -799,8 +816,8 @@ class AsyncTerminusService:
                             else:
                                 # This is an ObjectProperty - convert to relationship
                                 if terminus_type == "Set":
-                                    # 🔥 ULTRA! n:n is the standard notation, not n:m
-                                    cardinality = "n:n"
+                                    # 🔥 ULTRA! Use n:m for BFF compatibility (many-to-many)
+                                    cardinality = "n:m"
                                 elif terminus_type == "List" or terminus_type == "Array":
                                     cardinality = "1:n"
                                 else:  # Optional
@@ -837,6 +854,7 @@ class AsyncTerminusService:
                                 relationships.append({
                                     "predicate": key,
                                     "target": element_class,  # Use element_class instead of value.get("@class")
+                                    "linkTarget": element_class,  # 🔥 ULTRA! Add linkTarget for compatibility
                                     "cardinality": cardinality,
                                     "label": label,
                                     "description": description,
@@ -991,25 +1009,38 @@ class AsyncTerminusService:
                     # 메타데이터에서 relationship 정보 확인
                     field_meta = field_metadata_map.get(rel["predicate"], {})
                     
+                    # 🔥 ULTRA DEBUG! Log metadata lookup
+                    logger.debug(f"🔍 ULTRA DEBUG: Checking relationship '{rel['predicate']}'")
+                    logger.debug(f"🔍 ULTRA DEBUG: field_meta = {field_meta}")
+                    logger.debug(f"🔍 ULTRA DEBUG: is_relationship = {field_meta.get('is_relationship', 'NOT FOUND')}")
+                    logger.debug(f"🔍 ULTRA DEBUG: is_explicit_relationship = {field_meta.get('is_explicit_relationship', 'NOT FOUND')}")
+                    
                     # 🔥 THINK ULTRA! 원래 property에서 변환된 relationship인지 확인
                     # 메타데이터의 converted_from_property 플래그 사용
                     is_property_origin = field_meta.get("converted_from_property", False)
                     
                     # 🔥 ULTRA! If metadata has is_relationship=True, it's an explicit relationship
-                    if field_meta.get("is_relationship", False):
+                    if field_meta.get("is_relationship", False) or field_meta.get("is_explicit_relationship", False):
                         # This is an explicit relationship
                         explicit_relationships.append({k: v for k, v in rel.items() if v is not None})
                         logger.debug(f"🔍 Found explicit relationship from metadata: {rel['predicate']}")
-                    # 플래그가 없는 경우 휴리스틱 사용 (레거시 지원)
-                    elif not is_property_origin:
-                        # Check if it's a property-origin relationship using heuristics
-                        is_property_origin = (
+                    # 🔥 ULTRA FIX! PropertyToRelationshipConverter로 변환된 관계는 모두 relationship으로 유지
+                    # converted_from_property 플래그가 있으면 무조건 relationship으로 유지 (역변환 안함)
+                    elif is_property_origin:
+                        # PropertyToRelationshipConverter에서 변환된 관계는 relationship으로 유지
+                        explicit_relationships.append({k: v for k, v in rel.items() if v is not None})
+                        logger.debug(f"🔍 PropertyToRelationshipConverter origin relationship kept as relationship: {rel['predicate']}")
+                    else:
+                        # 플래그가 없는 경우 휴리스틱 사용 (레거시 지원) - 조건 강화
+                        is_property_origin_heuristic = (
                             rel.get("cardinality") in ["n:1", "1:1"] and 
                             not field_meta.get("inverse_predicate") and
-                            not field_meta.get("is_relationship", False)
+                            not field_meta.get("is_relationship", False) and
+                            # 🔥 ULTRA! 추가 조건: 메타데이터에 converted_from_property가 명시적으로 False인 경우만
+                            field_meta.get("converted_from_property") == False
                         )
                         
-                        if is_property_origin:
+                        if is_property_origin_heuristic:
                             # Property로 역변환
                             prop = {
                                 "name": rel["predicate"],
@@ -1037,31 +1068,6 @@ class AsyncTerminusService:
                             # 명시적 relationship 유지 (no metadata but not property-like)
                             explicit_relationships.append({k: v for k, v in rel.items() if v is not None})
                             logger.debug(f"🔍 Found explicit relationship (no metadata): {rel['predicate']}")
-                    else:
-                        # is_property_origin is True from metadata
-                        # Property로 역변환
-                        prop = {
-                            "name": rel["predicate"],
-                            "type": "link",  # 또는 rel["target"] 사용
-                            "linkTarget": rel["target"],
-                            "label": rel.get("label", rel["predicate"]),
-                            "description": rel.get("description"),
-                            "required": field_meta.get("required", False),
-                            "default": field_meta.get("default_value"),
-                        }
-                        
-                        # 제약조건 추가
-                        constraints = {}
-                        if field_meta.get("unique"):
-                            constraints["unique"] = True
-                        if constraints:
-                            prop["constraints"] = constraints
-                            
-                        # None 값 제거
-                        prop = {k: v for k, v in prop.items() if v is not None}
-                        property_converted_relationships.append(prop)
-                        
-                        logger.debug(f"🔄 Converted relationship '{rel['predicate']}' back to property with linkTarget")
                 
                 # Clean up None values from properties
                 cleaned_properties = []
@@ -1081,6 +1087,56 @@ class AsyncTerminusService:
                 result.pop("field_metadata_map", None)
                 
                 logger.info(f"🔍 Parsed schema for {class_id}: {len(properties)} properties, {len(relationships)} relationships, inherits: {result.get('inherits', 'None')}")
+                
+                # 🔥 THINK ULTRA! Resolve inheritance - fetch parent class properties and relationships
+                if result.get("inherits"):
+                    parent_class_id = result["inherits"]
+                    logger.info(f"🔥 ULTRA! Resolving inheritance from parent class: {parent_class_id}")
+                    
+                    try:
+                        # Recursively get parent class (which may also have inheritance)
+                        parent_data = await self.get_ontology(db_name, parent_class_id, raise_if_missing=False)
+                        
+                        if parent_data:
+                            # Merge parent properties (parent first, then child to allow overrides)
+                            parent_props = parent_data.get("properties", [])
+                            child_props = result.get("properties", [])
+                            child_prop_names = {p["name"] for p in child_props}
+                            
+                            # Add parent properties that aren't overridden
+                            merged_props = []
+                            for prop in parent_props:
+                                if prop["name"] not in child_prop_names:
+                                    merged_props.append(prop)
+                                    logger.info(f"✅ Inherited property: {prop['name']} from {parent_class_id}")
+                            
+                            # Add child properties (including overrides)
+                            merged_props.extend(child_props)
+                            result["properties"] = merged_props
+                            
+                            # Merge parent relationships
+                            parent_rels = parent_data.get("relationships", [])
+                            child_rels = result.get("relationships", [])
+                            child_rel_predicates = {r["predicate"] for r in child_rels}
+                            
+                            # Add parent relationships that aren't overridden
+                            merged_rels = []
+                            for rel in parent_rels:
+                                if rel["predicate"] not in child_rel_predicates:
+                                    merged_rels.append(rel)
+                                    logger.info(f"✅ Inherited relationship: {rel['predicate']} from {parent_class_id}")
+                            
+                            # Add child relationships (including overrides)
+                            merged_rels.extend(child_rels)
+                            result["relationships"] = merged_rels
+                            
+                            logger.info(f"🔥 Inheritance resolved: {len(parent_props)} parent props + {len(child_props)} child props = {len(result['properties'])} total props")
+                            logger.info(f"🔥 Inheritance resolved: {len(parent_rels)} parent rels + {len(child_rels)} child rels = {len(result['relationships'])} total rels")
+                        else:
+                            logger.warning(f"⚠️ Parent class {parent_class_id} not found for inheritance!")
+                            
+                    except Exception as e:
+                        logger.error(f"❌ Error resolving inheritance from {parent_class_id}: {e}")
             
             return result
 
@@ -2043,8 +2099,18 @@ class AsyncTerminusService:
             except Exception as e:
                 logger.info(f"📋 ClassMetadata schema does not exist, will create: {e}")
             
+            # FieldMetadata 스키마 존재 확인
+            try:
+                field_meta_check = await self._make_request("GET", f"{schema_endpoint}/FieldMetadata", params={"graph_type": "schema"})
+                logger.info("✅ FieldMetadata schema already exists")
+                field_metadata_exists = True
+            except Exception as e:
+                logger.info(f"📋 FieldMetadata schema does not exist, will create: {e}")
+                field_metadata_exists = False
+            
             # FieldMetadata 스키마 클래스 생성 (subdocument에는 @key 필수)
-            field_metadata_schema = {
+            if not field_metadata_exists:
+                field_metadata_schema = {
                 "@type": "Class",
                 "@id": "FieldMetadata",
                 "@subdocument": [],
@@ -2067,14 +2133,24 @@ class AsyncTerminusService:
                 "default_type": {"@type": "Optional", "@class": "xsd:string"},
                 # 🔥 ULTRA! Array/List constraints
                 "min_items": {"@type": "Optional", "@class": "xsd:integer"},
-                "max_items": {"@type": "Optional", "@class": "xsd:integer"}
+                "max_items": {"@type": "Optional", "@class": "xsd:integer"},
+                # 🔥 ULTRA! Relationship-specific fields
+                "is_relationship": {"@type": "Optional", "@class": "xsd:boolean"},
+                "is_explicit_relationship": {"@type": "Optional", "@class": "xsd:boolean"},
+                "converted_from_property": {"@type": "Optional", "@class": "xsd:boolean"},
+                "target_class": {"@type": "Optional", "@class": "xsd:string"},
+                "cardinality": {"@type": "Optional", "@class": "xsd:string"},
+                "min_cardinality": {"@type": "Optional", "@class": "xsd:integer"},
+                "max_cardinality": {"@type": "Optional", "@class": "xsd:integer"},
+                "inverse_predicate": {"@type": "Optional", "@class": "xsd:string"},
+                "inverse_label_en": {"@type": "Optional", "@class": "xsd:string"}
             }
             
-            try:
-                await self._make_request("POST", schema_endpoint, [field_metadata_schema], params={"graph_type": "schema", "author": self.connection_info.user, "message": "Creating FieldMetadata schema"})
-                logger.info("📝 Created FieldMetadata schema")
-            except Exception as e:
-                logger.warning(f"FieldMetadata schema creation failed: {e}")
+                try:
+                    await self._make_request("POST", schema_endpoint, [field_metadata_schema], params={"graph_type": "schema", "author": self.connection_info.user, "message": "Creating FieldMetadata schema"})
+                    logger.info("📝 Created FieldMetadata schema")
+                except Exception as e:
+                    logger.warning(f"FieldMetadata schema creation failed: {e}")
             
             # ClassMetadata 스키마 클래스 생성
             class_metadata_schema = {
@@ -2163,8 +2239,10 @@ class AsyncTerminusService:
             logger.warning(f"⚠️ Class ID '{class_id}' might be a reserved word!")
         
         # 🔥 THINK ULTRA! Property → Relationship 자동 변환
+        logger.warning(f"🔥🔥🔥 BEFORE conversion class_data: {json.dumps(class_data, indent=2, ensure_ascii=False)}")
         logger.info("🔄 Processing property to relationship conversion...")
         class_data = self.property_converter.process_class_data(class_data)
+        logger.warning(f"🔥🔥🔥 AFTER conversion class_data: {json.dumps(class_data, indent=2, ensure_ascii=False)}")
         logger.info(f"📊 After conversion: {len(class_data.get('properties', []))} properties, {len(class_data.get('relationships', []))} relationships")
         
         # TerminusDB 시스템 클래스 확인
@@ -2274,12 +2352,15 @@ class AsyncTerminusService:
                             logger.info(f"✅ Array type: {prop_name} -> List<{element_type_mapped}>")
                     
                     elif prop_type.startswith("union<") and prop_type.endswith(">"):
-                        # Union<Type1|Type2|...> 형식 처리 (OneOfType)
+                        # 🔥 ULTRA! Union<Type1|Type2|...> 형식 처리 - JSON string으로 변환
                         type_list_str = prop_type[6:-1]  # "union<string|integer>" -> "string|integer"
                         type_options = [t.strip() for t in type_list_str.split("|")]
-                        mapped_options = [converter.convert_property_type(t) for t in type_options]
-                        schema_builder.add_one_of_type(prop_name, mapped_options, optional=not required)
-                        logger.info(f"✅ Union type: {prop_name} -> OneOfType{mapped_options}")
+                        # Store union types as JSON string since TerminusDB doesn't support OneOfType
+                        schema_builder.add_string_property(prop_name, optional=not required)
+                        logger.warning(f"⚠️ Union type not supported by TerminusDB - converting {prop_name} to JSON string (was union<{type_list_str}>)")
+                        # Store union information in constraints for metadata
+                        if constraints:
+                            constraints["original_union_types"] = type_options
                     
                     elif prop_type.startswith("foreign<") and prop_type.endswith(">"):
                         # Foreign<TargetClass> 형식 처리
@@ -2516,6 +2597,17 @@ class AsyncTerminusService:
         
         # 4. 스마트 키 전략 (간단한 Random 키 사용)
         logger.info(f"🔑 Using Random key for class: {class_id} (safe default)")
+        
+        # 🔥 THINK ULTRA! Handle abstract and parent_class properties
+        if class_data.get("abstract", False):
+            # TerminusDB v11.x uses @abstract as empty array
+            schema_doc["@abstract"] = []
+            logger.info(f"🔧 Class {class_id} marked as abstract")
+        
+        if class_data.get("parent_class"):
+            # TerminusDB uses @inherits for inheritance
+            schema_doc["@inherits"] = class_data["parent_class"]
+            logger.info(f"🔧 Class {class_id} inherits from {class_data['parent_class']}")
 
         # 🔥 THINK ULTRA FIX! Document API 사용 (Schema API는 TerminusDB 11.x에서 문제 있음)
         endpoint = f"/api/document/{self.connection_info.account}/{db_name}"

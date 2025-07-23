@@ -10,11 +10,13 @@ load_dotenv()
 # Standard library imports
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
 
 # Third party imports
 import httpx
+import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -79,7 +81,9 @@ from bff.services.oms_client import OMSClient
 
 # 로깅 설정
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, 
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    force=True
 )
 logger = logging.getLogger(__name__)
 
@@ -171,6 +175,17 @@ else:
     logger.info("🚫 CORS disabled")
 
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    logger.info(
+        f'Request: {request.method} {request.url.path} - Response: {response.status_code} - Time: {process_time:.4f}s'
+    )
+    return response
+
+
 # 의존성 주입
 
 
@@ -188,139 +203,161 @@ else:
 # Note: Database creation moved to database router (POST /api/v1/databases)
 
 
-@app.post("/database/{db_name}/ontology", response_model=OntologyResponse)
-async def create_ontology(
-    db_name: str,
-    ontology_data: OntologyCreateRequestBFF,
-    request: Request,
-    oms: OMSClient = Depends(get_oms_client),
-    mapper: LabelMapper = Depends(get_label_mapper),
-):
-    """온톨로지 클래스 생성"""
-    lang = get_accept_language(request)
-
-    try:
+# 🔥 THINK ULTRA! Commented out duplicate route - using router version instead
+# @app.post("/database/{db_name}/ontology", response_model=OntologyResponse)
+# async def create_ontology(
+#     db_name: str,
+#     ontology_data: OntologyCreateRequestBFF,
+#     request: Request,
+#     oms: OMSClient = Depends(get_oms_client),
+#     mapper: LabelMapper = Depends(get_label_mapper),
+# ):
+#     """온톨로지 클래스 생성"""
+#     lang = get_accept_language(request)
+# 
+#     try:
         # 입력 데이터 보안 검증
-        db_name = validate_db_name(db_name)
-
+#         db_name = validate_db_name(db_name)
+# 
         # 온톨로지 데이터 정화
-        sanitized_data = sanitize_input(ontology_data.dict())
-
+#         sanitized_data = sanitize_input(ontology_data.dict())
+# 
         # 공통 ID 생성 유틸리티 사용
-        from shared.utils.id_generator import generate_ontology_id
-
+#         from shared.utils.id_generator import generate_ontology_id
+# 
         # 레이블로부터 ID 생성
-        class_id = generate_ontology_id(
-            label=sanitized_data.get("label"),
-            preserve_camel_case=True,
-            handle_korean=True,
-            default_fallback="UnnamedClass",
-        )
-
+#         class_id = generate_ontology_id(
+#             label=sanitized_data.get("label"),
+#             preserve_camel_case=True,
+#             handle_korean=True,
+#             default_fallback="UnnamedClass",
+#         )
+# 
         # 생성된 ID를 데이터에 추가
-        sanitized_data["id"] = class_id
-
+#         sanitized_data["id"] = class_id
+# 
         # 클래스 ID 검증
-        sanitized_data["id"] = validate_class_id(sanitized_data["id"])
-
+#         sanitized_data["id"] = validate_class_id(sanitized_data["id"])
+# 
         # Label 매핑 등록
-        await mapper.register_class(
-            db_name=db_name,
-            class_id=sanitized_data.get("id"),
-            label=sanitized_data.get("label"),
-            description=sanitized_data.get("description"),
-        )
-
+#         await mapper.register_class(
+#             db_name=db_name,
+#             class_id=sanitized_data.get("id"),
+#             label=sanitized_data.get("label"),
+#             description=sanitized_data.get("description"),
+#         )
+# 
         # 속성 매핑 등록 (정화된 데이터 사용)
-        for prop in sanitized_data.get("properties", []):
-            prop_sanitized = sanitize_input(prop) if isinstance(prop, dict) else prop
-            await mapper.register_property(
-                db_name=db_name,
-                class_id=sanitized_data.get("id"),
-                property_id=(
-                    prop_sanitized.get("name")
-                    if isinstance(prop_sanitized, dict)
-                    else getattr(prop_sanitized, "name", None)
-                ),
-                label=(
-                    prop_sanitized.get("label")
-                    if isinstance(prop_sanitized, dict)
-                    else getattr(prop_sanitized, "label", None)
-                ),
-            )
-
+#         for prop in sanitized_data.get("properties", []):
+#             prop_sanitized = sanitize_input(prop) if isinstance(prop, dict) else prop
+#             await mapper.register_property(
+#                 db_name=db_name,
+#                 class_id=sanitized_data.get("id"),
+#                 property_id=(
+#                     prop_sanitized.get("name")
+#                     if isinstance(prop_sanitized, dict)
+#                     else getattr(prop_sanitized, "name", None)
+#                 ),
+#                 label=(
+#                     prop_sanitized.get("label")
+#                     if isinstance(prop_sanitized, dict)
+#                     else getattr(prop_sanitized, "label", None)
+#                 ),
+#             )
+# 
         # 관계 매핑 등록 (정화된 데이터 사용)
-        for rel in sanitized_data.get("relationships", []):
-            rel_sanitized = sanitize_input(rel) if isinstance(rel, dict) else rel
-            await mapper.register_relationship(
-                db_name=db_name,
-                predicate=(
-                    rel_sanitized.get("predicate")
-                    if isinstance(rel_sanitized, dict)
-                    else getattr(rel_sanitized, "predicate", None)
-                ),
-                label=(
-                    rel_sanitized.get("label")
-                    if isinstance(rel_sanitized, dict)
-                    else getattr(rel_sanitized, "label", None)
-                ),
-            )
-
+#         for rel in sanitized_data.get("relationships", []):
+#             rel_sanitized = sanitize_input(rel) if isinstance(rel, dict) else rel
+#             await mapper.register_relationship(
+#                 db_name=db_name,
+#                 predicate=(
+#                     rel_sanitized.get("predicate")
+#                     if isinstance(rel_sanitized, dict)
+#                     else getattr(rel_sanitized, "predicate", None)
+#                 ),
+#                 label=(
+#                     rel_sanitized.get("label")
+#                     if isinstance(rel_sanitized, dict)
+#                     else getattr(rel_sanitized, "label", None)
+#                 ),
+#             )
+# 
+        # 🔥 THINK ULTRA! Transform properties for OMS compatibility
+        # Convert 'target' to 'linkTarget' for link-type properties
+#         def transform_properties_for_oms(data):
+#             if 'properties' in data and isinstance(data['properties'], list):
+#                 for prop in data['properties']:
+#                     if isinstance(prop, dict):
+                        # Convert target to linkTarget for link type properties
+#                         if prop.get('type') == 'link' and 'target' in prop:
+#                             prop['linkTarget'] = prop.pop('target')
+#                             logger.info(f"🔧 Converted property '{prop.get('name')}' target -> linkTarget: {prop.get('linkTarget')}")
+#                         
+                        # Handle array properties with link items
+#                         if prop.get('type') == 'array' and 'items' in prop:
+#                             items = prop['items']
+#                             if isinstance(items, dict) and items.get('type') == 'link' and 'target' in items:
+#                                 items['linkTarget'] = items.pop('target')
+#                                 logger.info(f"🔧 Converted array property '{prop.get('name')}' items target -> linkTarget: {items.get('linkTarget')}")
+#         
+        # Apply transformation
+#         transform_properties_for_oms(sanitized_data)
+#         
         # OMS를 통해 온톨로지 생성 (생성된 ID를 포함한 정화된 데이터 사용)
-        logger.info(
-            f"Sending to OMS create_ontology: {json.dumps(sanitized_data, ensure_ascii=False)}"
-        )
-        result = await oms.create_ontology(db_name, sanitized_data)
-
+#         logger.info(
+#             f"Sending to OMS create_ontology: {json.dumps(sanitized_data, ensure_ascii=False)}"
+#         )
+#         result = await oms.create_ontology(db_name, sanitized_data)
+# 
         # 응답 생성
-        label_text = sanitized_data.get("label", "")
-        if isinstance(label_text, dict):
+#         label_text = sanitized_data.get("label", "")
+#         if isinstance(label_text, dict):
             # Multilingual label - get by language with fallback
-            label_text = label_text.get(lang) or label_text.get("ko") or label_text.get("en") or ""
-
+#             label_text = label_text.get(lang) or label_text.get("ko") or label_text.get("en") or ""
+# 
         # OMS 응답에서 필요한 정보 추출
         # OMS는 data에 class ID 리스트를 반환함
-        oms_data = result.get("data", [])
-        if isinstance(oms_data, list) and len(oms_data) > 0:
-            created_class_id = oms_data[0]
-        else:
-            created_class_id = sanitized_data.get("id")
-
+#         oms_data = result.get("data", [])
+#         if isinstance(oms_data, list) and len(oms_data) > 0:
+#             created_class_id = oms_data[0]
+#         else:
+#             created_class_id = sanitized_data.get("id")
+# 
         # Create OntologyBase object
-        from shared.models.ontology import OntologyBase
-
-        ontology_base = OntologyBase(
-            id=created_class_id,
-            label=ontology_data.label,
-            description=ontology_data.description,
-            properties=ontology_data.properties,
-            relationships=ontology_data.relationships,
-            metadata={"created": True, "database": db_name},
-        )
-
-        return OntologyResponse(
-            status="success",
-            message=f"'{label_text}' 온톨로지가 생성되었습니다",
-            data=ontology_base,
-        )
-
-    except SecurityViolationError as e:
-        logger.warning(f"Security violation in create_ontology: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="입력 데이터에 보안 위반이 감지되었습니다",
-        )
-    except HTTPException:
-        raise
-    except (httpx.HTTPError, httpx.TimeoutException, ValueError, KeyError) as e:
-        logger.error(f"Failed to create ontology: {e}")
-        import traceback
-
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"온톨로지 생성 중 오류 발생: {str(e)}",
-        )
+#         from shared.models.ontology import OntologyBase
+# 
+#         ontology_base = OntologyBase(
+#             id=created_class_id,
+#             label=ontology_data.label,
+#             description=ontology_data.description,
+#             properties=ontology_data.properties,
+#             relationships=ontology_data.relationships,
+#             metadata={"created": True, "database": db_name},
+#         )
+# 
+#         return OntologyResponse(
+#             status="success",
+#             message=f"'{label_text}' 온톨로지가 생성되었습니다",
+#             data=ontology_base,
+#         )
+# 
+#     except SecurityViolationError as e:
+#         logger.warning(f"Security violation in create_ontology: {e}")
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail="입력 데이터에 보안 위반이 감지되었습니다",
+#         )
+#     except HTTPException:
+#         raise
+#     except (httpx.HTTPError, httpx.TimeoutException, ValueError, KeyError) as e:
+#         logger.error(f"Failed to create ontology: {e}")
+#         import traceback
+# 
+#         logger.error(f"Traceback: {traceback.format_exc()}")
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail=f"온톨로지 생성 중 오류 발생: {str(e)}",
+#         )
 
 
 @app.get("/database/{db_name}/ontology/{class_label}")
@@ -397,20 +434,21 @@ async def get_ontology(
         else:
             desc_value = None
 
-        # Create OntologyBase object
-        ontology_base = OntologyBase(
-            id=display_result.get("id"),
-            label=label_value,
-            description=desc_value,
-            properties=display_result.get("properties", []),
-            relationships=display_result.get("relationships", []),
-            parent_class=display_result.get("parent_class"),
-            abstract=display_result.get("abstract", False),
-            metadata=display_result.get("metadata"),
-        )
-
-        # Return the ontology directly as OntologyResponse
-        return ontology_base
+        # Return the ontology data directly as a dictionary
+        ontology_result = {
+            "id": display_result.get("id"),
+            "label": label_value,
+            "description": desc_value,
+            "properties": display_result.get("properties", []),
+            "relationships": display_result.get("relationships", []),
+            "parent_class": display_result.get("parent_class"),
+            "abstract": display_result.get("abstract", False),
+            "metadata": display_result.get("metadata"),
+            "created_at": display_result.get("created_at"),
+            "updated_at": display_result.get("updated_at"),
+        }
+        
+        return ontology_result
 
     except HTTPException:
         raise
@@ -1050,6 +1088,12 @@ if not ServiceConfig.is_production():
     async def debug_cors():
         """CORS 설정 디버그 정보"""
         return ServiceConfig.get_cors_debug_info()
+    
+    @app.post("/debug/test")
+    async def debug_test(data: Dict[str, Any]):
+        """POST 요청 디버그 테스트"""
+        logger.info(f"🔥 DEBUG TEST - Received POST: {data}")
+        return {"received": data, "status": "ok"}
 
 
 
@@ -1073,8 +1117,6 @@ app.include_router(health.router, tags=["health"])
 
 
 if __name__ == "__main__":
-    import uvicorn
-
     # SSL 설정 가져오기
     ssl_config = ServiceConfig.get_ssl_config()
 
@@ -1083,7 +1125,40 @@ if __name__ == "__main__":
         "host": ServiceConfig.get_bff_host(),
         "port": ServiceConfig.get_bff_port(),
         "reload": True,
-        "log_level": "info",
+        "log_config": {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "formatters": {
+                "default": {
+                    "()": "uvicorn.logging.DefaultFormatter",
+                    "fmt": "%(levelprefix)s %(asctime)s - %(message)s",
+                    "datefmt": "%Y-%m-%d %H:%M:%S",
+                },
+                "access": {
+                    "()": "uvicorn.logging.AccessFormatter",
+                    "fmt": '%(levelprefix)s %(asctime)s - %(client_addr)s - "%(request_line)s" %(status_code)s',
+                    "datefmt": "%Y-%m-%d %H:%M:%S",
+                },
+            },
+            "handlers": {
+                "default": {
+                    "formatter": "default",
+                    "class": "logging.StreamHandler",
+                    "stream": "ext://sys.stderr",
+                },
+                "access": {
+                    "formatter": "access",
+                    "class": "logging.StreamHandler",
+                    "stream": "ext://sys.stdout",
+                },
+            },
+            "loggers": {
+                "uvicorn": {"handlers": ["default"], "level": "INFO", "propagate": False},
+                "uvicorn.error": {"level": "INFO"},
+                "uvicorn.access": {"handlers": ["access"], "level": "INFO", "propagate": False},
+                "bff": {"handlers": ["default"], "level": "INFO", "propagate": False},
+            },
+        },
     }
 
     # SSL 설정이 있으면 추가

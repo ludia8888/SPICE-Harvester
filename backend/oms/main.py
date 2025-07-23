@@ -10,9 +10,11 @@ load_dotenv()  # Load .env file
 import json
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from typing import Optional
 
+import uvicorn
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,7 +33,9 @@ from shared.utils.jsonld import JSONToJSONLDConverter
 
 # 로깅 설정
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, 
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    force=True
 )
 logger = logging.getLogger(__name__)
 
@@ -99,6 +103,17 @@ if ServiceConfig.is_cors_enabled():
     )
 else:
     logger.info("🚫 CORS disabled")
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    logger.info(
+        f'Request: {request.method} {request.url.path} - Response: {response.status_code} - Time: {process_time:.4f}s'
+    )
+    return response
 
 
 # 에러 핸들러
@@ -232,8 +247,6 @@ app.include_router(branch.router, prefix="/api/v1", tags=["branch"])
 app.include_router(version.router, prefix="/api/v1", tags=["version"])
 
 if __name__ == "__main__":
-    import uvicorn
-
     # SSL 설정 가져오기
     ssl_config = ServiceConfig.get_ssl_config()
 
@@ -242,7 +255,40 @@ if __name__ == "__main__":
         "host": ServiceConfig.get_oms_host(),
         "port": ServiceConfig.get_oms_port(),
         "reload": True,
-        "log_level": "info",
+        "log_config": {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "formatters": {
+                "default": {
+                    "()": "uvicorn.logging.DefaultFormatter",
+                    "fmt": "%(levelprefix)s %(asctime)s - %(message)s",
+                    "datefmt": "%Y-%m-%d %H:%M:%S",
+                },
+                "access": {
+                    "()": "uvicorn.logging.AccessFormatter",
+                    "fmt": '%(levelprefix)s %(asctime)s - %(client_addr)s - "%(request_line)s" %(status_code)s',
+                    "datefmt": "%Y-%m-%d %H:%M:%S",
+                },
+            },
+            "handlers": {
+                "default": {
+                    "formatter": "default",
+                    "class": "logging.StreamHandler",
+                    "stream": "ext://sys.stderr",
+                },
+                "access": {
+                    "formatter": "access",
+                    "class": "logging.StreamHandler",
+                    "stream": "ext://sys.stdout",
+                },
+            },
+            "loggers": {
+                "uvicorn": {"handlers": ["default"], "level": "INFO", "propagate": False},
+                "uvicorn.error": {"level": "INFO"},
+                "uvicorn.access": {"handlers": ["access"], "level": "INFO", "propagate": False},
+                "oms": {"handlers": ["default"], "level": "INFO", "propagate": False},
+            },
+        },
     }
 
     # SSL 설정이 있으면 추가

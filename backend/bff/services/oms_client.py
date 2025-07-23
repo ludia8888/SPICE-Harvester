@@ -100,6 +100,18 @@ class OMSClient:
     async def create_ontology(self, db_name: str, ontology_data: Dict[str, Any]) -> Dict[str, Any]:
         """온톨로지 생성"""
         try:
+            # 🔥 ULTRA DEBUG! Log what we're sending to OMS
+            import json
+            debug_log = f"🔥🔥🔥 OMSClient sending to OMS: {json.dumps(ontology_data, ensure_ascii=False, indent=2)}"
+            logger.warning(debug_log)
+            print(debug_log)
+            
+            # Write to file for verification
+            import datetime
+            debug_file = f"/tmp/oms_client_debug_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            with open(debug_file, 'w') as f:
+                f.write(debug_log)
+            
             # Send data as-is to OMS (no format conversion needed)
             response = await self.client.post(
                 f"/api/v1/ontology/{db_name}/create", json=ontology_data

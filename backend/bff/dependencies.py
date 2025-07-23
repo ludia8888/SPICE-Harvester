@@ -4,6 +4,7 @@ BFF Dependencies
 """
 
 from typing import Any, Dict, List, Optional
+import json
 
 import httpx
 from fastapi import HTTPException, status
@@ -79,6 +80,8 @@ class TerminusService:
 
     async def create_class(self, db_name: str, class_data: dict):
         """클래스 생성"""
+        print(f"🔥🔥🔥 TerminusService.create_class called! db_name={db_name}")
+        print(f"🔥🔥🔥 class_data={json.dumps(class_data, ensure_ascii=False, indent=2)}")
         client = get_oms_client()
         response = await client.create_ontology(db_name, class_data)
         # Return the created data

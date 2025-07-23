@@ -3,6 +3,7 @@ Property to Relationship 자동 변환기
 사용자가 클래스 내부에서 정의한 속성을 관계로 자동 변환
 """
 
+import json
 import logging
 from typing import Dict, List, Tuple, Optional, Any
 
@@ -34,12 +35,20 @@ class PropertyToRelationshipConverter:
         """
         logger.info(f"🔄 Processing class data for property→relationship conversion: {class_data.get('id')}")
         
+        # 🔥 ULTRA DEBUG! Input data analysis
+        logger.error(f"🔥🔥🔥 PropertyToRelationshipConverter.process_class_data() CALLED!")
+        logger.error(f"🔥🔥🔥 INPUT CLASS DATA: {json.dumps(class_data, indent=2, ensure_ascii=False)}")
+        
         # 복사본 생성
         processed_data = class_data.copy()
         
         # properties와 relationships 초기화
         properties = class_data.get("properties", [])
         relationships = class_data.get("relationships", [])
+        
+        logger.error(f"🔥🔥🔥 FOUND {len(properties)} PROPERTIES TO ANALYZE")
+        for i, prop in enumerate(properties):
+            logger.error(f"🔥🔥🔥 PROPERTY {i+1}: {json.dumps(prop, indent=2, ensure_ascii=False)}")
         
         # 변환된 속성과 관계를 저장할 리스트
         final_properties = []
@@ -48,10 +57,18 @@ class PropertyToRelationshipConverter:
         # 각 property 검사 및 변환
         for prop_data in properties:
             if isinstance(prop_data, dict):
+                # 🔥 ULTRA DEBUG!
+                logger.warning(f"🔥 Processing property data: {prop_data}")
+                # Ensure label exists (use provided label or fallback to name)
+                if "label" not in prop_data or not prop_data["label"]:
+                    prop_data["label"] = prop_data.get("name", "unnamed")
                 prop = Property(**prop_data)
             else:
                 prop = prop_data
                 
+            # 🔥 ULTRA DEBUG!
+            logger.warning(f"🔥 Property object: name={prop.name}, type={prop.type}, linkTarget={prop.linkTarget}, target={prop.target}")
+            
             # 클래스 참조인지 확인
             if prop.is_class_reference():
                 logger.info(f"🔗 Converting property '{prop.name}' to relationship (target: {prop.linkTarget or prop.type})")
@@ -69,6 +86,7 @@ class PropertyToRelationshipConverter:
                 logger.debug(f"✅ Converted property to relationship: {relationship_data}")
             else:
                 # 일반 속성은 그대로 유지
+                logger.warning(f"🔥 Property '{prop.name}' is NOT a class reference, keeping as property")
                 final_properties.append(prop_data if isinstance(prop_data, dict) else prop.model_dump())
                 
         # 기존 relationships와 변환된 relationships 병합
@@ -89,6 +107,16 @@ class PropertyToRelationshipConverter:
         # 변환 통계 로깅
         logger.info(f"📊 Conversion complete: {len(properties)} properties → {len(final_properties)} properties + {len(converted_relationships)} relationships")
         logger.info(f"📊 Total relationships: {len(processed_data['relationships'])} (after deduplication)")
+        
+        # 🔥 ULTRA DEBUG! Output data analysis
+        logger.error(f"🔥🔥🔥 PropertyToRelationshipConverter.process_class_data() OUTPUT:")
+        logger.error(f"🔥🔥🔥 OUTPUT CLASS DATA: {json.dumps(processed_data, indent=2, ensure_ascii=False)}")
+        logger.error(f"🔥🔥🔥 FINAL PROPERTIES ({len(final_properties)}):")
+        for i, prop in enumerate(final_properties):
+            logger.error(f"🔥🔥🔥   PROPERTY {i+1}: {json.dumps(prop, indent=2, ensure_ascii=False)}")
+        logger.error(f"🔥🔥🔥 CONVERTED RELATIONSHIPS ({len(converted_relationships)}):")
+        for i, rel in enumerate(converted_relationships):
+            logger.error(f"🔥🔥🔥   RELATIONSHIP {i+1}: {json.dumps(rel, indent=2, ensure_ascii=False)}")
         
         return processed_data
     
@@ -124,6 +152,9 @@ class PropertyToRelationshipConverter:
         
         for prop_data in properties:
             if isinstance(prop_data, dict):
+                # Ensure label exists (use provided label or fallback to name)
+                if "label" not in prop_data or not prop_data["label"]:
+                    prop_data["label"] = prop_data.get("name", "unnamed")
                 prop = Property(**prop_data)
             else:
                 prop = prop_data

@@ -170,7 +170,9 @@ class TerminusSchemaBuilder:
     
     def add_one_of_type(self, name: str, type_options: List[str], optional: bool = False) -> "TerminusSchemaBuilder":
         """OneOfType 속성 추가 (Union type)"""
-        prop_type = {"@type": "OneOfType", "@class": type_options}
+        # 🔥 ULTRA! TerminusDB doesn't support OneOfType - use JSON string instead
+        logger.warning(f"OneOfType not supported by TerminusDB - converting field '{name}' to JSON string")
+        prop_type = TerminusSchemaType.STRING.value  # Store as JSON string
         if optional:
             prop_type = {"@type": "Optional", "@class": prop_type}
         self.schema_data[name] = prop_type
@@ -178,7 +180,9 @@ class TerminusSchemaBuilder:
     
     def add_geopoint_property(self, name: str, optional: bool = False) -> "TerminusSchemaBuilder":
         """지리적 좌표 속성 추가"""
-        prop_type = TerminusSchemaType.GEOPOINT.value
+        # 🔥 ULTRA! TerminusDB doesn't support xsd:geoPoint - use JSON string instead
+        logger.warning(f"GeoPoint not supported by TerminusDB - converting field '{name}' to JSON string")
+        prop_type = TerminusSchemaType.STRING.value  # Store as JSON string
         if optional:
             prop_type = {"@type": "Optional", "@class": prop_type}
         self.schema_data[name] = prop_type
@@ -225,7 +229,7 @@ class TerminusSchemaConverter:
             "uri": TerminusSchemaType.ANYURI.value,
             "url": TerminusSchemaType.ANYURI.value,
             "email": TerminusSchemaType.STRING.value,  # Email is a string with pattern validation
-            "geopoint": TerminusSchemaType.GEOPOINT.value,
+            "geopoint": TerminusSchemaType.STRING.value,  # 🔥 ULTRA! Store as JSON string since xsd:geoPoint not supported
             "json": TerminusSchemaType.STRING.value,  # JSON is stored as string
         }
         
@@ -308,11 +312,9 @@ class TerminusSchemaConverter:
             }
         
         elif type_name == "union":
-            type_options = type_config.get("types", [])
-            return {
-                "@type": "OneOfType",
-                "@class": type_options
-            }
+            # 🔥 ULTRA! TerminusDB doesn't support OneOfType - use JSON string instead
+            logger.warning(f"Union type not supported by TerminusDB - converting to JSON string")
+            return "xsd:string"  # Store as JSON string
         
         # 알 수 없는 타입은 그대로 반환
         return type_config

@@ -3,6 +3,7 @@
 온톨로지 생성, 조회, 수정, 삭제를 담당
 """
 
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -14,13 +15,15 @@ from shared.models.ontology import (
     OntologyCreateRequestBFF,
     OntologyResponse,
     OntologyUpdateInput,
+    Property,
+    Relationship,
 )
 
 # Add shared path for common utilities
 from shared.utils.language import get_accept_language
 
 # Security validation imports
-from shared.security.input_sanitizer import sanitize_input, validate_db_name
+from shared.security.input_sanitizer import sanitize_input, validate_db_name, validate_class_id
 
 
 # Schema suggestion request models
@@ -61,7 +64,7 @@ router = APIRouter(prefix="/database/{db_name}", tags=["Ontology Management"])
 @router.post("/ontology", response_model=OntologyResponse)
 async def create_ontology(
     db_name: str,
-    ontology: OntologyCreateRequestBFF,
+    ontology: Dict[str, Any],  # Accept raw dict to preserve target field
     mapper: LabelMapper = Depends(get_label_mapper),
     terminus: TerminusService = Depends(get_terminus_service),
     jsonld_conv: JSONToJSONLDConverter = Depends(get_jsonld_converter),
@@ -72,43 +75,80 @@ async def create_ontology(
     새로운 온톨로지 클래스를 생성합니다.
     레이블 기반으로 ID가 자동 생성됩니다.
     """
+    # 🔥 ULTRA DEBUG! Force logging to check if route is called
+    print(f"🔥🔥🔥 CREATE_ONTOLOGY CALLED! db_name={db_name}, ontology={ontology}")
+    logger.warning(f"🔥🔥🔥 CREATE_ONTOLOGY CALLED! db_name={db_name}, ontology={ontology}")
+    
     try:
         # 입력 데이터 보안 검증
         db_name = validate_db_name(db_name)
         
-        # 입력 데이터를 딕셔너리로 변환
-        ontology_dict = ontology.dict(exclude_unset=True)
+        # 입력 데이터 처리 (이미 dict 형태)
+        ontology_dict = ontology.copy()  # Make a copy to avoid modifying the original
         ontology_dict = sanitize_input(ontology_dict)
 
         # ID 생성 또는 검증
-        if ontology.id:
+        if ontology_dict.get('id'):
             # 사용자가 ID를 제공한 경우 검증
-            class_id = validate_class_id(ontology.id)
+            class_id = validate_class_id(ontology_dict['id'])
             logger.info(f"Using provided class_id '{class_id}'")
         else:
             # ID가 제공되지 않은 경우 자동 생성
             from shared.utils.id_generator import generate_simple_id
             class_id = generate_simple_id(
-                label=ontology.label, use_timestamp_for_korean=True, default_fallback="UnnamedClass"
+                label=ontology_dict.get('label', ''), use_timestamp_for_korean=True, default_fallback="UnnamedClass"
             )
-            logger.info(f"Generated class_id '{class_id}' from label '{ontology.label}'")
+            logger.info(f"Generated class_id '{class_id}' from label '{ontology_dict.get('label', '')}')")
 
         ontology_dict["id"] = class_id
 
+        # 🔥 THINK ULTRA! Transform properties for OMS compatibility
+        # Convert 'target' to 'linkTarget' for link-type properties
+        def transform_properties_for_oms(data):
+            if 'properties' in data and isinstance(data['properties'], list):
+                for prop in data['properties']:
+                    if isinstance(prop, dict):
+                        # Convert target to linkTarget for link type properties
+                        if prop.get('type') == 'link' and 'target' in prop:
+                            prop['linkTarget'] = prop.pop('target')
+                            logger.info(f"🔧 Converted property '{prop.get('name')}' target -> linkTarget: {prop.get('linkTarget')}")
+                        
+                        # Handle array properties with link items
+                        if prop.get('type') == 'array' and 'items' in prop:
+                            items = prop['items']
+                            if isinstance(items, dict) and items.get('type') == 'link' and 'target' in items:
+                                items['linkTarget'] = items.pop('target')
+                                logger.info(f"🔧 Converted array property '{prop.get('name')}' items target -> linkTarget: {items.get('linkTarget')}")
+        
+        # Apply transformation
+        transform_properties_for_oms(ontology_dict)
+        
+        # 🔥 ULTRA DEBUG! Write to file to verify transformation
+        import datetime
+        debug_file = f"/tmp/bff_debug_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        with open(debug_file, 'w') as f:
+            f.write(f"BEFORE transformation: {json.dumps(ontology, ensure_ascii=False, indent=2)}\n\n")
+            f.write(f"AFTER transformation: {json.dumps(ontology_dict, ensure_ascii=False, indent=2)}\n")
+        
+        # Log transformed data for debugging
+        logger.info(f"🔥 ULTRA DEBUG! Sending to OMS: {json.dumps(ontology_dict, ensure_ascii=False, indent=2)}")
+        
         # 온톨로지 생성
         result = await terminus.create_class(db_name, ontology_dict)
         logger.info(f"OMS create result: {result}")
 
         # 레이블 매핑 등록
-        await mapper.register_class(db_name, class_id, ontology.label, ontology.description)
+        await mapper.register_class(db_name, class_id, ontology_dict.get('label', ''), ontology_dict.get('description'))
 
         # 속성 레이블 매핑
-        for prop in ontology.properties:
-            await mapper.register_property(db_name, class_id, prop.name, prop.label)
+        for prop in ontology_dict.get('properties', []):
+            if isinstance(prop, dict):
+                await mapper.register_property(db_name, class_id, prop.get('name', ''), prop.get('label', ''))
 
         # 관계 레이블 매핑
-        for rel in ontology.relationships:
-            await mapper.register_relationship(db_name, rel.predicate, rel.label)
+        for rel in ontology_dict.get('relationships', []):
+            if isinstance(rel, dict):
+                await mapper.register_relationship(db_name, rel.get('predicate', ''), rel.get('label', ''))
 
         # OMS 응답에서 생성된 데이터 추출
         if isinstance(result, dict):
@@ -124,27 +164,27 @@ async def create_ontology(
                 class_id = result["id"]
 
         # 응답 생성
-        ontology_base = OntologyBase(
-            id=class_id,
-            label=ontology.label,
-            description=ontology.description,
-            properties=ontology.properties,
-            relationships=ontology.relationships,
-            metadata={"created": True, "database": db_name},
-        )
-        # OntologyResponse는 OntologyBase를 상속받으므로 직접 필드 전달
-        # OntologyBase에 없는 필드는 원본 ontology에서 가져오기
+        # Validate properties and relationships to ensure they're properly formatted
+        validated_properties = []
+        for prop in ontology_dict.get('properties', []):
+            if isinstance(prop, dict):
+                validated_properties.append(Property(**prop))
+                
+        validated_relationships = []
+        for rel in ontology_dict.get('relationships', []):
+            if isinstance(rel, dict):
+                validated_relationships.append(Relationship(**rel))
+        
+        # Create response
         return OntologyResponse(
-            id=ontology_base.id,
-            label=ontology_base.label,
-            description=ontology_base.description,
-            parent_class=getattr(ontology, 'parent_class', None),
-            abstract=getattr(ontology, 'abstract', False),
-            properties=getattr(ontology, 'properties', []),
-            relationships=getattr(ontology, 'relationships', []),
-            metadata={"created": True, "database": db_name},
-            created_at=ontology_base.created_at,
-            updated_at=ontology_base.updated_at
+            id=class_id,
+            label=ontology_dict.get('label', ''),
+            description=ontology_dict.get('description'),
+            parent_class=ontology_dict.get('parent_class'),
+            abstract=ontology_dict.get('abstract', False),
+            properties=validated_properties,
+            relationships=validated_relationships,
+            metadata={"created": True, "database": db_name}
         )
 
     except HTTPException as e:
@@ -248,11 +288,11 @@ async def get_ontology(
             "relationships": ontology_data.get("relationships", []),
             "parent_class": ontology_data.get("parent_class"),
             "abstract": ontology_data.get("abstract", False),
-            "metadata": ontology_data.get("metadata"),
+            "metadata": ontology_data.get("metadata", {}),
         }
 
-        # OntologyResponse expects a 'data' field
-        return OntologyResponse(data=OntologyBase(**ontology_base_data))
+        # OntologyResponse inherits from OntologyBase, so pass fields directly
+        return OntologyResponse(**ontology_base_data)
 
     except HTTPException:
         raise

@@ -16,7 +16,7 @@ class Cardinality(Enum):
     ONE_TO_ONE = "1:1"
     ONE_TO_MANY = "1:n"
     MANY_TO_ONE = "n:1"
-    MANY_TO_MANY = "n:n"
+    MANY_TO_MANY = "n:m"
     ONE = "one"
     MANY = "many"
 
@@ -90,9 +90,12 @@ class Relationship(BaseModel):
     @classmethod
     def validate_cardinality(cls, v) -> str:
         """Validate cardinality format"""
-        valid_cardinalities = ["1:1", "1:n", "n:1", "n:m"]
+        valid_cardinalities = ["1:1", "1:n", "n:1", "n:m", "n:n"]  # 🔥 THINK ULTRA! Added n:n for OMS compatibility
         if v not in valid_cardinalities:
             raise ValueError(f"Invalid cardinality: {v}. Must be one of {valid_cardinalities}")
+        # Normalize n:n to n:m for consistency
+        if v == "n:n":
+            return "n:m"
         return v
 
     def is_valid_cardinality(self) -> bool:
@@ -113,6 +116,7 @@ class Property(BaseModel):
     constraints: Dict[str, Any] = Field(default_factory=dict, description="Property constraints")
     
     # 🔥 THINK ULTRA! Class reference support for ObjectProperty conversion
+    target: Optional[str] = Field(None, description="Target class for link properties (BFF input)")
     linkTarget: Optional[str] = Field(None, description="Target class for object reference (when type is a class)")
     isRelationship: Optional[bool] = Field(None, description="Whether this property represents a relationship")
     cardinality: Optional[str] = Field(None, description="Relationship cardinality (1:1, 1:n, n:1, n:m)")
@@ -173,16 +177,16 @@ class Property(BaseModel):
         # 🔥 THINK ULTRA! Array relationship 지원
         if self.type == "array" and self.items:
             items_type = self.items.get("type")
-            if items_type == "link" and self.items.get("linkTarget"):
+            if items_type == "link" and (self.items.get("linkTarget") or self.items.get("target")):
                 return True
             
-        # 명시적으로 linkTarget이 설정되었거나 isRelationship가 True인 경우
-        if self.linkTarget or self.isRelationship:
+        # 명시적으로 target, linkTarget이 설정되었거나 isRelationship가 True인 경우
+        if self.target or self.linkTarget or self.isRelationship:
             return True
         
         # 🔥 ULTRA! Handle parameterized types like list<string>, set<integer>, etc.
         type_lower = self.type.lower()
-        if type_lower.startswith(("list<", "set<", "array<", "optional<")) and type_lower.endswith(">"):
+        if type_lower.startswith(("list<", "set<", "array<", "optional<", "union<")) and type_lower.endswith(">"):
             # These are parameterized basic types, not class references
             return False
             
@@ -190,7 +194,8 @@ class Property(BaseModel):
         basic_types = {
             "STRING", "INTEGER", "DECIMAL", "BOOLEAN", "DATE", "DATETIME", "TIME", "FLOAT", "DOUBLE", "LONG", "TEXT",
             "ARRAY", "OBJECT", "ENUM", "EMAIL", "PHONE", "URL", "MONEY", "IP", "UUID",
-            "COORDINATE", "ADDRESS", "NAME", "IMAGE", "FILE", "LINK", "SET", "LIST"  # LINK 추가
+            "COORDINATE", "ADDRESS", "NAME", "IMAGE", "FILE", "LINK", "SET", "LIST",  # LINK 추가
+            "JSON", "GEOPOINT", "UNION", "OPTIONAL"  # 🔥 ULTRA! Added missing basic types
         }
         
         # xsd: 프리픽스가 있는 경우는 기본 타입
@@ -202,22 +207,22 @@ class Property(BaseModel):
     
     def to_relationship(self) -> Dict[str, Any]:
         """Convert property to relationship format"""
-        # 🔥 THINK ULTRA! type="link"일 때 linkTarget 필수 사용
+        # 🔥 THINK ULTRA! type="link"일 때 target 또는 linkTarget 사용
         if self.type == "link":
-            if not self.linkTarget:
-                raise ValueError(f"Property '{self.name}' with type='link' must have linkTarget")
-            target = self.linkTarget
+            if not self.target and not self.linkTarget:
+                raise ValueError(f"Property '{self.name}' with type='link' must have target or linkTarget")
+            target = self.target or self.linkTarget
             cardinality = self.cardinality or "n:1"  # link는 보통 n:1
         # 🔥 THINK ULTRA! Array relationship 지원
         elif self.type == "array" and self.items:
             items_type = self.items.get("type")
-            if items_type == "link" and self.items.get("linkTarget"):
-                target = self.items["linkTarget"]
+            if items_type == "link" and (self.items.get("linkTarget") or self.items.get("target")):
+                target = self.items.get("target") or self.items["linkTarget"]
                 cardinality = self.cardinality or "1:n"  # array는 보통 1:n
             else:
-                raise ValueError(f"Property '{self.name}' with type='array' must have items.type='link' and items.linkTarget")
+                raise ValueError(f"Property '{self.name}' with type='array' must have items.type='link' and items.linkTarget or items.target")
         else:
-            target = self.linkTarget or self.type
+            target = self.target or self.linkTarget or self.type
             cardinality = self.cardinality or "1:n"
             
         return {
