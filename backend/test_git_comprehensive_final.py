@@ -143,7 +143,31 @@ class GitLikeFeaturesValidator:
         logger.info("🔍 Testing rollback functionality...")
         
         try:
-            # 현재 상태를 롤백 대상으로 사용
+            # 롤백 테스트를 위해 추가 커밋 생성
+            try:
+                # 첫 번째 추가 온톨로지 생성 (두 번째 커밋)
+                test_ontology2 = {
+                    "id": "TestEntity2",
+                    "label": "Test Entity 2",
+                    "properties": [
+                        {"name": "name", "type": "STRING", "label": "Name"},
+                        {"name": "value", "type": "INT", "label": "Value"}
+                    ]
+                }
+                await self.terminus_service.create_ontology(self.test_db, test_ontology2)
+                logger.info("Created second test ontology for rollback test")
+                
+                # 커밋 생성
+                await self.terminus_service.commit(self.test_db, "Second commit for rollback test")
+                
+                # 히스토리 확인
+                history = await self.terminus_service.get_commit_history(self.test_db, limit=5)
+                logger.info(f"Commit history has {len(history)} commits")
+                
+            except Exception as setup_error:
+                logger.warning(f"Could not create additional commits: {setup_error}")
+            
+            # 이제 롤백 시도
             rollback_result = await self.terminus_service.rollback(
                 self.test_db, "HEAD~1"
             )
