@@ -249,6 +249,9 @@ class E2EUserScenarioTest:
         if resp.status_code == 200:
             await self.show_result("Employee 클래스 생성 완료")
             self.created_classes.append("Employee")
+        else:
+            error_data = resp.text
+            await self.show_result(f"❌ Employee 클래스 생성 실패: {resp.status_code} - {error_data}")
         
         # 2-4: Project 클래스 생성
         await self.log_step("2-4", "Project (프로젝트) 클래스 생성")
@@ -384,7 +387,7 @@ class E2EUserScenarioTest:
             ]
         }
         
-        resp = await client.patch(
+        resp = await client.put(
             f"{self.bff_url}/api/v1/database/{self.db_name}/ontology/Company",
             json=company_update
         )
@@ -415,7 +418,7 @@ class E2EUserScenarioTest:
             ]
         }
         
-        resp = await client.patch(
+        resp = await client.put(
             f"{self.bff_url}/api/v1/database/{self.db_name}/ontology/Department",
             json=department_update
         )
@@ -452,7 +455,7 @@ class E2EUserScenarioTest:
             ]
         }
         
-        resp = await client.patch(
+        resp = await client.put(
             f"{self.bff_url}/api/v1/database/{self.db_name}/ontology/Employee",
             json=employee_update
         )
@@ -489,7 +492,7 @@ class E2EUserScenarioTest:
             ]
         }
         
-        resp = await client.patch(
+        resp = await client.put(
             f"{self.bff_url}/api/v1/database/{self.db_name}/ontology/Project",
             json=project_update
         )

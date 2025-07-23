@@ -2325,21 +2325,21 @@ class AsyncTerminusService:
                         schema_builder.add_string_property(prop_name, optional=not required)
                         logger.info(f"✅ Enum type (as string): {prop_name} -> {enum_values}")
                     
-                    elif prop_type.startswith("list<") and prop_type.endswith(">"):
+                    elif prop_type.lower().startswith("list<") and prop_type.lower().endswith(">"):
                         # List<Type> 형식 처리
                         element_type = prop_type[5:-1]  # "list<string>" -> "string"
                         element_type_mapped = converter.convert_property_type(element_type)
                         schema_builder.add_list_property(prop_name, element_type_mapped, optional=not required)
                         logger.info(f"✅ List type: {prop_name} -> List<{element_type_mapped}>")
                     
-                    elif prop_type.startswith("set<") and prop_type.endswith(">"):
+                    elif prop_type.lower().startswith("set<") and prop_type.lower().endswith(">"):
                         # Set<Type> 형식 처리
                         element_type = prop_type[4:-1]  # "set<string>" -> "string"
                         element_type_mapped = converter.convert_property_type(element_type)
                         schema_builder.add_set_property(prop_name, element_type_mapped, optional=not required)
                         logger.info(f"✅ Set type: {prop_name} -> Set<{element_type_mapped}>")
                     
-                    elif prop_type.startswith("array<") and prop_type.endswith(">"):
+                    elif prop_type.lower().startswith("array<") and prop_type.lower().endswith(">"):
                         # Array<Type> 형식 처리 (with dimensions support)
                         # 🔥 ULTRA! Arrays are converted to Lists in TerminusDB
                         element_type = prop_type[6:-1]  # "array<string>" -> "string"
@@ -2351,7 +2351,7 @@ class AsyncTerminusService:
                         else:
                             logger.info(f"✅ Array type: {prop_name} -> List<{element_type_mapped}>")
                     
-                    elif prop_type.startswith("union<") and prop_type.endswith(">"):
+                    elif prop_type.lower().startswith("union<") and prop_type.lower().endswith(">"):
                         # 🔥 ULTRA! Union<Type1|Type2|...> 형식 처리 - JSON string으로 변환
                         type_list_str = prop_type[6:-1]  # "union<string|integer>" -> "string|integer"
                         type_options = [t.strip() for t in type_list_str.split("|")]
@@ -2362,7 +2362,7 @@ class AsyncTerminusService:
                         if constraints:
                             constraints["original_union_types"] = type_options
                     
-                    elif prop_type.startswith("foreign<") and prop_type.endswith(">"):
+                    elif prop_type.lower().startswith("foreign<") and prop_type.lower().endswith(">"):
                         # Foreign<TargetClass> 형식 처리
                         target_class = prop_type[8:-1]  # "foreign<User>" -> "User"
                         schema_builder.add_foreign_property(prop_name, target_class, optional=not required)

@@ -211,6 +211,43 @@ class TerminusSchemaConverter:
     def convert_property_type(prop_type: str, constraints: Dict[str, Any] = None) -> Union[str, Dict[str, Any]]:
         """속성 타입을 TerminusDB 형식으로 변환"""
         
+        # 🔥 ULTRA! Handle parameterized types first
+        prop_type_lower = prop_type.lower()
+        if "<" in prop_type_lower and prop_type_lower.endswith(">"):
+            # Extract container and element type
+            container_type = prop_type_lower[:prop_type_lower.index("<")]
+            element_type = prop_type[prop_type.index("<")+1:-1]
+            
+            logger.info(f"🔥 ULTRA! Converting parameterized type: {prop_type} -> container={container_type}, element={element_type}")
+            
+            # Recursively convert element type
+            converted_element = TerminusSchemaConverter.convert_property_type(element_type)
+            
+            logger.info(f"🔥 ULTRA! Converted element type: {element_type} -> {converted_element}")
+            
+            if container_type == "array":
+                result = {
+                    "@type": "List",  # TerminusDB uses List for arrays
+                    "@class": converted_element
+                }
+                logger.info(f"🔥 ULTRA! Final array conversion: {prop_type} -> {result}")
+                return result
+            elif container_type == "list":
+                return {
+                    "@type": "List",
+                    "@class": converted_element
+                }
+            elif container_type == "set":
+                return {
+                    "@type": "Set",
+                    "@class": converted_element
+                }
+            elif container_type == "optional":
+                return {
+                    "@type": "Optional",
+                    "@class": converted_element
+                }
+        
         # 기본 타입 매핑
         type_mapping = {
             "string": TerminusSchemaType.STRING.value,
@@ -432,8 +469,14 @@ def convert_simple_schema(class_data: Dict[str, Any]) -> Dict[str, Any]:
                     # 클래스 참조 또는 알 수 없는 타입
                     builder.add_class_reference(prop_name, converted_type, optional)
             else:
-                # 복잡한 타입 구조
-                builder.schema_data[prop_name] = converted_type
+                # 복잡한 타입 구조 (List, Set, etc.)
+                # 🔥 ULTRA! Handle optional properly for complex types
+                if optional and converted_type.get("@type") not in ["List", "Set"]:
+                    # Wrap non-collection complex types in Optional
+                    builder.schema_data[prop_name] = {"@type": "Optional", "@class": converted_type}
+                else:
+                    # Lists and Sets are already optional by nature (can be empty)
+                    builder.schema_data[prop_name] = converted_type
     
     return builder.build()
 
