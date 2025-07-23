@@ -78,10 +78,10 @@ class BackupRestoreError(Exception):
     pass
 
 # 하위 호환성을 위한 별칭
-AsyncOntologyNotFoundError = OntologyNotFoundError
-AsyncDuplicateOntologyError = DuplicateOntologyError
-AsyncValidationError = OntologyValidationError
-AsyncDatabaseError = ConnectionError
+OntologyNotFoundError = OntologyNotFoundError
+DuplicateOntologyError = DuplicateOntologyError
+OntologyValidationError = OntologyValidationError
+DatabaseError = ConnectionError
 
 
 def async_terminus_retry(max_retries: int = 3, delay: float = 1.0):
@@ -274,17 +274,17 @@ class AsyncTerminusService:
                 logger.debug(f"Error extracting error detail: {detail_error}")
 
             if e.response.status_code == 404:
-                raise AsyncOntologyNotFoundError(f"리소스를 찾을 수 없습니다: {endpoint}")
+                raise OntologyNotFoundError(f"리소스를 찾을 수 없습니다: {endpoint}")
             elif e.response.status_code == 409:
                 logger.error(f"❌ Duplicate resource conflict for: {endpoint}")
                 logger.error(f"❌ Request data was: {json.dumps(data, indent=2, ensure_ascii=False) if data else 'None'}")
-                raise AsyncDuplicateOntologyError(f"중복된 리소스: {endpoint}. 상세: {error_detail[:200]}")
+                raise DuplicateOntologyError(f"중복된 리소스: {endpoint}. 상세: {error_detail[:200]}")
             else:
-                raise AsyncDatabaseError(
+                raise DatabaseError(
                     f"HTTP 오류 {e.response.status_code}: {e}. 응답: {error_detail}"
                 )
         except httpx.RequestError as e:
-            raise AsyncDatabaseError(f"요청 실패: {e}")
+            raise DatabaseError(f"요청 실패: {e}")
 
     async def connect(self, db_name: Optional[str] = None) -> None:
         """TerminusDB 연결 테스트"""
@@ -299,7 +299,7 @@ class AsyncTerminusService:
 
         except (httpx.HTTPError, httpx.RequestError, ConnectionError) as e:
             logger.error(f"Failed to connect to TerminusDB: {e}")
-            raise AsyncDatabaseError(f"TerminusDB 연결 실패: {e}")
+            raise DatabaseError(f"TerminusDB 연결 실패: {e}")
 
     async def disconnect(self) -> None:
         """연결 해제"""
@@ -328,7 +328,7 @@ class AsyncTerminusService:
             endpoint = f"/api/db/{self.connection_info.account}/{db_name}"
             await self._make_request("GET", endpoint)
             return True
-        except AsyncOntologyNotFoundError:
+        except OntologyNotFoundError:
             return False
 
     async def ensure_db_exists(self, db_name: str, description: Optional[str] = None) -> None:
@@ -347,7 +347,7 @@ class AsyncTerminusService:
 
         except Exception as e:
             logger.error(f"Error ensuring database exists: {e}")
-            raise AsyncDatabaseError(f"데이터베이스 생성/확인 실패: {e}")
+            raise DatabaseError(f"데이터베이스 생성/확인 실패: {e}")
 
     async def create_database(
         self, db_name: str, description: Optional[str] = None
@@ -355,7 +355,7 @@ class AsyncTerminusService:
         """새 데이터베이스 생성"""
         # 중복 검사 - 이미 존재하는 경우 예외 발생
         if await self.database_exists(db_name):
-            raise AsyncDuplicateOntologyError(f"데이터베이스 '{db_name}'이(가) 이미 존재합니다")
+            raise DuplicateOntologyError(f"데이터베이스 '{db_name}'이(가) 이미 존재합니다")
 
         endpoint = f"/api/db/{self.connection_info.account}/{db_name}"
 
@@ -381,7 +381,7 @@ class AsyncTerminusService:
 
         except Exception as e:
             logger.error(f"Failed to create database: {e}")
-            raise AsyncDatabaseError(f"데이터베이스 생성 실패: {e}")
+            raise DatabaseError(f"데이터베이스 생성 실패: {e}")
 
     async def list_databases(self) -> List[Dict[str, Any]]:
         """사용 가능한 데이터베이스 목록 조회"""
@@ -479,7 +479,7 @@ class AsyncTerminusService:
 
         except Exception as e:
             logger.error(f"Failed to list databases: {e}")
-            raise AsyncDatabaseError(f"데이터베이스 목록 조회 실패: {e}")
+            raise DatabaseError(f"데이터베이스 목록 조회 실패: {e}")
 
     @async_terminus_retry(max_retries=3)
     async def delete_database(self, db_name: str) -> bool:
@@ -487,7 +487,7 @@ class AsyncTerminusService:
         try:
             # 데이터베이스 존재 여부 확인
             if not await self.database_exists(db_name):
-                raise AsyncOntologyNotFoundError(f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다")
+                raise OntologyNotFoundError(f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다")
 
             # TerminusDB 데이터베이스 삭제 엔드포인트 사용
             endpoint = f"/api/db/{self.connection_info.account}/{db_name}"
@@ -499,11 +499,11 @@ class AsyncTerminusService:
             logger.info(f"Database '{db_name}' deleted successfully")
             return True
 
-        except AsyncOntologyNotFoundError:
+        except OntologyNotFoundError:
             raise
         except Exception as e:
             logger.error(f"Failed to delete database '{db_name}': {e}")
-            raise AsyncDatabaseError(f"데이터베이스 삭제 실패: {e}")
+            raise DatabaseError(f"데이터베이스 삭제 실패: {e}")
 
     async def create_ontology(self, db_name: str, jsonld_data: Dict[str, Any]) -> Dict[str, Any]:
         """온톨로지 클래스 생성"""
@@ -573,11 +573,11 @@ class AsyncTerminusService:
         except Exception as e:
             logger.error(f"Failed to create ontology: {e}")
             if "already exists" in str(e):
-                raise AsyncDuplicateOntologyError(str(e))
+                raise DuplicateOntologyError(str(e))
             elif "validation" in str(e).lower():
-                raise AsyncValidationError(str(e))
+                raise OntologyValidationError(str(e))
             else:
-                raise AsyncDatabaseError(f"온톨로지 생성 실패: {e}")
+                raise DatabaseError(f"온톨로지 생성 실패: {e}")
 
     async def get_ontology(
         self, db_name: str, class_id: str, raise_if_missing: bool = True
@@ -640,7 +640,7 @@ class AsyncTerminusService:
             
             if not result:
                 if raise_if_missing:
-                    raise AsyncOntologyNotFoundError(f"온톨로지를 찾을 수 없습니다: {class_id}")
+                    raise OntologyNotFoundError(f"온톨로지를 찾을 수 없습니다: {class_id}")
                 return None
             
             # 2단계: 인스턴스 그래프에서 다국어 메타데이터 가져오기
@@ -1157,14 +1157,14 @@ class AsyncTerminusService:
             
             return result
 
-        except AsyncOntologyNotFoundError:
+        except OntologyNotFoundError:
             if raise_if_missing:
                 raise
             return None
         except Exception as e:
             logger.error(f"온톨로지 조회 실패: {e}")
             if raise_if_missing:
-                raise AsyncDatabaseError(f"온톨로지 조회 실패: {e}")
+                raise DatabaseError(f"온톨로지 조회 실패: {e}")
             return None
 
     async def get_ontology_class(
@@ -1182,7 +1182,7 @@ class AsyncTerminusService:
         # 먼저 기존 문서 조회
         existing_doc = await self.get_ontology(db_name, class_id, raise_if_missing=True)
         if not existing_doc:
-            raise AsyncOntologyNotFoundError(f"온톨로지를 찾을 수 없습니다: {class_id}")
+            raise OntologyNotFoundError(f"온톨로지를 찾을 수 없습니다: {class_id}")
 
         # 기존 문서와 새 데이터 병합
         updated_doc = {**existing_doc, **jsonld_data}
@@ -1224,9 +1224,9 @@ class AsyncTerminusService:
 
         except Exception as e:
             if "validation" in str(e).lower():
-                raise AsyncValidationError(str(e))
+                raise OntologyValidationError(str(e))
             else:
-                raise AsyncDatabaseError(f"온톨로지 업데이트 실패: {e}")
+                raise DatabaseError(f"온톨로지 업데이트 실패: {e}")
 
     # delete_ontology method moved to line 1108 to avoid duplication
 
@@ -1294,7 +1294,7 @@ class AsyncTerminusService:
 
         except Exception as e:
             logger.error(f"Failed to execute query: {e}")
-            raise AsyncDatabaseError(f"쿼리 실행 실패: {e}")
+            raise DatabaseError(f"쿼리 실행 실패: {e}")
 
     async def delete_ontology(self, db_name: str, class_id: str) -> bool:
         """실제 TerminusDB 온톨로지 클래스 삭제"""
@@ -1372,7 +1372,7 @@ class AsyncTerminusService:
                             pass
             
             if not schema_doc:
-                raise AsyncOntologyNotFoundError(f"Schema document not found for class: {class_id}")
+                raise OntologyNotFoundError(f"Schema document not found for class: {class_id}")
             
             # 🔥 ULTRA! Delete by providing the document ID as a parameter
             delete_endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
@@ -1396,9 +1396,9 @@ class AsyncTerminusService:
         except Exception as e:
             logger.error(f"TerminusDB delete ontology API failed: {e}")
             if "not found" in str(e).lower():
-                raise AsyncOntologyNotFoundError(f"온톨로지를 찾을 수 없습니다: {class_id}")
+                raise OntologyNotFoundError(f"온톨로지를 찾을 수 없습니다: {class_id}")
             else:
-                raise AsyncDatabaseError(f"온톨로지 삭제 실패: {e}")
+                raise DatabaseError(f"온톨로지 삭제 실패: {e}")
 
     async def list_ontology_classes(self, db_name: str) -> List[Dict[str, Any]]:
         """실제 TerminusDB 온톨로지 클래스 목록 조회 - 동기화 오류 해결"""
@@ -1483,7 +1483,7 @@ class AsyncTerminusService:
 
         except Exception as e:
             logger.error(f"TerminusDB list ontology classes API failed: {e}")
-            raise AsyncDatabaseError(f"온톨로지 목록 조회 실패: {e}")
+            raise DatabaseError(f"온톨로지 목록 조회 실패: {e}")
 
     # === BRANCH MANAGEMENT METHODS ===
 
@@ -1952,7 +1952,7 @@ class AsyncTerminusService:
 
         except Exception as e:
             logger.error(f"TerminusDB diff API failed: {e}")
-            raise AsyncDatabaseError(f"diff 조회 실패: {e}")
+            raise DatabaseError(f"diff 조회 실패: {e}")
 
     async def merge(
         self, db_name: str, source_branch: str, target_branch: str, strategy: str = "auto"
@@ -2161,7 +2161,7 @@ class AsyncTerminusService:
 
         except Exception as e:
             logger.error(f"WOQL 쿼리 실행 실패: {e}")
-            raise AsyncDatabaseError(f"WOQL 쿼리 실행 실패: {e}")
+            raise DatabaseError(f"WOQL 쿼리 실행 실패: {e}")
 
     async def _ensure_metadata_schema(self, db_name: str):
         """ClassMetadata 타입이 존재하는지 확인하고 없으면 생성"""
@@ -2291,7 +2291,7 @@ class AsyncTerminusService:
         
         class_id = class_data.get("id")
         if not class_id:
-            raise AsyncValidationError("클래스 ID가 필요합니다")
+            raise OntologyValidationError("클래스 ID가 필요합니다")
         
         # 🔥 THINK ULTRA! 메타데이터 스키마 확인
         try:
@@ -2335,7 +2335,7 @@ class AsyncTerminusService:
         }
         if class_id in terminus_system_classes or class_id.startswith("sys:"):
             logger.error(f"❌ Class ID '{class_id}' conflicts with TerminusDB system class!")
-            raise AsyncValidationError(f"클래스 ID '{class_id}'는 시스템 예약어입니다")
+            raise OntologyValidationError(f"클래스 ID '{class_id}'는 시스템 예약어입니다")
 
         # 1. 스키마 문서 생성 (@documentation 형식 사용)
         # Simple string label and description extraction
@@ -2993,7 +2993,7 @@ class AsyncTerminusService:
             
             return return_data
 
-        except AsyncDuplicateOntologyError as e:
+        except DuplicateOntologyError as e:
             logger.error(f"❌ Duplicate class error: {e}")
             logger.error(f"💡 Suggestion: Try using a different class name or check existing classes")
             raise
@@ -3009,14 +3009,14 @@ class AsyncTerminusService:
             logger.info("❌ CREATE ONTOLOGY CLASS - FAILED")
             logger.info("=" * 80)
             
-            raise AsyncDatabaseError(f"클래스 생성 실패: {e}")
+            raise DatabaseError(f"클래스 생성 실패: {e}")
 
 
     async def create_document(self, db_name: str, document_data: Dict[str, Any]) -> Dict[str, Any]:
         """문서 생성"""
         doc_type = document_data.get("@type")
         if not doc_type:
-            raise AsyncValidationError("문서 타입이 필요합니다")
+            raise OntologyValidationError("문서 타입이 필요합니다")
 
         # ID 프리픽스 확인 및 수정
         doc_id = document_data.get("@id")
@@ -3034,7 +3034,7 @@ class AsyncTerminusService:
 
         except Exception as e:
             logger.error(f"문서 생성 실패: {e}")
-            raise AsyncDatabaseError(f"문서 생성 실패: {e}")
+            raise DatabaseError(f"문서 생성 실패: {e}")
 
     async def list_documents(
         self, db_name: str, doc_type: Optional[str] = None
@@ -3058,7 +3058,7 @@ class AsyncTerminusService:
 
         except Exception as e:
             logger.error(f"문서 목록 조회 실패: {e}")
-            raise AsyncDatabaseError(f"문서 목록 조회 실패: {e}")
+            raise DatabaseError(f"문서 목록 조회 실패: {e}")
 
     # 🔥 THINK ULTRA! Enhanced Relationship Management Methods
 
@@ -3100,7 +3100,7 @@ class AsyncTerminusService:
             ]
             if critical_errors:
                 error_messages = [r.message for r in critical_errors]
-                raise AsyncValidationError(f"관계 검증 실패: {', '.join(error_messages)}")
+                raise OntologyValidationError(f"관계 검증 실패: {', '.join(error_messages)}")
 
         # 3. 순환 참조 체크
         cycle_info = []
@@ -3116,7 +3116,7 @@ class AsyncTerminusService:
             critical_cycles = [c for c in cycle_info if c.severity == "critical"]
             if critical_cycles:
                 cycle_messages = [c.message for c in critical_cycles]
-                raise AsyncValidationError(f"치명적인 순환 참조 감지: {', '.join(cycle_messages)}")
+                raise OntologyValidationError(f"치명적인 순환 참조 감지: {', '.join(cycle_messages)}")
 
         # 4. 자동 역관계 생성
         enhanced_relationships = []

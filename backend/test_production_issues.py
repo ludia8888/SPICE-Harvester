@@ -56,7 +56,7 @@ async def test_production_failures():
             result = await terminus_service.create_database(test_db, "Duplicate Test")
             print(f"❌ Duplicate DB creation succeeded (should fail): {result}")
         except Exception as e:
-            if "400" in str(e) or "already exists" in str(e).lower():
+            if "400" in str(e) or "already exists" in str(e).lower() or "이미 존재합니다" in str(e):
                 print("✅ Duplicate DB creation properly rejected")
             else:
                 print(f"⚠️ Unexpected error: {e}")
