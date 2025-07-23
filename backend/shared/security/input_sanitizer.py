@@ -24,7 +24,10 @@ class InputSanitizer:
 
     # SQL Injection 패턴들
     SQL_INJECTION_PATTERNS = [
-        r"(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|EXECUTE|UNION|OR|AND)\b)",
+        # 🔥 ULTRA! More specific patterns to avoid false positives
+        r"(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|EXECUTE|UNION)\b\s+\b(FROM|INTO|TABLE|DATABASE|SCHEMA|INDEX|VIEW)\b)",
+        r"(\bOR\b\s+\d+\s*=\s*\d+)",  # OR 1=1 pattern
+        r"(\bAND\b\s+\d+\s*=\s*\d+)",  # AND 1=1 pattern
         r"(--|#|/\*|\*/)",
         r"(\b(CHAR|NCHAR|VARCHAR|NVARCHAR|CAST|CONVERT|SUBSTRING)\s*\()",
         r"(\b(INFORMATION_SCHEMA|SYS|MASTER|MSDB|TEMPDB)\b)",
@@ -91,26 +94,26 @@ class InputSanitizer:
 
     # NoSQL Injection 패턴들
     NOSQL_INJECTION_PATTERNS = [
-        r"\$where",
-        r"\$ne",
-        r"\$gt",
-        r"\$lt",
-        r"\$gte",
-        r"\$lte",
-        r"\$in",
-        r"\$nin",
-        r"\$or",
-        r"\$and",
-        r"\$not",
-        r"\$nor",
-        r"\$exists",
-        r"\$type",
-        r"\$mod",
-        r"\$regex",
-        r"\$text",
-        r"\$expr",
-        r"\$jsonSchema",
-        r"\$elemMatch",
+        r"(?<![a-zA-Z@])\$where\b",  # 🔥 ULTRA! Negative lookbehind to avoid @$where
+        r"(?<![a-zA-Z@])\$ne\b",
+        r"(?<![a-zA-Z@])\$gt\b",
+        r"(?<![a-zA-Z@])\$lt\b",
+        r"(?<![a-zA-Z@])\$gte\b",
+        r"(?<![a-zA-Z@])\$lte\b",
+        r"(?<![a-zA-Z@])\$in\b",
+        r"(?<![a-zA-Z@])\$nin\b",
+        r"(?<![a-zA-Z@])\$or\b",
+        r"(?<![a-zA-Z@])\$and\b",
+        r"(?<![a-zA-Z@])\$not\b",
+        r"(?<![a-zA-Z@])\$nor\b",
+        r"(?<![a-zA-Z@])\$exists\b",
+        r"(?<![a-zA-Z@])\$type\b",  # 🔥 ULTRA! Won't match @type anymore
+        r"(?<![a-zA-Z@])\$mod\b",
+        r"(?<![a-zA-Z@])\$regex\b",
+        r"(?<![a-zA-Z@])\$text\b",
+        r"(?<![a-zA-Z@])\$expr\b",
+        r"(?<![a-zA-Z@])\$jsonSchema\b",
+        r"(?<![a-zA-Z@])\$elemMatch\b",
     ]
 
     # LDAP Injection 패턴들 - 다국어 입력을 고려하여 개선

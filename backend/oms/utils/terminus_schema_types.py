@@ -231,11 +231,21 @@ class TerminusSchemaConverter:
             "email": TerminusSchemaType.STRING.value,  # Email is a string with pattern validation
             "geopoint": TerminusSchemaType.STRING.value,  # 🔥 ULTRA! Store as JSON string since xsd:geoPoint not supported
             "json": TerminusSchemaType.STRING.value,  # JSON is stored as string
+            "money": TerminusSchemaType.DECIMAL.value,  # 🔥 ULTRA! Money is stored as decimal for precision
+            "phone": TerminusSchemaType.STRING.value,  # Phone is a string with pattern validation
+            "ip": TerminusSchemaType.STRING.value,  # IP address is a string with pattern validation
+            "uuid": TerminusSchemaType.STRING.value,  # UUID is a string with pattern validation
+            "coordinate": TerminusSchemaType.STRING.value,  # Coordinate stored as JSON string
+            "address": TerminusSchemaType.STRING.value,  # Address is a complex type stored as string
+            "name": TerminusSchemaType.STRING.value,  # Name is a string
+            "image": TerminusSchemaType.STRING.value,  # Image URL or base64 string
+            "file": TerminusSchemaType.STRING.value,  # File URL or path
         }
         
-        # 기본 타입 매핑 시도
-        if prop_type in type_mapping:
-            base_type = type_mapping[prop_type]
+        # 기본 타입 매핑 시도 (대소문자 구분 없이)
+        prop_type_lower = prop_type.lower()
+        if prop_type_lower in type_mapping:
+            base_type = type_mapping[prop_type_lower]
         else:
             # 그대로 사용 (클래스 참조 등)
             base_type = prop_type
@@ -401,14 +411,23 @@ def convert_simple_schema(class_data: Dict[str, Any]) -> Dict[str, Any]:
             converted_type = converter.convert_property_type(prop_type, constraints)
             
             if isinstance(converted_type, str):
-                if prop_type in ["string", "text"]:
+                prop_type_lower = prop_type.lower()
+                if prop_type_lower in ["string", "text", "email", "phone", "ip", "uuid", "coordinate", "address", "name", "image", "file", "url"]:
                     builder.add_string_property(prop_name, optional)
-                elif prop_type in ["integer", "int"]:
+                elif prop_type_lower in ["integer", "int"]:
                     builder.add_integer_property(prop_name, optional)
-                elif prop_type in ["boolean", "bool"]:
+                elif prop_type_lower in ["boolean", "bool"]:
                     builder.add_boolean_property(prop_name, optional)
-                elif prop_type in ["datetime"]:
+                elif prop_type_lower in ["datetime"]:
                     builder.add_datetime_property(prop_name, optional)
+                elif prop_type_lower in ["date"]:
+                    builder.add_date_property(prop_name, optional)
+                elif prop_type_lower in ["decimal", "number", "money", "float", "double"]:
+                    # Use the converted_type which has the correct xsd type
+                    if optional:
+                        builder.schema_data[prop_name] = {"@type": "Optional", "@class": converted_type}
+                    else:
+                        builder.schema_data[prop_name] = converted_type
                 else:
                     # 클래스 참조 또는 알 수 없는 타입
                     builder.add_class_reference(prop_name, converted_type, optional)
