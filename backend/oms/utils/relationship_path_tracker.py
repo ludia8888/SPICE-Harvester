@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-from shared.models.ontology import OntologyBase, Relationship
+from shared.models.ontology import OntologyResponse, Relationship
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +156,7 @@ class RelationshipPathTracker:
             "many": 1.1,
         }
 
-    def build_graph(self, ontologies: List[OntologyBase]) -> None:
+    def build_graph(self, ontologies: List[OntologyResponse]) -> None:
         """온톨로지들로부터 관계 그래프 구축"""
 
         logger.info(f"Building path tracking graph from {len(ontologies)} ontologies")

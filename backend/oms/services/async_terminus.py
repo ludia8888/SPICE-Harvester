@@ -27,7 +27,7 @@ from oms.validators.relationship_validator import RelationshipValidator, Validat
 from shared.config.service_config import ServiceConfig
 from shared.models.common import DataType
 from shared.models.config import ConnectionConfig
-from shared.models.ontology import OntologyBase
+from shared.models.ontology import OntologyBase, OntologyResponse, Relationship, Property
 
 # Import new relationship management components
 # from .relationship_manager import RelationshipManager  # Temporarily disabled for version test
@@ -135,7 +135,7 @@ class AsyncTerminusService:
         self.property_converter = PropertyToRelationshipConverter()
 
         # Relationship cache for performance
-        self._ontology_cache: Dict[str, List[OntologyBase]] = {}
+        self._ontology_cache: Dict[str, List[OntologyResponse]] = {}
 
     async def _get_client(self) -> httpx.AsyncClient:
         """HTTP 클라이언트 생성/반환"""
@@ -546,6 +546,11 @@ class AsyncTerminusService:
 
         try:
             await self._make_request("POST", endpoint, schema_data, params)
+            
+            # 🔥 ULTRA! Clear cache after creating new ontology
+            if db_name in self._ontology_cache:
+                del self._ontology_cache[db_name]
+                logger.info(f"🔄 Cleared ontology cache for database: {db_name}")
 
             return {
                 "id": jsonld_data.get("@id"),
@@ -1231,8 +1236,8 @@ class AsyncTerminusService:
                 class_info = {
                     "id": cls.get("id"),
                     "type": cls.get("type", "Class"),
-                    "label": cls.get("properties", {}).get("rdfs:label", {}),
-                    "description": cls.get("properties", {}).get("rdfs:comment", {}),
+                    "label": cls.get("properties", {}).get("rdfs:label") or cls.get("id", ""),
+                    "description": cls.get("properties", {}).get("rdfs:comment") or None,
                     "properties": cls.get("properties", {}),
                 }
                 classes.append(class_info)
@@ -1471,42 +1476,91 @@ class AsyncTerminusService:
     # === BRANCH MANAGEMENT METHODS ===
 
     async def list_branches(self, db_name: str) -> List[str]:
-        """TerminusDB v11.x 브랜치 목록 조회"""
+        """TerminusDB v11.x 브랜치 목록 조회 - 여러 엔드포인트 시도"""
+        # TerminusDB v11.x에서 가능한 브랜치 목록 API 엔드포인트들
+        possible_endpoints = [
+            f"/api/db/{self.connection_info.account}/{db_name}/local/branch",  # 원래 시도
+            f"/api/db/{self.connection_info.account}/{db_name}/branch",        # local 없이
+            f"/api/db/{self.connection_info.account}/{db_name}/_branch",       # _branch 형태
+            f"/api/db/{self.connection_info.account}/{db_name}/local/_branch", # local + _branch
+        ]
+        
+        last_error = None
+        for endpoint in possible_endpoints:
+            try:
+                logger.debug(f"Trying branch list endpoint: {endpoint}")
+                result = await self._make_request("GET", endpoint)
+                
+                # 결과 파싱
+                branches = []
+                if isinstance(result, dict):
+                    if "branch_name" in result:
+                        branches = result["branch_name"]
+                    elif "branches" in result:
+                        branches = [branch.get("name", branch) for branch in result["branches"]]
+                    elif "branch" in result:
+                        branches = result["branch"] if isinstance(result["branch"], list) else [result["branch"]]
+                    else:
+                        # dict 내의 모든 키를 확인하여 브랜치 관련 정보 찾기
+                        for key, value in result.items():
+                            if "branch" in key.lower() and isinstance(value, (list, str)):
+                                branches = value if isinstance(value, list) else [value]
+                                break
+                        if not branches:
+                            branches = ["main"]  # 기본값
+                elif isinstance(result, list):
+                    branches = [
+                        branch if isinstance(branch, str) else branch.get("name", str(branch))
+                        for branch in result
+                    ]
+                
+                # 유효한 브랜치만 필터링
+                valid_branches = []
+                for branch in branches:
+                    if isinstance(branch, str) and branch.strip():
+                        valid_branches.append(branch)
+                    elif isinstance(branch, dict) and branch.get("name"):
+                        valid_branches.append(branch["name"])
+                
+                if not valid_branches:
+                    valid_branches = ["main"]
+                
+                logger.info(f"Successfully retrieved {len(valid_branches)} branches from {endpoint}: {valid_branches}")
+                return valid_branches
+                
+            except Exception as e:
+                last_error = e
+                logger.debug(f"Branch endpoint {endpoint} failed: {e}")
+                continue
+        
+        # 모든 엔드포인트 실패 시 실제 생성된 브랜치 추적 시도
+        logger.warning(f"All branch endpoints failed, attempting database introspection. Last error: {last_error}")
+        
         try:
-            # TerminusDB v11.x 실제 브랜치 API: GET /api/db/<account>/<db>/local/branch
-            endpoint = f"/api/db/{self.connection_info.account}/{db_name}/local/branch"
-
-            # TerminusDB에 실제 요청
-            result = await self._make_request("GET", endpoint)
-
-            branches = []
-            if isinstance(result, dict):
-                if "branch_name" in result:
-                    branches = result["branch_name"]
-                elif "branches" in result:
-                    branches = [branch.get("name", branch) for branch in result["branches"]]
-                else:
-                    # 기본 브랜치 정보만 있는 경우
-                    branches = ["main"]
-            elif isinstance(result, list):
-                branches = [
-                    branch if isinstance(branch, str) else branch.get("name", str(branch))
-                    for branch in result
-                ]
-
-            # 유효한 브랜치만 반환
-            valid_branches = [b for b in branches if b and isinstance(b, str)]
-
-            if not valid_branches:
-                valid_branches = ["main"]
-
-            logger.info(f"Retrieved {len(valid_branches)} branches: {valid_branches}")
-            return valid_branches
-
-        except Exception as e:
-            logger.warning(f"TerminusDB v11.x branch API failed: {e}, returning default")
-            # TerminusDB v11.x에서 브랜치 목록 API가 없을 수 있으므로 기본값 반환
-            return ["main"]
+            # 데이터베이스 메타데이터에서 브랜치 정보 추출 시도
+            db_info_endpoint = f"/api/db/{self.connection_info.account}/{db_name}"
+            db_info = await self._make_request("GET", db_info_endpoint)
+            
+            # 데이터베이스 정보에서 브랜치 관련 정보 찾기
+            if isinstance(db_info, dict):
+                branches = []
+                for key, value in db_info.items():
+                    if "branch" in key.lower():
+                        if isinstance(value, list):
+                            branches.extend(value)
+                        elif isinstance(value, str):
+                            branches.append(value)
+                
+                if branches:
+                    logger.info(f"Found branches in database metadata: {branches}")
+                    return branches
+            
+        except Exception as meta_error:
+            logger.debug(f"Database metadata introspection failed: {meta_error}")
+        
+        # 최종 폴백: 기본 브랜치만 반환
+        logger.warning("All branch discovery methods failed, returning default main branch")
+        return ["main"]
 
     async def get_current_branch(self, db_name: str) -> str:
         """실제 TerminusDB 현재 브랜치 조회 (fallback to main)"""
@@ -1834,8 +1888,8 @@ class AsyncTerminusService:
     async def diff(self, db_name: str, from_ref: str, to_ref: str) -> List[Dict[str, Any]]:
         """실제 TerminusDB diff 조회"""
         try:
-            # TerminusDB 실제 diff API: GET /api/db/<account>/<db>/_diff
-            endpoint = f"/api/db/{self.connection_info.account}/{db_name}/_diff"
+            # TerminusDB 실제 diff API: GET /api/db/<account>/<db>/local/_diff
+            endpoint = f"/api/db/{self.connection_info.account}/{db_name}/local/_diff"
 
             # diff 요청 파라미터
             params = {"from": from_ref, "to": to_ref}
@@ -2892,6 +2946,11 @@ class AsyncTerminusService:
             return_data["terminus_response"] = schema_result
             return_data["success"] = True  # Add success flag for consistency
             
+            # 🔥 ULTRA! Clear cache after creating new ontology
+            if db_name in self._ontology_cache:
+                del self._ontology_cache[db_name]
+                logger.info(f"🔄 Cleared ontology cache for database: {db_name}")
+            
             logger.info("🎉 CREATE ONTOLOGY CLASS - COMPLETE")
             logger.info("=" * 80)
             
@@ -3267,6 +3326,10 @@ class AsyncTerminusService:
 
         # 온톨로지들 조회
         ontologies = await self._get_cached_ontologies(db_name)
+        
+        logger.info(f"🔥 Retrieved {len(ontologies)} ontologies for analysis")
+        for onto in ontologies:
+            logger.info(f"  - {onto.id}: {len(onto.relationships)} relationships")
 
         if not ontologies:
             return {"message": "No ontologies found in database"}
@@ -3295,9 +3358,13 @@ class AsyncTerminusService:
         for ontology in ontologies:
             all_relationships.extend(ontology.relationships)
 
-        relationship_summary = self.relationship_manager.generate_relationship_summary(
-            all_relationships
-        )
+        # Create simple relationship summary since relationship_manager is disabled
+        relationship_summary = {
+            "total_relationships": len(all_relationships),
+            "relationship_types": list(set(rel.predicate for rel in all_relationships)),
+            "entities_with_relationships": len([o for o in ontologies if o.relationships]),
+            "average_relationships_per_entity": len(all_relationships) / len(ontologies) if ontologies else 0
+        }
 
         return {
             "database": db_name,
@@ -3312,33 +3379,107 @@ class AsyncTerminusService:
             ),
         }
 
-    async def _get_cached_ontologies(self, db_name: str) -> List[OntologyBase]:
+    async def _get_cached_ontologies(self, db_name: str) -> List[OntologyResponse]:
         """캐시된 온톨로지 조회 (성능 최적화)"""
 
         if db_name not in self._ontology_cache:
             # 온톨로지들을 실제로 조회하여 캐시
+            logger.info(f"🔥 Cache miss for {db_name}, fetching ontologies...")
             ontology_dicts = await self.list_ontologies(db_name)
             ontologies = []
 
+            logger.info(f"🔥 Retrieved {len(ontology_dicts)} ontology dictionaries from list_ontologies")
+            
             for onto_dict in ontology_dicts:
                 try:
+                    logger.info(f"🔥 Processing ontology: {onto_dict.get('id', 'NO_ID')}")
+                    
                     # 필요한 필드들이 있는지 확인하고 기본값 설정
                     if "id" not in onto_dict:
+                        logger.warning(f"Skipping ontology without ID: {onto_dict}")
+                        continue
+                    
+                    # Skip system classes (ClassMetadata, FieldMetadata)
+                    if onto_dict["id"] in ["ClassMetadata", "FieldMetadata"]:
+                        logger.debug(f"Skipping system class: {onto_dict['id']}")
                         continue
 
                     onto_dict.setdefault("label", onto_dict["id"])
-                    onto_dict.setdefault("properties", [])
-                    onto_dict.setdefault("relationships", [])
+                    
+                    # Extract relationships from properties (TerminusDB format)
+                    properties_dict = onto_dict.get("properties", {})
+                    relationships = []
+                    simple_properties = []
+                    
+                    # 🔥 ULTRA! Convert TerminusDB properties to relationships
+                    for prop_name, prop_def in properties_dict.items():
+                        if isinstance(prop_def, dict) and "@class" in prop_def:
+                            # Check if this is a relationship (points to another class)
+                            target_class = prop_def.get("@class", "")
+                            if not target_class.startswith("xsd:"):
+                                # This is a relationship, not a simple property
+                                relationships.append(Relationship(
+                                    predicate=prop_name,
+                                    target=target_class,
+                                    cardinality="n:1" if prop_def.get("@type") == "Optional" else "1:1",
+                                    label=prop_name
+                                ))
+                            else:
+                                # This is a simple property
+                                simple_properties.append(Property(
+                                    name=prop_name,
+                                    type=target_class.replace("xsd:", "").upper(),
+                                    label=prop_name,
+                                    required=prop_def.get("@type") != "Optional"
+                                ))
+                        else:
+                            # Simple property format
+                            simple_properties.append(Property(
+                                name=prop_name,
+                                type=str(prop_def).replace("xsd:", "").upper() if isinstance(prop_def, str) else "STRING",
+                                label=prop_name,
+                                required=True
+                            ))
+                    
+                    # Create clean dict for OntologyResponse
+                    clean_dict = {
+                        "id": onto_dict["id"],
+                        "label": onto_dict.get("label", onto_dict["id"]),
+                        "description": onto_dict.get("description"),
+                        "properties": simple_properties,
+                        "relationships": relationships,
+                        "parent_class": onto_dict.get("parent_class"),
+                        "abstract": onto_dict.get("abstract", False),
+                        "metadata": {
+                            "@type": onto_dict.get("@type"),
+                            "@id": onto_dict.get("@id"),
+                            "@key": onto_dict.get("@key"),
+                            "@documentation": onto_dict.get("@documentation")
+                        }
+                    }
+                    
+                    logger.info(f"🔥 Converted ontology {clean_dict['id']}: {len(simple_properties)} properties, {len(relationships)} relationships")
+                    if relationships:
+                        logger.info(f"  Relationships found:")
+                        for rel in relationships:
+                            logger.info(f"    - {rel.predicate} -> {rel.target} ({rel.cardinality})")
 
-                    ontology = OntologyBase(**onto_dict)
+                    # 🔥 ULTRA FIX! Create OntologyResponse instead of OntologyBase
+                    ontology = OntologyResponse(**clean_dict)
                     ontologies.append(ontology)
                 except Exception as e:
-                    logger.warning(
+                    logger.error(
                         f"Failed to parse ontology {onto_dict.get('id', 'unknown')}: {e}"
                     )
+                    logger.error(f"Ontology data that failed: {json.dumps(onto_dict, indent=2)}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
                     continue
 
             self._ontology_cache[db_name] = ontologies
+            logger.info(f"🔥 Cached {len(ontologies)} ontologies for database {db_name}")
+        else:
+            logger.info(f"🔥 Cache hit for {db_name}, returning {len(self._ontology_cache[db_name])} ontologies")
 
         return self._ontology_cache[db_name]
 

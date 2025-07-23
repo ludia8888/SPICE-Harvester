@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from shared.models.ontology import Cardinality, OntologyBase, Relationship
+from shared.models.ontology import Cardinality, OntologyResponse, Relationship
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ class RelationshipValidator:
     5. 관계명 규칙 검증
     """
 
-    def __init__(self, existing_ontologies: Optional[List[OntologyBase]] = None):
+    def __init__(self, existing_ontologies: Optional[List[OntologyResponse]] = None):
         self.existing_ontologies = existing_ontologies or []
         self.known_classes = {ont.id for ont in self.existing_ontologies}
 
@@ -125,7 +125,7 @@ class RelationshipValidator:
 
         return results
 
-    def validate_ontology_relationships(self, ontology: OntologyBase) -> List[ValidationResult]:
+    def validate_ontology_relationships(self, ontology: OntologyResponse) -> List[ValidationResult]:
         """온톨로지 전체 관계 검증"""
 
         results = []
@@ -146,7 +146,7 @@ class RelationshipValidator:
         return results
 
     def validate_multiple_ontologies(
-        self, ontologies: List[OntologyBase]
+        self, ontologies: List[OntologyResponse]
     ) -> List[ValidationResult]:
         """다중 온톨로지 간 관계 검증"""
 
@@ -538,7 +538,7 @@ class RelationshipValidator:
 
         return results
 
-    def _validate_relationship_network(self, ontology: OntologyBase) -> List[ValidationResult]:
+    def _validate_relationship_network(self, ontology: OntologyResponse) -> List[ValidationResult]:
         """관계 네트워크 검증"""
 
         results = []
@@ -562,7 +562,7 @@ class RelationshipValidator:
         return results
 
     def _validate_cross_ontology_relationships(
-        self, ontologies: List[OntologyBase]
+        self, ontologies: List[OntologyResponse]
     ) -> List[ValidationResult]:
         """온톨로지 간 관계 검증"""
 
@@ -587,7 +587,7 @@ class RelationshipValidator:
         return results
 
     def _validate_global_relationship_consistency(
-        self, ontologies: List[OntologyBase]
+        self, ontologies: List[OntologyResponse]
     ) -> List[ValidationResult]:
         """전역 관계 일관성 검증"""
 

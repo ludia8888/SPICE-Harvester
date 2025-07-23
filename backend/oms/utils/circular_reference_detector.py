@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from shared.models.ontology import OntologyBase, Relationship
+from shared.models.ontology import OntologyResponse, Relationship
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ class CircularReferenceDetector:
             ("manages", "managedBy"),
         }
 
-    def build_relationship_graph(self, ontologies: List[OntologyBase]) -> None:
+    def build_relationship_graph(self, ontologies: List[OntologyResponse]) -> None:
         """온톨로지들로부터 관계 그래프 구축"""
 
         logger.info(f"Building relationship graph from {len(ontologies)} ontologies")
