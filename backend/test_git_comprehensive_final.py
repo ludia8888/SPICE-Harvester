@@ -196,6 +196,50 @@ class GitLikeFeaturesValidator:
             self.features["versioning"]["working"] = False
             return False
     
+    async def test_branch_functionality(self):
+        """브랜치 기능 테스트"""
+        logger.info("🔍 Testing branch functionality...")
+        
+        try:
+            # 현재 브랜치 목록
+            initial_branches = await self.terminus_service.list_branches(self.test_db)
+            logger.info(f"Initial branches: {initial_branches}")
+            
+            # 새 브랜치 생성
+            try:
+                await self.terminus_service.create_branch(
+                    self.test_db, "feature-test", "main"
+                )
+                logger.info("Created feature-test branch")
+                
+                # 브랜치 목록 재확인
+                branches_after = await self.terminus_service.list_branches(self.test_db)
+                logger.info(f"Branches after creation: {branches_after}")
+                
+                # 브랜치가 추가되었는지 확인
+                if "feature-test" in branches_after and len(branches_after) > len(initial_branches):
+                    self.features["branches"]["tested"] = True
+                    self.features["branches"]["working"] = True
+                    logger.info("✅ Branch functionality working")
+                    return True
+                else:
+                    logger.warning("⚠️ Branch created but not in list")
+                    self.features["branches"]["tested"] = True
+                    self.features["branches"]["working"] = False
+                    return False
+                    
+            except Exception as create_error:
+                logger.error(f"Branch creation failed: {create_error}")
+                self.features["branches"]["tested"] = True
+                self.features["branches"]["working"] = False
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Branch functionality failed: {e}")
+            self.features["branches"]["tested"] = True
+            self.features["branches"]["working"] = False
+            return False
+    
     async def test_metadata_tracking(self):
         """메타데이터 추적 기능 테스트"""
         logger.info("🔍 Testing metadata tracking functionality...")
@@ -229,12 +273,11 @@ class GitLikeFeaturesValidator:
         diff_working = await self.test_diff_functionality()
         commit_working = await self.test_commit_functionality()
         rollback_working = await self.test_rollback_functionality()
+        branch_working = await self.test_branch_functionality()
         versioning_working = await self.test_version_history()
         metadata_working = await self.test_metadata_tracking()
         
-        # 브랜치와 충돌 해결은 현재 TerminusDB v11.x 구조상 제한적
-        self.features["branches"]["tested"] = True
-        self.features["branches"]["working"] = False  # TerminusDB v11.x에서 다른 방식으로 작동
+        # 충돌 해결은 현재 구현되지 않음
         self.features["conflicts"]["tested"] = True
         self.features["conflicts"]["working"] = False  # 현재 구현에서 제한적
         self.features["push"]["tested"] = True
