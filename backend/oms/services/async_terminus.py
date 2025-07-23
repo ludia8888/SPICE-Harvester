@@ -30,7 +30,7 @@ from shared.models.config import ConnectionConfig
 from shared.models.ontology import OntologyBase, OntologyResponse, Relationship, Property
 
 # Import new relationship management components
-# from .relationship_manager import RelationshipManager  # Temporarily disabled for version test
+from .relationship_manager import RelationshipManager
 from .property_to_relationship_converter import PropertyToRelationshipConverter
 
 # Import new TerminusDB schema type support
@@ -128,7 +128,7 @@ class AsyncTerminusService:
         self._db_cache = set()
 
         # 🔥 THINK ULTRA! Initialize relationship management components - TESTING ROOT CAUSE
-        # self.relationship_manager = RelationshipManager()  # Temporarily disabled for version test
+        self.relationship_manager = RelationshipManager()
         self.relationship_validator = RelationshipValidator()
         self.circular_detector = CircularReferenceDetector()
         self.path_tracker = RelationshipPathTracker()
@@ -525,10 +525,22 @@ class AsyncTerminusService:
                 documentation["@description"] = label_data["en"]
 
         # 최소한의 스키마 구조 (TerminusDB 11.x 호환)
+        # @id가 없으면 label이나 다른 필드에서 생성
+        class_id = jsonld_data.get("@id")
+        if not class_id:
+            # label에서 ID 생성 시도
+            label = jsonld_data.get("label", jsonld_data.get("rdfs:label", "UnnamedClass"))
+            if isinstance(label, dict):
+                label = label.get("en", label.get("ko", "UnnamedClass"))
+            # ID 생성
+            from shared.utils.id_generator import generate_simple_id
+            class_id = generate_simple_id(label=str(label), use_timestamp_for_korean=True, default_fallback="UnnamedClass")
+            logger.warning(f"No @id provided, generated: {class_id}")
+        
         schema_data = [
             {
                 "@type": "Class",
-                "@id": jsonld_data.get("@id"),
+                "@id": class_id,
                 "@key": {"@type": "Random"}  # 가장 안전한 키 타입
             }
         ]
@@ -541,7 +553,7 @@ class AsyncTerminusService:
         params = {
             "graph_type": "schema",
             "author": self.connection_info.user,
-            "message": f"Creating class {jsonld_data.get('@id')}"
+            "message": f"Creating class {class_id}"
         }
 
         try:
@@ -1533,27 +1545,38 @@ class AsyncTerminusService:
                 logger.debug(f"Branch endpoint {endpoint} failed: {e}")
                 continue
         
-        # 모든 엔드포인트 실패 시 실제 생성된 브랜치 추적 시도
-        logger.warning(f"All branch endpoints failed, attempting database introspection. Last error: {last_error}")
+        # 모든 엔드포인트 실패 시 직접 API로 브랜치 검색
+        logger.warning(f"All branch endpoints failed, attempting direct organization listing. Last error: {last_error}")
         
         try:
-            # 데이터베이스 메타데이터에서 브랜치 정보 추출 시도
-            db_info_endpoint = f"/api/db/{self.connection_info.account}/{db_name}"
-            db_info = await self._make_request("GET", db_info_endpoint)
+            # TerminusDB v11.x에서는 브랜치가 별도 DB로 생성됨
+            # 직접 전체 데이터베이스 목록 API 호출
+            branches = ["main"]  # main은 항상 존재
             
-            # 데이터베이스 정보에서 브랜치 관련 정보 찾기
-            if isinstance(db_info, dict):
-                branches = []
-                for key, value in db_info.items():
-                    if "branch" in key.lower():
-                        if isinstance(value, list):
-                            branches.extend(value)
-                        elif isinstance(value, str):
-                            branches.append(value)
+            # Organization 레벨에서 모든 데이터베이스 조회
+            try:
+                # api/ 엔드포인트는 모든 조직의 DB를 보여줌
+                all_dbs_result = await self._make_request("GET", "/api/")
                 
-                if branches:
-                    logger.info(f"Found branches in database metadata: {branches}")
-                    return branches
+                if isinstance(all_dbs_result, list):
+                    branch_pattern = f"{db_name}/local/branch/"
+                    for db_entry in all_dbs_result:
+                        if isinstance(db_entry, dict):
+                            db_name_entry = db_entry.get("name", "")
+                            if db_name_entry.startswith(branch_pattern):
+                                # 브랜치 이름 추출
+                                branch_name = db_name_entry[len(branch_pattern):]
+                                if branch_name and branch_name not in branches:
+                                    branches.append(branch_name)
+                                    logger.debug(f"Found branch '{branch_name}' from database: {db_name_entry}")
+                
+                logger.info(f"Found {len(branches)} branches using organization listing: {branches}")
+                return branches
+                
+            except Exception as api_error:
+                logger.debug(f"Organization listing failed: {api_error}")
+                # Fallback: main만 반환
+                return ["main"]
             
         except Exception as meta_error:
             logger.debug(f"Database metadata introspection failed: {meta_error}")
@@ -1627,11 +1650,17 @@ class AsyncTerminusService:
             if branch_name.lower() in protected_branches:
                 raise ValueError(f"보호된 브랜치 '{branch_name}'은(는) 삭제할 수 없습니다")
 
-            # TerminusDB 실제 브랜치 삭제 API: DELETE /api/db/<account>/<db>/branch/<branch_name>
-            endpoint = f"/api/db/{self.connection_info.account}/{db_name}/branch/{branch_name}"
-
-            # TerminusDB에 실제 브랜치 삭제 요청
-            await self._make_request("DELETE", endpoint)
+            # TerminusDB v11.x에서 브랜치는 별도 DB로 생성되므로 DB 삭제 API 사용
+            # 먼저 브랜치 삭제 시도 (이전 버전 호환)
+            try:
+                endpoint = f"/api/db/{self.connection_info.account}/{db_name}/local/branch/{branch_name}"
+                await self._make_request("DELETE", endpoint)
+            except Exception as e:
+                # 브랜치 삭제 실패시 DB로 삭제 시도
+                logger.debug(f"Branch deletion failed, trying database deletion: {e}")
+                db_path = f"{db_name}/local/branch/{branch_name}"
+                endpoint = f"/api/db/{self.connection_info.account}/{db_path}"
+                await self._make_request("DELETE", endpoint)
 
             logger.info(f"TerminusDB branch '{branch_name}' deleted successfully")
             return True
@@ -2487,11 +2516,19 @@ class AsyncTerminusService:
                             logger.info(f"🔧 Runtime constraints for {prop_name}: {schema_constraints}")
                             # 런타임 검증용 제약조건은 메타데이터에 저장됨
                 
+                except ValueError as e:
+                    # 유효하지 않은 타입은 에러로 처리
+                    if "Invalid property type" in str(e):
+                        logger.error(f"❌ Invalid property type for {prop_name}: {e}")
+                        raise ValueError(f"Invalid property type for '{prop_name}': {prop_type}")
+                    else:
+                        # 다른 ValueError는 재발생
+                        raise
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to process property {prop_name}: {e}")
                     import traceback
                     logger.warning(f"⚠️ Traceback: {traceback.format_exc()}")
-                    # 폴백: 기본 문자열 타입으로 처리
+                    # 심각한 에러가 아닌 경우에만 폴백: 기본 문자열 타입으로 처리
                     schema_builder.add_string_property(prop_name, optional=not required)
         
         # 4. 최종 스키마 생성 (relationships는 나중에 처리)
@@ -3358,12 +3395,17 @@ class AsyncTerminusService:
         for ontology in ontologies:
             all_relationships.extend(ontology.relationships)
 
-        # Create simple relationship summary since relationship_manager is disabled
+        # Create comprehensive relationship analysis using RelationshipManager
         relationship_summary = {
             "total_relationships": len(all_relationships),
             "relationship_types": list(set(rel.predicate for rel in all_relationships)),
             "entities_with_relationships": len([o for o in ontologies if o.relationships]),
-            "average_relationships_per_entity": len(all_relationships) / len(ontologies) if ontologies else 0
+            "average_relationships_per_entity": len(all_relationships) / len(ontologies) if ontologies else 0,
+            "bidirectional_relationships": len([rel for rel in all_relationships if hasattr(rel, 'is_bidirectional') and rel.is_bidirectional]),
+            "cardinality_distribution": {
+                cardinality.value if hasattr(cardinality, 'value') else str(cardinality): len([rel for rel in all_relationships if rel.cardinality == cardinality])
+                for cardinality in set(rel.cardinality for rel in all_relationships if rel.cardinality)
+            }
         }
 
         return {

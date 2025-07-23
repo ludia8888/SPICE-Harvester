@@ -57,9 +57,13 @@ class GoogleSheetPreviewResponse(BaseModel):
     """Google Sheet 미리보기 응답"""
 
     sheet_id: str = Field(..., description="Google Sheets ID")
-    sheet_url: str = Field(..., description="Google Sheets URL")
-    worksheet_name: str = Field(..., description="워크시트 이름")
+    sheet_url: str = Field(..., description="Google Sheets URL", default="")
+    sheet_title: str = Field(..., description="시트 제목")
+    worksheet_title: str = Field(..., description="워크시트 제목", default="")
+    worksheet_name: str = Field(..., description="워크시트 이름", default="")
     metadata: Optional[SheetMetadata] = Field(None, description="시트 메타데이터")
+    columns: List[str] = Field(default_factory=list, description="컬럼 목록")
+    sample_rows: List[Dict[str, Any]] = Field(default_factory=list, description="샘플 행 데이터")
     preview_data: List[List[str]] = Field(default_factory=list, description="미리보기 데이터")
     total_rows: int = Field(0, description="전체 행 수")
     total_columns: int = Field(0, description="전체 컬럼 수")

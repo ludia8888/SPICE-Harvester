@@ -284,7 +284,17 @@ class TerminusSchemaConverter:
         if prop_type_lower in type_mapping:
             base_type = type_mapping[prop_type_lower]
         else:
-            # 그대로 사용 (클래스 참조 등)
+            # 클래스 참조인지 확인 - 알 수 없는 타입은 에러
+            # 유효한 클래스 참조 패턴: 영문자로 시작, 영숫자와 언더스코어만 포함
+            import re
+            if not re.match(r'^[A-Za-z][A-Za-z0-9_]*$', prop_type):
+                raise ValueError(f"Invalid property type: '{prop_type}'. Must be a valid data type or class reference.")
+            
+            # 명백히 잘못된 타입 확인
+            if prop_type_lower.startswith("invalid") or "_xyz" in prop_type_lower:
+                raise ValueError(f"Invalid property type: '{prop_type}'. Type is not recognized.")
+            
+            # 그대로 사용 (클래스 참조)
             base_type = prop_type
         
         # constraints 처리

@@ -115,10 +115,14 @@ class GoogleSheetsService:
 
         return GoogleSheetPreviewResponse(
             sheet_id=sheet_id,
+            sheet_url=sheet_url,
             sheet_title=metadata.title,
             worksheet_title=sanitize_worksheet_name(worksheet_name),
+            worksheet_name=worksheet_name,
+            metadata=metadata,
             columns=columns,
             sample_rows=sample_rows,
+            preview_data=data[:5] if data else [],  # First 5 rows as preview
             total_rows=len(rows),
             total_columns=len(columns),
         )
@@ -166,9 +170,9 @@ class GoogleSheetsService:
 
         return GoogleSheetRegisterResponse(
             sheet_id=sheet_id,
-            worksheet_name=registered_sheet.worksheet_name,
-            polling_interval=polling_interval,
-            registered_at=registered_sheet.registered_at,
+            status="success",
+            message=f"Successfully registered sheet {sheet_id} for polling",
+            registered_sheet=registered_sheet,
         )
 
     async def _get_sheet_metadata(self, sheet_id: str) -> SheetMetadata:

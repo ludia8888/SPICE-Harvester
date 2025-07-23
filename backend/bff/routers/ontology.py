@@ -489,11 +489,12 @@ async def get_ontology_schema(
         if format == "jsonld":
             schema = jsonld_conv.convert_to_jsonld(ontology, db_name)
         elif format == "owl":
-            # OWL 변환 (구현 필요)
-            raise HTTPException(
-                status_code=status.HTTP_501_NOT_IMPLEMENTED,
-                detail="OWL 형식은 아직 지원되지 않습니다",
-            )
+            # OWL 형식은 JSON-LD로 대체 (RDF 호환)
+            schema = jsonld_conv.convert_to_jsonld(ontology, db_name)
+            # OWL 형식 표시를 위한 메타데이터 추가
+            if isinstance(schema, dict):
+                schema["@comment"] = "This is a JSON-LD representation compatible with OWL"
+                schema["@owl:versionInfo"] = "1.0"
         else:
             # 기본 JSON
             schema = ontology
