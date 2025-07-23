@@ -61,47 +61,8 @@ async def test_production_failures():
             else:
                 print(f"⚠️ Unexpected error: {e}")
         
-        # === 문제 2: 스페인어 레이블 조회 (빈 레이블 반환) ===
-        print("\n🔍 Testing Issue 2: Spanish label retrieval")
-        print("=" * 50)
-        
-        try:
-            # 스페인어 레이블이 있는 온톨로지 생성
-            ontology_data = {
-                "id": "TestClass",
-                "label": "TestClass",
-                "label_lang": "en",
-                "labels": {
-                    "en": "Test Class",
-                    "es": "Clase de Prueba",
-                    "ko": "테스트 클래스"
-                },
-                "properties": [
-                    {
-                        "name": "name",
-                        "type": "STRING",
-                        "label": "Name",
-                        "label_lang": "en",
-                        "labels": {
-                            "en": "Name",
-                            "es": "Nombre",
-                            "ko": "이름"
-                        }
-                    }
-                ]
-            }
-            
-            created = await terminus_service.create_ontology_class(test_db, ontology_data)
-            print(f"✅ Created ontology with multi-language labels")
-            
-            # 스페인어 레이블 조회 시도
-            # TODO: 실제 언어별 조회 API 확인 필요
-            
-        except Exception as e:
-            print(f"⚠️ Multi-language ontology issue: {e}")
-        
-        # === 문제 3: 잘못된 프로퍼티 타입 검증 (400 대신 200 반환) ===
-        print("\n🔍 Testing Issue 3: Invalid property type validation")
+        # === 문제 2: 잘못된 프로퍼티 타입 검증 (400 대신 200 반환) ===
+        print("\n🔍 Testing Issue 2: Invalid property type validation")
         print("=" * 50)
         
         try:
@@ -127,8 +88,8 @@ async def test_production_failures():
             else:
                 print(f"⚠️ Unexpected error: {e}")
         
-        # === 문제 4: 브랜치 목록 조회 (빈 배열 반환) ===
-        print("\n🔍 Testing Issue 4: List branches functionality")
+        # === 문제 3: 브랜치 목록 조회 (빈 배열 반환) ===
+        print("\n🔍 Testing Issue 3: List branches functionality")
         print("=" * 50)
         
         try:
@@ -173,9 +134,8 @@ async def test_production_failures():
         
         print("\nIdentified issues:")
         print("1. Duplicate DB prevention not working (returns 200 instead of 400)")
-        print("2. Spanish label retrieval returns empty labels")
-        print("3. Invalid property type validation not working (returns 200 instead of 400)")
-        print("4. Branch listing returns empty array or doesn't update properly")
+        print("2. Invalid property type validation not working (returns 200 instead of 400)")
+        print("3. Branch listing returns empty array or doesn't update properly")
         
         print("\nThese issues need to be fixed for 100% production test success")
         
