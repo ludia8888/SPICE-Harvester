@@ -248,7 +248,51 @@ POST /database/{db_name}/mappings/export
 POST /database/{db_name}/mappings/import
 ```
 
-**Request:** Multipart form data with CSV file
+**Request:** Multipart form data with JSON file
+
+**Features:**
+- Enhanced security validation with input sanitization
+- Schema validation using Pydantic models
+- Real-time validation against actual ontology data (not hardcoded)
+- Backup and rollback support
+- Detailed error reporting
+
+#### Validate Label Mappings
+```http
+POST /database/{db_name}/mappings/validate
+```
+
+**Request:** Multipart form data with JSON file
+
+**Response:**
+```json
+{
+  "status": "success|warning|error",
+  "message": "매핑 검증 완료",
+  "data": {
+    "validation_passed": true|false,
+    "details": {
+      "unmapped_classes": [],
+      "unmapped_properties": [],
+      "conflicts": [],
+      "duplicate_labels": []
+    },
+    "stats": {
+      "classes": 2,
+      "properties": 5,
+      "total": 7
+    }
+  }
+}
+```
+
+**Features:**
+- Real validation against actual ontology data (not hardcoded `validation_passed: true`)
+- Database existence verification
+- Class and property ID validation through OMS client
+- Duplicate label detection
+- Conflict detection with existing mappings
+- Detailed validation error reporting
 
 ## OMS API Endpoints
 
