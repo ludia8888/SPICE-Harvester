@@ -163,12 +163,33 @@ async def create_ontology(
         raise
     except Exception as e:
         import traceback
+        from oms.services.async_terminus import DuplicateOntologyError, OntologyNotFoundError, OntologyValidationError
+        
         error_msg = f"Failed to create ontology: {e}"
         traceback_str = traceback.format_exc()
         logger.error(f"🔥🔥🔥 ERROR in create_ontology: {error_msg}")
         logger.error(f"🔥🔥🔥 TRACEBACK:\n{traceback_str}")
         logger.error(f"🔥🔥🔥 ontology_data was: {ontology_data}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        
+        # 🔥 ULTRA! 에러 타입에 따른 적절한 HTTP 상태 코드 반환
+        if isinstance(e, DuplicateOntologyError) or "DocumentIdAlreadyExists" in str(e):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"온톨로지 '{ontology_data.get('id')}'이(가) 이미 존재합니다"
+            )
+        elif isinstance(e, OntologyValidationError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"온톨로지 검증 실패: {str(e)}"
+            )
+        elif isinstance(e, OntologyNotFoundError):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(e)
+            )
+        else:
+            # 그 외의 경우에만 500 반환
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.get("/list")
@@ -311,13 +332,13 @@ async def get_ontology(
     except HTTPException:
         raise
     except Exception as e:
-        # AsyncOntologyNotFoundError 확인
-        from oms.services.async_terminus import AsyncOntologyNotFoundError
-
+        # Check for not found errors in exception message
+        error_msg = str(e).lower()
         if (
-            isinstance(e, AsyncOntologyNotFoundError)
-            or "not found" in str(e).lower()
+            "not found" in error_msg
             or "찾을 수 없습니다" in str(e)
+            or "does not exist" in error_msg
+            or "documentnotfound" in error_msg
         ):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

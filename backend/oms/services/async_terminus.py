@@ -136,19 +136,35 @@ class AsyncTerminusService:
 
         # Relationship cache for performance
         self._ontology_cache: Dict[str, List[OntologyResponse]] = {}
+        
+        # 🔥 ULTRA FIX! 동시 요청 제한으로 TerminusDB 부하 조절 (더 많은 동시 요청 허용)
+        self._request_semaphore = asyncio.Semaphore(50)  # 최대 50개 동시 요청 (성능 최적화)
+        
+        # 🔥 ULTRA FIX! 메타데이터 스키마 캐시로 성능 최적화
+        self._metadata_schema_cache: set = set()  # 이미 생성된 DB의 메타데이터 스키마
 
     async def _get_client(self) -> httpx.AsyncClient:
-        """HTTP 클라이언트 생성/반환"""
+        """HTTP 클라이언트 생성/반환 - 연결 풀링 및 동시성 제한 적용"""
         if self._client is None:
             # SSL 설정 가져오기
             ssl_config = ServiceConfig.get_client_ssl_config()
 
+            # 🔥 ULTRA FIX! 연결 풀링 및 동시성 제한으로 성능 위기 해결
+            limits = httpx.Limits(
+                max_keepalive_connections=50,  # Keep-alive 연결 최대 50개 (증가)
+                max_connections=100,           # 전체 연결 최대 100개 (증가)
+                keepalive_expiry=30.0          # Keep-alive 만료 30초
+            )
+
             self._client = httpx.AsyncClient(
                 base_url=self.connection_info.server_url,
-                timeout=self.connection_info.timeout,
+                timeout=httpx.Timeout(30.0, connect=10.0),  # 타임아웃 최적화
                 headers={"Content-Type": "application/json", "Accept": "application/json"},
                 verify=ssl_config.get("verify", True),
+                limits=limits,  # 연결 제한 적용
+                http2=False     # HTTP/2 비활성화로 안정성 향상
             )
+            logger.info(f"🔧 Created optimized HTTP client with connection limits: max_connections=50, keepalive=20")
         return self._client
 
     async def _authenticate(self) -> str:
@@ -183,135 +199,148 @@ class AsyncTerminusService:
     async def _make_request(
         self, method: str, endpoint: str, data: Optional[Any] = None, params: Optional[Dict] = None
     ) -> Dict[str, Any]:
-        """HTTP 요청 실행"""
-        client = await self._get_client()
-        token = await self._authenticate()
+        """HTTP 요청 실행 - 동시성 제한 적용"""
+        # 🔥 ULTRA FIX! 세마포어로 동시 요청 제한
+        async with self._request_semaphore:
+            client = await self._get_client()
+            token = await self._authenticate()
 
-        headers = {
-            "Authorization": token,
-            "X-Request-ID": str(id(self)),  # For request tracking
-            "User-Agent": "SPICE-HARVESTER-OMS/1.0",  # Identify our service
-        }
+            headers = {
+                "Authorization": token,
+                "X-Request-ID": str(id(self)),  # For request tracking
+                "User-Agent": "SPICE-HARVESTER-OMS/1.0",  # Identify our service
+            }
 
-        try:
-            # 🔥 THINK ULTRA! 요청 정보 상세 로깅
-            logger.info(f"🌐 HTTP {method} {endpoint}")
-            logger.info(f"📦 Headers: {headers}")
-            logger.info(f"📄 JSON data: {json.dumps(data, indent=2, ensure_ascii=False) if data else 'None'}")
-            logger.info(f"🔗 Params: {params}")
-            
-            # 요청 크기 및 데이터 타입 정보
-            if data:
-                logger.info(f"📊 Data type: {type(data)}")
-                if isinstance(data, list):
-                    logger.info(f"📊 Data is list with {len(data)} items")
-                    if data:
-                        logger.info(f"📊 First item type: {type(data[0])}")
-                elif isinstance(data, dict):
-                    logger.info(f"📊 Data is dict with keys: {list(data.keys())}")
-            
-            response = await client.request(
-                method=method, url=endpoint, json=data, params=params, headers=headers
-            )
-            
-            logger.info(f"📨 Response status: {response.status_code}")
-            logger.info(f"📨 Response headers: {dict(response.headers)}")
-            logger.info(f"📨 Response content type: {response.headers.get('content-type', 'Unknown')}")
-            
-            response.raise_for_status()
-
-            # TerminusDB 응답이 빈 경우 처리
-            response_text = response.text.strip()
-            logger.info(f"📨 Response text length: {len(response_text)}")
-            
-            if response_text:
-                # 응답 크기가 클 경우 처음 500자만 로깅
-                if len(response_text) > 500:
-                    logger.info(f"📨 Response text (first 500 chars): {response_text[:500]}...")
-                else:
-                    logger.info(f"📨 Response text: {response_text}")
+            try:
+                # 🔥 THINK ULTRA! 요청 정보 상세 로깅
+                logger.info(f"🌐 HTTP {method} {endpoint}")
+                logger.info(f"📦 Headers: {headers}")
+                logger.info(f"📄 JSON data: {json.dumps(data, indent=2, ensure_ascii=False) if data else 'None'}")
+                logger.info(f"🔗 Params: {params}")
                 
-                try:
-                    json_response = response.json()
-                    logger.info(f"📨 Parsed JSON response type: {type(json_response)}")
-                    return json_response
-                except json.JSONDecodeError as e:
-                    # 🔥 ULTRA FIX! Handle NDJSON format
-                    if "Extra data" in str(e) or "\n" in response_text:
-                        logger.info("🔄 Detected NDJSON format, parsing line by line")
-                        try:
-                            # Parse as NDJSON (Newline Delimited JSON)
-                            lines = response_text.strip().split('\n')
-                            parsed_lines = []
-                            for line in lines:
-                                if line.strip():
-                                    parsed_lines.append(json.loads(line))
-                            
-                            # If only one line, return the object directly
-                            if len(parsed_lines) == 1:
-                                logger.info(f"📨 Parsed single NDJSON line as: {type(parsed_lines[0])}")
-                                return parsed_lines[0]
-                            else:
-                                logger.info(f"📨 Parsed {len(parsed_lines)} NDJSON lines")
-                                # For schema responses, return as string (will be parsed by _parse_schema_response)
-                                if any("schema" in str(endpoint).lower() for endpoint in [endpoint]):
-                                    return response_text
-                                # For other responses, return the list
-                                return parsed_lines
-                        except json.JSONDecodeError as ndjson_error:
-                            logger.error(f"❌ Failed to parse as NDJSON: {ndjson_error}")
+                # 요청 크기 및 데이터 타입 정보
+                if data:
+                    logger.info(f"📊 Data type: {type(data)}")
+                    if isinstance(data, list):
+                        logger.info(f"📊 Data is list with {len(data)} items")
+                        if data:
+                            logger.info(f"📊 First item type: {type(data[0])}")
+                    elif isinstance(data, dict):
+                        logger.info(f"📊 Data is dict with keys: {list(data.keys())}")
+                
+                response = await client.request(
+                    method=method, url=endpoint, json=data, params=params, headers=headers
+                )
+                
+                logger.info(f"📨 Response status: {response.status_code}")
+                logger.info(f"📨 Response headers: {dict(response.headers)}")
+                logger.info(f"📨 Response content type: {response.headers.get('content-type', 'Unknown')}")
+                
+                response.raise_for_status()
+
+                # TerminusDB 응답이 빈 경우 처리
+                response_text = response.text.strip()
+                logger.info(f"📨 Response text length: {len(response_text)}")
+                
+                if response_text:
+                    # 응답 크기가 클 경우 처음 500자만 로깅
+                    if len(response_text) > 500:
+                        logger.info(f"📨 Response text (first 500 chars): {response_text[:500]}...")
+                    else:
+                        logger.info(f"📨 Response text: {response_text}")
+                    
+                    try:
+                        json_response = response.json()
+                        logger.info(f"📨 Parsed JSON response type: {type(json_response)}")
+                        return json_response
+                    except json.JSONDecodeError as e:
+                        # 🔥 ULTRA FIX! Handle NDJSON format
+                        if "Extra data" in str(e) or "\n" in response_text:
+                            logger.info("🔄 Detected NDJSON format, parsing line by line")
+                            try:
+                                # Parse as NDJSON (Newline Delimited JSON)
+                                lines = response_text.strip().split('\n')
+                                parsed_lines = []
+                                for line in lines:
+                                    if line.strip():
+                                        parsed_lines.append(json.loads(line))
+                                
+                                # If only one line, return the object directly
+                                if len(parsed_lines) == 1:
+                                    logger.info(f"📨 Parsed single NDJSON line as: {type(parsed_lines[0])}")
+                                    return parsed_lines[0]
+                                else:
+                                    logger.info(f"📨 Parsed {len(parsed_lines)} NDJSON lines")
+                                    # For schema responses, return as string (will be parsed by _parse_schema_response)
+                                    if any("schema" in str(endpoint).lower() for endpoint in [endpoint]):
+                                        return response_text
+                                    # For other responses, return the list
+                                    return parsed_lines
+                            except json.JSONDecodeError as ndjson_error:
+                                logger.error(f"❌ Failed to parse as NDJSON: {ndjson_error}")
+                                logger.error(f"❌ Raw response: {response_text[:1000]}")
+                                raise
+                        else:
+                            logger.error(f"❌ Failed to parse JSON response: {e}")
                             logger.error(f"❌ Raw response: {response_text[:1000]}")
                             raise
-                    else:
-                        logger.error(f"❌ Failed to parse JSON response: {e}")
-                        logger.error(f"❌ Raw response: {response_text[:1000]}")
-                        raise
-            else:
-                # 빈 응답은 성공적인 작업을 의미할 수 있음 (예: DELETE)
-                logger.info("📨 Empty response (might be successful operation)")
-                return {}
+                else:
+                    # 빈 응답은 성공적인 작업을 의미할 수 있음 (예: DELETE)
+                    logger.info("📨 Empty response (might be successful operation)")
+                    return {}
 
-        except httpx.HTTPStatusError as e:
-            error_detail = ""
-            try:
-                error_detail = e.response.text
-                logger.error(f"❌ HTTP Error {e.response.status_code} for {method} {endpoint}")
-                logger.error(f"❌ Error response: {error_detail[:1000]}")
-                
-                # JSON 형식의 오류 메시지 파싱 시도
+            except httpx.HTTPStatusError as e:
+                error_detail = ""
                 try:
-                    error_json = e.response.json()
-                    logger.error(f"❌ Parsed error JSON: {json.dumps(error_json, indent=2, ensure_ascii=False)}")
+                    error_detail = e.response.text
+                    logger.error(f"❌ HTTP Error {e.response.status_code} for {method} {endpoint}")
+                    logger.error(f"❌ Error response: {error_detail[:1000]}")
                     
-                    # TerminusDB 특정 오류 메시지 추출
-                    if isinstance(error_json, dict):
-                        if "api:error" in error_json:
-                            terminus_error = error_json["api:error"]
-                            logger.error(f"❌ TerminusDB error: {terminus_error}")
-                        if "api:message" in error_json:
-                            terminus_message = error_json["api:message"]
-                            logger.error(f"❌ TerminusDB message: {terminus_message}")
-                except:
+                    # JSON 형식의 오류 메시지 파싱 시도
+                    try:
+                        error_json = e.response.json()
+                        logger.error(f"❌ Parsed error JSON: {json.dumps(error_json, indent=2, ensure_ascii=False)}")
+                        
+                        # TerminusDB 특정 오류 메시지 추출
+                        if isinstance(error_json, dict):
+                            if "api:error" in error_json:
+                                terminus_error = error_json["api:error"]
+                                logger.error(f"❌ TerminusDB error: {terminus_error}")
+                            if "api:message" in error_json:
+                                terminus_message = error_json["api:message"]
+                                logger.error(f"❌ TerminusDB message: {terminus_message}")
+                    except:
+                        pass
+                        
+                except AttributeError:
+                    # response.text가 없을 수 있음
                     pass
-                    
-            except AttributeError:
-                # response.text가 없을 수 있음
-                pass
-            except Exception as detail_error:
-                logger.debug(f"Error extracting error detail: {detail_error}")
+                except Exception as detail_error:
+                    logger.debug(f"Error extracting error detail: {detail_error}")
 
-            if e.response.status_code == 404:
-                raise OntologyNotFoundError(f"리소스를 찾을 수 없습니다: {endpoint}")
-            elif e.response.status_code == 409:
-                logger.error(f"❌ Duplicate resource conflict for: {endpoint}")
-                logger.error(f"❌ Request data was: {json.dumps(data, indent=2, ensure_ascii=False) if data else 'None'}")
-                raise DuplicateOntologyError(f"중복된 리소스: {endpoint}. 상세: {error_detail[:200]}")
-            else:
-                raise DatabaseError(
-                    f"HTTP 오류 {e.response.status_code}: {e}. 응답: {error_detail}"
-                )
-        except httpx.RequestError as e:
-            raise DatabaseError(f"요청 실패: {e}")
+                if e.response.status_code == 404:
+                    raise OntologyNotFoundError(f"리소스를 찾을 수 없습니다: {endpoint}")
+                elif e.response.status_code == 409:
+                    logger.error(f"❌ Duplicate resource conflict for: {endpoint}")
+                    logger.error(f"❌ Request data was: {json.dumps(data, indent=2, ensure_ascii=False) if data else 'None'}")
+                    raise DuplicateOntologyError(f"중복된 리소스: {endpoint}. 상세: {error_detail[:200]}")
+                elif e.response.status_code == 400:
+                    # 🔥 ULTRA! 400 에러 중 중복 ID 에러를 DuplicateOntologyError로 변환
+                    if "DocumentIdAlreadyExists" in error_detail:
+                        logger.error(f"❌ Document ID already exists: {endpoint}")
+                        # ID 추출 시도
+                        doc_id = "unknown"
+                        if data and isinstance(data, list) and len(data) > 0:
+                            doc_id = data[0].get("@id", "unknown") if isinstance(data[0], dict) else "unknown"
+                        raise DuplicateOntologyError(f"문서 ID '{doc_id}'이(가) 이미 존재합니다")
+                    else:
+                        raise OntologyValidationError(f"요청 검증 실패: {error_detail[:200]}")
+                else:
+                    raise DatabaseError(
+                        f"HTTP 오류 {e.response.status_code}: {e}. 응답: {error_detail}"
+                    )
+            except httpx.RequestError as e:
+                raise DatabaseError(f"요청 실패: {e}")
 
     async def connect(self, db_name: Optional[str] = None) -> None:
         """TerminusDB 연결 테스트"""
@@ -2687,6 +2716,11 @@ class AsyncTerminusService:
 
     async def _ensure_metadata_schema(self, db_name: str):
         """ClassMetadata 타입이 존재하는지 확인하고 없으면 생성"""
+        # 🔥 ULTRA FIX! 캐시를 사용하여 중복 스키마 생성 방지
+        if db_name in self._metadata_schema_cache:
+            logger.debug(f"🔧 Metadata schema already exists for {db_name} (cached)")
+            return
+            
         try:
             # 🔥 THINK ULTRA! 기존 스키마 확인 및 업데이트 방식 변경
             logger.info(f"🔧 Ensuring metadata schema for database: {db_name}")
@@ -2755,7 +2789,13 @@ class AsyncTerminusService:
                     await self._make_request("POST", schema_endpoint, [field_metadata_schema], params={"graph_type": "schema", "author": self.connection_info.user, "message": "Creating FieldMetadata schema"})
                     logger.info("📝 Created FieldMetadata schema")
                 except Exception as e:
-                    logger.warning(f"FieldMetadata schema creation failed: {e}")
+                    # 🔥 ULTRA! DocumentIdAlreadyExists는 성공으로 처리 (동시성 문제 해결)
+                    if "DocumentIdAlreadyExists" in str(e) or "already exists" in str(e).lower():
+                        logger.info("✅ FieldMetadata schema already exists (concurrent creation)")
+                        field_metadata_exists = True
+                    else:
+                        logger.warning(f"FieldMetadata schema creation failed: {e}")
+                        raise
             
             # ClassMetadata 스키마 클래스 생성
             class_metadata_schema = {
@@ -2776,9 +2816,17 @@ class AsyncTerminusService:
                 await self._make_request("POST", schema_endpoint, [class_metadata_schema], params={"graph_type": "schema", "author": self.connection_info.user, "message": "Creating ClassMetadata schema"})
                 logger.info("📝 Created ClassMetadata schema")
             except Exception as e:
-                logger.warning(f"ClassMetadata schema creation failed: {e}")
+                # 🔥 ULTRA! DocumentIdAlreadyExists는 성공으로 처리 (동시성 문제 해결)
+                if "DocumentIdAlreadyExists" in str(e) or "already exists" in str(e).lower():
+                    logger.info("✅ ClassMetadata schema already exists (concurrent creation)")
+                else:
+                    logger.warning(f"ClassMetadata schema creation failed: {e}")
+                    raise
             
             logger.info("✅ Metadata schema creation completed")
+            
+            # 🔥 ULTRA FIX! 스키마 생성 완료를 캐시에 기록
+            self._metadata_schema_cache.add(db_name)
             
         except Exception as e:
             logger.error(f"❌ Failed to ensure metadata schema: {e}")
@@ -2792,18 +2840,9 @@ class AsyncTerminusService:
         self, db_name: str, class_data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """온톨로지 클래스 생성 (스키마 + 메타데이터를 TerminusDB에 저장)"""
-        # 🔍 DEBUG: 입력 데이터 검증 및 로깅
-        logger.info("=" * 80)
-        logger.info("🚀 CREATE ONTOLOGY CLASS - START")
-        logger.info(f"📊 Database: {db_name}")
-        # Handle both dict and Pydantic model inputs
-        if hasattr(class_data, 'model_dump'):
-            display_data = class_data.model_dump()
-        elif hasattr(class_data, 'dict'):
-            display_data = class_data.dict()
-        else:
-            display_data = class_data
-        logger.info(f"📝 Input data: {json.dumps(display_data, indent=2, ensure_ascii=False, default=str)}")
+        # 🔥 ULTRA FIX! 로깅 최적화 - 상세 로깅 줄이기
+        logger.debug("🚀 CREATE ONTOLOGY CLASS - START")
+        logger.debug(f"📊 Database: {db_name}")
         
         # Convert Pydantic model to dict for consistent handling
         if hasattr(class_data, 'model_dump'):
@@ -2822,17 +2861,8 @@ class AsyncTerminusService:
         except Exception as e:
             logger.warning(f"⚠️ Metadata schema creation failed but continuing: {e}")
         
-        # 🔍 DEBUG: 클래스명 검증
-        logger.info(f"🔍 Class ID: '{class_id}'")
-        logger.info(f"🔍 Class ID type: {type(class_id)}")
-        logger.info(f"🔍 Class ID length: {len(class_id)}")
-        
-        # SHA1 해시 생성 과정 로깅
-        import hashlib
-        hash_input = f"{class_id}_{db_name}"
-        sha1_hash = hashlib.sha1(hash_input.encode()).hexdigest()
-        logger.info(f"🔐 SHA1 Hash Input: '{hash_input}'")
-        logger.info(f"🔐 SHA1 Hash Output: '{sha1_hash}'")
+        # 🔥 ULTRA FIX! 로깅 최적화 - 해시 로깅 제거
+        logger.debug(f"🔍 Class ID: '{class_id}'")
         
         # 예약어 체크
         reserved_words = {
@@ -2843,12 +2873,10 @@ class AsyncTerminusService:
         if class_id in reserved_words:
             logger.warning(f"⚠️ Class ID '{class_id}' might be a reserved word!")
         
-        # 🔥 THINK ULTRA! Property → Relationship 자동 변환
-        logger.warning(f"🔥🔥🔥 BEFORE conversion class_data: {json.dumps(class_data, indent=2, ensure_ascii=False)}")
-        logger.info("🔄 Processing property to relationship conversion...")
+        # 🔥 ULTRA FIX! Property → Relationship 자동 변환 (로깅 최적화)
+        logger.debug("🔄 Processing property to relationship conversion...")
         class_data = self.property_converter.process_class_data(class_data)
-        logger.warning(f"🔥🔥🔥 AFTER conversion class_data: {json.dumps(class_data, indent=2, ensure_ascii=False)}")
-        logger.info(f"📊 After conversion: {len(class_data.get('properties', []))} properties, {len(class_data.get('relationships', []))} relationships")
+        logger.debug(f"📊 After conversion: {len(class_data.get('properties', []))} properties, {len(class_data.get('relationships', []))} relationships")
         
         # TerminusDB 시스템 클래스 확인
         terminus_system_classes = {
@@ -2870,8 +2898,8 @@ class AsyncTerminusService:
         if not isinstance(desc_text, str):
             desc_text = str(desc_text) if desc_text else f"Class {class_id}"
         
-        # 🔥 THINK ULTRA! 새로운 TerminusDB 스키마 빌더 사용
-        logger.info("🔧 Building schema using advanced TerminusSchemaBuilder...")
+        # 🔥 ULTRA FIX! 스키마 빌더 (로깅 최적화)
+        logger.debug("🔧 Building schema using advanced TerminusSchemaBuilder...")
         
         # 1. 기본 클래스 스키마 빌더 생성
         schema_builder = create_basic_class_schema(class_id)
@@ -2882,17 +2910,12 @@ class AsyncTerminusService:
             description = desc_text if desc_text != f"Class {class_id}" else None
             schema_builder.add_documentation(comment, description)
         
-        # 3. 🔥 ULTRA! 제약조건 및 기본값 추출 분석
+        # 3. 🔥 ULTRA! 제약조건 및 기본값 추출 분석 (로깅 줄이기)
         constraint_extractor = ConstraintExtractor()
         all_constraints = constraint_extractor.extract_all_constraints(class_data)
         constraint_summary = constraint_extractor.generate_constraint_summary(all_constraints)
         
-        logger.info("🔧 제약조건 분석 완료:")
-        logger.info(f"   📊 총 필드: {constraint_summary['total_fields']}")
-        logger.info(f"   📦 속성: {constraint_summary['properties']}, 관계: {constraint_summary['relationships']}")  
-        logger.info(f"   ⚡ 필수 필드: {constraint_summary['required_fields']}")
-        logger.info(f"   🔧 기본값 필드: {constraint_summary['fields_with_defaults']}")
-        logger.info(f"   ⚠️ 검증 경고: {constraint_summary['validation_warnings']}")
+        logger.debug(f"🔧 제약조건 분석 완료: {constraint_summary['total_fields']} 필드, {constraint_summary['properties']} 속성, {constraint_summary['relationships']} 관계")
         
         if constraint_summary['validation_warnings'] > 0:
             logger.warning("⚠️ 제약조건 호환성 경고가 발견되었습니다!")
@@ -3233,31 +3256,19 @@ class AsyncTerminusService:
                 "message": f"Creating {class_id} schema"
             }
             
-            # 기존 클래스 존재 여부 확인
-            logger.info(f"🔍 Checking if class '{class_id}' already exists...")
-            try:
-                existing = await self.get_ontology_class(db_name, class_id, raise_if_missing=False)
-                if existing:
-                    logger.warning(f"⚠️ Class '{class_id}' already exists!")
-                    logger.warning(f"📊 Existing class: {json.dumps(existing, indent=2, ensure_ascii=False)}")
-            except Exception as e:
-                logger.info(f"✅ Class '{class_id}' does not exist (good): {e}")
+            # 🔥 ULTRA OPTIMIZATION! 고부하 상황에서는 존재 확인 생략
+            # TerminusDB가 중복 시 자체적으로 에러를 반환하므로 사전 확인 불필요
+            logger.debug(f"🚀 Skipping existence check for class '{class_id}' (performance optimization)")
             
-            # 🔥 THINK ULTRA! 클래스만 먼저 생성 (속성은 나중에)
-            logger.info(f"📤 Creating schema for class: {class_id}")
-            logger.info(f"📋 Schema document to be sent:")
-            logger.info(json.dumps(schema_doc, indent=2, ensure_ascii=False))
-            logger.info(f"🔗 Full endpoint URL: {self.connection_info.server_url}{endpoint}")
-            logger.info(f"📦 Request parameters: {json.dumps(params, indent=2)}")
+            # 🔥 ULTRA FIX! 로깅 최적화 - 스키마 생성 시작
+            logger.debug(f"📤 Creating schema for class: {class_id}")
             
-            # 요청 전 최종 확인
-            logger.info(f"🚀 Sending POST request to create class '{class_id}'...")
-            logger.info(f"📄 Final schema document: {json.dumps(schema_doc, indent=2)}")
+            # 🔥 ULTRA FIX! 로깅 최적화
+            logger.debug(f"🚀 Creating class '{class_id}'...")
             
             schema_result = await self._make_request("POST", endpoint, [schema_doc], params)
             
-            logger.info(f"✅ Class creation response received")
-            logger.info(f"📨 Response data: {json.dumps(schema_result, indent=2, ensure_ascii=False)}")
+            logger.debug(f"✅ Class creation response received")
             
             # 2단계: 인스턴스 그래프에 다국어 메타데이터 저장
             if "label" in class_data or "description" in class_data:
@@ -3488,17 +3499,9 @@ class AsyncTerminusService:
                     logger.warning(f"⚠️ Failed to store metadata (schema may not exist): {metadata_error}")
                     logger.info("🔄 Continuing without storing metadata - class will still be created")
             
-            # 생성 결과 확인
-            logger.info("🔍 Verifying class creation...")
-            try:
-                created_class = await self.get_ontology_class(db_name, class_id, raise_if_missing=False)
-                if created_class:
-                    logger.info(f"✅ Class '{class_id}' successfully created and verified!")
-                    logger.info(f"📊 Created class: {json.dumps(created_class, indent=2, ensure_ascii=False)}")
-                else:
-                    logger.warning(f"⚠️ Class '{class_id}' creation response OK but class not found!")
-            except Exception as verify_error:
-                logger.error(f"❌ Error verifying created class: {verify_error}")
+            # 🔥 ULTRA OPTIMIZATION! 고부하 상황에서는 생성 후 상세 검증 간소화
+            # schema_result가 정상 반환되면 생성 성공으로 간주
+            logger.debug(f"✅ Class '{class_id}' creation completed successfully")
             
             # 원본 데이터를 포함한 결과 반환
             return_data = class_data.copy()

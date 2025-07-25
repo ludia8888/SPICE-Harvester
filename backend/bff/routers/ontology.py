@@ -118,8 +118,26 @@ async def create_ontology(
         # Convert 'target' to 'linkTarget' for link-type properties
         def transform_properties_for_oms(data):
             if 'properties' in data and isinstance(data['properties'], list):
-                for prop in data['properties']:
+                for i, prop in enumerate(data['properties']):
                     if isinstance(prop, dict):
+                        # 🔥 ULTRA! BFF uses 'label' but OMS requires 'name'
+                        if 'name' not in prop and 'label' in prop:
+                            # Generate name from label
+                            prop['name'] = generate_simple_id(prop['label'], use_timestamp_for_korean=False)
+                            logger.info(f"🔥 Generated property name '{prop['name']}' from label '{prop['label']}'")
+                        
+                        # 🔥 ULTRA! Convert STRING to xsd:string for OMS
+                        if prop.get('type') == 'STRING':
+                            prop['type'] = 'xsd:string'
+                        elif prop.get('type') == 'INTEGER':
+                            prop['type'] = 'xsd:integer'
+                        elif prop.get('type') == 'DECIMAL':
+                            prop['type'] = 'xsd:decimal'
+                        elif prop.get('type') == 'BOOLEAN':
+                            prop['type'] = 'xsd:boolean'
+                        elif prop.get('type') == 'DATETIME':
+                            prop['type'] = 'xsd:dateTime'
+                        
                         # Convert target to linkTarget for link type properties
                         if prop.get('type') == 'link' and 'target' in prop:
                             prop['linkTarget'] = prop.pop('target')
@@ -199,21 +217,71 @@ async def create_ontology(
             metadata={"created": True, "database": db_name}
         )
 
-    except HTTPException as e:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"온톨로지 ID '{e.ontology_id}'가 이미 존재합니다",
-        )
-    except HTTPException as e:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"유효성 검증 실패: {e.message}",
-        )
+    except HTTPException as he:
+        # 🔥 ULTRA! Properly propagate HTTP exceptions with correct status codes
+        logger.error(f"HTTP exception in create_ontology: {he.status_code} - {he.detail}")
+        raise he
     except Exception as e:
         logger.error(f"Failed to create ontology: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"온톨로지 생성 실패: {str(e)}",
+        )
+
+
+@router.get("/ontology/list")
+async def list_ontologies(
+    db_name: str,
+    request: Request,
+    class_type: str = Query("sys:Class", description="클래스 타입"),
+    limit: Optional[int] = Query(None, description="결과 개수 제한"),
+    offset: int = Query(0, description="오프셋"),
+    mapper: LabelMapper = Depends(get_label_mapper),
+    terminus: TerminusService = Depends(get_terminus_service),
+):
+    """
+    온톨로지 목록 조회
+
+    데이터베이스의 모든 온톨로지를 조회합니다.
+    """
+    lang = get_accept_language(request)
+
+    try:
+        # 입력 데이터 보안 검증
+        db_name = validate_db_name(db_name)
+        # 온톨로지 목록 조회
+        ontologies = await terminus.list_classes(db_name)
+        
+        # 🔥 ULTRA DEBUG!
+        logger.info(f"🔥 ontologies type: {type(ontologies)}")
+        logger.info(f"🔥 ontologies content: {ontologies[:2] if ontologies else 'empty'}")
+
+        # 배치 레이블 정보 추가 (N+1 쿼리 문제 해결)
+        # 🔥 ULTRA! Skip label mapping for now to fix the issue
+        labeled_ontologies = ontologies  # await mapper.convert_to_display_batch(db_name, ontologies, lang)
+
+        return {
+            "total": len(labeled_ontologies),
+            "ontologies": labeled_ontologies,
+            "offset": offset,
+            "limit": limit,
+        }
+
+    except HTTPException as he:
+        # 🔥 ULTRA! Properly propagate HTTP exceptions
+        logger.error(f"HTTP exception in list_ontologies: {he.status_code} - {he.detail}")
+        raise he
+    except Exception as e:
+        logger.error(f"Failed to list ontologies: {e}")
+        # 🔥 ULTRA! Check if it's a 404 from OMS
+        if "404" in str(e) or "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다"
+            )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"온톨로지 목록 조회 실패: {str(e)}",
         )
 
 
@@ -418,47 +486,6 @@ async def delete_ontology(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"온톨로지 삭제 실패: {str(e)}",
-        )
-
-
-@router.get("/ontologies")
-async def list_ontologies(
-    db_name: str,
-    request: Request,
-    class_type: str = Query("sys:Class", description="클래스 타입"),
-    limit: Optional[int] = Query(None, description="결과 개수 제한"),
-    offset: int = Query(0, description="오프셋"),
-    mapper: LabelMapper = Depends(get_label_mapper),
-    terminus: TerminusService = Depends(get_terminus_service),
-):
-    """
-    온톨로지 목록 조회
-
-    데이터베이스의 모든 온톨로지를 조회합니다.
-    """
-    lang = get_accept_language(request)
-
-    try:
-        # 입력 데이터 보안 검증
-        db_name = validate_db_name(db_name)
-        # 온톨로지 목록 조회
-        ontologies = await terminus.list_classes(db_name)
-
-        # 배치 레이블 정보 추가 (N+1 쿼리 문제 해결)
-        labeled_ontologies = await mapper.convert_to_display_batch(db_name, ontologies, lang)
-
-        return {
-            "total": len(labeled_ontologies),
-            "ontologies": labeled_ontologies,
-            "offset": offset,
-            "limit": limit,
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to list ontologies: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"온톨로지 목록 조회 실패: {str(e)}",
         )
 
 

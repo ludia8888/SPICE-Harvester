@@ -93,7 +93,9 @@ async def ensure_database_exists(
     """데이터베이스 존재 확인 및 검증된 이름 반환"""
     try:
         dbs = await terminus.list_databases()
-        if db_name not in dbs:
+        # 올바른 방식: 딕셔너리 리스트에서 name 필드 확인
+        db_exists = any(db.get('name') == db_name for db in dbs if isinstance(db, dict))
+        if not db_exists:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"데이터베이스 '{db_name}'이(가) 존재하지 않습니다"

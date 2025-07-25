@@ -277,6 +277,17 @@ class TerminusSchemaConverter:
             "name": TerminusSchemaType.STRING.value,  # Name is a string
             "image": TerminusSchemaType.STRING.value,  # Image URL or base64 string
             "file": TerminusSchemaType.STRING.value,  # File URL or path
+            # XSD 타입 지원 추가
+            "xsd:string": TerminusSchemaType.STRING.value,
+            "xsd:integer": TerminusSchemaType.INTEGER.value,
+            "xsd:decimal": TerminusSchemaType.DECIMAL.value,
+            "xsd:float": TerminusSchemaType.FLOAT.value,
+            "xsd:double": TerminusSchemaType.DOUBLE.value,
+            "xsd:boolean": TerminusSchemaType.BOOLEAN.value,
+            "xsd:datetime": TerminusSchemaType.DATETIME.value,
+            "xsd:date": TerminusSchemaType.DATE.value,
+            "xsd:time": TerminusSchemaType.TIME.value,
+            "xsd:anyuri": TerminusSchemaType.ANYURI.value,
         }
         
         # 기본 타입 매핑 시도 (대소문자 구분 없이)

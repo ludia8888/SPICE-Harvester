@@ -92,11 +92,21 @@ class TerminusService:
     async def get_class(self, db_name: str, class_id: str):
         """클래스 조회"""
         client = get_oms_client()
-        response = await client.get_ontology(db_name, class_id)
-        # Extract the data from the response
-        if response and response.get("status") == "success":
-            return response.get("data", {})
-        return None
+        try:
+            response = await client.get_ontology(db_name, class_id)
+            # Extract the data from the response
+            if response and response.get("status") == "success":
+                return response.get("data", {})
+            return None
+        except httpx.HTTPStatusError as e:
+            # If it's a 404, return None (not found)
+            if e.response.status_code == 404:
+                return None
+            # Re-raise other HTTP errors
+            raise
+        except Exception:
+            # Re-raise other exceptions
+            raise
 
     async def update_class(self, db_name: str, class_id: str, class_data: dict):
         """클래스 업데이트"""
