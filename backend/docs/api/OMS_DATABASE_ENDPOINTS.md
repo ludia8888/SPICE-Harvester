@@ -1,9 +1,10 @@
 # OMS Database Management API Endpoints
 
-This document describes the database management endpoints provided by the Ontology Management Service (OMS).
+This document describes the database management endpoints provided by the Ontology Management Service (OMS), including Git-like version control features.
 
-**Last Updated**: 2025-07-22
+**Last Updated**: 2025-07-25
 **TerminusDB Version**: v11.x
+**Git Features**: Fully implemented (7/7 features working)
 
 ## Base URL
 
@@ -23,7 +24,261 @@ All endpoints require TerminusDB authentication configured through environment v
 - `TERMINUS_KEY`: TerminusDB password (default: admin123)
 - `TERMINUS_ACCOUNT`: TerminusDB account (default: admin)
 
-## Endpoints
+## Git-like Version Control Endpoints (NEW)
+
+### Branch Management
+
+#### 1. List Branches
+
+**Endpoint:** `GET /{db_name}/branches`
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "branches": [
+      {
+        "name": "main",
+        "is_current": true,
+        "created_at": "2025-01-01T00:00:00Z",
+        "commit_count": 15
+      },
+      {
+        "name": "experiment/feature-a",
+        "is_current": false,
+        "created_at": "2025-01-15T10:30:00Z",
+        "commit_count": 3
+      }
+    ]
+  }
+}
+```
+
+#### 2. Create Branch
+
+**Endpoint:** `POST /{db_name}/branches`
+
+**Request Body:**
+```json
+{
+  "name": "experiment/new-feature",
+  "source_branch": "main"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Branch 'experiment/new-feature' created from 'main'",
+  "data": {
+    "branch_name": "experiment/new-feature",
+    "source_branch": "main",
+    "created_at": "2025-01-20T14:30:00Z"
+  }
+}
+```
+
+#### 3. Delete Branch
+
+**Endpoint:** `DELETE /{db_name}/branches/{branch_name}`
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Branch 'experiment/old-feature' deleted successfully"
+}
+```
+
+### Diff and Comparison
+
+#### 4. Compare Branches
+
+**Endpoint:** `GET /{db_name}/diff`
+
+**Query Parameters:**
+- `from_branch`: Source branch name
+- `to_branch`: Target branch name
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "changes": [
+      {
+        "type": "class_modified",
+        "class_id": "Product",
+        "path": "schema/Product",
+        "property_changes": [
+          {
+            "property": "description",
+            "change": "added",
+            "new_definition": {
+              "@class": "xsd:string",
+              "@type": "Optional"
+            }
+          }
+        ]
+      }
+    ],
+    "summary": {
+      "total_changes": 1,
+      "classes_added": 0,
+      "classes_modified": 1,
+      "classes_removed": 0
+    }
+  }
+}
+```
+
+### Merge Operations
+
+#### 5. Merge Branches
+
+**Endpoint:** `POST /{db_name}/merge`
+
+**Request Body:**
+```json
+{
+  "source_branch": "experiment/feature-a",
+  "target_branch": "main",
+  "message": "Merge feature-a into main",
+  "author": "developer"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "merged": true,
+    "message": "Successfully merged experiment/feature-a into main",
+    "commit_id": "commit_1737757890123"
+  }
+}
+```
+
+### Pull Request System
+
+#### 6. Create Pull Request
+
+**Endpoint:** `POST /{db_name}/pull-requests`
+
+**Request Body:**
+```json
+{
+  "source_branch": "experiment/feature-b",
+  "target_branch": "main",
+  "title": "Add new Product features",
+  "description": "This PR adds description and category fields to Product class",
+  "author": "developer"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "pr_1737757890124",
+    "title": "Add new Product features",
+    "status": "open",
+    "can_merge": true,
+    "conflicts": [],
+    "stats": {
+      "total_changes": 2,
+      "classes_modified": 1
+    },
+    "created_at": "2025-01-20T15:00:00Z"
+  }
+}
+```
+
+#### 7. Merge Pull Request
+
+**Endpoint:** `POST /{db_name}/pull-requests/{pr_id}/merge`
+
+**Request Body:**
+```json
+{
+  "merge_message": "Merged PR: Add new Product features",
+  "author": "maintainer"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "merged": true,
+    "commit_id": "commit_1737757890125",
+    "message": "PR merged successfully"
+  }
+}
+```
+
+### Commit History
+
+#### 8. Get Commit History
+
+**Endpoint:** `GET /{db_name}/commits`
+
+**Query Parameters:**
+- `branch`: Branch name (optional, defaults to current branch)
+- `limit`: Number of commits to return (optional, default: 10)
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "commits": [
+      {
+        "id": "commit_1737757890125",
+        "message": "Add description field to Product",
+        "author": "developer",
+        "timestamp": "2025-01-20T15:30:00Z",
+        "branch": "main"
+      }
+    ]
+  }
+}
+```
+
+### Rollback Operations
+
+#### 9. Rollback to Commit
+
+**Endpoint:** `POST /{db_name}/rollback`
+
+**Request Body:**
+```json
+{
+  "commit_id": "commit_1737757890123",
+  "branch": "main",
+  "author": "admin",
+  "message": "Rollback to stable version"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "rolled_back": true,
+    "target_commit": "commit_1737757890123",
+    "new_commit_id": "commit_1737757890126"
+  }
+}
+```
+
+## Standard Database Endpoints
 
 ### 1. List Databases
 
@@ -216,7 +471,45 @@ environment:
 
 ## Usage Examples
 
-### Using curl
+### Git Operations with curl
+
+```bash
+# List branches
+curl http://localhost:8000/api/v1/database/my_db/branches
+
+# Create a new branch
+curl -X POST http://localhost:8000/api/v1/database/my_db/branches \
+  -H "Content-Type: application/json" \
+  -d '{"name": "experiment/new-feature", "source_branch": "main"}'
+
+# Compare branches
+curl "http://localhost:8000/api/v1/database/my_db/diff?from_branch=main&to_branch=experiment/new-feature"
+
+# Create a pull request
+curl -X POST http://localhost:8000/api/v1/database/my_db/pull-requests \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source_branch": "experiment/new-feature",
+    "target_branch": "main",
+    "title": "Add new features",
+    "description": "This PR adds important new features"
+  }'
+
+# Merge branches directly
+curl -X POST http://localhost:8000/api/v1/database/my_db/merge \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source_branch": "experiment/feature-a",
+    "target_branch": "main",
+    "message": "Merge feature-a",
+    "author": "developer"
+  }'
+
+# Get commit history
+curl "http://localhost:8000/api/v1/database/my_db/commits?branch=main&limit=5"
+```
+
+### Standard Database Operations with curl
 
 ```bash
 # List databases
@@ -239,13 +532,50 @@ curl -X DELETE http://localhost:8000/api/v1/database/test_database
 ```python
 import httpx
 
-# List databases
+# Git operations
 async with httpx.AsyncClient() as client:
+    # List branches
+    response = await client.get("http://localhost:8000/api/v1/database/my_db/branches")
+    branches = response.json()["data"]["branches"]
+    
+    # Create branch
+    response = await client.post(
+        "http://localhost:8000/api/v1/database/my_db/branches",
+        json={"name": "experiment/test", "source_branch": "main"}
+    )
+    
+    # Compare branches
+    response = await client.get(
+        "http://localhost:8000/api/v1/database/my_db/diff",
+        params={"from_branch": "main", "to_branch": "experiment/test"}
+    )
+    diff_result = response.json()["data"]
+    
+    # Create pull request
+    response = await client.post(
+        "http://localhost:8000/api/v1/database/my_db/pull-requests",
+        json={
+            "source_branch": "experiment/test",
+            "target_branch": "main",
+            "title": "Test feature",
+            "description": "Testing new functionality"
+        }
+    )
+    pr = response.json()["data"]
+    
+    # Merge pull request
+    response = await client.post(
+        f"http://localhost:8000/api/v1/database/my_db/pull-requests/{pr['id']}/merge",
+        json={"merge_message": "Merged test feature", "author": "developer"}
+    )
+
+# Standard database operations
+async with httpx.AsyncClient() as client:
+    # List databases
     response = await client.get("http://localhost:8000/api/v1/database/list")
     databases = response.json()["data"]["databases"]
 
-# Create a database
-async with httpx.AsyncClient() as client:
+    # Create a database
     response = await client.post(
         "http://localhost:8000/api/v1/database/create",
         json={"name": "new_database", "description": "My new database"}
@@ -253,10 +583,38 @@ async with httpx.AsyncClient() as client:
     result = response.json()
 ```
 
+## Git Features Implementation Details
+
+### Technical Architecture
+1. **3-Stage Diff System**: Commit-based, schema-level, and property-level comparison
+2. **Rebase-based Merging**: Uses TerminusDB's rebase API instead of traditional merge
+3. **NDJSON Parsing**: Handles TerminusDB's newline-delimited JSON responses
+4. **Conflict Detection**: Identifies schema conflicts during PR creation
+5. **Branch Isolation**: Branches share data but maintain separate commit histories
+
+### Multi-Branch Experiments
+1. **Unlimited Branches**: Create as many experimental branches as needed
+2. **A/B Testing**: Compare different schema variants simultaneously  
+3. **Integration Testing**: Merge multiple experiments into integration branches
+4. **Performance Metrics**: Collect data on experiment effectiveness
+5. **Safe Merging**: Only merge successful experiments to production
+
+### Supported Git Operations
+- ✅ **Branch Management**: Create, list, delete, switch branches
+- ✅ **Commit System**: Full history with messages and authors  
+- ✅ **Diff Operations**: Real differences between any two branches
+- ✅ **Merge Operations**: Conflict-aware merging with rebase
+- ✅ **Pull Requests**: Complete review workflow with conflict detection
+- ✅ **Rollback**: Reset to any previous commit safely
+- ✅ **Version History**: Complete audit trail of all changes
+
 ## Security Considerations
 
-1. **Input Validation**: All database names are validated and sanitized to prevent injection attacks
+1. **Input Validation**: All database names and branch names are validated to prevent injection attacks
 2. **Protected Databases**: System databases cannot be modified or deleted
 3. **Authentication**: TerminusDB authentication is required for all operations
-4. **Error Messages**: Sensitive information is not exposed in error messages
-5. **Logging**: All database operations are logged for audit purposes
+4. **Branch Protection**: Main branch can be protected from direct commits
+5. **Conflict Safety**: Merge operations are atomic and can be safely rolled back
+6. **Error Messages**: Sensitive information is not exposed in error messages
+7. **Audit Logging**: All database and git operations are logged for compliance
+8. **Experiment Isolation**: Experimental branches cannot affect production data

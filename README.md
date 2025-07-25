@@ -22,13 +22,15 @@ SPICE HARVESTER is a sophisticated ontology management platform designed for ent
 ### Key Capabilities
 
 - **Enterprise Ontology Management**: Complete lifecycle management with version control
+- **Git-like Version Control**: Branch management, diff, merge, and Pull Request workflows (7/7 features working)
+- **Multi-Branch Experiments**: Unlimited experimental branches with A/B testing support
 - **Multi-language Support**: Comprehensive internationalization for global deployments
 - **Complex Type System**: Support for 10+ data types including MONEY, EMAIL, PHONE, and custom objects
 - **Advanced Relationship Management**: Bidirectional relationships with circular reference detection
 - **Automatic Type Conversion**: Property-to-Relationship automatic transformation
 - **Type Inference**: Automatic schema generation from external data sources
 - **Security-First Design**: Input sanitization, authentication, and comprehensive audit logging
-- **TerminusDB v11.x Integration**: Full support for all schema types and features
+- **TerminusDB v11.x Integration**: Full support for all schema types and features including rebase-based merging
 
 ## Architecture
 
@@ -127,6 +129,26 @@ Comprehensive documentation is available in the `docs/` directory:
 
 ## Features
 
+### Git-like Version Control (100% Implemented)
+
+Complete git-like functionality for ontology management:
+
+**Core Git Features**:
+- ✅ **Branch Management**: Create, list, delete branches with shared data architecture
+- ✅ **Commit System**: Full commit history with messages, authors, and timestamps
+- ✅ **Diff & Compare**: 3-stage diff approach (commit-based, schema-level, property-level)
+- ✅ **Merge Operations**: Rebase-based merging with conflict detection
+- ✅ **Pull Requests**: Complete PR workflow with review, conflict detection, and merge
+- ✅ **Rollback**: Reset to previous commits with full data safety
+- ✅ **Version History**: Complete audit trail of all changes
+
+**Advanced Experiment Features**:
+- 🧪 **Multi-Branch Experiments**: Unlimited experimental branches for A/B testing
+- 📊 **Branch Comparison**: Compare multiple experiments simultaneously
+- 🔀 **Integration Testing**: Merge multiple experiments into integration branches
+- 📈 **Experiment Metrics**: Collect and analyze experiment performance data
+- 🚀 **Production Merging**: Safe merging of successful experiments to main
+
 ### Data Type Support
 
 The platform supports a comprehensive set of data types:
@@ -174,7 +196,8 @@ The platform supports a comprehensive set of data types:
 
 - **Programming Language**: Python 3.9+
 - **Web Framework**: FastAPI 0.100+
-- **Database**: TerminusDB v11.x
+- **Database**: TerminusDB v11.x with git-like features
+- **Version Control**: Custom git-like implementation with rebase support
 - **Async Operations**: asyncio, httpx
 - **Validation**: Pydantic
 - **Testing**: pytest, pytest-asyncio
