@@ -3,18 +3,18 @@
 ## 개요
 SPICE HARVESTER 프로젝트는 간결하고 직관적인 구조로 구성되어 있습니다.
 
-> **📌 최종 업데이트: 2025-07-25**  
+> **📌 최종 업데이트: 2025-07-26**  
 > 현재 프로젝트는 플랫 구조로 구성되어 있으며, 모든 sys.path.insert 구문이 제거되었습니다.  
 > **🔥 NEW**: Git-like 버전 관리 시스템 완전 구현 (7/7 기능 100% 작동)  
-> **🚀 ULTRA UPDATE**: 100% 실제 구현 완료 - Mock/Dummy 코드 전면 제거  
-> 새로운 기능: Property-to-Relationship 자동 변환, 고급 제약조건 시스템, TerminusDB v11.x 완전 지원
+> **🚀 ULTRA UPDATE**: 코드 중복 제거, API 표준화, 성능 최적화 완료  
+> 새로운 기능: Service Factory 패턴, ApiResponse 표준화, HTTP 연결 풀링
 
-> ### 🔥 실제 구현 완료 상태 (2025-01-25)
-> - ✅ **Mock 서비스 제거**: 모든 `MockTypeInferenceService` → `RealTypeInferenceService` 교체
-> - ✅ **더미 메시지 제거**: "아직 구현 중입니다" 메시지 완전 삭제  
-> - ✅ **Pass 함수 제거**: 모든 빈 함수에 실제 비즈니스 로직 구현
-> - ✅ **실제 에러 처리**: 구체적 HTTP 상태 코드와 실제 에러 분류
-> - ✅ **AI 타입 추론**: 100% 신뢰도의 실제 Funnel 알고리즘 작동
+> ### 🔥 최신 리팩토링 완료 (2025-07-26)
+> - ✅ **코드 중복 제거**: Service Factory로 600+ 라인 제거
+> - ✅ **API 표준화**: ApiResponse 모델로 모든 엔드포인트 통일
+> - ✅ **에러 처리 개선**: 404, 409, 400 상태 코드 정확한 매핑
+> - ✅ **성능 최적화**: HTTP 연결 풀링 (50/100), Semaphore(50)
+> - ✅ **BFF-OMS 통합**: 자동 property name 생성, XSD 타입 매핑
 
 ## 변경 사항
 
@@ -180,7 +180,127 @@ COPY . .
    - 명확한 의존성 관계
    - 표준 Python 패키지 구조
 
-### 9. 최신 기능 추가 (2025-07-25)
+### 9. 최신 기능 추가 (2025-07-26)
+
+#### 🎯 코드 중복 제거 및 표준화 (NEW)
+
+**Service Factory 패턴:**
+```python
+# shared/services/service_factory.py
+from shared.services.service_factory import create_fastapi_service, ServiceInfo
+
+# 기존: 각 서비스마다 100+ 라인의 초기화 코드
+app = FastAPI()
+app.add_middleware(CORSMiddleware, ...)
+app.add_middleware(LoggingMiddleware, ...)
+# ... 많은 중복 코드
+
+# 새로운 방식:
+service_info = ServiceInfo(
+    name="OMS",
+    version="1.0.0",
+    port=8000
+)
+app = create_fastapi_service(service_info)
+```
+
+**ApiResponse 표준화:**
+```python
+# shared/models/responses.py
+from shared.models.responses import ApiResponse
+
+# 기존: 각 엔드포인트마다 다른 응답 형식
+return {"success": True, "data": {...}}  # BFF
+return {"result": "success", "databases": [...]}  # OMS
+
+# 새로운 방식:
+return ApiResponse.success(
+    message="데이터베이스 목록 조회 성공",
+    data={"databases": databases}
+).to_dict()
+```
+
+**BFF Adapter Service:**
+```python
+# bff/services/adapter_service.py
+class BFFAdapterService:
+    """BFF와 OMS 간의 비즈니스 로직 중앙화"""
+    
+    async def create_ontology_with_label(self, db_name, label, properties):
+        # 라벨에서 ID 자동 생성
+        ontology_id = generate_simple_id(label)
+        
+        # property name 자동 생성
+        for prop in properties:
+            if 'name' not in prop and 'label' in prop:
+                prop['name'] = generate_simple_id(prop['label'])
+        
+        # OMS로 전달
+        return await self._terminus.create_class(db_name, {...})
+```
+
+#### 🚀 성능 최적화 (NEW)
+
+**HTTP 연결 풀링:**
+```python
+# oms/services/async_terminus.py
+import httpx
+
+# 기존: 매 요청마다 새 연결
+client = httpx.AsyncClient()
+response = await client.get(...)
+await client.aclose()
+
+# 새로운 방식: 연결 재사용
+limits = httpx.Limits(
+    max_keepalive_connections=50,
+    max_connections=100,
+    keepalive_expiry=30.0
+)
+self._client = httpx.AsyncClient(limits=limits)
+```
+
+**동시성 제어:**
+```python
+# TerminusDB 보호를 위한 동시 요청 제한
+self._request_semaphore = asyncio.Semaphore(50)
+
+async def _make_request(self, method, url, data, params):
+    async with self._request_semaphore:
+        # 최대 50개 동시 요청만 허용
+        response = await self._client.request(...)
+```
+
+#### 🔧 에러 처리 개선 (NEW)
+
+**HTTP 상태 코드 정확한 매핑:**
+```python
+# oms/routers/ontology.py
+try:
+    result = await terminus.create_ontology(...)
+except DuplicateOntologyError:
+    # 기존: 500 에러로 반환
+    # 새로운 방식: 409 Conflict
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=f"온톨로지 '{ontology_id}'이(가) 이미 존재합니다"
+    )
+```
+
+**404 에러 올바른 전파:**
+```python
+# bff/dependencies.py
+async def get_class(self, db_name: str, class_id: str):
+    try:
+        response = await client.get_ontology(db_name, class_id)
+        return response.get("data")
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            return None  # BFF에서 404로 처리
+        raise
+```
+
+### 10. 기존 기능 (2025-07-25)
 
 #### 🔥 Git-like 버전 관리 시스템 (NEW)
 
@@ -362,7 +482,65 @@ builder.add_geopoint_property("location")
 builder.add_one_of_type("value", ["xsd:string", "xsd:integer"])
 ```
 
-### 10. 참고 자료
+### 11. 마이그레이션 가이드 - 최신 리팩토링 적용
+
+기존 프로젝트에 최신 리팩토링을 적용하려면:
+
+#### 1. Service Factory 적용:
+```python
+# 기존 main.py의 초기화 코드를 대체
+# bff/main.py, oms/main.py, funnel/main.py
+
+from shared.services.service_factory import create_fastapi_service, ServiceInfo
+
+service_info = ServiceInfo(
+    name="OMS",
+    version="1.0.0",
+    description="Ontology Management Service",
+    port=int(os.getenv("OMS_PORT", "8000"))
+)
+
+app = create_fastapi_service(service_info)
+```
+
+#### 2. ApiResponse 표준화:
+```python
+# 모든 라우터에서 ApiResponse 사용
+from shared.models.responses import ApiResponse
+
+@router.get("/list")
+async def list_databases():
+    databases = await terminus.list_databases()
+    return ApiResponse.success(
+        message="데이터베이스 목록 조회 성공",
+        data={"databases": databases}
+    ).to_dict()
+```
+
+#### 3. 검증 Dependencies 적용:
+```python
+# oms/dependencies.py의 검증 로직 사용
+from oms.dependencies import ensure_database_exists, ValidatedDatabaseName
+
+@router.post("/{db_name}/ontology")
+async def create_ontology(
+    db_name: str = Depends(ensure_database_exists),
+    ontology_data: Dict[str, Any] = ...
+):
+    # db_name은 이미 검증됨
+    pass
+```
+
+#### 4. 환경 변수 업데이트:
+```bash
+# .env 파일
+TERMINUS_SERVER_URL=http://localhost:6364  # 6363 → 6364
+TERMINUS_KEY=admin  # admin123 → admin
+OMS_PORT=8000  # 8005 → 8000
+FUNNEL_PORT=8004  # 8003 → 8004
+```
+
+### 12. 참고 자료
 
 - [Python Packaging User Guide](https://packaging.python.org/)
 - [setuptools Documentation](https://setuptools.pypa.io/)

@@ -125,7 +125,7 @@ oms/
 **구성요소**:
 ```
 funnel/
-├── main.py                # FastAPI 애플리케이션 진입점 (Port: 8003)
+├── main.py                # FastAPI 애플리케이션 진입점 (Port: 8004)
 ├── routers/               # API 라우트 핸들러
 │   └── type_inference_router.py  # 타입 추론 엔드포인트
 ├── services/              # 비즈니스 로직
@@ -349,7 +349,7 @@ services:
       - "8002:8002"
     environment:
       - OMS_URL=http://oms:8000
-      - FUNNEL_URL=http://funnel:8003
+      - FUNNEL_URL=http://funnel:8004
     depends_on:
       - oms
       - funnel
@@ -359,21 +359,21 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - TERMINUS_URL=http://terminusdb:6363
+      - TERMINUS_URL=http://terminusdb:6364
     depends_on:
       - terminusdb
       
   funnel:
     image: spice-harvester/funnel:latest
     ports:
-      - "8003:8003"
+      - "8004:8004"
     environment:
       - BFF_URL=http://bff:8002
       
   terminusdb:
     image: terminusdb/terminusdb-server:latest
     ports:
-      - "6363:6363"
+      - "6364:6364"
     volumes:
       - terminus_data:/app/terminusdb/storage
 ```

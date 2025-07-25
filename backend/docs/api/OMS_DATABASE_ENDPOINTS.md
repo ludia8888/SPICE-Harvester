@@ -2,10 +2,11 @@
 
 This document describes the database management endpoints provided by the Ontology Management Service (OMS), including Git-like version control features and advanced type inference capabilities.
 
-**Last Updated**: 2025-07-25
+**Last Updated**: 2025-07-26
 **TerminusDB Version**: v11.x
 **Git Features**: Fully implemented (7/7 features working)
 **🔥 Implementation Status**: 100% Real Production Code (No Mock/Dummy implementations)
+**🎯 API Response Format**: Standardized with ApiResponse model
 
 ## Base URL
 
@@ -22,8 +23,9 @@ http://oms:8000/api/v1/database
 
 All endpoints require TerminusDB authentication configured through environment variables:
 - `TERMINUS_USER`: TerminusDB username (default: admin)
-- `TERMINUS_KEY`: TerminusDB password (default: admin123)
+- `TERMINUS_KEY`: TerminusDB password (default: admin)
 - `TERMINUS_ACCOUNT`: TerminusDB account (default: admin)
+- `TERMINUS_SERVER_URL`: TerminusDB server URL (default: http://localhost:6364)
 
 ## Git-like Version Control Endpoints (NEW)
 
@@ -33,10 +35,11 @@ All endpoints require TerminusDB authentication configured through environment v
 
 **Endpoint:** `GET /{db_name}/branches`
 
-**Response:**
+**Response (ApiResponse Format):**
 ```json
 {
-  "success": true,
+  "status": "success",
+  "message": "Branches retrieved successfully",
   "data": {
     "branches": [
       {
@@ -52,7 +55,8 @@ All endpoints require TerminusDB authentication configured through environment v
         "commit_count": 3
       }
     ]
-  }
+  },
+  "timestamp": "2025-07-26T10:30:00Z"
 }
 ```
 
@@ -287,17 +291,19 @@ Lists all databases in the TerminusDB instance.
 
 **Endpoint:** `GET /list`
 
-**Response:**
+**Response (ApiResponse Format):**
 ```json
 {
-  "success": true,
+  "status": "success",
+  "message": "Databases retrieved successfully",
   "data": {
     "databases": [
-      "test_db_1", 
-      "production_db",
-      "_system"
+      {"name": "test_db_1"},
+      {"name": "production_db"},
+      {"name": "_system"}
     ]
-  }
+  },
+  "timestamp": "2025-07-26T10:30:00Z"
 }
 ```
 
@@ -339,8 +345,15 @@ Creates a new database in TerminusDB.
 
 **Errors:**
 - `400`: Invalid database name or missing required field
-- `409`: Database already exists
+- `409`: Database already exists (DocumentIdAlreadyExists)
 - `500`: Failed to create database
+
+**Error Response Format:**
+```json
+{
+  "detail": "Database 'existing_db' already exists"
+}
+```
 
 ### 3. Delete Database
 
@@ -457,15 +470,20 @@ Analyzes a dataset and infers types for all columns using production AI algorith
 
 ## Error Response Format
 
-All error responses follow this format:
+All error responses follow FastAPI's standard format:
 
 ```json
 {
-  "success": false,
-  "error": "Error Type",
   "detail": "Detailed error message in Korean"
 }
 ```
+
+**HTTP Status Codes:**
+- `200`: Success
+- `400`: Bad Request - Invalid input or validation error
+- `404`: Not Found - Resource does not exist
+- `409`: Conflict - Resource already exists (e.g., DocumentIdAlreadyExists)
+- `500`: Internal Server Error - Unexpected server error
 
 ## Database Name Validation
 
@@ -493,15 +511,21 @@ Examples of invalid database names:
 When running with Docker Compose, the OMS service is accessible at:
 - From host machine: `http://localhost:8000`
 - From other containers: `http://oms:8000`
+- BFF service: `http://localhost:8002` (forwards to OMS)
 
 Environment variables are configured in `docker-compose.yml`:
 ```yaml
 environment:
-  - TERMINUS_SERVER_URL=${TERMINUS_SERVER_URL:-http://terminusdb:6363}
+  - TERMINUS_SERVER_URL=${TERMINUS_SERVER_URL:-http://terminusdb:6364}
   - TERMINUS_USER=${TERMINUS_USER:-admin}
   - TERMINUS_ACCOUNT=${TERMINUS_ACCOUNT:-admin}
-  - TERMINUS_KEY=${TERMINUS_KEY:-${TERMINUSDB_ADMIN_PASS:-admin123}}
+  - TERMINUS_KEY=${TERMINUS_KEY:-admin}
 ```
+
+**🔧 Performance Optimizations:**
+- HTTP connection pooling: 50 keep-alive, 100 max connections
+- Concurrent request limiting: Semaphore(50) for TerminusDB protection
+- Metadata schema caching to prevent duplicate creation
 
 ## Schema Management Features (v11.x)
 
@@ -520,6 +544,13 @@ environment:
 - `sys:JSON` is now replaced with `xsd:string` for metadata fields
 - Complex types are fully validated before storage
 - Automatic constraint extraction from schema definitions
+- **XSD Type Support**: Full support for `xsd:string`, `xsd:integer`, `xsd:decimal`, `xsd:boolean`, `xsd:dateTime`
+
+### BFF-OMS Integration:
+1. **Automatic Property Name Generation**: BFF labels are converted to valid property names
+2. **Type Mapping**: BFF types (STRING, INTEGER) are mapped to XSD types for OMS
+3. **Error Propagation**: OMS errors (404, 409) correctly propagated through BFF
+4. **Validation Dependencies**: Shared validation logic through FastAPI dependencies
 
 ## Usage Examples
 
@@ -670,3 +701,22 @@ async with httpx.AsyncClient() as client:
 6. **Error Messages**: Sensitive information is not exposed in error messages
 7. **Audit Logging**: All database and git operations are logged for compliance
 8. **Experiment Isolation**: Experimental branches cannot affect production data
+
+## Recent Updates (2025-07-26)
+
+### Code Deduplication:
+- **Service Factory Pattern**: Eliminated ~300 lines of initialization code duplication
+- **BFF Adapter Service**: Centralized business logic, removed ~150 lines of duplication
+- **Validation Dependencies**: Shared validation logic across all routers
+
+### Performance Improvements:
+- **HTTP Connection Pooling**: 50 keep-alive connections, 100 max connections
+- **Concurrent Request Control**: Semaphore(50) prevents TerminusDB overload
+- **Metadata Caching**: Prevents duplicate schema creation
+- **Target Performance**: <5s response time, >95% success rate for 1000 concurrent requests
+
+### Error Handling:
+- **404 Not Found**: Properly returned for non-existent resources
+- **409 Conflict**: Returned for duplicate IDs (DocumentIdAlreadyExists)
+- **400 Bad Request**: Validation errors with detailed messages
+- **500 Internal Server Error**: Only for true server errors

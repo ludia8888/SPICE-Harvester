@@ -1,1142 +1,202 @@
 # 🔥 SPICE HARVESTER Backend - Complete Frontend Development Guide
 
-## 📋 Table of Contents
+This guide provides frontend developers with everything needed to integrate with the SPICE HARVESTER backend. It reflects the latest code implementation, including the standardized `ApiResponse` model and clarified service responsibilities.
 
-1. [System Architecture](#system-architecture)
-2. [Services Overview](#services-overview)
-3. [🌐 CORS Configuration](#cors-configuration)
-4. [Complex Data Types System](#complex-data-types-system)
-5. [Version Control System](#version-control-system)
-6. [Security & Validation](#security--validation)
-7. [Label Mapping System](#label-mapping-system)
-8. [Merge Conflict Resolution](#merge-conflict-resolution)
-9. [Database Management](#database-management)
-10. [Query System](#query-system)
-11. [Authentication & Authorization](#authentication--authorization)
-12. [Error Handling](#error-handling)
-13. [WebSocket & Real-time Features](#websocket--real-time-features)
-14. [Testing & Development](#testing--development)
-15. [Production Deployment](#production-deployment)
+## 1. Core Concepts for Frontend
 
----
+- **BFF is Your Entry Point**: Always interact with the **BFF (Backend for Frontend)** service at `http://localhost:8002`. It is designed to be the single, stable entry point for all client applications.
+- **Standardized Responses**: Every API call returns a consistent JSON object: `{ "status": "success" | "error", "message": string, "data": any | null }`. Always check the `status` field first.
+- **Label-based Interaction**: Use human-readable labels (e.g., "제품", "Product") when sending data to the BFF. The backend handles the conversion to internal IDs.
+- **Language Preference**: Use the `Accept-Language` HTTP header (e.g., `ko`, `en`) to receive localized data.
 
-## 🏗️ System Architecture
+## 2. System Architecture Overview
 
-### Service Architecture
-The SPICE HARVESTER backend follows a **microservices architecture** with two main services:
+The backend consists of three main services:
 
-1. **Backend-for-Frontend (BFF)** - Port 8002
-   - User-facing API layer
-   - Data aggregation and transformation
-   - Label mapping and localization
-   - Merge conflict resolution
+1.  **BFF (Backend for Frontend)** - Port `8002`: Your primary integration point. It simplifies backend complexity.
+2.  **OMS (Ontology Management Service)** - Port `8000`: The core engine for data and version control. You will typically not call this directly.
+3.  **Funnel Service** - Port `8003`: Handles AI-powered schema generation from data. Called via the BFF.
 
-2. **Ontology Management Service (OMS)** - Port 8000
-   - Core ontology operations
-   - TerminusDB integration
-   - Version control (Git-like)
-   - Advanced relationship management
+## 3. API Integration Examples (React)
 
-### Technology Stack
-- **FastAPI** - REST API framework
-- **TerminusDB** - Graph database for ontologies
-- **httpx** - Async HTTP client
-- **SQLite** - Label mapping persistence
-- **Pydantic** - Data validation
-- **WebSocket** - Real-time updates
+### 3.1. API Client with Standardized Error Handling
 
----
+Here is a robust API client that handles the standardized `ApiResponse` format.
 
-## 🌐 Services Overview
-
-### 1. Backend-for-Frontend (BFF) Service
-**Base URL**: `http://localhost:8002`
-
-#### Available Endpoints:
-- **Ontology Management**: `/api/v1/ontology/{db_name}/`
-- **Query System**: `/api/v1/query/{db_name}/`
-- **Label Mappings**: `/api/v1/database/{db_name}/mappings/`
-- **Merge Conflicts**: `/api/v1/database/{db_name}/merge/`
-
-### 2. Ontology Management Service (OMS)
-**Base URL**: `http://localhost:8000`
-
-#### Available Endpoints:
-- **Database**: `/api/v1/database/`
-- **Ontology**: `/api/v1/ontology/{db_name}/`
-- **Version Control**: `/api/v1/version/{db_name}/`
-- **Branch Management**: `/api/v1/branch/{db_name}/`
-
----
-
-## 🌐 CORS Configuration
-
-### 🚀 Quick Start
-
-SPICE HARVESTER supports **automatic CORS configuration** for all common frontend development ports:
-
-```bash
-# No configuration needed! These ports are automatically allowed in development:
-npm start          # React on http://localhost:3000
-npm run dev        # Vite on http://localhost:5173  
-ng serve           # Angular on http://localhost:4200
-npm run serve      # Vue.js on http://localhost:8080
-```
-
-### 📋 Supported Ports (Auto-configured)
-
-- **React**: 3000, 3001, 3002
-- **Vite**: 5173, 5174
-- **Angular**: 4200, 4201
-- **Vue.js**: 8080, 8081, 8082
-- **Custom**: Any localhost port with HTTP/HTTPS
-
-### 🔧 Custom Configuration
-
-If you need to add custom origins:
-
-```bash
-# Create .env file
-cp .env.example .env
-
-# Add your custom origins
-CORS_ORIGINS=["http://localhost:3000", "http://localhost:YOUR_PORT"]
-```
-
-### 🧪 Testing CORS
-
-```bash
-# Test all services' CORS configuration
-python test_cors_configuration.py
-
-# Check specific service CORS settings
-curl http://localhost:8002/debug/cors  # BFF
-curl http://localhost:8000/debug/cors  # OMS
-curl http://localhost:8003/debug/cors  # Funnel
-```
-
-### 📖 Complete CORS Guide
-
-For detailed CORS configuration, troubleshooting, and production settings:
-
-- **📋 Complete Guide**: [CORS Configuration Guide](./CORS_CONFIGURATION_GUIDE.md)
-- **🚀 Quick Start**: [CORS Quick Start](../../CORS_QUICK_START.md)
-
----
-
-## 🔥 Complex Data Types System
-
-### Supported Data Types
-
-#### Basic Types (XSD):
 ```typescript
-type BasicDataType = 
-  | "xsd:string" | "xsd:integer" | "xsd:decimal" | "xsd:boolean"
-  | "xsd:date" | "xsd:dateTime" | "xsd:time" | "xsd:duration"
-  | "xsd:anyURI" | "xsd:base64Binary" | "xsd:hexBinary"
-  | "xsd:normalizedString" | "xsd:token" | "xsd:language"
-  | "xsd:double" | "xsd:float" | "xsd:long" | "xsd:int"
-  | "xsd:short" | "xsd:byte" | "xsd:nonNegativeInteger"
-  | "xsd:positiveInteger" | "xsd:nonPositiveInteger"
-  | "xsd:negativeInteger" | "xsd:unsignedLong"
-  | "xsd:unsignedInt" | "xsd:unsignedShort" | "xsd:unsignedByte"
-  | "xsd:gYear" | "xsd:gMonth" | "xsd:gDay" | "xsd:gYearMonth"
-  | "xsd:gMonthDay" | "xsd:QName" | "xsd:NOTATION";
-```
+// src/api/spiceHarvesterClient.ts
 
-#### 🔥 Complex Types (Custom):
-```typescript
-type ComplexDataType = 
-  | "custom:array"      // Dynamic arrays with validation
-  | "custom:object"     // Nested objects with schema validation
-  | "custom:enum"       // Enumeration with localized labels
-  | "custom:money"      // Currency with precision and locale
-  | "custom:phone"      // International phone number validation
-  | "custom:email"      // Email validation with domain checking
-  | "custom:coordinate" // Geographic coordinates (lat/lng)
-  | "custom:address"    // Structured postal addresses
-  | "custom:image"      // Image metadata with validation
-  | "custom:file";      // File attachments with type checking
-```
+const BFF_BASE_URL = 'http://localhost:8002/api/v1';
 
-### Complex Type Usage Examples
+// Define a standard response type for your frontend
+export interface ApiResponse<T> {
+  status: 'success' | 'error';
+  message: string;
+  data: T | null;
+  errors?: string[];
+}
 
-#### 1. Array Type
-```typescript
-// Request Body
-{
-  "id": "Product",
-  "properties": {
-    "tags": {
-      "type": "custom:array",
-      "constraints": {
-        "items": {
-          "type": "xsd:string",
-          "maxLength": 50
-        },
-        "minItems": 1,
-        "maxItems": 10,
-        "uniqueItems": true
-      }
-    }
+// Custom error for API failures
+export class ApiError extends Error {
+  constructor(message: string, public details?: string[]) {
+    super(message);
+    this.name = 'ApiError';
   }
 }
 
-// Valid Data
-{
-  "tags": ["electronics", "mobile", "smartphone"]
-}
-```
-
-#### 2. Object Type
-```typescript
-// Request Body
-{
-  "id": "Person",
-  "properties": {
-    "address": {
-      "type": "custom:object",
-      "constraints": {
-        "properties": {
-          "street": {"type": "xsd:string", "maxLength": 100},
-          "city": {"type": "xsd:string", "maxLength": 50},
-          "zipCode": {"type": "xsd:string", "pattern": "\\d{5}"}
-        },
-        "required": ["street", "city"]
-      }
-    }
-  }
-}
-
-// Valid Data
-{
-  "address": {
-    "street": "123 Main St",
-    "city": "Seoul",
-    "zipCode": "12345"
-  }
-}
-```
-
-#### 3. Money Type
-```typescript
-// Request Body
-{
-  "id": "Product",
-  "properties": {
-    "price": {
-      "type": "custom:money",
-      "constraints": {
-        "currency": "KRW",
-        "precision": 2,
-        "minimum": 0,
-        "maximum": 10000000
-      }
-    }
-  }
-}
-
-// Valid Data
-{
-  "price": {
-    "amount": 29900,
-    "currency": "KRW"
-  }
-}
-```
-
-#### 4. Email Type
-```typescript
-// Request Body
-{
-  "id": "User",
-  "properties": {
-    "email": {
-      "type": "custom:email",
-      "constraints": {
-        "domains": ["company.com", "gmail.com"],
-        "maxLength": 255
-      }
-    }
-  }
-}
-
-// Valid Data
-{
-  "email": "user@company.com"
-}
-```
-
-#### 5. Coordinate Type
-```typescript
-// Request Body
-{
-  "id": "Location",
-  "properties": {
-    "position": {
-      "type": "custom:coordinate",
-      "constraints": {
-        "crs": "EPSG:4326",
-        "precision": 6
-      }
-    }
-  }
-}
-
-// Valid Data
-{
-  "position": {
-    "latitude": 37.5665,
-    "longitude": 126.9780
-  }
-}
-```
-
----
-
-## 🔀 Version Control System
-
-### Git-Like Operations
-
-#### 1. Branch Management
-```typescript
-// List branches
-GET /api/v1/branch/{db_name}/list
-
-// Create branch
-POST /api/v1/branch/{db_name}/create
-{
-  "branch_name": "feature/new-ontology",
-  "from_branch": "main"
-}
-
-// Delete branch
-DELETE /api/v1/branch/{db_name}/branch/{branch_name}?force=false
-
-// Checkout branch
-POST /api/v1/branch/{db_name}/checkout
-{
-  "target": "develop",
-  "target_type": "branch"
-}
-```
-
-#### 2. Commit Operations
-```typescript
-// Create commit
-POST /api/v1/version/{db_name}/commit
-{
-  "message": "Add new product ontology",
-  "author": "admin"
-}
-
-// Get commit history
-GET /api/v1/version/{db_name}/history?branch=main&limit=10&offset=0
-
-// Get diff between commits
-GET /api/v1/version/{db_name}/diff?from_ref=main&to_ref=feature/new-ontology
-```
-
-#### 3. Merge Operations
-```typescript
-// Merge branches
-POST /api/v1/version/{db_name}/merge
-{
-  "source_branch": "feature/new-ontology",
-  "target_branch": "main",
-  "strategy": "auto"
-}
-
-// Rollback to commit
-POST /api/v1/version/{db_name}/rollback
-{
-  "target": "HEAD~1"
-}
-
-// Rebase branch
-POST /api/v1/version/{db_name}/rebase?onto=main&branch=feature/new-ontology
-```
-
----
-
-## 🔒 Security & Validation
-
-### Input Sanitization
-All user inputs are automatically sanitized using the comprehensive `InputSanitizer` class:
-
-#### Security Patterns Detected:
-- **SQL Injection**: `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `DROP`, `--`, `/*`, etc.
-- **XSS**: `<script>`, `<iframe>`, `javascript:`, `eval()`, etc.
-- **Path Traversal**: `../`, `..\\`, URL encoded variants
-- **Command Injection**: Shell metacharacters, command patterns
-- **NoSQL Injection**: `$where`, `$ne`, `$regex`, etc.
-- **LDAP Injection**: Filter patterns, special characters
-
-#### Request Validation Middleware
-```typescript
-// Security Configuration
-{
-  "MAX_REQUEST_SIZE": 10 * 1024 * 1024, // 10MB
-  "MAX_JSON_DEPTH": 10,
-  "MAX_FIELD_LENGTH": 1000,
-  "MAX_ARRAY_LENGTH": 1000,
-  "MAX_REQUESTS_PER_MINUTE": 100,
-  "MAX_REQUESTS_PER_HOUR": 1000
-}
-
-// Automatic Security Headers
-{
-  "X-Content-Type-Options": "nosniff",
-  "X-Frame-Options": "DENY",
-  "X-XSS-Protection": "1; mode=block",
-  "Referrer-Policy": "strict-origin-when-cross-origin"
-}
-```
-
-### Authentication & Authorization
-```typescript
-// Database name validation
-function validateDbName(name: string): boolean {
-  return /^[a-zA-Z][a-zA-Z0-9_-]*$/.test(name);
-}
-
-// Branch name validation
-function validateBranchName(name: string): boolean {
-  return /^[a-zA-Z0-9_/-]+$/.test(name);
-}
-
-// Class ID validation
-function validateClassId(id: string): boolean {
-  return /^[a-zA-Z][a-zA-Z0-9_:-]*$/.test(id);
-}
-```
-
----
-
-## 🏷️ Label Mapping System
-
-### Multi-Language Support
-The system supports comprehensive label mapping for internationalization:
-
-#### 1. Export Mappings
-```typescript
-// Export all mappings
-GET /api/v1/database/{db_name}/mappings/export
-
-// Response
-{
-  "db_name": "product_ontology",
-  "classes": [
-    {
-      "class_id": "Product",
-      "label": "제품",
-      "label_lang": "ko",
-      "description": "제품 정보"
-    }
-  ],
-  "properties": [
-    {
-      "property_id": "name",
-      "label": "이름",
-      "label_lang": "ko"
-    }
-  ],
-  "relationships": [
-    {
-      "predicate": "hasCategory",
-      "label": "카테고리",
-      "label_lang": "ko"
-    }
-  ]
-}
-```
-
-#### 2. Import Mappings
-```typescript
-// Import with file upload
-POST /api/v1/database/{db_name}/mappings/import
-Content-Type: multipart/form-data
-
-// Security features:
-// - File size limit: 10MB
-// - Content type validation
-// - Schema validation
-// - Integrity checks (SHA256)
-// - Rollback on failure
-```
-
-#### 3. Mapping Statistics
-```typescript
-// Get mapping summary
-GET /api/v1/database/{db_name}/mappings/
-
-// Response
-{
-  "database": "product_ontology",
-  "total": {
-    "classes": 25,
-    "properties": 150,
-    "relationships": 45
-  },
-  "by_language": {
-    "ko": {"classes": 25, "properties": 150, "relationships": 45},
-    "en": {"classes": 25, "properties": 150, "relationships": 45},
-    "ja": {"classes": 12, "properties": 80, "relationships": 20}
-  }
-}
-```
-
----
-
-## ⚔️ Merge Conflict Resolution
-
-### Foundry-Style Conflict Resolution
-
-#### 1. Simulate Merge
-```typescript
-// Simulate merge to detect conflicts
-POST /api/v1/database/{db_name}/merge/simulate
-{
-  "source_branch": "feature/new-ontology",
-  "target_branch": "main",
-  "strategy": "merge"
-}
-
-// Response
-{
-  "status": "success",
-  "message": "병합 시뮬레이션 완료: 3개 충돌 감지",
-  "data": {
-    "merge_preview": {
-      "source_branch": "feature/new-ontology",
-      "target_branch": "main",
-      "conflicts": [
-        {
-          "path": "Product.name",
-          "type": "content_conflict",
-          "source_change": {
-            "type": "modified",
-            "new_value": "Product Name v2",
-            "old_value": "Product Name"
-          },
-          "target_change": {
-            "type": "modified",
-            "new_value": "Product Title",
-            "old_value": "Product Name"
-          }
-        }
-      ],
-      "statistics": {
-        "changes_to_apply": 15,
-        "conflicts_detected": 3,
-        "mergeable": false,
-        "requires_manual_resolution": true
-      }
-    }
-  }
-}
-```
-
-#### 2. Resolve Conflicts
-```typescript
-// Resolve conflicts manually
-POST /api/v1/database/{db_name}/merge/resolve
-{
-  "source_branch": "feature/new-ontology",
-  "target_branch": "main",
-  "strategy": "merge",
-  "message": "Resolve conflicts: Product name updates",
-  "author": "admin@company.com",
-  "resolutions": [
-    {
-      "path": "Product.name",
-      "resolution_type": "use_value",
-      "resolved_value": "Product Title v2",
-      "metadata": {
-        "reason": "Combine both changes"
-      }
-    }
-  ]
-}
-```
-
----
-
-## 🗄️ Database Management
-
-### Database Operations
-
-#### 1. Create Database
-```typescript
-POST /api/v1/database/create
-{
-  "name": "product_ontology",
-  "description": "Product catalog ontology"
-}
-```
-
-#### 2. List Databases
-```typescript
-GET /api/v1/database/list
-
-// Response
-{
-  "databases": [
-    {
-      "name": "product_ontology",
-      "description": "Product catalog ontology",
-      "created_at": "2024-01-01T00:00:00Z",
-      "size": "15.2MB",
-      "status": "active"
-    }
-  ]
-}
-```
-
-#### 3. Database Status
-```typescript
-GET /api/v1/database/exists/{db_name}
-
-// Response
-{
-  "exists": true,
-  "name": "product_ontology",
-  "status": "active",
-  "branches": ["main", "develop"],
-  "current_branch": "main"
-}
-```
-
----
-
-## 🔍 Query System
-
-### Structured Query Interface
-
-#### 1. Basic Query
-```typescript
-POST /api/v1/query/{db_name}/execute
-{
-  "type": "select",
-  "class_id": "Product",
-  "filters": [
-    {
-      "property": "category",
-      "operator": "eq",
-      "value": "electronics"
-    }
-  ],
-  "limit": 10,
-  "offset": 0
-}
-```
-
-#### 2. Complex Query with Relationships
-```typescript
-POST /api/v1/query/{db_name}/execute
-{
-  "type": "select",
-  "class_id": "Product",
-  "filters": [
-    {
-      "property": "price",
-      "operator": "gte",
-      "value": {
-        "amount": 100000,
-        "currency": "KRW"
-      }
-    }
-  ],
-  "relationships": [
-    {
-      "predicate": "hasCategory",
-      "target_class": "Category",
-      "direction": "outgoing"
-    }
-  ],
-  "include_labels": true,
-  "language": "ko"
-}
-```
-
-#### 3. Aggregation Query
-```typescript
-POST /api/v1/query/{db_name}/execute
-{
-  "type": "count",
-  "class_id": "Product",
-  "filters": [
-    {
-      "property": "status",
-      "operator": "eq",
-      "value": "active"
-    }
-  ],
-  "group_by": ["category"]
-}
-```
-
----
-
-## 🔄 Relationship Management
-
-### Advanced Relationship Features
-
-#### 1. Circular Reference Detection
-```typescript
-// Automatic detection during ontology creation
-POST /api/v1/ontology/{db_name}/create
-{
-  "id": "Category",
-  "relationships": [
-    {
-      "predicate": "hasParent",
-      "target_class": "Category",
-      "cardinality": "many_to_one"
-    }
-  ]
-}
-
-// System automatically detects and prevents circular references
-```
-
-#### 2. Relationship Path Tracking
-```typescript
-// Find path between entities
-GET /api/v1/ontology/{db_name}/path?from=Product&to=Brand
-
-// Response
-{
-  "paths": [
-    {
-      "length": 2,
-      "relationships": [
-        {"predicate": "hasCategory", "target": "Category"},
-        {"predicate": "hasBrand", "target": "Brand"}
-      ]
-    }
-  ]
-}
-```
-
-#### 3. Relationship Validation
-```typescript
-// Validation results with severity levels
-{
-  "validation_results": [
-    {
-      "severity": "error",
-      "message": "Circular reference detected",
-      "path": "Product -> Category -> Product"
+async function fetchApi<T>(url: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept-Language': 'ko',
+      ...options.headers,
     },
-    {
-      "severity": "warning",
-      "message": "Deep relationship nesting (>5 levels)",
-      "path": "Product -> Category -> SubCategory -> ..."
-    }
-  ]
-}
-```
-
----
-
-## 🌐 WebSocket & Real-time Features
-
-### Real-time Updates
-```typescript
-// WebSocket connection for real-time updates
-const ws = new WebSocket('ws://localhost:8000/ws/updates/{db_name}');
-
-// Message types
-interface UpdateMessage {
-  type: 'ontology_created' | 'ontology_updated' | 'ontology_deleted' | 'merge_completed';
-  data: {
-    entity_id: string;
-    database: string;
-    timestamp: string;
-    changes: any;
-  };
-}
-
-// Subscribe to specific events
-ws.send(JSON.stringify({
-  action: 'subscribe',
-  events: ['ontology_created', 'merge_completed']
-}));
-```
-
----
-
-## 📊 Error Handling
-
-### Standardized Error Responses
-
-#### 1. Validation Errors
-```typescript
-// HTTP 400 - Bad Request
-{
-  "status": "error",
-  "message": "Validation failed",
-  "detail": "Email format is invalid",
-  "code": "VALIDATION_ERROR",
-  "field": "email"
-}
-```
-
-#### 2. Security Violations
-```typescript
-// HTTP 400 - Bad Request
-{
-  "status": "error",
-  "message": "Security violation detected",
-  "detail": "SQL injection pattern detected",
-  "code": "SECURITY_VIOLATION"
-}
-```
-
-#### 3. Conflict Errors
-```typescript
-// HTTP 409 - Conflict
-{
-  "status": "error",
-  "message": "Merge conflict detected",
-  "detail": "Manual resolution required",
-  "code": "MERGE_CONFLICT",
-  "conflicts": [...]
-}
-```
-
-#### 4. Not Found Errors
-```typescript
-// HTTP 404 - Not Found
-{
-  "status": "error",
-  "message": "Resource not found",
-  "detail": "Database 'test_db' does not exist",
-  "code": "NOT_FOUND"
-}
-```
-
----
-
-## 🧪 Testing & Development
-
-### Development Environment Setup
-
-#### 1. Start Services
-```bash
-# Start all services
-cd /Users/isihyeon/Desktop/SPICE\ HARVESTER/backend
-./start_services.sh
-
-# Services will be available at:
-# - BFF: http://localhost:8002
-# - OMS: http://localhost:8000
-# - TerminusDB: http://localhost:6363
-```
-
-#### 2. Health Checks
-```typescript
-// Check service health
-GET http://localhost:8002/health  // BFF
-GET http://localhost:8000/health  // OMS
-
-// Expected response
-{
-  "status": "healthy",
-  "timestamp": "2024-01-01T00:00:00Z",
-  "services": {
-    "database": "connected",
-    "terminus": "connected"
-  }
-}
-```
-
-#### 3. Test Complex Types
-```typescript
-// Test complex type validation
-POST http://localhost:8002/api/v1/ontology/test_db/create
-{
-  "id": "TestClass",
-  "properties": {
-    "email": {
-      "type": "custom:email",
-      "constraints": {
-        "domains": ["test.com"]
-      }
-    }
-  }
-}
-```
-
----
-
-## 🚀 Production Deployment
-
-### Production Considerations
-
-#### 1. Environment Variables
-```bash
-# Required environment variables
-TERMINUS_DB_URL=http://terminusdb:6363
-TERMINUS_DB_USER=admin
-TERMINUS_DB_PASSWORD=password
-BFF_PORT=8002
-OMS_PORT=8000
-DATABASE_PATH=/data/label_mappings.db
-LOG_LEVEL=INFO
-```
-
-#### 2. Security Configuration
-```typescript
-// Production security settings
-{
-  "ALLOWED_ORIGINS": ["https://yourapp.com"],
-  "RATE_LIMIT_ENABLED": true,
-  "CORS_CREDENTIALS": true,
-  "HTTPS_ONLY": true,
-  "CSRF_PROTECTION": true
-}
-```
-
-#### 3. Monitoring & Logging
-```typescript
-// Structured logging format
-{
-  "timestamp": "2024-01-01T00:00:00Z",
-  "level": "INFO",
-  "service": "BFF",
-  "message": "Ontology created",
-  "context": {
-    "database": "product_ontology",
-    "class_id": "Product",
-    "user": "admin"
-  }
-}
-```
-
----
-
-## 📱 Frontend Integration Examples
-
-### React Integration
-
-#### 1. API Client Setup
-```typescript
-// api/client.ts
-class SpiceHarvesterClient {
-  private bffUrl = 'http://localhost:8002';
-  private omsUrl = 'http://localhost:8000';
-  
-  async createOntology(dbName: string, ontologyData: any) {
-    const response = await fetch(`${this.bffUrl}/api/v1/ontology/${dbName}/create`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(ontologyData),
-    });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    
-    return response.json();
-  }
-  
-  async queryOntologies(dbName: string, queryData: any) {
-    const response = await fetch(`${this.bffUrl}/api/v1/query/${dbName}/execute`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(queryData),
-    });
-    
-    return response.json();
-  }
-}
-```
-
-#### 2. Complex Types Form Component
-```typescript
-// components/ComplexTypeForm.tsx
-import React, { useState } from 'react';
-
-interface ComplexTypeFormProps {
-  onSubmit: (data: any) => void;
-}
-
-const ComplexTypeForm: React.FC<ComplexTypeFormProps> = ({ onSubmit }) => {
-  const [formData, setFormData] = useState({
-    id: '',
-    properties: {}
   });
-  
-  const handleAddProperty = (name: string, type: string, constraints: any) => {
-    setFormData(prev => ({
-      ...prev,
-      properties: {
-        ...prev.properties,
-        [name]: {
-          type,
-          constraints
-        }
-      }
-    }));
-  };
-  
-  return (
-    <form onSubmit={(e) => { e.preventDefault(); onSubmit(formData); }}>
-      {/* Email property */}
-      <div>
-        <label>Email Property:</label>
-        <input 
-          type="text" 
-          placeholder="Property name"
-          onChange={(e) => handleAddProperty(e.target.value, 'custom:email', {
-            domains: ['company.com'],
-            maxLength: 255
-          })}
-        />
-      </div>
-      
-      {/* Money property */}
-      <div>
-        <label>Money Property:</label>
-        <input 
-          type="text" 
-          placeholder="Property name"
-          onChange={(e) => handleAddProperty(e.target.value, 'custom:money', {
-            currency: 'KRW',
-            precision: 2,
-            minimum: 0
-          })}
-        />
-      </div>
-      
-      <button type="submit">Create Ontology</button>
-    </form>
-  );
+
+  const responseData: ApiResponse<T> = await response.json();
+
+  if (response.status >= 400 || responseData.status === 'error') {
+    throw new ApiError(responseData.message, responseData.errors);
+  }
+
+  return responseData.data as T;
+}
+
+// --- API Functions ---
+
+export const createDatabase = (name: string, description: string) => {
+  return fetchApi<any>(`${BFF_BASE_URL}/database`, {
+    method: 'POST',
+    body: JSON.stringify({ name, description }),
+  });
+};
+
+export const createOntology = (dbName: string, ontologyData: any) => {
+  return fetchApi<any>(`${BFF_BASE_URL}/database/${dbName}/ontology`, {
+    method: 'POST',
+    body: JSON.stringify(ontologyData),
+  });
+};
+
+export const getOntology = (dbName: string, classLabel: string) => {
+  return fetchApi<any>(`${BFF_BASE_URL}/database/${dbName}/ontology/${classLabel}`);
+};
+
+export const listBranches = (dbName: string) => {
+  return fetchApi<{ branches: any[]; current: string }>(`${BFF_BASE_URL}/database/${dbName}/branches`);
 };
 ```
 
-#### 3. Version Control Component
-```typescript
-// components/VersionControl.tsx
-import React, { useState, useEffect } from 'react';
+### 3.2. React Component Example
 
-const VersionControl: React.FC<{ dbName: string }> = ({ dbName }) => {
-  const [branches, setBranches] = useState([]);
-  const [currentBranch, setCurrentBranch] = useState('');
-  
-  useEffect(() => {
-    fetchBranches();
-  }, [dbName]);
-  
-  const fetchBranches = async () => {
-    const response = await fetch(`http://localhost:8000/api/v1/branch/${dbName}/list`);
-    const data = await response.json();
-    setBranches(data.branches);
-    setCurrentBranch(data.current);
+This example shows how to use the API client in a React component with proper state and error handling.
+
+```typescript
+// src/components/OntologyManager.tsx
+import React, { useState, useEffect } from 'react';
+import { createOntology, getOntology, ApiError } from '../api/spiceHarvesterClient';
+
+const OntologyManager = ({ dbName }: { dbName: string }) => {
+  const [ontology, setOntology] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleCreate = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const newOntologyData = {
+        label: { ko: '새로운 제품', en: 'New Product' },
+        description: { ko: '테스트 제품입니다', en: 'This is a test product' },
+        properties: [
+          { name: 'price', type: 'xsd:decimal', label: { ko: '가격', en: 'Price' } }
+        ]
+      };
+      const result = await createOntology(dbName, newOntologyData);
+      alert(`Ontology created with ID: ${result.id}`);
+      handleFetch(result.id);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(`Error: ${err.message}`);
+      } else {
+        setError('An unknown error occurred.');
+      }
+    }
+    setIsLoading(false);
   };
-  
-  const createBranch = async (branchName: string) => {
-    await fetch(`http://localhost:8000/api/v1/branch/${dbName}/create`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        branch_name: branchName,
-        from_branch: currentBranch
-      })
-    });
-    fetchBranches();
+
+  const handleFetch = async (classId: string) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await getOntology(dbName, classId);
+      setOntology(result);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(`Error: ${err.message}`);
+      } else {
+        setError('An unknown error occurred.');
+      }
+    }
+    setIsLoading(false);
   };
-  
-  const checkout = async (branchName: string) => {
-    await fetch(`http://localhost:8000/api/v1/branch/${dbName}/checkout`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        target: branchName,
-        target_type: 'branch'
-      })
-    });
-    fetchBranches();
-  };
-  
+
   return (
     <div>
-      <h3>Version Control</h3>
-      <p>Current Branch: <strong>{currentBranch}</strong></p>
-      
-      <div>
-        <h4>Branches:</h4>
-        <ul>
-          {branches.map((branch: any) => (
-            <li key={branch.name}>
-              {branch.name} 
-              {branch.current && <span> (current)</span>}
-              {!branch.current && (
-                <button onClick={() => checkout(branch.name)}>
-                  Checkout
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-      </div>
-      
-      <div>
-        <input 
-          type="text" 
-          placeholder="New branch name"
-          onKeyPress={(e) => {
-            if (e.key === 'Enter') {
-              createBranch(e.target.value);
-              e.target.value = '';
-            }
-          }}
-        />
-      </div>
+      <h2>Ontology Manager for '{dbName}'</h2>
+      <button onClick={handleCreate} disabled={isLoading}>
+        {isLoading ? 'Creating...' : 'Create New Ontology'}
+      </button>
+      {error && <p style={{ color: 'red' }}>{error}</p>}
+      {ontology && (
+        <pre>{JSON.stringify(ontology, null, 2)}</pre>
+      )}
     </div>
   );
 };
+
+export default OntologyManager;
 ```
 
----
+## 4. Key API Endpoints (BFF Service)
 
-## 🎯 Best Practices & Recommendations
+Always use the BFF service (`http://localhost:8002`) for these operations.
 
-### 1. Data Validation
-- Always validate complex type constraints on the frontend
-- Use TypeScript interfaces that match Pydantic models
-- Implement client-side validation for better UX
+### Database Management
+- `POST /api/v1/database`: Create a new database.
+- `GET /api/v1/databases`: List all available databases.
+- `GET /api/v1/database/{db_name}/exists`: Check if a database exists.
 
-### 2. Error Handling
-- Implement retry logic for network failures
-- Show user-friendly error messages
-- Log errors for debugging
+### Ontology Management
+- `POST /api/v1/database/{db_name}/ontology`: Create a new ontology class.
+- `GET /api/v1/database/{db_name}/ontology/{class_label_or_id}`: Get details of an ontology class.
+- `GET /api/v1/database/{db_name}/ontologies`: List all ontology classes in a database.
+- `PUT /api/v1/database/{db_name}/ontology/{class_label_or_id}`: Update an ontology class.
+- `DELETE /api/v1/database/{db_name}/ontology/{class_label_or_id}`: Delete an ontology class.
 
-### 3. Performance Optimization
-- Use pagination for large datasets
-- Implement caching for frequently accessed data
-- Consider using WebSocket for real-time updates
+### Version Control
+- `GET /api/v1/database/{db_name}/branches`: List all branches.
+- `POST /api/v1/database/{db_name}/branch`: Create a new branch.
+- `POST /api/v1/database/{db_name}/commit`: Commit changes.
+- `GET /api/v1/database/{db_name}/history`: Get commit history for a branch.
+- `GET /api/v1/database/{db_name}/diff?from_ref=...&to_ref=...`: Get differences between two refs.
+- `POST /api/v1/database/{db_name}/merge`: Merge branches.
 
-### 4. Security
-- Sanitize all user inputs
-- Validate file uploads (size, type, content)
-- Use HTTPS in production
+### Merge Conflict Resolution
+- `POST /api/v1/database/{db_name}/merge/simulate`: Simulate a merge to detect conflicts without executing it.
+- `POST /api/v1/database/{db_name}/merge/resolve`: Provide resolutions to merge conflicting branches.
 
-### 5. Internationalization
-- Leverage the label mapping system
-- Support multiple languages
-- Use locale-specific formatting
+### Schema Inference (Funnel)
+- `POST /api/v1/funnel/suggest-schema-from-data`: Get a schema suggestion from raw data.
+- `POST /api/v1/funnel/suggest-schema-from-google-sheets`: Get a schema suggestion from a Google Sheets URL.
 
----
+## 5. Unimplemented Features (Frontend Considerations)
 
-This comprehensive guide covers ALL implemented features in the SPICE HARVESTER backend. Use this as your complete reference for frontend development, integrating with the complex types system, version control, security features, and all available services.
+Be aware of the following features that are planned but not yet fully implemented in the backend:
 
-For any questions or additional features, refer to the specific endpoint documentation or contact the development team.
+- **Role-Based Access Control (RBAC)**: Currently, there are no user roles or permissions enforced. All operations are permitted.
+- **Query History**: The `/query/history` endpoint exists but returns dummy data. It does not yet store or retrieve user query history.
+- **WebSockets for Real-time Updates**: While planned, WebSocket endpoints for real-time notifications are not yet active.
 
-**🔥 THINK ULTRA! This guide represents the complete implementation of the SPICE HARVESTER backend - every feature, every endpoint, every capability has been documented for your frontend development needs.**
+This guide reflects the current, stable, and tested state of the SPICE HARVESTER backend. By following these patterns, you can ensure a smooth and efficient integration.

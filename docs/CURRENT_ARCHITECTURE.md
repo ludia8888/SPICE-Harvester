@@ -27,21 +27,21 @@ SPICE HARVESTER/
 |--------|------|------|
 | OMS | 8000 | 핵심 온톨로지 관리 (내부 ID 기반) |
 | BFF | 8002 | 프론트엔드 API 게이트웨이 (사용자 친화적 레이블) |
-| Funnel | 8003 | 타입 추론 및 스키마 제안 |
-| TerminusDB | 6363 | 그래프 데이터베이스 |
+| Funnel | 8004 | 타입 추론 및 스키마 제안 |
+| TerminusDB | 6364 | 그래프 데이터베이스 |
 
 ### 아키텍처 다이어그램
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │   Frontend      │────▶│      BFF        │────▶│      OMS        │     │    Funnel       │
-│   (Port 3000)   │     │   (Port 8002)   │     │   (Port 8000)   │     │   (Port 8003)   │
+│   (Port 3000)   │     │   (Port 8002)   │     │   (Port 8000)   │     │   (Port 8004)   │
 └─────────────────┘     └─────────────────┘     └─────────────────┘     └─────────────────┘
                                 │                         │                         │
                                 └─────────────────────────┼─────────────────────────┘
                                                           ▼
                                                   ┌─────────────────┐
                                                   │   TerminusDB    │
-                                                  │   (Port 6363)   │
+                                                  │   (Port 6364)   │
                                                   └─────────────────┘
 ```
 
@@ -80,15 +80,15 @@ from spice_harvester.shared...  # 사용하지 않음
 # .env 파일
 OMS_PORT=8000
 BFF_PORT=8002
-FUNNEL_PORT=8003
-TERMINUS_SERVER_URL=http://terminusdb:6363
+FUNNEL_PORT=8004
+TERMINUS_SERVER_URL=http://terminusdb:6364
 ```
 
 ### 서비스 URL 설정
 ```bash
 OMS_BASE_URL=http://localhost:8000
 BFF_BASE_URL=http://localhost:8002
-FUNNEL_BASE_URL=http://localhost:8003
+FUNNEL_BASE_URL=http://localhost:8004
 ```
 
 ## 🏗️ 개발 환경
@@ -168,8 +168,8 @@ docker-compose logs -f [service-name]
 
 - **OMS**: http://localhost:8000/health
 - **BFF**: http://localhost:8002/health
-- **Funnel**: http://localhost:8003/health
-- **TerminusDB**: http://localhost:6363/api/
+- **Funnel**: http://localhost:8004/health
+- **TerminusDB**: http://localhost:6364/api/
 
 ## 🚨 중요 사항
 

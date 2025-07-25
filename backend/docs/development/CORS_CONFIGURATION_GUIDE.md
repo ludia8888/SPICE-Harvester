@@ -121,7 +121,7 @@ CORS_ORIGINS=["https://app.spice-harvester.com", "https://www.spice-harvester.co
 - **CORS 설정**: 중간 수준의 보안 설정
 
 ### Funnel (Type Inference Service)
-- **포트**: 8003
+- **포트**: 8004
 - **주요 용도**: 타입 추론 전용 서비스
 - **CORS 설정**: 필요에 따라 제한적 설정
 
@@ -141,7 +141,7 @@ curl http://localhost:8002/debug/cors
 curl http://localhost:8000/debug/cors
 
 # Funnel 서비스
-curl http://localhost:8003/debug/cors
+curl http://localhost:8004/debug/cors
 ```
 
 ### 2. 자동 테스트 스크립트
@@ -281,7 +281,7 @@ curl http://localhost:8002/debug/cors | jq
 # 서비스 상태 확인
 curl http://localhost:8002/health
 curl http://localhost:8000/health
-curl http://localhost:8003/health
+curl http://localhost:8004/health
 ```
 
 ---
