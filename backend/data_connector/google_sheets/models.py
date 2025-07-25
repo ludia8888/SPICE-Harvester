@@ -57,10 +57,10 @@ class GoogleSheetPreviewResponse(BaseModel):
     """Google Sheet 미리보기 응답"""
 
     sheet_id: str = Field(..., description="Google Sheets ID")
-    sheet_url: str = Field(..., description="Google Sheets URL", default="")
-    sheet_title: str = Field(..., description="시트 제목")
-    worksheet_title: str = Field(..., description="워크시트 제목", default="")
-    worksheet_name: str = Field(..., description="워크시트 이름", default="")
+    sheet_url: str = Field(description="Google Sheets URL")
+    sheet_title: str = Field(description="시트 제목")
+    worksheet_title: str = Field(default="", description="워크시트 제목")
+    worksheet_name: str = Field(default="", description="워크시트 이름")
     metadata: Optional[SheetMetadata] = Field(None, description="시트 메타데이터")
     columns: List[str] = Field(default_factory=list, description="컬럼 목록")
     sample_rows: List[Dict[str, Any]] = Field(default_factory=list, description="샘플 행 데이터")

@@ -75,13 +75,19 @@ class TypeInferenceInterface(ABC):
         pass
 
 
-class MockTypeInferenceService(TypeInferenceInterface):
+class RealTypeInferenceService(TypeInferenceInterface):
     """
-    Mock implementation for testing purposes.
+    🔥 REAL IMPLEMENTATION! Production-ready type inference service.
+    
+    Uses actual Funnel service algorithms for accurate type detection.
+    No more mock implementations!
+    """
 
-    This service always returns "string" type with high confidence.
-    Useful for testing and development when actual type inference is not needed.
-    """
+    def __init__(self):
+        """Initialize with real Funnel type inference service."""
+        # Import here to avoid circular dependencies
+        from funnel.services.type_inference import FunnelTypeInferenceService
+        self.funnel_service = FunnelTypeInferenceService
 
     def infer_column_type(
         self,
@@ -89,10 +95,18 @@ class MockTypeInferenceService(TypeInferenceInterface):
         column_name: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> TypeInferenceResult:
-        """Mock implementation - always returns string type."""
-        return TypeInferenceResult(
-            type="string", confidence=0.95, reason="Mock implementation - always returns string"
+        """🔥 REAL implementation using Funnel service algorithms."""
+        # Use actual Funnel service implementation
+        include_complex_types = metadata.get("include_complex_types", False) if metadata else False
+        
+        analysis_result = self.funnel_service.infer_column_type(
+            column_data=column_data,
+            column_name=column_name,
+            include_complex_types=include_complex_types
         )
+        
+        # Extract the TypeInferenceResult from ColumnAnalysisResult
+        return analysis_result.inferred_type
 
     def analyze_dataset(
         self,
@@ -100,42 +114,51 @@ class MockTypeInferenceService(TypeInferenceInterface):
         headers: Optional[List[str]] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> List[ColumnAnalysisResult]:
-        """Mock implementation - analyzes each column as string."""
-        results = []
-
-        if headers:
-            for header in headers:
-                # Extract column data
-                column_data = [row.get(header) for row in data if header in row]
-
-                mock_result = ColumnAnalysisResult(
-                    column_name=header,
-                    inferred_type=self.infer_column_type(column_data, header),
-                    sample_values=column_data[:5],  # First 5 values as samples
-                    null_count=sum(1 for val in column_data if val is None or val == ""),
-                    unique_count=len(set(str(val) for val in column_data if val is not None)),
-                )
-                results.append(mock_result)
-
-        return results
+        """🔥 REAL implementation using Funnel service algorithms."""
+        if not headers:
+            # Extract headers from first row if not provided
+            headers = list(data[0].keys()) if data else []
+        
+        # Convert dict data to list of lists format expected by Funnel
+        table_data = []
+        for row in data:
+            table_row = [row.get(header) for header in headers]
+            table_data.append(table_row)
+        
+        # Use actual Funnel service
+        include_complex_types = metadata.get("include_complex_types", False) if metadata else False
+        sample_size = metadata.get("sample_size", 1000) if metadata else 1000
+        
+        return self.funnel_service.analyze_dataset(
+            data=table_data,
+            columns=headers,
+            sample_size=sample_size,
+            include_complex_types=include_complex_types
+        )
 
     def infer_single_value_type(
         self, value: Any, context: Optional[Dict[str, Any]] = None
     ) -> TypeInferenceResult:
-        """Mock implementation - always returns string type."""
-        return TypeInferenceResult(
-            type="string", confidence=0.95, reason="Mock implementation - always returns string"
+        """🔥 REAL implementation using Funnel service algorithms."""
+        # Create a single-item column for analysis
+        analysis_result = self.infer_column_type(
+            column_data=[value],
+            column_name=context.get("column_name") if context else None,
+            metadata=context
         )
+        return analysis_result
 
 
-def get_mock_type_inference_service() -> TypeInferenceInterface:
+def get_production_type_inference_service() -> TypeInferenceInterface:
     """
-    Get a mock type inference service for testing.
+    🔥 Get REAL production type inference service!
+    
+    No more mocks - this returns the actual Funnel-powered service.
 
     Returns:
-        MockTypeInferenceService instance
+        RealTypeInferenceService instance with actual AI algorithms
     """
-    return MockTypeInferenceService()
+    return RealTypeInferenceService()
 
 
 if __name__ == "__main__":

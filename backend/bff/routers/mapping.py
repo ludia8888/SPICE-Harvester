@@ -207,6 +207,75 @@ def _validate_business_logic(mapping_request: Any, sanitized_mappings: dict, db_
 
     return total_mappings
 
+async def _perform_validation(mapping_request: Any, mapper: LabelMapper, db_name: str) -> bool:
+    """
+    실제 매핑 검증 수행
+    온톨로지 ID와 레이블 간의 매핑이 유효한지 확인
+    """
+    try:
+        from bff.services.oms_client import OMSClient
+        
+        # OMS 클라이언트를 통해 실제 온톨로지 데이터 조회
+        oms_client = OMSClient()
+        
+        # 1. 데이터베이스 존재 확인
+        try:
+            db_exists = await oms_client.database_exists(db_name)
+            if not db_exists:
+                logger.warning(f"Database {db_name} does not exist")
+                return False
+        except Exception as e:
+            logger.error(f"Failed to check database existence: {e}")
+            return False
+        
+        # 2. 실제 온톨로지 데이터 조회
+        try:
+            ontologies = await oms_client.get_ontologies(db_name)
+            existing_class_ids = {ont.id for ont in ontologies if ont.type == "Class"}
+            existing_property_ids = {ont.id for ont in ontologies if ont.type == "Property"}
+        except Exception as e:
+            logger.error(f"Failed to get ontologies: {e}")
+            return False
+        
+        # 3. 클래스 매핑 검증
+        for cls_mapping in mapping_request.classes:
+            class_id = cls_mapping.get("class_id")
+            if class_id not in existing_class_ids:
+                logger.warning(f"Class ID {class_id} not found in database {db_name}")
+                return False
+        
+        # 4. 속성 매핑 검증
+        for prop_mapping in mapping_request.properties:
+            property_id = prop_mapping.get("property_id")
+            if property_id not in existing_property_ids:
+                logger.warning(f"Property ID {property_id} not found in database {db_name}")
+                return False
+        
+        # 5. 중복 레이블 검증
+        existing_mappings = mapper.export_mappings(db_name)
+        existing_class_labels = {cls.get("label") for cls in existing_mappings.get("classes", [])}
+        existing_prop_labels = {prop.get("label") for prop in existing_mappings.get("properties", [])}
+        
+        # 새로운 레이블이 기존과 중복되는지 확인
+        for cls_mapping in mapping_request.classes:
+            label = cls_mapping.get("label")
+            if label in existing_class_labels:
+                logger.warning(f"Duplicate class label: {label}")
+                return False
+        
+        for prop_mapping in mapping_request.properties:
+            label = prop_mapping.get("label")
+            if label in existing_prop_labels:
+                logger.warning(f"Duplicate property label: {label}")
+                return False
+        
+        logger.info(f"Validation passed for {len(mapping_request.classes)} classes and {len(mapping_request.properties)} properties")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Validation failed with error: {e}")
+        return False
+
 def _perform_mapping_import(
     mapper: LabelMapper, validated_mappings: dict, db_name: str
 ) -> tuple:
@@ -275,7 +344,7 @@ async def import_mappings(
             "relationships": mapping_request.relationships,
             "imported_at": start_time.isoformat(),
             "import_hash": content_hash,
-            "validation_passed": True,
+            "validation_passed": await _perform_validation(mapping_request, mapper, db_name),
         }
         
         # Step 6: Perform import with backup
@@ -316,6 +385,166 @@ async def import_mappings(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"매핑 가져오기 실패: 서버 오류가 발생했습니다",
+        )
+
+
+@router.post("/validate", response_model=ApiResponse)
+async def validate_mappings(
+    db_name: str, 
+    file: UploadFile = File(...), 
+    mapper: LabelMapper = Depends(get_label_mapper)
+):
+    """
+    매핑 검증 전용 엔드포인트
+    실제 가져오기 없이 매핑 유효성만 검증합니다.
+    """
+    try:
+        from bff.services.oms_client import OMSClient
+        
+        # Step 1: 파일 검증
+        await _validate_file_upload(file)
+        
+        # Step 2: 파일 읽기 및 파싱
+        content_hash, raw_mappings = await _read_and_parse_file(file)
+        
+        # Step 3: 스키마 검증
+        mapping_request, sanitized_mappings = _sanitize_and_validate_schema(raw_mappings, db_name)
+        
+        # Step 4: 비즈니스 로직 검증
+        total_mappings = _validate_business_logic(mapping_request, sanitized_mappings, db_name)
+        
+        # Step 5: 실제 온톨로지와의 매핑 검증
+        oms_client = OMSClient()
+        validation_details = {
+            "unmapped_classes": [],
+            "unmapped_properties": [],
+            "conflicts": [],
+            "duplicate_labels": []
+        }
+        
+        # 데이터베이스 존재 확인
+        try:
+            db_exists = await oms_client.database_exists(db_name)
+            if not db_exists:
+                return {
+                    "status": "error",
+                    "message": f"데이터베이스 '{db_name}'이 존재하지 않습니다",
+                    "data": {
+                        "validation_passed": False,
+                        "details": validation_details
+                    }
+                }
+        except Exception as e:
+            logger.error(f"Failed to check database existence: {e}")
+            return {
+                "status": "error", 
+                "message": "데이터베이스 연결 실패",
+                "data": {
+                    "validation_passed": False,
+                    "details": validation_details
+                }
+            }
+        
+        # 실제 온톨로지 데이터 조회
+        try:
+            ontologies = await oms_client.get_ontologies(db_name)
+            existing_class_ids = {ont.id for ont in ontologies if ont.type == "Class"}
+            existing_property_ids = {ont.id for ont in ontologies if ont.type == "Property"}
+        except Exception as e:
+            logger.error(f"Failed to get ontologies: {e}")
+            return {
+                "status": "error",
+                "message": "온톨로지 데이터 조회 실패", 
+                "data": {
+                    "validation_passed": False,
+                    "details": validation_details
+                }
+            }
+        
+        # 클래스 매핑 검증
+        for cls_mapping in mapping_request.classes:
+            class_id = cls_mapping.get("class_id")
+            if class_id not in existing_class_ids:
+                validation_details["unmapped_classes"].append({
+                    "class_id": class_id,
+                    "label": cls_mapping.get("label"),
+                    "issue": "클래스 ID가 데이터베이스에 존재하지 않음"
+                })
+        
+        # 속성 매핑 검증
+        for prop_mapping in mapping_request.properties:
+            property_id = prop_mapping.get("property_id")
+            if property_id not in existing_property_ids:
+                validation_details["unmapped_properties"].append({
+                    "property_id": property_id,
+                    "label": prop_mapping.get("label"),
+                    "issue": "속성 ID가 데이터베이스에 존재하지 않음"
+                })
+        
+        # 기존 매핑과의 충돌 검증
+        existing_mappings = mapper.export_mappings(db_name)
+        existing_class_labels = {cls.get("label"): cls.get("class_id") for cls in existing_mappings.get("classes", [])}
+        existing_prop_labels = {prop.get("label"): prop.get("property_id") for prop in existing_mappings.get("properties", [])}
+        
+        # 중복 레이블 검사
+        for cls_mapping in mapping_request.classes:
+            label = cls_mapping.get("label")
+            class_id = cls_mapping.get("class_id")
+            if label in existing_class_labels and existing_class_labels[label] != class_id:
+                validation_details["conflicts"].append({
+                    "type": "class",
+                    "label": label,
+                    "new_id": class_id,
+                    "existing_id": existing_class_labels[label],
+                    "issue": "동일한 레이블이 다른 클래스 ID에 이미 매핑됨"
+                })
+        
+        for prop_mapping in mapping_request.properties:
+            label = prop_mapping.get("label")
+            property_id = prop_mapping.get("property_id")
+            if label in existing_prop_labels and existing_prop_labels[label] != property_id:
+                validation_details["conflicts"].append({
+                    "type": "property",
+                    "label": label,
+                    "new_id": property_id,
+                    "existing_id": existing_prop_labels[label],
+                    "issue": "동일한 레이블이 다른 속성 ID에 이미 매핑됨"
+                })
+        
+        # 검증 결과 결정
+        validation_passed = (
+            len(validation_details["unmapped_classes"]) == 0 and
+            len(validation_details["unmapped_properties"]) == 0 and
+            len(validation_details["conflicts"]) == 0
+        )
+        
+        status = "success" if validation_passed else "warning"
+        message = "매핑 검증 완료" if validation_passed else "매핑 검증 중 문제 발견"
+        
+        return {
+            "status": status,
+            "message": message,
+            "data": {
+                "database": db_name,
+                "validation_passed": validation_passed,
+                "stats": {
+                    "classes": len(mapping_request.classes),
+                    "properties": len(mapping_request.properties),
+                    "relationships": len(mapping_request.relationships),
+                    "total": total_mappings,
+                },
+                "details": validation_details,
+                "content_hash": content_hash[:16]
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Validation error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"매핑 검증 실패: {str(e)}"
         )
 
 
