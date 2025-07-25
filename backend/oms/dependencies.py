@@ -3,7 +3,8 @@ OMS Dependencies
 서비스 의존성 관리 모듈
 """
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Path, Depends
+from typing import Annotated
 
 from oms.services.async_terminus import AsyncTerminusService
 from shared.models.config import ConnectionConfig
@@ -13,6 +14,9 @@ from shared.utils.jsonld import JSONToJSONLDConverter
 
 # Import shared label mapper
 from shared.utils.label_mapper import LabelMapper
+
+# Import validation functions
+from shared.security.input_sanitizer import validate_db_name, validate_class_id
 
 # 전역 서비스 인스턴스
 terminus_service = None
@@ -56,3 +60,49 @@ def get_label_mapper() -> LabelMapper:
             detail="레이블 매퍼가 초기화되지 않았습니다",
         )
     return label_mapper
+
+
+# Validation Dependencies
+def ValidatedDatabaseName(db_name: str = Path(..., description="데이터베이스 이름")) -> str:
+    """데이터베이스 이름 검증 의존성"""
+    try:
+        return validate_db_name(db_name)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"잘못된 데이터베이스 이름: {str(e)}"
+        )
+
+
+def ValidatedClassId(class_id: str = Path(..., description="클래스 ID")) -> str:
+    """클래스 ID 검증 의존성"""
+    try:
+        return validate_class_id(class_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"잘못된 클래스 ID: {str(e)}"
+        )
+
+
+# Combined validation for database existence check
+async def ensure_database_exists(
+    db_name: Annotated[str, ValidatedDatabaseName],
+    terminus: AsyncTerminusService = Depends(get_terminus_service)
+) -> str:
+    """데이터베이스 존재 확인 및 검증된 이름 반환"""
+    try:
+        dbs = await terminus.list_databases()
+        if db_name not in dbs:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"데이터베이스 '{db_name}'이(가) 존재하지 않습니다"
+            )
+        return db_name
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"데이터베이스 확인 실패: {str(e)}"
+        )

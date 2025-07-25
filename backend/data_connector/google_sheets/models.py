@@ -2,7 +2,7 @@
 Google Sheets Connector - Request/Response Models
 """
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 

@@ -91,13 +91,12 @@ class BaseTypeChecker(ABC):
         return 0.0
 
 
+@dataclass
 class TypeCheckResult:
     """Result container for parallel type checking"""
-    
-    def __init__(self, checker_name: str, result: TypeInferenceResult):
-        self.checker_name = checker_name
-        self.result = result
-        self.priority = 0  # Will be set by the checker
+    checker_name: str
+    result: TypeInferenceResult
+    priority: int = 0  # Will be set by the manager
     
     def __lt__(self, other):
         """For sorting by confidence (descending) then priority (ascending)"""

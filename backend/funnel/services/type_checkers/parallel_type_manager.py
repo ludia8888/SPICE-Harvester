@@ -11,8 +11,10 @@ from .base import BaseTypeChecker, TypeCheckContext, TypeCheckResult
 from .adaptive_threshold_calculator import AdaptiveThresholdCalculator
 from .boolean_checker import BooleanTypeChecker
 from .integer_checker import IntegerTypeChecker
+from .decimal_checker import DecimalTypeChecker
 from .date_checker import DateTypeChecker
 from .phone_checker import PhoneTypeChecker
+from .email_checker import EmailTypeChecker
 
 
 class ParallelTypeInferenceManager:
@@ -35,9 +37,11 @@ class ParallelTypeInferenceManager:
         """Register all default type checkers"""
         self.checkers = [
             BooleanTypeChecker(),
-            IntegerTypeChecker(), 
+            IntegerTypeChecker(),
+            DecimalTypeChecker(),
             DateTypeChecker(),
             PhoneTypeChecker(),
+            EmailTypeChecker(),
         ]
         
         # Sort by priority (lower number = higher priority)

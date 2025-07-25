@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict
 
 from oms.dependencies import get_terminus_service
 from oms.services.async_terminus import AsyncTerminusService
+from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import (
     SecurityViolationError,
     sanitize_input,
@@ -89,12 +90,14 @@ async def create_commit(
             db_name, message=sanitized_data["message"], author=sanitized_data.get("author", "admin")
         )
 
-        return {
-            "message": "커밋이 생성되었습니다",
-            "commit_id": commit_id,
-            "author": request.author,
-            "commit_message": request.message,
-        }
+        return ApiResponse.created(
+            message="커밋이 생성되었습니다",
+            data={
+                "commit_id": commit_id,
+                "author": request.author,
+                "commit_message": request.message
+            }
+        ).to_dict()
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in create_commit: {e}")
@@ -155,13 +158,16 @@ async def get_commit_history(
             db_name, branch=branch, limit=limit, offset=offset
         )
 
-        return {
-            "branch": branch,
-            "commits": history,
-            "total": len(history),
-            "limit": limit,
-            "offset": offset,
-        }
+        return ApiResponse.success(
+            message="커밋 히스토리를 조회했습니다",
+            data={
+                "branch": branch,
+                "commits": history,
+                "total": len(history),
+                "limit": limit,
+                "offset": offset
+            }
+        ).to_dict()
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in get_commit_history: {e}")
@@ -206,16 +212,19 @@ async def get_diff(
         # 차이점 조회
         diff = await terminus.diff(db_name, from_ref, to_ref)
 
-        return {
-            "from": from_ref,
-            "to": to_ref,
-            "changes": diff,
-            "summary": {
-                "added": len([c for c in diff if c.get("type") == "added"]),
-                "modified": len([c for c in diff if c.get("type") == "modified"]),
-                "deleted": len([c for c in diff if c.get("type") == "deleted"]),
-            },
-        }
+        return ApiResponse.success(
+            message="차이점을 조회했습니다",
+            data={
+                "from": from_ref,
+                "to": to_ref,
+                "changes": diff,
+                "summary": {
+                    "added": len([c for c in diff if c.get("type") == "added"]),
+                    "modified": len([c for c in diff if c.get("type") == "modified"]),
+                    "deleted": len([c for c in diff if c.get("type") == "deleted"])
+                }
+            }
+        ).to_dict()
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in get_diff: {e}")
@@ -286,14 +295,16 @@ async def merge_branches(
             db_name, source_branch=source_branch, target_branch=target_branch, strategy=strategy
         )
 
-        return {
-            "message": f"브랜치 '{source_branch}'을(를) '{target_branch}'(으)로 머지했습니다",
-            "source_branch": source_branch,
-            "target_branch": target_branch,
-            "strategy": strategy,
-            "conflicts": result.get("conflicts", []),
-            "merged": result.get("merged", True),
-        }
+        return ApiResponse.success(
+            message=f"브랜치 '{source_branch}'을(를) '{target_branch}'(으)로 머지했습니다",
+            data={
+                "source_branch": source_branch,
+                "target_branch": target_branch,
+                "strategy": strategy,
+                "conflicts": result.get("conflicts", []),
+                "merged": result.get("merged", True)
+            }
+        ).to_dict()
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in merge_branches: {e}")
@@ -350,11 +361,13 @@ async def rollback(
         # 롤백 실행
         await terminus.rollback(db_name, target)
 
-        return {
-            "message": f"'{target}'(으)로 롤백했습니다",
-            "target": target,
-            "current_branch": await terminus.get_current_branch(db_name),
-        }
+        return ApiResponse.success(
+            message=f"'{target}'(으)로 롤백했습니다",
+            data={
+                "target": target,
+                "current_branch": await terminus.get_current_branch(db_name)
+            }
+        ).to_dict()
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in rollback: {e}")
@@ -412,12 +425,14 @@ async def rebase_branch(
         # 리베이스 실행
         await terminus.rebase(db_name, onto=onto, branch=branch)
 
-        return {
-            "message": f"브랜치 '{branch}'을(를) '{onto}' 위로 리베이스했습니다",
-            "branch": branch,
-            "onto": onto,
-            "success": True,
-        }
+        return ApiResponse.success(
+            message=f"브랜치 '{branch}'을(를) '{onto}' 위로 리베이스했습니다",
+            data={
+                "branch": branch,
+                "onto": onto,
+                "success": True
+            }
+        ).to_dict()
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in rebase_branch: {e}")
@@ -462,13 +477,12 @@ async def get_common_ancestor(
         common_ancestor = await terminus.find_common_ancestor(db_name, branch1, branch2)
         
         if not common_ancestor:
-            return {
-                "status": "success",
-                "data": {
-                    "common_ancestor": None,
-                    "message": f"브랜치 '{branch1}'과 '{branch2}'의 공통 조상을 찾을 수 없습니다"
+            return ApiResponse.success(
+                message=f"브랜치 '{branch1}'과 '{branch2}'의 공통 조상을 찾을 수 없습니다",
+                data={
+                    "common_ancestor": None
                 }
-            }
+            ).to_dict()
         
         # 공통 조상 커밋 정보 가져오기
         history = await terminus.get_commit_history(db_name, limit=100)
@@ -478,16 +492,15 @@ async def get_common_ancestor(
                 ancestor_info = commit
                 break
         
-        return {
-            "status": "success",
-            "data": {
+        return ApiResponse.success(
+            message=f"공통 조상 커밋을 찾았습니다: {common_ancestor[:8]}",
+            data={
                 "common_ancestor": common_ancestor,
                 "ancestor_info": ancestor_info,
                 "branch1": branch1,
-                "branch2": branch2,
-                "message": f"공통 조상 커밋을 찾았습니다: {common_ancestor[:8]}"
+                "branch2": branch2
             }
-        }
+        ).to_dict()
         
     except SecurityViolationError as e:
         logger.warning(f"Security violation in get_common_ancestor: {e}")

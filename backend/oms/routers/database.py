@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from oms.dependencies import get_terminus_service
 from oms.services.async_terminus import AsyncTerminusService
+from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
 
 logger = logging.getLogger(__name__)
@@ -26,7 +27,10 @@ async def list_databases(terminus_service: AsyncTerminusService = Depends(get_te
     """
     try:
         databases = await terminus_service.list_databases()
-        return {"status": "success", "data": {"databases": databases}}
+        return ApiResponse.success(
+            message=f"데이터베이스 목록 조회 완료 ({len(databases)}개)",
+            data={"databases": databases}
+        ).to_dict()
     except Exception as e:
         logger.error(f"Failed to list databases: {e}")
         raise HTTPException(
@@ -35,7 +39,7 @@ async def list_databases(terminus_service: AsyncTerminusService = Depends(get_te
         )
 
 
-@router.post("/create")
+@router.post("/create", status_code=status.HTTP_201_CREATED)
 async def create_database(
     request: dict, terminus_service: AsyncTerminusService = Depends(get_terminus_service)
 ):
@@ -68,11 +72,10 @@ async def create_database(
         # 데이터베이스 생성
         result = await terminus_service.create_database(db_name, description=description)
 
-        return {
-            "status": "success",
-            "message": f"데이터베이스 '{db_name}'이(가) 생성되었습니다",
-            "data": result,
-        }
+        return ApiResponse.created(
+            message=f"데이터베이스 '{db_name}'이(가) 생성되었습니다",
+            data=result
+        ).to_dict()
     except SecurityViolationError as e:
         logger.warning(f"Security violation in create_database: {e}")
         raise HTTPException(
@@ -144,11 +147,10 @@ async def delete_database(
         # 데이터베이스 삭제 실행
         await terminus_service.delete_database(db_name)
 
-        return {
-            "status": "success",
-            "message": f"데이터베이스 '{db_name}'이(가) 삭제되었습니다",
-            "database": db_name,
-        }
+        return ApiResponse.success(
+            message=f"데이터베이스 '{db_name}'이(가) 삭제되었습니다",
+            data={"database": db_name}
+        ).to_dict()
     except SecurityViolationError as e:
         logger.warning(f"Security violation in delete_database: {e}")
         raise HTTPException(
@@ -182,11 +184,10 @@ async def database_exists(
 
         exists = await terminus_service.database_exists(db_name)
         
-        return {
-            "status": "success", 
-            "data": {"exists": exists},
-            "message": f"데이터베이스 '{db_name}' 존재 여부: {exists}"
-        }
+        return ApiResponse.success(
+            message=f"데이터베이스 '{db_name}' 존재 여부: {exists}",
+            data={"exists": exists}
+        ).to_dict()
     except SecurityViolationError as e:
         logger.warning(f"Security violation in database_exists: {e}")
         raise HTTPException(

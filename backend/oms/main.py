@@ -10,20 +10,20 @@ load_dotenv()  # Load .env file
 import json
 import logging
 import os
-import time
 from contextlib import asynccontextmanager
 from typing import Optional
 
-import uvicorn
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+# Shared service factory import
+from shared.services.service_factory import OMS_SERVICE_INFO, create_fastapi_service, run_service
 
 # OMS 서비스 import
 from oms.services.async_terminus import AsyncTerminusService
-from shared.config.service_config import ServiceConfig
 from shared.models.config import ConnectionConfig
+from shared.config.service_config import ServiceConfig
 
 # shared 모델 import
 from shared.models.requests import ApiResponse
@@ -84,36 +84,13 @@ async def lifespan(app: FastAPI):
         await terminus_service.disconnect()
 
 
-# FastAPI 앱 생성
-app = FastAPI(
-    title="Ontology Management Service (OMS)",
-    description="내부 ID 기반 핵심 온톨로지 관리 서비스",
-    version="1.0.0",
-    lifespan=lifespan,
+# FastAPI 앱 생성 - Service Factory 사용
+app = create_fastapi_service(
+    service_info=OMS_SERVICE_INFO,
+    custom_lifespan=lifespan,
+    include_health_check=False,  # 기존 health check 유지
+    include_logging_middleware=True
 )
-
-# CORS 설정 - 환경변수 기반 동적 설정
-if ServiceConfig.is_cors_enabled():
-    cors_config = ServiceConfig.get_cors_config()
-    app.add_middleware(CORSMiddleware, **cors_config)
-    logger.info(
-        f"🌐 CORS enabled with origins: {cors_config['allow_origins'][:3]}..."
-        if len(cors_config["allow_origins"]) > 3
-        else f"🌐 CORS enabled with origins: {cors_config['allow_origins']}"
-    )
-else:
-    logger.info("🚫 CORS disabled")
-
-
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    start_time = time.time()
-    response = await call_next(request)
-    process_time = time.time() - start_time
-    logger.info(
-        f'Request: {request.method} {request.url.path} - Response: {response.status_code} - Time: {process_time:.4f}s'
-    )
-    return response
 
 
 # 에러 핸들러
@@ -229,13 +206,7 @@ async def health_check():
         return error_response.to_dict()
 
 
-# CORS 디버그 엔드포인트 (개발 환경에서만 활성화)
-if not ServiceConfig.is_production():
-
-    @app.get("/debug/cors")
-    async def debug_cors():
-        """CORS 설정 디버그 정보"""
-        return ServiceConfig.get_cors_debug_info()
+# Note: CORS debug endpoint는 service_factory에서 자동 제공됨
 
 
 # 라우터 등록
@@ -247,55 +218,5 @@ app.include_router(branch.router, prefix="/api/v1", tags=["branch"])
 app.include_router(version.router, prefix="/api/v1", tags=["version"])
 
 if __name__ == "__main__":
-    # SSL 설정 가져오기
-    ssl_config = ServiceConfig.get_ssl_config()
-
-    # uvicorn 설정
-    uvicorn_config = {
-        "host": ServiceConfig.get_oms_host(),
-        "port": ServiceConfig.get_oms_port(),
-        "reload": True,
-        "log_config": {
-            "version": 1,
-            "disable_existing_loggers": False,
-            "formatters": {
-                "default": {
-                    "()": "uvicorn.logging.DefaultFormatter",
-                    "fmt": "%(levelprefix)s %(asctime)s - %(message)s",
-                    "datefmt": "%Y-%m-%d %H:%M:%S",
-                },
-                "access": {
-                    "()": "uvicorn.logging.AccessFormatter",
-                    "fmt": '%(levelprefix)s %(asctime)s - %(client_addr)s - "%(request_line)s" %(status_code)s',
-                    "datefmt": "%Y-%m-%d %H:%M:%S",
-                },
-            },
-            "handlers": {
-                "default": {
-                    "formatter": "default",
-                    "class": "logging.StreamHandler",
-                    "stream": "ext://sys.stderr",
-                },
-                "access": {
-                    "formatter": "access",
-                    "class": "logging.StreamHandler",
-                    "stream": "ext://sys.stdout",
-                },
-            },
-            "loggers": {
-                "uvicorn": {"handlers": ["default"], "level": "INFO", "propagate": False},
-                "uvicorn.error": {"level": "INFO"},
-                "uvicorn.access": {"handlers": ["access"], "level": "INFO", "propagate": False},
-                "oms": {"handlers": ["default"], "level": "INFO", "propagate": False},
-            },
-        },
-    }
-
-    # SSL 설정이 있으면 추가
-    if ssl_config:
-        uvicorn_config.update(ssl_config)
-        logger.info(f"🔐 HTTPS enabled for OMS on port {uvicorn_config['port']}")
-    else:
-        logger.info(f"🔓 HTTP enabled for OMS on port {uvicorn_config['port']}")
-
-    uvicorn.run("main:app", **uvicorn_config)
+    # Service Factory를 사용한 간소화된 서비스 실행
+    run_service(app, OMS_SERVICE_INFO, "oms.main:app")

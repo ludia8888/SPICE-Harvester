@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict
 
 from oms.dependencies import get_terminus_service
 from oms.services.async_terminus import AsyncTerminusService
-from shared.models.requests import BranchCreateRequest, CheckoutRequest
+from shared.models.requests import ApiResponse, BranchCreateRequest, CheckoutRequest
 from shared.security.input_sanitizer import (
     SecurityViolationError,
     sanitize_input,
@@ -48,7 +48,10 @@ async def list_branches(
             # 추가 정보 (커밋 수 등) 조회 가능
             branch_info.append(info)
 
-        return {"branches": branch_info, "current": current_branch, "total": len(branch_info)}
+        return ApiResponse.success(
+            message="브랜치 목록을 조회했습니다",
+            data={"branches": branch_info, "current": current_branch, "total": len(branch_info)}
+        ).to_dict()
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in list_branches: {e}")
@@ -100,11 +103,13 @@ async def create_branch(
         # 브랜치 생성
         await terminus.create_branch(db_name, branch_name, from_branch=from_branch)
 
-        return {
-            "message": f"브랜치 '{branch_name}'이(가) 생성되었습니다",
-            "branch": branch_name,
-            "from_branch": from_branch or await terminus.get_current_branch(db_name),
-        }
+        return ApiResponse.created(
+            message=f"브랜치 '{branch_name}'이(가) 생성되었습니다",
+            data={
+                "branch": branch_name,
+                "from_branch": from_branch or await terminus.get_current_branch(db_name)
+            }
+        ).to_dict()
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in create_branch: {e}")
@@ -163,7 +168,10 @@ async def delete_branch(
         # 브랜치 삭제
         await terminus.delete_branch(db_name, branch_name)
 
-        return {"message": f"브랜치 '{branch_name}'이(가) 삭제되었습니다", "branch": branch_name}
+        return ApiResponse.success(
+            message=f"브랜치 '{branch_name}'이(가) 삭제되었습니다",
+            data={"branch": branch_name}
+        ).to_dict()
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in delete_branch: {e}")
@@ -233,12 +241,14 @@ async def checkout(
         # 현재 브랜치 확인
         current_branch = await terminus.get_current_branch(db_name)
 
-        return {
-            "message": f"{target_type} '{target}'(으)로 체크아웃했습니다",
-            "target": target,
-            "target_type": target_type,
-            "current_branch": current_branch,
-        }
+        return ApiResponse.success(
+            message=f"{target_type} '{target}'(으)로 체크아웃했습니다",
+            data={
+                "target": target,
+                "target_type": target_type,
+                "current_branch": current_branch
+            }
+        ).to_dict()
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in checkout: {e}")
@@ -295,7 +305,10 @@ async def get_branch_info(
 
         # 추가 정보 조회 가능 (커밋 히스토리, 통계 등)
 
-        return info
+        return ApiResponse.success(
+            message=f"브랜치 '{branch_name}'의 정보를 조회했습니다",
+            data=info
+        ).to_dict()
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in get_branch_info: {e}")

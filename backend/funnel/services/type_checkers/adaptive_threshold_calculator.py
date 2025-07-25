@@ -136,11 +136,21 @@ class AdaptiveThresholdCalculator:
         
         adjustment = 0.0
         
-        # Sample size adjustment
-        if metrics.sample_size < 10:
-            adjustment += 0.1  # Be more lenient with small samples
-        elif metrics.sample_size > 1000:
-            adjustment -= 0.05  # Be more strict with large samples
+        # Sample size adjustment - more granular and comprehensive
+        if metrics.sample_size < 5:
+            adjustment += 0.15  # Very lenient with tiny samples
+        elif metrics.sample_size < 10:
+            adjustment += 0.10  # Lenient with small samples
+        elif metrics.sample_size < 50:
+            adjustment += 0.05  # Slightly lenient with medium-small samples
+        elif metrics.sample_size < 100:
+            adjustment += 0.02  # Slightly lenient with medium samples
+        elif metrics.sample_size < 500:
+            pass  # Neutral for medium-large samples (no adjustment)
+        elif metrics.sample_size < 1000:
+            adjustment -= 0.03  # Slightly strict with large samples
+        else:
+            adjustment -= 0.08  # More strict with very large samples
         
         # Uniqueness adjustment
         if metrics.uniqueness_ratio > 0.8:

@@ -54,11 +54,23 @@ from bff.dependencies import (
     get_jsonld_converter,
     get_label_mapper,
     get_terminus_service,
+    get_oms_client,
 )
+from bff.services.adapter_service import BFFAdapterService
+from bff.services.oms_client import OMSClient
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/database/{db_name}", tags=["Ontology Management"])
+
+
+# Dependency for BFF Adapter Service
+def get_bff_adapter(
+    terminus_service: TerminusService = Depends(get_terminus_service),
+    label_mapper: LabelMapper = Depends(get_label_mapper)
+) -> BFFAdapterService:
+    """Get BFF Adapter Service instance"""
+    return BFFAdapterService(terminus_service, label_mapper)
 
 
 @router.post("/ontology", response_model=OntologyResponse)
@@ -518,16 +530,13 @@ async def get_ontology_schema(
 async def create_ontology_with_relationship_validation(
     db_name: str,
     ontology: OntologyCreateRequestBFF,
-    auto_generate_inverse: bool = Query(True, description="자동 역관계 생성 여부"),
-    validate_relationships: bool = Query(True, description="관계 검증 수행 여부"),
-    check_circular_references: bool = Query(True, description="순환 참조 체크 여부"),
-    mapper: LabelMapper = Depends(get_label_mapper),
-    terminus: TerminusService = Depends(get_terminus_service),
-    jsonld_conv: JSONToJSONLDConverter = Depends(get_jsonld_converter),
+    adapter: BFFAdapterService = Depends(get_bff_adapter),
 ):
     """
-    🔥 고급 관계 검증을 포함한 온톨로지 생성 (BFF 레이어)
+    🔥 고급 관계 검증을 포함한 온톨로지 생성 (BFF 레이어 - 리팩토링됨)
 
+    이제 중복 로직 없이 BFF Adapter를 통해 OMS로 모든 비즈니스 로직을 위임합니다.
+    
     Features:
     - 레이블 기반 자동 ID 생성
     - 자동 역관계 생성
@@ -536,70 +545,11 @@ async def create_ontology_with_relationship_validation(
     - 다국어 레이블 매핑
     """
     try:
-        # 입력 데이터 보안 검증
-        db_name = validate_db_name(db_name)
-        # 입력 데이터를 딕셔너리로 변환
-        ontology_dict = ontology.dict(exclude_unset=True)
-
-        # 공통 ID 생성 유틸리티 사용
-        from shared.utils.id_generator import generate_simple_id
-
-        # 레이블로부터 ID 생성
-        class_id = generate_simple_id(
-            label=ontology.label, use_timestamp_for_korean=True, default_fallback="UnnamedClass"
-        )
-
-        ontology_dict["id"] = class_id
-        logger.info(f"🔥 Generated class_id '{class_id}' for advanced ontology creation")
-
-        # 🔥 OMS에서 고급 관계 관리 기능 호출
-        oms_result = await terminus.create_ontology_with_advanced_relationships(
+        # BFF Adapter를 통해 모든 로직 위임 (중복 제거)
+        return await adapter.create_advanced_ontology(
             db_name=db_name,
-            ontology_data=ontology_dict,
-            auto_generate_inverse=auto_generate_inverse,
-            validate_relationships=validate_relationships,
-            check_circular_references=check_circular_references,
-        )
-
-        # 레이블 매핑 등록
-        await mapper.register_class(db_name, class_id, ontology.label, ontology.description)
-
-        # 속성 레이블 매핑
-        for prop in ontology.properties:
-            await mapper.register_property(db_name, class_id, prop.name, prop.label)
-
-        # 관계 레이블 매핑
-        for rel in ontology.relationships:
-            await mapper.register_relationship(db_name, rel.predicate, rel.label)
-
-        # 관계 향상 정보 추출
-        relationship_enhancements = oms_result.get("relationship_enhancements", {})
-
-        # 응답 생성
-        ontology_base = OntologyBase(
-            id=class_id,
-            label=ontology.label,
-            description=ontology.description,
-            properties=ontology.properties,
-            relationships=ontology.relationships,
-            metadata={
-                "created_with_advanced_features": True,
-                "database": db_name,
-                "auto_inverse_generated": auto_generate_inverse,
-                "validation_performed": validate_relationships,
-                "circular_check_performed": check_circular_references,
-                "validation_summary": relationship_enhancements.get("validation_results", []),
-                "cycles_detected": len(relationship_enhancements.get("cycle_info", [])),
-                "inverse_relationships": relationship_enhancements.get(
-                    "inverse_relationships_generated", False
-                ),
-            },
-        )
-
-        return OntologyResponse(
-            status="success",
-            data=ontology_base,
-            message=f"고급 관계 기능을 포함한 온톨로지 '{class_id}'가 생성되었습니다",
+            ontology_data=ontology.dict(exclude_unset=True),
+            language="ko"
         )
 
     except HTTPException:
@@ -616,86 +566,23 @@ async def create_ontology_with_relationship_validation(
 async def validate_ontology_relationships_bff(
     db_name: str,
     ontology: OntologyCreateRequestBFF,
-    terminus: TerminusService = Depends(get_terminus_service),
+    adapter: BFFAdapterService = Depends(get_bff_adapter),
 ):
     """
-    🔥 온톨로지 관계 검증 (BFF 레이어)
+    🔥 온톨로지 관계 검증 (BFF 레이어 - 리팩토링됨)
 
-    실제 생성 없이 관계의 유효성만 검증하고 사용자 친화적 결과 반환
+    이제 중복 로직 없이 BFF Adapter를 통해 OMS로 모든 비즈니스 로직을 위임합니다.
     """
     try:
-        # 입력 데이터 보안 검증
-        db_name = validate_db_name(db_name)
-        # 입력 데이터 준비
-        ontology_dict = ontology.dict(exclude_unset=True)
+        # BFF Adapter를 통해 모든 로직 위임 (중복 제거)
+        return await adapter.validate_relationships(
+            db_name=db_name,
+            validation_data=ontology.dict(exclude_unset=True),
+            language="ko"
+        )
 
-        # 임시 ID 생성 (검증용)
-        import re
-
-        # ontology.label is now a simple string
-        label = ontology.label if isinstance(ontology.label, str) else "TempClass"
-
-        class_id = re.sub(r"[^\w\s]", "", label)
-        class_id = "".join(word.capitalize() for word in class_id.split())
-        if not class_id or class_id[0].isdigit():
-            class_id = "TempClass"
-
-        ontology_dict["id"] = class_id
-
-        # 관계 검증 수행
-        validation_result = await terminus.validate_relationships(db_name, ontology_dict)
-
-        # 사용자 친화적 형태로 변환
-        summary = validation_result.get("validation_summary", {})
-        validation_issues = validation_result.get("validation_results", [])
-
-        # 심각도별 분류
-        errors = [issue for issue in validation_issues if issue.get("severity") == "error"]
-        warnings = [issue for issue in validation_issues if issue.get("severity") == "warning"]
-        info = [issue for issue in validation_issues if issue.get("severity") == "info"]
-
-        return {
-            "status": "success",
-            "message": "관계 검증이 완료되었습니다",
-            "validation_summary": {
-                "can_create": summary.get("can_proceed", True),
-                "total_issues": summary.get("total_issues", 0),
-                "errors": len(errors),
-                "warnings": len(warnings),
-                "info": len(info),
-            },
-            "issues": {
-                "critical_errors": [
-                    {
-                        "field": issue.get("field"),
-                        "message": issue.get("message"),
-                        "code": issue.get("code"),
-                    }
-                    for issue in errors
-                ],
-                "warnings": [
-                    {
-                        "field": issue.get("field"),
-                        "message": issue.get("message"),
-                        "code": issue.get("code"),
-                    }
-                    for issue in warnings
-                ],
-                "recommendations": [
-                    {
-                        "field": issue.get("field"),
-                        "message": issue.get("message"),
-                        "code": issue.get("code"),
-                    }
-                    for issue in info
-                ],
-            },
-            "metadata": {
-                "ontology_label": label,
-                "temp_class_id": class_id,
-                "validation_timestamp": validation_result.get("timestamp"),
-            },
-        }
+    except HTTPException:
+        raise
 
     except Exception as e:
         logger.error(f"Failed to validate relationships: {e}")
@@ -708,98 +595,25 @@ async def validate_ontology_relationships_bff(
 async def check_circular_references_bff(
     db_name: str,
     ontology: Optional[OntologyCreateRequestBFF] = None,
-    terminus: TerminusService = Depends(get_terminus_service),
+    adapter: BFFAdapterService = Depends(get_bff_adapter),
 ):
     """
-    🔥 순환 참조 탐지 (BFF 레이어)
+    🔥 순환 참조 탐지 (BFF 레이어 - 리팩토링됨)
 
-    기존 온톨로지들과 새 온톨로지(선택사항) 간의 순환 참조를 탐지하고
-    사용자 친화적 결과 반환
+    이제 중복 로직 없이 BFF Adapter를 통해 OMS로 모든 비즈니스 로직을 위임합니다.
     """
     try:
-        # 입력 데이터 보안 검증
-        db_name = validate_db_name(db_name)
         # 새 온톨로지 데이터 준비
-        new_ontology_data = None
+        detection_data = {}
         if ontology:
-            ontology_dict = ontology.dict(exclude_unset=True)
+            detection_data = ontology.dict(exclude_unset=True)
 
-            # 임시 ID 생성
-            import re
-
-            # ontology.label is now a simple string
-            label = ontology.label if isinstance(ontology.label, str) else "TempClass"
-
-            # 한글이 포함된 경우 처리
-            if any("\u4e00" <= char <= "\u9fff" or "\uac00" <= char <= "\ud7af" for char in label):
-                # 한글이 포함된 경우 기본 ID 사용
-                import time
-
-                class_id = f"TempClass{int(time.time() * 1000) % 1000000}"
-            else:
-                class_id = re.sub(r"[^\w\s]", "", label)
-                class_id = "".join(word.capitalize() for word in class_id.split())
-                if not class_id or (class_id and class_id[0].isdigit()):
-                    class_id = "TempClass"
-
-            ontology_dict["id"] = class_id
-            new_ontology_data = ontology_dict
-
-        # 순환 참조 탐지 수행
-        cycle_result = await terminus.detect_circular_references(
-            db_name, include_new_ontology=new_ontology_data
+        # BFF Adapter를 통해 모든 로직 위임 (중복 제거)
+        return await adapter.detect_circular_references(
+            db_name=db_name,
+            detection_data=detection_data,
+            language="ko"
         )
-
-        # 사용자 친화적 형태로 변환
-        report = cycle_result.get("cycle_analysis_report", {})
-        detected_cycles = cycle_result.get("detected_cycles", [])
-
-        # 심각도별 분류
-        critical_cycles = [
-            cycle for cycle in detected_cycles if cycle.get("severity") == "critical"
-        ]
-        warning_cycles = [cycle for cycle in detected_cycles if cycle.get("severity") == "warning"]
-        info_cycles = [cycle for cycle in detected_cycles if cycle.get("severity") == "info"]
-
-        return {
-            "status": "success",
-            "message": "순환 참조 탐지가 완료되었습니다",
-            "cycle_summary": {
-                "safe_to_create": len(critical_cycles) == 0,
-                "total_cycles": report.get("total_cycles", 0),
-                "critical_cycles": len(critical_cycles),
-                "warning_cycles": len(warning_cycles),
-                "info_cycles": len(info_cycles),
-                "average_cycle_length": report.get("average_cycle_length", 0),
-            },
-            "cycles": {
-                "critical": [
-                    {
-                        "type": cycle.get("type"),
-                        "path": " → ".join(cycle.get("path", [])),
-                        "predicates": cycle.get("predicates", []),
-                        "message": cycle.get("message"),
-                        "solutions": cycle.get("resolution_suggestions", []),
-                    }
-                    for cycle in critical_cycles
-                ],
-                "warnings": [
-                    {
-                        "type": cycle.get("type"),
-                        "path": " → ".join(cycle.get("path", [])),
-                        "predicates": cycle.get("predicates", []),
-                        "message": cycle.get("message"),
-                        "solutions": cycle.get("resolution_suggestions", []),
-                    }
-                    for cycle in warning_cycles
-                ],
-            },
-            "recommendations": report.get("recommendations", []),
-            "metadata": {
-                "analysis_includes_new_ontology": new_ontology_data is not None,
-                "new_ontology_label": label if ontology else None,
-            },
-        }
 
     except Exception as e:
         logger.error(f"Failed to check circular references: {e}")

@@ -10,19 +10,16 @@ load_dotenv()
 # Standard library imports
 import json
 import logging
-import time
 from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
 
 # Third party imports
 import httpx
-import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-# Local application imports
-from shared.config.service_config import ServiceConfig
+# Shared service factory import
+from shared.services.service_factory import BFF_SERVICE_INFO, create_fastapi_service, run_service
 from shared.models.ontology import (
     OntologyCreateRequestBFF,
     OntologyResponse,
@@ -137,53 +134,13 @@ async def lifespan(app: FastAPI):
         await type_inference_adapter.close()
 
 
-# FastAPI 앱 생성
-app = FastAPI(
-    title="BFF (Backend for Frontend) Service",
-    description="사용자 친화적인 레이블 기반 온톨로지 관리 서비스",
-    version="2.0.0",  # Updated version for production-grade features
-    lifespan=lifespan,
-    # Enhanced OpenAPI configuration
-    openapi_tags=[
-        {"name": "Health", "description": "Health check and service status"},
-        {"name": "Database", "description": "Database management operations"},
-        {"name": "Ontology", "description": "Ontology CRUD operations"},
-        {"name": "Query", "description": "Data querying and retrieval"},
-        {"name": "Label Mappings", "description": "Label mapping import/export"},
-        {"name": "Branch Management", "description": "Git-like branch operations"},
-    ],
+# FastAPI 앱 생성 - Service Factory 사용
+app = create_fastapi_service(
+    service_info=BFF_SERVICE_INFO,
+    custom_lifespan=lifespan,
+    include_health_check=False,  # 기존 라우터에서 처리
+    include_logging_middleware=True
 )
-
-# Production-grade middleware setup
-# Note: Order matters - validation should come before error handling
-# setup_validation_middleware(app)
-# setup_error_handlers(app)
-
-# Enhanced OpenAPI documentation
-# setup_enhanced_openapi(app)
-
-# CORS 설정 - 환경변수 기반 동적 설정
-if ServiceConfig.is_cors_enabled():
-    cors_config = ServiceConfig.get_cors_config()
-    app.add_middleware(CORSMiddleware, **cors_config)
-    logger.info(
-        f"🌐 CORS enabled with origins: {cors_config['allow_origins'][:3]}..."
-        if len(cors_config["allow_origins"]) > 3
-        else f"🌐 CORS enabled with origins: {cors_config['allow_origins']}"
-    )
-else:
-    logger.info("🚫 CORS disabled")
-
-
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    start_time = time.time()
-    response = await call_next(request)
-    process_time = time.time() - start_time
-    logger.info(
-        f'Request: {request.method} {request.url.path} - Response: {response.status_code} - Time: {process_time:.4f}s'
-    )
-    return response
 
 
 # 의존성 주입
@@ -1081,14 +1038,11 @@ async def rollback(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-# CORS 디버그 엔드포인트 (개발 환경에서만 활성화)
-if not ServiceConfig.is_production():
+# BFF 특별 디버그 엔드포인트 (개발 환경에서만 활성화)
+# Note: CORS debug endpoint는 service_factory에서 자동 제공됨
+from shared.config.service_config import ServiceConfig
 
-    @app.get("/debug/cors")
-    async def debug_cors():
-        """CORS 설정 디버그 정보"""
-        return ServiceConfig.get_cors_debug_info()
-    
+if not ServiceConfig.is_production():
     @app.post("/debug/test")
     async def debug_test(data: Dict[str, Any]):
         """POST 요청 디버그 테스트"""
@@ -1117,55 +1071,5 @@ app.include_router(health.router, tags=["health"])
 
 
 if __name__ == "__main__":
-    # SSL 설정 가져오기
-    ssl_config = ServiceConfig.get_ssl_config()
-
-    # uvicorn 설정
-    uvicorn_config = {
-        "host": ServiceConfig.get_bff_host(),
-        "port": ServiceConfig.get_bff_port(),
-        "reload": True,
-        "log_config": {
-            "version": 1,
-            "disable_existing_loggers": False,
-            "formatters": {
-                "default": {
-                    "()": "uvicorn.logging.DefaultFormatter",
-                    "fmt": "%(levelprefix)s %(asctime)s - %(message)s",
-                    "datefmt": "%Y-%m-%d %H:%M:%S",
-                },
-                "access": {
-                    "()": "uvicorn.logging.AccessFormatter",
-                    "fmt": '%(levelprefix)s %(asctime)s - %(client_addr)s - "%(request_line)s" %(status_code)s',
-                    "datefmt": "%Y-%m-%d %H:%M:%S",
-                },
-            },
-            "handlers": {
-                "default": {
-                    "formatter": "default",
-                    "class": "logging.StreamHandler",
-                    "stream": "ext://sys.stderr",
-                },
-                "access": {
-                    "formatter": "access",
-                    "class": "logging.StreamHandler",
-                    "stream": "ext://sys.stdout",
-                },
-            },
-            "loggers": {
-                "uvicorn": {"handlers": ["default"], "level": "INFO", "propagate": False},
-                "uvicorn.error": {"level": "INFO"},
-                "uvicorn.access": {"handlers": ["access"], "level": "INFO", "propagate": False},
-                "bff": {"handlers": ["default"], "level": "INFO", "propagate": False},
-            },
-        },
-    }
-
-    # SSL 설정이 있으면 추가
-    if ssl_config:
-        uvicorn_config.update(ssl_config)
-        logger.info("🔐 HTTPS enabled for BFF on port %s", uvicorn_config['port'])
-    else:
-        logger.info("🔓 HTTP enabled for BFF on port %s", uvicorn_config['port'])
-
-    uvicorn.run("bff.main:app", **uvicorn_config)
+    # Service Factory를 사용한 간소화된 서비스 실행
+    run_service(app, BFF_SERVICE_INFO, "bff.main:app")

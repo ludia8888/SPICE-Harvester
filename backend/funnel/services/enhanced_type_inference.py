@@ -5,6 +5,7 @@ Enterprise-grade type inference with SOLID principles and parallel processing
 
 from typing import Any, List, Optional, Dict
 import logging
+import asyncio
 
 from shared.models.type_inference import ColumnAnalysisResult, TypeInferenceResult
 from .type_checkers.parallel_type_manager import ParallelTypeInferenceManager
@@ -175,18 +176,24 @@ class FunnelTypeInferenceService:
     """
     
     def __init__(self):
-        import asyncio
         self._enhanced_service = EnhancedFunnelTypeInferenceService()
         self._loop = None
     
     def _get_event_loop(self):
         """Get or create event loop for async operations"""
         try:
-            return asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
+            # If we're already in an async context, we can't use run_until_complete
+            # This is a limitation of the sync wrapper
+            return None
         except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            return loop
+            # No running loop, we can create one
+            try:
+                return asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                return loop
     
     @classmethod
     def infer_column_type(
@@ -201,6 +208,13 @@ class FunnelTypeInferenceService:
         """
         service = cls()
         loop = service._get_event_loop()
+        
+        if loop is None:
+            # Already in async context, can't use sync wrapper
+            raise RuntimeError(
+                "Cannot use synchronous wrapper from within async context. "
+                "Use EnhancedFunnelTypeInferenceService directly with await."
+            )
         
         return loop.run_until_complete(
             service._enhanced_service.infer_column_type(
@@ -224,6 +238,13 @@ class FunnelTypeInferenceService:
         """
         service = cls()
         loop = service._get_event_loop()
+        
+        if loop is None:
+            # Already in async context, can't use sync wrapper
+            raise RuntimeError(
+                "Cannot use synchronous wrapper from within async context. "
+                "Use EnhancedFunnelTypeInferenceService directly with await."
+            )
         
         return loop.run_until_complete(
             service._enhanced_service.analyze_dataset(

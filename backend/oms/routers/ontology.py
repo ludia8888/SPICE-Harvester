@@ -8,7 +8,14 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from oms.dependencies import get_jsonld_converter, get_label_mapper, get_terminus_service
+from oms.dependencies import (
+    get_jsonld_converter, 
+    get_label_mapper, 
+    get_terminus_service,
+    ValidatedDatabaseName,
+    ValidatedClassId,
+    ensure_database_exists
+)
 
 # OMS 서비스 import
 from oms.services.async_terminus import AsyncTerminusService
@@ -56,8 +63,8 @@ router = APIRouter(prefix="/ontology/{db_name}", tags=["Ontology Management"])
 
 @router.post("/create", response_model=OntologyResponse)
 async def create_ontology(
-    db_name: str,
-    request: OntologyCreateRequest,
+    db_name: str = Depends(ensure_database_exists),
+    request: OntologyCreateRequest = ...,
     terminus: AsyncTerminusService = Depends(get_terminus_service),
     converter: JSONToJSONLDConverter = Depends(get_jsonld_converter),
     label_mapper=Depends(get_label_mapper),
@@ -69,14 +76,8 @@ async def create_ontology(
     logger.warning(f"🔥🔥🔥 OMS create_ontology called! db_name={db_name}, request={request}")
     
     try:
-        # 입력 데이터 보안 검증
-        db_name = validate_db_name(db_name)
-
         # 요청 데이터를 dict로 변환
         ontology_data = request.model_dump()
-
-        # 데이터베이스 존재 여부 확인
-        await _ensure_database_exists(db_name, terminus)
 
         # 클래스 ID 검증
         class_id = ontology_data.get("id")
@@ -172,7 +173,7 @@ async def create_ontology(
 
 @router.get("/list")
 async def list_ontologies(
-    db_name: str,
+    db_name: str = Depends(ensure_database_exists),
     class_type: str = "sys:Class",
     limit: Optional[int] = 100,
     offset: int = 0,
@@ -181,10 +182,6 @@ async def list_ontologies(
 ):
     """내부 ID 기반 온톨로지 목록 조회"""
     try:
-        # 입력 데이터 보안 검증
-        db_name = validate_db_name(db_name)
-        # class_type = sanitize_input(class_type)  # Temporarily disabled
-
         # 페이징 파라미터 검증
         if limit is not None and (limit < 1 or limit > 1000):
             raise HTTPException(
@@ -194,9 +191,6 @@ async def list_ontologies(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="offset은 0 이상이어야 합니다"
             )
-
-        # 데이터베이스 존재 여부 확인
-        await _ensure_database_exists(db_name, terminus)
 
         # TerminusDB에서 조회
         ontologies = await terminus.list_ontology_classes(db_name)
@@ -238,7 +232,7 @@ async def list_ontologies(
 
 @router.get("/analyze-network")
 async def analyze_relationship_network(
-    db_name: str,  # 이미 라우터 경로에서 추출됨
+    db_name: str = Depends(ensure_database_exists),
     terminus: AsyncTerminusService = Depends(get_terminus_service),
 ):
     """
@@ -247,12 +241,6 @@ async def analyze_relationship_network(
     전체 관계 네트워크의 건강성과 통계를 분석
     """
     try:
-        # 입력 데이터 보안 검증
-        db_name = validate_db_name(db_name)
-
-        # 데이터베이스 존재 여부 확인
-        await _ensure_database_exists(db_name, terminus)
-
         # 네트워크 분석 수행
         analysis_result = await terminus.analyze_relationship_network(db_name)
 
@@ -275,20 +263,14 @@ async def analyze_relationship_network(
 
 @router.get("/{class_id}")
 async def get_ontology(
-    db_name: str,
-    class_id: str,
+    db_name: str = Depends(ensure_database_exists),
+    class_id: str = Depends(ValidatedClassId),
     terminus: AsyncTerminusService = Depends(get_terminus_service),
     converter: JSONToJSONLDConverter = Depends(get_jsonld_converter),
     label_mapper=Depends(get_label_mapper),
 ):
     """내부 ID 기반 온톨로지 조회"""
     try:
-        # 입력 데이터 보안 검증
-        db_name = validate_db_name(db_name)
-        class_id = validate_class_id(class_id)
-
-        # 데이터베이스 존재 여부 확인
-        await _ensure_database_exists(db_name, terminus)
 
         # TerminusDB에서 조회
         ontology = await terminus.get_ontology(db_name, class_id)
@@ -348,23 +330,16 @@ async def get_ontology(
 
 @router.put("/{class_id}", response_model=OntologyResponse)
 async def update_ontology(
-    db_name: str,
-    class_id: str,
-    ontology_data: OntologyUpdateRequest,
+    db_name: str = Depends(ensure_database_exists),
+    class_id: str = Depends(ValidatedClassId),
+    ontology_data: OntologyUpdateRequest = ...,
     terminus: AsyncTerminusService = Depends(get_terminus_service),
     converter: JSONToJSONLDConverter = Depends(get_jsonld_converter),
 ):
     """내부 ID 기반 온톨로지 업데이트"""
     try:
-        # 입력 데이터 보안 검증
-        db_name = validate_db_name(db_name)
-        class_id = validate_class_id(class_id)
-
         # 요청 데이터 정화
         sanitized_data = sanitize_input(ontology_data.dict(exclude_unset=True))
-
-        # 데이터베이스 존재 여부 확인
-        await _ensure_database_exists(db_name, terminus)
 
         # 기존 데이터 조회
         existing = await terminus.get_ontology(db_name, class_id)
@@ -404,16 +379,12 @@ async def update_ontology(
 
 @router.delete("/{class_id}", response_model=BaseResponse)
 async def delete_ontology(
-    db_name: str, class_id: str, terminus: AsyncTerminusService = Depends(get_terminus_service)
+    db_name: str = Depends(ensure_database_exists),
+    class_id: str = Depends(ValidatedClassId),
+    terminus: AsyncTerminusService = Depends(get_terminus_service)
 ):
     """내부 ID 기반 온톨로지 삭제"""
     try:
-        # 입력 데이터 보안 검증
-        db_name = validate_db_name(db_name)
-        class_id = validate_class_id(class_id)
-
-        # 데이터베이스 존재 여부 확인
-        await _ensure_database_exists(db_name, terminus)
 
         # TerminusDB에서 삭제
         success = await terminus.delete_ontology(db_name, class_id)
@@ -441,15 +412,12 @@ async def delete_ontology(
 
 @router.post("/query", response_model=QueryResponse)
 async def query_ontologies(
-    db_name: str,
-    query: QueryRequestInternal,
+    db_name: str = Depends(ValidatedDatabaseName),
+    query: QueryRequestInternal = ...,
     terminus: AsyncTerminusService = Depends(get_terminus_service),
 ):
     """내부 ID 기반 온톨로지 쿼리"""
     try:
-        # 입력 데이터 보안 검증
-        db_name = validate_db_name(db_name)
-
         # 쿼리 데이터 정화
         sanitized_query = sanitize_input(query.dict())
 
