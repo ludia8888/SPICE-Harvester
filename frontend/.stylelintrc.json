@@ -1,0 +1,22 @@
+{
+  "extends": [
+    "stylelint-config-standard",
+    "stylelint-config-standard-scss"
+  ],
+  "rules": {
+    "selector-class-pattern": "^[a-z][a-zA-Z0-9]*$",
+    "custom-property-pattern": "^[a-z][a-zA-Z0-9]*$",
+    "scss/dollar-variable-pattern": "^[a-z][a-zA-Z0-9]*$",
+    "scss/at-mixin-pattern": "^[a-z][a-zA-Z0-9]*$",
+    "scss/at-function-pattern": "^[a-z][a-zA-Z0-9]*$",
+    "max-nesting-depth": 3,
+    "selector-max-compound-selectors": 3,
+    "selector-max-specificity": "0,3,0",
+    "declaration-no-important": true,
+    "at-rule-no-vendor-prefix": true,
+    "media-feature-name-no-vendor-prefix": true,
+    "property-no-vendor-prefix": true,
+    "selector-no-vendor-prefix": true,
+    "value-no-vendor-prefix": true
+  }
+}

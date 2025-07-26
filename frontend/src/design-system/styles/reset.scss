@@ -1,0 +1,121 @@
+/**
+ * SPICE HARVESTER CSS Reset
+ * Minimal reset for consistent cross-browser styling
+ */
+
+// Box sizing
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+// Remove default margins
+body,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p,
+figure,
+blockquote,
+dl,
+dd {
+  margin: 0;
+}
+
+// Remove list styles
+ul[role='list'],
+ol[role='list'] {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+// Set core root defaults
+html:focus-within {
+  scroll-behavior: smooth;
+}
+
+// Set core body defaults
+body {
+  min-height: 100vh;
+  text-rendering: optimizeSpeed;
+  line-height: 1.5;
+}
+
+// A elements that don't have a class get default styles
+a:not([class]) {
+  text-decoration-skip-ink: auto;
+}
+
+// Make images easier to work with
+img,
+picture,
+video,
+canvas,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+// Inherit fonts for inputs and buttons
+input,
+button,
+textarea,
+select {
+  font: inherit;
+}
+
+// Remove default button styles
+button {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+// Remove animations for people who prefer not to see them
+@media (prefers-reduced-motion: reduce) {
+  html:focus-within {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+// Table reset
+table {
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+
+// Form element resets
+fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+legend {
+  padding: 0;
+}
+
+// Text area resize
+textarea {
+  resize: vertical;
+}
+
+// Remove outline for mouse users
+:focus:not(:focus-visible) {
+  outline: none;
+}

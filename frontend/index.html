@@ -1,10 +1,31 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + React + TS</title>
+    <meta name="description" content="SPICE HARVESTER - Enterprise Data Platform" />
+    <meta name="theme-color" content="#0072FF" />
+    
+    <!-- Preconnect to external domains -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    
+    <title>SPICE HARVESTER</title>
+    
+    <!-- Initialize theme immediately to prevent flash -->
+    <script>
+      (function() {
+        const theme = localStorage.getItem('spice-harvester-theme') || 'light';
+        if (theme === 'dark') {
+          document.documentElement.classList.add('bp5-dark');
+          document.documentElement.dataset.theme = 'dark';
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

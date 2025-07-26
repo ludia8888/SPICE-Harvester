@@ -1,0 +1,27 @@
+/**
+ * SPICE HARVESTER SCSS Variables
+ * Application-specific values that extend Blueprint's design system
+ */
+
+@import '@blueprintjs/core/lib/scss/variables';
+
+// Application-specific custom colors (for data visualization)
+$color-key-primary: #7C3AED; // Purple for primary keys
+$color-key-title: #10B981; // Green for title keys  
+$color-key-foreign: #3B82F6; // Blue for foreign keys
+
+$color-status-experimental: #FF8000; // Orange
+$color-status-deprecated: #A7ABB6; // Gray
+$color-status-active: #00AF00; // Green
+
+// Layout dimensions (application-specific)
+$sidebar-width: 240px;
+$header-height: 56px;
+$container-padding: 24px;
+
+// Responsive breakpoints (if different from Blueprint's)
+$breakpoint-sm: 640px;
+$breakpoint-md: 768px;
+$breakpoint-lg: 1024px;
+$breakpoint-xl: 1280px;
+$breakpoint-2xl: 1536px;
