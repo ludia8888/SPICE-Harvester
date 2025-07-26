@@ -4,4 +4,5 @@
  * Examples: Sidebar, Header, Footer, PageContainer
  */
 
-export {}; // Component exports will be added here
+// Global navigation sidebar
+export * from './GlobalSidebar';

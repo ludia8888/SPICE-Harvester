@@ -6,6 +6,7 @@ interface ISidebarState {
   isOpen: boolean;
   isPinned: boolean;
   width: number;
+  isCollapsed: boolean;
 }
 
 interface IModalState {
@@ -60,6 +61,7 @@ interface IUIState {
   toggleSidebar: () => void;
   setSidebarPinned: (isPinned: boolean) => void;
   setSidebarWidth: (width: number) => void;
+  setSidebarCollapsed: (isCollapsed: boolean) => void;
   
   openModal: (component: React.ComponentType<any>, props?: any) => void;
   closeModal: (index?: number) => void;
@@ -86,6 +88,7 @@ export const useUIStore = create<IUIState>()(
           isOpen: true,
           isPinned: true,
           width: 240,
+          isCollapsed: false,
         },
         
         modals: [],
@@ -143,6 +146,12 @@ export const useUIStore = create<IUIState>()(
         setSidebarWidth: (width) => {
           set((state) => {
             state.sidebar.width = width;
+          });
+        },
+        
+        setSidebarCollapsed: (isCollapsed) => {
+          set((state) => {
+            state.sidebar.isCollapsed = isCollapsed;
           });
         },
         
@@ -230,6 +239,7 @@ export const useUIStore = create<IUIState>()(
 // Selectors
 export const selectTheme = (state: IUIState) => state.theme;
 export const selectSidebar = (state: IUIState) => state.sidebar;
+export const selectSidebarCollapsed = (state: IUIState) => state.sidebar.isCollapsed;
 export const selectModals = (state: IUIState) => state.modals;
 export const selectToasts = (state: IUIState) => state.toasts;
 export const selectBreadcrumbs = (state: IUIState) => state.breadcrumbs;

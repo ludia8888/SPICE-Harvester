@@ -1,0 +1,203 @@
+/**
+ * GlobalSidebar styles
+ * Following Palantir's minimal design with Blueprint.js integration
+ */
+
+@import '../../../design-system/styles/variables';
+
+.global-sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: $sidebar-width;
+  height: 100vh;
+  background-color: $dark-gray1;
+  border-right: 1px solid $pt-dark-divider-black;
+  display: flex;
+  flex-direction: column;
+  z-index: $pt-z-index-overlay;
+  transition: width $pt-transition-duration $pt-transition-ease;
+  
+  // Dark theme by default for sidebar
+  &.bp5-dark {
+    background-color: $dark-gray1;
+    color: $pt-dark-text-color;
+  }
+  
+  // Collapsed state - icon only
+  &--collapsed {
+    width: 50px;
+    
+    .nav-item-label,
+    .nav-section-title,
+    .global-sidebar__collapse-toggle {
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity $pt-transition-duration $pt-transition-ease;
+    }
+    
+    .nav-item {
+      justify-content: center;
+      padding: 12px;
+    }
+  }
+  
+  // Main content area
+  &__content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+    
+    // Custom scrollbar styling
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+    
+    &::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    
+    &::-webkit-scrollbar-thumb {
+      background-color: rgba($gray3, 0.3);
+      border-radius: 3px;
+      
+      &:hover {
+        background-color: rgba($gray3, 0.5);
+      }
+    }
+  }
+  
+  // Main navigation section
+  &__main {
+    flex: 1;
+    padding: $pt-grid-size * 2 0;
+  }
+  
+  // Bottom section (My Page)
+  &__bottom {
+    padding: $pt-grid-size * 2 0;
+    border-top: 1px solid $pt-dark-divider-black;
+    margin-top: auto;
+  }
+  
+  // Collapse toggle button
+  &__collapse-toggle {
+    position: absolute;
+    bottom: $pt-grid-size * 2;
+    right: $pt-grid-size;
+    opacity: 0.7;
+    transition: opacity $pt-transition-duration $pt-transition-ease;
+    
+    &:hover {
+      opacity: 1;
+    }
+  }
+}
+
+// Navigation section styles
+.nav-section {
+  &-title {
+    padding: 0 $pt-grid-size * 2;
+    margin-bottom: $pt-grid-size;
+    
+    h6 {
+      font-size: $pt-font-size-small;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: $pt-dark-text-color-muted;
+      margin: 0;
+    }
+  }
+  
+  &-items {
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+// Navigation item styles
+.nav-item {
+  display: flex;
+  align-items: center;
+  padding: 10px $pt-grid-size * 2;
+  text-decoration: none;
+  color: $pt-dark-text-color-muted;
+  transition: all $pt-transition-duration $pt-transition-ease;
+  position: relative;
+  overflow: hidden;
+  
+  // Icon styling
+  &-icon {
+    flex-shrink: 0;
+    margin-right: $pt-grid-size * 1.5;
+    color: $gray3;
+    transition: color $pt-transition-duration $pt-transition-ease;
+  }
+  
+  // Label styling
+  &-label {
+    font-size: $pt-font-size;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  
+  // Hover state
+  &:hover {
+    background-color: rgba($gray5, 0.05);
+    color: $pt-dark-text-color;
+    
+    .nav-item-icon {
+      color: $pt-dark-text-color;
+    }
+  }
+  
+  // Active state
+  &.bp5-active,
+  &.bp5-intent-primary {
+    background-color: rgba($blue3, 0.15);
+    color: $blue5;
+    
+    .nav-item-icon {
+      color: $blue5;
+    }
+    
+    // Active indicator bar
+    &::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background-color: $blue3;
+    }
+  }
+  
+  // Focus state for accessibility
+  &:focus {
+    outline: 2px solid $pt-outline-color;
+    outline-offset: -2px;
+  }
+  
+  // Keyboard navigation indicator
+  &:focus:not(:focus-visible) {
+    outline: none;
+  }
+}
+
+// Responsive adjustments
+@media (max-width: $breakpoint-md) {
+  .global-sidebar {
+    transform: translateX(-100%);
+    transition: transform $pt-transition-duration $pt-transition-ease;
+    
+    &.is-open {
+      transform: translateX(0);
+    }
+  }
+}
