@@ -6,6 +6,39 @@
 // Import our design system variables
 @import './design-system/styles/variables.scss';
 
+// Global styles to prevent white background issues
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background-color: $pt-dark-app-background-color;
+}
+
+#root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background-color: $pt-dark-app-background-color;
+}
+
+// App container styles
+.app-container {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  overflow: hidden;
+  background-color: $pt-dark-app-background-color;
+}
+
+.app-main {
+  flex: 1;
+  height: 100%;
+  overflow: hidden;
+  background-color: $pt-dark-app-background-color;
+}
+
 // Blueprint theme overrides
 .bp5-dark {
   // Custom dark theme colors that align with our design system

@@ -1,4 +1,4 @@
-import React, { forwardRef, useImperativeHandle, useRef } from 'react';
+import React, { forwardRef, useImperativeHandle, useRef, useEffect } from 'react';
 import { Button, TextArea, Classes } from '@blueprintjs/core';
 import clsx from 'clsx';
 import './ChatInput.scss';
@@ -14,6 +14,7 @@ interface ChatInputProps {
 
 export interface ChatInputRef {
   focus: () => void;
+  resetHeight: () => void;
 }
 
 export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
@@ -26,14 +27,30 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
 }, ref) => {
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
   
+  const resetTextAreaHeight = () => {
+    if (textAreaRef.current) {
+      // Reset to single row height
+      textAreaRef.current.style.height = 'auto';
+      textAreaRef.current.rows = 1;
+    }
+  };
+  
   useImperativeHandle(ref, () => ({
     focus: () => {
       textAreaRef.current?.focus();
-    }
+    },
+    resetHeight: resetTextAreaHeight
   }));
   
+  // Reset height when value becomes empty
+  useEffect(() => {
+    if (value === '') {
+      resetTextAreaHeight();
+    }
+  }, [value]);
+  
   // Auto-focus on mount and when disabled state changes
-  React.useEffect(() => {
+  useEffect(() => {
     if (!isLoading && textAreaRef.current) {
       textAreaRef.current.focus();
     }
@@ -60,6 +77,10 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
           growVertically={true}
           large={true}
           disabled={isLoading}
+          style={{
+            maxHeight: '200px',
+            overflowY: 'auto'
+          }}
         />
         <Button
           className="chat-input-button"

@@ -1,0 +1,291 @@
+/**
+ * InsightPanel component styles
+ * Left panel for managing insights in chat interface
+ */
+
+@import '../../../design-system/styles/variables';
+
+.insight-panel {
+  position: fixed;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 260px;
+  background: rgba($pt-dark-app-background-color, 0.95);
+  backdrop-filter: blur(20px);
+  border-left: 1px solid rgba($pt-dark-divider-black, 0.3);
+  transform: translateX(100%);
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  
+  &--visible {
+    transform: translateX(0);
+  }
+}
+
+.insight-panel-header {
+  padding: $pt-grid-size * 2.5 $pt-grid-size * 2;
+  border-bottom: 1px solid rgba($pt-dark-divider-black, 0.3);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  
+  .insight-panel-title {
+    margin: 0;
+    font-size: $pt-font-size-small;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: rgba(255, 255, 255, 0.7);
+    display: flex;
+    align-items: center;
+    gap: $pt-grid-size;
+    
+    .bp5-icon {
+      color: #4A90E2;
+    }
+  }
+  
+  .insight-panel-close {
+    &.bp5-button {
+      color: rgba(255, 255, 255, 0.5);
+      
+      &:hover {
+        color: rgba(255, 255, 255, 0.8);
+      }
+    }
+  }
+}
+
+.insight-panel-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: $pt-grid-size * 2;
+  
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background-color: rgba($pt-icon-color-disabled, 0.3);
+    border-radius: 3px;
+    
+    &:hover {
+      background-color: rgba($pt-icon-color-disabled, 0.5);
+    }
+  }
+}
+
+.insight-card-mini {
+  position: relative;
+  padding: $pt-grid-size * 1.5;
+  margin-bottom: $pt-grid-size;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  
+  &:hover:not(&--completed) {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+  
+  &--active {
+    background: rgba(74, 144, 226, 0.1);
+    border-color: rgba(74, 144, 226, 0.3);
+    
+    .insight-card-mini-indicator {
+      opacity: 1;
+      width: 3px;
+    }
+  }
+  
+  &--completed {
+    opacity: 0.6;
+    cursor: default;
+    
+    .insight-card-mini-content {
+      opacity: 0.7;
+    }
+  }
+  
+  &--warning .insight-card-mini-icon { color: #FF9F43; }
+  &--alert .insight-card-mini-icon { color: #EE5A6F; }
+  &--success .insight-card-mini-icon { color: #23D160; }
+  &--insight .insight-card-mini-icon { color: #4A90E2; }
+}
+
+.insight-card-mini-indicator {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  background: #4A90E2;
+  border-radius: 10px 0 0 10px;
+  transition: width 0.3s ease;
+  opacity: 0;
+}
+
+.insight-card-mini-content {
+  position: relative;
+}
+
+.insight-card-mini-header {
+  display: flex;
+  align-items: center;
+  gap: $pt-grid-size;
+  margin-bottom: $pt-grid-size / 2;
+  
+  .insight-card-mini-icon {
+    flex-shrink: 0;
+  }
+  
+  .insight-card-mini-title {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+  }
+}
+
+.insight-card-mini-subtitle {
+  margin: 0 0 $pt-grid-size;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  padding-left: $pt-grid-size * 2 + 14px;
+}
+
+.insight-card-mini-progress {
+  display: flex;
+  align-items: center;
+  gap: $pt-grid-size;
+  padding-left: $pt-grid-size * 2 + 14px;
+  
+  .bp5-progress-bar {
+    flex: 1;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    
+    .bp5-progress-meter {
+      background: linear-gradient(90deg, #4A90E2 0%, #6BA6E9 100%);
+    }
+  }
+  
+  .insight-card-mini-progress-text {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    min-width: 30px;
+  }
+}
+
+.insight-card-mini-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #23D160;
+  padding-left: $pt-grid-size * 2 + 14px;
+  
+  &--pending {
+    color: rgba(255, 255, 255, 0.5);
+  }
+}
+
+.insight-panel-footer {
+  padding: $pt-grid-size * 3 $pt-grid-size * 2;
+  border-top: 1px solid rgba($pt-dark-divider-black, 0.3);
+  text-align: center;
+  background: rgba(255, 255, 255, 0.01);
+  
+  .insight-panel-complete-message {
+    margin: 0 0 $pt-grid-size * 2.5;
+    font-size: 12px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  
+  .insight-panel-home-button {
+    &.bp5-button {
+      width: 100%;
+      height: 40px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.9);
+      font-weight: 500;
+      font-size: 13px;
+      letter-spacing: 0.02em;
+      border-radius: 8px;
+      box-shadow: none;
+      position: relative;
+      overflow: hidden;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      
+      &::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 1px;
+        background: linear-gradient(90deg, 
+          transparent 0%, 
+          rgba(255, 255, 255, 0.1) 50%, 
+          transparent 100%);
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      }
+      
+      &::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(135deg, 
+          transparent 0%, 
+          rgba(74, 144, 226, 0.1) 50%, 
+          transparent 100%);
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      }
+      
+      .bp5-icon {
+        margin-right: $pt-grid-size;
+        transition: transform 0.3s ease;
+      }
+      
+      &:hover {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: rgba(255, 255, 255, 0.15);
+        color: $white;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+        
+        &::before {
+          opacity: 1;
+        }
+        
+        &::after {
+          opacity: 1;
+        }
+        
+        .bp5-icon {
+          transform: translateX(-2px);
+        }
+      }
+      
+      &:active {
+        transform: translateY(0);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+      }
+    }
+  }
+}

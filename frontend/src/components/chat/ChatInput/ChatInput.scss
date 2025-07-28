@@ -12,6 +12,19 @@
     rgba($pt-dark-app-background-color, 0.95) 0%,
     lighten($pt-dark-app-background-color, 4%) 100%);
   backdrop-filter: blur(10px);
+  opacity: 0;
+  transform: translateY(40px);
+  animation: chat-input-slide-up 0.8s cubic-bezier(0.4, 0, 0.2, 1) 0.4s forwards;
+  flex-shrink: 0; // Prevent shrinking
+  position: relative;
+  z-index: 2;
+}
+
+@keyframes chat-input-slide-up {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .chat-input-wrapper {
@@ -33,6 +46,41 @@
   padding: $pt-grid-size * 1.5 $pt-grid-size * 2;
   resize: none;
   transition: all 0.2s ease;
+  min-height: 44px; // Minimum single line height
+  max-height: 200px; // Maximum height before scroll
+  line-height: 1.4;
+  overflow-y: auto; // Enable vertical scrolling
+  scroll-behavior: smooth; // Smooth scrolling
+  -webkit-overflow-scrolling: touch; // Better mobile scrolling
+  
+  // Custom scrollbar styling
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: transparent;
+    border-radius: 3px;
+    margin: 2px; // Add some margin to scrollbar track
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background-color: rgba($pt-icon-color-disabled, 0.2);
+    border-radius: 3px;
+    transition: background-color 0.2s ease;
+    
+    &:hover {
+      background-color: rgba($pt-icon-color-disabled, 0.4);
+    }
+    
+    &:active {
+      background-color: rgba($pt-icon-color-disabled, 0.6);
+    }
+  }
+  
+  // Firefox scrollbar styling
+  scrollbar-width: thin;
+  scrollbar-color: rgba($pt-icon-color-disabled, 0.2) transparent;
   
   &:focus {
     outline: none;
@@ -40,6 +88,22 @@
     background-color: rgba($pt-dark-app-background-color, 0.8);
     box-shadow: 0 0 0 1px rgba(#4A90E2, 0.6), 
                 0 0 20px rgba(74, 144, 226, 0.15);
+    
+    // Enhance scrollbar visibility on focus
+    &::-webkit-scrollbar-thumb {
+      background-color: rgba($pt-icon-color-disabled, 0.3);
+      
+      &:hover {
+        background-color: rgba($pt-icon-color-disabled, 0.5);
+      }
+      
+      &:active {
+        background-color: rgba($pt-icon-color-disabled, 0.7);
+      }
+    }
+    
+    // Firefox scrollbar enhancement on focus
+    scrollbar-color: rgba($pt-icon-color-disabled, 0.3) transparent;
   }
   
   &:disabled {
