@@ -11,7 +11,7 @@
   left: 0;
   width: 50px; // 항상 좁은 너비 유지
   height: 100vh;
-  background-color: $dark-gray1;
+  background-color: $pt-dark-app-background-color;
   border-right: 1px solid $pt-dark-divider-black;
   display: flex;
   flex-direction: column;
@@ -20,7 +20,7 @@
   
   // Dark theme by default for sidebar
   &.bp5-dark {
-    background-color: $dark-gray1;
+    background-color: $pt-dark-app-background-color;
     color: $pt-dark-text-color;
   }
   
@@ -229,11 +229,11 @@
   // Active state
   &.bp5-active,
   &.bp5-intent-primary {
-    background-color: rgba($blue3, 0.15);
-    color: $blue5;
+    background-color: rgba($pt-intent-primary, 0.15);
+    color: $pt-intent-primary;
     
     .nav-item-icon {
-      color: $blue5;
+      color: $pt-intent-primary;
     }
     
     // Active indicator bar
@@ -244,7 +244,7 @@
       top: 0;
       bottom: 0;
       width: 3px;
-      background-color: $blue3;
+      background-color: $pt-intent-primary;
     }
   }
   

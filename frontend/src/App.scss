@@ -101,7 +101,7 @@
 .app-container {
   min-height: 100vh;
   display: flex;
-  background-color: $dark-gray1;
+  background-color: $pt-dark-app-background-color;
   
   &.sidebar-collapsed {
     .app-main {
@@ -115,7 +115,15 @@
   margin-left: 50px; // 좁은 사이드바에 맞춤
   transition: margin-left $pt-transition-duration $pt-transition-ease;
   min-height: 100vh;
-  background-color: $dark-gray2;
+  background-color: lighten($pt-dark-app-background-color, 3%);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  
+  > * {
+    flex: 1;
+    position: relative;
+  }
 }
 
 .app-content {
@@ -172,7 +180,7 @@
 .app-d3-tooltip {
   position: absolute;
   visibility: hidden;
-  background-color: $dark-gray5;
+  background-color: $pt-dark-app-background-color;
   color: $white;
   padding: 8px 12px;
   border-radius: $pt-border-radius;
@@ -233,4 +241,15 @@
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+// Page placeholder styles
+.page-placeholder {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  font-size: 2rem;
+  color: $pt-dark-text-color-muted;
+  font-weight: 300;
 }

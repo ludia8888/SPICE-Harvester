@@ -1,0 +1,69 @@
+/**
+ * ChatInput component styles
+ * Following Palantir Foundry design patterns
+ */
+
+@import '../../../design-system/styles/variables';
+
+.chat-input-container {
+  padding: $pt-grid-size * 2;
+  border-top: 1px solid $pt-dark-divider-black;
+  background-color: lighten($pt-dark-app-background-color, 5%);
+}
+
+.chat-input-wrapper {
+  display: flex;
+  gap: $pt-grid-size;
+  align-items: flex-end;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.chat-input-textarea {
+  flex: 1;
+  background-color: lighten($pt-dark-app-background-color, 3%);
+  border: 1px solid $pt-dark-divider-black;
+  border-radius: $pt-border-radius;
+  color: $pt-dark-text-color;
+  font-size: $pt-font-size;
+  padding: $pt-grid-size * 1.5;
+  resize: none;
+  
+  &:focus {
+    outline: none;
+    border-color: $pt-intent-primary;
+    box-shadow: 0 0 0 1px $pt-intent-primary, 0 0 0 3px rgba($pt-intent-primary, 0.3);
+  }
+  
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  
+  // Blueprint overrides for dark theme
+  &.bp5-input {
+    background: $dark-gray2;
+    box-shadow: none;
+    
+    &::placeholder {
+      color: $pt-icon-color-disabled;
+    }
+  }
+}
+
+.chat-input-button {
+  // Ensure button aligns with textarea bottom
+  &.bp5-button {
+    min-height: 40px;
+    padding: 0 $pt-grid-size * 2;
+  }
+}
+
+.chat-input-hint {
+  margin-top: $pt-grid-size / 2;
+  font-size: $pt-font-size-small;
+  text-align: center;
+  max-width: 900px;
+  margin-left: auto;
+  margin-right: auto;
+}

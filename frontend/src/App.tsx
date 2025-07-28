@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import clsx from 'clsx';
 import { ThemeProvider } from './design-system/theme/ThemeProvider';
 import { GlobalSidebar } from './components/layout/GlobalSidebar';
+import { AppRouter } from './router';
 import { useUIStore } from './stores/ui.store';
 import './App.scss';
 
@@ -21,10 +22,7 @@ function App(): JSX.Element {
         })}>
           <GlobalSidebar />
           <main className="app-main">
-            <div className="app-content">
-              <h1>SPICE HARVESTER</h1>
-              <p>Palantir Foundry Style Enterprise Data Platform</p>
-            </div>
+            <AppRouter />
           </main>
         </div>
       </BrowserRouter>

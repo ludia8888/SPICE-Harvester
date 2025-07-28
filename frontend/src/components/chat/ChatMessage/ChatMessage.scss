@@ -1,0 +1,72 @@
+/**
+ * ChatMessage component styles
+ * Following Palantir Foundry design patterns
+ */
+
+@import '../../../design-system/styles/variables';
+
+.chat-message {
+  display: flex;
+  gap: $pt-grid-size * 1.5;
+  padding: $pt-grid-size * 2;
+  margin: 0 auto $pt-grid-size * 2;
+  max-width: 900px;
+  width: 100%;
+  
+  &:last-child {
+    margin-bottom: 0;
+  }
+  
+  &--user {
+    .chat-message-avatar {
+      background-color: $pt-intent-primary;
+    }
+  }
+  
+  &--assistant {
+    .chat-message-avatar {
+      background-color: $pt-icon-color-disabled;
+    }
+  }
+}
+
+.chat-message-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: $pt-border-radius;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: $white;
+}
+
+.chat-message-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-message-header {
+  display: flex;
+  align-items: center;
+  gap: $pt-grid-size;
+  margin-bottom: $pt-grid-size / 2;
+}
+
+.chat-message-role {
+  font-weight: 600;
+  font-size: $pt-font-size;
+  color: $pt-dark-text-color;
+}
+
+.chat-message-time {
+  font-size: $pt-font-size-small;
+}
+
+.chat-message-text {
+  font-size: $pt-font-size;
+  line-height: 1.5;
+  color: $pt-dark-text-color;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
