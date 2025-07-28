@@ -97,6 +97,43 @@
   }
 }
 
+// App container layout
+.app-container {
+  min-height: 100vh;
+  display: flex;
+  background-color: $dark-gray1;
+  
+  &.sidebar-collapsed {
+    .app-main {
+      margin-left: 50px;
+    }
+  }
+}
+
+.app-main {
+  flex: 1;
+  margin-left: 50px; // 좁은 사이드바에 맞춤
+  transition: margin-left $pt-transition-duration $pt-transition-ease;
+  min-height: 100vh;
+  background-color: $dark-gray2;
+}
+
+.app-content {
+  padding: $pt-grid-size * 4;
+  
+  h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+    letter-spacing: -0.02em;
+  }
+  
+  p {
+    font-size: 1.125rem;
+    color: $pt-dark-text-color-muted;
+  }
+}
+
 // App-specific layout classes
 .app-page-container {
   height: 100%;

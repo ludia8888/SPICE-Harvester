@@ -9,7 +9,7 @@
   position: fixed;
   top: 0;
   left: 0;
-  width: $sidebar-width;
+  width: 50px; // 항상 좁은 너비 유지
   height: 100vh;
   background-color: $dark-gray1;
   border-right: 1px solid $pt-dark-divider-black;
@@ -28,6 +28,24 @@
   &--collapsed {
     width: 50px;
     
+    // 내부 섹션들의 패딩 제거
+    .global-sidebar__main,
+    .global-sidebar__bottom {
+      padding: 0 !important;
+    }
+    
+    .nav-section {
+      padding: 0 !important;
+    }
+    
+    .nav-section-items {
+      padding: 0 !important;
+      width: 100% !important;
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: center !important; // 중앙 정렬
+    }
+    
     .nav-item-label,
     .nav-section-title,
     .global-sidebar__collapse-toggle {
@@ -37,8 +55,55 @@
     }
     
     .nav-item {
-      justify-content: center;
-      padding: 12px;
+      // 크기와 정렬 설정
+      width: 100% !important; // 부모의 전체 너비
+      height: 44px !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      
+      // Flexbox 중앙 정렬
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      
+      // Blueprint.js 메뉴 아이템 기본 스타일 제거
+      &.bp5-menu-item {
+        padding: 0 !important;
+        line-height: 44px !important;
+        
+        &::before,
+        &::after {
+          display: none !important;
+        }
+      }
+      
+      .nav-item-icon {
+        margin: 0 !important;
+        width: 20px !important;
+        height: 20px !important;
+      }
+    }
+    
+    // When hovered while collapsed, temporarily expand
+    &.global-sidebar--hovered {
+      width: $sidebar-width;
+      
+      .nav-item-label,
+      .nav-section-title {
+        opacity: 1;
+        visibility: visible;
+        transition: opacity $pt-transition-duration $pt-transition-ease 0.1s;
+      }
+      
+      .nav-item {
+        justify-content: flex-start;
+        padding: 10px $pt-grid-size * 2;
+        width: 100%;
+        
+        .nav-item-icon {
+          margin-right: $pt-grid-size * 1.5;
+        }
+      }
     }
   }
   
@@ -122,28 +187,33 @@
 .nav-item {
   display: flex;
   align-items: center;
-  padding: 10px $pt-grid-size * 2;
+  justify-content: center; // 중앙 정렬
+  padding: 0;
+  width: 50px;
   text-decoration: none;
   color: $pt-dark-text-color-muted;
   transition: all $pt-transition-duration $pt-transition-ease;
   position: relative;
   overflow: hidden;
+  height: 44px; // 고정 높이 설정
+  box-sizing: border-box;
   
   // Icon styling
   &-icon {
     flex-shrink: 0;
-    margin-right: $pt-grid-size * 1.5;
+    margin: 0; // 마진 제거
     color: $gray3;
     transition: color $pt-transition-duration $pt-transition-ease;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
   
-  // Label styling
+  // Label styling - 항상 숨김
   &-label {
-    font-size: $pt-font-size;
-    font-weight: 500;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    display: none !important;
   }
   
   // Hover state

@@ -1,3 +1,4 @@
+
 # SPICE HARVESTER
 
 An enterprise-grade ontology management platform with comprehensive multi-language support, complex data types, and advanced relationship management capabilities.

@@ -26,6 +26,50 @@ SPICE HARVESTER는 환경변수 기반의 **동적 CORS 설정**을 지원합니
 
 ---
 
+## 🚀 빠른 시작 (Quick Start)
+
+### 즉시 테스트하기
+
+**1단계: 환경변수 설정** (선택사항)
+```bash
+# .env 파일 생성 (기본 설정으로도 동작함)
+cp .env.example .env
+
+# 또는 직접 설정
+export ENVIRONMENT=development
+export CORS_ENABLED=true
+```
+
+**2단계: 서비스 시작**
+```bash
+# 모든 서비스 시작
+python start_services.py
+
+# 또는 개별 시작
+python -m bff.main &
+python -m oms.main &
+python -m funnel.main &
+```
+
+**3단계: CORS 설정 확인**
+```bash
+# 각 서비스의 CORS 설정 확인
+curl http://localhost:8002/debug/cors | jq  # BFF
+curl http://localhost:8000/debug/cors | jq  # OMS
+curl http://localhost:8004/debug/cors | jq  # Funnel
+```
+
+**4단계: 자동 테스트 실행**
+```bash
+# 의존성 설치 (필요시)
+pip install aiohttp colorama
+
+# CORS 테스트 실행
+python test_cors_configuration.py
+```
+
+---
+
 ## ⚙️ CORS 설정 방법
 
 ### 1. 환경변수 설정
@@ -176,6 +220,25 @@ curl -X GET \\
 ---
 
 ## 🚨 문제 해결
+
+### CORS 에러 발생 시
+
+1. **서비스 상태 확인**
+   ```bash
+   curl http://localhost:8002/health
+   curl http://localhost:8000/health
+   curl http://localhost:8004/health
+   ```
+
+2. **CORS 설정 확인**
+   ```bash
+   curl http://localhost:8002/debug/cors
+   ```
+
+3. **특정 포트 허용**
+   ```bash
+   export CORS_ORIGINS='["http://localhost:3000", "http://localhost:YOUR_PORT"]'
+   ```
 
 ### 자주 발생하는 문제
 

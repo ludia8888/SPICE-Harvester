@@ -77,6 +77,11 @@ interface IUIState {
 
 let toastId = 0;
 
+// Clear localStorage in development to ensure fresh state
+if (import.meta.env.DEV) {
+  localStorage.removeItem('spice-harvester-ui');
+}
+
 export const useUIStore = create<IUIState>()(
   devtools(
     persist(
@@ -88,7 +93,7 @@ export const useUIStore = create<IUIState>()(
           isOpen: true,
           isPinned: true,
           width: 240,
-          isCollapsed: false,
+          isCollapsed: false, // 기본값을 펼쳐진 상태로 설정
         },
         
         modals: [],
