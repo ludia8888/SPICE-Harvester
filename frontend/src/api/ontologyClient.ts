@@ -85,7 +85,35 @@ export const databaseApi = {
 export const branchApi = {
   // List all branches
   async list(dbName: string): Promise<{ branches: Branch[]; current: string }> {
-    return fetchOntologyApi<{ branches: Branch[]; current: string }>(`${BFF_BASE_URL}/${dbName}/branches`);
+    // Fixed: Use correct endpoint from OpenAPI spec
+    const response = await fetch(`${BFF_BASE_URL}/databases/${dbName}/branches`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept-Language': 'ko',
+      },
+    });
+    
+    if (!response.ok) {
+      throw new OntologyApiError(`Failed to fetch branches: ${response.statusText}`, [], response.status.toString());
+    }
+    
+    const data = await response.json();
+    
+    // Transform backend response to match frontend interface
+    const transformedBranches = data.branches.map((branch: any) => ({
+      name: branch.name,
+      is_current: branch.current || false,
+      commit_count: branch.commit_count || 0,
+      last_commit: branch.last_commit || null
+    }));
+    
+    // Find current branch name
+    const currentBranch = transformedBranches.find((b: any) => b.is_current)?.name || 'main';
+    
+    return {
+      branches: transformedBranches,
+      current: currentBranch
+    };
   },
 
   // Create new branch
@@ -169,10 +197,22 @@ export const branchApi = {
 export const objectTypeApi = {
   // List all object types in database
   async list(dbName: string): Promise<ObjectType[]> {
-    const response = await fetchOntologyApi<{total: number, ontologies: any[]}>(`${BFF_BASE_URL}/database/${dbName}/ontology/list`);
+    // Direct fetch without wrapper since BFF ontology endpoints don't use standard wrapper
+    const response = await fetch(`${BFF_BASE_URL}/database/${dbName}/ontology/list`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept-Language': 'ko',
+      },
+    });
+    
+    if (!response.ok) {
+      throw new OntologyApiError(`Failed to fetch ontologies: ${response.statusText}`, [], response.status.toString());
+    }
+    
+    const data: {total: number, ontologies: any[]} = await response.json();
     
     // Transform backend response to frontend format
-    return response.ontologies.map(ont => ({
+    return data.ontologies.map(ont => ({
       id: ont.id,
       label: ont.id,
       description: ont['@documentation']?.['@comment'] || '',
