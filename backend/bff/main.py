@@ -807,7 +807,7 @@ async def commit_changes(
 
         # Pydantic 모델에서 직접 값 접근 (자동 검증됨)
         result = await terminus.commit_changes(
-            validated_db_name, request.message, request.author, request.branch
+            validated_db_name, request.message, request.author, None  # Use current branch
         )
 
         return {"status": "success", "message": "변경사항이 커밋되었습니다", "data": result}

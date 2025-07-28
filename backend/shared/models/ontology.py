@@ -45,6 +45,11 @@ class OntologyBase(BaseModel):
     description: Optional[str] = Field(None, description="English description")
     created_at: Optional[datetime] = Field(None, description="Creation timestamp")
     updated_at: Optional[datetime] = Field(None, description="Last update timestamp")
+    parent_class: Optional[str] = Field(None, description="Parent class identifier")
+    abstract: bool = Field(default=False, description="Whether class is abstract")
+    properties: List['Property'] = Field(default_factory=list, description="Class properties")
+    relationships: List['Relationship'] = Field(default_factory=list, description="Class relationships")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
     @field_validator("id")
     @classmethod

@@ -16,7 +16,12 @@ function App(): JSX.Element {
   
   return (
     <ThemeProvider>
-      <BrowserRouter>
+      <BrowserRouter
+        future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true,
+        }}
+      >
         <div className={clsx('app-container', 'bp5-dark', {
           'sidebar-collapsed': sidebarCollapsed,
         })}>

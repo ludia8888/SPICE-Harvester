@@ -26,6 +26,10 @@ export default defineConfig({
       '@assets': path.resolve(__dirname, './src/assets'),
     },
   },
+  optimizeDeps: {
+    include: ['react', 'react-dom', 'react-router-dom', '@blueprintjs/core', '@blueprintjs/icons'],
+    force: true,
+  },
   server: {
     port: 3000,
     proxy: {

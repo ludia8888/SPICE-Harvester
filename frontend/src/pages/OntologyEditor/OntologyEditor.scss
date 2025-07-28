@@ -1,0 +1,333 @@
+/**
+ * Ontology Editor Page Styles
+ * Following Palantir Foundry design patterns with dark theme
+ */
+
+@import '../../design-system/styles/variables';
+
+.ontology-editor {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: $pt-dark-app-background-color;
+  color: $pt-dark-text-color;
+
+  // Topbar styles
+  .ontology-editor-topbar {
+    background: linear-gradient(to bottom, 
+      darken($pt-dark-app-background-color, 2%) 0%, 
+      darken($pt-dark-app-background-color, 5%) 100%);
+    border-bottom: 1px solid rgba($pt-dark-divider-black, 0.3);
+    backdrop-filter: blur(10px);
+    z-index: 20;
+    min-height: 50px;
+    padding: 0 $pt-grid-size * 2;
+
+    .ontology-brand {
+      display: flex;
+      align-items: center;
+      gap: $pt-grid-size;
+      font-weight: 600;
+      font-size: $pt-font-size-large;
+      color: $pt-intent-primary;
+      
+      .bp5-icon {
+        color: $pt-intent-primary;
+      }
+    }
+
+    .database-selector {
+      background: rgba($pt-dark-app-background-color, 0.6);
+      border: 1px solid rgba($pt-dark-divider-black, 0.4);
+      border-radius: 6px;
+      min-width: 160px;
+      justify-content: space-between;
+
+      &:hover {
+        background: rgba($pt-dark-app-background-color, 0.8);
+        border-color: rgba($pt-dark-divider-black, 0.6);
+      }
+    }
+
+    .branch-tag {
+      background: rgba($pt-intent-primary, 0.15);
+      border: 1px solid rgba($pt-intent-primary, 0.3);
+      color: $pt-intent-primary;
+      font-weight: 500;
+      
+      .bp5-icon {
+        margin-right: $pt-grid-size * 0.5;
+      }
+    }
+
+    .navbar-center {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1;
+    }
+
+    .ontology-search {
+      width: 300px;
+      
+      .bp5-input {
+        background: rgba($pt-dark-app-background-color, 0.6);
+        border: 1px solid rgba($pt-dark-divider-black, 0.4);
+        
+        &:focus {
+          border-color: $pt-intent-primary;
+          box-shadow: 0 0 0 1px $pt-intent-primary;
+        }
+      }
+    }
+  }
+
+  // Loading state
+  .ontology-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 60vh;
+    gap: $pt-grid-size * 2;
+    
+    p {
+      color: $pt-text-color-muted;
+      font-size: $pt-font-size-large;
+    }
+  }
+
+  // Empty state
+  .ontology-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 60vh;
+    gap: $pt-grid-size * 2;
+    
+    .bp5-icon {
+      color: $pt-text-color-disabled;
+    }
+    
+    h3 {
+      color: $pt-dark-text-color;
+      margin: 0;
+    }
+    
+    p {
+      color: $pt-text-color-muted;
+      margin: 0;
+      text-align: center;
+      max-width: 400px;
+    }
+  }
+
+  // Main workspace
+  .ontology-workspace {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+
+    .ontology-main-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+
+      .ontology-tabs {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+
+        .bp5-tab-list {
+          background: linear-gradient(to bottom, 
+            rgba($pt-dark-app-background-color, 0.95) 0%, 
+            lighten($pt-dark-app-background-color, 2%) 100%);
+          border-bottom: 1px solid rgba($pt-dark-divider-black, 0.3);
+          padding: 0 $pt-grid-size * 2;
+          
+          .bp5-tab {
+            display: flex;
+            align-items: center;
+            gap: $pt-grid-size * 0.5;
+            
+            .bp5-icon {
+              opacity: 0.7;
+            }
+            
+            &[aria-selected="true"] .bp5-icon {
+              opacity: 1;
+              color: $pt-intent-primary;
+            }
+          }
+        }
+
+        .bp5-tab-panel {
+          flex: 1;
+          overflow: hidden;
+          padding: 0;
+        }
+      }
+    }
+
+    // Discover panel content
+    .ontology-discover-panel {
+      padding: $pt-grid-size * 3;
+      
+      h3 {
+        color: $pt-dark-text-color;
+        margin: 0 0 $pt-grid-size;
+      }
+      
+      p {
+        color: $pt-text-color-muted;
+        margin: 0;
+      }
+    }
+
+    // Side panels
+    .ontology-side-panels {
+      display: flex;
+      
+      .side-panel {
+        width: 300px;
+        background: linear-gradient(to left, 
+          darken($pt-dark-app-background-color, 3%) 0%, 
+          darken($pt-dark-app-background-color, 1%) 100%);
+        border-left: 1px solid rgba($pt-dark-divider-black, 0.3);
+        display: flex;
+        flex-direction: column;
+
+        .panel-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: $pt-grid-size * 1.5 $pt-grid-size * 2;
+          border-bottom: 1px solid rgba($pt-dark-divider-black, 0.2);
+          background: rgba($pt-dark-app-background-color, 0.5);
+          
+          h4 {
+            margin: 0;
+            font-size: $pt-font-size;
+            font-weight: 600;
+            color: $pt-dark-text-color;
+          }
+        }
+
+        &.properties-panel {
+          border-left-color: rgba($pt-intent-success, 0.3);
+        }
+
+        &.branch-panel {
+          border-left-color: rgba($pt-intent-primary, 0.3);
+        }
+
+        &.history-panel {
+          border-left-color: rgba($pt-intent-warning, 0.3);
+        }
+      }
+    }
+  }
+
+  // Toaster styling
+  .ontology-toaster {
+    .bp5-toast {
+      background: rgba($pt-dark-app-background-color, 0.95);
+      border: 1px solid rgba($pt-dark-divider-black, 0.4);
+      backdrop-filter: blur(10px);
+      
+      &.bp5-intent-success {
+        border-color: rgba($pt-intent-success, 0.5);
+      }
+      
+      &.bp5-intent-danger {
+        border-color: rgba($pt-intent-danger, 0.5);
+      }
+      
+      &.bp5-intent-warning {
+        border-color: rgba($pt-intent-warning, 0.5);
+      }
+    }
+  }
+
+  // Responsive adjustments
+  @media (max-width: 1200px) {
+    .ontology-workspace {
+      .ontology-side-panels .side-panel {
+        width: 250px;
+      }
+    }
+  }
+
+  @media (max-width: 768px) {
+    .ontology-editor-topbar {
+      .ontology-search {
+        width: 200px;
+      }
+      
+      .database-selector {
+        min-width: 120px;
+      }
+    }
+    
+    .ontology-workspace {
+      .ontology-side-panels .side-panel {
+        width: 100%;
+        position: absolute;
+        right: 0;
+        top: 0;
+        bottom: 0;
+        z-index: 10;
+        box-shadow: -2px 0 8px rgba(0, 0, 0, 0.3);
+      }
+    }
+  }
+
+  // Animation for panel slides
+  .side-panel {
+    animation: slideInRight 0.2s ease-out;
+  }
+
+  @keyframes slideInRight {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  // Focus states
+  .bp5-button:focus,
+  .bp5-input:focus {
+    outline: none;
+    box-shadow: 0 0 0 1px $pt-intent-primary, 
+                0 0 0 3px rgba($pt-intent-primary, 0.3);
+  }
+
+  // Custom scrollbars for panels
+  .side-panel {
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+    
+    &::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    
+    &::-webkit-scrollbar-thumb {
+      background-color: rgba($pt-text-color-disabled, 0.3);
+      border-radius: 3px;
+      
+      &:hover {
+        background-color: rgba($pt-text-color-disabled, 0.5);
+      }
+    }
+    
+    scrollbar-width: thin;
+    scrollbar-color: rgba($pt-text-color-disabled, 0.3) transparent;
+  }
+}

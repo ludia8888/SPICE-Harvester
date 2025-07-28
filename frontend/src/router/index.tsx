@@ -1,13 +1,15 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Home } from '../pages/Home';
+import { OntologyEditor } from '../pages/OntologyEditor';
 
 export const AppRouter: React.FC = () => {
   return (
     <Routes>
       <Route path="/" element={<Home />} />
       <Route path="/home" element={<Home />} />
-      <Route path="/editor" element={<div className="page-placeholder">Ontology Editor Page</div>} />
+      <Route path="/editor" element={<OntologyEditor />} />
+      <Route path="/ontology-editor" element={<OntologyEditor />} />
       <Route path="/analysis" element={<div className="page-placeholder">Analysis Page</div>} />
       <Route path="/actions" element={<div className="page-placeholder">Action Center Page</div>} />
       <Route path="/my" element={<div className="page-placeholder">My Page</div>} />
