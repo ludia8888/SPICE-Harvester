@@ -57,7 +57,7 @@ export async function fetchApi<T>(url: string, options: RequestInit = {}): Promi
 
 // Database Management APIs
 export const createDatabase = (name: string, description: string) => {
-  return fetchApi<any>(`${BFF_BASE_URL}/database`, {
+  return fetchApi<any>(`${BFF_BASE_URL}/databases`, {
     method: 'POST',
     body: JSON.stringify({ name, description }),
   });

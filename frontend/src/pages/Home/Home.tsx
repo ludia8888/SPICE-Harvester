@@ -97,18 +97,11 @@ export const Home: React.FC = () => {
   
   // Reset to welcome page when home navigation is detected
   useEffect(() => {
-    console.log('Location change detected:', {
-      pathname: location.pathname,
-      key: location.key,
-      prevKey: prevLocationKeyRef.current,
-      showChat
-    });
-    
     // If we're on /home and the location key changed (navigation event) and in chat mode
     if (location.pathname === '/home' && 
         location.key !== prevLocationKeyRef.current && 
         showChat) {
-      console.log('Resetting to welcome page from navigation');  
+      // Reset to welcome page from navigation
       setShowChat(false);
       setMessages([]);
       setInsightStatuses([]);
@@ -182,18 +175,14 @@ export const Home: React.FC = () => {
   }, [messages, isUserScrolling]);
 
   const handleSend = async () => {
-    console.log('handleSend called', { inputValue: inputValue.trim(), isLoading, messages: messages.length, showChat });
-    
     if (!inputValue.trim() || isLoading) return;
 
     // Start transition if this is the first message
     if (messages.length === 0 && !showChat) {
-      console.log('Starting transition to chat mode');
       setIsTransitioning(true);
       
       // Initialize insight statuses if there are incomplete insights
       if (insights.length > 0 && insightStatuses.length === 0) {
-        console.log('Initializing insight statuses', insights.length);
         const statuses: InsightStatus[] = insights.map((ins) => ({
           id: ins.id,
           type: ins.type,
@@ -208,7 +197,6 @@ export const Home: React.FC = () => {
       }
       
       setTimeout(() => {
-        console.log('Setting showChat to true');
         setShowChat(true);
         setIsTransitioning(false);
       }, 300);
@@ -259,7 +247,6 @@ export const Home: React.FC = () => {
   };
 
   const handleNewChat = () => {
-    console.log('handleNewChat called', { showChat });
     setMessages([]);
     setInputValue('');
     // Keep chat mode if already in chat, otherwise stay in welcome

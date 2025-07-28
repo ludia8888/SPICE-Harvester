@@ -14,14 +14,13 @@ import {
   NavbarDivider, 
   NavbarGroup, 
   NavbarHeading, 
+  OverlayToaster,
   Popover, 
   Position, 
   Spinner, 
   Tab, 
   Tabs, 
   Tag,
-  Toast,
-  Toaster,
   Tooltip
 } from '@blueprintjs/core';
 import clsx from 'clsx';
@@ -38,7 +37,7 @@ import { BranchPanel } from './components/BranchPanel';
 import { HistoryPanel } from './components/HistoryPanel';
 import { TypeInferencePanel } from './components/TypeInferencePanel';
 
-const AppToaster = Toaster.create({
+const AppToaster = OverlayToaster.create({
   className: "ontology-toaster",
   position: Position.TOP_RIGHT,
 });

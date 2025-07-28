@@ -48,12 +48,13 @@ async function fetchOntologyApi<T>(url: string, options: RequestInit = {}): Prom
 export const databaseApi = {
   // List all databases
   async list(): Promise<Database[]> {
-    return fetchOntologyApi<Database[]>(`${BFF_BASE_URL}/databases`);
+    const response = await fetchOntologyApi<{databases: Database[]}>(`${BFF_BASE_URL}/databases`);
+    return response.databases;
   },
 
   // Create new database
   async create(name: string, description: string): Promise<Database> {
-    return fetchOntologyApi<Database>(`${BFF_BASE_URL}/database`, {
+    return fetchOntologyApi<Database>(`${BFF_BASE_URL}/databases`, {
       method: 'POST',
       body: JSON.stringify({ name, description }),
     });
