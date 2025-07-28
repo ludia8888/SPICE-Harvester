@@ -97,14 +97,15 @@ export const OntologyEditor: React.FC = () => {
     clearAllErrors();
     
     try {
-      // Load available databases
+      // Load available databases  
       const databases = await ontologyApi.database.list();
       setDatabases(databases);
       setAvailableDatabases(databases.map(db => db.name));
       
-      // Set default database if none selected
+      // Set default database to test_db if none selected
       if (!currentDatabase && databases.length > 0) {
-        setCurrentDatabase(databases[0].name);
+        const defaultDb = databases.find(db => db.name === 'test_db') || databases[0];
+        setCurrentDatabase(defaultDb.name);
       }
     } catch (error) {
       const message = error instanceof OntologyApiError 

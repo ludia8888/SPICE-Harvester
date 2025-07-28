@@ -139,7 +139,6 @@ export const LinkTypePanel: React.FC = () => {
                     icon={getCardinalityIcon(linkType.cardinality)}
                     intent={Intent.NONE}
                     minimal
-                    small
                   >
                     {getCardinalityLabel(linkType.cardinality)}
                   </Tag>

@@ -86,7 +86,7 @@ export const ObjectTypePanel: React.FC = () => {
               intent={property.required ? Intent.WARNING : Intent.NONE}
             />
             <span>{property.label || property.name}</span>
-            <Tag minimal small className="property-type">
+            <Tag minimal className="property-type">
               {property.type.replace('xsd:', '').replace('custom:', '')}
             </Tag>
           </div>

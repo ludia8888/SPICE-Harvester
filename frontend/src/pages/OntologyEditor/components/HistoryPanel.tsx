@@ -149,7 +149,7 @@ export const HistoryPanel: React.FC = () => {
                     {commit.id.substring(0, 7)}
                   </span>
                   {commit.branch !== currentBranch && (
-                    <Tag minimal small intent={Intent.WARNING}>
+                    <Tag minimal intent={Intent.WARNING}>
                       {commit.branch}
                     </Tag>
                   )}

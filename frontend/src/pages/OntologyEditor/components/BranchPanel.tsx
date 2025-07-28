@@ -123,7 +123,7 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ onBranchChange }) => {
                   />
                   <span className="branch-label">{branch.name}</span>
                   {branch.is_current && (
-                    <Tag intent={Intent.PRIMARY} minimal small>
+                    <Tag intent={Intent.PRIMARY} minimal>
                       Current
                     </Tag>
                   )}

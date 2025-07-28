@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Button, 
-  ButtonGroup,
   Card, 
   Classes,
   Dialog,
-  Divider,
   FormGroup,
   HTMLSelect,
   Icon, 
@@ -14,8 +12,7 @@ import {
   Tab,
   Tabs,
   Tag,
-  TextArea,
-  HTMLTable
+  TextArea
 } from '@blueprintjs/core';
 import clsx from 'clsx';
 import { useOntologyStore } from '../../../stores/ontology.store';
@@ -165,7 +162,7 @@ export const LinkTypeEditor: React.FC<LinkTypeEditorProps> = ({
 
   const renderGeneralTab = () => (
     <div className="general-tab">
-      <FormGroup label="Link Type ID" labelFor="link-id" required>
+      <FormGroup label="Link Type ID *" labelFor="link-id">
         <InputGroup
           id="link-id"
           value={formData.id}
@@ -177,7 +174,7 @@ export const LinkTypeEditor: React.FC<LinkTypeEditorProps> = ({
         />
       </FormGroup>
 
-      <FormGroup label="Display Label" labelFor="link-label" required>
+      <FormGroup label="Display Label *" labelFor="link-label">
         <InputGroup
           id="link-label"
           value={formData.label}
@@ -210,7 +207,7 @@ export const LinkTypeEditor: React.FC<LinkTypeEditorProps> = ({
           <h5>Relationship Definition</h5>
           
           <div className="relationship-form">
-            <FormGroup label="From Class" labelFor="from-class" required>
+            <FormGroup label="From Class *" labelFor="from-class">
               <HTMLSelect
                 id="from-class"
                 value={formData.from_class}
@@ -239,7 +236,7 @@ export const LinkTypeEditor: React.FC<LinkTypeEditorProps> = ({
               </span>
             </div>
 
-            <FormGroup label="To Class" labelFor="to-class" required>
+            <FormGroup label="To Class *" labelFor="to-class">
               <HTMLSelect
                 id="to-class"
                 value={formData.to_class}

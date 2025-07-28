@@ -1,5 +1,5 @@
-import { ApiResponse, fetchApi } from './spiceHarvesterClient';
-import { ObjectType, LinkType, Property, Database, Branch } from '../stores/ontology.store';
+import { ApiResponse } from './spiceHarvesterClient';
+import { ObjectType, LinkType, Database, Branch } from '../stores/ontology.store';
 
 // Base URLs for different services
 const BFF_BASE_URL = 'http://localhost:8002/api/v1';
@@ -85,7 +85,7 @@ export const databaseApi = {
 export const branchApi = {
   // List all branches
   async list(dbName: string): Promise<{ branches: Branch[]; current: string }> {
-    return fetchOntologyApi<{ branches: Branch[]; current: string }>(`${BFF_BASE_URL}/database/${dbName}/branches`);
+    return fetchOntologyApi<{ branches: Branch[]; current: string }>(`${BFF_BASE_URL}/${dbName}/branches`);
   },
 
   // Create new branch
@@ -169,7 +169,26 @@ export const branchApi = {
 export const objectTypeApi = {
   // List all object types in database
   async list(dbName: string): Promise<ObjectType[]> {
-    return fetchOntologyApi<ObjectType[]>(`${BFF_BASE_URL}/database/${dbName}/ontologies`);
+    const response = await fetchOntologyApi<{total: number, ontologies: any[]}>(`${BFF_BASE_URL}/database/${dbName}/ontology/list`);
+    
+    // Transform backend response to frontend format
+    return response.ontologies.map(ont => ({
+      id: ont.id,
+      label: ont.id,
+      description: ont['@documentation']?.['@comment'] || '',
+      properties: Object.entries(ont.properties || {}).map(([name, propDef]: [string, any]) => ({
+        name,
+        label: name,
+        type: typeof propDef === 'string' ? propDef.replace('xsd:', '') : 
+              propDef['@class']?.replace('xsd:', '') || 'string',
+        required: !propDef['@type'] || propDef['@type'] !== 'Optional'
+      })),
+      metadata: {
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        version: 1
+      }
+    }));
   },
 
   // Get specific object type
@@ -288,7 +307,7 @@ export const linkTypeApi = {
     
     ontologies.forEach(ontology => {
       if (ontology.properties) {
-        ontology.properties.forEach(prop => {
+        ontology.properties.forEach((prop: any) => {
           // Check if this property is a class reference (relationship)
           const isClassReference = !prop.type.startsWith('xsd:') && 
                                    prop.type !== 'string' && 
@@ -314,7 +333,7 @@ export const linkTypeApi = {
       
       // Also check explicit relationships array if it exists
       if (ontology.relationships) {
-        ontology.relationships.forEach(rel => {
+        ontology.relationships.forEach((rel: any) => {
           linkTypes.push({
             id: rel.predicate || rel.name,
             label: rel.label,
@@ -342,12 +361,12 @@ export const linkTypeApi = {
   },
 
   // Update link type (requires updating the ontology that contains it)
-  async update(dbName: string, linkId: string, updates: Partial<LinkType>): Promise<LinkType> {
+  async update(_dbName: string, _linkId: string, _updates: Partial<LinkType>): Promise<LinkType> {
     throw new OntologyApiError('Link updates not implemented - modify the source ontology instead', [], 'NOT_IMPLEMENTED');
   },
 
   // Delete link type (requires updating the ontology that contains it)
-  async delete(dbName: string, linkId: string): Promise<void> {
+  async delete(_dbName: string, _linkId: string): Promise<void> {
     throw new OntologyApiError('Link deletion not implemented - modify the source ontology instead', [], 'NOT_IMPLEMENTED');
   },
 };
