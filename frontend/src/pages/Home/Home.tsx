@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Button, TextArea, Classes, Icon } from '@blueprintjs/core';
 import clsx from 'clsx';
 import { ChatMessage } from '../../components/chat/ChatMessage';
-import { ChatInput } from '../../components/chat/ChatInput';
+import { ChatInput, ChatInputRef } from '../../components/chat/ChatInput';
 import { ChatSidebar } from '../../components/layout/ChatSidebar';
 import './Home.scss';
 
@@ -19,7 +19,7 @@ export const Home: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isChatSidebarCollapsed, setIsChatSidebarCollapsed] = useState(true); // Default to collapsed
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const chatInputRef = useRef<HTMLTextAreaElement>(null);
+  const chatInputRef = useRef<ChatInputRef>(null);
   
   // Mock user data - replace with actual user data from auth/context
   const userName = 'sihuyhn';
@@ -30,6 +30,13 @@ export const Home: React.FC = () => {
 
   useEffect(() => {
     scrollToBottom();
+    
+    // Auto-focus input when chat interface appears
+    if (messages.length > 0 && chatInputRef.current && typeof chatInputRef.current.focus === 'function') {
+      setTimeout(() => {
+        chatInputRef.current?.focus();
+      }, 100);
+    }
   }, [messages]);
 
   const handleSend = async () => {
@@ -45,6 +52,11 @@ export const Home: React.FC = () => {
     setMessages(prev => [...prev, userMessage]);
     setInputValue('');
     setIsLoading(true);
+    
+    // Keep focus on input
+    setTimeout(() => {
+      chatInputRef.current?.focus();
+    }, 50);
 
     // Simulate AI response
     setTimeout(() => {
@@ -56,6 +68,11 @@ export const Home: React.FC = () => {
       };
       setMessages(prev => [...prev, assistantMessage]);
       setIsLoading(false);
+      
+      // Auto-focus input after response
+      setTimeout(() => {
+        chatInputRef.current?.focus();
+      }, 100);
     }, 1000);
   };
 
@@ -178,9 +195,9 @@ export const Home: React.FC = () => {
               ))}
               {isLoading && (
                 <div className="chat-loading">
-                  <Icon icon="dot" className="chat-loading-dot" />
-                  <Icon icon="dot" className="chat-loading-dot" />
-                  <Icon icon="dot" className="chat-loading-dot" />
+                  <div className="chat-loading-dot" />
+                  <div className="chat-loading-dot" />
+                  <div className="chat-loading-dot" />
                 </div>
               )}
               <div ref={messagesEndRef} />
@@ -196,6 +213,7 @@ export const Home: React.FC = () => {
             onSend={handleSend}
             onKeyPress={handleKeyPress}
             isLoading={isLoading}
+            placeholder=""
           />
         )}
       </div>

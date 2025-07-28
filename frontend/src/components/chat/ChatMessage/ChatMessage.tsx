@@ -31,16 +31,18 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
         />
       </div>
       <div className="chat-message-content">
+        <div className="chat-message-bubble">
+          <div className="chat-message-text">
+            {message.content}
+          </div>
+        </div>
         <div className="chat-message-header">
           <span className="chat-message-role">
             {message.role === 'user' ? '나' : 'MENTAT'}
           </span>
-          <span className={clsx('chat-message-time', Classes.TEXT_MUTED)}>
+          <span className="chat-message-time">
             {formatTime(message.timestamp)}
           </span>
-        </div>
-        <div className="chat-message-text">
-          {message.content}
         </div>
       </div>
     </div>

@@ -6,33 +6,40 @@
 @import '../../../design-system/styles/variables';
 
 .chat-input-container {
-  padding: $pt-grid-size * 2;
-  border-top: 1px solid $pt-dark-divider-black;
-  background-color: lighten($pt-dark-app-background-color, 5%);
+  padding: $pt-grid-size * 3 $pt-grid-size * 2;
+  border-top: 1px solid rgba($pt-dark-divider-black, 0.5);
+  background: linear-gradient(to bottom,
+    rgba($pt-dark-app-background-color, 0.95) 0%,
+    lighten($pt-dark-app-background-color, 4%) 100%);
+  backdrop-filter: blur(10px);
 }
 
 .chat-input-wrapper {
   display: flex;
-  gap: $pt-grid-size;
+  gap: $pt-grid-size * 1.5;
   align-items: flex-end;
-  max-width: 900px;
+  max-width: 1000px;
   margin: 0 auto;
+  position: relative;
 }
 
 .chat-input-textarea {
   flex: 1;
-  background-color: lighten($pt-dark-app-background-color, 3%);
-  border: 1px solid $pt-dark-divider-black;
-  border-radius: $pt-border-radius;
+  background-color: rgba($pt-dark-app-background-color, 0.6);
+  border: 1px solid rgba($pt-dark-divider-black, 0.4);
+  border-radius: 12px;
   color: $pt-dark-text-color;
   font-size: $pt-font-size;
-  padding: $pt-grid-size * 1.5;
+  padding: $pt-grid-size * 1.5 $pt-grid-size * 2;
   resize: none;
+  transition: all 0.2s ease;
   
   &:focus {
     outline: none;
-    border-color: $pt-intent-primary;
-    box-shadow: 0 0 0 1px $pt-intent-primary, 0 0 0 3px rgba($pt-intent-primary, 0.3);
+    border-color: rgba(#4A90E2, 0.6);
+    background-color: rgba($pt-dark-app-background-color, 0.8);
+    box-shadow: 0 0 0 1px rgba(#4A90E2, 0.6), 
+                0 0 20px rgba(74, 144, 226, 0.15);
   }
   
   &:disabled {
@@ -52,18 +59,41 @@
 }
 
 .chat-input-button {
-  // Ensure button aligns with textarea bottom
   &.bp5-button {
-    min-height: 40px;
-    padding: 0 $pt-grid-size * 2;
+    min-height: 44px;
+    padding: 0 $pt-grid-size * 2.5;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #4A90E2 0%, #357ABD 100%);
+    border: none;
+    font-weight: 500;
+    box-shadow: 0 2px 8px rgba(74, 144, 226, 0.3);
+    transition: all 0.2s ease;
+    
+    &:hover:not(:disabled) {
+      background: linear-gradient(135deg, #5A9FE8 0%, #4088C8 100%);
+      box-shadow: 0 4px 12px rgba(74, 144, 226, 0.4);
+      transform: translateY(-1px);
+    }
+    
+    &:active:not(:disabled) {
+      transform: translateY(0);
+      box-shadow: 0 2px 6px rgba(74, 144, 226, 0.3);
+    }
+    
+    &:disabled {
+      background: $pt-dark-divider-black;
+      box-shadow: none;
+    }
   }
 }
 
 .chat-input-hint {
-  margin-top: $pt-grid-size / 2;
+  margin-top: $pt-grid-size;
   font-size: $pt-font-size-small;
   text-align: center;
-  max-width: 900px;
+  max-width: 1000px;
   margin-left: auto;
   margin-right: auto;
+  opacity: 0.6;
+  letter-spacing: 0.02em;
 }
