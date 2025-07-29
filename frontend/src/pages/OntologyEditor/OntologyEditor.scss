@@ -1,8 +1,9 @@
 /**
- * Ontology Editor Page Styles
- * Following Palantir Foundry design patterns with dark theme
+ * Ontology Canvas Editor Styles
+ * Canvas-based UI inspired by Palantir Foundry
  */
 
+@import '@blueprintjs/core/lib/scss/variables';
 @import '../../design-system/styles/variables';
 
 .ontology-editor {
@@ -19,7 +20,7 @@
       darken($pt-dark-app-background-color, 5%) 100%);
     border-bottom: 1px solid rgba($pt-dark-divider-black, 0.3);
     backdrop-filter: blur(10px);
-    z-index: 20;
+    z-index: 30;
     min-height: 50px;
     padding: 0 $pt-grid-size * 2;
 
@@ -59,27 +60,6 @@
         margin-right: $pt-grid-size * 0.5;
       }
     }
-
-    .navbar-center {
-      position: absolute;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 1;
-    }
-
-    .ontology-search {
-      width: 300px;
-      
-      .bp5-input {
-        background: rgba($pt-dark-app-background-color, 0.6);
-        border: 1px solid rgba($pt-dark-divider-black, 0.4);
-        
-        &:focus {
-          border-color: $pt-intent-primary;
-          box-shadow: 0 0 0 1px $pt-intent-primary;
-        }
-      }
-    }
   }
 
   // Loading state
@@ -88,7 +68,7 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    height: 60vh;
+    height: 100%;
     gap: $pt-grid-size * 2;
     
     p {
@@ -97,29 +77,52 @@
     }
   }
 
-  // Empty state
-  .ontology-empty-state {
+  // Error state
+  .ontology-error-state {
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    height: 60vh;
-    gap: $pt-grid-size * 2;
-    
-    .bp5-icon {
-      color: $pt-text-color-disabled;
-    }
-    
-    h3 {
-      color: $pt-dark-text-color;
-      margin: 0;
-    }
-    
-    p {
-      color: $pt-text-color-muted;
-      margin: 0;
+    height: 100%;
+    padding: $pt-grid-size * 4;
+
+    .error-card {
+      max-width: 500px;
       text-align: center;
-      max-width: 400px;
+      padding: $pt-grid-size * 4;
+      background: rgba($pt-dark-app-background-color, 0.95);
+      border: 1px solid $pt-dark-divider-black;
+
+      .#{$ns}-icon {
+        margin-bottom: $pt-grid-size * 2;
+        color: $pt-intent-danger;
+      }
+
+      h2 {
+        margin: $pt-grid-size * 2 0;
+        color: $pt-dark-heading-color;
+        font-size: 24px;
+      }
+
+      p {
+        margin-bottom: $pt-grid-size * 2;
+        color: $pt-dark-text-color-muted;
+        
+        &.error-details {
+          margin-top: $pt-grid-size;
+          
+          code {
+            background: rgba($black, 0.3);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+            color: $pt-intent-warning;
+          }
+        }
+      }
+
+      .#{$ns}-button {
+        margin-top: $pt-grid-size * 2;
+      }
     }
   }
 
@@ -127,104 +130,158 @@
   .ontology-workspace {
     flex: 1;
     display: flex;
+    position: relative;
     overflow: hidden;
 
-    .ontology-main-content {
+    // Canvas container
+    .ontology-canvas-container {
       flex: 1;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-
-      .ontology-tabs {
+      position: relative;
+      background: $pt-dark-app-background-color;
+      
+      .ontology-canvas {
+        width: 100%;
         height: 100%;
-        display: flex;
-        flex-direction: column;
-
-        .bp5-tab-list {
-          background: linear-gradient(to bottom, 
-            rgba($pt-dark-app-background-color, 0.95) 0%, 
-            lighten($pt-dark-app-background-color, 2%) 100%);
-          border-bottom: 1px solid rgba($pt-dark-divider-black, 0.3);
-          padding: 0 $pt-grid-size * 2;
+        
+        // Empty state
+        .ontology-canvas-empty {
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
           
-          .bp5-tab {
-            display: flex;
-            align-items: center;
-            gap: $pt-grid-size * 0.5;
+          .empty-state-card {
+            text-align: center;
+            padding: $pt-grid-size * 5;
+            max-width: 500px;
+            background: rgba(darken($pt-dark-app-background-color, 3%), 0.9);
+            border: 1px solid rgba($pt-dark-divider-black, 0.3);
+            border-radius: 8px;
             
-            .bp5-icon {
-              opacity: 0.7;
+            h2 {
+              margin-bottom: $pt-grid-size * 2;
+              color: $pt-dark-text-color;
+              font-size: $pt-font-size * 1.5;
             }
             
-            &[aria-selected="true"] .bp5-icon {
-              opacity: 1;
-              color: $pt-intent-primary;
+            p {
+              margin-bottom: $pt-grid-size * 3;
+              color: $pt-text-color-muted;
+              font-size: $pt-font-size-large;
+            }
+            
+            .bp5-button {
+              font-size: $pt-font-size-large;
+              padding: $pt-grid-size * 1.5 $pt-grid-size * 3;
             }
           }
         }
-
-        .bp5-tab-panel {
-          flex: 1;
-          overflow: hidden;
-          padding: 0;
+        
+        // ReactFlow customizations
+        .react-flow__renderer {
+          background: $pt-dark-app-background-color;
+          background-image: 
+            radial-gradient(circle, rgba($pt-dark-divider-black, 0.2) 1px, transparent 1px);
+          background-size: 20px 20px;
         }
-      }
-    }
-
-    // Discover panel content
-    .ontology-discover-panel {
-      padding: $pt-grid-size * 3;
-      
-      h3 {
-        color: $pt-dark-text-color;
-        margin: 0 0 $pt-grid-size;
-      }
-      
-      p {
-        color: $pt-text-color-muted;
-        margin: 0;
+        
+        .react-flow__controls {
+          background: rgba(darken($pt-dark-app-background-color, 3%), 0.95);
+          border: 1px solid rgba($pt-dark-divider-black, 0.4);
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+          border-radius: 6px;
+          
+          button {
+            background: transparent;
+            border-color: rgba($pt-dark-divider-black, 0.3);
+            color: $pt-text-color-muted;
+            
+            &:hover {
+              background: rgba($pt-intent-primary, 0.15);
+              color: $pt-intent-primary;
+              border-color: rgba($pt-intent-primary, 0.3);
+            }
+            
+            &:active {
+              background: rgba($pt-intent-primary, 0.25);
+            }
+          }
+        }
+        
+        // Context menu
+        .canvas-context-menu {
+          position: fixed;
+          z-index: 1000;
+          
+          .bp5-menu {
+            background: rgba(darken($pt-dark-app-background-color, 5%), 0.98);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba($pt-dark-divider-black, 0.4);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            border-radius: 6px;
+          }
+        }
       }
     }
 
     // Side panels
-    .ontology-side-panels {
+    .side-panel {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 350px;
+      height: 100%;
+      background: linear-gradient(to left, 
+        darken($pt-dark-app-background-color, 4%) 0%, 
+        darken($pt-dark-app-background-color, 2%) 100%);
+      border-left: 1px solid rgba($pt-dark-divider-black, 0.4);
       display: flex;
-      
-      .side-panel {
-        width: 300px;
-        background: linear-gradient(to left, 
-          darken($pt-dark-app-background-color, 3%) 0%, 
-          darken($pt-dark-app-background-color, 1%) 100%);
-        border-left: 1px solid rgba($pt-dark-divider-black, 0.3);
+      flex-direction: column;
+      z-index: 25;
+      box-shadow: -4px 0 12px rgba(0, 0, 0, 0.3);
+      animation: slideInRight 0.2s ease-out;
+
+      .panel-header {
         display: flex;
-        flex-direction: column;
+        align-items: center;
+        justify-content: space-between;
+        padding: $pt-grid-size * 1.5 $pt-grid-size * 2;
+        border-bottom: 1px solid rgba($pt-dark-divider-black, 0.3);
+        background: rgba($pt-dark-app-background-color, 0.5);
+        backdrop-filter: blur(10px);
+        
+        h4 {
+          margin: 0;
+          font-size: $pt-font-size;
+          font-weight: 600;
+          color: $pt-dark-text-color;
+        }
+      }
 
+      > div:not(.panel-header) {
+        flex: 1;
+        overflow: auto;
+      }
+
+      &.branch-panel {
+        border-left-color: rgba($pt-intent-primary, 0.3);
+        
         .panel-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: $pt-grid-size * 1.5 $pt-grid-size * 2;
-          border-bottom: 1px solid rgba($pt-dark-divider-black, 0.2);
-          background: rgba($pt-dark-app-background-color, 0.5);
-          
-          h4 {
-            margin: 0;
-            font-size: $pt-font-size;
-            font-weight: 600;
-            color: $pt-dark-text-color;
-          }
+          border-bottom-color: rgba($pt-intent-primary, 0.2);
         }
+      }
 
-        &.properties-panel {
-          border-left-color: rgba($pt-intent-success, 0.3);
+      &.history-panel {
+        border-left-color: rgba($pt-intent-warning, 0.3);
+        
+        .panel-header {
+          border-bottom-color: rgba($pt-intent-warning, 0.2);
         }
-
-        &.branch-panel {
-          border-left-color: rgba($pt-intent-primary, 0.3);
-        }
-
-        &.history-panel {
-          border-left-color: rgba($pt-intent-warning, 0.3);
+        
+        // Stack panels when both are open
+        & ~ .branch-panel {
+          right: 350px;
         }
       }
     }
@@ -233,7 +290,7 @@
   // Toaster styling
   .ontology-toaster {
     .bp5-toast {
-      background: rgba($pt-dark-app-background-color, 0.95);
+      background: rgba(darken($pt-dark-app-background-color, 5%), 0.95);
       border: 1px solid rgba($pt-dark-divider-black, 0.4);
       backdrop-filter: blur(10px);
       
@@ -254,41 +311,31 @@
   // Responsive adjustments
   @media (max-width: 1200px) {
     .ontology-workspace {
-      .ontology-side-panels .side-panel {
-        width: 250px;
+      .side-panel {
+        width: 300px;
       }
     }
   }
 
   @media (max-width: 768px) {
     .ontology-editor-topbar {
-      .ontology-search {
-        width: 200px;
-      }
-      
       .database-selector {
         min-width: 120px;
       }
     }
     
     .ontology-workspace {
-      .ontology-side-panels .side-panel {
+      .side-panel {
         width: 100%;
-        position: absolute;
-        right: 0;
-        top: 0;
-        bottom: 0;
-        z-index: 10;
-        box-shadow: -2px 0 8px rgba(0, 0, 0, 0.3);
+        
+        &.history-panel ~ .branch-panel {
+          display: none;
+        }
       }
     }
   }
 
   // Animation for panel slides
-  .side-panel {
-    animation: slideInRight 0.2s ease-out;
-  }
-
   @keyframes slideInRight {
     from {
       transform: translateX(100%);
@@ -308,7 +355,7 @@
                 0 0 0 3px rgba($pt-intent-primary, 0.3);
   }
 
-  // Custom scrollbars for panels
+  // Custom scrollbars
   .side-panel {
     &::-webkit-scrollbar {
       width: 6px;
@@ -329,5 +376,17 @@
     
     scrollbar-width: thin;
     scrollbar-color: rgba($pt-text-color-disabled, 0.3) transparent;
+  }
+
+  // Dark theme enhancements
+  .bp5-dark & {
+    .react-flow__edge-path {
+      stroke: rgba($pt-text-color-disabled, 0.6);
+    }
+    
+    .react-flow__handle {
+      background: $pt-intent-primary;
+      border-color: darken($pt-dark-app-background-color, 5%);
+    }
   }
 }

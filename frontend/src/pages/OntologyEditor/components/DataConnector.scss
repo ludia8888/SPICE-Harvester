@@ -1,0 +1,101 @@
+@use '@blueprintjs/core/lib/scss/variables' as *;
+
+.data-connector-dialog {
+  .#{$ns}-dialog-body {
+    padding: 20px;
+  }
+  
+  .processing-view {
+    text-align: center;
+    padding: 40px 20px;
+    
+    .processing-icon {
+      margin-bottom: 20px;
+    }
+    
+    h3 {
+      margin: 20px 0;
+      color: $light-gray5;
+      font-weight: 400;
+    }
+    
+    .#{$ns}-progress-bar {
+      max-width: 400px;
+      margin: 0 auto;
+    }
+  }
+  
+  .data-source-tabs {
+    margin-top: 20px;
+    
+    .#{$ns}-tab-panel {
+      padding: 20px 0;
+    }
+  }
+  
+  .csv-panel,
+  .sheets-panel {
+    .#{$ns}-form-group {
+      margin-bottom: 20px;
+    }
+    
+    .#{$ns}-button {
+      margin-top: 20px;
+    }
+  }
+  
+  .file-preview {
+    margin: 15px 0;
+    padding: 15px;
+    background: rgba($dark-gray2, 0.5);
+    
+    .file-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+      
+      .#{$ns}-icon {
+        color: $blue4;
+      }
+      
+      p {
+        margin: 0;
+      }
+      
+      .file-name {
+        font-weight: 500;
+        color: $light-gray5;
+      }
+      
+      .file-size {
+        font-size: 12px;
+        color: $gray3;
+      }
+    }
+  }
+  
+  .#{$ns}-callout {
+    margin: 15px 0;
+    
+    &.#{$ns}-intent-warning {
+      background: rgba($orange3, 0.15);
+      border-color: $orange4;
+    }
+    
+    &.#{$ns}-intent-primary {
+      background: rgba($blue3, 0.15);
+      border-color: $blue4;
+    }
+  }
+}
+
+// Dark theme adjustments
+.#{$ns}-dark {
+  .data-connector-dialog {
+    .file-preview {
+      background: rgba($dark-gray1, 0.8);
+      border: 1px solid $dark-gray4;
+    }
+  }
+}

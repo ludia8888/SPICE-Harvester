@@ -49,8 +49,25 @@ async def create_database(request: DatabaseCreateRequest, oms: OMSClient = Depen
         validated_name = validate_db_name(request.name)
         if request.description:
             sanitized_description = sanitize_input(request.description)
+        
         # OMS를 통해 데이터베이스 생성
         result = await oms.create_database(request.name, request.description)
+
+        # 자동 커밋: 데이터베이스 생성 기록
+        try:
+            commit_message = f"Create database: {request.name}"
+            if request.description:
+                commit_message += f"\n\nDescription: {request.description}"
+            
+            await oms.commit_database_change(
+                db_name=request.name,
+                message=commit_message,
+                author="system"
+            )
+            logger.info(f"Auto-committed database creation: {request.name}")
+        except Exception as commit_error:
+            # 커밋 실패해도 데이터베이스 생성은 성공으로 처리
+            logger.warning(f"Failed to auto-commit database creation for '{request.name}': {commit_error}")
 
         return ApiResponse.created(
             message=f"데이터베이스 '{request.name}'가 생성되었습니다",
@@ -71,28 +88,48 @@ async def create_database(request: DatabaseCreateRequest, oms: OMSClient = Depen
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.delete("/{db_name}")
+@router.delete("/{db_name:path}")
 async def delete_database(db_name: str, oms: OMSClient = Depends(get_oms_client)):
     """데이터베이스 삭제"""
     try:
         # 입력 데이터 보안 검증
-        db_name = validate_db_name(db_name)
+        # 슬래시가 포함된 잘못된 데이터베이스 이름도 삭제할 수 있도록 임시 허용
+        if "/" not in db_name:
+            validated_db_name = validate_db_name(db_name)
+        else:
+            logger.warning(f"Deleting database with invalid name containing slashes: {db_name}")
+            validated_db_name = db_name
 
         # 시스템 데이터베이스 보호
         protected_dbs = ["_system", "_meta"]
-        if db_name in protected_dbs:
+        if validated_db_name in protected_dbs:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"시스템 데이터베이스 '{db_name}'은(는) 삭제할 수 없습니다",
+                detail=f"시스템 데이터베이스 '{validated_db_name}'은(는) 삭제할 수 없습니다",
             )
 
         # OMS를 통해 데이터베이스 삭제
-        await oms.delete_database(db_name)
+        await oms.delete_database(validated_db_name)
+
+        # 자동 커밋: 데이터베이스 삭제 기록
+        # 참고: 데이터베이스가 삭제되었으므로 메타데이터나 로그 시스템에 기록
+        try:
+            # 다른 데이터베이스(보통 _system 또는 메인 데이터베이스)에 기록
+            await oms.commit_system_change(
+                message=f"Delete database: {validated_db_name}",
+                author="system",
+                operation="database_delete",
+                target=validated_db_name
+            )
+            logger.info(f"Auto-committed database deletion: {validated_db_name}")
+        except Exception as commit_error:
+            # 커밋 실패해도 데이터베이스 삭제는 성공으로 처리
+            logger.warning(f"Failed to auto-commit database deletion for '{validated_db_name}': {commit_error}")
 
         return {
             "status": "success",
-            "message": f"데이터베이스 '{db_name}'이(가) 삭제되었습니다",
-            "database": db_name,
+            "message": f"데이터베이스 '{validated_db_name}'이(가) 삭제되었습니다",
+            "database": validated_db_name,
         }
     except HTTPException:
         raise
@@ -280,8 +317,14 @@ async def create_branch(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="브랜치 이름이 필요합니다"
             )
 
+        # 🔥 ROOT CAUSE FIX: OMS가 기대하는 필드명으로 변환
+        oms_branch_data = {
+            "branch_name": branch_name,  # 'name' -> 'branch_name'
+            "from_branch": branch_data.get("from_branch", "main")
+        }
+
         # OMS를 통해 브랜치 생성
-        result = await oms.create_branch(db_name, branch_data)
+        result = await oms.create_branch(db_name, oms_branch_data)
 
         return {"status": "success", "name": branch_name, "data": result}
     except HTTPException:

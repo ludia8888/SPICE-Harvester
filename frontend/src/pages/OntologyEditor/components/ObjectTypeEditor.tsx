@@ -5,7 +5,6 @@ import {
   Card, 
   Classes,
   Dialog,
-  Divider,
   FormGroup,
   HTMLSelect,
   Icon, 
@@ -22,6 +21,7 @@ import clsx from 'clsx';
 import { useOntologyStore } from '../../../stores/ontology.store';
 import { ontologyApi, OntologyApiError } from '../../../api/ontologyClient';
 import { ObjectType, Property } from '../../../stores/ontology.store';
+import { extractDatabaseName } from '../../../utils/database';
 
 // Data types available in the system (from documentation)
 const DATA_TYPES = [
@@ -108,6 +108,8 @@ export const ObjectTypeEditor: React.FC<ObjectTypeEditorProps> = ({
     clearError('object-type-editor');
   }, [objectType, isOpen]);
 
+
+
   const isCreateMode = !objectType;
 
   const handleSave = async () => {
@@ -144,11 +146,17 @@ export const ObjectTypeEditor: React.FC<ObjectTypeEditorProps> = ({
         properties: formData.properties
       };
 
+      const dbName = extractDatabaseName(currentDatabase);
+      if (!dbName) {
+        setError('save', 'No database selected');
+        return;
+      }
+
       if (isCreateMode) {
-        const created = await ontologyApi.objectType.create(currentDatabase, objectTypeData);
+        const created = await ontologyApi.objectType.create(dbName, objectTypeData);
         addObjectType(created);
       } else {
-        const updated = await ontologyApi.objectType.update(currentDatabase, formData.id, objectTypeData);
+        const updated = await ontologyApi.objectType.update(dbName, formData.id, objectTypeData);
         updateObjectType(formData.id, updated);
       }
 
@@ -222,7 +230,7 @@ export const ObjectTypeEditor: React.FC<ObjectTypeEditorProps> = ({
 
   const renderGeneralTab = () => (
     <div className="general-tab">
-      <FormGroup label="Object Type ID" labelFor="obj-id" required>
+      <FormGroup label="Object Type ID" labelFor="obj-id">
         <InputGroup
           id="obj-id"
           value={formData.id}
@@ -234,7 +242,7 @@ export const ObjectTypeEditor: React.FC<ObjectTypeEditorProps> = ({
         />
       </FormGroup>
 
-      <FormGroup label="Display Label" labelFor="obj-label" required>
+      <FormGroup label="Display Label" labelFor="obj-label">
         <InputGroup
           id="obj-label"
           value={formData.label}
@@ -353,28 +361,40 @@ export const ObjectTypeEditor: React.FC<ObjectTypeEditorProps> = ({
           : 'Add Property'
         }
         className="property-editor-dialog"
+        canEscapeKeyClose={true}
+        canOutsideClickClose={true}
+        enforceFocus={false}
+        autoFocus={false}
       >
         <div className={Classes.DIALOG_BODY}>
           {editingProperty && (
             <div className="property-form">
-              <FormGroup label="Property Name" labelFor="prop-name" required>
+              <FormGroup label="Property Name" labelFor="prop-name">
                 <InputGroup
                   id="prop-name"
                   value={editingProperty.name}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => 
                     setEditingProperty({...editingProperty, name: e.target.value})
                   }
+                  onKeyDown={(e) => {
+                    // Prevent dialog from intercepting keyboard events
+                    e.stopPropagation();
+                  }}
                   placeholder="Enter property name..."
                 />
               </FormGroup>
 
-              <FormGroup label="Display Label" labelFor="prop-label" required>
+              <FormGroup label="Display Label" labelFor="prop-label">
                 <InputGroup
                   id="prop-label"
                   value={editingProperty.label}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => 
                     setEditingProperty({...editingProperty, label: e.target.value})
                   }
+                  onKeyDown={(e) => {
+                    // Prevent dialog from intercepting keyboard events
+                    e.stopPropagation();
+                  }}
                   placeholder="Enter display label..."
                 />
               </FormGroup>
@@ -412,6 +432,10 @@ export const ObjectTypeEditor: React.FC<ObjectTypeEditorProps> = ({
                   onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => 
                     setEditingProperty({...editingProperty, description: e.target.value})
                   }
+                  onKeyDown={(e) => {
+                    // Prevent dialog from intercepting keyboard events
+                    e.stopPropagation();
+                  }}
                   placeholder="Enter property description..."
                   rows={3}
                   fill
@@ -455,6 +479,10 @@ export const ObjectTypeEditor: React.FC<ObjectTypeEditorProps> = ({
                       } catch {
                         // Invalid JSON, ignore
                       }
+                    }}
+                    onKeyDown={(e) => {
+                      // Prevent dialog from intercepting keyboard events
+                      e.stopPropagation();
                     }}
                     placeholder="Enter constraints as JSON..."
                     rows={4}
@@ -536,6 +564,10 @@ export const ObjectTypeEditor: React.FC<ObjectTypeEditorProps> = ({
       }
       className="object-type-editor-dialog"
       style={{ width: '800px', maxHeight: '90vh' }}
+      canEscapeKeyClose={true}
+      canOutsideClickClose={true}
+      enforceFocus={false}
+      autoFocus={false}
     >
       <div className={Classes.DIALOG_BODY}>
         <Tabs

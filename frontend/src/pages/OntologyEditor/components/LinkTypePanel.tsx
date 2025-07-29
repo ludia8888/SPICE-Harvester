@@ -2,8 +2,7 @@ import React, { useState } from 'react';
 import { 
   Button, 
   ButtonGroup,
-  Card, 
-  Classes, 
+  Card,
   Icon, 
   InputGroup, 
   Intent, 
@@ -182,7 +181,7 @@ export const LinkTypePanel: React.FC = () => {
 
               return (
                 <div className="link-details-content">
-                  <HTMLTable small striped className="link-details-table">
+                  <HTMLTable striped className="link-details-table">
                     <tbody>
                       <tr>
                         <td><strong>ID</strong></td>
@@ -207,7 +206,6 @@ export const LinkTypePanel: React.FC = () => {
                             icon={getCardinalityIcon(linkType.cardinality)}
                             intent={Intent.PRIMARY}
                             minimal
-                            small
                           >
                             {getCardinalityLabel(linkType.cardinality)}
                           </Tag>
@@ -227,7 +225,7 @@ export const LinkTypePanel: React.FC = () => {
                             intent={property.required ? Intent.WARNING : Intent.NONE}
                           />
                           <span>{property.label || property.name}</span>
-                          <Tag minimal small>
+                          <Tag minimal>
                             {property.type.replace('xsd:', '').replace('custom:', '')}
                           </Tag>
                         </div>

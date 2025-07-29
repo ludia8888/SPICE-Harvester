@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { 
   Button, 
-  ButtonGroup,
   Card, 
   FormGroup,
   Icon, 
@@ -18,6 +17,7 @@ import {
 import clsx from 'clsx';
 import { useOntologyStore } from '../../../stores/ontology.store';
 import { ontologyApi, OntologyApiError } from '../../../api/ontologyClient';
+import { extractDatabaseName } from '../../../utils/database';
 
 interface BranchPanelProps {
   onBranchChange: (branchName: string) => void;
@@ -29,7 +29,6 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ onBranchChange }) => {
     currentBranch,
     branches,
     setBranches,
-    setLoading,
     setError
   } = useOntologyStore();
 
@@ -42,14 +41,17 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ onBranchChange }) => {
 
     setIsCreating(true);
     try {
-      const newBranch = await ontologyApi.branch.create(
-        currentDatabase,
+      const dbName = extractDatabaseName(currentDatabase);
+      if (!dbName) return;
+      
+      await ontologyApi.branch.create(
+        dbName,
         newBranchName.trim(),
         currentBranch
       );
       
       // Refresh branches list
-      const branchesData = await ontologyApi.branch.list(currentDatabase);
+      const branchesData = await ontologyApi.branch.list(dbName);
       setBranches(branchesData.branches);
       
       setIsCreateDialogOpen(false);

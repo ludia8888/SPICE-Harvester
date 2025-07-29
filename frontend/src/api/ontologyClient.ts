@@ -1,9 +1,9 @@
 import { ApiResponse } from './spiceHarvesterClient';
 import { ObjectType, LinkType, Database, Branch } from '../stores/ontology.store';
 
-// Base URLs for different services
-const BFF_BASE_URL = 'http://localhost:8002/api/v1';
-const FUNNEL_BASE_URL = 'http://localhost:8004/api/v1';
+// Base URLs for different services from environment variables
+const BFF_BASE_URL = import.meta.env.VITE_BFF_BASE_URL || 'http://localhost:8002/api/v1';
+const FUNNEL_BASE_URL = import.meta.env.VITE_FUNNEL_BASE_URL || 'http://localhost:8004/api/v1';
 
 // Custom error class for ontology operations
 export class OntologyApiError extends Error {
@@ -25,9 +25,10 @@ async function fetchOntologyApi<T>(url: string, options: RequestInit = {}): Prom
       },
     });
 
-    const responseData: ApiResponse<T> = await response.json();
+    const responseData: any = await response.json();
 
-    if (response.status >= 400 || !responseData.success) {
+    // Only throw error for actual HTTP errors (4xx, 5xx), not for successful responses
+    if (response.status >= 400) {
       throw new OntologyApiError(
         responseData.message || 'An error occurred',
         responseData.data as string[] || [],
@@ -40,6 +41,23 @@ async function fetchOntologyApi<T>(url: string, options: RequestInit = {}): Prom
     if (error instanceof OntologyApiError) {
       throw error;
     }
+    
+    // Check for various network errors
+    if (error instanceof TypeError && error.message.includes('fetch')) {
+      // Network connection failed
+      throw new OntologyApiError('Cannot connect to server', [], 'NETWORK_ERROR');
+    }
+    
+    if (error instanceof Error && (
+      error.name === 'NetworkError' || 
+      error.message.includes('Failed to fetch') ||
+      error.message.includes('Network request failed') ||
+      error.message.includes('ECONNREFUSED')
+    )) {
+      throw new OntologyApiError('Network connection failed', [], 'NETWORK_ERROR');
+    }
+    
+    // Other unknown errors
     throw new OntologyApiError('Network error occurred', [], 'NETWORK_ERROR');
   }
 }
@@ -75,7 +93,7 @@ export const databaseApi = {
 
   // Delete database
   async delete(dbName: string): Promise<void> {
-    return fetchOntologyApi<void>(`${BFF_BASE_URL}/database/${dbName}`, {
+    return fetchOntologyApi<void>(`${BFF_BASE_URL}/databases/${dbName}`, {
       method: 'DELETE',
     });
   },
@@ -85,7 +103,7 @@ export const databaseApi = {
 export const branchApi = {
   // List all branches
   async list(dbName: string): Promise<{ branches: Branch[]; current: string }> {
-    // Fixed: Use correct endpoint from OpenAPI spec
+    // Use correct BFF database router path
     const response = await fetch(`${BFF_BASE_URL}/databases/${dbName}/branches`, {
       headers: {
         'Content-Type': 'application/json',
@@ -118,13 +136,36 @@ export const branchApi = {
 
   // Create new branch
   async create(dbName: string, branchName: string, fromBranch?: string): Promise<Branch> {
-    return fetchOntologyApi<Branch>(`${BFF_BASE_URL}/database/${dbName}/branch`, {
+    // Use correct BFF database router path
+    const response = await fetch(`${BFF_BASE_URL}/databases/${dbName}/branches`, {
       method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept-Language': 'ko',
+      },
       body: JSON.stringify({ 
         name: branchName, 
         from_branch: fromBranch || 'main' 
       }),
     });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+      throw new OntologyApiError(
+        errorData.detail || `Failed to create branch: ${response.statusText}`, 
+        [], 
+        response.status.toString()
+      );
+    }
+    
+    await response.json(); // Consume response
+    
+    return {
+      name: branchName,
+      is_current: false,
+      commit_count: 0,
+      last_commit: undefined
+    };
   },
 
   // Switch to branch
@@ -152,13 +193,31 @@ export const branchApi = {
     branch: string;
   }>> {
     const params = limit ? `?limit=${limit}` : '';
-    return fetchOntologyApi<Array<{
-      id: string;
-      message: string;
-      author: string;
-      timestamp: string;
-      branch: string;
-    }>>(`${BFF_BASE_URL}/database/${dbName}/history${params}`);
+    
+    // Use direct fetch to handle the actual API response format
+    const response = await fetch(`${BFF_BASE_URL}/databases/${dbName}/versions${params}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept-Language': 'ko',
+      },
+    });
+    
+    if (!response.ok) {
+      throw new OntologyApiError(`Failed to fetch history: ${response.statusText}`, [], response.status.toString());
+    }
+    
+    const responseData = await response.json();
+    
+    // Extract versions from BFF response structure
+    const versions = responseData.versions || [];
+    
+    return versions.map((version: any) => ({
+      id: version.version_id || version.identifier,
+      message: version.message || version.description || 'No message',
+      author: version.author || 'Unknown',
+      timestamp: version.timestamp ? new Date(version.timestamp * 1000).toISOString() : new Date().toISOString(),
+      branch: version.branch || dbName
+    }));
   },
 
   // Get diff between refs
@@ -197,7 +256,7 @@ export const branchApi = {
 export const objectTypeApi = {
   // List all object types in database
   async list(dbName: string): Promise<ObjectType[]> {
-    // Direct fetch without wrapper since BFF ontology endpoints don't use standard wrapper
+    // This endpoint returns data directly without BFF wrapper
     const response = await fetch(`${BFF_BASE_URL}/database/${dbName}/ontology/list`, {
       headers: {
         'Content-Type': 'application/json',
@@ -212,23 +271,46 @@ export const objectTypeApi = {
     const data: {total: number, ontologies: any[]} = await response.json();
     
     // Transform backend response to frontend format
-    return data.ontologies.map(ont => ({
-      id: ont.id,
-      label: ont.id,
-      description: ont['@documentation']?.['@comment'] || '',
-      properties: Object.entries(ont.properties || {}).map(([name, propDef]: [string, any]) => ({
-        name,
-        label: name,
-        type: typeof propDef === 'string' ? propDef.replace('xsd:', '') : 
-              propDef['@class']?.replace('xsd:', '') || 'string',
-        required: !propDef['@type'] || propDef['@type'] !== 'Optional'
-      })),
-      metadata: {
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        version: 1
+    return data.ontologies.map(ont => {
+      // Extract properties from TerminusDB format
+      const properties: any[] = [];
+      if (ont.properties && typeof ont.properties === 'object') {
+        Object.entries(ont.properties).forEach(([name, propDef]: [string, any]) => {
+          let type = 'string';
+          let required = false;
+          
+          if (typeof propDef === 'string') {
+            // Simple property: "name": "xsd:string"
+            type = propDef.replace('xsd:', '').replace('custom:', '');
+            required = true; // Non-optional properties are required
+          } else if (propDef && typeof propDef === 'object') {
+            // Complex property: {"@class": "xsd:string", "@type": "Optional"}
+            type = (propDef['@class'] || 'xsd:string').replace('xsd:', '').replace('custom:', '');
+            required = propDef['@type'] !== 'Optional';
+          }
+          
+          properties.push({
+            name,
+            label: name.charAt(0).toUpperCase() + name.slice(1), // Capitalize first letter
+            type,
+            required,
+            constraints: required ? { primary_key: name === 'id' || name.includes('id') } : {}
+          });
+        });
       }
-    }));
+      
+      return {
+        id: ont.id,
+        label: ont.label || ont.id,
+        description: ont['@documentation']?.['@comment'] || ont.description || '',
+        properties,
+        metadata: {
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          version: 1
+        }
+      };
+    });
   },
 
   // Get specific object type
@@ -238,8 +320,13 @@ export const objectTypeApi = {
 
   // Create new object type
   async create(dbName: string, objectType: Omit<ObjectType, 'metadata'>): Promise<ObjectType> {
-    return fetchOntologyApi<ObjectType>(`${BFF_BASE_URL}/database/${dbName}/ontology`, {
+    // Use direct fetch to handle the actual API response format
+    const response = await fetch(`${BFF_BASE_URL}/database/${dbName}/ontology`, {
       method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept-Language': 'ko',
+      },
       body: JSON.stringify({
         id: objectType.id,
         label: objectType.label,
@@ -247,6 +334,30 @@ export const objectTypeApi = {
         properties: objectType.properties,
       }),
     });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+      throw new OntologyApiError(
+        errorData.detail || `Failed to create ontology: ${response.statusText}`, 
+        [], 
+        response.status.toString()
+      );
+    }
+    
+    const responseData = await response.json();
+    
+    // Transform the response to match frontend ObjectType format
+    return {
+      id: responseData.id,
+      label: responseData.label,
+      description: responseData.description || '',
+      properties: responseData.properties || objectType.properties,
+      metadata: {
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        version: 1
+      }
+    };
   },
 
   // Update object type
@@ -341,29 +452,46 @@ export const linkTypeApi = {
   // List all relationships across ontologies - Extract from properties (Palantir style)
   async list(dbName: string): Promise<LinkType[]> {
     // Get all ontologies and extract their relationships from properties
-    const response = await fetchOntologyApi<{ontologies: any[]}>(`${BFF_BASE_URL}/database/${dbName}/ontologies`);
-    const ontologies = response.ontologies || response;
+    const response = await fetch(`${BFF_BASE_URL}/database/${dbName}/ontology/list`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept-Language': 'ko',
+      },
+    });
+    
+    if (!response.ok) {
+      throw new OntologyApiError(`Failed to fetch ontologies for links: ${response.statusText}`, [], response.status.toString());
+    }
+    
+    const responseData = await response.json();
+    const ontologies = responseData.ontologies || [];
     const linkTypes: LinkType[] = [];
     
     ontologies.forEach(ontology => {
-      if (ontology.properties) {
-        ontology.properties.forEach((prop: any) => {
+      if (ontology.properties && typeof ontology.properties === 'object') {
+        // Properties is an object, not an array - use Object.entries
+        Object.entries(ontology.properties).forEach(([propName, propDef]: [string, any]) => {
+          let propType = '';
+          
+          // Extract type from property definition
+          if (typeof propDef === 'string') {
+            propType = propDef;
+          } else if (propDef && propDef['@class']) {
+            propType = propDef['@class'];
+          }
+          
           // Check if this property is a class reference (relationship)
-          const isClassReference = !prop.type.startsWith('xsd:') && 
-                                   prop.type !== 'string' && 
-                                   prop.type !== 'integer' && 
-                                   prop.type !== 'boolean' &&
-                                   prop.type !== 'email' &&
-                                   prop.type !== 'phone' &&
-                                   prop.type !== 'money';
+          const isClassReference = propType && 
+                                   !propType.startsWith('xsd:') && 
+                                   !['string', 'integer', 'boolean', 'email', 'phone', 'money'].includes(propType.replace('custom:', ''));
           
           if (isClassReference) {
             linkTypes.push({
-              id: `${ontology.id}_${prop.name}`,
-              label: prop.display_label || prop.label || prop.name,
-              description: `${ontology.label || ontology.id} ${prop.display_label || prop.name} ${prop.type}`,
+              id: `${ontology.id}_${propName}`,
+              label: propName.charAt(0).toUpperCase() + propName.slice(1),
+              description: `${ontology.label || ontology.id} ${propName} ${propType}`,
               from_class: ontology.id,
-              to_class: prop.type,
+              to_class: propType,
               cardinality: 'many_to_one' as any, // Default for object properties
               properties: []
             });
@@ -428,52 +556,52 @@ export const typeInferenceApi = {
       }>;
     };
   }> {
-    // First analyze the data to get column types
+    // Prepare data in the format expected by the BFF endpoint
     const columns = Object.keys(data[0] || {});
     const rows = data.map(item => columns.map(col => item[col]));
     
-    const analysisResponse = await fetchOntologyApi<{
-      columns: Array<{
-        column_name: string;
-        inferred_type: {
-          type: string;
-          confidence: number;
-          reason?: string;
-          metadata?: Record<string, any>;
-        };
-        sample_values: any[];
-        null_count: number;
-        unique_count: number;
-      }>;
-      analysis_metadata: Record<string, any>;
-      timestamp: string;
-    }>(`${FUNNEL_BASE_URL}/funnel/analyze`, {
+    // Call the BFF schema suggestion endpoint
+    const response = await fetch(`${BFF_BASE_URL}/database/test_db/suggest-schema-from-data`, {
       method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept-Language': 'ko',
+      },
       body: JSON.stringify({ 
         data: rows,
         columns: columns,
         include_complex_types: true
       }),
     });
-
-    // Then convert analysis to schema suggestion
-    return fetchOntologyApi<{
+    
+    if (!response.ok) {
+      throw new OntologyApiError(`Failed to suggest schema: ${response.statusText}`, [], response.status.toString());
+    }
+    
+    const responseData = await response.json();
+    
+    // Transform BFF response to expected frontend format
+    const suggestedSchema = responseData.suggested_schema;
+    
+    // Convert single schema object to object_types array format
+    const objectType = {
+      id: suggestedSchema.id,
+      label: typeof suggestedSchema.label === 'object' 
+        ? (suggestedSchema.label.ko || suggestedSchema.label.en || suggestedSchema.id)
+        : suggestedSchema.label,
+      properties: suggestedSchema.properties.map((prop: any) => ({
+        name: prop.name,
+        type: prop.type,
+        confidence: prop.metadata?.inferred_confidence || 1.0,
+        constraints: prop.constraints || {}
+      }))
+    };
+    
+    return {
       suggested_schema: {
-        object_types: Array<{
-          id: string;
-          label: string;
-          properties: Array<{
-            name: string;
-            type: string;
-            confidence: number;
-            constraints?: Record<string, any>;
-          }>;
-        }>;
-      };
-    }>(`${FUNNEL_BASE_URL}/funnel/suggest-schema`, {
-      method: 'POST',
-      body: JSON.stringify(analysisResponse),
-    });
+        object_types: [objectType]
+      }
+    };
   },
 
   // Suggest schema from Google Sheets
@@ -491,26 +619,51 @@ export const typeInferenceApi = {
       }>;
     };
   }> {
-    return fetchOntologyApi<{
-      suggested_schema: {
-        object_types: Array<{
-          id: string;
-          label: string;
-          properties: Array<{
-            name: string;
-            type: string;
-            confidence: number;
-            constraints?: Record<string, any>;
-          }>;
-        }>;
-      };
-    }>(`${FUNNEL_BASE_URL}/funnel/suggest-schema`, {
+    // Call the BFF Google Sheets endpoint
+    const response = await fetch(`${BFF_BASE_URL}/database/test_db/suggest-schema-from-google-sheets`, {
       method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept-Language': 'ko',
+      },
       body: JSON.stringify({ 
         sheet_url: sheetUrl,
-        range: range || 'A1:Z1000'
+        worksheet_name: range || 'Sheet1'
       }),
     });
+    
+    if (!response.ok) {
+      throw new OntologyApiError(`Failed to analyze Google Sheets: ${response.statusText}`, [], response.status.toString());
+    }
+    
+    const responseData = await response.json();
+    
+    // Transform BFF response to expected frontend format
+    const suggestedSchema = responseData.suggested_schema;
+    
+    if (!suggestedSchema) {
+      throw new OntologyApiError('No schema suggestion received from Google Sheets analysis', []);
+    }
+    
+    // Convert single schema object to object_types array format
+    const objectType = {
+      id: suggestedSchema.id,
+      label: typeof suggestedSchema.label === 'object' 
+        ? (suggestedSchema.label.ko || suggestedSchema.label.en || suggestedSchema.id)
+        : suggestedSchema.label,
+      properties: suggestedSchema.properties.map((prop: any) => ({
+        name: prop.name,
+        type: prop.type,
+        confidence: prop.metadata?.inferred_confidence || 1.0,
+        constraints: prop.constraints || {}
+      }))
+    };
+    
+    return {
+      suggested_schema: {
+        object_types: [objectType]
+      }
+    };
   },
 
   // Validate property type

@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { 
-  Button, 
-  ButtonGroup,
+  Button,
   Card, 
   Classes,
   Dialog,
@@ -15,15 +14,14 @@ import {
   Tabs,
   Tag,
   TextArea,
-  Tree,
-  TreeNodeInfo,
   HTMLTable,
   Switch,
   ProgressBar
 } from '@blueprintjs/core';
 import clsx from 'clsx';
 import { useOntologyStore } from '../../../stores/ontology.store';
-import { ontologyApi, typeInferenceApi, OntologyApiError } from '../../../api/ontologyClient';
+import { ontologyApi, OntologyApiError } from '../../../api/ontologyClient';
+import { extractDatabaseName } from '../../../utils/database';
 
 interface InferredProperty {
   name: string;
@@ -217,7 +215,12 @@ export const TypeInferencePanel: React.FC<TypeInferencePanelProps> = ({
         if (!inferredType) continue;
 
         try {
-          await ontologyApi.objectType.create(currentDatabase, {
+          const dbName = extractDatabaseName(currentDatabase);
+          if (!dbName) {
+            errors.push(`Invalid database path: ${currentDatabase}`);
+            continue;
+          }
+          await ontologyApi.objectType.create(dbName, {
             id: inferredType.id,
             label: inferredType.label,
             description: `Auto-generated from data analysis (${Math.round(inferredType.confidence * 100)}% confidence)`,
@@ -304,7 +307,7 @@ export const TypeInferencePanel: React.FC<TypeInferencePanelProps> = ({
 
   const renderSheetsTab = () => (
     <div className="sheets-input-tab">
-      <FormGroup label="Google Sheets URL" labelFor="sheets-url" required>
+      <FormGroup label="Google Sheets URL" labelFor="sheets-url">
         <InputGroup
           id="sheets-url"
           value={googleSheetsUrl}
@@ -411,7 +414,7 @@ export const TypeInferencePanel: React.FC<TypeInferencePanelProps> = ({
 
                 <div className="properties-preview">
                   <h6>Properties ({objectType.properties.length})</h6>
-                  <HTMLTable small striped className="properties-table">
+                  <HTMLTable striped className="properties-table">
                     <thead>
                       <tr>
                         <th>Name</th>
@@ -425,7 +428,7 @@ export const TypeInferencePanel: React.FC<TypeInferencePanelProps> = ({
                         <tr key={property.name}>
                           <td><code>{property.name}</code></td>
                           <td>
-                            <Tag minimal small>
+                            <Tag minimal>
                               {property.type.replace('xsd:', '').replace('custom:', '')}
                             </Tag>
                           </td>

@@ -18,6 +18,7 @@ import clsx from 'clsx';
 import { useOntologyStore } from '../../../stores/ontology.store';
 import { ontologyApi, OntologyApiError } from '../../../api/ontologyClient';
 import { LinkType } from '../../../stores/ontology.store';
+import { extractDatabaseName } from '../../../utils/database';
 
 // Cardinality options for relationships
 const CARDINALITY_OPTIONS = [
@@ -131,11 +132,17 @@ export const LinkTypeEditor: React.FC<LinkTypeEditorProps> = ({
         properties: formData.properties
       };
 
+      const dbName = extractDatabaseName(currentDatabase);
+      if (!dbName) {
+        setError('save', 'No database selected');
+        return;
+      }
+
       if (isCreateMode) {
-        const created = await ontologyApi.linkType.create(currentDatabase, linkTypeData);
+        const created = await ontologyApi.linkType.create(dbName, linkTypeData);
         addLinkType(created);
       } else {
-        const updated = await ontologyApi.linkType.update(currentDatabase, formData.id, linkTypeData);
+        const updated = await ontologyApi.linkType.update(dbName, formData.id, linkTypeData);
         updateLinkType(formData.id, updated);
       }
 

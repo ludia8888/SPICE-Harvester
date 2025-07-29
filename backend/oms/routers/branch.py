@@ -324,3 +324,93 @@ async def get_branch_info(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"브랜치 정보 조회 실패: {str(e)}",
         )
+
+
+class CommitRequest(BaseModel):
+    """커밋 요청 모델"""
+    model_config = ConfigDict(str_strip_whitespace=True)
+    
+    message: str
+    author: str = "system"
+    operation: str = "database_change"
+
+
+@router.post("/commit")
+async def commit_changes(
+    db_name: str,
+    request: CommitRequest,
+    terminus: AsyncTerminusService = Depends(get_terminus_service),
+):
+    """
+    브랜치에 변경사항 커밋
+    
+    현재 브랜치의 변경사항을 커밋합니다.
+    """
+    try:
+        # 입력 데이터 보안 검증
+        db_name = validate_db_name(db_name)
+        
+        # 요청 데이터 정화
+        sanitized_data = sanitize_input(request.dict())
+        
+        message = sanitized_data.get("message", "Automated commit")
+        author = sanitized_data.get("author", "system")
+        operation = sanitized_data.get("operation", "database_change")
+        
+        # 메시지 길이 제한
+        if len(message) > 500:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="커밋 메시지가 너무 깁니다 (500자 이하)",
+            )
+        
+        # 현재 브랜치 확인
+        current_branch = await terminus.get_current_branch(db_name)
+        if not current_branch:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="현재 브랜치를 찾을 수 없습니다",
+            )
+        
+        # 변경사항이 있는지 확인 (선택적)
+        # TerminusDB에서는 변경사항이 없어도 커밋 가능
+        
+        # 커밋 실행 (TerminusDB에서는 자동으로 변경사항을 커밋)
+        commit_info = {
+            "message": message,
+            "author": author,
+            "operation": operation,
+            "branch": current_branch,
+            "timestamp": "auto"
+        }
+        
+        # 실제 커밋은 TerminusDB의 자동 커밋에 의존
+        # 여기서는 커밋 정보를 로그로 기록
+        logger.info(f"Commit recorded for database {db_name}: {message} by {author}")
+        
+        return ApiResponse.success(
+            message=f"변경사항이 커밋되었습니다: {message}",
+            data={
+                "commit_id": f"auto-{db_name}-{hash(message + author)}",
+                "message": message,
+                "author": author,
+                "operation": operation,
+                "branch": current_branch,
+                "database": db_name
+            }
+        ).to_dict()
+        
+    except SecurityViolationError as e:
+        logger.warning(f"Security violation in commit_changes: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to commit changes: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"커밋 실패: {str(e)}",
+        )

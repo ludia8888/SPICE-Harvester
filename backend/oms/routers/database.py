@@ -97,13 +97,11 @@ async def create_database(
 
         logger.error(f"Failed to create database '{db_name_for_error}': {e}")
 
-        # Import the exception class for proper type checking
-        from oms.services.async_terminus import AsyncDuplicateOntologyError
-
+        # Check for duplicate database error
         if (
-            isinstance(e, AsyncDuplicateOntologyError)
-            or "already exists" in str(e).lower()
+            "already exists" in str(e).lower()
             or "이미 존재합니다" in str(e)
+            or "duplicate" in str(e).lower()
         ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT, detail="데이터베이스가 이미 존재합니다"

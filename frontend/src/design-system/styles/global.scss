@@ -3,8 +3,8 @@
  * Using Blueprint.js design system
  */
 
-@import './variables.scss';
-@import './reset.scss';
+@use './variables' as *;
+@use './reset';
 
 // Blueprint already provides comprehensive styles
 // We only need to add custom application-specific styles here

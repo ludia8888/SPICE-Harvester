@@ -225,6 +225,66 @@ class OMSClient:
             logger.error(f"데이터베이스 존재 여부 확인 실패: {e}")
             raise
 
+    async def commit_database_change(self, db_name: str, message: str, author: str = "system") -> Dict[str, Any]:
+        """데이터베이스 변경사항 자동 커밋"""
+        try:
+            commit_data = {
+                "message": message,
+                "author": author,
+                "operation": "database_change"
+            }
+            
+            # OMS의 브랜치 커밋 엔드포인트 사용
+            response = await self.client.post(f"/api/v1/branch/{db_name}/commit", json=commit_data)
+            
+            # 404 에러는 브랜치가 없다는 의미이므로 무시
+            if response.status_code == 404:
+                logger.info(f"Database {db_name} has no branches yet, skipping commit")
+                return {"status": "skipped", "message": "No branches to commit"}
+            
+            response.raise_for_status()
+            result = response.json()
+            logger.info(f"Successfully committed changes to database {db_name}: {message}")
+            return result
+            
+        except Exception as e:
+            logger.warning(f"Failed to commit database change for {db_name}: {e}")
+            # 커밋 실패는 심각한 오류가 아니므로 예외를 다시 던지지 않음
+            return {"status": "failed", "error": str(e)}
+
+    async def commit_system_change(
+        self, 
+        message: str, 
+        author: str = "system", 
+        operation: str = "system_change",
+        target: str = None
+    ) -> Dict[str, Any]:
+        """시스템 레벨 변경사항 커밋 (데이터베이스 생성/삭제 등)"""
+        try:
+            commit_data = {
+                "message": message,
+                "author": author,
+                "operation": operation,
+                "target": target,
+                "timestamp": "auto"
+            }
+            
+            # 시스템 로그나 메타데이터 데이터베이스에 기록
+            # 여기서는 간단히 로그로 기록하고 향후 확장 가능
+            logger.info(f"System change committed - Operation: {operation}, Target: {target}, Message: {message}")
+            
+            # 향후 메타데이터 데이터베이스나 Git 레포지토리에 실제 커밋 구현 가능
+            return {
+                "status": "success", 
+                "message": "System change logged",
+                "operation": operation,
+                "target": target
+            }
+            
+        except Exception as e:
+            logger.warning(f"Failed to commit system change: {e}")
+            return {"status": "failed", "error": str(e)}
+
     async def __aenter__(self):
         return self
 

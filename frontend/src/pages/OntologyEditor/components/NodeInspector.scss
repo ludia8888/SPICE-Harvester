@@ -1,0 +1,155 @@
+@use '@blueprintjs/core/lib/scss/variables' as *;
+
+.node-inspector {
+  .inspector-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    
+    .#{$ns}-icon {
+      color: $blue4;
+    }
+  }
+  
+  .inspector-content {
+    padding: 16px;
+    
+    .inspector-section {
+      margin-bottom: 20px;
+      background: rgba($dark-gray2, 0.5);
+      
+      h4 {
+        margin-bottom: 16px;
+        color: $light-gray5;
+        font-size: 16px;
+      }
+      
+      .section-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 16px;
+        
+        h4 {
+          margin: 0;
+        }
+      }
+    }
+    
+    .#{$ns}-form-group {
+      margin-bottom: 16px;
+      
+      label {
+        font-size: 12px;
+        color: $gray3;
+        font-weight: 500;
+      }
+    }
+    
+    .help-text {
+      color: $gray3;
+      font-size: 13px;
+      margin: 0;
+    }
+  }
+  
+  .properties-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  .property-card {
+    padding: 12px;
+    background: rgba($dark-gray1, 0.5);
+    border: 1px solid $dark-gray4;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    
+    &:hover {
+      background: rgba($dark-gray1, 0.8);
+      border-color: $gray4;
+    }
+    
+    .property-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      
+      .property-info {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 1;
+        
+        .#{$ns}-icon {
+          color: $gray3;
+          transition: transform 0.2s ease;
+        }
+        
+        .property-name {
+          font-weight: 500;
+          color: $light-gray5;
+        }
+        
+        .#{$ns}-tag {
+          font-size: 11px;
+          padding: 2px 6px;
+          
+          &.#{$ns}-intent-success {
+            background: rgba($green3, 0.2);
+            color: $green5;
+          }
+          
+          &.#{$ns}-intent-warning {
+            background: rgba($orange3, 0.2);
+            color: $orange5;
+          }
+        }
+      }
+    }
+    
+    .property-details {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid $dark-gray4;
+      
+      .#{$ns}-form-group {
+        margin-bottom: 12px;
+      }
+      
+      .#{$ns}-switch {
+        margin-top: 12px;
+      }
+    }
+  }
+  
+  .#{$ns}-drawer-footer {
+    padding: 16px;
+    background: rgba($dark-gray1, 0.5);
+    border-top: 1px solid $dark-gray4;
+  }
+}
+
+// Animations
+.#{$ns}-collapse-body {
+  transition: height 0.2s ease;
+}
+
+// Dark theme adjustments
+.#{$ns}-dark {
+  .node-inspector {
+    .inspector-section {
+      background: rgba($dark-gray1, 0.8);
+      border: 1px solid $dark-gray4;
+    }
+    
+    .property-card {
+      background: rgba($dark-gray2, 0.6);
+      
+      &:hover {
+        background: rgba($dark-gray2, 0.9);
+      }
+    }
+  }
+}

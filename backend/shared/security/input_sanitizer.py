@@ -395,8 +395,8 @@ class InputSanitizer:
         if not db_name or not isinstance(db_name, str):
             raise SecurityViolationError("Database name must be a non-empty string")
 
-        # 데이터베이스 이름은 영숫자, 하이픈, 언더스코어만 허용
-        if not re.match(r"^[a-zA-Z0-9_-]+$", db_name):
+        # 데이터베이스 이름은 영숫자, 한글(완성형+자음모음), 하이픈, 언더스코어만 허용
+        if not re.match(r"^[a-zA-Z0-9가-힣ㄱ-ㅎㅏ-ㅣ_-]+$", db_name):
             raise SecurityViolationError("Database name contains invalid characters")
 
         if len(db_name) > 50:

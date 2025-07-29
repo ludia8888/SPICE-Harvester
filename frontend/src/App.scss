@@ -3,8 +3,9 @@
  * Blueprint.js integration and custom overrides
  */
 
-// Import our design system variables
-@import './design-system/styles/variables.scss';
+// Import Blueprint variables and custom variables
+@import '@blueprintjs/core/lib/scss/variables';
+@import './design-system/styles/variables';
 
 // Global styles to prevent white background issues
 html, body {

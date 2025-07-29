@@ -55,8 +55,6 @@ export const OntologyGraph: React.FC = () => {
   useEffect(() => {
     // Initialize graph visualization
     // This would integrate with the existing Cytoscape.js setup
-    console.log('Initializing graph with nodes:', graphNodes.length, 'edges:', graphEdges.length);
-    
     // TODO: Implement actual graph rendering using existing graph infrastructure
     // The SPICE HARVESTER frontend already has Cytoscape and React Flow configured
   }, [objectTypes, linkTypes, layoutMode]);
@@ -149,7 +147,6 @@ export const OntologyGraph: React.FC = () => {
             onChange={(e) => setShowLabels(e.currentTarget.checked)}
             label="Labels"
             inline
-            small
           />
           
           <Switch
@@ -157,7 +154,6 @@ export const OntologyGraph: React.FC = () => {
             onChange={(e) => setShowProperties(e.currentTarget.checked)}
             label="Properties"
             inline
-            small
           />
 
           <Button

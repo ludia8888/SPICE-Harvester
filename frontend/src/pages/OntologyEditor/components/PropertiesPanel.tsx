@@ -23,7 +23,7 @@ import { Property } from '../../../stores/ontology.store';
 const DATA_TYPES = [
   { value: 'xsd:string', label: 'String', icon: 'text-highlight' },
   { value: 'xsd:integer', label: 'Integer', icon: 'numerical' },
-  { value: 'xsd:decimal', label: 'Decimal', icon: 'decimal' },
+  { value: 'xsd:decimal', label: 'Decimal', icon: 'numerical' },
   { value: 'xsd:boolean', label: 'Boolean', icon: 'tick-circle' },
   { value: 'xsd:date', label: 'Date', icon: 'calendar' },
   { value: 'xsd:dateTime', label: 'DateTime', icon: 'time' },
@@ -32,7 +32,7 @@ const DATA_TYPES = [
   { value: 'custom:email', label: 'Email', icon: 'envelope' },
   { value: 'custom:phone', label: 'Phone', icon: 'phone' },
   { value: 'custom:money', label: 'Money', icon: 'dollar' },
-  { value: 'custom:array', label: 'Array', icon: 'array' },
+  { value: 'custom:array', label: 'Array', icon: 'th-list' },
   { value: 'custom:object', label: 'Object', icon: 'cube' },
 ];
 
@@ -190,7 +190,7 @@ export const PropertiesPanel: React.FC = () => {
                 </div>
                 
                 <div className="property-actions">
-                  <Tag minimal small>
+                  <Tag minimal>
                     {getTypeLabel(property.type)}
                   </Tag>
                   
@@ -263,7 +263,7 @@ export const PropertiesPanel: React.FC = () => {
             <Divider />
 
             <div className="editor-form">
-              <FormGroup label="Property Name" labelFor="prop-name" required>
+              <FormGroup label="Property Name" labelFor="prop-name">
                 <InputGroup
                   id="prop-name"
                   value={editingProperty.name}
@@ -275,7 +275,7 @@ export const PropertiesPanel: React.FC = () => {
                 />
               </FormGroup>
 
-              <FormGroup label="Display Label" labelFor="prop-label" required>
+              <FormGroup label="Display Label" labelFor="prop-label">
                 <InputGroup
                   id="prop-label"
                   value={editingProperty.label}

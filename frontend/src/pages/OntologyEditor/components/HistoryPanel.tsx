@@ -3,16 +3,13 @@ import {
   Button, 
   Card, 
   Icon, 
-  Intent, 
-  Menu, 
-  MenuItem, 
-  Popover, 
-  Position,
+  Intent,
   Tag,
   Spinner
 } from '@blueprintjs/core';
 import { useOntologyStore } from '../../../stores/ontology.store';
 import { ontologyApi, OntologyApiError } from '../../../api/ontologyClient';
+import { extractDatabaseName } from '../../../utils/database';
 
 interface CommitInfo {
   id: string;
@@ -44,11 +41,14 @@ export const HistoryPanel: React.FC = () => {
 
     setIsLoading(true);
     try {
-      const history = await ontologyApi.branch.history(currentDatabase, 50);
+      const dbName = extractDatabaseName(currentDatabase);
+      if (!dbName) return;
+      
+      const history = await ontologyApi.branch.history(dbName, 50);
       setCommits(history);
     } catch (error) {
       const message = error instanceof OntologyApiError 
-        ? error.message 
+        ? error.message
         : 'Failed to load history';
       setError('history', message);
     } finally {
