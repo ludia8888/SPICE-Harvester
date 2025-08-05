@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 import redis.asyncio as redis
 from redis.asyncio.connection import ConnectionPool
 from redis.exceptions import RedisError
+from shared.config.app_config import AppConfig
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +111,7 @@ class RedisService:
             data: Optional additional data
             ttl: Time to live in seconds
         """
-        key = f"command:{command_id}:status"
+        key = AppConfig.get_command_status_key(command_id)
         value = {
             "status": status,
             "updated_at": datetime.utcnow().isoformat(),
@@ -136,7 +137,7 @@ class RedisService:
         Returns:
             Command status data or None if not found
         """
-        key = f"command:{command_id}:status"
+        key = AppConfig.get_command_status_key(command_id)
         data = await self.client.get(key)
         
         if data:
@@ -183,7 +184,7 @@ class RedisService:
             result: Command execution result
             ttl: Time to live in seconds
         """
-        key = f"command:{command_id}:result"
+        key = AppConfig.get_command_result_key(command_id)
         await self.client.setex(
             key,
             ttl,
@@ -200,7 +201,7 @@ class RedisService:
         Returns:
             Command result or None if not found
         """
-        key = f"command:{command_id}:result"
+        key = AppConfig.get_command_result_key(command_id)
         data = await self.client.get(key)
         
         if data:

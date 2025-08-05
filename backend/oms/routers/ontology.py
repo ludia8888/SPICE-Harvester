@@ -21,6 +21,7 @@ from oms.database.postgres import db as postgres_db
 from oms.database.outbox import MessageType, OutboxService
 from shared.models.commands import CommandType, OntologyCommand
 from shared.models.events import EventType
+from shared.config.app_config import AppConfig
 
 # OMS 서비스 import
 from oms.services.async_terminus import AsyncTerminusService
@@ -163,7 +164,7 @@ async def create_ontology(
                             "parent_class": ontology_data.get("parent_class"),
                             "abstract": ontology_data.get("abstract", False),
                         },
-                        topic="ontology_events",
+                        topic=AppConfig.ONTOLOGY_EVENTS_TOPIC,
                         additional_context={
                             "user": "system",  # TODO: 실제 사용자 정보 추가
                             "source": "oms_api",
@@ -433,7 +434,7 @@ async def update_ontology(
                             "updates": sanitized_data,
                             "merged_data": merged_data,
                         },
-                        topic="ontology_events",
+                        topic=AppConfig.ONTOLOGY_EVENTS_TOPIC,
                         additional_context={
                             "user": "system",  # TODO: 실제 사용자 정보 추가
                             "source": "oms_api",
@@ -493,7 +494,7 @@ async def delete_ontology(
                             "db_name": db_name,
                             "class_id": class_id,
                         },
-                        topic="ontology_events",
+                        topic=AppConfig.ONTOLOGY_EVENTS_TOPIC,
                         additional_context={
                             "user": "system",  # TODO: 실제 사용자 정보 추가
                             "source": "oms_api",

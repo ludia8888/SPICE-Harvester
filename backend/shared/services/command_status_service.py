@@ -11,6 +11,7 @@ from enum import Enum
 from uuid import UUID
 
 from shared.services.redis_service import RedisService
+from shared.config.app_config import AppConfig
 
 logger = logging.getLogger(__name__)
 
@@ -308,7 +309,7 @@ class CommandStatusService:
             List of command summaries
         """
         # Pattern to match user commands
-        pattern = f"command:*:status"
+        pattern = AppConfig.get_command_status_pattern()
         keys = await self.redis.keys(pattern)
         
         commands = []

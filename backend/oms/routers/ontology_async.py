@@ -26,6 +26,7 @@ from oms.database.outbox import MessageType, OutboxService
 from shared.models.commands import CommandType, OntologyCommand, CommandResult, CommandStatus
 from shared.models.common import BaseResponse
 from shared.services import CommandStatusService
+from shared.config.app_config import AppConfig
 from shared.models.ontology import (
     OntologyCreateRequest,
     OntologyUpdateRequest,
@@ -93,7 +94,7 @@ async def create_ontology_async(
             command_id = await outbox_service.publish_command(
                 connection=conn,
                 command=command,
-                topic="ontology_commands"
+                topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC
             )
         
         # Redis에 command 상태 저장
@@ -176,7 +177,7 @@ async def update_ontology_async(
             command_id = await outbox_service.publish_command(
                 connection=conn,
                 command=command,
-                topic="ontology_commands"
+                topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC
             )
         
         # Redis에 command 상태 저장
@@ -245,7 +246,7 @@ async def delete_ontology_async(
             command_id = await outbox_service.publish_command(
                 connection=conn,
                 command=command,
-                topic="ontology_commands"
+                topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC
             )
         
         # Redis에 command 상태 저장

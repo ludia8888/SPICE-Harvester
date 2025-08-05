@@ -17,6 +17,7 @@ from confluent_kafka import Consumer, Producer, KafkaError, KafkaException
 import asyncpg
 
 from shared.config.service_config import ServiceConfig
+from shared.config.app_config import AppConfig
 from shared.models.commands import (
     BaseCommand, CommandType, CommandStatus, 
     InstanceCommand
@@ -54,7 +55,7 @@ class InstanceWorker:
         self.redis_service: Optional[RedisService] = None
         self.command_status_service: Optional[CommandStatusService] = None
         self.storage_service: Optional[StorageService] = None
-        self.instance_bucket = os.getenv("INSTANCE_BUCKET", "instance-events")
+        self.instance_bucket = AppConfig.INSTANCE_BUCKET
         
     async def initialize(self):
         """워커 초기화"""
@@ -100,7 +101,7 @@ class InstanceWorker:
         logger.info(f"Storage service initialized with bucket: {self.instance_bucket}")
         
         # Command 토픽 구독
-        self.consumer.subscribe(['instance_commands'])
+        self.consumer.subscribe([AppConfig.INSTANCE_COMMANDS_TOPIC])
         logger.info("Instance Worker initialized successfully")
         
     async def process_command(self, command_data: Dict[str, Any]) -> None:
@@ -564,7 +565,7 @@ class InstanceWorker:
     async def publish_event(self, event: BaseEvent) -> None:
         """이벤트 발행"""
         self.producer.produce(
-            topic='instance_events',
+            topic=AppConfig.INSTANCE_EVENTS_TOPIC,
             value=event.json(),
             key=str(event.event_id).encode('utf-8')
         )

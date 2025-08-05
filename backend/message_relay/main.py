@@ -15,6 +15,7 @@ from confluent_kafka import Producer, KafkaError
 from confluent_kafka.admin import AdminClient, NewTopic
 
 from shared.config.service_config import ServiceConfig
+from shared.config.app_config import AppConfig
 
 # 로깅 설정
 logging.basicConfig(
@@ -60,7 +61,7 @@ class MessageRelay:
         # 생성할 토픽 리스트
         topics = [
             NewTopic(
-                topic="ontology_events",
+                topic=AppConfig.ONTOLOGY_EVENTS_TOPIC,
                 num_partitions=3,
                 replication_factor=1,
                 config={

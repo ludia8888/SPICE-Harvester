@@ -20,6 +20,7 @@ from shared.config.search_config import (
     get_ontologies_index_name,
     DEFAULT_INDEX_SETTINGS
 )
+from shared.config.app_config import AppConfig
 from shared.models.events import (
     BaseEvent, EventType,
     InstanceEvent,
@@ -53,7 +54,7 @@ class ProjectionWorker:
         self.created_indices = set()
         
         # DLQ 토픽
-        self.dlq_topic = "projection_failures_dlq"
+        self.dlq_topic = AppConfig.PROJECTION_DLQ_TOPIC
         
         # 재시도 설정
         self.max_retries = 5
@@ -94,7 +95,7 @@ class ProjectionWorker:
         await self._setup_indices()
         
         # 토픽 구독
-        topics = ['instance_events', 'ontology_events']
+        topics = [AppConfig.INSTANCE_EVENTS_TOPIC, AppConfig.ONTOLOGY_EVENTS_TOPIC]
         self.consumer.subscribe(topics)
         logger.info(f"Subscribed to topics: {topics}")
         
@@ -202,9 +203,9 @@ class ProjectionWorker:
             
             logger.info(f"Processing event: {event_type} from topic: {topic}")
             
-            if topic == 'instance_events':
+            if topic == AppConfig.INSTANCE_EVENTS_TOPIC:
                 await self._handle_instance_event(event_data)
-            elif topic == 'ontology_events':
+            elif topic == AppConfig.ONTOLOGY_EVENTS_TOPIC:
                 await self._handle_ontology_event(event_data)
             else:
                 logger.warning(f"Unknown topic: {topic}")
@@ -512,7 +513,7 @@ class ProjectionWorker:
             )
             
             # Redis 캐시 삭제 (DB별로 키 구분)
-            await self.redis_service.delete(f"class_label:{db_name}:{class_id}")
+            await self.redis_service.delete(AppConfig.get_class_label_key(db_name, class_id))
             
             if success:
                 logger.info(f"Ontology class deleted from Elasticsearch: {class_id} from index: {index_name}")
@@ -529,7 +530,7 @@ class ProjectionWorker:
             if not class_id or not db_name:
                 return None
                 
-            cache_key = f"class_label:{db_name}:{class_id}"
+            cache_key = AppConfig.get_class_label_key(db_name, class_id)
             cached_label = await self.redis_service.client.get(cache_key)
             if cached_label:
                 return cached_label
@@ -564,7 +565,7 @@ class ProjectionWorker:
             if not class_id or not label or not db_name:
                 return
                 
-            cache_key = f"class_label:{db_name}:{class_id}"
+            cache_key = AppConfig.get_class_label_key(db_name, class_id)
             await self.redis_service.client.setex(
                 cache_key,
                 3600,  # 1시간 TTL

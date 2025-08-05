@@ -14,6 +14,7 @@ from confluent_kafka import Consumer, Producer, KafkaError, KafkaException
 import asyncpg
 
 from shared.config.service_config import ServiceConfig
+from shared.config.app_config import AppConfig
 from shared.models.commands import (
     BaseCommand, CommandType, CommandStatus, 
     OntologyCommand, DatabaseCommand, BranchCommand
@@ -85,7 +86,7 @@ class OntologyWorker:
         logger.info("Redis connection established")
         
         # Command 토픽 구독
-        self.consumer.subscribe(['ontology_commands'])
+        self.consumer.subscribe([AppConfig.ONTOLOGY_COMMANDS_TOPIC])
         logger.info("Ontology Worker initialized successfully")
         
     async def process_command(self, command_data: Dict[str, Any]) -> None:
@@ -362,7 +363,7 @@ class OntologyWorker:
     async def publish_event(self, event: BaseEvent) -> None:
         """이벤트 발행"""
         self.producer.produce(
-            topic='ontology_events',
+            topic=AppConfig.ONTOLOGY_EVENTS_TOPIC,
             value=event.json(),
             key=str(event.event_id).encode('utf-8')
         )

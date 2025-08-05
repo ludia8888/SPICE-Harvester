@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from oms.database.postgres import PostgresDatabase
 from shared.models.commands import BaseCommand, CommandType
 from shared.models.events import BaseEvent, EventType
+from shared.config.app_config import AppConfig
 
 
 class MessageType(str, Enum):
@@ -47,7 +48,7 @@ class OutboxService:
         self,
         connection: asyncpg.Connection,
         command: BaseCommand,
-        topic: str = "ontology_commands"
+        topic: str = AppConfig.ONTOLOGY_COMMANDS_TOPIC
     ) -> str:
         """
         트랜잭션 내에서 Command를 outbox 테이블에 발행
@@ -83,7 +84,7 @@ class OutboxService:
         self,
         connection: asyncpg.Connection,
         event: BaseEvent,
-        topic: str = "ontology_events"
+        topic: str = AppConfig.ONTOLOGY_EVENTS_TOPIC
     ) -> str:
         """
         트랜잭션 내에서 Event를 outbox 테이블에 발행
