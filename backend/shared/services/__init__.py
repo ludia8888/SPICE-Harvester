@@ -14,6 +14,7 @@ from .websocket_service import (
     get_notification_service,
 )
 from .storage_service import StorageService, create_storage_service
+from .elasticsearch_service import ElasticsearchService, create_elasticsearch_service
 
 __all__ = [
     "RedisService",
@@ -27,4 +28,6 @@ __all__ = [
     "get_notification_service",
     "StorageService",
     "create_storage_service",
+    "ElasticsearchService",
+    "create_elasticsearch_service",
 ]

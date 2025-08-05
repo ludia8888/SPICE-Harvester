@@ -1,0 +1,96 @@
+{
+  "mappings": {
+    "properties": {
+      "class_id": {
+        "type": "keyword"
+      },
+      "label": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword"
+          }
+        }
+      },
+      "description": {
+        "type": "text"
+      },
+      "properties": {
+        "type": "nested",
+        "properties": {
+          "name": {
+            "type": "keyword"
+          },
+          "label": {
+            "type": "text",
+            "fields": {
+              "keyword": {
+                "type": "keyword"
+              }
+            }
+          },
+          "type": {
+            "type": "keyword"
+          },
+          "required": {
+            "type": "boolean"
+          }
+        }
+      },
+      "relationships": {
+        "type": "nested",
+        "properties": {
+          "predicate": {
+            "type": "keyword"
+          },
+          "target": {
+            "type": "keyword"
+          },
+          "label": {
+            "type": "text",
+            "fields": {
+              "keyword": {
+                "type": "keyword"
+              }
+            }
+          },
+          "cardinality": {
+            "type": "keyword"
+          }
+        }
+      },
+      "parent_classes": {
+        "type": "keyword"
+      },
+      "child_classes": {
+        "type": "keyword"
+      },
+      "db_name": {
+        "type": "keyword"
+      },
+      "branch": {
+        "type": "keyword"
+      },
+      "version": {
+        "type": "long"
+      },
+      "event_id": {
+        "type": "keyword"
+      },
+      "event_timestamp": {
+        "type": "date"
+      },
+      "created_at": {
+        "type": "date"
+      },
+      "updated_at": {
+        "type": "date"
+      }
+    }
+  },
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0,
+    "refresh_interval": "1s"
+  }
+}

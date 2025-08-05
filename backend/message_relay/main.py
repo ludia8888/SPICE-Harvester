@@ -96,14 +96,14 @@ class MessageRelay:
             logger.debug(f"Message delivered to {msg.topic()} [{msg.partition()}]")
             
     async def process_events(self):
-        """Outbox 테이블에서 이벤트를 읽어 Kafka로 전송"""
+        """Outbox 테이블에서 메시지(Command/Event)를 읽어 Kafka로 전송"""
         batch_size = int(os.getenv("MESSAGE_RELAY_BATCH_SIZE", "100"))
         
         async with self.conn.transaction():
-            # 처리되지 않은 이벤트를 조회하고 잠금
-            events = await self.conn.fetch(
+            # 처리되지 않은 메시지를 조회하고 잠금
+            messages = await self.conn.fetch(
                 """
-                SELECT id, topic, payload, retry_count
+                SELECT id, message_type, topic, payload, retry_count
                 FROM spice_outbox.outbox
                 WHERE processed_at IS NULL
                   AND (retry_count < 5 OR retry_count IS NULL)
@@ -115,18 +115,18 @@ class MessageRelay:
                 batch_size
             )
             
-            if not events:
+            if not messages:
                 return 0
                 
             processed_count = 0
             
-            for event in events:
+            for message in messages:
                 try:
                     # Kafka로 메시지 발행
                     self.producer.produce(
-                        topic=event['topic'],
-                        value=event['payload'],
-                        key=str(event['id']).encode('utf-8'),
+                        topic=message['topic'],
+                        value=message['payload'],
+                        key=str(message['id']).encode('utf-8'),
                         callback=self.delivery_report
                     )
                     
@@ -137,15 +137,15 @@ class MessageRelay:
                         SET processed_at = NOW()
                         WHERE id = $1
                         """,
-                        event['id']
+                        message['id']
                     )
                     
                     processed_count += 1
-                    logger.info(f"Relayed event {event['id']} to topic {event['topic']}")
+                    logger.info(f"Relayed {message['message_type']} {message['id']} to topic {message['topic']}")
                     
                 except Exception as e:
                     # 에러 발생 시 재시도 카운트 증가
-                    logger.error(f"Failed to relay event {event['id']}: {e}")
+                    logger.error(f"Failed to relay message {message['id']}: {e}")
                     
                     await self.conn.execute(
                         """
@@ -154,7 +154,7 @@ class MessageRelay:
                             last_retry_at = NOW()
                         WHERE id = $1
                         """,
-                        event['id']
+                        message['id']
                     )
                     
             # 남은 메시지 전송 완료 대기

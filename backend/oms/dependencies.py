@@ -23,15 +23,19 @@ terminus_service = None
 jsonld_converter = None
 label_mapper = None
 outbox_service = None
+redis_service = None
+command_status_service = None
 
 
-def set_services(terminus: AsyncTerminusService, converter: JSONToJSONLDConverter, outbox=None):
+def set_services(terminus: AsyncTerminusService, converter: JSONToJSONLDConverter, outbox=None, redis=None, command_status=None):
     """서비스 인스턴스 설정"""
-    global terminus_service, jsonld_converter, label_mapper, outbox_service
+    global terminus_service, jsonld_converter, label_mapper, outbox_service, redis_service, command_status_service
     terminus_service = terminus
     jsonld_converter = converter
     label_mapper = LabelMapper()
     outbox_service = outbox
+    redis_service = redis
+    command_status_service = command_status
 
 
 def get_terminus_service() -> AsyncTerminusService:
@@ -71,6 +75,26 @@ def get_outbox_service():
         # 이벤트 발행은 선택적 기능이므로
         return None
     return outbox_service
+
+
+def get_redis_service():
+    """Redis 서비스 의존성"""
+    if not redis_service:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Redis 서비스가 초기화되지 않았습니다",
+        )
+    return redis_service
+
+
+def get_command_status_service():
+    """Command 상태 추적 서비스 의존성"""
+    if not command_status_service:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Command 상태 추적 서비스가 초기화되지 않았습니다",
+        )
+    return command_status_service
 
 
 # Validation Dependencies

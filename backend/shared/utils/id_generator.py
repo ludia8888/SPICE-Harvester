@@ -316,6 +316,35 @@ def generate_relationship_id(label: Union[str, Dict[str, Any], Any]) -> str:
     return generate_simple_id(label, use_timestamp_for_korean=False)
 
 
+def generate_instance_id(class_id: str, label: Optional[Union[str, Dict[str, Any], Any]] = None) -> str:
+    """
+    인스턴스 ID 생성
+    
+    Args:
+        class_id: 클래스 ID
+        label: 선택적 레이블 (제공되지 않으면 타임스탬프 사용)
+        
+    Returns:
+        생성된 인스턴스 ID (예: Product_inst_20250805123456)
+    """
+    try:
+        # 기본 ID 부분
+        if label:
+            base_id = generate_simple_id(label, use_timestamp_for_korean=False)
+        else:
+            base_id = f"{class_id}_inst"
+        
+        # 고유성을 위한 타임스탬프 추가
+        timestamp = _generate_short_timestamp()
+        instance_id = f"{base_id}_{timestamp}"
+        
+        return instance_id
+        
+    except Exception as e:
+        logger.error(f"Error generating instance ID: {e}")
+        return f"{class_id}_inst_{_generate_short_timestamp()}"
+
+
 # 검증 함수
 def validate_generated_id(id_string: str) -> bool:
     """생성된 ID의 유효성 검증"""

@@ -1,11 +1,18 @@
 # SPICE HARVESTER Architecture
 
-> Auto-generated on 2025-07-18 10:41:34
-> Updated on 2025-08-05 - Outbox Pattern Implementation
+> Auto-generated on 2025-07-18 10:41:34  
+> Updated on 2025-08-05 - Command/Event Sourcing & Redis Integration
 
 ## Overview
 
-This document contains automatically generated architecture diagrams for the SPICE HARVESTER project. The architecture now includes the Outbox Pattern for reliable event publishing and asynchronous processing.
+This document contains architecture diagrams for the SPICE HARVESTER project. The architecture now includes:
+
+- **Command/Event Sourcing Pattern**: Complete separation of Commands (intent) from Events (results)
+- **Redis-based Status Tracking**: Real-time command status monitoring with history
+- **Synchronous API Wrapper**: Convenience APIs with configurable timeouts
+- **Enhanced Outbox Pattern**: Support for both Commands and Events
+- **Kafka Message Broker**: Reliable message delivery with retry logic
+- **Ontology Worker Service**: Asynchronous command processing
 
 ## Class Diagrams
 
@@ -96,6 +103,72 @@ classDiagram
         +delete_document() bool
     }
     
+    %% Command/Event Sourcing Layer
+    class RedisService {
+        +ConnectionPool pool
+        +Redis client
+        +connect() None
+        +disconnect() None
+        +set_command_status() None
+        +get_command_status() Dict
+        +publish_command_update() None
+        +subscribe_command_updates() PubSub
+    }
+    
+    class CommandStatusService {
+        +RedisService redis_service
+        +create_command_status() None
+        +update_status() bool
+        +start_processing() bool
+        +complete_command() bool
+        +fail_command() bool
+        +get_command_details() Dict
+    }
+    
+    class SyncWrapperService {
+        +CommandStatusService status_service
+        +wait_for_command() SyncResult
+        +execute_sync() SyncResult
+        +poll_until_complete() Dict
+    }
+    
+    class OntologyWorker {
+        +Consumer kafka_consumer
+        +Producer kafka_producer
+        +RedisService redis_service
+        +AsyncTerminusService terminus_service
+        +process_command() None
+        +handle_create_ontology() None
+        +handle_update_ontology() None
+        +handle_delete_ontology() None
+    }
+    
+    class MessageRelayService {
+        +PostgreSQL outbox_db
+        +KafkaProducer producer
+        +poll_outbox() None
+        +publish_messages() None
+        +handle_retry() None
+    }
+    
+    %% Command/Event Models
+    class BaseCommand {
+        +UUID command_id
+        +CommandType command_type
+        +String aggregate_id
+        +Dict payload
+        +Dict metadata
+        +DateTime created_at
+    }
+    
+    class BaseEvent {
+        +UUID event_id
+        +EventType event_type
+        +UUID command_id
+        +Dict data
+        +DateTime occurred_at
+    }
+    
     %% Complex Type System
     class ComplexTypeValidator {
         +Dict type_registry
@@ -152,16 +225,27 @@ classDiagram
     %% Relationships
     FastAPIApplication --> OntologyManagementService : uses
     FastAPIApplication --> BackendForFrontend : uses
+    FastAPIApplication --> SyncWrapperService : uses
     OntologyManagementService --> AsyncTerminusService : uses
     OntologyManagementService --> RelationshipManager : uses
+    OntologyManagementService --> CommandStatusService : uses
     BackendForFrontend --> ComplexTypeSerializer : uses
     BackendForFrontend --> ComplexTypeValidator : uses
+    CommandStatusService --> RedisService : uses
+    SyncWrapperService --> CommandStatusService : uses
+    OntologyWorker --> RedisService : uses
+    OntologyWorker --> AsyncTerminusService : uses
+    OntologyWorker --> BaseCommand : processes
+    OntologyWorker --> BaseEvent : publishes
+    MessageRelayService --> BaseCommand : relays
+    MessageRelayService --> BaseEvent : relays
     Production --> Relationship : has many
     Ontology --> Production : defines
     RelationshipManager --> Relationship : manages
     FastAPIApplication --> RBACMiddleware : applies
     FastAPIApplication --> ValidationMiddleware : applies
     MultilingualText --> ComplexTypeValidator : validated by
+    BaseEvent --> BaseCommand : originated from
 ```
 
 ### Classes Spice Harvester
@@ -240,86 +324,204 @@ sequenceDiagram
     participant Client
     participant BFF as Backend for Frontend
     participant OMS as Ontology Management Service
+    participant Redis
     participant DB as TerminusDB
     participant PG as PostgreSQL
     participant Relay as Message Relay
     participant Kafka
+    participant Worker as Ontology Worker
     participant Consumer as Event Consumer
     
-    %% Create/Update Request Flow with Outbox Pattern
-    Client->>BFF: HTTP Request (Create/Update)
+    %% Async API Flow with Command/Event Sourcing
+    Client->>BFF: HTTP Request (Async Create)
     BFF->>BFF: Validate Request
     BFF->>BFF: Check Permissions
     
-    BFF->>OMS: Forward Request
-    OMS->>OMS: Business Logic
+    BFF->>OMS: Forward to Async API
     
     rect rgb(240, 240, 240)
-        Note over OMS,PG: Atomic Transaction
-        OMS->>DB: Update Ontology
-        DB-->>OMS: Success
-        OMS->>PG: Insert Outbox Event
-        PG-->>OMS: Event Stored
+        Note over OMS,Redis: Command Creation
+        OMS->>PG: Store Command (Atomic)
+        PG-->>OMS: Command Stored
+        OMS->>Redis: Create Command Status
+        Redis-->>OMS: Status Stored
     end
     
-    OMS-->>BFF: Response
-    BFF-->>Client: Success Response
+    OMS-->>BFF: Command ID & PENDING Status
+    BFF-->>Client: Immediate Response
     
-    %% Asynchronous Event Processing
+    %% Asynchronous Processing Flow
     rect rgb(230, 250, 230)
-        Note over Relay,Consumer: Asynchronous Flow
-        Relay->>PG: Poll Unprocessed Events
-        PG-->>Relay: Events List
-        Relay->>Kafka: Publish Events
+        Note over Relay,Worker: Command Processing
+        Relay->>PG: Poll Commands
+        PG-->>Relay: Command List
+        Relay->>Kafka: Publish Commands
         Kafka-->>Relay: Ack
-        Relay->>PG: Mark as Processed
+        
+        Worker->>Kafka: Subscribe to Commands
+        Kafka-->>Worker: New Command
+        Worker->>Redis: Update Status (PROCESSING)
+        Worker->>DB: Execute Operation
+        DB-->>Worker: Result
+        Worker->>PG: Store Event
+        Worker->>Redis: Update Status (COMPLETED)
+        Worker->>Kafka: Publish Event
         
         Consumer->>Kafka: Subscribe to Events
         Kafka-->>Consumer: New Event
         Consumer->>Consumer: Process Event
     end
     
-    %% Read Request Flow (unchanged)
-    Client->>BFF: HTTP Request (Read)
-    BFF->>OMS: Forward Request
-    OMS->>DB: Query
-    DB-->>OMS: Result
-    OMS-->>BFF: Response
-    BFF-->>Client: Formatted Response
+    %% Sync API Flow with Polling
+    rect rgb(250, 230, 230)
+        Note over Client,Redis: Sync API Option
+        Client->>OMS: HTTP Request (Sync Create)
+        OMS->>PG: Store Command
+        OMS->>Redis: Create Status
+        
+        loop Poll until complete
+            OMS->>Redis: Check Status
+            Redis-->>OMS: Current Status
+        end
+        
+        OMS-->>Client: Final Result
+    end
+    
+    %% Status Check Flow
+    Client->>OMS: GET Command Status
+    OMS->>Redis: Query Status
+    Redis-->>OMS: Status + History
+    OMS-->>Client: Detailed Status
 ```
 
-## Outbox Pattern Implementation
+## Outbox Pattern with Command/Event Sourcing
 
 ### Overview
 
-The Outbox Pattern ensures reliable event publishing by storing events in a database table within the same transaction as the business operation. A separate Message Relay service then reads these events and publishes them to Kafka.
+The enhanced Outbox Pattern with Command/Event Sourcing solves the distributed transaction problem by separating intent (Commands) from results (Events). This ensures perfect atomicity and reliability in a microservices architecture.
+
+### Architecture Evolution
+
+#### Problem with Original Approach
+```
+OMS → TerminusDB (Transaction A) → PostgreSQL Outbox (Transaction B)
+```
+Two independent transactions cannot guarantee atomicity!
+
+#### Solution: Command/Event Sourcing
+```
+OMS → PostgreSQL (Command) → Kafka → Worker → TerminusDB
+                                          ↓
+                                    PostgreSQL (Event) → Kafka → Consumers
+```
 
 ### Components
 
-1. **PostgreSQL Outbox Table**: Stores events with metadata
-2. **OMS Service**: Writes to both TerminusDB and Outbox table in a single transaction
-3. **Message Relay Service**: Polls the outbox table and publishes to Kafka
-4. **Kafka**: Message broker for event distribution
-5. **Event Consumers**: Services that subscribe to and process events
+1. **PostgreSQL Outbox Table**: Stores both Commands and Events
+2. **OMS Service**: Only stores Commands (single transaction)
+3. **Message Relay Service**: Publishes messages to Kafka
+4. **Ontology Worker**: Processes Commands and executes TerminusDB operations
+5. **Kafka**: Message broker for both Commands and Events
+6. **Event Consumers**: Services that react to Events
 
-### Event Types
+### Message Types
 
-- `ONTOLOGY_CLASS_CREATED`: New ontology class created
-- `ONTOLOGY_CLASS_UPDATED`: Existing ontology class modified
-- `ONTOLOGY_CLASS_DELETED`: Ontology class removed
+#### Commands (Intent)
+- `CREATE_ONTOLOGY_CLASS`: Request to create a new ontology class
+- `UPDATE_ONTOLOGY_CLASS`: Request to update an existing class
+- `DELETE_ONTOLOGY_CLASS`: Request to delete a class
+
+#### Events (Facts)
+- `ONTOLOGY_CLASS_CREATED`: Ontology class was successfully created
+- `ONTOLOGY_CLASS_UPDATED`: Ontology class was successfully updated
+- `ONTOLOGY_CLASS_DELETED`: Ontology class was successfully deleted
+- `COMMAND_FAILED`: Command execution failed
 
 ### Benefits
 
-- **Atomicity**: Events are guaranteed to be published if the business transaction succeeds
-- **Reliability**: No events are lost even if Kafka is temporarily unavailable
-- **Scalability**: Multiple Message Relay instances can run concurrently
-- **Decoupling**: Services communicate asynchronously through events
+- **Perfect Atomicity**: Commands are stored in a single transaction
+- **Distributed Transaction Solution**: No two-phase commit needed
+- **Audit Trail**: Complete history of intentions and outcomes
+- **Resilience**: Failed commands can be automatically retried
+- **Scalability**: Workers can be scaled horizontally
+- **Event Sourcing**: System state can be rebuilt from events
 
 ### Configuration
 
 Key environment variables:
-- `POSTGRES_HOST/PORT/USER/PASSWORD/DB`: PostgreSQL connection
+- `POSTGRES_*`: PostgreSQL connection settings
 - `KAFKA_BOOTSTRAP_SERVERS`: Kafka broker addresses
-- `MESSAGE_RELAY_BATCH_SIZE`: Events per batch (default: 100)
+- `MESSAGE_RELAY_BATCH_SIZE`: Messages per batch (default: 100)
 - `MESSAGE_RELAY_POLL_INTERVAL`: Polling interval in seconds (default: 5)
+
+### API Usage
+
+#### 1. Async API (Production Recommended)
+```bash
+# Submit command and get immediate response
+POST /api/v1/ontology/mydb/async/create
+{
+  "id": "Person",
+  "label": "Person"
+}
+
+Response:
+{
+  "command_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "PENDING"
+}
+
+# Check command status
+GET /api/v1/ontology/mydb/async/command/550e8400.../status
+Response:
+{
+  "command_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "COMPLETED",
+  "result": {
+    "progress": 100,
+    "history": [...],
+    "result": {...}
+  }
+}
+```
+
+#### 2. Sync API (Convenience Wrapper)
+```bash
+# Submit and wait for completion (with timeout)
+POST /api/v1/ontology/mydb/sync/create?timeout=30&poll_interval=0.5
+{
+  "id": "Person",
+  "label": "Person"
+}
+
+Response (Success):
+{
+  "status": "success",
+  "message": "Successfully created ontology class 'Person'",
+  "data": {
+    "command_id": "550e8400...",
+    "execution_time": 2.5,
+    "result": {...}
+  }
+}
+
+Response (Timeout):
+HTTP 408 Request Timeout
+{
+  "detail": {
+    "message": "Operation timed out after 30 seconds",
+    "command_id": "550e8400...",
+    "hint": "Check status using the async API"
+  }
+}
+
+# Wait for existing command
+GET /api/v1/ontology/mydb/sync/command/550e8400.../wait?timeout=30
+```
+
+#### 3. Legacy Direct API (Limited Use)
+```bash
+POST /api/v1/ontology/mydb/create
+# Direct TerminusDB operation (use with caution - no status tracking)
+```
 

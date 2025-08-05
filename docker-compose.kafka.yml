@@ -1,5 +1,10 @@
 version: '3.8'
 
+# Kafka 메시지 브로커 및 관련 서비스 구성
+# Command/Event 메시지 전달을 위한 핵심 인프라
+# 포함: Zookeeper, Kafka, Kafka UI
+# 실행: docker-compose -f docker-compose.kafka.yml up -d
+
 services:
   # Zookeeper (Kafka dependency)
   zookeeper:

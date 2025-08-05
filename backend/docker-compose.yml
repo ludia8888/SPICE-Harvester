@@ -128,6 +128,74 @@ services:
     networks:
       - spice_network
     restart: unless-stopped
+    
+  # Ontology Worker Service (Command Processing)
+  ontology-worker:
+    build:
+      context: .
+      dockerfile: ./ontology_worker/Dockerfile
+    container_name: spice_ontology_worker
+    environment:
+      - KAFKA_HOST=${KAFKA_HOST:-kafka}
+      - KAFKA_PORT=${KAFKA_PORT:-29092}
+      - TERMINUS_SERVER_URL=${TERMINUS_SERVER_URL:-http://terminusdb:6363}
+      - TERMINUS_USER=${TERMINUS_USER:-admin}
+      - TERMINUS_ACCOUNT=${TERMINUS_ACCOUNT:-admin}
+      - TERMINUS_KEY=${TERMINUS_KEY:-${TERMINUSDB_ADMIN_PASS:-admin123}}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      - terminusdb
+      - message-relay
+    networks:
+      - spice_network
+    restart: unless-stopped
+
+  instance-worker:
+    build:
+      context: .
+      dockerfile: ./instance_worker/Dockerfile
+    container_name: spice_instance_worker
+    environment:
+      - KAFKA_HOST=${KAFKA_HOST:-kafka}
+      - KAFKA_PORT=${KAFKA_PORT:-29092}
+      - TERMINUS_SERVER_URL=${TERMINUS_SERVER_URL:-http://terminusdb:6363}
+      - TERMINUS_USER=${TERMINUS_USER:-admin}
+      - TERMINUS_ACCOUNT=${TERMINUS_ACCOUNT:-admin}
+      - TERMINUS_KEY=${TERMINUS_KEY:-${TERMINUSDB_ADMIN_PASS:-admin123}}
+      - MINIO_ENDPOINT_URL=${MINIO_ENDPOINT_URL:-http://minio:9000}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
+      - INSTANCE_BUCKET=${INSTANCE_BUCKET:-instance-events}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      - terminusdb
+      - message-relay
+    networks:
+      - spice_network
+    restart: unless-stopped
+
+  # Projection Worker Service (Event Sourcing to Elasticsearch)
+  projection-worker:
+    build:
+      context: .
+      dockerfile: ./projection_worker/Dockerfile
+    container_name: spice_projection_worker
+    environment:
+      - KAFKA_HOST=${KAFKA_HOST:-kafka}
+      - KAFKA_PORT=${KAFKA_PORT:-29092}
+      - ELASTICSEARCH_HOST=${ELASTICSEARCH_HOST:-elasticsearch}
+      - ELASTICSEARCH_PORT=${ELASTICSEARCH_PORT:-9200}
+      - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_USERNAME:-elastic}
+      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-elasticpass123}
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-spicepass123}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      - message-relay
+    networks:
+      - spice_network
+    restart: unless-stopped
 
 volumes:
   terminusdb_data:

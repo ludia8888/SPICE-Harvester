@@ -1,0 +1,68 @@
+{
+  "mappings": {
+    "properties": {
+      "instance_id": {
+        "type": "keyword"
+      },
+      "class_id": {
+        "type": "keyword"
+      },
+      "class_label": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword"
+          }
+        }
+      },
+      "properties": {
+        "type": "nested",
+        "properties": {
+          "name": {
+            "type": "keyword"
+          },
+          "value": {
+            "type": "text",
+            "fields": {
+              "keyword": {
+                "type": "keyword"
+              }
+            }
+          },
+          "type": {
+            "type": "keyword"
+          }
+        }
+      },
+      "data": {
+        "enabled": false
+      },
+      "event_id": {
+        "type": "keyword"
+      },
+      "event_timestamp": {
+        "type": "date"
+      },
+      "version": {
+        "type": "long"
+      },
+      "db_name": {
+        "type": "keyword"
+      },
+      "branch": {
+        "type": "keyword"
+      },
+      "created_at": {
+        "type": "date"
+      },
+      "updated_at": {
+        "type": "date"
+      }
+    }
+  },
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0,
+    "refresh_interval": "1s"
+  }
+}

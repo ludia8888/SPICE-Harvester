@@ -18,7 +18,9 @@ from oms.dependencies import (
     ensure_database_exists
 )
 from oms.database.postgres import db as postgres_db
-from oms.database.outbox import EventType, OutboxService
+from oms.database.outbox import MessageType, OutboxService
+from shared.models.commands import CommandType, OntologyCommand
+from shared.models.events import EventType
 
 # OMS 서비스 import
 from oms.services.async_terminus import AsyncTerminusService

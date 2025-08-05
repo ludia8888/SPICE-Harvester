@@ -1,8 +1,8 @@
 # SPICE HARVESTER API Reference
 
-> **Last Updated**: 2025-07-26  
+> **Last Updated**: 2025-08-05  
 > **API Version**: v1.0  
-> **Status**: Production Ready (90-95% Complete)
+> **Status**: Production Ready (95% Complete) - Command/Event Sourcing & Redis Integration
 
 ## Table of Contents
 
@@ -10,19 +10,31 @@
 2. [Authentication](#authentication)
 3. [BFF API Endpoints](#bff-api-endpoints)
 4. [OMS API Endpoints](#oms-api-endpoints)
+   - [Legacy Direct API](#legacy-direct-api)
+   - [Asynchronous API](#asynchronous-api) ⭐ NEW
+   - [Synchronous API Wrapper](#synchronous-api-wrapper) ⭐ NEW
 5. [Funnel API Endpoints](#funnel-api-endpoints)
 6. [Git-like Features](#git-like-features)
-7. [Common Models](#common-models)
-8. [Error Handling](#error-handling)
-9. [Performance & Rate Limiting](#performance--rate-limiting)
+7. [Command Status Tracking](#command-status-tracking) ⭐ NEW
+8. [WebSocket Real-time Updates](#websocket-real-time-updates) ⭐ NEW
+9. [Common Models](#common-models)
+10. [Error Handling](#error-handling)
+11. [Performance & Rate Limiting](#performance--rate-limiting)
 
 ## Overview
 
-SPICE HARVESTER provides RESTful APIs across three main services:
+SPICE HARVESTER provides RESTful APIs across three main services with advanced Command/Event architecture:
 
 - **BFF (Backend for Frontend)**: User-facing API with label-based operations
-- **OMS (Ontology Management Service)**: Internal API with ID-based operations
+- **OMS (Ontology Management Service)**: Internal API with ID-based operations + Command/Event Sourcing
 - **Funnel (Type Inference Service)**: Data analysis and type inference API
+
+### New Features (2025-08-05)
+- **Asynchronous API**: Command-based operations with status tracking
+- **Synchronous API Wrapper**: Convenience endpoints with configurable timeouts
+- **Redis Status Tracking**: Real-time command monitoring with history
+- **WebSocket Real-time Updates**: Live command status broadcasting with Redis Pub/Sub
+- **Enhanced Error Handling**: 408 Request Timeout with helpful hints
 
 ### Base URLs
 
@@ -1070,9 +1082,431 @@ Official SDKs available for:
 - JavaScript: `npm install @spice-harvester/sdk`
 - Go: `go get github.com/spice-harvester/go-sdk`
 
+## Asynchronous API ⭐ NEW
+
+The async API follows Command/Event Sourcing pattern for reliable operations.
+
+### Submit Commands
+
+All async endpoints return immediately with a command ID:
+
+```http
+POST /api/v1/ontology/{db_name}/async/create
+Content-Type: application/json
+
+{
+  "id": "Person",
+  "label": "Person",
+  "properties": [...]
+}
+```
+
+Response:
+```json
+{
+  "command_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "PENDING",
+  "result": {
+    "message": "Ontology creation command accepted for 'Person'",
+    "class_id": "Person",
+    "db_name": "mydb"
+  }
+}
+```
+
+### Check Command Status
+
+```http
+GET /api/v1/ontology/{db_name}/async/command/{command_id}/status
+```
+
+Response (Completed):
+```json
+{
+  "command_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "COMPLETED",
+  "result": {
+    "message": "Command is COMPLETED",
+    "command_type": "CREATE_ONTOLOGY_CLASS",
+    "progress": 100,
+    "history": [
+      {
+        "status": "PENDING",
+        "timestamp": "2025-08-05T10:30:00Z",
+        "message": "Command created"
+      },
+      {
+        "status": "PROCESSING", 
+        "timestamp": "2025-08-05T10:30:01Z",
+        "message": "Processing started by worker-12345"
+      },
+      {
+        "status": "COMPLETED",
+        "timestamp": "2025-08-05T10:30:05Z", 
+        "message": "Command completed successfully"
+      }
+    ],
+    "result": {...}
+  }
+}
+```
+
+## Synchronous API Wrapper ⭐ NEW
+
+Convenience API that submits commands and waits for completion.
+
+### Create with Timeout
+
+```http
+POST /api/v1/ontology/{db_name}/sync/create?timeout=30&poll_interval=0.5
+Content-Type: application/json
+
+{
+  "id": "Person",
+  "label": "Person"
+}
+```
+
+Response (Success):
+```json
+{
+  "status": "success",
+  "message": "Successfully created ontology class 'Person'",
+  "data": {
+    "command_id": "550e8400-e29b-41d4-a716-446655440000",
+    "class_id": "Person",
+    "execution_time": 2.5,
+    "result": {...}
+  }
+}
+```
+
+Response (Timeout):
+```http
+HTTP/1.1 408 Request Timeout
+Content-Type: application/json
+
+{
+  "detail": {
+    "message": "Operation timed out after 30 seconds",
+    "command_id": "550e8400-e29b-41d4-a716-446655440000",
+    "hint": "You can check the status using GET /api/v1/ontology/mydb/async/command/550e8400.../status"
+  }
+}
+```
+
+### Wait for Existing Command
+
+```http
+GET /api/v1/ontology/{db_name}/sync/command/{command_id}/wait?timeout=30
+```
+
+## Command Status Tracking ⭐ NEW
+
+### Status Values
+
+| Status | Description |
+|--------|-------------|
+| `PENDING` | Command received, awaiting processing |
+| `PROCESSING` | Command being executed by worker |
+| `COMPLETED` | Command executed successfully |
+| `FAILED` | Command execution failed |
+| `CANCELLED` | Command was cancelled |
+| `RETRYING` | Command being retried after failure |
+
+### Status History
+
+Each status change is tracked with:
+- Timestamp
+- Status message
+- Optional worker ID
+- Progress percentage (0-100)
+- Error details (for failures)
+
+### TTL and Cleanup
+
+- Commands are automatically cleaned up after 24 hours
+- Configurable via `REDIS_COMMAND_TTL` environment variable
+- Manual cleanup endpoint: `DELETE /api/v1/commands/{command_id}`
+
+## WebSocket Real-time Updates ⭐ NEW
+
+Real-time command status updates via WebSocket connections.
+
+### Base URL
+```
+ws://localhost:8002/ws  (Development)
+wss://api.spiceharvester.com/ws  (Production)
+```
+
+### Connection Endpoints
+
+#### Subscribe to Specific Command
+```
+ws://localhost:8002/ws/commands/{command_id}?client_id={client_id}&user_id={user_id}
+```
+
+**Parameters:**
+- `command_id` (required): Command ID to subscribe to
+- `client_id` (optional): Unique client identifier (auto-generated if not provided)
+- `user_id` (optional): User identifier for authentication
+
+#### Subscribe to All User Commands
+```
+ws://localhost:8002/ws/commands?user_id={user_id}&client_id={client_id}
+```
+
+**Parameters:**
+- `user_id` (required): User ID to subscribe to all their commands
+- `client_id` (optional): Unique client identifier
+
+### Client Messages
+
+Clients can send these message types:
+
+#### Subscribe to Command
+```json
+{
+  "type": "subscribe",
+  "command_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+#### Unsubscribe from Command
+```json
+{
+  "type": "unsubscribe",
+  "command_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+#### Get Current Subscriptions
+```json
+{
+  "type": "get_subscriptions"
+}
+```
+
+#### Ping (Keep-alive)
+```json
+{
+  "type": "ping",
+  "timestamp": "2025-08-05T10:30:00Z"
+}
+```
+
+### Server Messages
+
+#### Connection Established
+```json
+{
+  "type": "connection_established",
+  "client_id": "client_abc123",
+  "command_id": "550e8400-e29b-41d4-a716-446655440000",
+  "message": "Subscribed to command updates"
+}
+```
+
+#### Command Status Update
+```json
+{
+  "type": "command_update",
+  "command_id": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2025-08-05T10:30:05Z",
+  "data": {
+    "status": "PROCESSING",
+    "progress": 75,
+    "message": "Validating ontology schema...",
+    "updated_at": "2025-08-05T10:30:05Z",
+    "worker_id": "worker-12345"
+  }
+}
+```
+
+#### Subscription Result
+```json
+{
+  "type": "subscription_result",
+  "action": "subscribe",
+  "command_id": "550e8400-e29b-41d4-a716-446655440000",
+  "success": true
+}
+```
+
+#### Error Message
+```json
+{
+  "type": "error",
+  "message": "Invalid JSON format"
+}
+```
+
+#### Pong Response
+```json
+{
+  "type": "pong",
+  "timestamp": "2025-08-05T10:30:00Z"
+}
+```
+
+### REST Endpoints
+
+#### WebSocket Statistics
+```http
+GET /ws/stats
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "total_connections": 15,
+    "total_users": 8,
+    "command_subscriptions": 25,
+    "connections_per_user": {
+      "user1": 2,
+      "user2": 1
+    }
+  }
+}
+```
+
+#### Test Page
+```http
+GET /ws/test
+```
+
+Returns an interactive HTML page for testing WebSocket functionality.
+
+#### Manual Update Trigger (Testing)
+```http
+POST /ws/test/trigger-update/{command_id}?status=PROCESSING&progress=50
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Test update sent to 3 clients",
+  "command_id": "550e8400-e29b-41d4-a716-446655440000",
+  "update_data": {
+    "status": "PROCESSING",
+    "progress": 50,
+    "updated_at": "2025-08-05T12:00:00Z",
+    "message": "Test update: PROCESSING"
+  }
+}
+```
+
+### JavaScript Client Example
+
+```javascript
+// Connect to specific command updates
+const socket = new WebSocket('ws://localhost:8002/ws/commands/my-command-123');
+
+socket.onopen = function() {
+    console.log('WebSocket connected');
+    
+    // Subscribe to additional commands
+    socket.send(JSON.stringify({
+        type: 'subscribe',
+        command_id: 'another-command-456'
+    }));
+};
+
+socket.onmessage = function(event) {
+    const data = JSON.parse(event.data);
+    
+    switch(data.type) {
+        case 'command_update':
+            console.log(`Command ${data.command_id} status: ${data.data.status}`);
+            console.log(`Progress: ${data.data.progress}%`);
+            updateUI(data.command_id, data.data);
+            break;
+            
+        case 'connection_established':
+            console.log('Connected:', data.message);
+            break;
+            
+        case 'error':
+            console.error('WebSocket error:', data.message);
+            break;
+    }
+};
+
+socket.onclose = function() {
+    console.log('WebSocket disconnected');
+};
+
+socket.onerror = function(error) {
+    console.error('WebSocket error:', error);
+};
+
+// Send ping to keep connection alive
+setInterval(() => {
+    if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+            type: 'ping',
+            timestamp: new Date().toISOString()
+        }));
+    }
+}, 30000); // Every 30 seconds
+```
+
+### Connection Lifecycle
+
+1. **Connect**: Client connects to WebSocket endpoint
+2. **Subscribe**: Automatically subscribe to specified command or user commands
+3. **Receive Updates**: Real-time status updates are pushed to client
+4. **Manage Subscriptions**: Add/remove command subscriptions dynamically
+5. **Heartbeat**: Ping/pong to maintain connection
+6. **Disconnect**: Clean disconnection with automatic cleanup
+
+### Error Handling
+
+- **Connection Failures**: Automatic cleanup of failed connections
+- **Invalid Messages**: Error responses for malformed JSON
+- **Subscription Errors**: Clear error messages for failed subscriptions
+- **Resource Cleanup**: Automatic cleanup when clients disconnect
+
+## Enhanced Error Handling ⭐ NEW
+
+### 408 Request Timeout
+
+For sync API operations that exceed the timeout:
+
+```json
+{
+  "detail": {
+    "message": "Operation timed out after 30 seconds", 
+    "command_id": "550e8400-e29b-41d4-a716-446655440000",
+    "hint": "You can check the status using the async API",
+    "retry_after": 5
+  }
+}
+```
+
+### Command Failure Details
+
+```json
+{
+  "command_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "FAILED",
+  "result": {
+    "error": "Database connection timeout",
+    "retry_count": 2,
+    "last_retry_at": "2025-08-05T10:30:10Z",
+    "can_retry": true
+  }
+}
+```
+
 ## Additional Resources
 
 - [OpenAPI Specification](/api/openapi.json)
 - [Postman Collection](/api/postman-collection.json)
+- [Command/Event Pattern Guide](/docs/command-event-pattern.md) ⭐ NEW
+- [Architecture Documentation](/docs/architecture/README.md)
 - [GraphQL Schema](/api/graphql-schema.graphql) (planned)
-- [WebSocket Events](/api/websocket-events.md) (planned)
+- [WebSocket Real-time Updates](#websocket-real-time-updates) ✅ COMPLETED

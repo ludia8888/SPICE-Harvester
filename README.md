@@ -29,22 +29,27 @@ SPICE HARVESTER is a sophisticated ontology management platform designed for ent
 - **Complex Type System**: Support for 10+ data types including MONEY, EMAIL, PHONE, and custom objects
 - **Advanced Relationship Management**: Bidirectional relationships with circular reference detection
 - **Automatic Type Conversion**: Property-to-Relationship automatic transformation
-- **🔥 Real AI Type Inference**: Production-ready automatic schema generation with 100% confidence rates
-- **🔥 Advanced Complex Type Detection**: Email, Date, Boolean, Decimal types with multilingual column hints
-- **🔥 Complete Real Implementation**: No mock/dummy implementations - all features production-ready
+- **Real AI Type Inference**: Production-ready automatic schema generation with 100% confidence rates
+- **Advanced Complex Type Detection**: Email, Date, Boolean, Decimal types with multilingual column hints
+- **Complete Real Implementation**: No mock/dummy implementations - all features production-ready
 - **Security-First Design**: Input sanitization, authentication, and comprehensive audit logging
 - **TerminusDB v11.x Integration**: Full support for all schema types and features including rebase-based merging
 
 ### 🚀 Recent Improvements
 
-- **Outbox Pattern Implementation**: Added reliable event publishing with PostgreSQL Outbox table and Kafka integration for asynchronous processing.
-- **Event-Driven Architecture**: OMS service now publishes events for all ontology CRUD operations (CREATE, UPDATE, DELETE).
-- **Message Relay Service**: New service that polls outbox table and publishes events to Kafka with automatic retry logic.
+- **Command/Event Sourcing Pattern**: Solved distributed transaction problem by separating Commands (intent) from Events (results).
+- **Enhanced Outbox Pattern**: Upgraded to support both Commands and Events with perfect atomicity guarantee.
+- **Ontology Worker Service**: New service that processes Commands asynchronously and performs actual TerminusDB operations.
+- **Async API Endpoints**: Added `/async` endpoints for non-blocking operations with Command tracking.
+- **Message Relay Service**: Polls outbox table and publishes both Commands and Events to Kafka with automatic retry logic.
+- **Event-Driven Architecture**: Complete separation of concerns - OMS accepts requests, Worker executes, Consumers react.
 - **Structural Refactoring**: Centralized service creation with a **Service Factory**, eliminating boilerplate code and ensuring consistency.
 - **API Response Standardization**: All API endpoints now return a standardized `ApiResponse` object (`{status, message, data}`), improving frontend integration.
-- **Test Code Optimization**: Adopted `pytest fixtures` for setup and teardown, removing redundant code in integration tests.
-- **Performance Optimization**: Implemented HTTP connection pooling and Semaphore-based concurrency controls.
-- **Enhanced Error Handling**: Standardized HTTP status codes (404, 409, 400) for clearer error reporting.
+- **Redis-based Command Status Tracking** (✅ NEW): Real-time command status monitoring with history tracking, progress updates, and result storage.
+- **Command Lifecycle Management** (✅ NEW): Complete command state transitions (PENDING → PROCESSING → COMPLETED/FAILED) with detailed history.
+- **Synchronous API Wrapper** (✅ NEW): Convenience APIs that submit Commands and wait for completion with configurable timeouts and polling intervals.
+- **WebSocket Real-time Updates** (✅ NEW): Complete WebSocket implementation with Redis Pub/Sub bridge for real-time command status broadcasting.
+- **Enhanced Error Handling** (✅ NEW): 408 Request Timeout responses with helpful hints for long-running operations.
 
 ## Architecture
 
@@ -76,11 +81,11 @@ The system follows a microservices architecture with clear separation of concern
 └─────────────────────────┘    └─────────────────────────┘
             │           │
             ▼           ▼
-┌──────────────┐  ┌──────────────┐    ┌─────────────────────┐
-│  TerminusDB  │  │  PostgreSQL  │    │   Message Relay     │
-│  Port: 6363  │  │  Port: 5433  │◄───│   (Outbox → Kafka)  │
-│ Graph DB     │  │ Outbox Table │    │                     │
-└──────────────┘  └──────────────┘    └──────────┬──────────┘
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌─────────────────────┐
+│  TerminusDB  │  │  PostgreSQL  │  │    Redis     │  │   Message Relay     │
+│  Port: 6363  │  │  Port: 5433  │  │  Port: 6379  │  │   (Outbox → Kafka)  │
+│ Graph DB     │  │ Outbox Table │  │Command Status│  │                     │
+└──────────────┘  └──────────────┘  └──────────────┘  └──────────┬──────────┘
                                                   │
                                                   ▼
                                          ┌─────────────────┐
@@ -126,11 +131,14 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your configuration
 
-# Start core services only (without Kafka/PostgreSQL)
+# Start core services only (without Kafka/PostgreSQL/Redis)
 docker-compose -f backend/docker-compose.yml up -d
 
-# Or start all services including Kafka and PostgreSQL
+# Or start all services including Kafka, PostgreSQL, and Redis
 docker-compose -f docker-compose.full.yml up -d
+
+# Or start just database services (PostgreSQL, Redis)
+docker-compose -f docker-compose.databases.yml up -d
 ```
 
 ### Verify Installation
@@ -206,6 +214,7 @@ Production-ready, automated schema generation from data.
 - **Databases**: 
     - TerminusDB (graph database and versioning engine)
     - PostgreSQL (Outbox pattern for event publishing)
+    - Redis (Command status tracking and caching)
 - **Message Broker**: Apache Kafka
 - **Async Operations**: `asyncio` and `httpx` with connection pooling.
 - **Validation**: Pydantic
@@ -217,6 +226,8 @@ Production-ready, automated schema generation from data.
     - **Adapter Pattern**: The BFF acts as an adapter between the client and backend services.
     - **Dependency Injection**: Used throughout the FastAPI application.
     - **Outbox Pattern**: Reliable event publishing with transactional guarantees.
+    - **Command/Event Sourcing**: Separation of intent (Commands) from results (Events).
+    - **Synchronous Wrapper Pattern**: Async-to-sync API adaptation with timeout handling.
 
 ## Testing
 
@@ -322,15 +333,20 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Current Development Status
 
-### ✅ **Production-Ready Components (90-95% Complete)**
-- **Backend Services**: Enterprise-grade microservices architecture
+### ✅ **Production-Ready Components (95% Complete)**
+- **Backend Services**: Enterprise-grade microservices architecture with Redis integration
 - **Git Features**: 7/7 features working (100% complete)
 - **Type Inference**: Sophisticated AI algorithms with 100% confidence rates
 - **Data Validation**: 18+ complex type validators
 - **Testing**: Comprehensive test coverage with production reports
 - **Performance**: Optimized for production load (95%+ success rate)
+- **Command/Event Architecture**: Full Command/Event Sourcing with Redis status tracking
+- **API Patterns**: Both asynchronous and synchronous API patterns implemented
+- **Message Broker**: Complete Kafka integration with automatic retry logic
 
 ### ⚠️ **In Development**
+- **Saga Pattern**: Complex workflow orchestration (planned)
+- **Event Store**: Permanent event storage with point-in-time recovery (planned)
 - **Frontend UI**: Foundational React structure exists (30-40% complete)
 - **Authentication**: Security framework present, RBAC implementation in progress
 - **Additional Connectors**: Google Sheets fully implemented, others planned

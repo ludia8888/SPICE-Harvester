@@ -1,36 +1,32 @@
 """
-Outbox Pattern implementation for reliable event publishing
-이벤트의 원자적 발행을 위한 Outbox 패턴 구현
+Outbox Pattern implementation for reliable message publishing
+메시지(Command/Event)의 원자적 발행을 위한 Outbox 패턴 구현
 """
 
 import json
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from enum import Enum
 
 import asyncpg
 from pydantic import BaseModel, Field
 
 from oms.database.postgres import PostgresDatabase
+from shared.models.commands import BaseCommand, CommandType
+from shared.models.events import BaseEvent, EventType
 
 
-class EventType(str, Enum):
-    """이벤트 유형 정의"""
-    ONTOLOGY_CLASS_CREATED = "ONTOLOGY_CLASS_CREATED"
-    ONTOLOGY_CLASS_UPDATED = "ONTOLOGY_CLASS_UPDATED"
-    ONTOLOGY_CLASS_DELETED = "ONTOLOGY_CLASS_DELETED"
-    PROPERTY_CREATED = "PROPERTY_CREATED"
-    PROPERTY_UPDATED = "PROPERTY_UPDATED"
-    PROPERTY_DELETED = "PROPERTY_DELETED"
-    RELATIONSHIP_CREATED = "RELATIONSHIP_CREATED"
-    RELATIONSHIP_UPDATED = "RELATIONSHIP_UPDATED"
-    RELATIONSHIP_DELETED = "RELATIONSHIP_DELETED"
+class MessageType(str, Enum):
+    """메시지 유형"""
+    COMMAND = "COMMAND"
+    EVENT = "EVENT"
 
 
-class OutboxEvent(BaseModel):
-    """Outbox 이벤트 모델"""
+class OutboxMessage(BaseModel):
+    """Outbox 메시지 모델 (Command 또는 Event)"""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    message_type: MessageType
     aggregate_type: str
     aggregate_id: str
     topic: str
@@ -42,104 +38,140 @@ class OutboxEvent(BaseModel):
 
 
 class OutboxService:
-    """Outbox 패턴을 사용한 이벤트 발행 서비스"""
+    """Outbox 패턴을 사용한 메시지 발행 서비스"""
     
     def __init__(self, db: PostgresDatabase):
         self.db = db
         
-    async def publish_event(
+    async def publish_command(
         self,
         connection: asyncpg.Connection,
-        event_type: EventType,
-        aggregate_type: str,
-        aggregate_id: str,
-        data: Dict[str, Any],
-        topic: str = "ontology_events",
-        additional_context: Optional[Dict[str, Any]] = None
+        command: BaseCommand,
+        topic: str = "ontology_commands"
     ) -> str:
         """
-        트랜잭션 내에서 이벤트를 outbox 테이블에 발행
+        트랜잭션 내에서 Command를 outbox 테이블에 발행
         
         Args:
             connection: 활성 트랜잭션 연결
-            event_type: 이벤트 유형
-            aggregate_type: 엔티티 유형 (OntologyClass, Property 등)
-            aggregate_id: 엔티티 ID
-            data: 이벤트 데이터
+            command: 발행할 Command 객체
             topic: Kafka 토픽 이름
-            additional_context: 추가 컨텍스트 정보
             
         Returns:
-            생성된 이벤트 ID
+            생성된 메시지 ID
         """
-        event_id = str(uuid.uuid4())
+        message_id = str(command.command_id)
         
-        # 이벤트 페이로드 구성
-        payload = {
-            "event_id": event_id,
-            "event_type": event_type,
-            "timestamp": datetime.utcnow().isoformat(),
-            "aggregate_type": aggregate_type,
-            "aggregate_id": aggregate_id,
-            "data": data,
-        }
-        
-        # 추가 컨텍스트가 있으면 포함
-        if additional_context:
-            payload.update(additional_context)
-        
-        # Outbox 테이블에 이벤트 삽입
+        # Outbox 테이블에 Command 삽입
         await connection.execute(
             """
-            INSERT INTO spice_outbox.outbox (id, aggregate_type, aggregate_id, topic, payload)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO spice_outbox.outbox 
+            (id, message_type, aggregate_type, aggregate_id, topic, payload)
+            VALUES ($1, $2, $3, $4, $5, $6)
             """,
-            event_id,
-            aggregate_type,
-            aggregate_id,
+            message_id,
+            MessageType.COMMAND,
+            command.aggregate_type,
+            command.aggregate_id,
             topic,
-            json.dumps(payload)
+            command.json()
         )
         
-        return event_id
+        return message_id
         
-    async def get_unprocessed_events(self, limit: int = 100) -> List[OutboxEvent]:
+    async def publish_event(
+        self,
+        connection: asyncpg.Connection,
+        event: BaseEvent,
+        topic: str = "ontology_events"
+    ) -> str:
         """
-        처리되지 않은 이벤트 조회
+        트랜잭션 내에서 Event를 outbox 테이블에 발행
         
         Args:
-            limit: 조회할 최대 이벤트 수
+            connection: 활성 트랜잭션 연결
+            event: 발행할 Event 객체
+            topic: Kafka 토픽 이름
             
         Returns:
-            OutboxEvent 리스트
+            생성된 메시지 ID
         """
-        rows = await self.db.fetch(
+        message_id = str(event.event_id)
+        
+        # Outbox 테이블에 Event 삽입
+        await connection.execute(
             """
-            SELECT id, aggregate_type, aggregate_id, topic, payload, 
-                   created_at, processed_at, retry_count, last_retry_at
-            FROM spice_outbox.outbox
-            WHERE processed_at IS NULL
-            ORDER BY created_at
-            LIMIT $1
+            INSERT INTO spice_outbox.outbox 
+            (id, message_type, aggregate_type, aggregate_id, topic, payload)
+            VALUES ($1, $2, $3, $4, $5, $6)
             """,
-            limit
+            message_id,
+            MessageType.EVENT,
+            event.aggregate_type,
+            event.aggregate_id,
+            topic,
+            event.json()
         )
         
-        events = []
+        return message_id
+        
+    async def get_unprocessed_messages(
+        self, 
+        message_type: Optional[MessageType] = None,
+        limit: int = 100
+    ) -> List[OutboxMessage]:
+        """
+        처리되지 않은 메시지 조회
+        
+        Args:
+            message_type: 조회할 메시지 유형 (None이면 모든 유형)
+            limit: 조회할 최대 메시지 수
+            
+        Returns:
+            OutboxMessage 리스트
+        """
+        if message_type:
+            rows = await self.db.fetch(
+                """
+                SELECT id, message_type, aggregate_type, aggregate_id, topic, 
+                       payload, created_at, processed_at, retry_count, last_retry_at
+                FROM spice_outbox.outbox
+                WHERE processed_at IS NULL AND message_type = $1
+                ORDER BY created_at
+                LIMIT $2
+                """,
+                message_type,
+                limit
+            )
+        else:
+            rows = await self.db.fetch(
+                """
+                SELECT id, message_type, aggregate_type, aggregate_id, topic, 
+                       payload, created_at, processed_at, retry_count, last_retry_at
+                FROM spice_outbox.outbox
+                WHERE processed_at IS NULL
+                ORDER BY created_at
+                LIMIT $1
+                """,
+                limit
+            )
+        
+        messages = []
         for row in rows:
-            events.append(OutboxEvent(
+            messages.append(OutboxMessage(
                 id=str(row['id']),
+                message_type=row['message_type'],
                 aggregate_type=row['aggregate_type'],
                 aggregate_id=row['aggregate_id'],
                 topic=row['topic'],
-                payload=json.loads(row['payload']),
+                payload=json.loads(row['payload']) if isinstance(row['payload'], str) else row['payload'],
                 created_at=row['created_at'],
                 processed_at=row['processed_at'],
                 retry_count=row['retry_count'],
                 last_retry_at=row['last_retry_at']
             ))
             
-        return events
+        return messages
         
     async def mark_as_processed(self, event_id: str) -> None:
         """

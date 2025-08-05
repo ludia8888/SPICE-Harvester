@@ -33,6 +33,8 @@
 - **🔥 Complete Real Implementation**: No mock/dummy implementations - all features production-ready
 - **Security-First Design**: Input sanitization, authentication, and comprehensive audit logging
 - **TerminusDB v11.x Integration**: Full support for all schema types and features including rebase-based merging
+- **Command/Event Sourcing Pattern**: Complete implementation solving distributed transaction problems with Redis-based command tracking
+- **WebSocket Real-time Updates**: Production-ready real-time command status broadcasting with Redis Pub/Sub integration
 
 ## Architectural Principles
 
@@ -478,6 +480,14 @@ services:
 - **18+ Complex Type Validators**: EMAIL, PHONE, URL, MONEY, COORDINATE, ADDRESS, etc.
 - **100% Confidence Rates**: Production-validated accuracy
 
+#### Command/Event Sourcing Architecture - Complete Implementation
+- **Distributed Transaction Solution**: Commands stored atomically in PostgreSQL, executed asynchronously by workers
+- **Redis Command Status Tracking**: Real-time status monitoring with TTL, progress tracking, and history
+- **Synchronous API Wrapper**: Async-to-sync adaptation with configurable timeouts (1-300s) and polling
+- **WebSocket Real-time Updates**: Complete WebSocket service with Redis Pub/Sub bridge for live status updates
+- **Message Relay Service**: Reliable outbox pattern with Kafka integration and automatic retry logic
+- **Worker Service Pattern**: Dedicated ontology worker for TerminusDB operations with event publishing
+
 #### Data Validation & Architecture Quality
 - **18+ Complex Type Validators**: Comprehensive validation in `shared/validators/`
 - **SOLID Principles**: Dependency injection, single responsibility, modular design
@@ -513,8 +523,8 @@ services:
 
 #### Application Features
 1. **GraphQL API Support**: Alternative query interface for complex data fetching
-2. **Real-time Subscriptions**: WebSocket-based live updates
-3. **Advanced Caching Layer**: Redis/Memcached for performance optimization
+2. **GraphQL API Support**: Alternative query interface for complex data fetching
+3. **Advanced Caching Layer**: Extended Redis usage for performance optimization beyond command status
 4. **Machine Learning Integration**: Enhanced type inference and pattern recognition
 
 #### User Experience
@@ -537,12 +547,13 @@ services:
 
 #### Phase 3 (6-12 months)
 - **Advanced Architecture**: API Gateway, message queues, caching
-- **Real-time Features**: WebSocket integration, live collaboration
+- **Enhanced Real-time Features**: Advanced WebSocket features, live collaboration capabilities
 - **Performance Optimization**: Multi-region deployment, advanced scaling
 
 #### Phase 4 (12+ months)
-- **CQRS Implementation**: Command Query Responsibility Segregation
-- **Event-Driven Architecture**: Comprehensive event sourcing
+- **Enhanced CQRS**: Advanced Command Query Responsibility Segregation patterns
+- **Event Store Implementation**: Comprehensive event sourcing with point-in-time recovery
+- **Saga Pattern**: Complex workflow orchestration with compensation transactions
 - **Microservices Mesh**: Service mesh integration for advanced management
 
 ---
@@ -555,5 +566,5 @@ The architecture provides a solid foundation for scaling to enterprise requireme
 
 ---
 
-*Last updated: 2025-07-26*
-*Document version: 3.0 (Unified)*
+*Last updated: 2025-08-05*
+*Document version: 4.0 (Command/Event Sourcing & WebSocket Complete)*

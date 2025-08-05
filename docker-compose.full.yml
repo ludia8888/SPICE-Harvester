@@ -1,7 +1,15 @@
 version: '3.8'
 
-# 전체 서비스 통합 구성
+# 전체 서비스 통합 구성 - Command/Event Sourcing + Redis + WebSocket 통합
+# 포함 서비스: TerminusDB, PostgreSQL, Redis, Kafka, OMS, BFF, Funnel, Worker, Message Relay
+# WebSocket 실시간 업데이트 완전 지원
 # 실행: docker-compose -f docker-compose.full.yml up -d
+
+# 서비스 실행 순서:
+# 1. 데이터베이스 (TerminusDB, PostgreSQL, Redis)
+# 2. 메시지 브로커 (Zookeeper, Kafka)
+# 3. 핵심 서비스 (OMS, BFF, Funnel) - WebSocket 자동 시작
+# 4. 백그라운드 서비스 (Message Relay, Ontology Worker)
 
 services:
   # Core services
@@ -36,11 +44,49 @@ services:
       - postgres
       - kafka
       
+  ontology-worker:
+    extends:
+      file: backend/docker-compose.yml
+      service: ontology-worker
+    depends_on:
+      - terminusdb
+      - kafka
+      - message-relay
+      
+  instance-worker:
+    extends:
+      file: backend/docker-compose.yml
+      service: instance-worker
+    depends_on:
+      - terminusdb
+      - kafka
+      - message-relay
+      
+  projection-worker:
+    extends:
+      file: backend/docker-compose.yml
+      service: projection-worker
+    depends_on:
+      - elasticsearch
+      - redis
+      - kafka
+      - message-relay
+      
   # Database services
   postgres:
     extends:
       file: docker-compose.databases.yml
       service: postgres
+      
+  redis:
+    extends:
+      file: docker-compose.databases.yml
+      service: redis
+      
+  elasticsearch:
+    extends:
+      file: docker-compose.databases.yml
+      service: elasticsearch
       
   # Kafka services
   zookeeper:
@@ -62,6 +108,8 @@ volumes:
   terminusdb_data:
   bff_data:
   postgres-data:
+  redis-data:
+  elasticsearch-data:
   zookeeper-data:
   zookeeper-logs:
   kafka-data:
