@@ -12,7 +12,10 @@ This document contains architecture diagrams for the SPICE HARVESTER project. Th
 - **Synchronous API Wrapper**: Convenience APIs with configurable timeouts
 - **Enhanced Outbox Pattern**: Support for both Commands and Events
 - **Kafka Message Broker**: Reliable message delivery with retry logic
-- **Ontology Worker Service**: Asynchronous command processing
+- **Multi-Worker Architecture**: Ontology, Instance, and Projection workers for distributed processing
+- **CQRS with Elasticsearch**: Search-optimized projections with real-time indexing
+- **S3 Storage Integration**: Instance event storage with MinIO for audit and recovery
+- **Fault Tolerance**: DLQ pattern with retry logic and circuit breaker patterns
 
 ## Class Diagrams
 

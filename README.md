@@ -50,6 +50,10 @@ SPICE HARVESTER is a sophisticated ontology management platform designed for ent
 - **Synchronous API Wrapper** (✅ NEW): Convenience APIs that submit Commands and wait for completion with configurable timeouts and polling intervals.
 - **WebSocket Real-time Updates** (✅ NEW): Complete WebSocket implementation with Redis Pub/Sub bridge for real-time command status broadcasting.
 - **Enhanced Error Handling** (✅ NEW): 408 Request Timeout responses with helpful hints for long-running operations.
+- **Instance CQRS Architecture** (✅ NEW): Complete Instance Command processing with S3 storage and event sourcing.
+- **Projection Worker Service** (✅ NEW): Real-time Elasticsearch indexing from domain events with fault tolerance and DLQ pattern.
+- **Elasticsearch Integration** (✅ NEW): Full-featured async ElasticsearchService with search optimization and Redis caching.
+- **Multi-Worker Architecture** (✅ NEW): Ontology Worker, Instance Worker, and Projection Worker for distributed processing.
 
 ## Architecture
 
@@ -96,9 +100,16 @@ The system follows a microservices architecture with clear separation of concern
                     ┌─────────────────────────────┼─────────────────────────────┐
                     ▼                             ▼                             ▼
           ┌──────────────────┐         ┌──────────────────┐         ┌──────────────────┐
-          │ Import Service   │         │ Search Service   │         │ Analytics Service │
-          │ (Event Consumer) │         │ (Event Consumer) │         │ (Event Consumer) │
-          └──────────────────┘         └──────────────────┘         └──────────────────┘
+          │ Ontology Worker  │         │ Instance Worker  │         │ Projection Worker │
+          │  (Commands)      │         │ (Commands + S3)  │         │ (Events → ES)    │
+          └──────────────────┘         └──────────────────┘         └─────────┬────────┘
+                                                                               │
+                                                                               ▼
+                                                                      ┌─────────────────┐
+                                                                      │  Elasticsearch  │
+                                                                      │   Port: 9200    │
+                                                                      │  Search & Index │
+                                                                      └─────────────────┘
 ```
 
 For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -215,6 +226,8 @@ Production-ready, automated schema generation from data.
     - TerminusDB (graph database and versioning engine)
     - PostgreSQL (Outbox pattern for event publishing)
     - Redis (Command status tracking and caching)
+    - Elasticsearch (search engine and analytics)
+    - MinIO (S3-compatible object storage)
 - **Message Broker**: Apache Kafka
 - **Async Operations**: `asyncio` and `httpx` with connection pooling.
 - **Validation**: Pydantic
@@ -227,7 +240,10 @@ Production-ready, automated schema generation from data.
     - **Dependency Injection**: Used throughout the FastAPI application.
     - **Outbox Pattern**: Reliable event publishing with transactional guarantees.
     - **Command/Event Sourcing**: Separation of intent (Commands) from results (Events).
+    - **CQRS Pattern**: Command Query Responsibility Segregation with separate read/write models.
     - **Synchronous Wrapper Pattern**: Async-to-sync API adaptation with timeout handling.
+    - **Circuit Breaker Pattern**: Fault tolerance with retry logic and Dead Letter Queue (DLQ).
+    - **Saga Pattern**: Distributed transaction management across multiple services.
 
 ## Testing
 

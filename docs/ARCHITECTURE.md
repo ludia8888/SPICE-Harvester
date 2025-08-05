@@ -188,7 +188,82 @@ funnel/
     └── test_type_inference.py
 ```
 
-### 4. TerminusDB
+### 4. Message Relay Service
+
+- **Primary Responsibility**: Event sourcing implementation using Outbox pattern for guaranteed event delivery
+
+#### Key Functions
+- **Outbox Pattern**: Ensures atomic operations between database writes and event publishing
+- **Event Publishing**: Publishes domain events to Kafka topics for downstream processing
+- **Reliable Delivery**: Guarantees event delivery with PostgreSQL transaction consistency
+- **Command Status Tracking**: Updates Redis with real-time command processing status
+
+#### Component Structure
+```
+message_relay/
+├── main.py                # Service entry point
+├── services/
+│   ├── outbox_processor.py # Outbox pattern implementation
+│   └── event_publisher.py  # Kafka event publishing
+└── requirements.txt
+```
+
+### 5. Ontology Worker Service
+
+- **Primary Responsibility**: Asynchronous processing of ontology-related commands
+
+#### Key Functions
+- **Command Processing**: Processes ontology commands from Kafka queue
+- **TerminusDB Integration**: Direct integration with TerminusDB for ontology operations
+- **Event Generation**: Publishes domain events after successful operations
+- **Error Handling**: Comprehensive retry logic and failure handling
+
+#### Component Structure
+```
+ontology_worker/
+├── main.py                # Worker service implementation
+└── requirements.txt
+```
+
+### 6. Instance Worker Service
+
+- **Primary Responsibility**: Asynchronous processing of instance-related commands with S3 storage
+
+#### Key Functions
+- **Instance Management**: Creates, updates, and deletes instance data
+- **S3 Integration**: Stores instance events in MinIO/S3 for audit and recovery
+- **Event Sourcing**: Maintains complete event history for each instance
+- **Checksum Validation**: Ensures data integrity with SHA256 checksums
+
+#### Component Structure
+```
+instance_worker/
+├── main.py                # Worker service implementation
+└── requirements.txt
+```
+
+### 7. Projection Worker Service
+
+- **Primary Responsibility**: Real-time Elasticsearch indexing from domain events
+
+#### Key Functions
+- **Event Processing**: Consumes instance and ontology events from Kafka
+- **Search Optimization**: Creates search-optimized projections in Elasticsearch
+- **Redis Caching**: Caches ontology metadata for denormalized indexing
+- **Fault Tolerance**: Implements DLQ pattern with 5-retry logic
+- **Idempotent Processing**: Uses event IDs as document IDs for guaranteed idempotency
+
+#### Component Structure
+```
+projection_worker/
+├── main.py                # Projection worker implementation
+├── mappings/              # Elasticsearch index mappings
+│   ├── instances_mapping.json
+│   └── ontologies_mapping.json
+└── requirements.txt
+```
+
+### 8. TerminusDB
 
 - **Port**: `6364`
 - **Primary Responsibility**: Underlying data store and versioning engine
@@ -201,7 +276,7 @@ funnel/
 - **NDJSON API**: Advanced response parsing for complex git operations
 - **Schema-First Approach**: Enforces data consistency and validation at database level
 
-### 5. Shared Components
+### 9. Shared Components
 
 **Purpose**: Common utilities and models shared across services
 
@@ -258,7 +333,15 @@ SPICE HARVESTER/
 | OMS | 8000 | Core ontology management (internal ID-based) |
 | BFF | 8002 | Frontend API gateway (user-friendly labels) |
 | Funnel | 8004 | Type inference and schema suggestion |
+| Message Relay | - | Event sourcing with Outbox pattern |
+| Ontology Worker | - | Async ontology command processing |
+| Instance Worker | - | Async instance command processing with S3 storage |
+| Projection Worker | - | Real-time Elasticsearch indexing from events |
 | TerminusDB | 6364 | Graph database |
+| PostgreSQL | 5433 | Outbox pattern & command status |
+| Redis | 6379 | Command status caching & pub/sub |
+| Kafka | 29092 | Event streaming & message broker |
+| Elasticsearch | 9200 | Search & analytics engine |
 
 ## Data Flow & Communication
 
@@ -282,7 +365,43 @@ sequenceDiagram
     BFF-->>Client: Forward response
 ```
 
-### 2. Complex Type Processing Flow
+### 2. Event Sourcing & CQRS Architecture Flow
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant BFF/OMS
+    participant PostgreSQL
+    participant MessageRelay
+    participant Kafka
+    participant Worker
+    participant Redis
+    participant ES as Elasticsearch
+    
+    Client->>BFF/OMS: Command Request
+    BFF/OMS->>BFF/OMS: Validate Command
+    BFF/OMS->>PostgreSQL: Store Command + Outbox Event
+    PostgreSQL-->>BFF/OMS: Transaction Success
+    BFF/OMS->>Redis: Update Command Status (PROCESSING)
+    BFF/OMS-->>Client: Command Accepted (202)
+    
+    MessageRelay->>PostgreSQL: Poll Outbox Events
+    MessageRelay->>Kafka: Publish Event
+    MessageRelay->>PostgreSQL: Mark Event Published
+    
+    Worker->>Kafka: Consume Event
+    Worker->>Worker: Process Command
+    Worker->>Worker: Generate Domain Event
+    Worker->>Kafka: Publish Domain Event
+    Worker->>Redis: Update Status (COMPLETED/FAILED)
+    
+    ProjectionWorker->>Kafka: Consume Domain Event
+    ProjectionWorker->>Redis: Get Cached Metadata
+    ProjectionWorker->>ES: Index/Update Document
+    ProjectionWorker->>Redis: Cache Updated Metadata
+```
+
+### 3. Complex Type Processing Flow
 
 ```mermaid
 graph TD
@@ -297,7 +416,7 @@ graph TD
     H --> I[Processed Data]
 ```
 
-### 3. Type Inference Flow (Funnel Service)
+### 4. Type Inference Flow (Funnel Service)
 
 ```mermaid
 sequenceDiagram
@@ -326,17 +445,36 @@ sequenceDiagram
 - **Testing**: `pytest`, `pytest-asyncio` with fixtures
 - **Type Inference**: pandas, numpy for complex type detection
 
-### Database
+### Database & Storage
 - **Primary Database**: TerminusDB (Graph database)
-- **Features**: 
   - ACID compliance
   - Version management
   - JSON-LD support
   - WOQL query language
+- **Event Store**: PostgreSQL with Outbox pattern
+  - Command tracking and status
+  - Guaranteed event delivery
+  - ACID transaction support
+- **Cache & Session Store**: Redis
+  - Command status caching
+  - Real-time pub/sub messaging
+  - Metadata caching for projections
+- **Search Engine**: Elasticsearch
+  - Full-text search capabilities
+  - Real-time indexing from events
+  - Aggregations and analytics
+- **Object Storage**: MinIO (S3-compatible)
+  - Instance event storage
+  - File uploads and attachments
+  - Data backup and archival
 
 ### Infrastructure
 - **Containerization**: Docker
 - **Orchestration**: Docker Compose
+- **Message Broker**: Apache Kafka
+  - Event streaming and pub/sub
+  - High-throughput event processing
+  - Distributed event sourcing
 - **API Documentation**: OpenAPI/Swagger
 - **Monitoring**: Health check endpoints
 - **Security**: HTTPS support, automatic CORS configuration
@@ -346,6 +484,12 @@ sequenceDiagram
 - **Service Factory**: Centralized service instantiation reducing boilerplate
 - **Adapter Pattern**: BFF acts as adapter between client and backend services
 - **Dependency Injection**: Used throughout FastAPI applications
+- **Event Sourcing**: Complete event history with domain events
+- **CQRS (Command Query Responsibility Segregation)**: Separate read/write models
+- **Outbox Pattern**: Guaranteed event delivery with transactional consistency
+- **Saga Pattern**: Distributed transaction management across services
+- **Circuit Breaker**: Fault tolerance with retry logic and DLQ
+- **Idempotent Processing**: Event IDs as document IDs for guaranteed idempotency
 
 ## Database Architecture
 

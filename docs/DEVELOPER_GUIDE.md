@@ -620,7 +620,162 @@ type_mapping = {
 }
 ```
 
-### 2. Adding a New API Endpoint
+### 2. Adding a New Worker Service
+
+#### Step 1: Create Worker Directory Structure
+
+```bash
+# Create new worker directory
+mkdir backend/my_worker
+cd backend/my_worker
+
+# Create required files
+touch __init__.py
+touch main.py
+touch requirements.txt
+touch Dockerfile
+```
+
+#### Step 2: Implement Worker Service
+
+```python
+# backend/my_worker/main.py
+import asyncio
+import json
+import logging
+from typing import Optional
+from confluent_kafka import Consumer, Producer
+
+from shared.config.service_config import ServiceConfig
+from shared.services import RedisService, create_redis_service
+
+logger = logging.getLogger(__name__)
+
+class MyWorker:
+    def __init__(self):
+        self.running = False
+        self.kafka_servers = ServiceConfig.get_kafka_bootstrap_servers()
+        self.consumer: Optional[Consumer] = None
+        self.producer: Optional[Producer] = None
+        self.redis_service: Optional[RedisService] = None
+        
+    async def initialize(self):
+        """Initialize worker connections"""
+        # Kafka Consumer
+        self.consumer = Consumer({
+            'bootstrap.servers': self.kafka_servers,
+            'group.id': 'my-worker-group',
+            'auto.offset.reset': 'earliest',
+            'enable.auto.commit': False,
+        })
+        
+        # Kafka Producer
+        self.producer = Producer({
+            'bootstrap.servers': self.kafka_servers,
+            'client.id': 'my-worker',
+        })
+        
+        # Redis connection
+        self.redis_service = create_redis_service()
+        await self.redis_service.connect()
+        
+        # Subscribe to topics
+        self.consumer.subscribe(['my_events'])
+        
+    async def run(self):
+        """Main worker loop"""
+        self.running = True
+        
+        while self.running:
+            msg = self.consumer.poll(timeout=1.0)
+            if msg is None:
+                continue
+                
+            try:
+                await self._process_event(msg)
+                self.consumer.commit(msg)
+            except Exception as e:
+                logger.error(f"Failed to process event: {e}")
+                
+    async def _process_event(self, msg):
+        """Process individual event"""
+        event_data = json.loads(msg.value().decode('utf-8'))
+        # Add your processing logic here
+        
+async def main():
+    worker = MyWorker()
+    await worker.initialize()
+    await worker.run()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+#### Step 3: Add Dependencies
+
+```txt
+# backend/my_worker/requirements.txt
+confluent-kafka==2.3.0
+redis[hiredis]==5.0.1
+
+# Shared dependencies
+pydantic==2.5.0
+python-dotenv==1.0.0
+```
+
+#### Step 4: Create Dockerfile
+
+```dockerfile
+# backend/my_worker/Dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y gcc g++ && rm -rf /var/lib/apt/lists/*
+
+# Copy shared modules
+COPY shared /app/shared
+COPY oms /app/oms
+
+# Install shared package
+RUN pip install -e /app/shared
+
+# Copy worker requirements and install
+COPY my_worker/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy worker code
+COPY my_worker /app/my_worker
+
+ENV PYTHONPATH=/app:$PYTHONPATH
+
+CMD ["python", "-m", "my_worker.main"]
+```
+
+#### Step 5: Add to Docker Compose
+
+```yaml
+# backend/docker-compose.yml
+  my-worker:
+    build:
+      context: .
+      dockerfile: ./my_worker/Dockerfile
+    container_name: spice_my_worker
+    environment:
+      - KAFKA_HOST=${KAFKA_HOST:-kafka}
+      - KAFKA_PORT=${KAFKA_PORT:-29092}
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      - message-relay
+    networks:
+      - spice_network
+    restart: unless-stopped
+```
+
+### 3. Adding a New API Endpoint
 
 #### Step 1: Define Request/Response Models
 
