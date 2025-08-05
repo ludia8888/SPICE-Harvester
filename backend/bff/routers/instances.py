@@ -265,12 +265,14 @@ async def get_instance(
     class_id: str,
     instance_id: str,
     elasticsearch_service: ElasticsearchService = Depends(get_elasticsearch_service),
+    oms_client: OMSClient = Depends(get_oms_client),  # 의존성 정상 주입
 ) -> Dict[str, Any]:
     """
-    개별 인스턴스 조회 (Elasticsearch 사용)
+    개별 인스턴스 조회 (Elasticsearch 우선, TerminusDB fallback)
     
-    Event Sourcing + CQRS 패턴에 따라 Elasticsearch에서 
-    미리 계산된 최신 상태를 조회합니다.
+    Event Sourcing + CQRS 패턴에 따라:
+    1. Elasticsearch에서 미리 계산된 최신 상태 조회
+    2. 없으면 TerminusDB에서 직접 조회 (Projection 지연 대응)
     """
     try:
         # 입력 데이터 보안 검증
@@ -278,10 +280,9 @@ async def get_instance(
         class_id = validate_class_id(class_id)
         instance_id = validate_instance_id(instance_id)
         
-        # Elasticsearch에서 인스턴스 조회
+        # 1. Elasticsearch (읽기 모델) 우선 조회
         index_name = f"{db_name.lower()}_instances"
         
-        # 특정 인스턴스 ID로 문서 조회
         query = {
             "bool": {
                 "must": [
@@ -293,23 +294,55 @@ async def get_instance(
         
         logger.info(f"Querying instance {instance_id} of class {class_id} from Elasticsearch")
         
-        result = await elasticsearch_service.search(
-            index=index_name,
-            query=query,
-            size=1
-        )
+        try:
+            result = await elasticsearch_service.search(
+                index=index_name,
+                query=query,
+                size=1
+            )
+            
+            if result and result.get("hits", {}).get("total", {}).get("value", 0) > 0:
+                hits = result["hits"]["hits"]
+                if hits:
+                    instance_data = hits[0]["_source"]
+                    return {
+                        "status": "success",
+                        "data": instance_data,
+                        "source": "elasticsearch"
+                    }
+            
+            # ES에 문서가 없는 경우 - TerminusDB fallback
+            logger.warning(f"Instance {instance_id} not found in Elasticsearch. Falling back to TerminusDB.")
+            
+        except Exception as es_error:
+            # ES 서비스 자체 장애 - TerminusDB fallback
+            logger.error(f"Elasticsearch service error: {es_error}. Falling back to TerminusDB.")
         
-        # 결과 처리
-        if result and result.get("hits", {}).get("total", {}).get("value", 0) > 0:
-            hits = result["hits"]["hits"]
-            if hits:
-                instance_data = hits[0]["_source"]
-                return {
-                    "status": "success",
-                    "data": instance_data
-                }
+        # 2. Fallback: TerminusDB에서 직접 조회
+        query = f"""
+        SELECT *
+        WHERE {{
+            <{instance_id}> a <{class_id}> .
+            <{instance_id}> ?property ?value .
+        }}
+        """
         
-        # 인스턴스를 찾을 수 없는 경우
+        result = await oms_client.query_ontologies(db_name, query)
+        
+        if result and 'results' in result and len(result['results']) > 0:
+            instance_data = {"id": instance_id, "type": class_id}
+            for row in result['results']:
+                property_name = row.get('property', '').split('/')[-1]
+                value = row.get('value', '')
+                instance_data[property_name] = value
+            
+            return {
+                "status": "success",
+                "data": instance_data,
+                "source": "terminus_fallback"
+            }
+        
+        # 두 곳 모두에서 찾을 수 없는 경우
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"인스턴스 '{instance_id}'를 찾을 수 없습니다"
@@ -318,45 +351,9 @@ async def get_instance(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get instance from Elasticsearch: {e}")
-        
-        # Elasticsearch 장애 시 TerminusDB로 fallback
-        try:
-            logger.info("Falling back to TerminusDB query")
-            oms_client = get_oms_client()
-            
-            # TerminusDB에서 직접 조회
-            query = f"""
-            SELECT *
-            WHERE {{
-                <{instance_id}> a <{class_id}> .
-                <{instance_id}> ?property ?value .
-            }}
-            """
-            
-            result = await oms_client.query_ontologies(db_name, query)
-            
-            if result and 'results' in result:
-                instance_data = {"id": instance_id, "type": class_id}
-                for row in result['results']:
-                    property_name = row.get('property', '').split('/')[-1]
-                    value = row.get('value', '')
-                    instance_data[property_name] = value
-                
-                return {
-                    "status": "success",
-                    "data": instance_data,
-                    "source": "terminus_fallback"
-                }
-            
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"인스턴스 '{instance_id}'를 찾을 수 없습니다"
-            )
-            
-        except Exception as fallback_error:
-            logger.error(f"Fallback to TerminusDB also failed: {fallback_error}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"인스턴스 조회 실패: {str(e)}"
-            )
+        # 예기치 못한 에러 처리
+        logger.error(f"Failed to get instance {instance_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"인스턴스 조회 실패: {str(e)}"
+        )
