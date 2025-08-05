@@ -13,8 +13,9 @@ from bff.dependencies import (
     get_elasticsearch_service,
 )
 from bff.services.oms_client import OMSClient
-from shared.security.input_sanitizer import validate_db_name, validate_class_id, validate_instance_id
+from shared.security.input_sanitizer import validate_db_name, validate_class_id, validate_instance_id, sanitize_es_query
 from shared.services import ElasticsearchService
+from elasticsearch.exceptions import ConnectionError as ESConnectionError, NotFoundError, RequestError
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +43,12 @@ async def get_class_instances(
         db_name = validate_db_name(db_name)
         class_id = validate_class_id(class_id)
         
-        # 검색어 보안 검증
-        if search and len(search) > 100:
-            search = search[:100]
+        # 검색어 보안 검증 및 정제
+        sanitized_search = None
+        if search:
+            if len(search) > 100:
+                search = search[:100]
+            sanitized_search = sanitize_es_query(search)
         
         # Elasticsearch에서 인스턴스 목록 조회
         index_name = f"{db_name.lower()}_instances"
@@ -58,34 +62,50 @@ async def get_class_instances(
             }
         }
         
-        # 검색어가 있는 경우 추가
-        if search:
+        # 정제된 검색어가 있는 경우 추가
+        if sanitized_search:
             query["bool"]["must"].append({
-                "multi_match": {
-                    "query": search,
+                "simple_query_string": {
+                    "query": sanitized_search,
                     "fields": ["*"],
-                    "type": "phrase_prefix"
+                    "default_operator": "AND",
+                    "analyze_wildcard": False,
+                    "allow_leading_wildcard": False
                 }
             })
         
         logger.info(f"Querying instances for class {class_id} from Elasticsearch")
         
+        # Elasticsearch 조회 시도
+        es_result = None
+        es_error = None
         try:
-            result = await elasticsearch_service.search(
+            es_result = await elasticsearch_service.search(
                 index=index_name,
                 query=query,
                 size=limit,
                 from_=offset,
                 sort=[{"event_timestamp": {"order": "desc"}}]
             )
-            
+        except (ESConnectionError, ConnectionRefusedError, TimeoutError) as e:
+            logger.warning(f"Elasticsearch connection failed, falling back to TerminusDB: {e}")
+            es_error = "connection"
+        except RequestError as e:
+            logger.error(f"Elasticsearch query error: {e}")
+            es_error = "query"
+        except Exception as e:
+            logger.error(f"Unexpected Elasticsearch error, falling back to TerminusDB: {e}")
+            es_error = "unknown"
+        
+        # Elasticsearch 결과 처리
+        if es_result and not es_error:
             # 결과 처리
             instances = []
             total = 0
             
-            if result:
-                total = result.get("hits", {}).get("total", {}).get("value", 0)
-                hits = result.get("hits", {}).get("hits", [])
+            if es_result:
+                total = es_result.get("hits", {}).get("total", {}).get("value", 0)
+                hits = es_result.get("hits", {}).get("hits", [])
                 
                 for hit in hits:
                     instance_data = hit["_source"]
@@ -100,9 +120,9 @@ async def get_class_instances(
                 "instances": instances,
                 "source": "elasticsearch"
             }
-            
-        except Exception as es_error:
-            logger.error(f"Elasticsearch query failed: {es_error}")
+        
+        # Fallback to TerminusDB
+        if es_error:
             logger.info("Falling back to TerminusDB query")
             
             # Elasticsearch 장애 시 TerminusDB로 fallback
@@ -294,6 +314,8 @@ async def get_instance(
         
         logger.info(f"Querying instance {instance_id} of class {class_id} from Elasticsearch")
         
+        # Elasticsearch 조회 시도
+        es_found = False
         try:
             result = await elasticsearch_service.search(
                 index=index_name,
@@ -314,9 +336,15 @@ async def get_instance(
             # ES에 문서가 없는 경우 - TerminusDB fallback
             logger.warning(f"Instance {instance_id} not found in Elasticsearch. Falling back to TerminusDB.")
             
-        except Exception as es_error:
-            # ES 서비스 자체 장애 - TerminusDB fallback
-            logger.error(f"Elasticsearch service error: {es_error}. Falling back to TerminusDB.")
+        except (ESConnectionError, ConnectionRefusedError, TimeoutError) as e:
+            # ES 연결 장애 - TerminusDB fallback
+            logger.warning(f"Elasticsearch connection error: {e}. Falling back to TerminusDB.")
+        except RequestError as e:
+            # ES 쿼리 에러 (인덱스가 없는 경우 등)
+            logger.warning(f"Elasticsearch request error: {e}. Falling back to TerminusDB.")
+        except Exception as e:
+            # 예상치 못한 ES 에러
+            logger.error(f"Unexpected Elasticsearch error: {e}. Falling back to TerminusDB.")
         
         # 2. Fallback: TerminusDB에서 직접 조회
         query = f"""

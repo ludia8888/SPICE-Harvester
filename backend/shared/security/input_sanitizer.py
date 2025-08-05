@@ -493,3 +493,36 @@ def validate_branch_name(branch_name: str) -> str:
 def validate_instance_id(instance_id: str) -> str:
     """인스턴스 ID 검증 함수"""
     return input_sanitizer.validate_instance_id(instance_id)
+
+
+def sanitize_es_query(query: str) -> str:
+    """
+    Elasticsearch 쿼리 문자열 정제
+    Lucene 쿼리 구문에 영향을 줄 수 있는 특수 문자 이스케이프
+    
+    Args:
+        query: 사용자가 입력한 검색 쿼리
+        
+    Returns:
+        안전하게 정제된 쿼리 문자열
+    """
+    # Lucene 특수 문자: + - = && || > < ! ( ) { } [ ] ^ " ~ * ? : \ /
+    # 참고: https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-query-string-query.html#_reserved_characters
+    special_chars = r'+-=&|><!()\{\}[\]^"~*?:\/'
+    
+    # 각 특수 문자 앞에 백슬래시 추가
+    for char in special_chars:
+        query = query.replace(char, f'\\{char}')
+    
+    # 와일드카드로만 이루어진 쿼리 방지 (DoS 공격 방지)
+    if query.strip() in ['*', '?', '**', '??', '***']:
+        return ''
+    
+    # 쿼리 시작 부분의 와일드카드 제거 (성능 문제 방지)
+    query = re.sub(r'^[*?]+', '', query)
+    
+    # 연속된 와일드카드 제한
+    query = re.sub(r'\*{2,}', '*', query)
+    query = re.sub(r'\?{2,}', '?', query)
+    
+    return query.strip()

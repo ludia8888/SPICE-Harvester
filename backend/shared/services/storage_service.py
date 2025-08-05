@@ -13,6 +13,7 @@ from botocore.client import BaseClient
 from botocore.exceptions import ClientError
 
 from backend.shared.config.service_config import ServiceConfig
+from shared.models.commands import CommandType
 
 
 class StorageService:
@@ -359,7 +360,7 @@ class StorageService:
                 })
                 
                 # Command 유형에 따라 상태 업데이트
-                if command_type == 'CREATE_INSTANCE':
+                if command_type == CommandType.CREATE_INSTANCE.value:
                     # 인스턴스 생성
                     instance_state = {
                         'instance_id': command_data.get('instance_id'),
@@ -374,7 +375,7 @@ class StorageService:
                         }
                     }
                     
-                elif command_type == 'UPDATE_INSTANCE' and instance_state:
+                elif command_type == CommandType.UPDATE_INSTANCE.value and instance_state:
                     # 인스턴스 업데이트
                     updates = command_data.get('payload', {})
                     # 메타데이터는 보존하면서 데이터 업데이트
@@ -385,7 +386,7 @@ class StorageService:
                     instance_state['_metadata']['updated_by'] = command_data.get('created_by')
                     instance_state['_metadata']['version'] = metadata.get('version', 1) + 1
                     
-                elif command_type == 'DELETE_INSTANCE':
+                elif command_type == CommandType.DELETE_INSTANCE.value:
                     # 인스턴스 삭제 표시
                     if instance_state:
                         instance_state['_metadata']['deleted'] = True
