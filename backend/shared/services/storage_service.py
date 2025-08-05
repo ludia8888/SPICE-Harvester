@@ -12,12 +12,33 @@ import boto3
 from botocore.client import BaseClient
 from botocore.exceptions import ClientError
 
-from backend.shared.config.service_config import ServiceConfig
+from shared.config.service_config import ServiceConfig
 from shared.models.commands import CommandType
 
 
 class StorageService:
-    """S3/MinIO 스토리지 서비스"""
+    """
+    S3/MinIO 스토리지 서비스 - Event Sourcing 지원
+    
+    Event Sourcing 원칙에 따른 인스턴스 삭제 정책:
+    
+    🔥 중요: 삭제는 상태의 변화일 뿐, 정보의 소멸이 아닙니다.
+    
+    삭제 처리 원칙:
+    1. 모든 Command 로그는 영구 보존됩니다 (감사 추적 목적)
+    2. DELETE_INSTANCE Command도 다른 Command와 동일하게 S3에 저장됩니다
+    3. 삭제된 인스턴스도 replay를 통해 완전한 상태 조회가 가능합니다
+    4. 삭제 정보는 _metadata.deleted 플래그와 상세 정보로 기록됩니다
+    
+    API 레벨 처리:
+    - replay_instance_state()는 삭제된 인스턴스도 전체 상태를 반환합니다
+    - 상위 API에서 is_instance_deleted()로 삭제 여부를 확인해야 합니다
+    - 삭제된 인스턴스에 대해서는 적절한 HTTP 상태 코드와 메시지를 반환해야 합니다
+    
+    복구 기능:
+    - Event Sourcing의 장점으로 삭제된 인스턴스도 이론적으로 복구 가능합니다
+    - 새로운 RESTORE_INSTANCE Command를 추가하여 복구 기능을 구현할 수 있습니다
+    """
     
     def __init__(
         self,
@@ -314,9 +335,10 @@ class StorageService:
                     break
             
             # .json 파일만 필터링하고 시간순 정렬
+            # Event Sourcing 원칙: 모든 Command는 감사 추적을 위해 보존되어야 함
             command_files = [
                 obj for obj in all_objects 
-                if obj['Key'].endswith('.json') and 'deleted.json' not in obj['Key']
+                if obj['Key'].endswith('.json')
             ]
             command_files.sort(key=lambda x: x['LastModified'])
             
@@ -331,16 +353,20 @@ class StorageService:
         self,
         bucket: str,
         command_files: list
-    ) -> Dict[str, Any]:
+    ) -> Optional[Dict[str, Any]]:
         """
         Command 파일들을 순차적으로 읽어 인스턴스의 최종 상태 재구성
+        
+        Event Sourcing 원칙에 따라 삭제된 인스턴스도 완전한 상태 정보를 반환합니다.
+        삭제는 상태의 변화일 뿐 정보의 소멸이 아닙니다.
         
         Args:
             bucket: 버킷 이름
             command_files: Command 파일 경로 목록 (시간순)
             
         Returns:
-            재구성된 인스턴스의 최종 상태
+            재구성된 인스턴스의 최종 상태 (삭제된 인스턴스도 포함)
+            Command 파일이 없거나 처리 불가능한 경우에만 None 반환
         """
         instance_state = None
         command_history = []
@@ -387,11 +413,31 @@ class StorageService:
                     instance_state['_metadata']['version'] = metadata.get('version', 1) + 1
                     
                 elif command_type == CommandType.DELETE_INSTANCE.value:
-                    # 인스턴스 삭제 표시
+                    # 인스턴스 삭제 상태 기록
+                    # Event Sourcing 원칙: 삭제도 하나의 상태 변화로 기록하여 감사 추적 가능
                     if instance_state:
                         instance_state['_metadata']['deleted'] = True
                         instance_state['_metadata']['deleted_at'] = command_data.get('created_at')
                         instance_state['_metadata']['deleted_by'] = command_data.get('created_by')
+                        instance_state['_metadata']['deletion_command_id'] = command_data.get('command_id')
+                        instance_state['_metadata']['deletion_reason'] = command_data.get('payload', {}).get('reason', 'No reason provided')
+                    else:
+                        # 생성 없이 삭제 Command만 있는 경우 (데이터 정합성 문제)
+                        # 최소한의 삭제 정보라도 기록
+                        instance_state = {
+                            'instance_id': command_data.get('instance_id'),
+                            'class_id': command_data.get('class_id'),
+                            'db_name': command_data.get('db_name'),
+                            '_metadata': {
+                                'deleted': True,
+                                'deleted_at': command_data.get('created_at'),
+                                'deleted_by': command_data.get('created_by'),
+                                'deletion_command_id': command_data.get('command_id'),
+                                'deletion_reason': command_data.get('payload', {}).get('reason', 'No reason provided'),
+                                'orphan_deletion': True,  # 생성 Command 없이 삭제된 경우
+                                'version': 1
+                            }
+                        }
                 
             except Exception as e:
                 # 개별 Command 처리 실패 시 로그만 남기고 계속 진행
@@ -405,6 +451,42 @@ class StorageService:
             instance_state['_metadata']['total_commands'] = len(command_history)
         
         return instance_state
+    
+    def is_instance_deleted(self, instance_state: Dict[str, Any]) -> bool:
+        """
+        인스턴스가 삭제된 상태인지 확인
+        
+        Args:
+            instance_state: replay_instance_state로 재구성된 인스턴스 상태
+            
+        Returns:
+            삭제 여부
+        """
+        if not instance_state:
+            return False
+        return instance_state.get('_metadata', {}).get('deleted', False)
+    
+    def get_deletion_info(self, instance_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        삭제된 인스턴스의 삭제 정보 반환
+        
+        Args:
+            instance_state: replay_instance_state로 재구성된 인스턴스 상태
+            
+        Returns:
+            삭제 정보 (삭제된 경우) 또는 None
+        """
+        if not self.is_instance_deleted(instance_state):
+            return None
+            
+        metadata = instance_state.get('_metadata', {})
+        return {
+            'deleted_at': metadata.get('deleted_at'),
+            'deleted_by': metadata.get('deleted_by'),
+            'deletion_command_id': metadata.get('deletion_command_id'),
+            'deletion_reason': metadata.get('deletion_reason'),
+            'is_orphan_deletion': metadata.get('orphan_deletion', False)
+        }
         
 
 
