@@ -46,6 +46,9 @@ from oms.utils.terminus_schema_types import (
 # Import constraint and default value extraction
 from oms.utils.constraint_extractor import ConstraintExtractor
 
+# Import deprecation utilities
+from oms.utils.deprecation import deprecated, legacy_api, experimental
+
 logger = logging.getLogger(__name__)
 
 # Atomic update specific exceptions
@@ -1229,10 +1232,16 @@ class AsyncTerminusService:
         """온톨로지 클래스 조회 (get_ontology의 별칭)"""
         return await self.get_ontology(db_name, class_id, raise_if_missing)
 
-    async def update_ontology(
+    @deprecated(
+        reason="This is a simple implementation. Use the atomic update version (line ~4450) for production",
+        version="1.0.0",
+        alternative="update_ontology (atomic version)",
+        removal_version="2.0.0"
+    )
+    async def update_ontology_simple(
         self, db_name: str, class_id: str, jsonld_data: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """온톨로지 클래스 업데이트 - Document API 사용"""
+        """온톨로지 클래스 업데이트 - Document API 사용 (Simple/Legacy version)"""
         await self.ensure_db_exists(db_name)
 
         # 먼저 기존 문서 조회
@@ -1834,8 +1843,11 @@ class AsyncTerminusService:
             logger.error(f"Commit operation failed: {e}")
             raise ValueError(f"커밋 생성 실패: {e}")
 
+    @legacy_api(
+        reason="Use the standard commit() method which automatically uses the current branch"
+    )
     async def commit_to_branch(self, db_name: str, branch: str, message: str, author: str = "admin") -> str:
-        """브랜치별 커밋 생성 - TerminusDB v11.x 호환"""
+        """브랜치별 커밋 생성 - TerminusDB v11.x 호환 (Legacy - use commit() instead)"""
         try:
             if not message or not message.strip():
                 raise ValueError("커밋 메시지는 필수입니다")
@@ -2291,11 +2303,14 @@ class AsyncTerminusService:
             raise ValueError(f"브랜치 머지 실패: {e}")
 
     # 🔥 ULTRA: Real Pull Request implementation
+    @legacy_api(
+        reason="Pull request functionality is not actively used. TerminusDB does not have native PR support"
+    )
     async def create_pull_request(
         self, db_name: str, source_branch: str, target_branch: str, 
         title: str, description: str = "", author: str = "system"
     ) -> Dict[str, Any]:
-        """Create a pull request (실제 작동하는 PR 구현)"""
+        """Create a pull request (실제 작동하는 PR 구현) (Legacy - test use only)"""
         try:
             if source_branch == target_branch:
                 raise ValueError("Source and target branches must be different")
@@ -2340,8 +2355,11 @@ class AsyncTerminusService:
             logger.error(f"Failed to create pull request: {e}")
             raise ValueError(f"Pull request creation failed: {e}")
     
+    @legacy_api(
+        reason="Pull request functionality is not actively used. TerminusDB does not have native PR support"
+    )
     async def get_pull_request_diff(self, db_name: str, pr_id: str) -> List[Dict[str, Any]]:
-        """Get the diff for a pull request"""
+        """Get the diff for a pull request (Legacy - test use only)"""
         # In a real implementation, you'd fetch the PR data from storage
         # For now, we'll recalculate based on PR ID parsing
         try:
@@ -2361,10 +2379,13 @@ class AsyncTerminusService:
             logger.error(f"Failed to get PR diff: {e}")
             return []
     
+    @legacy_api(
+        reason="Pull request functionality is not actively used. TerminusDB does not have native PR support"
+    )
     async def merge_pull_request(
         self, db_name: str, pr_id: str, merge_message: str = None, author: str = "system"
     ) -> Dict[str, Any]:
-        """Merge a pull request"""
+        """Merge a pull request (Legacy - test use only)"""
         try:
             # Parse PR ID to get branches
             parts = pr_id.split("_")
@@ -2692,8 +2713,14 @@ class AsyncTerminusService:
 
         return woql_query
 
+    @deprecated(
+        reason="Duplicate of execute_query(). Use execute_query() instead",
+        version="1.0.0",
+        alternative="execute_query",
+        removal_version="2.0.0"
+    )
     async def query_database(self, db_name: str, query: Dict[str, Any]) -> Dict[str, Any]:
-        """WOQL 쿼리 실행"""
+        """WOQL 쿼리 실행 (Deprecated - use execute_query instead)"""
         await self.ensure_db_exists(db_name)
 
         # TerminusDB WOQL 엔드포인트
@@ -3537,8 +3564,11 @@ class AsyncTerminusService:
             raise DatabaseError(f"클래스 생성 실패: {e}")
 
 
+    @legacy_api(
+        reason="Document operations are handled through ontology methods. This is redundant"
+    )
     async def create_document(self, db_name: str, document_data: Dict[str, Any]) -> Dict[str, Any]:
-        """문서 생성"""
+        """문서 생성 (Legacy - use create_ontology_class instead)"""
         doc_type = document_data.get("@type")
         if not doc_type:
             raise OntologyValidationError("문서 타입이 필요합니다")
@@ -3561,10 +3591,13 @@ class AsyncTerminusService:
             logger.error(f"문서 생성 실패: {e}")
             raise DatabaseError(f"문서 생성 실패: {e}")
 
+    @legacy_api(
+        reason="Document operations are handled through ontology methods. This is redundant"
+    )
     async def list_documents(
         self, db_name: str, doc_type: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """문서 목록 조회"""
+        """문서 목록 조회 (Legacy - use list_ontologies instead)"""
         endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
         params = {}
 
@@ -4487,10 +4520,13 @@ class AsyncTerminusService:
 
     # 🔥 THINK ULTRA! 버전 관리 편의 메서드들 추가
     
+    @legacy_api(
+        reason="Use the standard commit() method instead. This method is only used in tests"
+    )
     async def create_commit(
         self, db_name: str, branch: str, message: str, description: Optional[str] = None
     ) -> Dict[str, Any]:
-        """브랜치에 커밋 생성 - TerminusDB v11.x 브랜치별 커밋 지원"""
+        """브랜치에 커밋 생성 - TerminusDB v11.x 브랜치별 커밋 지원 (Legacy - test use only)"""
         try:
             # TerminusDB v11.x에서는 브랜치별 커밋 API 사용
             try:
@@ -4520,10 +4556,13 @@ class AsyncTerminusService:
             logger.error(f"Create commit failed: {e}")
             return {"success": False, "error": str(e)}
     
+    @legacy_api(
+        reason="Use the standard merge() method instead. This wrapper adds no value"
+    )
     async def merge_branch(
         self, db_name: str, source_branch: str, target_branch: str, message: Optional[str] = None
     ) -> Dict[str, Any]:
-        """브랜치 병합 (merge 메서드의 확장 버전)"""
+        """브랜치 병합 (merge 메서드의 확장 버전) (Legacy - use merge() directly)"""
         try:
             merge_message = message or f"Merge {source_branch} into {target_branch}"
             result = await self.merge(db_name, source_branch, target_branch)
@@ -4540,10 +4579,13 @@ class AsyncTerminusService:
             logger.error(f"Merge branch failed: {e}")
             return {"success": False, "error": str(e)}
     
+    @legacy_api(
+        reason="Tag functionality is only used in tests. Consider using branch-based versioning instead"
+    )
     async def create_tag(
         self, db_name: str, tag_name: str, branch: str = "main", message: Optional[str] = None
     ) -> Dict[str, Any]:
-        """태그 생성"""
+        """태그 생성 (Legacy - test use only)"""
         try:
             # TerminusDB v11.x 태그 API: POST /api/db/<account>/<db>/local/tag/<tag_name>
             endpoint = f"/api/db/{self.connection_info.account}/{db_name}/local/tag/{tag_name}"
@@ -4569,8 +4611,11 @@ class AsyncTerminusService:
             logger.error(f"Create tag failed: {e}")
             return {"success": False, "error": str(e)}
     
+    @legacy_api(
+        reason="Tag functionality is only used in tests. Consider using branch-based versioning instead"
+    )
     async def list_tags(self, db_name: str) -> List[str]:
-        """태그 목록 조회"""
+        """태그 목록 조회 (Legacy - test use only)"""
         try:
             # TerminusDB v11.x 태그 목록 API: GET /api/db/<account>/<db>/local/tag
             endpoint = f"/api/db/{self.connection_info.account}/{db_name}/local/tag"
@@ -4590,10 +4635,13 @@ class AsyncTerminusService:
             logger.error(f"List tags failed: {e}")
             return []
     
+    @legacy_api(
+        reason="Squash functionality is not actively used. Only present for Git-like API completeness"
+    )
     async def squash_commits(
         self, db_name: str, branch: str, count: int, message: str
     ) -> Dict[str, Any]:
-        """커밋 스쿼시 (TerminusDB에서 지원되는 경우)"""
+        """커밋 스쿼시 (TerminusDB에서 지원되는 경우) (Legacy - test use only)"""
         try:
             # TerminusDB v11.x 스쿼시 API (실제 지원 여부에 따라 다름)
             endpoint = f"/api/db/{self.connection_info.account}/{db_name}/local/_squash"
@@ -4620,10 +4668,13 @@ class AsyncTerminusService:
             logger.warning(f"Squash commits not supported or failed: {e}")
             return {"success": False, "error": f"Squash not supported: {e}"}
     
+    @legacy_api(
+        reason="Use the standard rebase() method instead. This wrapper adds no value"
+    )
     async def rebase_branch(
         self, db_name: str, branch: str, onto: str
     ) -> Dict[str, Any]:
-        """브랜치 리베이스 (rebase 메서드의 브랜치 특화 버전)"""
+        """브랜치 리베이스 (rebase 메서드의 브랜치 특화 버전) (Legacy - use rebase() directly)"""
         try:
             result = await self.rebase(db_name, onto, branch)
             
