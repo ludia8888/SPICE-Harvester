@@ -71,6 +71,7 @@ from bff.dependencies import (
     get_terminus_service,
     set_label_mapper,
     set_oms_client,
+    set_elasticsearch_service,
 )
 from bff.routers import database, health, mapping, merge_conflict, ontology, query, instances, instance_async, websocket
 from bff.services.funnel_type_inference_adapter import FunnelHTTPTypeInferenceAdapter
@@ -143,6 +144,27 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to initialize WebSocket services: {e}")
         # Continue without WebSocket - service can still work without real-time updates
 
+    # Initialize ElasticsearchService
+    try:
+        logger.info("Initializing Elasticsearch service...")
+        from shared.services import ElasticsearchService
+        
+        # Create Elasticsearch service
+        elasticsearch_service = ElasticsearchService(
+            hosts=[f"{os.getenv('ELASTICSEARCH_HOST', 'localhost')}:{os.getenv('ELASTICSEARCH_PORT', '9200')}"],
+            username=os.getenv('ELASTICSEARCH_USERNAME', 'elastic'),
+            password=os.getenv('ELASTICSEARCH_PASSWORD', 'elasticpass123')
+        )
+        await elasticsearch_service.connect()
+        
+        # Set in dependencies
+        set_elasticsearch_service(elasticsearch_service)
+        
+        logger.info("Elasticsearch service connected successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize Elasticsearch service: {e}")
+        # Continue without Elasticsearch - fallback to TerminusDB queries
+
     logger.info("BFF Service startup complete")
 
     yield
@@ -156,6 +178,9 @@ async def lifespan(app: FastAPI):
     if websocket_notification_service:
         await websocket_notification_service.stop()
         logger.info("WebSocket notification service stopped")
+    if 'elasticsearch_service' in locals() and elasticsearch_service:
+        await elasticsearch_service.disconnect()
+        logger.info("Elasticsearch service disconnected")
 
 
 # FastAPI 앱 생성 - Service Factory 사용

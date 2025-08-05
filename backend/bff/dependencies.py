@@ -498,8 +498,14 @@ def get_jsonld_converter() -> JSONToJSONLDConverter:
 # Label Mapper 의존성 제공
 from shared.utils.label_mapper import LabelMapper
 
+# ElasticsearchService 의존성 제공
+from shared.services import ElasticsearchService
+
 # 전역 Label Mapper 인스턴스 (main.py에서 초기화)
 label_mapper: Optional[LabelMapper] = None
+
+# 전역 ElasticsearchService 인스턴스 (main.py에서 초기화)
+elasticsearch_service: Optional[ElasticsearchService] = None
 
 
 def set_label_mapper(mapper: LabelMapper):
@@ -516,3 +522,19 @@ def get_label_mapper() -> LabelMapper:
             detail="Label Mapper가 초기화되지 않았습니다",
         )
     return label_mapper
+
+
+def set_elasticsearch_service(service: ElasticsearchService):
+    """ElasticsearchService 설정"""
+    global elasticsearch_service
+    elasticsearch_service = service
+
+
+def get_elasticsearch_service() -> ElasticsearchService:
+    """ElasticsearchService 의존성 제공"""
+    if not elasticsearch_service:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ElasticsearchService가 초기화되지 않았습니다",
+        )
+    return elasticsearch_service

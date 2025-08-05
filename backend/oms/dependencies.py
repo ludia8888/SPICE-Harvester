@@ -18,6 +18,9 @@ from shared.utils.label_mapper import LabelMapper
 # Import validation functions
 from shared.security.input_sanitizer import validate_db_name, validate_class_id
 
+# Import ElasticsearchService
+from shared.services import ElasticsearchService
+
 # 전역 서비스 인스턴스
 terminus_service = None
 jsonld_converter = None
@@ -25,17 +28,19 @@ label_mapper = None
 outbox_service = None
 redis_service = None
 command_status_service = None
+elasticsearch_service = None
 
 
-def set_services(terminus: AsyncTerminusService, converter: JSONToJSONLDConverter, outbox=None, redis=None, command_status=None):
+def set_services(terminus: AsyncTerminusService, converter: JSONToJSONLDConverter, outbox=None, redis=None, command_status=None, elasticsearch=None):
     """서비스 인스턴스 설정"""
-    global terminus_service, jsonld_converter, label_mapper, outbox_service, redis_service, command_status_service
+    global terminus_service, jsonld_converter, label_mapper, outbox_service, redis_service, command_status_service, elasticsearch_service
     terminus_service = terminus
     jsonld_converter = converter
     label_mapper = LabelMapper()
     outbox_service = outbox
     redis_service = redis
     command_status_service = command_status
+    elasticsearch_service = elasticsearch
 
 
 def get_terminus_service() -> AsyncTerminusService:
@@ -95,6 +100,16 @@ def get_command_status_service():
             detail="Command 상태 추적 서비스가 초기화되지 않았습니다",
         )
     return command_status_service
+
+
+def get_elasticsearch_service() -> ElasticsearchService:
+    """Elasticsearch 서비스 의존성"""
+    if not elasticsearch_service:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Elasticsearch 서비스가 초기화되지 않았습니다",
+        )
+    return elasticsearch_service
 
 
 # Validation Dependencies

@@ -48,6 +48,7 @@ jsonld_converter: Optional[JSONToJSONLDConverter] = None
 outbox_service: Optional[OutboxService] = None
 redis_service: Optional[RedisService] = None
 command_status_service: Optional[CommandStatusService] = None
+elasticsearch_service = None
 
 
 @asynccontextmanager
@@ -88,10 +89,24 @@ async def lifespan(app: FastAPI):
         logger.error(f"Redis 연결 실패: {e}")
         # Redis 연결 실패해도 서비스는 시작 (기본 기능은 동작)
 
+    # Elasticsearch 연결 초기화
+    try:
+        from shared.services import ElasticsearchService
+        elasticsearch_service = ElasticsearchService(
+            hosts=[f"{os.getenv('ELASTICSEARCH_HOST', 'localhost')}:{os.getenv('ELASTICSEARCH_PORT', '9200')}"],
+            username=os.getenv('ELASTICSEARCH_USERNAME', 'elastic'),
+            password=os.getenv('ELASTICSEARCH_PASSWORD', 'elasticpass123')
+        )
+        await elasticsearch_service.connect()
+        logger.info("Elasticsearch 연결 성공")
+    except Exception as e:
+        logger.error(f"Elasticsearch 연결 실패: {e}")
+        # Elasticsearch 연결 실패해도 서비스는 시작 (기본 기능은 동작)
+
     # 의존성 설정
     from oms.dependencies import set_services
 
-    set_services(terminus_service, jsonld_converter, outbox_service, redis_service, command_status_service)
+    set_services(terminus_service, jsonld_converter, outbox_service, redis_service, command_status_service, elasticsearch_service)
 
     try:
         # TerminusDB 연결 테스트
@@ -111,6 +126,8 @@ async def lifespan(app: FastAPI):
         await postgres_db.disconnect()
     if redis_service:
         await redis_service.disconnect()
+    if elasticsearch_service:
+        await elasticsearch_service.disconnect()
 
 
 # FastAPI 앱 생성 - Service Factory 사용

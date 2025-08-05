@@ -264,6 +264,147 @@ class StorageService:
         """
         return f"{db_name}/{class_id}/{instance_id}/{command_id}.json"
         
+    async def get_all_commands_for_instance(
+        self,
+        bucket: str,
+        db_name: str,
+        class_id: str,
+        instance_id: str
+    ) -> list:
+        """
+        특정 인스턴스의 모든 Command 파일 목록 조회
+        
+        Args:
+            bucket: 버킷 이름
+            db_name: 데이터베이스 이름
+            class_id: 클래스 ID
+            instance_id: 인스턴스 ID
+            
+        Returns:
+            Command 파일 경로 목록 (시간순 정렬)
+        """
+        prefix = f"{db_name}/{class_id}/{instance_id}/"
+        
+        try:
+            # 모든 파일 목록 조회
+            all_objects = []
+            continuation_token = None
+            
+            while True:
+                if continuation_token:
+                    response = self.client.list_objects_v2(
+                        Bucket=bucket,
+                        Prefix=prefix,
+                        ContinuationToken=continuation_token
+                    )
+                else:
+                    response = self.client.list_objects_v2(
+                        Bucket=bucket,
+                        Prefix=prefix
+                    )
+                
+                if 'Contents' in response:
+                    all_objects.extend(response['Contents'])
+                
+                # 페이지네이션 처리
+                if response.get('IsTruncated'):
+                    continuation_token = response.get('NextContinuationToken')
+                else:
+                    break
+            
+            # .json 파일만 필터링하고 시간순 정렬
+            command_files = [
+                obj for obj in all_objects 
+                if obj['Key'].endswith('.json') and 'deleted.json' not in obj['Key']
+            ]
+            command_files.sort(key=lambda x: x['LastModified'])
+            
+            return [obj['Key'] for obj in command_files]
+            
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchBucket':
+                raise FileNotFoundError(f"Bucket not found: {bucket}")
+            raise
+            
+    async def replay_instance_state(
+        self,
+        bucket: str,
+        command_files: list
+    ) -> Dict[str, Any]:
+        """
+        Command 파일들을 순차적으로 읽어 인스턴스의 최종 상태 재구성
+        
+        Args:
+            bucket: 버킷 이름
+            command_files: Command 파일 경로 목록 (시간순)
+            
+        Returns:
+            재구성된 인스턴스의 최종 상태
+        """
+        instance_state = None
+        command_history = []
+        
+        for file_key in command_files:
+            try:
+                # Command 파일 읽기
+                command_data = await self.load_json(bucket, file_key)
+                command_type = command_data.get('command_type')
+                
+                # Command 이력 추가
+                command_history.append({
+                    'command_id': command_data.get('command_id'),
+                    'command_type': command_type,
+                    'timestamp': command_data.get('created_at'),
+                    'file': file_key
+                })
+                
+                # Command 유형에 따라 상태 업데이트
+                if command_type == 'CREATE_INSTANCE':
+                    # 인스턴스 생성
+                    instance_state = {
+                        'instance_id': command_data.get('instance_id'),
+                        'class_id': command_data.get('class_id'),
+                        'db_name': command_data.get('db_name'),
+                        **command_data.get('payload', {}),
+                        '_metadata': {
+                            'created_at': command_data.get('created_at'),
+                            'created_by': command_data.get('created_by'),
+                            'version': 1,
+                            'command_history': command_history
+                        }
+                    }
+                    
+                elif command_type == 'UPDATE_INSTANCE' and instance_state:
+                    # 인스턴스 업데이트
+                    updates = command_data.get('payload', {})
+                    # 메타데이터는 보존하면서 데이터 업데이트
+                    metadata = instance_state.get('_metadata', {})
+                    instance_state.update(updates)
+                    instance_state['_metadata'] = metadata
+                    instance_state['_metadata']['updated_at'] = command_data.get('created_at')
+                    instance_state['_metadata']['updated_by'] = command_data.get('created_by')
+                    instance_state['_metadata']['version'] = metadata.get('version', 1) + 1
+                    
+                elif command_type == 'DELETE_INSTANCE':
+                    # 인스턴스 삭제 표시
+                    if instance_state:
+                        instance_state['_metadata']['deleted'] = True
+                        instance_state['_metadata']['deleted_at'] = command_data.get('created_at')
+                        instance_state['_metadata']['deleted_by'] = command_data.get('created_by')
+                
+            except Exception as e:
+                # 개별 Command 처리 실패 시 로그만 남기고 계속 진행
+                import logging
+                logging.error(f"Failed to process command file {file_key}: {e}")
+                continue
+        
+        # 최종 상태에 Command 이력 포함
+        if instance_state:
+            instance_state['_metadata']['command_history'] = command_history
+            instance_state['_metadata']['total_commands'] = len(command_history)
+        
+        return instance_state
+        
 
 
 def create_storage_service(
