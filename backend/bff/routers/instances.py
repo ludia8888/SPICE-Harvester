@@ -15,6 +15,7 @@ from bff.dependencies import (
 from bff.services.oms_client import OMSClient
 from shared.security.input_sanitizer import validate_db_name, validate_class_id, validate_instance_id, sanitize_es_query
 from shared.services import ElasticsearchService
+from shared.config.search_config import get_instances_index_name
 from elasticsearch.exceptions import ConnectionError as ESConnectionError, NotFoundError, RequestError
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,7 @@ async def get_class_instances(
             sanitized_search = sanitize_es_query(search)
         
         # Elasticsearch에서 인스턴스 목록 조회
-        index_name = f"{db_name.lower()}_instances"
+        index_name = get_instances_index_name(db_name)
         
         # 쿼리 구성
         query = {
@@ -288,7 +289,7 @@ async def get_instance(
         instance_id = validate_instance_id(instance_id)
         
         # 1. Elasticsearch (읽기 모델) 우선 조회
-        index_name = f"{db_name.lower()}_instances"
+        index_name = get_instances_index_name(db_name)
         
         query = {
             "bool": {

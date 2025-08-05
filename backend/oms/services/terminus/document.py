@@ -1,0 +1,537 @@
+"""
+Document Service for TerminusDB
+문서(인스턴스) CRUD 작업 서비스
+"""
+
+import logging
+from typing import Any, Dict, List, Optional, Union
+from datetime import datetime
+import json
+
+from .base import BaseTerminusService
+from .database import DatabaseService
+from oms.exceptions import (
+    DatabaseError,
+    OntologyNotFoundError
+)
+
+logger = logging.getLogger(__name__)
+
+
+class DocumentService(BaseTerminusService):
+    """
+    TerminusDB 문서(인스턴스) 관리 서비스
+    
+    문서 생성, 수정, 삭제 및 조회 기능을 제공합니다.
+    """
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # DatabaseService 인스턴스 (데이터베이스 존재 확인용)
+        self.db_service = DatabaseService(*args, **kwargs)
+    
+    async def create_document(
+        self,
+        db_name: str,
+        document: Dict[str, Any],
+        graph_type: str = "instance",
+        author: Optional[str] = None,
+        message: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        새 문서 생성
+        
+        Args:
+            db_name: 데이터베이스 이름
+            document: 문서 데이터
+            graph_type: 그래프 타입 (instance, schema, inference)
+            author: 작성자
+            message: 커밋 메시지
+            
+        Returns:
+            생성된 문서 정보
+        """
+        try:
+            await self.db_service.ensure_db_exists(db_name)
+            
+            # 문서 ID 확인
+            doc_id = document.get("@id") or document.get("id")
+            if not doc_id:
+                raise ValueError("문서에 ID가 필요합니다")
+            
+            # 중복 확인
+            if await self.document_exists(db_name, doc_id, graph_type):
+                raise DatabaseError(f"문서 '{doc_id}'이(가) 이미 존재합니다")
+            
+            # 문서 생성 엔드포인트
+            endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
+            params = {"graph_type": graph_type}
+            
+            if author:
+                params["author"] = author
+            if message:
+                params["message"] = message
+            
+            # @type 확인 및 추가
+            if "@type" not in document and "type" in document:
+                document["@type"] = document["type"]
+            
+            await self._make_request("POST", endpoint, document, params=params)
+            
+            logger.info(f"Document '{doc_id}' created in database '{db_name}'")
+            
+            return {
+                "id": doc_id,
+                "created_at": datetime.utcnow().isoformat(),
+                "graph_type": graph_type
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to create document: {e}")
+            raise DatabaseError(f"문서 생성 실패: {e}")
+    
+    async def update_document(
+        self,
+        db_name: str,
+        doc_id: str,
+        document: Dict[str, Any],
+        graph_type: str = "instance",
+        author: Optional[str] = None,
+        message: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        문서 업데이트
+        
+        Args:
+            db_name: 데이터베이스 이름
+            doc_id: 문서 ID
+            document: 업데이트할 문서 데이터
+            graph_type: 그래프 타입
+            author: 작성자
+            message: 커밋 메시지
+            
+        Returns:
+            업데이트된 문서 정보
+        """
+        try:
+            # 존재 확인
+            if not await self.document_exists(db_name, doc_id, graph_type):
+                raise OntologyNotFoundError(f"문서 '{doc_id}'을(를) 찾을 수 없습니다")
+            
+            # ID 설정
+            document["@id"] = doc_id
+            
+            # 문서 업데이트 엔드포인트
+            endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
+            params = {
+                "graph_type": graph_type,
+                "id": doc_id
+            }
+            
+            if author:
+                params["author"] = author
+            if message:
+                params["message"] = message
+            
+            await self._make_request("PUT", endpoint, document, params=params)
+            
+            logger.info(f"Document '{doc_id}' updated in database '{db_name}'")
+            
+            return {
+                "id": doc_id,
+                "updated_at": datetime.utcnow().isoformat(),
+                "graph_type": graph_type
+            }
+            
+        except OntologyNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to update document: {e}")
+            raise DatabaseError(f"문서 업데이트 실패: {e}")
+    
+    async def delete_document(
+        self,
+        db_name: str,
+        doc_id: str,
+        graph_type: str = "instance",
+        author: Optional[str] = None,
+        message: Optional[str] = None
+    ) -> bool:
+        """
+        문서 삭제
+        
+        Args:
+            db_name: 데이터베이스 이름
+            doc_id: 문서 ID
+            graph_type: 그래프 타입
+            author: 작성자
+            message: 커밋 메시지
+            
+        Returns:
+            삭제 성공 여부
+        """
+        try:
+            # 존재 확인
+            if not await self.document_exists(db_name, doc_id, graph_type):
+                raise OntologyNotFoundError(f"문서 '{doc_id}'을(를) 찾을 수 없습니다")
+            
+            # 문서 삭제 엔드포인트
+            endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
+            params = {
+                "graph_type": graph_type,
+                "id": doc_id
+            }
+            
+            if author:
+                params["author"] = author
+            if message:
+                params["message"] = message
+            
+            await self._make_request("DELETE", endpoint, params=params)
+            
+            logger.info(f"Document '{doc_id}' deleted from database '{db_name}'")
+            return True
+            
+        except OntologyNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to delete document: {e}")
+            raise DatabaseError(f"문서 삭제 실패: {e}")
+    
+    async def get_document(
+        self,
+        db_name: str,
+        doc_id: str,
+        graph_type: str = "instance"
+    ) -> Optional[Dict[str, Any]]:
+        """
+        특정 문서 조회
+        
+        Args:
+            db_name: 데이터베이스 이름
+            doc_id: 문서 ID
+            graph_type: 그래프 타입
+            
+        Returns:
+            문서 데이터 또는 None
+        """
+        try:
+            endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
+            params = {
+                "graph_type": graph_type,
+                "id": doc_id
+            }
+            
+            result = await self._make_request("GET", endpoint, params=params)
+            
+            if not result:
+                return None
+            
+            # 단일 문서 추출
+            if isinstance(result, list) and len(result) > 0:
+                return result[0]
+            elif isinstance(result, dict):
+                return result
+            else:
+                return None
+                
+        except Exception as e:
+            logger.error(f"Failed to get document: {e}")
+            return None
+    
+    async def list_documents(
+        self,
+        db_name: str,
+        graph_type: str = "instance",
+        doc_type: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        문서 목록 조회
+        
+        Args:
+            db_name: 데이터베이스 이름
+            graph_type: 그래프 타입
+            doc_type: 문서 타입 (클래스) 필터
+            limit: 최대 결과 수
+            offset: 시작 위치
+            
+        Returns:
+            문서 목록
+        """
+        try:
+            await self.db_service.ensure_db_exists(db_name)
+            
+            endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
+            params = {
+                "graph_type": graph_type,
+                "limit": limit,
+                "offset": offset
+            }
+            
+            if doc_type:
+                params["type"] = doc_type
+            
+            result = await self._make_request("GET", endpoint, params=params)
+            
+            documents = []
+            
+            if isinstance(result, list):
+                documents = result
+            elif isinstance(result, dict):
+                if "@graph" in result:
+                    documents = result["@graph"]
+                elif "documents" in result:
+                    documents = result["documents"]
+                else:
+                    documents = [result]
+            
+            return documents
+            
+        except Exception as e:
+            logger.error(f"Failed to list documents: {e}")
+            raise DatabaseError(f"문서 목록 조회 실패: {e}")
+    
+    async def document_exists(
+        self,
+        db_name: str,
+        doc_id: str,
+        graph_type: str = "instance"
+    ) -> bool:
+        """
+        문서 존재 여부 확인
+        
+        Args:
+            db_name: 데이터베이스 이름
+            doc_id: 문서 ID
+            graph_type: 그래프 타입
+            
+        Returns:
+            존재 여부
+        """
+        try:
+            doc = await self.get_document(db_name, doc_id, graph_type)
+            return doc is not None
+        except Exception:
+            return False
+    
+    async def bulk_create_documents(
+        self,
+        db_name: str,
+        documents: List[Dict[str, Any]],
+        graph_type: str = "instance",
+        author: Optional[str] = None,
+        message: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        여러 문서를 한 번에 생성
+        
+        Args:
+            db_name: 데이터베이스 이름
+            documents: 문서 목록
+            graph_type: 그래프 타입
+            author: 작성자
+            message: 커밋 메시지
+            
+        Returns:
+            생성 결과
+        """
+        try:
+            await self.db_service.ensure_db_exists(db_name)
+            
+            # 문서 ID 검증
+            for doc in documents:
+                if not doc.get("@id") and not doc.get("id"):
+                    raise ValueError("모든 문서에 ID가 필요합니다")
+            
+            # 벌크 생성 엔드포인트
+            endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
+            params = {"graph_type": graph_type}
+            
+            if author:
+                params["author"] = author
+            if message:
+                params["message"] = message
+            
+            # JSON-LD 그래프 형식으로 래핑
+            data = {"@graph": documents}
+            
+            await self._make_request("POST", endpoint, data, params=params)
+            
+            logger.info(f"Bulk created {len(documents)} documents in database '{db_name}'")
+            
+            return {
+                "created_count": len(documents),
+                "created_at": datetime.utcnow().isoformat(),
+                "graph_type": graph_type
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to bulk create documents: {e}")
+            raise DatabaseError(f"벌크 문서 생성 실패: {e}")
+    
+    async def bulk_update_documents(
+        self,
+        db_name: str,
+        documents: List[Dict[str, Any]],
+        graph_type: str = "instance",
+        author: Optional[str] = None,
+        message: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        여러 문서를 한 번에 업데이트
+        
+        Args:
+            db_name: 데이터베이스 이름
+            documents: 업데이트할 문서 목록
+            graph_type: 그래프 타입
+            author: 작성자
+            message: 커밋 메시지
+            
+        Returns:
+            업데이트 결과
+        """
+        try:
+            # 벌크 업데이트 엔드포인트
+            endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
+            params = {"graph_type": graph_type}
+            
+            if author:
+                params["author"] = author
+            if message:
+                params["message"] = message
+            
+            # JSON-LD 그래프 형식으로 래핑
+            data = {"@graph": documents}
+            
+            await self._make_request("PUT", endpoint, data, params=params)
+            
+            logger.info(f"Bulk updated {len(documents)} documents in database '{db_name}'")
+            
+            return {
+                "updated_count": len(documents),
+                "updated_at": datetime.utcnow().isoformat(),
+                "graph_type": graph_type
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to bulk update documents: {e}")
+            raise DatabaseError(f"벌크 문서 업데이트 실패: {e}")
+    
+    async def bulk_delete_documents(
+        self,
+        db_name: str,
+        doc_ids: List[str],
+        graph_type: str = "instance",
+        author: Optional[str] = None,
+        message: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        여러 문서를 한 번에 삭제
+        
+        Args:
+            db_name: 데이터베이스 이름
+            doc_ids: 삭제할 문서 ID 목록
+            graph_type: 그래프 타입
+            author: 작성자
+            message: 커밋 메시지
+            
+        Returns:
+            삭제 결과
+        """
+        try:
+            deleted_count = 0
+            
+            # 각 문서를 개별적으로 삭제 (TerminusDB는 벌크 삭제 미지원)
+            for doc_id in doc_ids:
+                try:
+                    await self.delete_document(
+                        db_name, doc_id, graph_type, author, message
+                    )
+                    deleted_count += 1
+                except OntologyNotFoundError:
+                    logger.warning(f"Document '{doc_id}' not found, skipping")
+                    continue
+            
+            logger.info(f"Bulk deleted {deleted_count} documents from database '{db_name}'")
+            
+            return {
+                "deleted_count": deleted_count,
+                "deleted_at": datetime.utcnow().isoformat(),
+                "graph_type": graph_type
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to bulk delete documents: {e}")
+            raise DatabaseError(f"벌크 문서 삭제 실패: {e}")
+    
+    async def search_documents(
+        self,
+        db_name: str,
+        search_query: str,
+        graph_type: str = "instance",
+        doc_type: Optional[str] = None,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        문서 검색
+        
+        Args:
+            db_name: 데이터베이스 이름
+            search_query: 검색어
+            graph_type: 그래프 타입
+            doc_type: 문서 타입 필터
+            limit: 최대 결과 수
+            
+        Returns:
+            검색 결과
+        """
+        try:
+            await self.db_service.ensure_db_exists(db_name)
+            
+            # SPARQL 검색 쿼리 구성
+            type_filter = f"?doc a <{doc_type}> ." if doc_type else ""
+            
+            sparql_query = f"""
+            SELECT DISTINCT ?doc ?prop ?value
+            WHERE {{
+                {type_filter}
+                ?doc ?prop ?value .
+                FILTER(
+                    isLiteral(?value) && 
+                    regex(str(?value), "{search_query}", "i")
+                )
+            }}
+            LIMIT {limit}
+            """
+            
+            endpoint = f"/api/sparql/{self.connection_info.account}/{db_name}"
+            result = await self._make_request("POST", endpoint, {"query": sparql_query})
+            
+            # 결과를 문서별로 그룹화
+            doc_map = {}
+            
+            if isinstance(result, dict) and "results" in result:
+                bindings = result.get("results", {}).get("bindings", [])
+                
+                for binding in bindings:
+                    doc_uri = binding.get("doc", {}).get("value", "")
+                    doc_id = doc_uri.split("/")[-1] if "/" in doc_uri else doc_uri
+                    
+                    if doc_id not in doc_map:
+                        doc_map[doc_id] = {"@id": doc_id}
+                    
+                    prop = binding.get("prop", {}).get("value", "")
+                    value = binding.get("value", {}).get("value", "")
+                    
+                    prop_name = prop.split("/")[-1] if "/" in prop else prop
+                    prop_name = prop_name.split("#")[-1] if "#" in prop_name else prop_name
+                    
+                    doc_map[doc_id][prop_name] = value
+            
+            return list(doc_map.values())
+            
+        except Exception as e:
+            logger.error(f"Failed to search documents: {e}")
+            raise DatabaseError(f"문서 검색 실패: {e}")

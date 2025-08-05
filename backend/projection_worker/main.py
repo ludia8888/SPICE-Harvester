@@ -15,6 +15,11 @@ from uuid import uuid4
 from confluent_kafka import Consumer, Producer, KafkaError, KafkaException
 
 from shared.config.service_config import ServiceConfig
+from shared.config.search_config import (
+    get_instances_index_name,
+    get_ontologies_index_name,
+    DEFAULT_INDEX_SETTINGS
+)
 from shared.models.events import (
     BaseEvent, EventType,
     InstanceEvent,
@@ -44,9 +49,8 @@ class ProjectionWorker:
         self.redis_service: Optional[RedisService] = None
         self.elasticsearch_service: Optional[ElasticsearchService] = None
         
-        # 인덱스 이름
-        self.instances_index = "instances"
-        self.ontologies_index = "ontologies"
+        # 생성된 인덱스 캐시 (중복 생성 방지)
+        self.created_indices = set()
         
         # DLQ 토픽
         self.dlq_topic = "projection_failures_dlq"
@@ -95,30 +99,48 @@ class ProjectionWorker:
         logger.info(f"Subscribed to topics: {topics}")
         
     async def _setup_indices(self):
-        """Elasticsearch 인덱스 생성 및 매핑 설정"""
+        """매핑 파일 로드 (인덱스는 DB별로 동적 생성)"""
         try:
-            # instances 인덱스 설정
-            instances_mapping = await self._load_mapping('instances_mapping.json')
-            if not await self.elasticsearch_service.index_exists(self.instances_index):
-                await self.elasticsearch_service.create_index(
-                    self.instances_index,
-                    mappings=instances_mapping['mappings'],
-                    settings=instances_mapping['settings']
-                )
-                logger.info(f"Created index: {self.instances_index}")
-            
-            # ontologies 인덱스 설정
-            ontologies_mapping = await self._load_mapping('ontologies_mapping.json')
-            if not await self.elasticsearch_service.index_exists(self.ontologies_index):
-                await self.elasticsearch_service.create_index(
-                    self.ontologies_index,
-                    mappings=ontologies_mapping['mappings'],
-                    settings=ontologies_mapping['settings']
-                )
-                logger.info(f"Created index: {self.ontologies_index}")
+            # 매핑 파일만 미리 로드
+            self.instances_mapping = await self._load_mapping('instances_mapping.json')
+            self.ontologies_mapping = await self._load_mapping('ontologies_mapping.json')
+            logger.info("Loaded index mappings successfully")
                 
         except Exception as e:
-            logger.error(f"Failed to setup indices: {e}")
+            logger.error(f"Failed to load mappings: {e}")
+            raise
+            
+    async def _ensure_index_exists(self, db_name: str, index_type: str = "instances"):
+        """특정 데이터베이스의 인덱스가 존재하는지 확인하고 없으면 생성"""
+        if index_type == "instances":
+            index_name = get_instances_index_name(db_name)
+            mapping = self.instances_mapping
+        else:
+            index_name = get_ontologies_index_name(db_name)
+            mapping = self.ontologies_mapping
+            
+        # 이미 생성된 인덱스는 스킵
+        if index_name in self.created_indices:
+            return index_name
+            
+        try:
+            if not await self.elasticsearch_service.index_exists(index_name):
+                # 설정 병합 (매핑 파일 설정 + 기본 설정)
+                settings = mapping.get('settings', {}).copy()
+                settings.update(DEFAULT_INDEX_SETTINGS)
+                
+                await self.elasticsearch_service.create_index(
+                    index_name,
+                    mappings=mapping['mappings'],
+                    settings=settings
+                )
+                logger.info(f"Created index: {index_name} for database: {db_name}")
+                
+            self.created_indices.add(index_name)
+            return index_name
+            
+        except Exception as e:
+            logger.error(f"Failed to ensure index exists for {db_name}: {e}")
             raise
             
     async def _load_mapping(self, filename: str) -> Dict[str, Any]:
@@ -237,8 +259,16 @@ class ProjectionWorker:
     async def _handle_instance_created(self, instance_data: Dict[str, Any], event_id: str, event_data: Dict[str, Any]):
         """인스턴스 생성 이벤트 처리"""
         try:
+            # 데이터베이스 이름 추출
+            db_name = event_data.get('db_name') or instance_data.get('db_name')
+            if not db_name:
+                raise ValueError("db_name is required for instance creation")
+                
+            # 인덱스 확인 및 생성
+            index_name = await self._ensure_index_exists(db_name, "instances")
+            
             # 클래스 라벨 조회 (Redis 캐시 활용)
-            class_label = await self._get_class_label(instance_data.get('class_id'))
+            class_label = await self._get_class_label(instance_data.get('class_id'), db_name)
             
             # Elasticsearch 문서 구성
             doc = {
@@ -250,7 +280,7 @@ class ProjectionWorker:
                 'event_id': event_id,
                 'event_timestamp': event_data.get('timestamp'),
                 'version': 1,
-                'db_name': instance_data.get('db_name'),
+                'db_name': db_name,
                 'branch': instance_data.get('branch'),
                 'created_at': datetime.utcnow().isoformat(),
                 'updated_at': datetime.utcnow().isoformat()
@@ -258,13 +288,13 @@ class ProjectionWorker:
             
             # 멱등성을 위해 event_id를 문서 ID로 사용
             await self.elasticsearch_service.index_document(
-                self.instances_index,
+                index_name,
                 doc,
                 doc_id=event_id,
                 refresh=True
             )
             
-            logger.info(f"Instance created in Elasticsearch: {instance_data.get('instance_id')}")
+            logger.info(f"Instance created in Elasticsearch: {instance_data.get('instance_id')} in index: {index_name}")
             
         except Exception as e:
             logger.error(f"Failed to handle instance created: {e}")
@@ -273,12 +303,20 @@ class ProjectionWorker:
     async def _handle_instance_updated(self, instance_data: Dict[str, Any], event_id: str, event_data: Dict[str, Any]):
         """인스턴스 업데이트 이벤트 처리"""
         try:
+            # 데이터베이스 이름 추출
+            db_name = event_data.get('db_name') or instance_data.get('db_name')
+            if not db_name:
+                raise ValueError("db_name is required for instance update")
+                
+            # 인덱스 확인 및 생성
+            index_name = await self._ensure_index_exists(db_name, "instances")
+            
             # 클래스 라벨 조회
-            class_label = await self._get_class_label(instance_data.get('class_id'))
+            class_label = await self._get_class_label(instance_data.get('class_id'), db_name)
             
             # 기존 문서 조회
             existing_doc = await self.elasticsearch_service.get_document(
-                self.instances_index,
+                index_name,
                 instance_data.get('instance_id')
             )
             
@@ -296,21 +334,21 @@ class ProjectionWorker:
                 'event_id': event_id,
                 'event_timestamp': event_data.get('timestamp'),
                 'version': version,
-                'db_name': instance_data.get('db_name'),
+                'db_name': db_name,
                 'branch': instance_data.get('branch'),
                 'updated_at': datetime.utcnow().isoformat()
             }
             
             # 문서 업데이트
             await self.elasticsearch_service.update_document(
-                self.instances_index,
+                index_name,
                 instance_data.get('instance_id'),
                 doc=doc,
                 upsert=doc,
                 refresh=True
             )
             
-            logger.info(f"Instance updated in Elasticsearch: {instance_data.get('instance_id')}")
+            logger.info(f"Instance updated in Elasticsearch: {instance_data.get('instance_id')} in index: {index_name}")
             
         except Exception as e:
             logger.error(f"Failed to handle instance updated: {e}")
@@ -319,19 +357,26 @@ class ProjectionWorker:
     async def _handle_instance_deleted(self, instance_data: Dict[str, Any], event_id: str, event_data: Dict[str, Any]):
         """인스턴스 삭제 이벤트 처리"""
         try:
+            # 데이터베이스 이름 추출
+            db_name = event_data.get('db_name') or instance_data.get('db_name')
+            if not db_name:
+                raise ValueError("db_name is required for instance deletion")
+                
+            # 인덱스 이름 결정
+            index_name = get_instances_index_name(db_name)
             instance_id = instance_data.get('instance_id')
             
             # 문서 삭제
             success = await self.elasticsearch_service.delete_document(
-                self.instances_index,
+                index_name,
                 instance_id,
                 refresh=True
             )
             
             if success:
-                logger.info(f"Instance deleted from Elasticsearch: {instance_id}")
+                logger.info(f"Instance deleted from Elasticsearch: {instance_id} from index: {index_name}")
             else:
-                logger.warning(f"Instance not found for deletion: {instance_id}")
+                logger.warning(f"Instance not found for deletion: {instance_id} in index: {index_name}")
                 
         except Exception as e:
             logger.error(f"Failed to handle instance deleted: {e}")
@@ -340,6 +385,14 @@ class ProjectionWorker:
     async def _handle_ontology_class_created(self, ontology_data: Dict[str, Any], event_id: str, event_data: Dict[str, Any]):
         """온톨로지 클래스 생성 이벤트 처리"""
         try:
+            # 데이터베이스 이름 추출
+            db_name = event_data.get('db_name') or ontology_data.get('db_name')
+            if not db_name:
+                raise ValueError("db_name is required for ontology class creation")
+                
+            # 인덱스 확인 및 생성
+            index_name = await self._ensure_index_exists(db_name, "ontologies")
+            
             # Elasticsearch 문서 구성
             doc = {
                 'class_id': ontology_data.get('id'),
@@ -349,7 +402,7 @@ class ProjectionWorker:
                 'relationships': ontology_data.get('relationships', []),
                 'parent_classes': ontology_data.get('parent_classes', []),
                 'child_classes': ontology_data.get('child_classes', []),
-                'db_name': ontology_data.get('db_name'),
+                'db_name': db_name,
                 'branch': ontology_data.get('branch'),
                 'version': 1,
                 'event_id': event_id,
@@ -360,19 +413,20 @@ class ProjectionWorker:
             
             # 인덱싱
             await self.elasticsearch_service.index_document(
-                self.ontologies_index,
+                index_name,
                 doc,
                 doc_id=ontology_data.get('id'),
                 refresh=True
             )
             
-            # Redis에 클래스 라벨 캐싱
+            # Redis에 클래스 라벨 캐싱 (DB별로 키 구분)
             await self._cache_class_label(
                 ontology_data.get('id'),
-                ontology_data.get('label')
+                ontology_data.get('label'),
+                db_name
             )
             
-            logger.info(f"Ontology class created in Elasticsearch: {ontology_data.get('id')}")
+            logger.info(f"Ontology class created in Elasticsearch: {ontology_data.get('id')} in index: {index_name}")
             
         except Exception as e:
             logger.error(f"Failed to handle ontology class created: {e}")
@@ -381,9 +435,17 @@ class ProjectionWorker:
     async def _handle_ontology_class_updated(self, ontology_data: Dict[str, Any], event_id: str, event_data: Dict[str, Any]):
         """온톨로지 클래스 업데이트 이벤트 처리"""
         try:
+            # 데이터베이스 이름 추출
+            db_name = event_data.get('db_name') or ontology_data.get('db_name')
+            if not db_name:
+                raise ValueError("db_name is required for ontology class update")
+                
+            # 인덱스 확인 및 생성
+            index_name = await self._ensure_index_exists(db_name, "ontologies")
+            
             # 기존 문서 조회
             existing_doc = await self.elasticsearch_service.get_document(
-                self.ontologies_index,
+                index_name,
                 ontology_data.get('id')
             )
             
@@ -400,7 +462,7 @@ class ProjectionWorker:
                 'relationships': ontology_data.get('relationships', []),
                 'parent_classes': ontology_data.get('parent_classes', []),
                 'child_classes': ontology_data.get('child_classes', []),
-                'db_name': ontology_data.get('db_name'),
+                'db_name': db_name,
                 'branch': ontology_data.get('branch'),
                 'version': version,
                 'event_id': event_id,
@@ -410,20 +472,21 @@ class ProjectionWorker:
             
             # 문서 업데이트
             await self.elasticsearch_service.update_document(
-                self.ontologies_index,
+                index_name,
                 ontology_data.get('id'),
                 doc=doc,
                 upsert=doc,
                 refresh=True
             )
             
-            # Redis 캐시 업데이트
+            # Redis 캐시 업데이트 (DB별로 키 구분)
             await self._cache_class_label(
                 ontology_data.get('id'),
-                ontology_data.get('label')
+                ontology_data.get('label'),
+                db_name
             )
             
-            logger.info(f"Ontology class updated in Elasticsearch: {ontology_data.get('id')}")
+            logger.info(f"Ontology class updated in Elasticsearch: {ontology_data.get('id')} in index: {index_name}")
             
         except Exception as e:
             logger.error(f"Failed to handle ontology class updated: {e}")
@@ -432,40 +495,49 @@ class ProjectionWorker:
     async def _handle_ontology_class_deleted(self, ontology_data: Dict[str, Any], event_id: str, event_data: Dict[str, Any]):
         """온톨로지 클래스 삭제 이벤트 처리"""
         try:
+            # 데이터베이스 이름 추출
+            db_name = event_data.get('db_name') or ontology_data.get('db_name')
+            if not db_name:
+                raise ValueError("db_name is required for ontology class deletion")
+                
+            # 인덱스 이름 결정
+            index_name = get_ontologies_index_name(db_name)
             class_id = ontology_data.get('id')
             
             # 문서 삭제
             success = await self.elasticsearch_service.delete_document(
-                self.ontologies_index,
+                index_name,
                 class_id,
                 refresh=True
             )
             
-            # Redis 캐시 삭제
-            await self.redis_service.delete(f"class_label:{class_id}")
+            # Redis 캐시 삭제 (DB별로 키 구분)
+            await self.redis_service.delete(f"class_label:{db_name}:{class_id}")
             
             if success:
-                logger.info(f"Ontology class deleted from Elasticsearch: {class_id}")
+                logger.info(f"Ontology class deleted from Elasticsearch: {class_id} from index: {index_name}")
             else:
-                logger.warning(f"Ontology class not found for deletion: {class_id}")
+                logger.warning(f"Ontology class not found for deletion: {class_id} in index: {index_name}")
                 
         except Exception as e:
             logger.error(f"Failed to handle ontology class deleted: {e}")
             raise
             
-    async def _get_class_label(self, class_id: str) -> Optional[str]:
+    async def _get_class_label(self, class_id: str, db_name: str) -> Optional[str]:
         """Redis에서 클래스 라벨 조회"""
         try:
-            if not class_id:
+            if not class_id or not db_name:
                 return None
                 
-            cached_label = await self.redis_service.client.get(f"class_label:{class_id}")
+            cache_key = f"class_label:{db_name}:{class_id}"
+            cached_label = await self.redis_service.client.get(cache_key)
             if cached_label:
                 return cached_label
                 
             # 캐시에 없으면 Elasticsearch에서 조회
+            index_name = get_ontologies_index_name(db_name)
             doc = await self.elasticsearch_service.get_document(
-                self.ontologies_index,
+                index_name,
                 class_id
             )
             
@@ -474,7 +546,7 @@ class ProjectionWorker:
                 if label:
                     # 캐시에 저장 (1시간 TTL)
                     await self.redis_service.client.setex(
-                        f"class_label:{class_id}",
+                        cache_key,
                         3600,
                         label
                     )
@@ -483,19 +555,23 @@ class ProjectionWorker:
             return None
             
         except Exception as e:
-            logger.error(f"Failed to get class label for {class_id}: {e}")
+            logger.error(f"Failed to get class label for {class_id} in {db_name}: {e}")
             return None
             
-    async def _cache_class_label(self, class_id: str, label: str):
+    async def _cache_class_label(self, class_id: str, label: str, db_name: str):
         """클래스 라벨을 Redis에 캐싱"""
         try:
+            if not class_id or not label or not db_name:
+                return
+                
+            cache_key = f"class_label:{db_name}:{class_id}"
             await self.redis_service.client.setex(
-                f"class_label:{class_id}",
+                cache_key,
                 3600,  # 1시간 TTL
                 label
             )
         except Exception as e:
-            logger.error(f"Failed to cache class label: {e}")
+            logger.error(f"Failed to cache class label for {class_id} in {db_name}: {e}")
             
     def _normalize_properties(self, properties: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """속성을 검색 최적화된 형태로 정규화"""
