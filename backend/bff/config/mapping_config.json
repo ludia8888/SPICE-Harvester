@@ -1,0 +1,38 @@
+{
+  "thresholds": {
+    "min_confidence": 0.5,
+    "auto_accept": 0.8,
+    "fuzzy_match": 0.65,
+    "name_similarity": 0.4
+  },
+  "weights": {
+    "exact_match": 1.0,
+    "token_similarity": 0.85,
+    "fuzzy_match": 0.7,
+    "semantic_match": 0.85,
+    "type_match": 0.5,
+    "pattern_match": 0.9,
+    "distribution_similarity": 0.95
+  },
+  "stop_words": [
+    "id", "code", "name", "no", "number", "key", "value", "data", "info",
+    "item", "type", "status", "flag", "is", "has", "get", "set"
+  ],
+  "domain_specific_mappings": {
+    "finance": {
+      "amount": ["price", "cost", "total", "sum", "payment"],
+      "transaction": ["payment", "transfer", "order", "purchase"],
+      "account": ["customer", "client", "user", "member"]
+    },
+    "healthcare": {
+      "patient": ["person", "individual", "subject", "client"],
+      "diagnosis": ["condition", "disease", "disorder", "finding"],
+      "medication": ["drug", "medicine", "treatment", "prescription"]
+    },
+    "ecommerce": {
+      "product": ["item", "goods", "merchandise", "article"],
+      "order": ["purchase", "transaction", "sale", "booking"],
+      "customer": ["buyer", "client", "user", "shopper"]
+    }
+  }
+}

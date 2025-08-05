@@ -16,6 +16,13 @@ export class OntologyApiError extends Error {
 // Enhanced fetch function with ontology-specific error handling
 async function fetchOntologyApi<T>(url: string, options: RequestInit = {}): Promise<T> {
   try {
+    console.log('🔍 API Request Details:', {
+      url,
+      method: options.method || 'GET',
+      headers: options.headers,
+      body: options.body
+    });
+    
     const response = await fetch(url, {
       ...options,
       headers: {
@@ -24,18 +31,31 @@ async function fetchOntologyApi<T>(url: string, options: RequestInit = {}): Prom
         ...options.headers,
       },
     });
+    
+    console.log('📡 API Response:', {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers
+    });
 
-    const responseData: any = await response.json();
-
-    // Only throw error for actual HTTP errors (4xx, 5xx), not for successful responses
-    if (response.status >= 400) {
+    // Handle response based on status code
+    if (!response.ok) {
+      let errorData: any = {};
+      try {
+        errorData = await response.json();
+      } catch {
+        // If JSON parsing fails, use status text
+        errorData = { message: response.statusText || 'An error occurred' };
+      }
+      
       throw new OntologyApiError(
-        responseData.message || 'An error occurred',
-        responseData.data as string[] || [],
+        errorData.message || errorData.detail || 'An error occurred',
+        errorData.data as string[] || [],
         response.status === 409 ? 'CONFLICT' : response.status === 404 ? 'NOT_FOUND' : 'UNKNOWN'
       );
     }
 
+    const responseData: any = await response.json();
     return responseData.data as T;
   } catch (error) {
     if (error instanceof OntologyApiError) {
@@ -541,8 +561,19 @@ export const linkTypeApi = {
 
 // Property validation and type inference using Funnel service
 export const typeInferenceApi = {
-  // Suggest schema from raw data
-  async suggestFromData(data: any[]): Promise<{
+  // Suggest schema from raw data with optional profiling
+  async suggestFromData(data: any[], profile?: {
+    totalRows: number;
+    columns: Array<{
+      name: string;
+      nullCount: number;
+      nullRatio: number;
+      uniqueCount: number;
+      uniqueRatio: number;
+      sampleValues: any[];
+      totalValues: number;
+    }>;
+  }): Promise<{
     suggested_schema: {
       object_types: Array<{
         id: string;
@@ -570,7 +601,8 @@ export const typeInferenceApi = {
       body: JSON.stringify({ 
         data: rows,
         columns: columns,
-        include_complex_types: true
+        include_complex_types: true,
+        profile: profile // Include profiling data if available
       }),
     });
     

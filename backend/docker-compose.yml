@@ -105,6 +105,29 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+      
+  # Message Relay Service (Outbox Pattern)
+  message-relay:
+    build:
+      context: .
+      dockerfile: ./message_relay/Dockerfile
+    container_name: spice_message_relay
+    environment:
+      - POSTGRES_HOST=${POSTGRES_HOST:-postgres}
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
+      - POSTGRES_DB=${POSTGRES_DB:-spicedb}
+      - KAFKA_HOST=${KAFKA_HOST:-kafka}
+      - KAFKA_PORT=${KAFKA_PORT:-29092}
+      - MESSAGE_RELAY_BATCH_SIZE=${MESSAGE_RELAY_BATCH_SIZE:-100}
+      - MESSAGE_RELAY_POLL_INTERVAL=${MESSAGE_RELAY_POLL_INTERVAL:-5}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      - oms
+    networks:
+      - spice_network
+    restart: unless-stopped
 
 volumes:
   terminusdb_data:

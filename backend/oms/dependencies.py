@@ -22,14 +22,16 @@ from shared.security.input_sanitizer import validate_db_name, validate_class_id
 terminus_service = None
 jsonld_converter = None
 label_mapper = None
+outbox_service = None
 
 
-def set_services(terminus: AsyncTerminusService, converter: JSONToJSONLDConverter):
+def set_services(terminus: AsyncTerminusService, converter: JSONToJSONLDConverter, outbox=None):
     """서비스 인스턴스 설정"""
-    global terminus_service, jsonld_converter, label_mapper
+    global terminus_service, jsonld_converter, label_mapper, outbox_service
     terminus_service = terminus
     jsonld_converter = converter
     label_mapper = LabelMapper()
+    outbox_service = outbox
 
 
 def get_terminus_service() -> AsyncTerminusService:
@@ -60,6 +62,15 @@ def get_label_mapper() -> LabelMapper:
             detail="레이블 매퍼가 초기화되지 않았습니다",
         )
     return label_mapper
+
+
+def get_outbox_service():
+    """Outbox 서비스 의존성"""
+    if not outbox_service:
+        # Outbox 서비스가 없어도 에러를 발생시키지 않고 None 반환
+        # 이벤트 발행은 선택적 기능이므로
+        return None
+    return outbox_service
 
 
 # Validation Dependencies

@@ -37,6 +37,9 @@ SPICE HARVESTER is a sophisticated ontology management platform designed for ent
 
 ### 🚀 Recent Improvements
 
+- **Outbox Pattern Implementation**: Added reliable event publishing with PostgreSQL Outbox table and Kafka integration for asynchronous processing.
+- **Event-Driven Architecture**: OMS service now publishes events for all ontology CRUD operations (CREATE, UPDATE, DELETE).
+- **Message Relay Service**: New service that polls outbox table and publishes events to Kafka with automatic retry logic.
 - **Structural Refactoring**: Centralized service creation with a **Service Factory**, eliminating boilerplate code and ensuring consistency.
 - **API Response Standardization**: All API endpoints now return a standardized `ApiResponse` object (`{status, message, data}`), improving frontend integration.
 - **Test Code Optimization**: Adopted `pytest fixtures` for setup and teardown, removing redundant code in integration tests.
@@ -69,14 +72,28 @@ The system follows a microservices architecture with clear separation of concern
 │ • Core ontology & versioning ops │    │ • Data analysis & profiling │
 │ • Direct TerminusDB interface    │    │ • Schema suggestion       │
 │ • Data validation & integrity  │    │ • External data connectors  │
+│ • Event publishing via Outbox │    │                         │
 └─────────────────────────┘    └─────────────────────────┘
-            │
-            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                        TerminusDB                           │
-│                        Port: 6363                           │
-│              Graph Database & Query Engine                  │
-└─────────────────────────────────────────────────────────────┘
+            │           │
+            ▼           ▼
+┌──────────────┐  ┌──────────────┐    ┌─────────────────────┐
+│  TerminusDB  │  │  PostgreSQL  │    │   Message Relay     │
+│  Port: 6363  │  │  Port: 5433  │◄───│   (Outbox → Kafka)  │
+│ Graph DB     │  │ Outbox Table │    │                     │
+└──────────────┘  └──────────────┘    └──────────┬──────────┘
+                                                  │
+                                                  ▼
+                                         ┌─────────────────┐
+                                         │   Apache Kafka  │
+                                         │   Port: 9092    │
+                                         └────────┬────────┘
+                                                  │
+                    ┌─────────────────────────────┼─────────────────────────────┐
+                    ▼                             ▼                             ▼
+          ┌──────────────────┐         ┌──────────────────┐         ┌──────────────────┐
+          │ Import Service   │         │ Search Service   │         │ Analytics Service │
+          │ (Event Consumer) │         │ (Event Consumer) │         │ (Event Consumer) │
+          └──────────────────┘         └──────────────────┘         └──────────────────┘
 ```
 
 For detailed architecture documentation, see [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -109,8 +126,11 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your configuration
 
-# Start all services including TerminusDB
-docker-compose up -d
+# Start core services only (without Kafka/PostgreSQL)
+docker-compose -f backend/docker-compose.yml up -d
+
+# Or start all services including Kafka and PostgreSQL
+docker-compose -f docker-compose.full.yml up -d
 ```
 
 ### Verify Installation
@@ -183,7 +203,10 @@ Production-ready, automated schema generation from data.
 
 - **Programming Language**: Python 3.9+
 - **Web Framework**: FastAPI
-- **Database**: TerminusDB (as a graph database and versioning engine)
+- **Databases**: 
+    - TerminusDB (graph database and versioning engine)
+    - PostgreSQL (Outbox pattern for event publishing)
+- **Message Broker**: Apache Kafka
 - **Async Operations**: `asyncio` and `httpx` with connection pooling.
 - **Validation**: Pydantic
 - **Testing**: `pytest` and `pytest-asyncio` with `fixtures`.
@@ -193,6 +216,7 @@ Production-ready, automated schema generation from data.
     - **Service Factory**: Centralized service instantiation to reduce boilerplate.
     - **Adapter Pattern**: The BFF acts as an adapter between the client and backend services.
     - **Dependency Injection**: Used throughout the FastAPI application.
+    - **Outbox Pattern**: Reliable event publishing with transactional guarantees.
 
 ## Testing
 

@@ -1,0 +1,11 @@
+customer_id,full_name,email_address,phone_number,birth_date,registration_date,city,country,total_purchases,vip_status
+C001,김철수,chulsoo.kim@example.com,010-1234-5678,1985-03-15,2020-01-10,서울,한국,125000,TRUE
+C002,이영희,younghee.lee@gmail.com,010-2345-6789,1990-07-22,2020-02-15,부산,한국,85000,FALSE
+C003,박민수,minsu.park@naver.com,010-3456-7890,1988-11-30,2020-03-20,인천,한국,250000,TRUE
+C004,정수진,soojin.jung@kakao.com,010-4567-8901,1992-05-08,2020-04-25,대구,한국,45000,FALSE
+C005,홍길동,gildong.hong@example.com,010-5678-9012,1987-09-17,2020-05-30,광주,한국,180000,TRUE
+C006,김민지,minji.kim@gmail.com,010-6789-0123,1995-01-25,2020-06-10,대전,한국,92000,FALSE
+C007,이준호,junho.lee@naver.com,010-7890-1234,1986-12-03,2020-07-15,울산,한국,310000,TRUE
+C008,박서연,seoyeon.park@example.com,010-8901-2345,1993-04-18,2020-08-20,수원,한국,67000,FALSE
+C009,최동욱,dongwook.choi@kakao.com,010-9012-3456,1989-08-27,2020-09-25,성남,한국,195000,TRUE
+C010,장미란,miran.jang@gmail.com,010-0123-4567,1991-02-14,2020-10-30,고양,한국,112000,FALSE

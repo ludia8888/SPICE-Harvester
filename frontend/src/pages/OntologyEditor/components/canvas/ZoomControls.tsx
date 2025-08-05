@@ -1,5 +1,5 @@
 import React from 'react';
-import { useReactFlow } from 'reactflow';
+import { useReactFlow, useStore } from 'reactflow';
 import {
   Button,
   ButtonGroup,
@@ -12,22 +12,11 @@ import {
 import './ZoomControls.scss';
 
 export const ZoomControls: React.FC = () => {
-  const { zoomIn, zoomOut, fitView, getZoom } = useReactFlow();
-  const [currentZoom, setCurrentZoom] = React.useState(100);
-
-  React.useEffect(() => {
-    const updateZoom = () => {
-      const zoom = Math.round(getZoom() * 100);
-      setCurrentZoom(zoom);
-    };
-    
-    // Update on mount
-    updateZoom();
-    
-    // Listen for zoom changes
-    const interval = setInterval(updateZoom, 100);
-    return () => clearInterval(interval);
-  }, [getZoom]);
+  const { zoomIn, zoomOut, fitView } = useReactFlow();
+  
+  // Use React Flow's store to reactively get zoom level
+  const zoom = useStore((state) => state.transform[2]);
+  const currentZoom = Math.round(zoom * 100);
 
   const handleZoomIn = () => {
     zoomIn();

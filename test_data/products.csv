@@ -1,0 +1,11 @@
+productSKU,productName,categoryName,unitPrice,stockQuantity,manufacturer,releaseDate,isActive
+SKU-001,Galaxy S24 Ultra,스마트폰,1590000,45,Samsung,2024-01-15,true
+SKU-002,iPhone 15 Pro Max,스마트폰,1890000,32,Apple,2023-09-22,true
+SKU-003,LG 그램 17,노트북,2290000,18,LG,2023-03-10,true
+SKU-004,맥북 프로 16,노트북,3990000,12,Apple,2023-10-30,true
+SKU-005,갤럭시 워치6,스마트워치,390000,85,Samsung,2023-08-11,true
+SKU-006,애플 워치 시리즈9,스마트워치,590000,67,Apple,2023-09-22,true
+SKU-007,버즈3 프로,이어폰,290000,120,Samsung,2023-07-26,true
+SKU-008,에어팟 프로 2,이어폰,359000,95,Apple,2022-09-23,true
+SKU-009,갤럭시 탭 S9,태블릿,1090000,28,Samsung,2023-08-11,true
+SKU-010,아이패드 프로 12.9,태블릿,1590000,22,Apple,2022-10-18,true

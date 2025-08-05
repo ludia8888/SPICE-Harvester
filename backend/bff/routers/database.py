@@ -44,14 +44,22 @@ async def list_databases(oms: OMSClient = Depends(get_oms_client)):
 @router.post("", response_model=ApiResponse)
 async def create_database(request: DatabaseCreateRequest, oms: OMSClient = Depends(get_oms_client)):
     """데이터베이스 생성"""
+    logger.info(f"🔥 BFF: Database creation request received - name: {request.name}, description: {request.description}")
+    
     try:
         # 입력 데이터 보안 검증
+        logger.info(f"🔒 BFF: Validating database name: {request.name}")
         validated_name = validate_db_name(request.name)
+        logger.info(f"✅ BFF: Database name validated: {validated_name}")
+        
         if request.description:
             sanitized_description = sanitize_input(request.description)
+            logger.info(f"✅ BFF: Description sanitized")
         
         # OMS를 통해 데이터베이스 생성
+        logger.info(f"📡 BFF: Calling OMS to create database - URL: {oms.base_url}")
         result = await oms.create_database(request.name, request.description)
+        logger.info(f"✅ BFF: OMS response received: {result}")
 
         # 자동 커밋: 데이터베이스 생성 기록
         try:

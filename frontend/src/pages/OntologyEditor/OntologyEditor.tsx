@@ -679,7 +679,7 @@ export const OntologyEditor: React.FC = () => {
           >
             <InputGroup
               id="db-name"
-              placeholder="my_database or 내데이터베이스 or ㅁㅇㄴㄹ"
+              placeholder="예: customer_db, 고객관리, product_catalog"
               value={newDbName}
               onChange={(e) => setNewDbName(e.target.value)}
               onKeyDown={(e) => {
@@ -705,7 +705,7 @@ export const OntologyEditor: React.FC = () => {
           >
             <TextArea
               id="db-description"
-              placeholder="This database contains... or 이 데이터베이스는..."
+              placeholder="데이터베이스의 용도나 포함된 데이터를 설명하세요"
               value={newDbDescription}
               onChange={(e) => setNewDbDescription(e.target.value)}
               onKeyDown={(e) => {

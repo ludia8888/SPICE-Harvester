@@ -72,7 +72,7 @@ from bff.dependencies import (
     set_label_mapper,
     set_oms_client,
 )
-from bff.routers import database, health, mapping, merge_conflict, ontology, query
+from bff.routers import database, health, mapping, merge_conflict, ontology, query, instances
 from bff.services.funnel_type_inference_adapter import FunnelHTTPTypeInferenceAdapter
 from bff.services.oms_client import OMSClient
 
@@ -98,7 +98,9 @@ async def lifespan(app: FastAPI):
     logger.info("BFF 서비스 초기화 중...")
 
     # 서비스 초기화
-    oms_client = OMSClient("http://localhost:8000")
+    import os
+    oms_base_url = os.getenv("OMS_BASE_URL", "http://localhost:8000")
+    oms_client = OMSClient(oms_base_url)
     label_mapper = LabelMapper()
 
     # dependencies에 서비스 설정
@@ -1060,6 +1062,7 @@ app.include_router(query.router, prefix="/api/v1", tags=["query"])
 app.include_router(mapping.router, prefix="/api/v1", tags=["mapping"])
 app.include_router(health.router, prefix="/api/v1", tags=["health"])
 app.include_router(merge_conflict.router, prefix="/api/v1", tags=["merge-conflict"])
+app.include_router(instances.router, prefix="/api/v1", tags=["instances"])
 
 # Health endpoint를 루트 경로에도 등록 (호환성을 위해)
 app.include_router(health.router, tags=["health"])

@@ -78,6 +78,43 @@
     display: flex;
     flex-direction: column;
     
+    .preview-layout {
+      flex: 1;
+      display: flex;
+      gap: 16px;
+      padding: 16px;
+      overflow: hidden;
+      
+      &.table-only {
+        .table-section {
+          flex: 1;
+        }
+      }
+      
+      &.with-inspector {
+        .table-section {
+          flex: 2;
+          min-width: 0;
+        }
+        
+        .inspector-section {
+          flex: 1;
+          min-width: 300px;
+          max-width: 400px;
+        }
+      }
+      
+      .table-section {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      
+      .inspector-section {
+        overflow: auto;
+      }
+    }
+    
     .loading-state {
       display: flex;
       flex-direction: column;
@@ -192,6 +229,139 @@
       }
       
       tbody tr:hover {
+        background: rgba($blue3, 0.08);
+      }
+    }
+  }
+}
+
+// Inspector Panel Styles
+.instance-inspector {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: rgba($dark-gray2, 0.8);
+  border: 1px solid $dark-gray4;
+  
+  .inspector-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: rgba($dark-gray3, 0.5);
+    
+    h4 {
+      margin: 0;
+      font-size: 14px;
+      color: $light-gray5;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+  }
+  
+  .inspector-content {
+    flex: 1;
+    overflow: auto;
+    padding: 16px;
+    
+    .property-detail {
+      margin-bottom: 16px;
+      
+      .property-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+        
+        strong {
+          color: $light-gray5;
+          font-size: 13px;
+        }
+        
+        .#{$ns}-tag {
+          font-size: 10px;
+          background: rgba($gray3, 0.2);
+        }
+      }
+      
+      .property-value {
+        margin-bottom: 12px;
+        
+        .#{$ns}-tag {
+          font-size: 12px;
+          padding: 4px 8px;
+        }
+      }
+      
+      .value-distribution {
+        margin-top: 12px;
+        
+        h5 {
+          font-size: 12px;
+          color: $gray3;
+          margin: 0 0 8px 0;
+          text-transform: uppercase;
+        }
+        
+        .distribution-chart {
+          height: 120px;
+          margin-bottom: 8px;
+          background: rgba($dark-gray1, 0.5);
+          border-radius: 4px;
+          padding: 8px;
+        }
+        
+        .distribution-stats {
+          color: $gray4;
+          font-size: 11px;
+          text-align: center;
+        }
+      }
+    }
+  }
+}
+
+.inspector-placeholder {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba($dark-gray2, 0.3);
+  border: 1px dashed $dark-gray4;
+  
+  .#{$ns}-non-ideal-state {
+    .#{$ns}-non-ideal-state-icon {
+      color: $gray4;
+    }
+    
+    .#{$ns}-heading {
+      color: $gray3;
+      font-size: 14px;
+    }
+    
+    .#{$ns}-non-ideal-state-description {
+      color: $gray4;
+      font-size: 12px;
+    }
+  }
+}
+
+// Row selection styles
+.preview-table {
+  tbody {
+    .selected-row {
+      background: rgba($blue3, 0.15) !important;
+      
+      &:hover {
+        background: rgba($blue3, 0.2) !important;
+      }
+    }
+    
+    .clickable-row {
+      cursor: pointer;
+      
+      &:hover {
         background: rgba($blue3, 0.08);
       }
     }

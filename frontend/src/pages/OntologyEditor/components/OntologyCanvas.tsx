@@ -20,6 +20,7 @@ import ReactFlow, {
   applyEdgeChanges,
   NodeChange,
   EdgeChange,
+  MiniMap,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 
@@ -34,7 +35,10 @@ import {
   Popover,
   Dialog,
   Classes,
-  OverlayToaster
+  OverlayToaster,
+  FormGroup,
+  InputGroup,
+  HTMLSelect
 } from '@blueprintjs/core';
 
 import * as d3 from 'd3';
@@ -48,7 +52,6 @@ import { NodeInspector } from './NodeInspector';
 import { DataPreviewPanel } from './DataPreviewPanel';
 import { DataConnector } from './DataConnector';
 import { CanvasToolbar } from './canvas/CanvasToolbar';
-import { MiniMap } from './canvas/MiniMap';
 import { ZoomControls } from './canvas/ZoomControls';
 import './OntologyCanvas.scss';
 
@@ -57,32 +60,53 @@ const nodeTypes: NodeTypes = {
   ontologyNode: OntologyNodeComponent,
 };
 
-const edgeTypes: EdgeTypes = {
-  ontologyEdge: OntologyEdgeComponent,
-};
+// Create edge types with handlers
+const createEdgeTypes = (
+  onEdgeEdit: (edgeId: string) => void,
+  onEdgeDelete: (edgeId: string) => void,
+  onEdgeReverse: (edgeId: string) => void,
+  onEdgeMakeBidirectional: (edgeId: string) => void
+): EdgeTypes => ({
+  ontologyEdge: (props: any) => (
+    <OntologyEdgeComponent
+      {...props}
+      onEdit={() => onEdgeEdit(props.id)}
+      onDelete={() => onEdgeDelete(props.id)}
+      onReverse={() => onEdgeReverse(props.id)}
+      onMakeBidirectional={() => onEdgeMakeBidirectional(props.id)}
+    />
+  ),
+});
 
 // D3 Layout algorithms
 const layoutAlgorithms = {
   force: (nodes: Node[], edges: Edge[]) => {
-    const simulation = forceSimulation(nodes)
-      .force('link', forceLink(edges).id((d: any) => d.id).distance(200))
+    if (nodes.length === 0) return nodes;
+    
+    // Copy nodes to avoid mutation
+    const nodesCopy = nodes.map(n => ({ ...n, x: n.position.x, y: n.position.y }));
+    
+    const simulation = forceSimulation(nodesCopy)
+      .force('link', forceLink(edges).id((d: any) => d.id).distance(200).strength(0.5))
       .force('charge', forceManyBody().strength(-1000))
-      .force('center', forceCenter(window.innerWidth / 2, window.innerHeight / 2))
-      .force('collision', forceCollide(100));
+      .force('center', forceCenter(500, 300))
+      .force('collision', forceCollide(80));
 
     simulation.stop();
     for (let i = 0; i < 300; ++i) simulation.tick();
 
     return nodes.map((node) => {
-      const simNode = simulation.nodes().find((n: any) => n.id === node.id) as any;
+      const simNode = nodesCopy.find((n: any) => n.id === node.id) as any;
       return {
         ...node,
-        position: { x: simNode.x, y: simNode.y }
+        position: { x: simNode.x || node.position.x, y: simNode.y || node.position.y }
       };
     });
   },
   
   hierarchical: (nodes: Node[], edges: Edge[]) => {
+    if (nodes.length === 0) return nodes;
+    
     // Create hierarchy using d3
     const stratify = d3.stratify<Node>()
       .id(d => d.id)
@@ -94,8 +118,8 @@ const layoutAlgorithms = {
     try {
       const root = stratify(nodes);
       const treeLayout = d3.tree<Node>()
-        .size([window.innerWidth - 200, window.innerHeight - 200])
-        .separation((a, b) => 2);
+        .size([800, 600])
+        .separation((a, b) => 1.5);
       
       treeLayout(root as any);
       
@@ -104,29 +128,85 @@ const layoutAlgorithms = {
         return {
           ...node,
           position: {
-            x: treeNode?.x || node.position.x,
-            y: treeNode?.y || node.position.y
+            x: (treeNode?.x || node.position.x) + 100,
+            y: (treeNode?.y || node.position.y) + 100
           }
         };
       });
     } catch {
-      // Fallback to force layout if hierarchy fails
-      return layoutAlgorithms.force(nodes, edges);
+      // If hierarchy fails, arrange nodes in levels based on connections
+      const levels = new Map<string, number>();
+      const positioned = new Set<string>();
+      
+      // Find root nodes (no incoming edges)
+      const rootNodes = nodes.filter(node => 
+        !edges.some(edge => edge.target === node.id)
+      );
+      
+      // Assign levels
+      rootNodes.forEach(node => levels.set(node.id, 0));
+      
+      let maxLevel = 0;
+      const assignLevel = (nodeId: string, level: number) => {
+        levels.set(nodeId, level);
+        maxLevel = Math.max(maxLevel, level);
+        
+        edges.filter(e => e.source === nodeId).forEach(edge => {
+          if (!levels.has(edge.target) || levels.get(edge.target)! < level + 1) {
+            assignLevel(edge.target, level + 1);
+          }
+        });
+      };
+      
+      rootNodes.forEach(node => assignLevel(node.id, 0));
+      
+      // Position nodes by level
+      const levelCounts = new Map<number, number>();
+      return nodes.map(node => {
+        const level = levels.get(node.id) || 0;
+        const count = levelCounts.get(level) || 0;
+        levelCounts.set(level, count + 1);
+        
+        return {
+          ...node,
+          position: {
+            x: 200 + count * 150,
+            y: 100 + level * 150
+          }
+        };
+      });
     }
   },
   
   circular: (nodes: Node[], edges: Edge[]) => {
-    const radius = Math.min(window.innerWidth, window.innerHeight) * 0.3;
-    const center = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    if (nodes.length === 0) return nodes;
+    
+    const radius = Math.min(400, 300 * Math.sqrt(nodes.length / 10));
+    const center = { x: 500, y: 300 };
     const angleStep = (2 * Math.PI) / nodes.length;
     
-    return nodes.map((node, index) => ({
-      ...node,
-      position: {
-        x: center.x + radius * Math.cos(index * angleStep),
-        y: center.y + radius * Math.sin(index * angleStep)
-      }
-    }));
+    // Sort nodes by connectivity for better layout
+    const nodeDegree = new Map<string, number>();
+    nodes.forEach(node => {
+      const degree = edges.filter(e => e.source === node.id || e.target === node.id).length;
+      nodeDegree.set(node.id, degree);
+    });
+    
+    const sortedNodes = [...nodes].sort((a, b) => 
+      (nodeDegree.get(b.id) || 0) - (nodeDegree.get(a.id) || 0)
+    );
+    
+    return nodes.map((node) => {
+      const index = sortedNodes.findIndex(n => n.id === node.id);
+      const angle = index * angleStep - Math.PI / 2; // Start from top
+      return {
+        ...node,
+        position: {
+          x: center.x + radius * Math.cos(angle),
+          y: center.y + radius * Math.sin(angle)
+        }
+      };
+    });
   }
 };
 
@@ -146,16 +226,19 @@ const OntologyCanvasInner: React.FC<OntologyCanvasProps> = ({ onNodeDoubleClick 
   } = useOntologyStore();
 
   const reactFlowInstance = useReactFlow();
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [nodes, setNodes] = useNodesState([]);
+  const [edges, setEdges] = useEdgesState([]);
+  const nodePositions = useRef<Map<string, { x: number; y: number }>>(new Map());
   
   const [showNodeInspector, setShowNodeInspector] = useState(false);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [showDataPreview, setShowDataPreview] = useState(false);
   const [showDataConnector, setShowDataConnector] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [editingEdge, setEditingEdge] = useState<Edge | null>(null);
+  const [showEdgeDialog, setShowEdgeDialog] = useState(false);
   
-  const deletePressed = useKeyPress(['Delete', 'Backspace']);
+  // Remove useKeyPress and handle keyboard events directly
   const spacePressed = useKeyPress(' ');
 
   // Toast notification utility
@@ -167,19 +250,28 @@ const OntologyCanvasInner: React.FC<OntologyCanvasProps> = ({ onNodeDoubleClick 
     });
   };
 
-  // Convert store data to ReactFlow nodes and edges
+  // Convert store data to ReactFlow nodes and edges - only when objectTypes or linkTypes change
   useEffect(() => {
-    const newNodes = objectTypes.map(obj => ({
-      id: obj.id,
-      type: 'ontologyNode',
-      position: { x: Math.random() * 800, y: Math.random() * 600 },
-      data: {
-        label: obj.label,
-        description: obj.description,
-        properties: obj.properties,
-        isSelected: selectedObjectType === obj.id,
-      } as OntologyNodeData,
-    }));
+    const newNodes = objectTypes.map(obj => {
+      // Use stored position or generate new one
+      let position = nodePositions.current.get(obj.id);
+      if (!position) {
+        position = { x: Math.random() * 800, y: Math.random() * 600 };
+        nodePositions.current.set(obj.id, position);
+      }
+      
+      return {
+        id: obj.id,
+        type: 'ontologyNode',
+        position,
+        data: {
+          label: obj.label,
+          description: obj.description,
+          properties: obj.properties,
+          isSelected: selectedObjectType === obj.id,
+        } as OntologyNodeData,
+      };
+    });
 
     const newEdges = linkTypes.map(link => ({
       id: link.id,
@@ -189,8 +281,8 @@ const OntologyCanvasInner: React.FC<OntologyCanvasProps> = ({ onNodeDoubleClick 
       animated: true,
       markerEnd: {
         type: MarkerType.ArrowClosed,
-        width: 20,
-        height: 20,
+        width: 12,
+        height: 12,
       },
       data: {
         label: link.label,
@@ -200,7 +292,20 @@ const OntologyCanvasInner: React.FC<OntologyCanvasProps> = ({ onNodeDoubleClick 
 
     setNodes(newNodes);
     setEdges(newEdges);
-  }, [objectTypes, linkTypes, selectedObjectType]);
+  }, [objectTypes, linkTypes]); // Remove selectedObjectType from dependencies
+
+  // Update selection state separately
+  useEffect(() => {
+    setNodes(currentNodes =>
+      currentNodes.map(node => ({
+        ...node,
+        data: {
+          ...node.data,
+          isSelected: selectedObjectType === node.id,
+        },
+      }))
+    );
+  }, [selectedObjectType]);
 
   // Handle node double click
   const handleNodeDoubleClick = useCallback((event: React.MouseEvent, node: Node) => {
@@ -213,7 +318,6 @@ const OntologyCanvasInner: React.FC<OntologyCanvasProps> = ({ onNodeDoubleClick 
   // Handle node click
   const handleNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
     selectObjectType(node.id);
-    setShowDataPreview(true);
   }, [selectObjectType]);
 
   // Handle connection
@@ -225,8 +329,8 @@ const OntologyCanvasInner: React.FC<OntologyCanvasProps> = ({ onNodeDoubleClick 
       animated: true,
       markerEnd: {
         type: MarkerType.ArrowClosed,
-        width: 20,
-        height: 20,
+        width: 12,
+        height: 12,
       },
       data: {
         label: 'relates_to',
@@ -251,9 +355,13 @@ const OntologyCanvasInner: React.FC<OntologyCanvasProps> = ({ onNodeDoubleClick 
 
   // Handle add node from context menu
   const handleAddNode = useCallback((fromContextMenu: boolean = true) => {
+    const existingNodesCount = nodes.length;
     const position = fromContextMenu && contextMenu 
       ? reactFlowInstance.project(contextMenu)
-      : { x: window.innerWidth / 2 - 100, y: window.innerHeight / 2 - 50 };
+      : { 
+          x: 300 + (existingNodesCount % 5) * 150, 
+          y: 200 + Math.floor(existingNodesCount / 5) * 150 
+        };
     
     const newNode: Node = {
       id: `node-${Date.now()}`,
@@ -270,23 +378,55 @@ const OntologyCanvasInner: React.FC<OntologyCanvasProps> = ({ onNodeDoubleClick 
     setNodes((nds) => [...nds, newNode]);
     if (fromContextMenu) setContextMenu(null);
     
+    // Store position
+    nodePositions.current.set(newNode.id, position);
+    
     // Open inspector for new node
     setSelectedNode(newNode);
     setShowNodeInspector(true);
-  }, [contextMenu, reactFlowInstance, setNodes]);
+  }, [contextMenu, reactFlowInstance, setNodes, nodes.length]);
 
   // Apply layout
   const applyLayout = useCallback((algorithm: keyof typeof layoutAlgorithms) => {
     const layoutedNodes = layoutAlgorithms[algorithm](nodes, edges);
+    // Update node positions reference
+    layoutedNodes.forEach(node => {
+      nodePositions.current.set(node.id, node.position);
+    });
     setNodes(layoutedNodes);
-  }, [nodes, edges, setNodes]);
+    // Fit view after layout change
+    setTimeout(() => {
+      reactFlowInstance?.fitView({ padding: 0.2, duration: 500 });
+    }, 50);
+    showToast(`Layout applied: ${algorithm}`, Intent.SUCCESS);
+  }, [nodes, edges, setNodes, reactFlowInstance]);
 
-  // Handle keyboard shortcuts
+  // Handle keyboard shortcuts directly
   useEffect(() => {
-    if (deletePressed && selectedObjectType) {
-      handleDeleteNode();
-    }
-  }, [deletePressed, selectedObjectType]);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Only handle delete/backspace keys
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedObjectType) {
+        // Check if the delete key was pressed in an input field
+        const activeElement = document.activeElement;
+        const isInputField = activeElement instanceof HTMLInputElement || 
+                            activeElement instanceof HTMLTextAreaElement || 
+                            activeElement instanceof HTMLSelectElement ||
+                            (activeElement as HTMLElement)?.contentEditable === 'true';
+        
+        if (!isInputField) {
+          event.preventDefault();
+          // Delete node logic
+          setNodes((nds) => nds.filter((n) => n.id !== selectedObjectType));
+          setEdges((eds) => eds.filter((e) => e.source !== selectedObjectType && e.target !== selectedObjectType));
+          selectObjectType(null);
+          // TODO: Call API to delete object type
+        }
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedObjectType, setNodes, setEdges, selectObjectType]);
   
   // Delete selected node
   const handleDeleteNode = useCallback(() => {
@@ -341,6 +481,66 @@ const OntologyCanvasInner: React.FC<OntologyCanvasProps> = ({ onNodeDoubleClick 
     showToast('Search functionality coming soon', Intent.WARNING);
   }, []);
 
+  // Edge handlers
+  const handleEdgeEdit = useCallback((edgeId: string) => {
+    const edge = edges.find(e => e.id === edgeId);
+    if (edge) {
+      setEditingEdge(edge);
+      setShowEdgeDialog(true);
+    }
+  }, [edges]);
+
+  const handleEdgeDelete = useCallback((edgeId: string) => {
+    setEdges(edges => edges.filter(e => e.id !== edgeId));
+    showToast('Edge deleted', Intent.SUCCESS);
+    // TODO: Call API to delete link type
+  }, [setEdges]);
+
+  const handleEdgeReverse = useCallback((edgeId: string) => {
+    setEdges(edges =>
+      edges.map(edge => {
+        if (edge.id === edgeId) {
+          return {
+            ...edge,
+            source: edge.target,
+            target: edge.source,
+          };
+        }
+        return edge;
+      })
+    );
+    showToast('Edge direction reversed', Intent.SUCCESS);
+  }, [setEdges]);
+
+  const handleEdgeMakeBidirectional = useCallback((edgeId: string) => {
+    setEdges(edges =>
+      edges.map(edge => {
+        if (edge.id === edgeId) {
+          return {
+            ...edge,
+            data: {
+              ...edge.data,
+              bidirectional: !edge.data?.bidirectional,
+            },
+          };
+        }
+        return edge;
+      })
+    );
+    showToast('Edge bidirectionality toggled', Intent.SUCCESS);
+  }, [setEdges]);
+
+  // Create edge types with handlers
+  const edgeTypes = useMemo(
+    () => createEdgeTypes(
+      handleEdgeEdit,
+      handleEdgeDelete,
+      handleEdgeReverse,
+      handleEdgeMakeBidirectional
+    ),
+    [handleEdgeEdit, handleEdgeDelete, handleEdgeReverse, handleEdgeMakeBidirectional]
+  );
+
   // Show/hide panels with space key
   useEffect(() => {
     if (spacePressed) {
@@ -365,8 +565,18 @@ const OntologyCanvasInner: React.FC<OntologyCanvasProps> = ({ onNodeDoubleClick 
       <ReactFlow
         nodes={nodes}
         edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
+        onNodesChange={(changes: NodeChange[]) => {
+          // Update node positions when they are dragged
+          changes.forEach(change => {
+            if (change.type === 'position' && change.position) {
+              nodePositions.current.set(change.id, change.position);
+            }
+          });
+          setNodes(currentNodes => applyNodeChanges(changes, currentNodes));
+        }}
+        onEdgesChange={(changes: EdgeChange[]) => {
+          setEdges(currentEdges => applyEdgeChanges(changes, currentEdges));
+        }}
         onConnect={onConnect}
         onNodeClick={handleNodeClick}
         onNodeDoubleClick={handleNodeDoubleClick}
@@ -377,6 +587,8 @@ const OntologyCanvasInner: React.FC<OntologyCanvasProps> = ({ onNodeDoubleClick 
         defaultViewport={{ x: 0, y: 0, zoom: 1 }}
         fitView
         attributionPosition="bottom-left"
+        deleteKeyCode={null} // Disable default delete behavior
+        selectionKeyCode={null} // Disable default selection behavior
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
         
@@ -394,11 +606,36 @@ const OntologyCanvasInner: React.FC<OntologyCanvasProps> = ({ onNodeDoubleClick 
           />
         </Panel>
         
-        <Panel position="bottom-left">
-          <MiniMap nodes={nodes} />
-        </Panel>
+        <MiniMap 
+          nodeStrokeColor={(n) => {
+            if (n.data?.isSelected) return '#48aff0';
+            return '#5c7080';
+          }}
+          nodeColor={(n) => {
+            if (n.data?.isSelected) return '#48aff0';
+            return '#394b59';
+          }}
+          style={{
+            backgroundColor: 'rgba(16, 22, 26, 0.8)',
+            border: '1px solid #394b59',
+          }}
+          position="bottom-left"
+          pannable
+          zoomable
+        />
         
-        <Panel position="bottom-right">
+        <Panel position="bottom-right" style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+          <Button
+            icon="th"
+            title="데이터 프리뷰 보기/숨기기 (Space)"
+            onClick={() => setShowDataPreview(prev => !prev)}
+            active={showDataPreview}
+            intent={showDataPreview ? Intent.PRIMARY : Intent.NONE}
+            style={{ 
+              marginRight: '8px',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24)'
+            }}
+          />
           <ZoomControls />
         </Panel>
       </ReactFlow>
@@ -471,6 +708,93 @@ const OntologyCanvasInner: React.FC<OntologyCanvasProps> = ({ onNodeDoubleClick 
           }}
         />
       )}
+
+      {/* Edge Edit Dialog */}
+      <Dialog
+        isOpen={showEdgeDialog}
+        onClose={() => {
+          setShowEdgeDialog(false);
+          setEditingEdge(null);
+        }}
+        title="Edit Relationship"
+        style={{ width: '500px' }}
+      >
+        <div className={Classes.DIALOG_BODY}>
+          {editingEdge && (
+            <>
+              <FormGroup label="Relationship Label" labelFor="edge-label">
+                <InputGroup
+                  id="edge-label"
+                  value={editingEdge.data?.label || ''}
+                  onChange={(e) => {
+                    if (editingEdge) {
+                      setEditingEdge({
+                        ...editingEdge,
+                        data: {
+                          ...editingEdge.data,
+                          label: e.target.value,
+                        },
+                      });
+                    }
+                  }}
+                  placeholder="Enter relationship label..."
+                />
+              </FormGroup>
+
+              <FormGroup label="Cardinality" labelFor="edge-cardinality">
+                <HTMLSelect
+                  id="edge-cardinality"
+                  value={editingEdge.data?.cardinality || '1:n'}
+                  onChange={(e) => {
+                    if (editingEdge) {
+                      setEditingEdge({
+                        ...editingEdge,
+                        data: {
+                          ...editingEdge.data,
+                          cardinality: e.target.value,
+                        },
+                      });
+                    }
+                  }}
+                  options={[
+                    { value: '1:1', label: 'One to One' },
+                    { value: '1:n', label: 'One to Many' },
+                    { value: 'n:1', label: 'Many to One' },
+                    { value: 'n:n', label: 'Many to Many' },
+                  ]}
+                />
+              </FormGroup>
+            </>
+          )}
+        </div>
+        <div className={Classes.DIALOG_FOOTER}>
+          <div className={Classes.DIALOG_FOOTER_ACTIONS}>
+            <Button
+              text="Cancel"
+              onClick={() => {
+                setShowEdgeDialog(false);
+                setEditingEdge(null);
+              }}
+            />
+            <Button
+              text="Save"
+              intent={Intent.PRIMARY}
+              onClick={() => {
+                if (editingEdge) {
+                  setEdges(edges =>
+                    edges.map(edge =>
+                      edge.id === editingEdge.id ? editingEdge : edge
+                    )
+                  );
+                  showToast('Relationship updated', Intent.SUCCESS);
+                  setShowEdgeDialog(false);
+                  setEditingEdge(null);
+                }
+              }}
+            />
+          </div>
+        </div>
+      </Dialog>
     </>
   );
 };

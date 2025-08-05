@@ -26,7 +26,7 @@ services:
       start_period: 60s
     restart: unless-stopped
     networks:
-      - spice-foundry-network
+      - spice_network
 
   # PostgreSQL Database
   postgres:
@@ -41,6 +41,7 @@ services:
       - "5433:5432"  # Using 5433 to avoid conflict with existing postgres
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./backend/database/init:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U spiceadmin -d spicedb"]
       interval: 10s
@@ -49,7 +50,7 @@ services:
       start_period: 30s
     restart: unless-stopped
     networks:
-      - spice-foundry-network
+      - spice_network
 
   # Elasticsearch
   elasticsearch:
@@ -83,7 +84,7 @@ services:
       start_period: 60s
     restart: unless-stopped
     networks:
-      - spice-foundry-network
+      - spice_network
 
   # Kibana (Optional - Elasticsearch UI)
   kibana:
@@ -109,7 +110,7 @@ services:
       start_period: 60s
     restart: unless-stopped
     networks:
-      - spice-foundry-network
+      - spice_network
 
 volumes:
   cassandra-data:
@@ -120,5 +121,5 @@ volumes:
     driver: local
 
 networks:
-  spice-foundry-network:
-    driver: bridge
+  spice_network:
+    external: true

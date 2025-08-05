@@ -408,11 +408,11 @@ export const Home: React.FC = () => {
       
       // Complete progress animation (70 -> 100%) when AI responds
       let finalProgress = 70;
-      const completeInterval = setInterval(() => {
-        finalProgress += 10;
+      const animateProgress = () => {
+        finalProgress += 2; // Smaller increments for smoother animation
+        
         if (finalProgress >= 100) {
           finalProgress = 100;
-          clearInterval(completeInterval);
           
           // Mark insight as completed only after AI response is delivered
           setInsightStatuses(prev => prev.map(ins => 
@@ -434,8 +434,10 @@ export const Home: React.FC = () => {
           setInsightStatuses(prev => prev.map(ins => 
             ins.id === insightId ? { ...ins, progress: finalProgress } : ins
           ));
+          requestAnimationFrame(animateProgress);
         }
-      }, 100);
+      };
+      requestAnimationFrame(animateProgress);
       
       // Reset height and auto-focus input
       setTimeout(() => {

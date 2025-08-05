@@ -1,10 +1,11 @@
 # SPICE HARVESTER Architecture
 
 > Auto-generated on 2025-07-18 10:41:34
+> Updated on 2025-08-05 - Outbox Pattern Implementation
 
 ## Overview
 
-This document contains automatically generated architecture diagrams for the SPICE HARVESTER project.
+This document contains automatically generated architecture diagrams for the SPICE HARVESTER project. The architecture now includes the Outbox Pattern for reliable event publishing and asynchronous processing.
 
 ## Class Diagrams
 
@@ -171,7 +172,7 @@ classDiagram
 
 ```mermaid
 graph TB
-    %% Data Flow Architecture
+    %% Data Flow Architecture with Outbox Pattern
     
     subgraph "Client Layer"
         Web[Web Application]
@@ -189,12 +190,19 @@ graph TB
         OMS[Ontology Management]
         Query[Query Service]
         Validator[Validation Service]
+        Relay[Message Relay Service]
     end
     
     subgraph "Data Layer"
         Terminus[TerminusDB]
+        Postgres[(PostgreSQL<br/>Outbox Table)]
         Cache[Redis Cache]
         Search[Search Index]
+    end
+    
+    subgraph "Message Layer"
+        Kafka[Apache Kafka]
+        Consumers[Event Consumers]
     end
     
     %% Connections
@@ -212,8 +220,13 @@ graph TB
     Query --> Validator
     
     OMS --> Terminus
+    OMS --> Postgres
     Query --> Terminus
     Query --> Cache
+    
+    Postgres --> Relay
+    Relay --> Kafka
+    Kafka --> Consumers
     
     Terminus --> Search
 ```
@@ -222,38 +235,91 @@ graph TB
 
 ```mermaid
 sequenceDiagram
-    %% Service Interaction Flow
+    %% Service Interaction Flow with Outbox Pattern
     
     participant Client
     participant BFF as Backend for Frontend
     participant OMS as Ontology Management Service
     participant DB as TerminusDB
-    participant Cache as Cache Layer
+    participant PG as PostgreSQL
+    participant Relay as Message Relay
+    participant Kafka
+    participant Consumer as Event Consumer
     
-    %% Standard Request Flow
-    Client->>BFF: HTTP Request
+    %% Create/Update Request Flow with Outbox Pattern
+    Client->>BFF: HTTP Request (Create/Update)
     BFF->>BFF: Validate Request
     BFF->>BFF: Check Permissions
     
-    alt Cached Response Available
-        BFF->>Cache: Get Cached Data
-        Cache-->>BFF: Return Data
-        BFF-->>Client: Return Response
-    else Fresh Data Needed
-        BFF->>OMS: Forward Request
-        OMS->>OMS: Business Logic
-        OMS->>DB: Query/Update
-        DB-->>OMS: Result
-        OMS-->>BFF: Response
-        BFF->>Cache: Update Cache
-        BFF-->>Client: Formatted Response
+    BFF->>OMS: Forward Request
+    OMS->>OMS: Business Logic
+    
+    rect rgb(240, 240, 240)
+        Note over OMS,PG: Atomic Transaction
+        OMS->>DB: Update Ontology
+        DB-->>OMS: Success
+        OMS->>PG: Insert Outbox Event
+        PG-->>OMS: Event Stored
     end
     
-    %% Error Handling
-    alt Error Occurs
-        OMS-->>BFF: Error Response
-        BFF->>BFF: Format Error
-        BFF-->>Client: Error Details
+    OMS-->>BFF: Response
+    BFF-->>Client: Success Response
+    
+    %% Asynchronous Event Processing
+    rect rgb(230, 250, 230)
+        Note over Relay,Consumer: Asynchronous Flow
+        Relay->>PG: Poll Unprocessed Events
+        PG-->>Relay: Events List
+        Relay->>Kafka: Publish Events
+        Kafka-->>Relay: Ack
+        Relay->>PG: Mark as Processed
+        
+        Consumer->>Kafka: Subscribe to Events
+        Kafka-->>Consumer: New Event
+        Consumer->>Consumer: Process Event
     end
+    
+    %% Read Request Flow (unchanged)
+    Client->>BFF: HTTP Request (Read)
+    BFF->>OMS: Forward Request
+    OMS->>DB: Query
+    DB-->>OMS: Result
+    OMS-->>BFF: Response
+    BFF-->>Client: Formatted Response
 ```
+
+## Outbox Pattern Implementation
+
+### Overview
+
+The Outbox Pattern ensures reliable event publishing by storing events in a database table within the same transaction as the business operation. A separate Message Relay service then reads these events and publishes them to Kafka.
+
+### Components
+
+1. **PostgreSQL Outbox Table**: Stores events with metadata
+2. **OMS Service**: Writes to both TerminusDB and Outbox table in a single transaction
+3. **Message Relay Service**: Polls the outbox table and publishes to Kafka
+4. **Kafka**: Message broker for event distribution
+5. **Event Consumers**: Services that subscribe to and process events
+
+### Event Types
+
+- `ONTOLOGY_CLASS_CREATED`: New ontology class created
+- `ONTOLOGY_CLASS_UPDATED`: Existing ontology class modified
+- `ONTOLOGY_CLASS_DELETED`: Ontology class removed
+
+### Benefits
+
+- **Atomicity**: Events are guaranteed to be published if the business transaction succeeds
+- **Reliability**: No events are lost even if Kafka is temporarily unavailable
+- **Scalability**: Multiple Message Relay instances can run concurrently
+- **Decoupling**: Services communicate asynchronously through events
+
+### Configuration
+
+Key environment variables:
+- `POSTGRES_HOST/PORT/USER/PASSWORD/DB`: PostgreSQL connection
+- `KAFKA_BOOTSTRAP_SERVERS`: Kafka broker addresses
+- `MESSAGE_RELAY_BATCH_SIZE`: Events per batch (default: 100)
+- `MESSAGE_RELAY_POLL_INTERVAL`: Polling interval in seconds (default: 5)
 

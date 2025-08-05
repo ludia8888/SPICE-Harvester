@@ -17,7 +17,14 @@ export interface OntologyEdgeData {
   bidirectional?: boolean;
 }
 
-export const OntologyEdgeComponent = memo<EdgeProps<OntologyEdgeData>>(({
+interface OntologyEdgeProps extends EdgeProps<OntologyEdgeData> {
+  onEdit?: () => void;
+  onDelete?: () => void;
+  onReverse?: () => void;
+  onMakeBidirectional?: () => void;
+}
+
+export const OntologyEdgeComponent = memo<OntologyEdgeProps>(({
   id,
   sourceX,
   sourceY,
@@ -29,6 +36,10 @@ export const OntologyEdgeComponent = memo<EdgeProps<OntologyEdgeData>>(({
   selected,
   markerEnd,
   style = {},
+  onEdit,
+  onDelete,
+  onReverse,
+  onMakeBidirectional,
 }) => {
   // Calculate path based on node positions
   const [edgePath, labelX, labelY] = getBezierPath({
@@ -70,10 +81,27 @@ export const OntologyEdgeComponent = memo<EdgeProps<OntologyEdgeData>>(({
           <Popover
             content={
               <Menu>
-                <MenuItem text="Edit Relationship" icon="edit" />
-                <MenuItem text="Reverse Direction" icon="swap-horizontal" />
-                <MenuItem text="Make Bidirectional" icon="exchange" />
-                <MenuItem text="Delete" icon="trash" intent={Intent.DANGER} />
+                <MenuItem 
+                  text="Edit Relationship" 
+                  icon="edit" 
+                  onClick={onEdit}
+                />
+                <MenuItem 
+                  text="Reverse Direction" 
+                  icon="swap-horizontal" 
+                  onClick={onReverse}
+                />
+                <MenuItem 
+                  text={data?.bidirectional ? "Make Unidirectional" : "Make Bidirectional"} 
+                  icon="exchange" 
+                  onClick={onMakeBidirectional}
+                />
+                <MenuItem 
+                  text="Delete" 
+                  icon="trash" 
+                  intent={Intent.DANGER} 
+                  onClick={onDelete}
+                />
               </Menu>
             }
             minimal

@@ -1,0 +1,71 @@
+version: '3.8'
+
+# 전체 서비스 통합 구성
+# 실행: docker-compose -f docker-compose.full.yml up -d
+
+services:
+  # Core services
+  terminusdb:
+    extends:
+      file: backend/docker-compose.yml
+      service: terminusdb
+      
+  oms:
+    extends:
+      file: backend/docker-compose.yml
+      service: oms
+    depends_on:
+      - terminusdb
+      - postgres
+      
+  bff:
+    extends:
+      file: backend/docker-compose.yml
+      service: bff
+      
+  funnel:
+    extends:
+      file: backend/docker-compose.yml
+      service: funnel
+      
+  message-relay:
+    extends:
+      file: backend/docker-compose.yml
+      service: message-relay
+    depends_on:
+      - postgres
+      - kafka
+      
+  # Database services
+  postgres:
+    extends:
+      file: docker-compose.databases.yml
+      service: postgres
+      
+  # Kafka services
+  zookeeper:
+    extends:
+      file: docker-compose.kafka.yml
+      service: zookeeper
+      
+  kafka:
+    extends:
+      file: docker-compose.kafka.yml
+      service: kafka
+      
+  kafka-ui:
+    extends:
+      file: docker-compose.kafka.yml
+      service: kafka-ui
+
+volumes:
+  terminusdb_data:
+  bff_data:
+  postgres-data:
+  zookeeper-data:
+  zookeeper-logs:
+  kafka-data:
+
+networks:
+  spice_network:
+    driver: bridge

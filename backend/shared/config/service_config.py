@@ -119,6 +119,30 @@ class ServiceConfig:
             return url
         protocol = ServiceConfig.get_protocol()
         return f"{protocol}://localhost:6363"
+    
+    @staticmethod
+    def get_postgres_url() -> str:
+        """Get PostgreSQL connection URL from environment or default."""
+        if url := os.getenv("POSTGRES_URL"):
+            return url
+        
+        host = os.getenv("POSTGRES_HOST", "postgres" if ServiceConfig.is_docker_environment() else "localhost")
+        port = os.getenv("POSTGRES_PORT", "5432")
+        user = os.getenv("POSTGRES_USER", "spiceadmin")
+        password = os.getenv("POSTGRES_PASSWORD", "spicepass123")
+        database = os.getenv("POSTGRES_DB", "spicedb")
+        
+        return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+    
+    @staticmethod
+    def get_kafka_bootstrap_servers() -> str:
+        """Get Kafka bootstrap servers from environment or default."""
+        if servers := os.getenv("KAFKA_BOOTSTRAP_SERVERS"):
+            return servers
+        
+        host = os.getenv("KAFKA_HOST", "kafka" if ServiceConfig.is_docker_environment() else "localhost")
+        port = os.getenv("KAFKA_PORT", "9092")
+        return f"{host}:{port}"
 
     @staticmethod
     def is_docker_environment() -> bool:

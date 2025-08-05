@@ -1,8 +1,36 @@
 @use '@blueprintjs/core/lib/scss/variables' as *;
 
 .data-connector-dialog {
-  .#{$ns}-dialog-body {
-    padding: 20px;
+  &.#{$ns}-dialog {
+    width: 90vw;
+    max-width: 1200px;
+    height: 90vh;
+    max-height: 900px;
+    
+    .#{$ns}-dialog-body {
+      padding: 20px;
+      height: calc(100% - 120px); // Subtract header and footer height
+      overflow-y: auto;
+      overflow-x: hidden;
+      
+      &:has(.data-profiling-panel) {
+        padding: 0;
+        overflow: hidden; // Let the panel handle its own scrolling
+      }
+      
+      &:has(.ontology-mapping-panel) {
+        padding: 0;
+        overflow: hidden; // Let the panel handle its own scrolling
+      }
+    }
+    
+    .#{$ns}-dialog-footer {
+      position: sticky;
+      bottom: 0;
+      background: $dark-gray1;
+      border-top: 1px solid $gray1;
+      z-index: 10;
+    }
   }
   
   .processing-view {
@@ -88,6 +116,404 @@
       border-color: $blue4;
     }
   }
+
+  // Modern Workflow Steps Indicator
+  .workflow-steps {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 15px 0 25px 0;
+    padding: 24px 32px;
+    background: linear-gradient(135deg, rgba($dark-gray1, 0.8) 0%, rgba($dark-gray2, 0.4) 100%);
+    border-radius: 12px;
+    border: 1px solid rgba($dark-gray4, 0.3);
+    position: relative;
+    overflow: hidden;
+    
+    // Background glow effect
+    &::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(90deg, 
+        transparent 0%, 
+        rgba($blue3, 0.05) 25%, 
+        rgba($blue3, 0.1) 50%, 
+        rgba($blue3, 0.05) 75%, 
+        transparent 100%
+      );
+      opacity: 0.6;
+    }
+    
+    .workflow-step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      z-index: 1;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      
+      &:not(:last-child) {
+        margin-right: 48px;
+      }
+      
+      // Active step styling
+      &.active {
+        .step-indicator {
+          background: linear-gradient(135deg, $blue4 0%, $blue5 100%);
+          border: 3px solid rgba($blue3, 0.6);
+          box-shadow: 
+            0 0 20px rgba($blue4, 0.4),
+            0 0 40px rgba($blue4, 0.2),
+            inset 0 1px 3px rgba(255, 255, 255, 0.3);
+          transform: scale(1.1);
+          
+          .step-number {
+            color: white;
+            font-weight: 700;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+          }
+          
+          .#{$ns}-icon {
+            color: white;
+            filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+          }
+        }
+        
+        .step-label {
+          color: $blue4;
+          font-weight: 600;
+          transform: translateY(-2px);
+        }
+        
+        .step-description {
+          color: $blue5;
+          opacity: 1;
+        }
+      }
+      
+      // Completed step styling
+      &.completed {
+        .step-indicator {
+          background: linear-gradient(135deg, $green4 0%, $green5 100%);
+          border: 3px solid rgba($green3, 0.6);
+          box-shadow: 
+            0 0 15px rgba($green4, 0.3),
+            inset 0 1px 3px rgba(255, 255, 255, 0.3);
+          
+          .#{$ns}-icon {
+            color: white;
+            filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+          }
+        }
+        
+        .step-label {
+          color: $green4;
+          font-weight: 500;
+        }
+        
+        .step-description {
+          color: $green5;
+        }
+        
+        .step-connector {
+          background: linear-gradient(90deg, $green4 0%, $green5 100%);
+          box-shadow: 0 0 8px rgba($green4, 0.4);
+        }
+      }
+      
+      // Disabled step styling
+      &.disabled {
+        opacity: 0.4;
+        
+        .step-indicator {
+          background: rgba($gray5, 0.2);
+          border: 2px solid $gray5;
+        }
+      }
+      
+      // Step indicator circle
+      .step-indicator {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, rgba($gray3, 0.3) 0%, rgba($gray4, 0.2) 100%);
+        border: 2px solid $gray4;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 8px;
+        position: relative;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        backdrop-filter: blur(8px);
+        
+        // Pulse animation for active step
+        &.pulsing {
+          animation: stepPulse 2s ease-in-out infinite;
+        }
+        
+        .step-number {
+          font-size: 14px;
+          font-weight: 600;
+          color: $gray3;
+          transition: all 0.3s ease;
+        }
+        
+        .#{$ns}-icon {
+          transition: all 0.3s ease;
+        }
+      }
+      
+      // Step content
+      .step-content {
+        text-align: center;
+        transition: all 0.3s ease;
+        
+        .step-label {
+          font-size: 12px;
+          font-weight: 500;
+          color: $gray3;
+          margin-bottom: 2px;
+          white-space: nowrap;
+          transition: all 0.3s ease;
+        }
+        
+        .step-description {
+          font-size: 10px;
+          color: $gray4;
+          opacity: 0.8;
+          white-space: nowrap;
+          transition: all 0.3s ease;
+        }
+      }
+      
+      // Connector line between steps
+      .step-connector {
+        position: absolute;
+        top: 22px;
+        left: calc(100% + 12px);
+        width: 24px;
+        height: 3px;
+        background: linear-gradient(90deg, $gray5 0%, $gray4 100%);
+        border-radius: 2px;
+        transition: all 0.3s ease;
+        
+        &::before {
+          content: '';
+          position: absolute;
+          top: -1px;
+          left: 0;
+          right: 0;
+          bottom: -1px;
+          background: linear-gradient(90deg, 
+            rgba($gray5, 0.3) 0%, 
+            rgba($gray4, 0.5) 50%, 
+            rgba($gray5, 0.3) 100%
+          );
+          border-radius: 3px;
+          z-index: -1;
+        }
+      }
+    }
+  }
+  
+  // Pulse animation
+  @keyframes stepPulse {
+    0%, 100% {
+      box-shadow: 
+        0 0 20px rgba($blue4, 0.4),
+        0 0 40px rgba($blue4, 0.2),
+        inset 0 1px 3px rgba(255, 255, 255, 0.3);
+    }
+    50% {
+      box-shadow: 
+        0 0 30px rgba($blue4, 0.6),
+        0 0 60px rgba($blue4, 0.3),
+        inset 0 1px 3px rgba(255, 255, 255, 0.3);
+    }
+  }
+  
+  // Responsive design
+  @media (max-width: 768px) {
+    .workflow-steps {
+      padding: 16px 20px;
+      
+      .workflow-step {
+        &:not(:last-child) {
+          margin-right: 32px;
+        }
+        
+        .step-indicator {
+          width: 36px;
+          height: 36px;
+          
+          .step-number {
+            font-size: 12px;
+          }
+        }
+        
+        .step-content {
+          .step-label {
+            font-size: 11px;
+          }
+          
+          .step-description {
+            font-size: 9px;
+          }
+        }
+        
+        .step-connector {
+          width: 20px;
+          top: 18px;
+        }
+      }
+    }
+  }
+  
+  // Import Confirmation View
+  .import-confirm-view {
+    text-align: center;
+    padding: 40px 20px;
+    
+    .confirm-icon {
+      margin-bottom: 20px;
+    }
+    
+    h3 {
+      color: $light-gray5;
+      margin: 20px 0 10px 0;
+    }
+    
+    p {
+      color: $gray3;
+      margin-bottom: 30px;
+    }
+    
+    .import-preview {
+      max-width: 500px;
+      margin: 0 auto 30px auto;
+      background: rgba($dark-gray2, 0.5);
+      
+      h4 {
+        color: $light-gray5;
+        margin-bottom: 16px;
+      }
+      
+      .import-details {
+        .detail-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 12px;
+          
+          strong {
+            color: $gray3;
+            font-size: 13px;
+          }
+          
+          span {
+            color: $light-gray4;
+            font-size: 13px;
+          }
+        }
+      }
+    }
+    
+    .import-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      margin-top: 20px;
+    }
+  }
+  
+  // Import Complete View
+  .import-complete-view {
+    text-align: center;
+    padding: 40px 20px;
+    
+    .completion-icon {
+      margin-bottom: 20px;
+    }
+    
+    h2 {
+      color: $green4;
+      margin: 20px 0 30px 0;
+    }
+    
+    .import-summary {
+      max-width: 600px;
+      margin: 0 auto 30px auto;
+      
+      .summary-card {
+        background: rgba($dark-gray2, 0.5);
+        
+        h4 {
+          color: $light-gray5;
+          margin-bottom: 16px;
+        }
+        
+        .summary-stats {
+          margin-bottom: 20px;
+          
+          .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+            
+            &.success {
+              color: $green4;
+            }
+            
+            &.failed {
+              color: $red4;
+            }
+            
+            span {
+              font-size: 14px;
+              font-weight: 500;
+            }
+          }
+        }
+        
+        .error-details {
+          h5 {
+            color: $orange4;
+            font-size: 13px;
+            margin-bottom: 10px;
+          }
+          
+          .error-list {
+            text-align: left;
+            
+            .error-item {
+              display: flex;
+              align-items: flex-start;
+              gap: 8px;
+              margin-bottom: 6px;
+              font-size: 12px;
+              color: $orange4;
+              
+              span {
+                line-height: 1.4;
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    .completion-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+  }
 }
 
 // Dark theme adjustments
@@ -96,6 +522,11 @@
     .file-preview {
       background: rgba($dark-gray1, 0.8);
       border: 1px solid $dark-gray4;
+    }
+    
+    .workflow-steps {
+      background: rgba($dark-gray1, 0.5);
+      border: 1px solid rgba($dark-gray4, 0.5);
     }
   }
 }

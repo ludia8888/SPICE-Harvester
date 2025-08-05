@@ -45,9 +45,9 @@ class ConnectionConfig:
         import os
 
         # Get environment variables with defaults
-        server_url = os.getenv("TERMINUS_SERVER_URL", "http://terminusdb:6363")
+        server_url = os.getenv("TERMINUS_SERVER_URL", "http://localhost:6364")
         user = os.getenv("TERMINUS_USER", "admin")
-        key = os.getenv("TERMINUS_KEY", os.getenv("TERMINUSDB_ADMIN_PASS", "admin123"))
+        key = os.getenv("TERMINUS_KEY", os.getenv("TERMINUSDB_ADMIN_PASS", "admin"))
         account = os.getenv("TERMINUS_ACCOUNT", "admin")
         timeout = int(os.getenv("TERMINUS_TIMEOUT", "30"))
         database = os.getenv("TERMINUS_DATABASE")

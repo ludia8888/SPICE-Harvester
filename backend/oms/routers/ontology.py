@@ -12,10 +12,13 @@ from oms.dependencies import (
     get_jsonld_converter, 
     get_label_mapper, 
     get_terminus_service,
+    get_outbox_service,
     ValidatedDatabaseName,
     ValidatedClassId,
     ensure_database_exists
 )
+from oms.database.postgres import db as postgres_db
+from oms.database.outbox import EventType, OutboxService
 
 # OMS 서비스 import
 from oms.services.async_terminus import AsyncTerminusService
@@ -68,6 +71,7 @@ async def create_ontology(
     terminus: AsyncTerminusService = Depends(get_terminus_service),
     converter: JSONToJSONLDConverter = Depends(get_jsonld_converter),
     label_mapper=Depends(get_label_mapper),
+    outbox_service: Optional[OutboxService] = Depends(get_outbox_service),
 ) -> OntologyResponse:
     """내부 ID 기반 온톨로지 생성"""
     # 🔥 ULTRA DEBUG! OMS received data
@@ -137,6 +141,36 @@ async def create_ontology(
                 description = description_data.get("en") or description_data.get("ko") or list(description_data.values())[0] if description_data else None
             else:
                 description = str(description_data)
+
+        # Outbox 이벤트 발행 (선택적)
+        if outbox_service and postgres_db.pool:
+            try:
+                async with postgres_db.transaction() as conn:
+                    await outbox_service.publish_event(
+                        connection=conn,
+                        event_type=EventType.ONTOLOGY_CLASS_CREATED,
+                        aggregate_type="OntologyClass",
+                        aggregate_id=ontology_data.get("id"),
+                        data={
+                            "db_name": db_name,
+                            "class_id": ontology_data.get("id"),
+                            "label": label,
+                            "description": description,
+                            "properties": ontology_data.get("properties", []),
+                            "relationships": ontology_data.get("relationships", []),
+                            "parent_class": ontology_data.get("parent_class"),
+                            "abstract": ontology_data.get("abstract", False),
+                        },
+                        topic="ontology_events",
+                        additional_context={
+                            "user": "system",  # TODO: 실제 사용자 정보 추가
+                            "source": "oms_api",
+                        }
+                    )
+                    logger.info(f"Published ONTOLOGY_CLASS_CREATED event for {ontology_data.get('id')}")
+            except Exception as e:
+                # 이벤트 발행 실패는 생성 작업을 실패시키지 않음
+                logger.error(f"Failed to publish outbox event: {e}")
 
         # 생성된 온톨로지 데이터를 OntologyResponse 형식으로 직접 변환
         return OntologyResponse(
@@ -356,6 +390,7 @@ async def update_ontology(
     ontology_data: OntologyUpdateRequest = ...,
     terminus: AsyncTerminusService = Depends(get_terminus_service),
     converter: JSONToJSONLDConverter = Depends(get_jsonld_converter),
+    outbox_service: Optional[OutboxService] = Depends(get_outbox_service),
 ):
     """내부 ID 기반 온톨로지 업데이트"""
     try:
@@ -381,6 +416,32 @@ async def update_ontology(
         # TerminusDB 업데이트
         result = await terminus.update_ontology(db_name, class_id, jsonld_data)
 
+        # Outbox 이벤트 발행 (선택적)
+        if outbox_service and postgres_db.pool:
+            try:
+                async with postgres_db.transaction() as conn:
+                    await outbox_service.publish_event(
+                        connection=conn,
+                        event_type=EventType.ONTOLOGY_CLASS_UPDATED,
+                        aggregate_type="OntologyClass",
+                        aggregate_id=class_id,
+                        data={
+                            "db_name": db_name,
+                            "class_id": class_id,
+                            "updates": sanitized_data,
+                            "merged_data": merged_data,
+                        },
+                        topic="ontology_events",
+                        additional_context={
+                            "user": "system",  # TODO: 실제 사용자 정보 추가
+                            "source": "oms_api",
+                        }
+                    )
+                    logger.info(f"Published ONTOLOGY_CLASS_UPDATED event for {class_id}")
+            except Exception as e:
+                # 이벤트 발행 실패는 업데이트 작업을 실패시키지 않음
+                logger.error(f"Failed to publish outbox event: {e}")
+
         return OntologyResponse(
             status="success", message=f"온톨로지 '{class_id}'가 업데이트되었습니다", data=result
         )
@@ -402,7 +463,8 @@ async def update_ontology(
 async def delete_ontology(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
-    terminus: AsyncTerminusService = Depends(get_terminus_service)
+    terminus: AsyncTerminusService = Depends(get_terminus_service),
+    outbox_service: Optional[OutboxService] = Depends(get_outbox_service),
 ):
     """내부 ID 기반 온톨로지 삭제"""
     try:
@@ -415,6 +477,30 @@ async def delete_ontology(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"온톨로지 '{class_id}'를 찾을 수 없습니다",
             )
+
+        # Outbox 이벤트 발행 (선택적)
+        if outbox_service and postgres_db.pool:
+            try:
+                async with postgres_db.transaction() as conn:
+                    await outbox_service.publish_event(
+                        connection=conn,
+                        event_type=EventType.ONTOLOGY_CLASS_DELETED,
+                        aggregate_type="OntologyClass",
+                        aggregate_id=class_id,
+                        data={
+                            "db_name": db_name,
+                            "class_id": class_id,
+                        },
+                        topic="ontology_events",
+                        additional_context={
+                            "user": "system",  # TODO: 실제 사용자 정보 추가
+                            "source": "oms_api",
+                        }
+                    )
+                    logger.info(f"Published ONTOLOGY_CLASS_DELETED event for {class_id}")
+            except Exception as e:
+                # 이벤트 발행 실패는 삭제 작업을 실패시키지 않음
+                logger.error(f"Failed to publish outbox event: {e}")
 
         return BaseResponse(status="success", message=f"온톨로지 '{class_id}'가 삭제되었습니다")
 

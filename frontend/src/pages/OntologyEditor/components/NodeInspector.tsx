@@ -145,10 +145,20 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
       onClose={onClose}
       position={Position.RIGHT}
       size="400px"
+      canEscapeKeyClose={true}
+      canOutsideClickClose={true}
       title={
-        <div className="inspector-header">
-          <Icon icon="cube" size={20} />
-          <span>Object Type Properties</span>
+        <div className="inspector-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Icon icon="cube" size={20} />
+            <span>Object Type Properties</span>
+          </div>
+          <Button
+            icon="cross"
+            minimal
+            onClick={onClose}
+            title="닫기 (ESC)"
+          />
         </div>
       }
       className={`node-inspector ${Classes.DARK}`}
@@ -164,6 +174,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
                 id="node-label"
                 value={nodeData.label}
                 onChange={(e) => handleNodeDataChange('label', e.target.value)}
+                onKeyDown={(e) => e.stopPropagation()}
                 placeholder="Object type name"
               />
             </FormGroup>
@@ -173,6 +184,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
                 id="node-description"
                 value={nodeData.description || ''}
                 onChange={(e) => handleNodeDataChange('description', e.target.value)}
+                onKeyDown={(e) => e.stopPropagation()}
                 placeholder="Describe this object type..."
                 rows={3}
                 fill
@@ -225,9 +237,8 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
                   key={property.id}
                   className="property-card"
                   interactive
-                  onClick={() => togglePropertyExpansion(property.id)}
                 >
-                  <div className="property-header">
+                  <div className="property-header" onClick={() => togglePropertyExpansion(property.id)}>
                     <div className="property-info">
                       <Icon 
                         icon={expandedProperties.has(property.id) ? 'chevron-down' : 'chevron-right'} 
@@ -254,12 +265,13 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
                   </div>
                   
                   <Collapse isOpen={expandedProperties.has(property.id)}>
-                    <div className="property-details">
+                    <div className="property-details" onClick={(e) => e.stopPropagation()}>
                       <FormGroup label="Property Name" labelFor={`prop-name-${property.id}`}>
                         <InputGroup
                           id={`prop-name-${property.id}`}
                           value={property.name}
                           onChange={(e) => handlePropertyChange(property.id, 'name', e.target.value)}
+                          onKeyDown={(e) => e.stopPropagation()}
                           placeholder="property_name"
                           small
                         />
@@ -270,6 +282,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
                           id={`prop-label-${property.id}`}
                           value={property.label}
                           onChange={(e) => handlePropertyChange(property.id, 'label', e.target.value)}
+                          onKeyDown={(e) => e.stopPropagation()}
                           placeholder="Property Label"
                           small
                         />

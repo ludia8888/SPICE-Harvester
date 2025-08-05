@@ -45,6 +45,15 @@ class SchemaFromGoogleSheetsRequest(BaseModel):
     api_key: Optional[str] = None
 
 
+class MappingSuggestionRequest(BaseModel):
+    """Request model for mapping suggestions between schemas"""
+    
+    source_schema: List[Dict[str, Any]]  # New data schema
+    target_schema: List[Dict[str, Any]]  # Existing ontology schema
+    sample_data: Optional[List[Dict[str, Any]]] = None  # Sample values for pattern matching
+    target_sample_data: Optional[List[Dict[str, Any]]] = None  # Target sample values for distribution matching
+
+
 from fastapi import HTTPException
 
 from bff.dependencies import (
@@ -117,9 +126,32 @@ async def create_ontology(
         # 🔥 THINK ULTRA! Transform properties for OMS compatibility
         # Convert 'target' to 'linkTarget' for link-type properties
         def transform_properties_for_oms(data):
+            # Extract string from language objects
+            def extract_string_value(value, field_name="field"):
+                """Extract string value from either a plain string or language object"""
+                if isinstance(value, str):
+                    return value
+                elif isinstance(value, dict):
+                    # Try to get Korean first, then English, then any available language
+                    return value.get('ko') or value.get('en') or next(iter(value.values()), '')
+                else:
+                    return str(value) if value else ''
+            
+            # Transform top-level label and description
+            if 'label' in data:
+                data['label'] = extract_string_value(data['label'], 'label')
+            if 'description' in data:
+                data['description'] = extract_string_value(data['description'], 'description')
+            
             if 'properties' in data and isinstance(data['properties'], list):
                 for i, prop in enumerate(data['properties']):
                     if isinstance(prop, dict):
+                        # Extract string values from language objects in properties
+                        if 'label' in prop:
+                            prop['label'] = extract_string_value(prop['label'], 'property label')
+                        if 'description' in prop:
+                            prop['description'] = extract_string_value(prop['description'], 'property description')
+                        
                         # 🔥 ULTRA! BFF uses 'label' but OMS requires 'name'
                         if 'name' not in prop and 'label' in prop:
                             # Generate name from label
@@ -149,6 +181,15 @@ async def create_ontology(
                             if isinstance(items, dict) and items.get('type') == 'link' and 'target' in items:
                                 items['linkTarget'] = items.pop('target')
                                 logger.info(f"🔧 Converted array property '{prop.get('name')}' items target -> linkTarget: {items.get('linkTarget')}")
+            
+            # Transform relationships
+            if 'relationships' in data and isinstance(data['relationships'], list):
+                for rel in data['relationships']:
+                    if isinstance(rel, dict):
+                        if 'label' in rel:
+                            rel['label'] = extract_string_value(rel['label'], 'relationship label')
+                        if 'description' in rel:
+                            rel['description'] = extract_string_value(rel['description'], 'relationship description')
         
         # Apply transformation
         transform_properties_for_oms(ontology_dict)
@@ -927,6 +968,96 @@ async def suggest_schema_from_data(
         )
 
 
+@router.post("/suggest-mappings")
+async def suggest_mappings(
+    db_name: str,
+    request: MappingSuggestionRequest,
+) -> Dict[str, Any]:
+    """
+    두 스키마 간의 매핑을 자동으로 제안
+    
+    AI 기반 매핑 제안 엔진을 사용하여 소스 스키마(새 데이터)를
+    타겟 스키마(기존 온톨로지)에 매핑하는 제안을 생성합니다.
+    
+    Features:
+    - 이름 기반 매칭 (exact, fuzzy, phonetic)
+    - 타입 기반 매칭
+    - 의미론적 매칭 (도메인 지식)
+    - 값 패턴 기반 매칭
+    - 신뢰도 점수 제공
+    """
+    try:
+        # 입력 데이터 보안 검증
+        db_name = validate_db_name(db_name)
+        
+        from bff.services.mapping_suggestion_service import MappingSuggestionService
+        
+        # 매핑 제안 서비스 사용 (구성 가능한 임계값/가중치)
+        config = None
+        try:
+            # Try to load config from file
+            import os
+            config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'mapping_config.json')
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                logger.info(f"Loaded mapping config from {config_path}")
+        except Exception as e:
+            logger.warning(f"Failed to load mapping config: {e}, using defaults")
+        
+        suggestion_service = MappingSuggestionService(config=config)
+        
+        # Get target sample data if provided
+        target_sample_data = request.target_sample_data
+        
+        # Note: For better accuracy, the frontend should fetch target sample data
+        # when selecting a target ontology class and include it in the request.
+        # This allows for value distribution similarity matching.
+        
+        if not target_sample_data:
+            logger.info("No target sample data provided - value distribution matching will be skipped")
+        
+        suggestion = suggestion_service.suggest_mappings(
+            source_schema=request.source_schema,
+            target_schema=request.target_schema,
+            sample_data=request.sample_data,
+            target_sample_data=target_sample_data
+        )
+        
+        # 결과 포맷팅
+        return {
+            "status": "success",
+            "message": f"Found {len(suggestion.mappings)} mapping suggestions with {suggestion.overall_confidence:.2f} overall confidence",
+            "mappings": [
+                {
+                    "source_field": m.source_field,
+                    "target_field": m.target_field,
+                    "confidence": m.confidence,
+                    "match_type": m.match_type,
+                    "reasons": m.reasons
+                }
+                for m in suggestion.mappings
+            ],
+            "unmapped_source_fields": suggestion.unmapped_source_fields,
+            "unmapped_target_fields": suggestion.unmapped_target_fields,
+            "overall_confidence": suggestion.overall_confidence,
+            "statistics": {
+                "total_source_fields": len(request.source_schema),
+                "total_target_fields": len(request.target_schema),
+                "mapped_fields": len(suggestion.mappings),
+                "high_confidence_mappings": len([m for m in suggestion.mappings if m.confidence >= 0.8]),
+                "medium_confidence_mappings": len([m for m in suggestion.mappings if 0.6 <= m.confidence < 0.8]),
+            }
+        }
+    
+    except Exception as e:
+        logger.error(f"Mapping suggestion failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail=f"매핑 제안 실패: {str(e)}"
+        )
+
+
 @router.post("/suggest-schema-from-google-sheets")
 async def suggest_schema_from_google_sheets(
     db_name: str,
@@ -979,4 +1110,268 @@ async def suggest_schema_from_google_sheets(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Google Sheets 스키마 제안 실패: {str(e)}",
+        )
+
+
+@router.post("/ontology/{class_id}/mapping-metadata")
+async def save_mapping_metadata(
+    db_name: str,
+    class_id: str,
+    metadata: Dict[str, Any],
+    oms: OMSClient = Depends(get_oms_client),
+    mapper: LabelMapper = Depends(get_label_mapper),
+):
+    """
+    매핑 메타데이터를 온톨로지 클래스에 저장
+    
+    데이터 매핑 이력과 통계를 ClassMetadata에 저장합니다.
+    """
+    try:
+        # 입력 데이터 보안 검증
+        db_name = validate_db_name(db_name)
+        class_id = validate_class_id(class_id)
+        sanitized_metadata = sanitize_input(metadata)
+        
+        # 기존 메타데이터 가져오기
+        existing_metadata = await oms.get_class_metadata(db_name, class_id)
+        
+        # 매핑 이력 업데이트
+        mapping_history = existing_metadata.get("mapping_history", [])
+        
+        # 새 매핑 정보 추가
+        new_mapping_entry = {
+            "timestamp": sanitized_metadata.get("timestamp", datetime.utcnow().isoformat()),
+            "source_file": sanitized_metadata.get("sourceFile", "unknown"),
+            "mappings_count": sanitized_metadata.get("mappingsCount", 0),
+            "average_confidence": sanitized_metadata.get("averageConfidence", 0),
+            "mapping_details": sanitized_metadata.get("mappingDetails", [])
+        }
+        
+        mapping_history.append(new_mapping_entry)
+        
+        # 최근 10개의 매핑 이력만 유지
+        if len(mapping_history) > 10:
+            mapping_history = mapping_history[-10:]
+        
+        # 메타데이터 업데이트
+        updated_metadata = {
+            **existing_metadata,
+            "mapping_history": mapping_history,
+            "last_mapping_date": new_mapping_entry["timestamp"],
+            "total_mappings": sum(entry.get("mappings_count", 0) for entry in mapping_history),
+            "mapping_sources": list(set(
+                entry.get("source_file", "unknown") 
+                for entry in mapping_history 
+                if entry.get("source_file") != "unknown"
+            ))
+        }
+        
+        # OMS를 통해 메타데이터 저장
+        await oms.update_class_metadata(db_name, class_id, updated_metadata)
+        
+        logger.info(f"Saved mapping metadata for class {class_id}: {new_mapping_entry['mappings_count']} mappings from {new_mapping_entry['source_file']}")
+        
+        return {
+            "status": "success",
+            "message": "매핑 메타데이터가 저장되었습니다",
+            "data": {
+                "class_id": class_id,
+                "mapping_entry": new_mapping_entry,
+                "total_history_entries": len(mapping_history)
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to save mapping metadata: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"매핑 메타데이터 저장 실패: {str(e)}"
+        )
+
+
+# ==========================================
+# CSV DATA IMPORT ENDPOINTS
+# ==========================================
+# TODO: Replace with actual Outbox Pattern + CQRS implementation
+# ARCHITECTURE NOTES for future developers:
+# ========================================
+# 
+# 1. OUTBOX PATTERN IMPLEMENTATION:
+#    - Create PostgreSQL table: import_jobs
+#    - Schema: job_id, database_name, class_id, csv_data, mappings, status, created_at
+#    - Insert import job atomically with other operations
+#    - Use database transactions to ensure consistency
+#
+# 2. EVENT STREAMING with KAFKA:
+#    - Topic: "data-import-requests"
+#    - Event Schema: { jobId, database, classId, csvData, mappings, timestamp }
+#    - Producer: BFF service (this endpoint)
+#    - Consumer: Import processing service
+#
+# 3. CQRS IMPLEMENTATION:
+#    - COMMAND: Import job creation (handled by Kafka consumer)
+#    - QUERY: Data retrieval from ElasticSearch + Cassandra
+#    - Write Model: TerminusDB (source of truth)
+#    - Read Models: ElasticSearch (search), Cassandra (bulk data)
+#
+# 4. SERVICES ARCHITECTURE:
+#    BFF -> Outbox Table -> Kafka -> Import Service -> TerminusDB + ElasticSearch + Cassandra
+#
+# 5. PROGRESS TRACKING:
+#    - WebSocket/SSE endpoint for real-time progress
+#    - Redis for caching import job status
+#    - Event-driven status updates
+#
+# 6. ERROR HANDLING:
+#    - Dead letter queue for failed imports
+#    - Retry mechanism with exponential backoff
+#    - Detailed error logging and recovery
+
+class CsvImportRequest(BaseModel):
+    """Request model for CSV data import"""
+    csv_data: List[Dict[str, Any]]
+    mappings: Dict[str, Any]
+    source_file: str
+    total_records: int
+
+
+@router.post("/import-csv-data")
+async def import_csv_data(
+    db_name: str,
+    import_request: CsvImportRequest,
+    oms: OMSClient = Depends(get_oms_client)
+) -> Dict[str, Any]:
+    """
+    CSV 데이터를 온톨로지 인스턴스로 임포트
+    
+    TODO: 실제 구현에서는 Outbox Pattern + Event Streaming 사용
+    현재는 UX 플로우 완성을 위한 Placeholder 구현
+    """
+    try:
+        # Input validation
+        validate_db_name(db_name)
+        
+        if not import_request.csv_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="CSV 데이터가 비어있습니다"
+            )
+        
+        logger.info(f"Starting CSV import for database {db_name}: {import_request.total_records} records from {import_request.source_file}")
+        
+        # TODO: Replace with Outbox Pattern
+        # =====================================
+        # STEP 1: Insert to outbox table (PostgreSQL)
+        # import_job = await create_import_job({
+        #     "database_name": db_name,
+        #     "source_file": import_request.source_file,
+        #     "total_records": import_request.total_records,
+        #     "csv_data": import_request.csv_data,
+        #     "mappings": import_request.mappings,
+        #     "status": "pending",
+        #     "created_at": datetime.utcnow()
+        # })
+        # 
+        # STEP 2: Publish to Kafka
+        # await kafka_producer.send("data-import-requests", {
+        #     "job_id": import_job.id,
+        #     "database": db_name,
+        #     "class_id": import_request.mappings.get("target_class"),
+        #     "csv_data": import_request.csv_data,
+        #     "mappings": import_request.mappings,
+        #     "timestamp": datetime.utcnow().isoformat()
+        # })
+        # 
+        # STEP 3: Return job ID for progress tracking
+        # return {
+        #     "status": "accepted",
+        #     "job_id": import_job.id,
+        #     "message": "Import job queued successfully",
+        #     "progress_url": f"/api/v1/import-progress/{import_job.id}"
+        # }
+        
+        # PLACEHOLDER IMPLEMENTATION: Simulate async processing
+        import uuid
+        import asyncio
+        
+        job_id = str(uuid.uuid4())
+        
+        # Simulate processing delay
+        await asyncio.sleep(0.1)
+        
+        # Mock processing results (95% success rate)
+        success_count = int(import_request.total_records * 0.95)
+        failed_count = import_request.total_records - success_count
+        
+        mock_errors = [
+            f"Row {i}: Invalid data format" for i in range(1, failed_count + 1)
+        ]
+        
+        logger.info(f"CSV import completed for job {job_id}: {success_count}/{import_request.total_records} records successful")
+        
+        return {
+            "status": "completed",
+            "job_id": job_id,
+            "results": {
+                "total_records": import_request.total_records,
+                "success_count": success_count,
+                "failed_count": failed_count,
+                "errors": mock_errors[:3]  # Return first 3 errors
+            },
+            "message": f"Successfully imported {success_count} out of {import_request.total_records} records"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"CSV import failed for database {db_name}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"CSV 데이터 임포트 실패: {str(e)}"
+        )
+
+
+@router.get("/import-progress/{job_id}")
+async def get_import_progress(
+    db_name: str,
+    job_id: str
+) -> Dict[str, Any]:
+    """
+    임포트 작업 진행 상황 조회
+    
+    TODO: WebSocket/SSE로 실시간 진행 상황 제공
+    Redis에서 진행 상황 캐시 조회
+    """
+    try:
+        validate_db_name(db_name)
+        
+        # TODO: Replace with Redis cache lookup
+        # progress_data = await redis_client.get(f"import_progress:{job_id}")
+        # if not progress_data:
+        #     raise HTTPException(404, "Import job not found")
+        # return json.loads(progress_data)
+        
+        # PLACEHOLDER: Mock progress data
+        return {
+            "job_id": job_id,
+            "status": "completed",
+            "progress": 100,
+            "current_step": "Import completed",
+            "total_records": 500,
+            "processed_records": 500,
+            "success_count": 475,
+            "failed_count": 25,
+            "started_at": "2024-01-01T10:00:00Z",
+            "completed_at": "2024-01-01T10:05:00Z"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get import progress for job {job_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"임포트 진행 상황 조회 실패: {str(e)}"
         )

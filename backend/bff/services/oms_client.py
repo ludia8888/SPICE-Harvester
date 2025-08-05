@@ -68,13 +68,25 @@ class OMSClient:
 
     async def create_database(self, db_name: str, description: str = "") -> Dict[str, Any]:
         """데이터베이스 생성"""
+        logger.info(f"🔥 OMS Client: Creating database - name: {db_name}, description: {description}")
+        logger.info(f"🌐 OMS Client: Base URL: {self.base_url}")
+        
         try:
             data = {"name": db_name, "description": description}
-            response = await self.client.post("/api/v1/database/create", json=data)
+            url = "/api/v1/database/create"
+            full_url = f"{self.base_url}{url}"
+            logger.info(f"📤 OMS Client: POST {full_url} with data: {data}")
+            
+            response = await self.client.post(url, json=data)
+            logger.info(f"📥 OMS Client: Response status: {response.status_code}")
+            
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+            logger.info(f"✅ OMS Client: Database created successfully: {result}")
+            return result
         except Exception as e:
-            logger.error(f"데이터베이스 생성 실패 ({db_name}): {e}")
+            logger.error(f"❌ OMS Client: Database creation failed ({db_name}): {type(e).__name__}: {e}")
+            logger.error(f"🔍 OMS Client: Error details: {e.__dict__ if hasattr(e, '__dict__') else str(e)}")
             raise
 
     async def delete_database(self, db_name: str) -> Dict[str, Any]:
@@ -284,6 +296,62 @@ class OMSClient:
         except Exception as e:
             logger.warning(f"Failed to commit system change: {e}")
             return {"status": "failed", "error": str(e)}
+
+    async def get_class_metadata(self, db_name: str, class_id: str) -> Dict[str, Any]:
+        """클래스의 메타데이터 가져오기"""
+        try:
+            response = await self.client.get(f"/api/v1/ontology/{db_name}/class/{class_id}")
+            response.raise_for_status()
+            ontology_data = response.json()
+            
+            # Extract metadata from the ontology response
+            if isinstance(ontology_data, dict) and "data" in ontology_data:
+                class_data = ontology_data["data"]
+                # Return metadata fields or empty dict
+                return {
+                    "mapping_history": class_data.get("mapping_history", []),
+                    "last_mapping_date": class_data.get("last_mapping_date"),
+                    "total_mappings": class_data.get("total_mappings", 0),
+                    "mapping_sources": class_data.get("mapping_sources", [])
+                }
+            return {}
+        except Exception as e:
+            logger.error(f"클래스 메타데이터 조회 실패: {e}")
+            # Return empty metadata instead of raising
+            return {}
+
+    async def update_class_metadata(self, db_name: str, class_id: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """클래스의 메타데이터 업데이트"""
+        try:
+            # Get current class data
+            response = await self.client.get(f"/api/v1/ontology/{db_name}/class/{class_id}")
+            response.raise_for_status()
+            current_data = response.json()
+            
+            # Update with new metadata fields
+            if isinstance(current_data, dict) and "data" in current_data:
+                class_data = current_data["data"]
+                # Merge metadata into class data
+                update_data = {
+                    **class_data,
+                    "mapping_history": metadata.get("mapping_history", []),
+                    "last_mapping_date": metadata.get("last_mapping_date"),
+                    "total_mappings": metadata.get("total_mappings", 0),
+                    "mapping_sources": metadata.get("mapping_sources", [])
+                }
+                
+                # Update the class with new metadata
+                response = await self.client.put(
+                    f"/api/v1/ontology/{db_name}/class/{class_id}",
+                    json=update_data
+                )
+                response.raise_for_status()
+                return response.json()
+            
+            return {"status": "error", "message": "Unable to update metadata"}
+        except Exception as e:
+            logger.error(f"클래스 메타데이터 업데이트 실패: {e}")
+            raise
 
     async def __aenter__(self):
         return self

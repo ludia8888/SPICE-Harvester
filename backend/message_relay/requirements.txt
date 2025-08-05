@@ -1,0 +1,7 @@
+# Message Relay Service Dependencies
+asyncpg==0.29.0
+confluent-kafka==2.3.0
+
+# Shared dependencies
+pydantic==2.5.0
+python-dotenv==1.0.0

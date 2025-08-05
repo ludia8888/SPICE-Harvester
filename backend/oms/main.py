@@ -24,6 +24,8 @@ from shared.services.service_factory import OMS_SERVICE_INFO, create_fastapi_ser
 from oms.services.async_terminus import AsyncTerminusService
 from shared.models.config import ConnectionConfig
 from shared.config.service_config import ServiceConfig
+from oms.database.postgres import db as postgres_db
+from oms.database.outbox import OutboxService
 
 # shared 모델 import
 from shared.models.requests import ApiResponse
@@ -42,13 +44,14 @@ logger = logging.getLogger(__name__)
 # 전역 서비스 인스턴스
 terminus_service: Optional[AsyncTerminusService] = None
 jsonld_converter: Optional[JSONToJSONLDConverter] = None
+outbox_service: Optional[OutboxService] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """애플리케이션 생명주기 관리"""
     # 시작 시
-    global terminus_service, jsonld_converter
+    global terminus_service, jsonld_converter, outbox_service
 
     logger.info("OMS 서비스 초기화 중...")
 
@@ -62,11 +65,20 @@ async def lifespan(app: FastAPI):
 
     terminus_service = AsyncTerminusService(connection_info)
     jsonld_converter = JSONToJSONLDConverter()
+    
+    # PostgreSQL 연결 초기화
+    try:
+        await postgres_db.connect()
+        outbox_service = OutboxService(postgres_db)
+        logger.info("PostgreSQL 연결 성공")
+    except Exception as e:
+        logger.error(f"PostgreSQL 연결 실패: {e}")
+        # PostgreSQL 연결 실패해도 서비스는 시작 (기본 기능은 동작)
 
     # 의존성 설정
     from oms.dependencies import set_services
 
-    set_services(terminus_service, jsonld_converter)
+    set_services(terminus_service, jsonld_converter, outbox_service)
 
     try:
         # TerminusDB 연결 테스트
@@ -82,6 +94,8 @@ async def lifespan(app: FastAPI):
     logger.info("OMS 서비스 종료 중...")
     if terminus_service:
         await terminus_service.disconnect()
+    if postgres_db:
+        await postgres_db.disconnect()
 
 
 # FastAPI 앱 생성 - Service Factory 사용
