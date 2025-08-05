@@ -60,6 +60,18 @@ class ProjectionWorker:
         self.max_retries = 5
         self.retry_count = {}
         
+        # Cache Stampede 방지 모니터링 메트릭
+        self.cache_metrics = {
+            'cache_hits': 0,
+            'cache_misses': 0,
+            'negative_cache_hits': 0,
+            'lock_acquisitions': 0,
+            'lock_failures': 0,
+            'elasticsearch_queries': 0,
+            'fallback_queries': 0,
+            'total_lock_wait_time': 0.0
+        }
+        
     async def initialize(self):
         """워커 초기화"""
         # Kafka Consumer 설정 (멀티 토픽 구독)
@@ -525,17 +537,114 @@ class ProjectionWorker:
             raise
             
     async def _get_class_label(self, class_id: str, db_name: str) -> Optional[str]:
-        """Redis에서 클래스 라벨 조회"""
+        """
+        Redis에서 클래스 라벨 조회 (Cache Stampede 방지)
+        
+        분산 락을 사용하여 동시에 여러 요청이 들어와도 
+        Elasticsearch에는 한 번만 요청하도록 최적화합니다.
+        """
         try:
             if not class_id or not db_name:
                 return None
                 
             cache_key = AppConfig.get_class_label_key(db_name, class_id)
-            cached_label = await self.redis_service.client.get(cache_key)
-            if cached_label:
-                return cached_label
+            lock_key = f"lock:{cache_key}"
+            
+            # 캐시 stampede 방지를 위한 분산 락 메커니즘
+            max_wait_time = 5.0  # 최대 5초 대기
+            lock_timeout = 10    # 락 타임아웃 10초
+            retry_interval = 0.05  # 50ms 간격으로 재시도
+            
+            start_time = asyncio.get_event_loop().time()
+            
+            while (asyncio.get_event_loop().time() - start_time) < max_wait_time:
+                # 1. 캐시에서 조회 시도
+                cached_label = await self.redis_service.client.get(cache_key)
+                if cached_label:
+                    # Negative caching 처리
+                    if cached_label == "__NONE__":
+                        self.cache_metrics['negative_cache_hits'] += 1
+                        return None
+                    self.cache_metrics['cache_hits'] += 1
+                    return cached_label
                 
-            # 캐시에 없으면 Elasticsearch에서 조회
+                # 2. 분산 락 획득 시도 (SETNX with TTL)
+                lock_acquired = await self.redis_service.client.set(
+                    lock_key, 
+                    "1", 
+                    ex=lock_timeout,  # TTL 설정으로 데드락 방지
+                    nx=True  # SET if Not eXists
+                )
+                
+                if lock_acquired:
+                    # 3. 락을 획득한 요청만 Elasticsearch에서 데이터 조회
+                    self.cache_metrics['lock_acquisitions'] += 1
+                    try:
+                        # 락 획득 후 다시 한번 캐시 확인 (다른 요청이 이미 저장했을 수 있음)
+                        cached_label = await self.redis_service.client.get(cache_key)
+                        if cached_label:
+                            # Negative caching 처리
+                            if cached_label == "__NONE__":
+                                self.cache_metrics['negative_cache_hits'] += 1
+                                return None
+                            self.cache_metrics['cache_hits'] += 1
+                            return cached_label
+                        
+                        # Elasticsearch에서 조회
+                        self.cache_metrics['cache_misses'] += 1
+                        self.cache_metrics['elasticsearch_queries'] += 1
+                        index_name = get_ontologies_index_name(db_name)
+                        doc = await self.elasticsearch_service.get_document(
+                            index_name,
+                            class_id
+                        )
+                        
+                        if doc:
+                            label = doc.get('label')
+                            if label:
+                                # 캐시에 저장 (1시간 TTL)
+                                await self.redis_service.client.setex(
+                                    cache_key,
+                                    AppConfig.CLASS_LABEL_CACHE_TTL,
+                                    label
+                                )
+                                logger.debug(f"Cached class label for {class_id} in {db_name}: {label}")
+                                return label
+                        
+                        # 결과가 없는 경우도 짧은 시간 캐싱 (negative caching)
+                        await self.redis_service.client.setex(
+                            cache_key,
+                            300,  # 5분간 negative 캐싱
+                            "__NONE__"  # 빈 값 표시자
+                        )
+                        return None
+                        
+                    finally:
+                        # 4. 락 해제 (반드시 실행)
+                        await self.redis_service.client.delete(lock_key)
+                        
+                else:
+                    # 5. 락 획득 실패 시 잠시 대기 후 재시도
+                    self.cache_metrics['lock_failures'] += 1
+                    self.cache_metrics['total_lock_wait_time'] += retry_interval
+                    await asyncio.sleep(retry_interval)
+                    
+            # 최대 대기 시간 초과 시 fallback (락 없이 직접 조회)
+            logger.warning(f"Lock wait timeout for class_label {class_id} in {db_name}, falling back to direct query")
+            return await self._get_class_label_fallback(class_id, db_name)
+            
+        except Exception as e:
+            logger.error(f"Failed to get class label for {class_id} in {db_name}: {e}")
+            return None
+    
+    async def _get_class_label_fallback(self, class_id: str, db_name: str) -> Optional[str]:
+        """
+        락 획득 실패 시 fallback 조회 (성능보다 안정성 우선)
+        """
+        try:
+            self.cache_metrics['fallback_queries'] += 1
+            self.cache_metrics['elasticsearch_queries'] += 1
+            
             index_name = get_ontologies_index_name(db_name)
             doc = await self.elasticsearch_service.get_document(
                 index_name,
@@ -545,10 +654,11 @@ class ProjectionWorker:
             if doc:
                 label = doc.get('label')
                 if label:
-                    # 캐시에 저장 (1시간 TTL)
+                    # 짧은 시간만 캐싱 (경합 상황이므로)
+                    cache_key = AppConfig.get_class_label_key(db_name, class_id)
                     await self.redis_service.client.setex(
                         cache_key,
-                        3600,
+                        60,  # 1분만 캐싱
                         label
                     )
                     return label
@@ -556,8 +666,80 @@ class ProjectionWorker:
             return None
             
         except Exception as e:
-            logger.error(f"Failed to get class label for {class_id} in {db_name}: {e}")
+            logger.error(f"Fallback query failed for {class_id} in {db_name}: {e}")
             return None
+    
+    def get_cache_efficiency_metrics(self) -> Dict[str, Any]:
+        """
+        캐시 효율성 및 락 경합 메트릭 반환
+        
+        Returns:
+            메트릭 딕셔너리
+        """
+        total_requests = (
+            self.cache_metrics['cache_hits'] + 
+            self.cache_metrics['cache_misses'] + 
+            self.cache_metrics['negative_cache_hits']
+        )
+        
+        if total_requests == 0:
+            return {
+                'cache_hit_rate': 0.0,
+                'elasticsearch_query_rate': 0.0,
+                'lock_contention_rate': 0.0,
+                'average_lock_wait_time': 0.0,
+                **self.cache_metrics
+            }
+        
+        cache_hit_rate = (
+            self.cache_metrics['cache_hits'] + 
+            self.cache_metrics['negative_cache_hits']
+        ) / total_requests
+        
+        total_lock_attempts = (
+            self.cache_metrics['lock_acquisitions'] + 
+            self.cache_metrics['lock_failures']
+        )
+        
+        lock_contention_rate = (
+            self.cache_metrics['lock_failures'] / total_lock_attempts 
+            if total_lock_attempts > 0 else 0.0
+        )
+        
+        avg_lock_wait_time = (
+            self.cache_metrics['total_lock_wait_time'] / self.cache_metrics['lock_failures']
+            if self.cache_metrics['lock_failures'] > 0 else 0.0
+        )
+        
+        return {
+            'cache_hit_rate': round(cache_hit_rate * 100, 2),  # 백분율
+            'elasticsearch_query_rate': round(
+                (self.cache_metrics['elasticsearch_queries'] / total_requests) * 100, 2
+            ),
+            'lock_contention_rate': round(lock_contention_rate * 100, 2),
+            'average_lock_wait_time': round(avg_lock_wait_time * 1000, 2),  # ms 단위
+            'total_requests': total_requests,
+            **self.cache_metrics
+        }
+    
+    def log_cache_metrics(self):
+        """캐시 메트릭을 로그로 출력"""
+        metrics = self.get_cache_efficiency_metrics()
+        
+        logger.info(
+            f"Cache Efficiency Metrics - "
+            f"Hit Rate: {metrics['cache_hit_rate']}%, "
+            f"ES Query Rate: {metrics['elasticsearch_query_rate']}%, "
+            f"Lock Contention: {metrics['lock_contention_rate']}%, "
+            f"Avg Lock Wait: {metrics['average_lock_wait_time']}ms, "
+            f"Total Requests: {metrics['total_requests']}"
+        )
+        
+        if metrics['fallback_queries'] > 0:
+            logger.warning(
+                f"Fallback queries detected: {metrics['fallback_queries']} "
+                f"(indicates high lock contention)"
+            )
             
     async def _cache_class_label(self, class_id: str, label: str, db_name: str):
         """클래스 라벨을 Redis에 캐싱"""
