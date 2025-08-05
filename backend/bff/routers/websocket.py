@@ -7,6 +7,7 @@ BFF WebSocket Router for Real-time Command Status Updates
 import asyncio
 import json
 import logging
+import re
 import uuid
 from typing import Optional, Dict, Any
 
@@ -46,8 +47,18 @@ async def websocket_command_updates(
         client_id: 클라이언트 고유 ID (선택사항, 자동 생성)
         user_id: 사용자 ID (선택사항, 인증 시 사용)
     """
-    if not client_id:
+    # 입력 검증 (Security Enhancement)
+    if client_id:
+        if len(client_id) > 50 or not re.match(r"^[a-zA-Z0-9_-]+$", client_id):
+            await websocket.close(code=4000, reason="Invalid client_id format")
+            return
+    else:
         client_id = f"client_{uuid.uuid4().hex[:8]}"
+    
+    if user_id:
+        if len(user_id) > 50 or not re.match(r"^[a-zA-Z0-9_-]+$", user_id):
+            await websocket.close(code=4000, reason="Invalid user_id format")
+            return
         
     try:
         # WebSocket 연결 수락
@@ -110,7 +121,16 @@ async def websocket_user_commands(
         user_id: 사용자 ID (필수)
         client_id: 클라이언트 고유 ID (선택사항, 자동 생성)
     """
-    if not client_id:
+    # 입력 검증 (Security Enhancement)
+    if len(user_id) > 50 or not re.match(r"^[a-zA-Z0-9_-]+$", user_id):
+        await websocket.close(code=4000, reason="Invalid user_id format")
+        return
+    
+    if client_id:
+        if len(client_id) > 50 or not re.match(r"^[a-zA-Z0-9_-]+$", client_id):
+            await websocket.close(code=4000, reason="Invalid client_id format")
+            return
+    else:
         client_id = f"user_{user_id}_{uuid.uuid4().hex[:8]}"
         
     try:

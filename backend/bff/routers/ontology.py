@@ -290,6 +290,15 @@ async def list_ontologies(
     try:
         # 입력 데이터 보안 검증
         db_name = validate_db_name(db_name)
+        
+        # class_type 파라미터 화이트리스트 검증 (Security Enhancement)
+        allowed_class_types = {"sys:Class", "owl:Class", "rdfs:Class"}
+        if class_type not in allowed_class_types:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid class_type. Allowed values: {', '.join(allowed_class_types)}"
+            )
+        
         # 온톨로지 목록 조회
         ontologies = await terminus.list_classes(db_name)
         
@@ -551,6 +560,15 @@ async def get_ontology_schema(
         # 입력 데이터 보안 검증
         db_name = validate_db_name(db_name)
         class_id = sanitize_input(class_id)
+        
+        # format 파라미터 화이트리스트 검증 (Security Enhancement)
+        allowed_formats = {"json", "jsonld", "owl"}
+        if format not in allowed_formats:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid format. Allowed values: {', '.join(allowed_formats)}"
+            )
+        
         # 레이블로 ID 조회
         actual_id = await mapper.get_class_id(db_name, class_id, lang)
         if not actual_id:
@@ -816,6 +834,14 @@ async def find_relationship_paths_bff(
         start_entity = sanitize_input(start_entity)
         if end_entity:
             end_entity = sanitize_input(end_entity)
+        
+        # path_type 파라미터 화이트리스트 검증 (Security Enhancement)
+        allowed_path_types = {"shortest", "all", "weighted", "semantic"}
+        if path_type not in allowed_path_types:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid path_type. Allowed values: {', '.join(allowed_path_types)}"
+            )
         # 레이블을 ID로 변환
         start_id = await mapper.get_class_id(db_name, start_entity, lang)
         if not start_id:

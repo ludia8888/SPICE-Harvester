@@ -44,12 +44,29 @@ async def get_class_instances(
         db_name = validate_db_name(db_name)
         class_id = validate_class_id(class_id)
         
-        # 검색어 보안 검증 및 정제
+        # 검색어 보안 검증 및 정제 (엄격한 보안 검사 적용)
         sanitized_search = None
         if search:
+            # 1. 길이 제한 (자르지 말고 거부)
             if len(search) > 100:
-                search = search[:100]
-            sanitized_search = sanitize_es_query(search)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Search query too long (max 100 characters)"
+                )
+            
+            # 2. 포괄적 보안 검증 (SQL injection, XSS, NoSQL injection 등)
+            try:
+                from shared.security.input_sanitizer import input_sanitizer
+                # 모든 보안 패턴 검사 적용
+                validated_search = input_sanitizer.sanitize_string(search, max_length=100)
+                # 3. Elasticsearch 전용 정제 추가 적용
+                sanitized_search = sanitize_es_query(validated_search)
+            except Exception as security_error:
+                logger.warning(f"Search query security violation: {security_error}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid search query format"
+                )
         
         # Elasticsearch에서 인스턴스 목록 조회
         index_name = get_instances_index_name(db_name)

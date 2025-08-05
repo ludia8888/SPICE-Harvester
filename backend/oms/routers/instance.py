@@ -51,15 +51,36 @@ async def get_class_instances(
         # 입력 검증
         class_id = validate_class_id(class_id)
         
+        # 검색어 보안 검증 (Critical Security Fix)
+        validated_search = None
+        if search:
+            # 1. 길이 제한 강제
+            if len(search) > 100:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Search query too long (max 100 characters)"
+                )
+            
+            # 2. 포괄적 보안 검증 적용
+            try:
+                from shared.security.input_sanitizer import input_sanitizer
+                validated_search = input_sanitizer.sanitize_string(search, max_length=100)
+            except Exception as security_error:
+                logger.warning(f"Search query security violation in OMS: {security_error}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid search query format"
+                )
+        
         logger.info(f"Getting instances for class {class_id} in database {db_name}")
         
-        # 최적화된 인스턴스 조회 (TerminusService의 새 메서드 사용)
+        # 최적화된 인스턴스 조회 (검증된 search 사용)
         result = await terminus.get_class_instances_optimized(
             db_name=db_name,
             class_id=class_id,
             limit=limit,
             offset=offset,
-            search=search
+            search=validated_search
         )
         
         return {
@@ -68,7 +89,7 @@ async def get_class_instances(
             "total": result.get("total", 0),
             "limit": limit,
             "offset": offset,
-            "search": search,
+            "search": validated_search,
             "instances": result.get("instances", []),
             "source": "terminus_optimized"
         }
