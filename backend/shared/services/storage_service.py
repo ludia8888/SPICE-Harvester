@@ -264,24 +264,6 @@ class StorageService:
         """
         return f"{db_name}/{class_id}/{instance_id}/{command_id}.json"
         
-    def generate_latest_path(
-        self,
-        db_name: str,
-        class_id: str,
-        instance_id: str
-    ) -> str:
-        """
-        인스턴스 최신 상태 저장 경로 생성
-        
-        Args:
-            db_name: 데이터베이스 이름
-            class_id: 클래스 ID
-            instance_id: 인스턴스 ID
-            
-        Returns:
-            S3 경로
-        """
-        return f"{db_name}/{class_id}/{instance_id}/latest.json"
 
 
 def create_storage_service(

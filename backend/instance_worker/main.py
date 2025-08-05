@@ -206,17 +206,7 @@ class InstanceWorker:
                 document_data=instance_data
             )
             
-            # 3. 최신 상태를 S3에도 저장
-            latest_path = self.storage_service.generate_latest_path(
-                db_name, class_id, instance_id
-            )
-            await self.storage_service.save_json(
-                bucket=self.instance_bucket,
-                key=latest_path,
-                data=instance_data
-            )
-            
-            # 4. 성공 이벤트 생성
+            # 3. 성공 이벤트 생성 (latest.json 제거 - 순수 append-only 유지)
             event = InstanceEvent(
                 event_type=EventType.INSTANCE_CREATED,
                 db_name=db_name,
@@ -326,17 +316,7 @@ class InstanceWorker:
                 data=updated_data
             )
             
-            # 4. 최신 상태를 S3에 저장
-            latest_path = self.storage_service.generate_latest_path(
-                db_name, class_id, instance_id
-            )
-            await self.storage_service.save_json(
-                bucket=self.instance_bucket,
-                key=latest_path,
-                data=updated_data
-            )
-            
-            # 5. 성공 이벤트 생성
+            # 4. 성공 이벤트 생성 (latest.json 제거 - 순수 append-only 유지)
             event = InstanceEvent(
                 event_type=EventType.INSTANCE_UPDATED,
                 db_name=db_name,
@@ -430,18 +410,8 @@ class InstanceWorker:
                     raise Exception(f"Instance '{instance_id}' not found")
                 raise
             
-            # 3. S3의 latest.json은 삭제하지 않음 (감사 추적용)
-            # 대신 삭제 마커 추가
-            deletion_marker_path = f"{db_name}/{class_id}/{instance_id}/deleted.json"
-            await self.storage_service.save_json(
-                bucket=self.instance_bucket,
-                key=deletion_marker_path,
-                data={
-                    "deleted_at": datetime.utcnow().isoformat(),
-                    "deleted_by": command_data.get('created_by', 'system'),
-                    "command_id": command_id
-                }
-            )
+            # 3. 삭제 Command도 append-only로 저장됨 (위의 S3 저장으로 충분)
+            # 별도의 deletion marker는 불필요 - 모든 상태 변경은 Command로 추적
             
             # 4. 성공 이벤트 생성
             event = InstanceEvent(
