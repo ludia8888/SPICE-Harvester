@@ -26,6 +26,7 @@ from shared.models.config import ConnectionConfig
 from shared.config.service_config import ServiceConfig
 from oms.database.postgres import db as postgres_db
 from oms.database.outbox import OutboxService
+from shared.services import RedisService, create_redis_service, CommandStatusService
 
 # shared 모델 import
 from shared.models.requests import ApiResponse
@@ -45,13 +46,15 @@ logger = logging.getLogger(__name__)
 terminus_service: Optional[AsyncTerminusService] = None
 jsonld_converter: Optional[JSONToJSONLDConverter] = None
 outbox_service: Optional[OutboxService] = None
+redis_service: Optional[RedisService] = None
+command_status_service: Optional[CommandStatusService] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """애플리케이션 생명주기 관리"""
     # 시작 시
-    global terminus_service, jsonld_converter, outbox_service
+    global terminus_service, jsonld_converter, outbox_service, redis_service, command_status_service
 
     logger.info("OMS 서비스 초기화 중...")
 
@@ -75,10 +78,20 @@ async def lifespan(app: FastAPI):
         logger.error(f"PostgreSQL 연결 실패: {e}")
         # PostgreSQL 연결 실패해도 서비스는 시작 (기본 기능은 동작)
 
+    # Redis 연결 초기화
+    try:
+        redis_service = create_redis_service()
+        await redis_service.connect()
+        command_status_service = CommandStatusService(redis_service)
+        logger.info("Redis 연결 성공")
+    except Exception as e:
+        logger.error(f"Redis 연결 실패: {e}")
+        # Redis 연결 실패해도 서비스는 시작 (기본 기능은 동작)
+
     # 의존성 설정
     from oms.dependencies import set_services
 
-    set_services(terminus_service, jsonld_converter, outbox_service)
+    set_services(terminus_service, jsonld_converter, outbox_service, redis_service, command_status_service)
 
     try:
         # TerminusDB 연결 테스트
@@ -96,6 +109,8 @@ async def lifespan(app: FastAPI):
         await terminus_service.disconnect()
     if postgres_db:
         await postgres_db.disconnect()
+    if redis_service:
+        await redis_service.disconnect()
 
 
 # FastAPI 앱 생성 - Service Factory 사용
@@ -224,10 +239,13 @@ async def health_check():
 
 
 # 라우터 등록
-from oms.routers import branch, database, ontology, version
+from oms.routers import branch, database, ontology, version, ontology_async, ontology_sync, instance_async
 
 app.include_router(database.router, prefix="/api/v1", tags=["database"])
 app.include_router(ontology.router, prefix="/api/v1", tags=["ontology"])
+app.include_router(ontology_async.router, prefix="/api/v1", tags=["async-ontology"])
+app.include_router(ontology_sync.router, prefix="/api/v1", tags=["sync-ontology"])
+app.include_router(instance_async.router, prefix="/api/v1", tags=["async-instance"])
 app.include_router(branch.router, prefix="/api/v1", tags=["branch"])
 app.include_router(version.router, prefix="/api/v1", tags=["version"])
 

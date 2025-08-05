@@ -440,6 +440,24 @@ class InputSanitizer:
 
         return branch_name
 
+    def validate_instance_id(self, instance_id: str) -> str:
+        """인스턴스 ID 검증"""
+        if not instance_id or not isinstance(instance_id, str):
+            raise SecurityViolationError("Instance ID must be a non-empty string")
+
+        # 인스턴스 ID는 영숫자, 하이픈, 언더스코어, 콜론만 허용
+        if not re.match(r'^[a-zA-Z0-9_:\-]+$', instance_id):
+            raise SecurityViolationError(
+                f"Invalid instance ID format: '{instance_id}'. "
+                "Only alphanumeric characters, hyphens, underscores, and colons are allowed"
+            )
+
+        # 길이 제한 (1-255자)
+        if len(instance_id) > 255:
+            raise SecurityViolationError("Instance ID must not exceed 255 characters")
+
+        return instance_id
+
 
 # 전역 인스턴스
 input_sanitizer = InputSanitizer()
@@ -470,3 +488,8 @@ def validate_class_id(class_id: str) -> str:
 def validate_branch_name(branch_name: str) -> str:
     """브랜치 이름 검증 함수"""
     return input_sanitizer.validate_branch_name(branch_name)
+
+
+def validate_instance_id(instance_id: str) -> str:
+    """인스턴스 ID 검증 함수"""
+    return input_sanitizer.validate_instance_id(instance_id)

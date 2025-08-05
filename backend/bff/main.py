@@ -72,7 +72,7 @@ from bff.dependencies import (
     set_label_mapper,
     set_oms_client,
 )
-from bff.routers import database, health, mapping, merge_conflict, ontology, query, instances
+from bff.routers import database, health, mapping, merge_conflict, ontology, query, instances, instance_async, websocket
 from bff.services.funnel_type_inference_adapter import FunnelHTTPTypeInferenceAdapter
 from bff.services.oms_client import OMSClient
 
@@ -87,13 +87,14 @@ logger = logging.getLogger(__name__)
 # 전역 서비스 인스턴스
 oms_client: Optional[OMSClient] = None
 label_mapper: Optional[LabelMapper] = None
+websocket_notification_service = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """애플리케이션 생명주기 관리"""
     # 시작 시
-    global oms_client, label_mapper
+    global oms_client, label_mapper, websocket_notification_service
 
     logger.info("BFF 서비스 초기화 중...")
 
@@ -124,6 +125,24 @@ async def lifespan(app: FastAPI):
     configure_type_inference_service(type_inference_adapter)
     logger.info("Type inference service configured successfully")
 
+    # Initialize WebSocket notification service
+    try:
+        logger.info("Initializing WebSocket notification service...")
+        from shared.services import create_redis_service, get_notification_service
+        
+        # Create Redis service for WebSocket
+        redis_service = create_redis_service()
+        await redis_service.connect()
+        
+        # Create and start WebSocket notification service
+        websocket_notification_service = get_notification_service(redis_service)
+        await websocket_notification_service.start()
+        
+        logger.info("WebSocket notification service started successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize WebSocket services: {e}")
+        # Continue without WebSocket - service can still work without real-time updates
+
     logger.info("BFF Service startup complete")
 
     yield
@@ -134,6 +153,9 @@ async def lifespan(app: FastAPI):
         await oms_client.close()
     if hasattr(type_inference_adapter, "close"):
         await type_inference_adapter.close()
+    if websocket_notification_service:
+        await websocket_notification_service.stop()
+        logger.info("WebSocket notification service stopped")
 
 
 # FastAPI 앱 생성 - Service Factory 사용
@@ -1063,6 +1085,8 @@ app.include_router(mapping.router, prefix="/api/v1", tags=["mapping"])
 app.include_router(health.router, prefix="/api/v1", tags=["health"])
 app.include_router(merge_conflict.router, prefix="/api/v1", tags=["merge-conflict"])
 app.include_router(instances.router, prefix="/api/v1", tags=["instances"])
+app.include_router(instance_async.router, prefix="/api/v1", tags=["async-instances"])
+app.include_router(websocket.router, prefix="/api/v1", tags=["websocket"])
 
 # Health endpoint를 루트 경로에도 등록 (호환성을 위해)
 app.include_router(health.router, tags=["health"])
