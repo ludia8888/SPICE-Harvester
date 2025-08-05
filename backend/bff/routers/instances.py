@@ -123,66 +123,53 @@ async def get_class_instances(
         
         # Fallback to TerminusDB
         if es_error:
-            logger.info("Falling back to TerminusDB query")
+            logger.info("Falling back to TerminusDB optimized query")
             
-            # Elasticsearch 장애 시 TerminusDB로 fallback
-            # 기존 SPARQL 쿼리 로직 사용
-            if search:
-                # 특수 문자 이스케이프
-                search_escaped = search.replace('"', '\\"').replace("'", "\\'").replace("\\", "\\\\")
-                query = f"""
-                SELECT DISTINCT ?instance ?property ?value
-                WHERE {{
-                    ?instance a <{class_id}> .
-                    ?instance ?property ?value .
-                    FILTER(
-                        isLiteral(?value) && 
-                        regex(str(?value), "{search_escaped}", "i")
-                    )
-                }}
-                LIMIT {limit}
-                OFFSET {offset}
-                """
-            else:
-                query = f"""
-                SELECT * 
-                WHERE {{
-                    ?instance a <{class_id}> .
-                    ?instance ?property ?value .
-                }}
-                LIMIT {limit}
-                OFFSET {offset}
-                """
-            
-            # OMS API 호출
-            result = await oms_client.query_ontologies(db_name, query)
-            
-            # 결과 포맷팅
-            instances = []
-            instance_data = {}
-            
-            if result and 'results' in result:
-                for row in result['results']:
-                    instance_id = row.get('instance', '')
-                    property_name = row.get('property', '').split('/')[-1]
-                    value = row.get('value', '')
-                    
-                    if instance_id not in instance_data:
-                        instance_data[instance_id] = {'id': instance_id}
-                    
-                    instance_data[instance_id][property_name] = value
+            # Elasticsearch 장애 시 최적화된 OMS Instance API로 fallback
+            try:
+                result = await oms_client.get_class_instances(
+                    db_name=db_name,
+                    class_id=class_id,
+                    limit=limit,
+                    offset=offset,
+                    search=search
+                )
                 
-                instances = list(instance_data.values())
-            
-            return {
-                "class_id": class_id,
-                "total": len(instances),
-                "limit": limit,
-                "offset": offset,
-                "search": search,
-                "instances": instances,
-                "source": "terminus_fallback"
-            }
+                # API 응답에서 데이터 추출
+                if result and result.get("status") == "success":
+                    return {
+                        "class_id": class_id,
+                        "total": result.get("total", 0),
+                        "limit": limit,
+                        "offset": offset,
+                        "search": search,
+                        "instances": result.get("instances", []),
+                        "source": "terminus_optimized"
+                    }
+                else:
+                    # API 응답이 실패인 경우
+                    logger.error(f"OMS Instance API returned error: {result}")
+                    return {
+                        "class_id": class_id,
+                        "total": 0,
+                        "limit": limit,
+                        "offset": offset,
+                        "search": search,
+                        "instances": [],
+                        "source": "error"
+                    }
+                    
+            except Exception as e:
+                logger.error(f"Failed to query instances from OMS: {e}")
+                return {
+                    "class_id": class_id,
+                    "total": 0,
+                    "limit": limit,
+                    "offset": offset,
+                    "search": search,
+                    "instances": [],
+                    "source": "error"
+                }
         
     except HTTPException:
         raise
@@ -346,29 +333,24 @@ async def get_instance(
             # 예상치 못한 ES 에러
             logger.error(f"Unexpected Elasticsearch error: {e}. Falling back to TerminusDB.")
         
-        # 2. Fallback: TerminusDB에서 직접 조회
-        query = f"""
-        SELECT *
-        WHERE {{
-            <{instance_id}> a <{class_id}> .
-            <{instance_id}> ?property ?value .
-        }}
-        """
-        
-        result = await oms_client.query_ontologies(db_name, query)
-        
-        if result and 'results' in result and len(result['results']) > 0:
-            instance_data = {"id": instance_id, "type": class_id}
-            for row in result['results']:
-                property_name = row.get('property', '').split('/')[-1]
-                value = row.get('value', '')
-                instance_data[property_name] = value
+        # 2. Fallback: 최적화된 OMS Instance API 사용
+        try:
+            result = await oms_client.get_instance(
+                db_name=db_name,
+                instance_id=instance_id,
+                class_id=class_id
+            )
             
-            return {
-                "status": "success",
-                "data": instance_data,
-                "source": "terminus_fallback"
-            }
+            if result and result.get("status") == "success":
+                instance_data = result.get("data", {})
+                if instance_data:
+                    return {
+                        "status": "success",
+                        "data": instance_data,
+                        "source": "terminus_optimized"
+                    }
+        except Exception as e:
+            logger.error(f"Failed to get instance from OMS: {e}")
         
         # 두 곳 모두에서 찾을 수 없는 경우
         raise HTTPException(

@@ -256,13 +256,14 @@ async def health_check():
 
 
 # 라우터 등록
-from oms.routers import branch, database, ontology, version, ontology_async, ontology_sync, instance_async
+from oms.routers import branch, database, ontology, version, ontology_async, ontology_sync, instance_async, instance
 
 app.include_router(database.router, prefix="/api/v1", tags=["database"])
 app.include_router(ontology.router, prefix="/api/v1", tags=["ontology"])
 app.include_router(ontology_async.router, prefix="/api/v1", tags=["async-ontology"])
 app.include_router(ontology_sync.router, prefix="/api/v1", tags=["sync-ontology"])
 app.include_router(instance_async.router, prefix="/api/v1", tags=["async-instance"])
+app.include_router(instance.router, prefix="/api/v1", tags=["instance"])
 app.include_router(branch.router, prefix="/api/v1", tags=["branch"])
 app.include_router(version.router, prefix="/api/v1", tags=["version"])
 

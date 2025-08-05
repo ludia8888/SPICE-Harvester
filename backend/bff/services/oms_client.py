@@ -353,6 +353,140 @@ class OMSClient:
             logger.error(f"클래스 메타데이터 업데이트 실패: {e}")
             raise
 
+    async def get_class_instances(
+        self, 
+        db_name: str, 
+        class_id: str,
+        limit: int = 100,
+        offset: int = 0,
+        search: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        특정 클래스의 인스턴스 목록을 효율적으로 조회 (N+1 Query 최적화)
+        
+        Args:
+            db_name: 데이터베이스 이름
+            class_id: 클래스 ID
+            limit: 최대 결과 수
+            offset: 시작 위치
+            search: 검색 쿼리
+            
+        Returns:
+            완전히 조립된 인스턴스 목록
+        """
+        try:
+            params = {
+                "limit": limit,
+                "offset": offset
+            }
+            if search:
+                params["search"] = search
+                
+            response = await self.client.get(
+                f"/api/v1/instance/{db_name}/class/{class_id}/instances",
+                params=params
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"클래스 인스턴스 목록 조회 실패: {e}")
+            raise
+    
+    async def get_instance(
+        self,
+        db_name: str,
+        instance_id: str,
+        class_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        개별 인스턴스를 효율적으로 조회
+        
+        Args:
+            db_name: 데이터베이스 이름
+            instance_id: 인스턴스 ID
+            class_id: 클래스 ID (선택사항)
+            
+        Returns:
+            완전한 인스턴스 객체
+        """
+        try:
+            params = {}
+            if class_id:
+                params["class_id"] = class_id
+                
+            response = await self.client.get(
+                f"/api/v1/instance/{db_name}/instance/{instance_id}",
+                params=params
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"인스턴스 조회 실패: {e}")
+            raise
+    
+    async def count_class_instances(
+        self,
+        db_name: str,
+        class_id: str
+    ) -> Dict[str, Any]:
+        """
+        특정 클래스의 인스턴스 개수 조회
+        
+        Args:
+            db_name: 데이터베이스 이름
+            class_id: 클래스 ID
+            
+        Returns:
+            인스턴스 개수
+        """
+        try:
+            response = await self.client.get(
+                f"/api/v1/instance/{db_name}/class/{class_id}/count"
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"인스턴스 개수 조회 실패: {e}")
+            raise
+    
+    async def execute_sparql(
+        self,
+        db_name: str,
+        query: str,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        SPARQL 쿼리 실행
+        
+        Args:
+            db_name: 데이터베이스 이름
+            query: SPARQL 쿼리
+            limit: 최대 결과 수
+            offset: 시작 위치
+            
+        Returns:
+            쿼리 결과
+        """
+        try:
+            data = {"query": query}
+            params = {}
+            if limit is not None:
+                params["limit"] = limit
+            if offset is not None:
+                params["offset"] = offset
+                
+            response = await self.client.post(
+                f"/api/v1/instance/{db_name}/sparql",
+                json=data,
+                params=params
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"SPARQL 쿼리 실행 실패: {e}")
+            raise
+
     async def __aenter__(self):
         return self
 
