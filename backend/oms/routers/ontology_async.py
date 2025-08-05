@@ -10,6 +10,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+# Modernized dependency injection imports
 from oms.dependencies import (
     get_jsonld_converter, 
     get_label_mapper, 
@@ -17,16 +18,27 @@ from oms.dependencies import (
     get_outbox_service,
     get_redis_service,
     get_command_status_service,
+    TerminusServiceDep,
+    JSONLDConverterDep,
+    LabelMapperDep,
+    OutboxServiceDep,
+    CommandStatusServiceDep,
     ValidatedDatabaseName,
     ValidatedClassId,
     ensure_database_exists
 )
+from shared.dependencies.providers import RedisServiceDep
 from oms.database.postgres import db as postgres_db
 from oms.database.outbox import MessageType, OutboxService
 from shared.models.commands import CommandType, OntologyCommand, CommandResult, CommandStatus
 from shared.models.common import BaseResponse
-from shared.services import CommandStatusService
+from shared.services import CommandStatusService, RedisService
 from shared.config.app_config import AppConfig
+
+# Import service types for type annotations
+from oms.services.async_terminus import AsyncTerminusService
+from shared.utils.jsonld import JSONToJSONLDConverter
+from shared.utils.label_mapper import LabelMapper
 from shared.models.ontology import (
     OntologyCreateRequest,
     OntologyUpdateRequest,
@@ -47,8 +59,8 @@ router = APIRouter(prefix="/ontology/{db_name}/async", tags=["Async Ontology Man
 async def create_ontology_async(
     db_name: str = Depends(ensure_database_exists),
     request: OntologyCreateRequest = ...,
-    outbox_service: Optional[OutboxService] = Depends(get_outbox_service),
-    command_status_service: CommandStatusService = Depends(get_command_status_service),
+    outbox_service: Optional[OutboxService] = OutboxServiceDep,
+    command_status_service: CommandStatusService = CommandStatusServiceDep,
 ) -> CommandResult:
     """
     비동기 온톨로지 생성 - Command를 저장하고 즉시 응답
@@ -140,8 +152,8 @@ async def update_ontology_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
     request: OntologyUpdateRequest = ...,
-    outbox_service: Optional[OutboxService] = Depends(get_outbox_service),
-    command_status_service: CommandStatusService = Depends(get_command_status_service),
+    outbox_service: Optional[OutboxService] = OutboxServiceDep,
+    command_status_service: CommandStatusService = CommandStatusServiceDep,
 ) -> CommandResult:
     """
     비동기 온톨로지 업데이트 - Command를 저장하고 즉시 응답
@@ -213,8 +225,8 @@ async def update_ontology_async(
 async def delete_ontology_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
-    outbox_service: Optional[OutboxService] = Depends(get_outbox_service),
-    command_status_service: CommandStatusService = Depends(get_command_status_service),
+    outbox_service: Optional[OutboxService] = OutboxServiceDep,
+    command_status_service: CommandStatusService = CommandStatusServiceDep,
 ) -> CommandResult:
     """
     비동기 온톨로지 삭제 - Command를 저장하고 즉시 응답
@@ -281,7 +293,7 @@ async def delete_ontology_async(
 @router.get("/command/{command_id}/status", response_model=CommandResult)
 async def get_command_status(
     command_id: UUID,
-    command_status_service: CommandStatusService = Depends(get_command_status_service),
+    command_status_service: CommandStatusService = CommandStatusServiceDep,
 ) -> CommandResult:
     """
     Command 실행 상태 조회

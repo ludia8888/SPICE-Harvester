@@ -5,6 +5,7 @@ S3 호환 객체 스토리지 연동 서비스
 
 import hashlib
 import json
+import os
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -12,7 +13,6 @@ import boto3
 from botocore.client import BaseClient
 from botocore.exceptions import ClientError
 
-from shared.config.service_config import ServiceConfig
 from shared.models.commands import CommandType
 
 
@@ -490,13 +490,38 @@ class StorageService:
         
 
 
-def create_storage_service(
+def create_storage_service(settings: 'ApplicationSettings') -> StorageService:
+    """
+    스토리지 서비스 팩토리 함수 (Anti-pattern 13 해결)
+    
+    Args:
+        settings: 중앙화된 애플리케이션 설정 객체
+        
+    Returns:
+        StorageService 인스턴스
+        
+    Note:
+        이 함수는 더 이상 내부에서 환경변수를 로드하지 않습니다.
+        모든 설정은 ApplicationSettings를 통해 중앙화되어 관리됩니다.
+    """
+    return StorageService(
+        endpoint_url=settings.storage.minio_endpoint_url,
+        access_key=settings.storage.minio_access_key,
+        secret_key=settings.storage.minio_secret_key,
+        use_ssl=settings.storage.use_ssl
+    )
+
+
+def create_storage_service_legacy(
     endpoint_url: Optional[str] = None,
     access_key: Optional[str] = None,
     secret_key: Optional[str] = None
 ) -> StorageService:
     """
-    스토리지 서비스 팩토리 함수
+    레거시 스토리지 서비스 팩토리 함수 (하위 호환성)
+    
+    이 함수는 기존 코드와의 호환성을 위해 유지되며,
+    마이그레이션 완료 후 제거될 예정입니다.
     
     Args:
         endpoint_url: S3/MinIO 엔드포인트 URL (환경변수 우선)
@@ -506,10 +531,7 @@ def create_storage_service(
     Returns:
         StorageService 인스턴스
     """
-    config = ServiceConfig()
-    
     # 환경변수에서 값 가져오기 (인자보다 우선)
-    import os
     endpoint = os.getenv('MINIO_ENDPOINT_URL', endpoint_url or 'http://localhost:9000')
     access = os.getenv('MINIO_ACCESS_KEY', access_key or 'minioadmin')
     secret = os.getenv('MINIO_SECRET_KEY', secret_key or 'minioadmin123')

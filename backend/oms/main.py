@@ -1,40 +1,73 @@
 """
-OMS (Ontology Management Service) 메인 애플리케이션
-내부 ID 기반 핵심 온톨로지 관리 서비스
+OMS (Ontology Management Service) - Modernized Version
+
+This is the modernized version of the OMS service that resolves anti-pattern 13:
+- Uses centralized Pydantic settings instead of scattered os.getenv() calls
+- Uses modern dependency injection container instead of global variables
+- All imports are at module level instead of inside functions
+- Service lifecycle is properly managed through the container
+
+Key improvements:
+1. ✅ All imports at module level
+2. ✅ No global service variables
+3. ✅ Centralized configuration via ApplicationSettings
+4. ✅ Type-safe dependency injection
+5. ✅ Proper service lifecycle management
+6. ✅ Test-friendly architecture
 """
 
+# Load environment variables first (before other imports)
 from dotenv import load_dotenv
+load_dotenv()
 
-load_dotenv()  # Load .env file
-
+# Standard library imports
 import json
 import logging
-import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
+# Third party imports
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-# Shared service factory import
+# Centralized configuration and dependency injection
+from shared.config.settings import settings, ApplicationSettings
+from shared.dependencies import (
+    initialize_container, 
+    get_container, 
+    shutdown_container,
+    register_core_services
+)
+from shared.dependencies.providers import (
+    RedisServiceDep,
+    ElasticsearchServiceDep,
+    SettingsDep
+)
+
+# Service factory import
 from shared.services.service_factory import OMS_SERVICE_INFO, create_fastapi_service, run_service
 
-# OMS 서비스 import
+# OMS specific imports  
 from oms.services.async_terminus import AsyncTerminusService
-from shared.models.config import ConnectionConfig
-from shared.config.service_config import ServiceConfig
 from oms.database.postgres import db as postgres_db
 from oms.database.outbox import OutboxService
-from shared.services import RedisService, create_redis_service, CommandStatusService
-
-# shared 모델 import
+from shared.models.config import ConnectionConfig
+from shared.services import RedisService, create_redis_service, CommandStatusService, ElasticsearchService
 from shared.models.requests import ApiResponse
-
-# shared imports
 from shared.utils.jsonld import JSONToJSONLDConverter
+from shared.utils.label_mapper import LabelMapper
 
-# 로깅 설정
+# Router imports
+from oms.routers import (
+    branch, database, ontology, version, ontology_async, 
+    ontology_sync, instance_async, instance
+)
+
+# Monitoring and observability routers
+from shared.routers import monitoring, config_monitoring
+
+# Logging setup
 logging.basicConfig(
     level=logging.INFO, 
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -42,106 +75,268 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 전역 서비스 인스턴스
-terminus_service: Optional[AsyncTerminusService] = None
-jsonld_converter: Optional[JSONToJSONLDConverter] = None
-outbox_service: Optional[OutboxService] = None
-redis_service: Optional[RedisService] = None
-command_status_service: Optional[CommandStatusService] = None
-elasticsearch_service = None
+
+class OMSServiceContainer:
+    """
+    OMS-specific service container to manage OMS services
+    
+    This class extends the core service container functionality
+    with OMS-specific services like AsyncTerminusService and OutboxService.
+    """
+    
+    def __init__(self, container, settings: ApplicationSettings):
+        self.container = container
+        self.settings = settings
+        self._oms_services = {}
+        self._postgres_db = None
+    
+    async def initialize_oms_services(self) -> None:
+        """Initialize OMS-specific services"""
+        logger.info("Initializing OMS-specific services...")
+        
+        # 1. Initialize TerminusDB service
+        await self._initialize_terminus_service()
+        
+        # 2. Initialize JSON-LD converter
+        await self._initialize_jsonld_converter()
+        
+        # 3. Initialize Label Mapper
+        await self._initialize_label_mapper()
+        
+        # 4. Initialize PostgreSQL and Outbox service
+        await self._initialize_postgres_and_outbox()
+        
+        # 5. Initialize Redis and Command Status service
+        await self._initialize_redis_and_command_status()
+        
+        # 6. Initialize Elasticsearch service
+        await self._initialize_elasticsearch()
+        
+        logger.info("OMS services initialized successfully")
+    
+    async def _initialize_terminus_service(self) -> None:
+        """Initialize TerminusDB service with health check"""
+        try:
+            connection_info = ConnectionConfig(
+                server_url=self.settings.services.terminus_url,
+                user=self.settings.services.terminus_user,
+                account=self.settings.services.terminus_account,
+                key=self.settings.services.terminus_key,
+            )
+            
+            terminus_service = AsyncTerminusService(connection_info)
+            
+            # Test connection
+            try:
+                await terminus_service.connect()
+                logger.info("TerminusDB 연결 성공")
+            except Exception as e:
+                logger.error(f"TerminusDB 연결 실패: {e}")
+                # Continue - service can start without initial connection
+            
+            self._oms_services['terminus_service'] = terminus_service
+            
+        except Exception as e:
+            logger.error(f"TerminusDB service initialization failed: {e}")
+            raise
+    
+    async def _initialize_jsonld_converter(self) -> None:
+        """Initialize JSON-LD converter"""
+        jsonld_converter = JSONToJSONLDConverter()
+        self._oms_services['jsonld_converter'] = jsonld_converter
+        logger.info("JSON-LD converter initialized")
+    
+    async def _initialize_label_mapper(self) -> None:
+        """Initialize label mapper"""
+        label_mapper = LabelMapper()
+        self._oms_services['label_mapper'] = label_mapper
+        logger.info("Label mapper initialized")
+    
+    async def _initialize_postgres_and_outbox(self) -> None:
+        """Initialize PostgreSQL connection and Outbox service"""
+        try:
+            # Store reference for cleanup
+            self._postgres_db = postgres_db
+            
+            await postgres_db.connect()
+            outbox_service = OutboxService(postgres_db)
+            
+            self._oms_services['outbox_service'] = outbox_service
+            logger.info("PostgreSQL 연결 성공")
+            
+        except Exception as e:
+            logger.error(f"PostgreSQL 연결 실패: {e}")
+            # PostgreSQL failure is non-fatal - basic functionality can work
+            self._oms_services['outbox_service'] = None
+    
+    async def _initialize_redis_and_command_status(self) -> None:
+        """Initialize Redis service and Command Status service"""
+        try:
+            redis_service = create_redis_service(self.settings)
+            await redis_service.connect()
+            
+            command_status_service = CommandStatusService(redis_service)
+            
+            self._oms_services['redis_service'] = redis_service
+            self._oms_services['command_status_service'] = command_status_service
+            logger.info("Redis 연결 성공")
+            
+        except Exception as e:
+            logger.error(f"Redis 연결 실패: {e}")
+            # Redis failure is non-fatal - basic functionality can work
+            self._oms_services['redis_service'] = None
+            self._oms_services['command_status_service'] = None
+    
+    async def _initialize_elasticsearch(self) -> None:
+        """Initialize Elasticsearch service"""
+        try:
+            elasticsearch_service = ElasticsearchService(
+                hosts=[f"{self.settings.services.elasticsearch_host}:{self.settings.services.elasticsearch_port}"],
+                username=self.settings.services.elasticsearch_username,
+                password=self.settings.services.elasticsearch_password
+            )
+            await elasticsearch_service.connect()
+            
+            self._oms_services['elasticsearch_service'] = elasticsearch_service
+            logger.info("Elasticsearch 연결 성공")
+            
+        except Exception as e:
+            logger.error(f"Elasticsearch 연결 실패: {e}")
+            # Elasticsearch failure is non-fatal - basic functionality can work
+            self._oms_services['elasticsearch_service'] = None
+    
+    async def shutdown_oms_services(self) -> None:
+        """Shutdown OMS-specific services"""
+        logger.info("Shutting down OMS services...")
+        
+        # Shutdown in reverse order of initialization
+        if 'elasticsearch_service' in self._oms_services and self._oms_services['elasticsearch_service']:
+            try:
+                await self._oms_services['elasticsearch_service'].disconnect()
+                logger.info("Elasticsearch service disconnected")
+            except Exception as e:
+                logger.error(f"Error disconnecting Elasticsearch service: {e}")
+        
+        if 'redis_service' in self._oms_services and self._oms_services['redis_service']:
+            try:
+                await self._oms_services['redis_service'].disconnect()
+                logger.info("Redis service disconnected")
+            except Exception as e:
+                logger.error(f"Error disconnecting Redis service: {e}")
+        
+        if self._postgres_db:
+            try:
+                await self._postgres_db.disconnect()
+                logger.info("PostgreSQL disconnected")
+            except Exception as e:
+                logger.error(f"Error disconnecting PostgreSQL: {e}")
+        
+        if 'terminus_service' in self._oms_services and self._oms_services['terminus_service']:
+            try:
+                await self._oms_services['terminus_service'].disconnect()
+                logger.info("TerminusDB service disconnected")
+            except Exception as e:
+                logger.error(f"Error disconnecting TerminusDB service: {e}")
+        
+        self._oms_services.clear()
+        logger.info("OMS services shutdown completed")
+    
+    def get_terminus_service(self) -> AsyncTerminusService:
+        """Get TerminusDB service instance"""
+        if 'terminus_service' not in self._oms_services:
+            raise RuntimeError("TerminusDB service not initialized")
+        return self._oms_services['terminus_service']
+    
+    def get_jsonld_converter(self) -> JSONToJSONLDConverter:
+        """Get JSON-LD converter instance"""
+        if 'jsonld_converter' not in self._oms_services:
+            raise RuntimeError("JSON-LD converter not initialized")
+        return self._oms_services['jsonld_converter']
+    
+    def get_label_mapper(self) -> LabelMapper:
+        """Get label mapper instance"""
+        if 'label_mapper' not in self._oms_services:
+            raise RuntimeError("Label mapper not initialized")
+        return self._oms_services['label_mapper']
+    
+    def get_outbox_service(self) -> Optional[OutboxService]:
+        """Get outbox service instance (can be None)"""
+        return self._oms_services.get('outbox_service')
+    
+    def get_redis_service(self) -> Optional[RedisService]:
+        """Get Redis service instance (can be None)"""
+        return self._oms_services.get('redis_service')
+    
+    def get_command_status_service(self) -> Optional[CommandStatusService]:
+        """Get command status service instance (can be None)"""
+        return self._oms_services.get('command_status_service')
+    
+    def get_elasticsearch_service(self) -> Optional[ElasticsearchService]:
+        """Get Elasticsearch service instance (can be None)"""
+        return self._oms_services.get('elasticsearch_service')
+
+
+# Global OMS service container (replaces global variables)
+_oms_container: Optional[OMSServiceContainer] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """애플리케이션 생명주기 관리"""
-    # 시작 시
-    global terminus_service, jsonld_converter, outbox_service, redis_service, command_status_service
-
-    logger.info("OMS 서비스 초기화 중...")
-
-    # 서비스 초기화
-    connection_info = ConnectionConfig(
-        server_url=ServiceConfig.get_terminus_url(),
-        user=os.getenv("TERMINUS_USER", "admin"),
-        account=os.getenv("TERMINUS_ACCOUNT", "admin"),
-        key=os.getenv("TERMINUS_KEY", "admin123"),
-    )
-
-    terminus_service = AsyncTerminusService(connection_info)
-    jsonld_converter = JSONToJSONLDConverter()
+    """
+    Modern application lifecycle management
     
-    # PostgreSQL 연결 초기화
+    This replaces the old lifespan function that had scattered imports
+    and environment variable loading with centralized service management.
+    """
+    global _oms_container
+    
+    logger.info("OMS Service startup beginning...")
+    
     try:
-        await postgres_db.connect()
-        outbox_service = OutboxService(postgres_db)
-        logger.info("PostgreSQL 연결 성공")
+        # 1. Initialize the main dependency injection container
+        container = await initialize_container(settings)
+        
+        # 2. Register core services
+        register_core_services(container)
+        
+        # 3. Initialize OMS-specific container
+        _oms_container = OMSServiceContainer(container, settings)
+        await _oms_container.initialize_oms_services()
+        
+        # 4. Store container in app state for easy access
+        app.state.container = container
+        app.state.oms_container = _oms_container
+        
+        logger.info("OMS Service startup completed successfully")
+        
+        yield
+        
     except Exception as e:
-        logger.error(f"PostgreSQL 연결 실패: {e}")
-        # PostgreSQL 연결 실패해도 서비스는 시작 (기본 기능은 동작)
-
-    # Redis 연결 초기화
-    try:
-        redis_service = create_redis_service()
-        await redis_service.connect()
-        command_status_service = CommandStatusService(redis_service)
-        logger.info("Redis 연결 성공")
-    except Exception as e:
-        logger.error(f"Redis 연결 실패: {e}")
-        # Redis 연결 실패해도 서비스는 시작 (기본 기능은 동작)
-
-    # Elasticsearch 연결 초기화
-    try:
-        from shared.services import ElasticsearchService
-        elasticsearch_service = ElasticsearchService(
-            hosts=[f"{os.getenv('ELASTICSEARCH_HOST', 'localhost')}:{os.getenv('ELASTICSEARCH_PORT', '9200')}"],
-            username=os.getenv('ELASTICSEARCH_USERNAME', 'elastic'),
-            password=os.getenv('ELASTICSEARCH_PASSWORD', 'elasticpass123')
-        )
-        await elasticsearch_service.connect()
-        logger.info("Elasticsearch 연결 성공")
-    except Exception as e:
-        logger.error(f"Elasticsearch 연결 실패: {e}")
-        # Elasticsearch 연결 실패해도 서비스는 시작 (기본 기능은 동작)
-
-    # 의존성 설정
-    from oms.dependencies import set_services
-
-    set_services(terminus_service, jsonld_converter, outbox_service, redis_service, command_status_service, elasticsearch_service)
-
-    try:
-        # TerminusDB 연결 테스트
-        await terminus_service.connect()
-        logger.info("TerminusDB 연결 성공")
-    except Exception as e:
-        logger.error(f"TerminusDB 연결 실패: {e}")
-        # 연결 실패해도 서비스는 시작 (나중에 재연결 시도)
-
-    yield
-
-    # 종료 시
-    logger.info("OMS 서비스 종료 중...")
-    if terminus_service:
-        await terminus_service.disconnect()
-    if postgres_db:
-        await postgres_db.disconnect()
-    if redis_service:
-        await redis_service.disconnect()
-    if elasticsearch_service:
-        await elasticsearch_service.disconnect()
+        logger.error(f"OMS Service startup failed: {e}")
+        raise
+    
+    finally:
+        # Shutdown in reverse order
+        logger.info("OMS Service shutdown beginning...")
+        
+        if _oms_container:
+            await _oms_container.shutdown_oms_services()
+        
+        await shutdown_container()
+        
+        logger.info("OMS Service shutdown completed")
 
 
-# FastAPI 앱 생성 - Service Factory 사용
+# FastAPI app creation using service factory
 app = create_fastapi_service(
     service_info=OMS_SERVICE_INFO,
     custom_lifespan=lifespan,
-    include_health_check=False,  # 기존 health check 유지
+    include_health_check=False,  # Handled by existing health endpoint
     include_logging_middleware=True
 )
 
 
-# 에러 핸들러
-
-
+# Error handlers (unchanged from original)
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """FastAPI validation error를 400으로 변환"""
@@ -189,10 +384,18 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-# API 엔드포인트
+# Modern dependency injection functions
+async def get_terminus_service() -> AsyncTerminusService:
+    """Get TerminusDB service from OMS container"""
+    if _oms_container is None:
+        raise RuntimeError("OMS services not initialized")
+    return _oms_container.get_terminus_service()
+
+
+# API endpoints (modernized)
 @app.get("/")
 async def root():
-    """루트 엔드포인트"""
+    """루트 엔드포인트 - Modernized version"""
     return {
         "message": "Ontology Management Service (OMS)",
         "version": "1.0.0",
@@ -204,13 +407,29 @@ async def root():
             "버전 관리",
             "브랜치 관리",
         ],
+        "environment": settings.environment.value,
+        "modernized": True
     }
 
 
 @app.get("/health")
 async def health_check():
-    """헬스 체크"""
+    """헬스 체크 - Modernized version"""
     try:
+        if _oms_container is None:
+            error_response = ApiResponse.error(
+                message="OMS 서비스가 초기화되지 않았습니다", 
+                errors=["Container not initialized"]
+            )
+            error_response.data = {
+                "service": "OMS",
+                "version": "1.0.0",
+                "status": "unhealthy",
+                "terminus_connected": False,
+            }
+            return error_response.to_dict()
+        
+        terminus_service = _oms_container.get_terminus_service()
         is_connected = await terminus_service.check_connection()
 
         if is_connected:
@@ -222,6 +441,8 @@ async def health_check():
             )
             # TerminusDB 연결 상태 추가
             health_response.data["terminus_connected"] = True
+            health_response.data["environment"] = settings.environment.value
+            health_response.data["modernized"] = True
 
             return health_response.to_dict()
         else:
@@ -234,6 +455,8 @@ async def health_check():
                 "version": "1.0.0",
                 "status": "unhealthy",
                 "terminus_connected": False,
+                "environment": settings.environment.value,
+                "modernized": True
             }
 
             return error_response.to_dict()
@@ -247,17 +470,105 @@ async def health_check():
             "version": "1.0.0",
             "status": "unhealthy",
             "terminus_connected": False,
+            "environment": settings.environment.value,
+            "modernized": True
         }
 
         return error_response.to_dict()
 
 
-# Note: CORS debug endpoint는 service_factory에서 자동 제공됨
+# Health check endpoint that uses the new container system
+@app.get("/health/container")
+async def container_health_check():
+    """
+    Health check for the modernized container system
+    
+    This endpoint provides visibility into the new dependency injection system.
+    """
+    try:
+        if _oms_container is None:
+            return {
+                "status": "unhealthy",
+                "message": "OMS container not initialized",
+                "container_status": None
+            }
+        
+        # Get container health
+        container_health = await _oms_container.container.health_check_all()
+        
+        # Check OMS-specific services
+        oms_services_status = {}
+        
+        try:
+            terminus_service = _oms_container.get_terminus_service()
+            is_connected = await terminus_service.check_connection()
+            oms_services_status["terminus_service"] = "connected" if is_connected else "disconnected"
+        except Exception as e:
+            oms_services_status["terminus_service"] = f"unhealthy: {str(e)}"
+        
+        try:
+            _oms_container.get_jsonld_converter()
+            oms_services_status["jsonld_converter"] = "healthy"
+        except Exception as e:
+            oms_services_status["jsonld_converter"] = f"unhealthy: {str(e)}"
+        
+        try:
+            _oms_container.get_label_mapper()
+            oms_services_status["label_mapper"] = "healthy"
+        except Exception as e:
+            oms_services_status["label_mapper"] = f"unhealthy: {str(e)}"
+        
+        # Check optional services
+        outbox_service = _oms_container.get_outbox_service()
+        oms_services_status["outbox_service"] = "available" if outbox_service else "not_available"
+        
+        redis_service = _oms_container.get_redis_service()
+        oms_services_status["redis_service"] = "available" if redis_service else "not_available"
+        
+        command_status_service = _oms_container.get_command_status_service()
+        oms_services_status["command_status_service"] = "available" if command_status_service else "not_available"
+        
+        elasticsearch_service = _oms_container.get_elasticsearch_service()
+        oms_services_status["elasticsearch_service"] = "available" if elasticsearch_service else "not_available"
+        
+        return {
+            "status": "healthy",
+            "message": "OMS container system operational",
+            "container_health": container_health,
+            "oms_services": oms_services_status,
+            "settings_environment": settings.environment.value,
+            "settings_debug": settings.debug
+        }
+        
+    except Exception as e:
+        logger.error(f"Container health check failed: {e}")
+        return {
+            "status": "unhealthy", 
+            "message": f"Health check error: {str(e)}",
+            "container_health": None
+        }
 
 
-# 라우터 등록
-from oms.routers import branch, database, ontology, version, ontology_async, ontology_sync, instance_async, instance
+# Debug endpoint for development (using modern config system)
+if settings.is_development:
+    @app.get("/debug/config")
+    async def debug_config():
+        """Debug endpoint to show configuration - Modern version"""
+        return {
+            "environment": settings.environment.value,
+            "debug_mode": settings.debug,
+            "terminus_url": settings.services.terminus_url,
+            "terminus_user": settings.services.terminus_user,
+            "database_settings": {
+                "host": settings.database.host,
+                "port": settings.database.port,
+                "name": settings.database.name
+            },
+            "modernized": True
+        }
 
+
+# Router registration (unchanged)
 app.include_router(database.router, prefix="/api/v1", tags=["database"])
 app.include_router(ontology.router, prefix="/api/v1", tags=["ontology"])
 app.include_router(ontology_async.router, prefix="/api/v1", tags=["async-ontology"])
@@ -267,6 +578,11 @@ app.include_router(instance.router, prefix="/api/v1", tags=["instance"])
 app.include_router(branch.router, prefix="/api/v1", tags=["branch"])
 app.include_router(version.router, prefix="/api/v1", tags=["version"])
 
+# Monitoring and observability endpoints (modernized architecture)
+app.include_router(monitoring.router, prefix="/api/v1/monitoring", tags=["monitoring"])
+app.include_router(config_monitoring.router, prefix="/api/v1/config", tags=["config-monitoring"])
+
+
 if __name__ == "__main__":
-    # Service Factory를 사용한 간소화된 서비스 실행
+    # Use service factory for simplified service execution
     run_service(app, OMS_SERVICE_INFO, "oms.main:app")

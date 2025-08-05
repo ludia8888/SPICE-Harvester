@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
 
-from oms.dependencies import get_terminus_service
+from oms.dependencies import TerminusServiceDep
 from oms.services.async_terminus import AsyncTerminusService
 from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import (
@@ -65,7 +65,7 @@ class RollbackRequest(BaseModel):
 async def create_commit(
     db_name: str,
     request: CommitRequest,
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     """
     변경사항 커밋
@@ -124,7 +124,7 @@ async def get_commit_history(
     branch: Optional[str] = Query(None, description="브랜치 이름"),
     limit: int = Query(10, description="조회할 커밋 수"),
     offset: int = Query(0, description="오프셋"),
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     """
     커밋 히스토리 조회
@@ -190,7 +190,7 @@ async def get_diff(
     db_name: str,
     from_ref: str = Query(..., description="시작 참조 (브랜치 또는 커밋)"),
     to_ref: str = Query("HEAD", description="끝 참조 (브랜치 또는 커밋)"),
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     """
     차이점 조회
@@ -251,7 +251,7 @@ async def get_diff(
 async def merge_branches(
     db_name: str,
     request: MergeRequest,
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     """
     브랜치 머지
@@ -337,7 +337,7 @@ async def merge_branches(
 async def rollback(
     db_name: str,
     request: RollbackRequest,
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     """
     변경사항 롤백
@@ -395,7 +395,7 @@ async def rebase_branch(
     db_name: str,
     onto: str = Query(..., description="리베이스 대상 브랜치"),
     branch: Optional[str] = Query(None, description="리베이스할 브랜치 (기본: 현재 브랜치)"),
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     """
     브랜치 리베이스
@@ -460,7 +460,7 @@ async def get_common_ancestor(
     db_name: str,
     branch1: str = Query(..., description="첫 번째 브랜치"),
     branch2: str = Query(..., description="두 번째 브랜치"),
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     """
     두 브랜치의 공통 조상 찾기

@@ -8,11 +8,16 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+# Modernized dependency injection imports
 from oms.dependencies import (
     get_jsonld_converter, 
     get_label_mapper, 
     get_terminus_service,
     get_outbox_service,
+    TerminusServiceDep,
+    JSONLDConverterDep,
+    LabelMapperDep,
+    OutboxServiceDep,
     ValidatedDatabaseName,
     ValidatedClassId,
     ensure_database_exists
@@ -25,6 +30,8 @@ from shared.config.app_config import AppConfig
 
 # OMS 서비스 import
 from oms.services.async_terminus import AsyncTerminusService
+from shared.utils.jsonld import JSONToJSONLDConverter
+from shared.utils.label_mapper import LabelMapper
 from shared.models.common import BaseResponse
 
 # shared 모델 import
@@ -71,10 +78,10 @@ router = APIRouter(prefix="/ontology/{db_name}", tags=["Ontology Management"])
 async def create_ontology(
     db_name: str = Depends(ensure_database_exists),
     request: OntologyCreateRequest = ...,
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
-    converter: JSONToJSONLDConverter = Depends(get_jsonld_converter),
-    label_mapper=Depends(get_label_mapper),
-    outbox_service: Optional[OutboxService] = Depends(get_outbox_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
+    converter: JSONToJSONLDConverter = JSONLDConverterDep,
+    label_mapper=LabelMapperDep,
+    outbox_service: Optional[OutboxService] = OutboxServiceDep,
 ) -> OntologyResponse:
     """내부 ID 기반 온톨로지 생성"""
     # 🔥 ULTRA DEBUG! OMS received data
@@ -235,8 +242,8 @@ async def list_ontologies(
     class_type: str = "sys:Class",
     limit: Optional[int] = 100,
     offset: int = 0,
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
-    label_mapper=Depends(get_label_mapper),
+    terminus: AsyncTerminusService = TerminusServiceDep,
+    label_mapper=LabelMapperDep,
 ):
     """내부 ID 기반 온톨로지 목록 조회"""
     try:
@@ -291,7 +298,7 @@ async def list_ontologies(
 @router.get("/analyze-network")
 async def analyze_relationship_network(
     db_name: str = Depends(ensure_database_exists),
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     """
     🔥 관계 네트워크 종합 분석 엔드포인트
@@ -323,9 +330,9 @@ async def analyze_relationship_network(
 async def get_ontology(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
-    converter: JSONToJSONLDConverter = Depends(get_jsonld_converter),
-    label_mapper=Depends(get_label_mapper),
+    terminus: AsyncTerminusService = TerminusServiceDep,
+    converter: JSONToJSONLDConverter = JSONLDConverterDep,
+    label_mapper=LabelMapperDep,
 ):
     """내부 ID 기반 온톨로지 조회"""
     try:
@@ -391,9 +398,9 @@ async def update_ontology(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
     ontology_data: OntologyUpdateRequest = ...,
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
-    converter: JSONToJSONLDConverter = Depends(get_jsonld_converter),
-    outbox_service: Optional[OutboxService] = Depends(get_outbox_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
+    converter: JSONToJSONLDConverter = JSONLDConverterDep,
+    outbox_service: Optional[OutboxService] = OutboxServiceDep,
 ):
     """내부 ID 기반 온톨로지 업데이트"""
     try:
@@ -466,8 +473,8 @@ async def update_ontology(
 async def delete_ontology(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
-    outbox_service: Optional[OutboxService] = Depends(get_outbox_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
+    outbox_service: Optional[OutboxService] = OutboxServiceDep,
 ):
     """내부 ID 기반 온톨로지 삭제"""
     try:
@@ -524,7 +531,7 @@ async def delete_ontology(
 async def query_ontologies(
     db_name: str = Depends(ValidatedDatabaseName),
     query: QueryRequestInternal = ...,
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     """내부 ID 기반 온톨로지 쿼리"""
     try:
@@ -613,8 +620,8 @@ async def create_ontology_with_advanced_relationships(
     auto_generate_inverse: bool = True,
     validate_relationships: bool = True,
     check_circular_references: bool = True,
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
-    label_mapper=Depends(get_label_mapper),
+    terminus: AsyncTerminusService = TerminusServiceDep,
+    label_mapper=LabelMapperDep,
 ) -> OntologyResponse:
     """
     🔥 고급 관계 관리 기능을 포함한 온톨로지 생성
@@ -715,7 +722,7 @@ async def create_ontology_with_advanced_relationships(
 async def validate_ontology_relationships(
     db_name: str,
     request: OntologyCreateRequest,
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     """
     🔥 온톨로지 관계 검증 전용 엔드포인트
@@ -761,7 +768,7 @@ async def validate_ontology_relationships(
 async def detect_circular_references(
     db_name: str,
     new_ontology: Optional[OntologyCreateRequest] = None,
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     """
     🔥 순환 참조 탐지 전용 엔드포인트
@@ -812,7 +819,7 @@ async def find_relationship_paths(
     end_entity: Optional[str] = None,
     max_depth: int = 5,
     path_type: str = "shortest",
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     """
     🔥 관계 경로 탐색 엔드포인트
@@ -869,7 +876,7 @@ async def get_reachable_entities(
     db_name: str,
     start_entity: str,
     max_depth: int = 3,
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     """
     🔥 도달 가능한 엔티티 조회 엔드포인트

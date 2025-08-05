@@ -6,9 +6,9 @@
 import logging
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 
-from oms.dependencies import get_terminus_service
+from oms.dependencies import TerminusServiceDep
 from oms.services.async_terminus import AsyncTerminusService
 from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/database", tags=["Database Management"])
 
 
 @router.get("/list")
-async def list_databases(terminus_service: AsyncTerminusService = Depends(get_terminus_service)):
+async def list_databases(terminus_service: AsyncTerminusService = TerminusServiceDep):
     """
     데이터베이스 목록 조회
 
@@ -41,7 +41,7 @@ async def list_databases(terminus_service: AsyncTerminusService = Depends(get_te
 
 @router.post("/create", status_code=status.HTTP_201_CREATED)
 async def create_database(
-    request: dict, terminus_service: AsyncTerminusService = Depends(get_terminus_service)
+    request: dict, terminus_service: AsyncTerminusService = TerminusServiceDep
 ):
     """
     새 데이터베이스 생성
@@ -115,7 +115,7 @@ async def create_database(
 
 @router.delete("/{db_name}")
 async def delete_database(
-    db_name: str, terminus_service: AsyncTerminusService = Depends(get_terminus_service)
+    db_name: str, terminus_service: AsyncTerminusService = TerminusServiceDep
 ):
     """
     데이터베이스 삭제
@@ -168,7 +168,7 @@ async def delete_database(
 
 @router.get("/exists/{db_name}")
 async def database_exists(
-    db_name: str, terminus_service: AsyncTerminusService = Depends(get_terminus_service)
+    db_name: str, terminus_service: AsyncTerminusService = TerminusServiceDep
 ):
     """
     데이터베이스 존재 여부 확인

@@ -3,6 +3,6 @@
 """
 
 from .conflict_converter import ConflictConverter
-from .label_mapper import LabelMapper
+# LabelMapper is now in shared.utils.label_mapper
 
-__all__ = ["LabelMapper", "ConflictConverter"]
+__all__ = ["ConflictConverter"]

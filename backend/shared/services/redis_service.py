@@ -8,6 +8,7 @@ error handling, and common operations for command status tracking.
 import asyncio
 import json
 import logging
+import os
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 import redis.asyncio as redis
@@ -311,13 +312,37 @@ class RedisService:
 
 
 # Factory function for creating Redis service instances
-def create_redis_service(
+def create_redis_service(settings: 'ApplicationSettings') -> RedisService:
+    """
+    Redis 서비스 팩토리 함수 (Anti-pattern 13 해결)
+    
+    Args:
+        settings: 중앙화된 애플리케이션 설정 객체
+        
+    Returns:
+        RedisService 인스턴스
+        
+    Note:
+        이 함수는 더 이상 내부에서 환경변수를 로드하지 않습니다.
+        모든 설정은 ApplicationSettings를 통해 중앙화되어 관리됩니다.
+    """
+    return RedisService(
+        host=settings.database.redis_host,
+        port=settings.database.redis_port,
+        password=settings.database.redis_password
+    )
+
+
+def create_redis_service_legacy(
     host: Optional[str] = None,
     port: Optional[int] = None,
     password: Optional[str] = None
 ) -> RedisService:
     """
-    Create Redis service instance with environment-based configuration.
+    레거시 Redis 서비스 팩토리 함수 (하위 호환성)
+    
+    이 함수는 기존 코드와의 호환성을 위해 유지되며,
+    마이그레이션 완료 후 제거될 예정입니다.
     
     Args:
         host: Redis host (defaults to env var or 'redis')
@@ -327,8 +352,6 @@ def create_redis_service(
     Returns:
         RedisService instance
     """
-    import os
-    
     return RedisService(
         host=host or os.getenv("REDIS_HOST", "redis"),
         port=port or int(os.getenv("REDIS_PORT", "6379")),

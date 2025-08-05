@@ -5,6 +5,7 @@
 
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -56,14 +57,16 @@ class MappingSuggestionRequest(BaseModel):
 
 from fastapi import HTTPException
 
+# Modernized dependency injection imports  
 from bff.dependencies import (
-    JSONToJSONLDConverter,
-    LabelMapper,
-    TerminusService,
-    get_jsonld_converter,
-    get_label_mapper,
-    get_terminus_service,
     get_oms_client,
+    OMSClientDep,
+    LabelMapperDep,
+    JSONLDConverterDep,
+    TerminusServiceDep,
+    TerminusService,
+    LabelMapper,
+    JSONToJSONLDConverter
 )
 from bff.services.adapter_service import BFFAdapterService
 from bff.services.oms_client import OMSClient
@@ -75,20 +78,23 @@ router = APIRouter(prefix="/database/{db_name}", tags=["Ontology Management"])
 
 # Dependency for BFF Adapter Service
 def get_bff_adapter(
-    terminus_service: TerminusService = Depends(get_terminus_service),
-    label_mapper: LabelMapper = Depends(get_label_mapper)
+    terminus_service: TerminusService = TerminusServiceDep,
+    label_mapper: LabelMapper = LabelMapperDep
 ) -> BFFAdapterService:
     """Get BFF Adapter Service instance"""
     return BFFAdapterService(terminus_service, label_mapper)
+
+# Type-safe dependency annotation for BFF Adapter Service
+BFFAdapterServiceDep = Depends(get_bff_adapter)
 
 
 @router.post("/ontology", response_model=OntologyResponse)
 async def create_ontology(
     db_name: str,
     ontology: Dict[str, Any],  # Accept raw dict to preserve target field
-    mapper: LabelMapper = Depends(get_label_mapper),
-    terminus: TerminusService = Depends(get_terminus_service),
-    jsonld_conv: JSONToJSONLDConverter = Depends(get_jsonld_converter),
+    mapper: LabelMapper = LabelMapperDep,
+    terminus: TerminusService = TerminusServiceDep,
+    jsonld_conv: JSONToJSONLDConverter = JSONLDConverterDep,
 ):
     """
     온톨로지 생성
@@ -195,8 +201,7 @@ async def create_ontology(
         transform_properties_for_oms(ontology_dict)
         
         # 🔥 ULTRA DEBUG! Write to file to verify transformation
-        import datetime
-        debug_file = f"/tmp/bff_debug_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        debug_file = f"/tmp/bff_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         with open(debug_file, 'w') as f:
             f.write(f"BEFORE transformation: {json.dumps(ontology, ensure_ascii=False, indent=2)}\n\n")
             f.write(f"AFTER transformation: {json.dumps(ontology_dict, ensure_ascii=False, indent=2)}\n")
@@ -277,8 +282,8 @@ async def list_ontologies(
     class_type: str = Query("sys:Class", description="클래스 타입"),
     limit: Optional[int] = Query(None, description="결과 개수 제한"),
     offset: int = Query(0, description="오프셋"),
-    mapper: LabelMapper = Depends(get_label_mapper),
-    terminus: TerminusService = Depends(get_terminus_service),
+    mapper: LabelMapper = LabelMapperDep,
+    terminus: TerminusService = TerminusServiceDep,
 ):
     """
     온톨로지 목록 조회
@@ -340,8 +345,8 @@ async def get_ontology(
     db_name: str,
     class_label: str,
     request: Request,
-    mapper: LabelMapper = Depends(get_label_mapper),
-    terminus: TerminusService = Depends(get_terminus_service),
+    mapper: LabelMapper = LabelMapperDep,
+    terminus: TerminusService = TerminusServiceDep,
 ):
     """
     온톨로지 조회
@@ -440,8 +445,8 @@ async def update_ontology(
     class_label: str,
     ontology: OntologyUpdateInput,
     request: Request,
-    mapper: LabelMapper = Depends(get_label_mapper),
-    terminus: TerminusService = Depends(get_terminus_service),
+    mapper: LabelMapper = LabelMapperDep,
+    terminus: TerminusService = TerminusServiceDep,
 ):
     """
     온톨로지 수정
@@ -498,8 +503,8 @@ async def delete_ontology(
     db_name: str,
     class_label: str,
     request: Request,
-    mapper: LabelMapper = Depends(get_label_mapper),
-    terminus: TerminusService = Depends(get_terminus_service),
+    mapper: LabelMapper = LabelMapperDep,
+    terminus: TerminusService = TerminusServiceDep,
 ):
     """
     온톨로지 삭제
@@ -545,9 +550,9 @@ async def get_ontology_schema(
     class_id: str,
     request: Request,
     format: str = Query("json", description="스키마 형식 (json, jsonld, owl)"),
-    mapper: LabelMapper = Depends(get_label_mapper),
-    terminus: TerminusService = Depends(get_terminus_service),
-    jsonld_conv: JSONToJSONLDConverter = Depends(get_jsonld_converter),
+    mapper: LabelMapper = LabelMapperDep,
+    terminus: TerminusService = TerminusServiceDep,
+    jsonld_conv: JSONToJSONLDConverter = JSONLDConverterDep,
 ):
     """
     온톨로지 스키마 조회
@@ -616,7 +621,7 @@ async def get_ontology_schema(
 async def create_ontology_with_relationship_validation(
     db_name: str,
     ontology: OntologyCreateRequestBFF,
-    adapter: BFFAdapterService = Depends(get_bff_adapter),
+    adapter: BFFAdapterService = BFFAdapterServiceDep,
 ):
     """
     🔥 고급 관계 검증을 포함한 온톨로지 생성 (BFF 레이어 - 리팩토링됨)
@@ -652,7 +657,7 @@ async def create_ontology_with_relationship_validation(
 async def validate_ontology_relationships_bff(
     db_name: str,
     ontology: OntologyCreateRequestBFF,
-    adapter: BFFAdapterService = Depends(get_bff_adapter),
+    adapter: BFFAdapterService = BFFAdapterServiceDep,
 ):
     """
     🔥 온톨로지 관계 검증 (BFF 레이어 - 리팩토링됨)
@@ -681,7 +686,7 @@ async def validate_ontology_relationships_bff(
 async def check_circular_references_bff(
     db_name: str,
     ontology: Optional[OntologyCreateRequestBFF] = None,
-    adapter: BFFAdapterService = Depends(get_bff_adapter),
+    adapter: BFFAdapterService = BFFAdapterServiceDep,
 ):
     """
     🔥 순환 참조 탐지 (BFF 레이어 - 리팩토링됨)
@@ -713,8 +718,8 @@ async def check_circular_references_bff(
 async def analyze_relationship_network_bff(
     db_name: str,
     request: Request,
-    terminus: TerminusService = Depends(get_terminus_service),
-    mapper: LabelMapper = Depends(get_label_mapper),
+    terminus: TerminusService = TerminusServiceDep,
+    mapper: LabelMapper = LabelMapperDep,
 ):
     """
     🔥 관계 네트워크 분석 (BFF 레이어)
@@ -818,8 +823,8 @@ async def find_relationship_paths_bff(
     ),
     max_depth: int = Query(3, ge=1, le=5, description="최대 탐색 깊이"),
     path_type: str = Query("shortest", description="경로 타입 (shortest, all, weighted, semantic)"),
-    terminus: TerminusService = Depends(get_terminus_service),
-    mapper: LabelMapper = Depends(get_label_mapper),
+    terminus: TerminusService = TerminusServiceDep,
+    mapper: LabelMapper = LabelMapperDep,
 ):
     """
     🔥 관계 경로 탐색 (BFF 레이어)
@@ -924,7 +929,7 @@ async def find_relationship_paths_bff(
 async def suggest_schema_from_data(
     db_name: str,
     request: SchemaFromDataRequest,
-    terminus: TerminusService = Depends(get_terminus_service),
+    terminus: TerminusService = TerminusServiceDep,
 ):
     """
     🔥 데이터에서 스키마 자동 제안
@@ -1088,7 +1093,7 @@ async def suggest_mappings(
 async def suggest_schema_from_google_sheets(
     db_name: str,
     request: SchemaFromGoogleSheetsRequest,
-    terminus: TerminusService = Depends(get_terminus_service),
+    terminus: TerminusService = TerminusServiceDep,
 ):
     """
     🔥 Google Sheets에서 스키마 자동 제안
@@ -1144,8 +1149,8 @@ async def save_mapping_metadata(
     db_name: str,
     class_id: str,
     metadata: Dict[str, Any],
-    oms: OMSClient = Depends(get_oms_client),
-    mapper: LabelMapper = Depends(get_label_mapper),
+    oms: OMSClient = OMSClientDep,
+    mapper: LabelMapper = LabelMapperDep,
 ):
     """
     매핑 메타데이터를 온톨로지 클래스에 저장
@@ -1166,7 +1171,7 @@ async def save_mapping_metadata(
         
         # 새 매핑 정보 추가
         new_mapping_entry = {
-            "timestamp": sanitized_metadata.get("timestamp", datetime.utcnow().isoformat()),
+            "timestamp": sanitized_metadata.get("timestamp", datetime.now(timezone.utc).isoformat()),
             "source_file": sanitized_metadata.get("sourceFile", "unknown"),
             "mappings_count": sanitized_metadata.get("mappingsCount", 0),
             "average_confidence": sanitized_metadata.get("averageConfidence", 0),
@@ -1267,7 +1272,7 @@ class CsvImportRequest(BaseModel):
 async def import_csv_data(
     db_name: str,
     import_request: CsvImportRequest,
-    oms: OMSClient = Depends(get_oms_client)
+    oms: OMSClient = OMSClientDep
 ) -> Dict[str, Any]:
     """
     CSV 데이터를 온톨로지 인스턴스로 임포트

@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
 
-from oms.dependencies import get_terminus_service
+from oms.dependencies import TerminusServiceDep
 from oms.services.async_terminus import AsyncTerminusService
 from shared.models.requests import ApiResponse, BranchCreateRequest, CheckoutRequest
 from shared.security.input_sanitizer import (
@@ -26,7 +26,7 @@ router = APIRouter(prefix="/branch/{db_name}", tags=["Branch Management"])
 
 @router.get("/list")
 async def list_branches(
-    db_name: str, terminus: AsyncTerminusService = Depends(get_terminus_service)
+    db_name: str, terminus: AsyncTerminusService = TerminusServiceDep
 ):
     """
     브랜치 목록 조회
@@ -71,7 +71,7 @@ async def list_branches(
 async def create_branch(
     db_name: str,
     request: BranchCreateRequest,
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     """
     새 브랜치 생성
@@ -137,7 +137,7 @@ async def delete_branch(
     db_name: str,
     branch_name: str,
     force: bool = Query(False, description="강제 삭제 여부"),
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     """
     브랜치 삭제
@@ -199,7 +199,7 @@ async def delete_branch(
 async def checkout(
     db_name: str,
     request: CheckoutRequest,
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     """
     브랜치 또는 커밋 체크아웃
@@ -273,7 +273,7 @@ async def checkout(
 
 @router.get("/branch/{branch_name}/info")
 async def get_branch_info(
-    db_name: str, branch_name: str, terminus: AsyncTerminusService = Depends(get_terminus_service)
+    db_name: str, branch_name: str, terminus: AsyncTerminusService = TerminusServiceDep
 ):
     """
     브랜치 정보 조회
@@ -339,7 +339,7 @@ class CommitRequest(BaseModel):
 async def commit_changes(
     db_name: str,
     request: CommitRequest,
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     """
     브랜치에 변경사항 커밋

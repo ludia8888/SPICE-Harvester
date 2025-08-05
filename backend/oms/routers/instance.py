@@ -9,8 +9,8 @@ import logging
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from oms.dependencies import ValidatedDatabaseName, get_terminus_service
-from shared.services.terminus_service import AsyncTerminusService
+from oms.dependencies import ValidatedDatabaseName, TerminusServiceDep
+from oms.services.async_terminus import AsyncTerminusService
 from shared.security.input_sanitizer import (
     SecurityViolationError,
     validate_class_id,
@@ -29,7 +29,7 @@ async def get_class_instances(
     limit: int = Query(default=100, le=1000),
     offset: int = Query(default=0, ge=0),
     search: Optional[str] = Query(default=None, description="Search query"),
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
 ) -> Dict[str, Any]:
     """
     특정 클래스의 인스턴스 목록을 효율적으로 조회
@@ -115,7 +115,7 @@ async def get_instance(
     db_name: str = Depends(ValidatedDatabaseName),
     instance_id: str = ...,
     class_id: Optional[str] = Query(default=None, description="Optional class ID for validation"),
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
 ) -> Dict[str, Any]:
     """
     개별 인스턴스를 효율적으로 조회
@@ -177,7 +177,7 @@ async def get_instance(
 async def get_class_instance_count(
     db_name: str = Depends(ValidatedDatabaseName),
     class_id: str = ...,
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
 ) -> Dict[str, Any]:
     """
     특정 클래스의 인스턴스 개수를 효율적으로 조회
@@ -229,7 +229,7 @@ async def execute_sparql_query(
     query: str = ...,
     limit: Optional[int] = Query(default=None, le=10000),
     offset: Optional[int] = Query(default=None, ge=0),
-    terminus: AsyncTerminusService = Depends(get_terminus_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
 ) -> Dict[str, Any]:
     """
     SPARQL 쿼리 직접 실행

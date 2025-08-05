@@ -9,6 +9,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+# Modernized dependency injection imports
 from oms.dependencies import (
     get_jsonld_converter, 
     get_label_mapper, 
@@ -16,6 +17,8 @@ from oms.dependencies import (
     get_outbox_service,
     get_redis_service,
     get_command_status_service,
+    OutboxServiceDep,
+    CommandStatusServiceDep,
     ValidatedDatabaseName,
     ValidatedClassId,
     ensure_database_exists
@@ -58,10 +61,13 @@ router = APIRouter(
 
 
 def get_sync_wrapper_service(
-    command_status_service: CommandStatusService = Depends(get_command_status_service)
+    command_status_service: CommandStatusService = CommandStatusServiceDep
 ) -> SyncWrapperService:
     """동기 래퍼 서비스 의존성"""
     return SyncWrapperService(command_status_service)
+
+# Type-safe dependency annotation for SyncWrapperService
+SyncWrapperServiceDep = Depends(get_sync_wrapper_service)
 
 
 @router.post("/create", response_model=ApiResponse)
@@ -70,9 +76,9 @@ async def create_ontology_sync(
     request: OntologyCreateRequest = ...,
     timeout: float = Query(default=30.0, ge=1.0, le=300.0, description="최대 대기 시간(초)"),
     poll_interval: float = Query(default=0.5, ge=0.1, le=5.0, description="상태 확인 간격(초)"),
-    outbox_service: Optional[OutboxService] = Depends(get_outbox_service),
-    command_status_service: CommandStatusService = Depends(get_command_status_service),
-    sync_wrapper: SyncWrapperService = Depends(get_sync_wrapper_service),
+    outbox_service: Optional[OutboxService] = OutboxServiceDep,
+    command_status_service: CommandStatusService = CommandStatusServiceDep,
+    sync_wrapper: SyncWrapperService = SyncWrapperServiceDep,
 ) -> ApiResponse:
     """
     동기식 온톨로지 생성 - Command를 제출하고 완료될 때까지 대기
@@ -154,9 +160,9 @@ async def update_ontology_sync(
     request: OntologyUpdateRequest = ...,
     timeout: float = Query(default=30.0, ge=1.0, le=300.0, description="최대 대기 시간(초)"),
     poll_interval: float = Query(default=0.5, ge=0.1, le=5.0, description="상태 확인 간격(초)"),
-    outbox_service: Optional[OutboxService] = Depends(get_outbox_service),
-    command_status_service: CommandStatusService = Depends(get_command_status_service),
-    sync_wrapper: SyncWrapperService = Depends(get_sync_wrapper_service),
+    outbox_service: Optional[OutboxService] = OutboxServiceDep,
+    command_status_service: CommandStatusService = CommandStatusServiceDep,
+    sync_wrapper: SyncWrapperService = SyncWrapperServiceDep,
 ) -> ApiResponse:
     """
     동기식 온톨로지 업데이트 - Command를 제출하고 완료될 때까지 대기
@@ -235,9 +241,9 @@ async def delete_ontology_sync(
     class_id: str = Depends(ValidatedClassId),
     timeout: float = Query(default=30.0, ge=1.0, le=300.0, description="최대 대기 시간(초)"),
     poll_interval: float = Query(default=0.5, ge=0.1, le=5.0, description="상태 확인 간격(초)"),
-    outbox_service: Optional[OutboxService] = Depends(get_outbox_service),
-    command_status_service: CommandStatusService = Depends(get_command_status_service),
-    sync_wrapper: SyncWrapperService = Depends(get_sync_wrapper_service),
+    outbox_service: Optional[OutboxService] = OutboxServiceDep,
+    command_status_service: CommandStatusService = CommandStatusServiceDep,
+    sync_wrapper: SyncWrapperService = SyncWrapperServiceDep,
 ) -> ApiResponse:
     """
     동기식 온톨로지 삭제 - Command를 제출하고 완료될 때까지 대기
@@ -313,7 +319,7 @@ async def wait_for_command(
     command_id: str,
     timeout: float = Query(default=30.0, ge=1.0, le=300.0, description="최대 대기 시간(초)"),
     poll_interval: float = Query(default=0.5, ge=0.1, le=5.0, description="상태 확인 간격(초)"),
-    sync_wrapper: SyncWrapperService = Depends(get_sync_wrapper_service),
+    sync_wrapper: SyncWrapperService = SyncWrapperServiceDep,
 ) -> ApiResponse:
     """
     기존 Command의 완료를 대기

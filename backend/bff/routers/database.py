@@ -8,7 +8,8 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from bff.dependencies import get_oms_client
+# Modernized dependency injection imports
+from bff.dependencies import get_oms_client, OMSClientDep
 from bff.services.oms_client import OMSClient
 from shared.models.requests import ApiResponse, DatabaseCreateRequest
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
@@ -22,7 +23,7 @@ router = APIRouter(prefix="/databases", tags=["Database Management"])
 
 
 @router.get("")
-async def list_databases(oms: OMSClient = Depends(get_oms_client)):
+async def list_databases(oms: OMSClient = OMSClientDep):
     """데이터베이스 목록 조회"""
     try:
         # 기본 보안 검증 (관리자 권한 필요한 작업)
@@ -42,7 +43,7 @@ async def list_databases(oms: OMSClient = Depends(get_oms_client)):
 
 
 @router.post("", response_model=ApiResponse)
-async def create_database(request: DatabaseCreateRequest, oms: OMSClient = Depends(get_oms_client)):
+async def create_database(request: DatabaseCreateRequest, oms: OMSClient = OMSClientDep):
     """데이터베이스 생성"""
     logger.info(f"🔥 BFF: Database creation request received - name: {request.name}, description: {request.description}")
     
@@ -97,7 +98,7 @@ async def create_database(request: DatabaseCreateRequest, oms: OMSClient = Depen
 
 
 @router.delete("/{db_name:path}")
-async def delete_database(db_name: str, oms: OMSClient = Depends(get_oms_client)):
+async def delete_database(db_name: str, oms: OMSClient = OMSClientDep):
     """데이터베이스 삭제"""
     try:
         # 입력 데이터 보안 검증
@@ -154,7 +155,7 @@ async def delete_database(db_name: str, oms: OMSClient = Depends(get_oms_client)
 
 
 @router.get("/{db_name}")
-async def get_database(db_name: str, oms: OMSClient = Depends(get_oms_client)):
+async def get_database(db_name: str, oms: OMSClient = OMSClientDep):
     """데이터베이스 정보 조회"""
     try:
         # 입력 데이터 보안 검증
@@ -181,7 +182,7 @@ async def list_classes(
     db_name: str,
     type: Optional[str] = "Class",
     limit: Optional[int] = None,
-    oms: OMSClient = Depends(get_oms_client),
+    oms: OMSClient = OMSClientDep,
 ):
     """데이터베이스의 클래스 목록 조회"""
     try:
@@ -208,7 +209,7 @@ async def list_classes(
 
 @router.post("/{db_name}/classes")
 async def create_class(
-    db_name: str, class_data: Dict[str, Any], oms: OMSClient = Depends(get_oms_client)
+    db_name: str, class_data: Dict[str, Any], oms: OMSClient = OMSClientDep
 ):
     """데이터베이스에 새 클래스 생성"""
     try:
@@ -247,7 +248,7 @@ async def create_class(
 
 @router.get("/{db_name}/classes/{class_id}")
 async def get_class(
-    db_name: str, class_id: str, request: Request, oms: OMSClient = Depends(get_oms_client)
+    db_name: str, class_id: str, request: Request, oms: OMSClient = OMSClientDep
 ):
     """특정 클래스 조회"""
     get_accept_language(request)
@@ -274,7 +275,7 @@ async def get_class(
 
 
 @router.get("/{db_name}/branches")
-async def list_branches(db_name: str, oms: OMSClient = Depends(get_oms_client)):
+async def list_branches(db_name: str, oms: OMSClient = OMSClientDep):
     """브랜치 목록 조회"""
     try:
         # 입력 데이터 보안 검증
@@ -310,7 +311,7 @@ async def list_branches(db_name: str, oms: OMSClient = Depends(get_oms_client)):
 
 @router.post("/{db_name}/branches")
 async def create_branch(
-    db_name: str, branch_data: Dict[str, Any], oms: OMSClient = Depends(get_oms_client)
+    db_name: str, branch_data: Dict[str, Any], oms: OMSClient = OMSClientDep
 ):
     """새 브랜치 생성"""
     try:
@@ -360,7 +361,7 @@ async def create_branch(
 
 
 @router.get("/{db_name}/versions")
-async def get_versions(db_name: str, oms: OMSClient = Depends(get_oms_client)):
+async def get_versions(db_name: str, oms: OMSClient = OMSClientDep):
     """버전 히스토리 조회"""
     try:
         # 입력 데이터 보안 검증

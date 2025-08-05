@@ -12,21 +12,21 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from oms.dependencies import (
-    get_jsonld_converter, 
-    get_label_mapper, 
-    get_terminus_service,
-    get_outbox_service,
-    get_redis_service,
-    get_command_status_service,
+    JSONLDConverterDep,
+    LabelMapperDep,
+    TerminusServiceDep,
+    OutboxServiceDep,
+    CommandStatusServiceDep,
     ValidatedDatabaseName,
     ValidatedClassId,
     ensure_database_exists
 )
+from shared.dependencies.providers import RedisServiceDep
 from oms.database.postgres import db as postgres_db
 from oms.database.outbox import MessageType, OutboxService
 from shared.models.commands import CommandType, InstanceCommand, CommandResult, CommandStatus
 from shared.models.common import BaseResponse
-from shared.services import CommandStatusService
+from shared.services import CommandStatusService, RedisService
 from shared.security.input_sanitizer import (
     SecurityViolationError,
     sanitize_input,
@@ -64,8 +64,8 @@ async def create_instance_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
     request: InstanceCreateRequest = ...,
-    outbox_service: Optional[OutboxService] = Depends(get_outbox_service),
-    command_status_service: CommandStatusService = Depends(get_command_status_service),
+    outbox_service: Optional[OutboxService] = OutboxServiceDep,
+    command_status_service: CommandStatusService = CommandStatusServiceDep,
     user_id: Optional[str] = None,
 ):
     """
@@ -142,8 +142,8 @@ async def update_instance_async(
     class_id: str = Depends(ValidatedClassId),
     instance_id: str = ...,
     request: InstanceUpdateRequest = ...,
-    outbox_service: Optional[OutboxService] = Depends(get_outbox_service),
-    command_status_service: CommandStatusService = Depends(get_command_status_service),
+    outbox_service: Optional[OutboxService] = OutboxServiceDep,
+    command_status_service: CommandStatusService = CommandStatusServiceDep,
     user_id: Optional[str] = None,
 ):
     """
@@ -219,8 +219,8 @@ async def delete_instance_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
     instance_id: str = ...,
-    outbox_service: Optional[OutboxService] = Depends(get_outbox_service),
-    command_status_service: CommandStatusService = Depends(get_command_status_service),
+    outbox_service: Optional[OutboxService] = OutboxServiceDep,
+    command_status_service: CommandStatusService = CommandStatusServiceDep,
     user_id: Optional[str] = None,
 ):
     """
@@ -294,8 +294,8 @@ async def bulk_create_instances_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
     request: BulkInstanceCreateRequest = ...,
-    outbox_service: Optional[OutboxService] = Depends(get_outbox_service),
-    command_status_service: CommandStatusService = Depends(get_command_status_service),
+    outbox_service: Optional[OutboxService] = OutboxServiceDep,
+    command_status_service: CommandStatusService = CommandStatusServiceDep,
     user_id: Optional[str] = None,
 ):
     """
@@ -371,7 +371,7 @@ async def bulk_create_instances_async(
 async def get_instance_command_status(
     db_name: str = Depends(ensure_database_exists),
     command_id: str = ...,
-    command_status_service: CommandStatusService = Depends(get_command_status_service),
+    command_status_service: CommandStatusService = CommandStatusServiceDep,
 ):
     """
     인스턴스 명령의 상태 조회

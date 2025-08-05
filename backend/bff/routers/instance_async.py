@@ -16,7 +16,7 @@ from bff.dependencies import (
     get_label_mapper,
 )
 from bff.services.oms_client import OMSClient
-from bff.utils.label_mapper import LabelMapper
+from shared.utils.label_mapper import LabelMapper
 from shared.models.commands import CommandResult, CommandStatus
 from shared.models.common import BaseResponse
 from shared.security.input_sanitizer import (

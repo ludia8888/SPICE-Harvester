@@ -7,15 +7,46 @@ error handling, and common operations for search and indexing.
 
 import json
 import logging
+import os
 from typing import Optional, Dict, Any, List, Union
 from datetime import datetime
 from elasticsearch import AsyncElasticsearch
-from elasticsearch.exceptions import (
-    ElasticsearchException,
-    NotFoundError,
-    RequestError,
-    ConnectionError as ESConnectionError
-)
+# Handle different elasticsearch versions
+try:
+    from elasticsearch.exceptions import (
+        ElasticsearchException,
+        NotFoundError,
+        RequestError,
+        ConnectionError as ESConnectionError
+    )
+except ImportError:
+    # In newer versions, ElasticsearchException might be in a different location
+    try:
+        from elasticsearch import ElasticsearchException
+        from elasticsearch.exceptions import (
+            NotFoundError,
+            RequestError,
+            ConnectionError as ESConnectionError
+        )
+    except ImportError:
+        # Fallback - define a basic exception
+        class ElasticsearchException(Exception):
+            pass
+        
+        try:
+            from elasticsearch.exceptions import (
+                NotFoundError,
+                RequestError,
+                ConnectionError as ESConnectionError
+            )
+        except ImportError:
+            # Final fallback - define basic exceptions
+            class NotFoundError(Exception):
+                pass
+            class RequestError(Exception):
+                pass
+            class ESConnectionError(Exception):
+                pass
 from elasticsearch.helpers import async_bulk
 
 logger = logging.getLogger(__name__)
@@ -567,14 +598,39 @@ class ElasticsearchService:
 
 
 # Factory function for creating Elasticsearch service instances
-def create_elasticsearch_service(
+def create_elasticsearch_service(settings: 'ApplicationSettings') -> ElasticsearchService:
+    """
+    Elasticsearch 서비스 팩토리 함수 (Anti-pattern 13 해결)
+    
+    Args:
+        settings: 중앙화된 애플리케이션 설정 객체
+        
+    Returns:
+        ElasticsearchService 인스턴스
+        
+    Note:
+        이 함수는 더 이상 내부에서 환경변수를 로드하지 않습니다.
+        모든 설정은 ApplicationSettings를 통해 중앙화되어 관리됩니다.
+    """
+    return ElasticsearchService(
+        host=settings.database.elasticsearch_host,
+        port=settings.database.elasticsearch_port,
+        username=settings.database.elasticsearch_username,
+        password=settings.database.elasticsearch_password
+    )
+
+
+def create_elasticsearch_service_legacy(
     host: Optional[str] = None,
     port: Optional[int] = None,
     username: Optional[str] = None,
     password: Optional[str] = None
 ) -> ElasticsearchService:
     """
-    Create Elasticsearch service instance with environment-based configuration.
+    레거시 Elasticsearch 서비스 팩토리 함수 (하위 호환성)
+    
+    이 함수는 기존 코드와의 호환성을 위해 유지되며,
+    마이그레이션 완료 후 제거될 예정입니다.
     
     Args:
         host: Elasticsearch host (defaults to env var or 'elasticsearch')
@@ -585,8 +641,6 @@ def create_elasticsearch_service(
     Returns:
         ElasticsearchService instance
     """
-    import os
-    
     return ElasticsearchService(
         host=host or os.getenv("ELASTICSEARCH_HOST", "elasticsearch"),
         port=port or int(os.getenv("ELASTICSEARCH_PORT", "9200")),
