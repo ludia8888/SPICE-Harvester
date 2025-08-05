@@ -135,13 +135,12 @@ async def get_class_instances(
                 "limit": limit,
                 "offset": offset,
                 "search": search,
-                "instances": instances,
-                "source": "elasticsearch"
+                "instances": instances
             }
         
         # Fallback to TerminusDB
         if es_error:
-            logger.info("Falling back to TerminusDB optimized query")
+            logger.info(f"Elasticsearch unavailable ({es_error}), using TerminusDB fallback for class {class_id} instances")
             
             # Elasticsearch 장애 시 최적화된 OMS Instance API로 fallback
             try:
@@ -161,8 +160,7 @@ async def get_class_instances(
                         "limit": limit,
                         "offset": offset,
                         "search": search,
-                        "instances": result.get("instances", []),
-                        "source": "terminus_optimized"
+                        "instances": result.get("instances", [])
                     }
                 else:
                     # API 응답이 실패인 경우
@@ -173,8 +171,7 @@ async def get_class_instances(
                         "limit": limit,
                         "offset": offset,
                         "search": search,
-                        "instances": [],
-                        "source": "error"
+                        "instances": []
                     }
                     
             except Exception as e:
@@ -185,8 +182,7 @@ async def get_class_instances(
                     "limit": limit,
                     "offset": offset,
                     "search": search,
-                    "instances": [],
-                    "source": "error"
+                    "instances": []
                 }
         
     except HTTPException:
@@ -334,12 +330,11 @@ async def get_instance(
                     instance_data = hits[0]["_source"]
                     return {
                         "status": "success",
-                        "data": instance_data,
-                        "source": "elasticsearch"
+                        "data": instance_data
                     }
             
             # ES에 문서가 없는 경우 - TerminusDB fallback
-            logger.warning(f"Instance {instance_id} not found in Elasticsearch. Falling back to TerminusDB.")
+            logger.info(f"Instance {instance_id} not in Elasticsearch index, querying TerminusDB directly for latest state")
             
         except (ESConnectionError, ConnectionRefusedError, TimeoutError) as e:
             # ES 연결 장애 - TerminusDB fallback
@@ -364,8 +359,7 @@ async def get_instance(
                 if instance_data:
                     return {
                         "status": "success",
-                        "data": instance_data,
-                        "source": "terminus_optimized"
+                        "data": instance_data
                     }
         except Exception as e:
             logger.error(f"Failed to get instance from OMS: {e}")
