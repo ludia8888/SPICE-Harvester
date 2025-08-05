@@ -438,6 +438,7 @@ get_oms_client = BFFDependencyProvider.get_oms_client
 get_label_mapper = BFFDependencyProvider.get_label_mapper
 get_jsonld_converter = BFFDependencyProvider.get_jsonld_converter
 get_elasticsearch_service = ElasticsearchServiceDep
+get_storage_service = StorageServiceDep
 
 
 # Health check function for the modernized dependencies

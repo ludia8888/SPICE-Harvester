@@ -78,6 +78,9 @@ class RedisService:
     async def disconnect(self) -> None:
         """Close Redis connection and pool."""
         try:
+            # Clean up listeners first
+            await self.cleanup_listeners()
+            
             if self._pubsub:
                 await self._pubsub.close()
             if self._client:
@@ -229,14 +232,16 @@ class RedisService:
     async def subscribe_command_updates(
         self,
         command_id: str,
-        callback: callable
+        callback: callable,
+        task_manager: Optional['BackgroundTaskManager'] = None
     ) -> redis.client.PubSub:
         """
-        Subscribe to command status updates.
+        Subscribe to command status updates with proper task tracking.
         
         Args:
             command_id: Unique command identifier
             callback: Async callback function to handle updates
+            task_manager: Optional BackgroundTaskManager for tracking
             
         Returns:
             PubSub instance
@@ -247,24 +252,77 @@ class RedisService:
         channel = f"command_updates:{command_id}"
         await self._pubsub.subscribe(channel)
         
-        # Start listening in background
-        asyncio.create_task(self._listen_for_updates(self._pubsub, callback))
+        # Start listening with proper tracking
+        if task_manager:
+            # Use BackgroundTaskManager for proper tracking
+            await task_manager.create_task(
+                self._listen_for_updates,
+                self._pubsub,
+                callback,
+                command_id,
+                task_name=f"Redis PubSub listener for {command_id}",
+                task_type="pubsub_listener",
+                metadata={"command_id": command_id, "channel": channel}
+            )
+        else:
+            # Fallback with improved error handling
+            task = asyncio.create_task(
+                self._listen_for_updates(self._pubsub, callback, command_id)
+            )
+            # Add done callback for error logging
+            task.add_done_callback(self._handle_listener_done)
+            # Store task reference for cleanup
+            if not hasattr(self, '_listener_tasks'):
+                self._listener_tasks = {}
+            self._listener_tasks[command_id] = task
         
         return self._pubsub
         
     async def _listen_for_updates(
         self,
         pubsub: redis.client.PubSub,
-        callback: callable
+        callback: callable,
+        command_id: str
     ) -> None:
-        """Listen for pub/sub updates and call callback."""
+        """
+        Listen for pub/sub updates with improved error handling.
+        
+        Args:
+            pubsub: Redis pubsub instance
+            callback: Callback function for messages
+            command_id: Command ID for tracking
+        """
+        logger.info(f"Starting pub/sub listener for command {command_id}")
+        
         try:
             async for message in pubsub.listen():
                 if message["type"] == "message":
-                    data = json.loads(message["data"])
-                    await callback(data)
+                    try:
+                        data = json.loads(message["data"])
+                        await callback(data)
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Invalid JSON in pub/sub message for {command_id}: {e}")
+                    except Exception as e:
+                        logger.error(f"Error in callback for {command_id}: {e}")
+                        # Continue listening despite callback errors
+                        
+        except asyncio.CancelledError:
+            logger.info(f"Pub/sub listener for {command_id} was cancelled")
+            raise
         except Exception as e:
-            logger.error(f"Error in pub/sub listener: {e}")
+            logger.error(f"Fatal error in pub/sub listener for {command_id}: {e}")
+            raise
+        finally:
+            logger.info(f"Pub/sub listener for {command_id} stopped")
+            
+    def _handle_listener_done(self, task: asyncio.Task) -> None:
+        """Handle completion of a listener task."""
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            logger.debug("Listener task was cancelled")
+        except Exception as e:
+            logger.error(f"Listener task failed: {e}")
             
     # General Operations
     
@@ -309,6 +367,46 @@ class RedisService:
             return await self.client.ping()
         except RedisError:
             return False
+    
+    async def cleanup_listeners(self) -> None:
+        """Clean up all active pub/sub listeners."""
+        if hasattr(self, '_listener_tasks'):
+            for command_id, task in list(self._listener_tasks.items()):
+                if not task.done():
+                    logger.info(f"Cancelling listener task for {command_id}")
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+            self._listener_tasks.clear()
+            
+        if self._pubsub:
+            await self._pubsub.unsubscribe()
+            await self._pubsub.close()
+            self._pubsub = None
+            
+    async def scan_keys(self, pattern: str, count: int = 100) -> List[str]:
+        """
+        Scan keys matching pattern without blocking.
+        
+        Args:
+            pattern: Key pattern to match
+            count: Approximate number of keys per iteration
+            
+        Returns:
+            List of matching keys
+        """
+        keys = []
+        cursor = 0
+        
+        while True:
+            cursor, batch = await self.client.scan(cursor, match=pattern, count=count)
+            keys.extend(batch)
+            if cursor == 0:
+                break
+                
+        return keys
 
 
 # Factory function for creating Redis service instances

@@ -578,3 +578,251 @@ async def get_service_dependencies(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve dependency information: {str(e)}"
         )
+
+
+@router.get("/background-tasks/metrics",
+           summary="Background Task Metrics",
+           description="Get metrics for background task execution")
+async def get_background_task_metrics(
+    container: ServiceContainer = Depends(get_container)
+):
+    """
+    Get background task execution metrics
+    
+    Returns comprehensive metrics about background task execution,
+    including success rates, performance, and current load.
+    
+    This endpoint addresses Anti-pattern 14 by providing visibility
+    into all background tasks running in the system.
+    """
+    try:
+        # Get BackgroundTaskManager from container
+        from shared.services.background_task_manager import BackgroundTaskManager
+        
+        if not container.has(BackgroundTaskManager):
+            return {
+                "status": "not_available",
+                "message": "Background task manager not initialized",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        
+        task_manager = await container.get(BackgroundTaskManager)
+        metrics = await task_manager.get_task_metrics()
+        
+        return {
+            "status": "ok",
+            "metrics": {
+                "total_tasks": metrics.total_tasks,
+                "active_tasks": metrics.active_tasks,
+                "pending_tasks": metrics.pending_tasks,
+                "processing_tasks": metrics.processing_tasks,
+                "retrying_tasks": metrics.retrying_tasks,
+                "completed_tasks": metrics.completed_tasks,
+                "failed_tasks": metrics.failed_tasks,
+                "success_rate": metrics.success_rate,
+                "average_duration_seconds": metrics.average_duration,
+                "tasks_by_type": metrics.tasks_by_type
+            },
+            "health": {
+                "status": "healthy" if metrics.success_rate >= 90 else "degraded",
+                "issues": []
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+    except Exception as e:
+        return JSONResponse(
+            content={
+                "status": "error",
+                "error": str(e),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            },
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@router.get("/background-tasks/active",
+           summary="Active Background Tasks",
+           description="List all currently active background tasks")
+async def get_active_background_tasks(
+    limit: int = Query(100, ge=1, le=1000, description="Maximum tasks to return"),
+    container: ServiceContainer = Depends(get_container)
+):
+    """
+    Get list of all active background tasks
+    
+    Returns detailed information about currently running background tasks,
+    helping identify potential issues with stuck or long-running tasks.
+    """
+    try:
+        from shared.services.background_task_manager import BackgroundTaskManager
+        from shared.models.background_task import TaskStatus
+        
+        if not container.has(BackgroundTaskManager):
+            return {
+                "status": "not_available",
+                "message": "Background task manager not initialized",
+                "tasks": [],
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        
+        task_manager = await container.get(BackgroundTaskManager)
+        
+        # Get all active tasks (pending, processing, retrying)
+        active_statuses = [TaskStatus.PENDING, TaskStatus.PROCESSING, TaskStatus.RETRYING]
+        active_tasks = []
+        
+        for status in active_statuses:
+            tasks = await task_manager.get_all_tasks(status=status, limit=limit)
+            active_tasks.extend(tasks)
+        
+        # Sort by created_at (most recent first)
+        active_tasks.sort(key=lambda t: t.created_at, reverse=True)
+        active_tasks = active_tasks[:limit]
+        
+        return {
+            "status": "ok",
+            "count": len(active_tasks),
+            "tasks": [
+                {
+                    "task_id": task.task_id,
+                    "task_name": task.task_name,
+                    "task_type": task.task_type,
+                    "status": task.status.value,
+                    "created_at": task.created_at.isoformat(),
+                    "started_at": task.started_at.isoformat() if task.started_at else None,
+                    "duration_seconds": task.duration,
+                    "progress": task.progress.dict() if task.progress else None,
+                    "retry_count": task.retry_count,
+                    "metadata": task.metadata
+                }
+                for task in active_tasks
+            ],
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+    except Exception as e:
+        return JSONResponse(
+            content={
+                "status": "error",
+                "error": str(e),
+                "tasks": [],
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            },
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@router.get("/background-tasks/health",
+           summary="Background Task System Health",
+           description="Check health of background task processing system")
+async def get_background_task_health(
+    container: ServiceContainer = Depends(get_container)
+):
+    """
+    Get health status of background task processing system
+    
+    Provides health checks and diagnostics for the background task system,
+    including identification of potential issues like:
+    - High failure rates
+    - Stuck tasks
+    - Queue backlog
+    - Resource exhaustion
+    """
+    try:
+        from shared.services.background_task_manager import BackgroundTaskManager
+        
+        if not container.has(BackgroundTaskManager):
+            return JSONResponse(
+                content={
+                    "status": "unavailable",
+                    "healthy": False,
+                    "message": "Background task manager not initialized",
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                },
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+        
+        task_manager = await container.get(BackgroundTaskManager)
+        metrics = await task_manager.get_task_metrics()
+        
+        # Health checks
+        issues = []
+        warnings = []
+        healthy = True
+        
+        # Check success rate
+        if metrics.success_rate < 80:
+            issues.append(f"Low success rate: {metrics.success_rate:.1f}%")
+            healthy = False
+        elif metrics.success_rate < 90:
+            warnings.append(f"Success rate below optimal: {metrics.success_rate:.1f}%")
+        
+        # Check for stuck tasks
+        if metrics.processing_tasks > 50:
+            issues.append(f"High number of processing tasks: {metrics.processing_tasks}")
+            healthy = False
+        elif metrics.processing_tasks > 20:
+            warnings.append(f"Many tasks in processing: {metrics.processing_tasks}")
+        
+        # Check retry queue
+        if metrics.retrying_tasks > 10:
+            warnings.append(f"High retry queue: {metrics.retrying_tasks} tasks")
+        
+        # Check pending queue
+        if metrics.pending_tasks > 100:
+            warnings.append(f"Large pending queue: {metrics.pending_tasks} tasks")
+        
+        # Check for dead tasks (tasks stuck in processing for too long)
+        dead_tasks = await task_manager._get_dead_tasks()
+        if len(dead_tasks) > 0:
+            issues.append(f"Found {len(dead_tasks)} potentially dead tasks")
+            healthy = False
+        
+        health_status = "healthy" if healthy and not warnings else "degraded" if healthy else "unhealthy"
+        
+        response_data = {
+            "status": health_status,
+            "healthy": healthy,
+            "issues": issues,
+            "warnings": warnings,
+            "metrics_summary": {
+                "total_tasks": metrics.total_tasks,
+                "active_tasks": metrics.active_tasks,
+                "success_rate": metrics.success_rate,
+                "average_duration_seconds": metrics.average_duration
+            },
+            "recommendations": []
+        }
+        
+        # Add recommendations based on issues
+        if metrics.success_rate < 80:
+            response_data["recommendations"].append(
+                "Investigate failing tasks to identify common patterns"
+            )
+        
+        if metrics.processing_tasks > 20:
+            response_data["recommendations"].append(
+                "Consider scaling up workers or optimizing task processing"
+            )
+        
+        if len(dead_tasks) > 0:
+            response_data["recommendations"].append(
+                "Run cleanup process to mark dead tasks as failed"
+            )
+        
+        response_data["timestamp"] = datetime.now(timezone.utc).isoformat()
+        
+        status_code = status.HTTP_200_OK if healthy else status.HTTP_503_SERVICE_UNAVAILABLE
+        return JSONResponse(content=response_data, status_code=status_code)
+        
+    except Exception as e:
+        return JSONResponse(
+            content={
+                "status": "error",
+                "healthy": False,
+                "error": str(e),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            },
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

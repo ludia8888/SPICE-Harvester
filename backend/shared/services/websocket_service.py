@@ -229,45 +229,89 @@ class WebSocketConnectionManager:
 
 class WebSocketNotificationService:
     """
-    WebSocket 알림 서비스
+    WebSocket 알림 서비스 with proper task tracking
     
     Redis Pub/Sub 이벤트를 받아서 WebSocket 클라이언트들에게 전달
+    Addresses Anti-pattern 14 by using BackgroundTaskManager for all async tasks
     """
     
     def __init__(
         self, 
         redis_service: RedisService,
-        connection_manager: WebSocketConnectionManager
+        connection_manager: WebSocketConnectionManager,
+        task_manager: Optional['BackgroundTaskManager'] = None
     ):
         self.redis = redis_service
         self.connection_manager = connection_manager
+        self.task_manager = task_manager
         self.running = False
         self._pubsub_task: Optional[asyncio.Task] = None
+        self._pubsub_task_id: Optional[str] = None
         
     async def start(self) -> None:
-        """알림 서비스 시작"""
+        """알림 서비스 시작 with proper task tracking"""
         if self.running:
             return
             
         self.running = True
-        self._pubsub_task = asyncio.create_task(self._listen_redis_updates())
-        logger.info("WebSocket notification service started")
+        
+        if self.task_manager:
+            # Use BackgroundTaskManager for proper tracking
+            self._pubsub_task_id = await self.task_manager.create_task(
+                self._listen_redis_updates,
+                task_name="WebSocket Redis PubSub listener",
+                task_type="websocket_pubsub",
+                metadata={"service": "websocket_notification"}
+            )
+            logger.info(f"WebSocket notification service started with task ID: {self._pubsub_task_id}")
+        else:
+            # Fallback with improved error handling
+            self._pubsub_task = asyncio.create_task(self._listen_redis_updates())
+            self._pubsub_task.add_done_callback(self._handle_pubsub_task_done)
+            logger.info("WebSocket notification service started (without task manager)")
         
     async def stop(self) -> None:
-        """알림 서비스 중지"""
+        """알림 서비스 중지 with proper cleanup"""
         self.running = False
         
-        if self._pubsub_task:
+        if self.task_manager and self._pubsub_task_id:
+            # Cancel through task manager
+            await self.task_manager.cancel_task(self._pubsub_task_id)
+            self._pubsub_task_id = None
+        elif self._pubsub_task:
+            # Fallback cancellation
             self._pubsub_task.cancel()
             try:
                 await self._pubsub_task
             except asyncio.CancelledError:
                 pass
+            self._pubsub_task = None
                 
         logger.info("WebSocket notification service stopped")
         
+    def _handle_pubsub_task_done(self, task: asyncio.Task) -> None:
+        """Handle completion of pubsub task."""
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            logger.info("WebSocket pubsub task was cancelled")
+        except Exception as e:
+            logger.error(f"WebSocket pubsub task failed: {e}")
+            # Attempt to restart if still running
+            if self.running:
+                logger.info("Attempting to restart WebSocket pubsub listener...")
+                asyncio.create_task(self._restart_pubsub_listener())
+        
+    async def _restart_pubsub_listener(self) -> None:
+        """Restart the pubsub listener after a failure."""
+        await asyncio.sleep(5)  # Wait before restarting
+        if self.running:
+            logger.info("Restarting WebSocket pubsub listener...")
+            await self.start()
+        
     async def _listen_redis_updates(self) -> None:
-        """Redis Pub/Sub 채널을 수신하여 WebSocket으로 전달"""
+        """Redis Pub/Sub 채널을 수신하여 WebSocket으로 전달 with improved error handling"""
+        pubsub = None
         try:
             # 모든 command_updates 채널 구독
             pubsub = self.redis.client.pubsub()
@@ -296,13 +340,31 @@ class WebSocketNotificationService:
                     except Exception as e:
                         logger.error(f"Error processing Redis message: {e}")
                         
+        except asyncio.CancelledError:
+            logger.info("Redis pub/sub listener was cancelled")
+            raise
         except Exception as e:
             logger.error(f"Redis pub/sub listener error: {e}")
+            raise  # Let the task manager handle retry logic
         finally:
-            try:
-                await pubsub.close()
-            except:
-                pass
+            if pubsub:
+                try:
+                    await pubsub.punsubscribe("command_updates:*")
+                    await pubsub.close()
+                except Exception as e:
+                    logger.error(f"Error closing pubsub: {e}")
+                    
+    async def notify_task_update(self, update_data: Dict[str, Any]) -> None:
+        """
+        Send task update notification to all connected clients.
+        
+        This is used by BackgroundTaskManager to send real-time updates.
+        """
+        await self.connection_manager.broadcast_to_all({
+            "type": "task_update",
+            "data": update_data,
+            "timestamp": datetime.utcnow().isoformat()
+        })
 
 
 # 싱글톤 인스턴스들

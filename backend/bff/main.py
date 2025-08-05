@@ -80,7 +80,7 @@ from bff.services.funnel_type_inference_adapter import FunnelHTTPTypeInferenceAd
 from bff.services.oms_client import OMSClient
 from bff.routers import (
     database, health, mapping, merge_conflict, ontology, query, 
-    instances, instance_async, websocket
+    instances, instance_async, websocket, tasks, admin
 )
 
 # Monitoring and observability routers
@@ -564,6 +564,8 @@ app.include_router(merge_conflict.router, prefix="/api/v1", tags=["merge-conflic
 app.include_router(instances.router, prefix="/api/v1", tags=["instances"])
 app.include_router(instance_async.router, prefix="/api/v1", tags=["async-instances"])
 app.include_router(websocket.router, prefix="/api/v1", tags=["websocket"])
+app.include_router(tasks.router, prefix="/api/v1", tags=["background-tasks"])
+app.include_router(admin.router, prefix="/api/v1", tags=["admin"])
 
 # Monitoring and observability endpoints (modernized architecture)
 app.include_router(monitoring.router, prefix="/api/v1/monitoring", tags=["monitoring"])
