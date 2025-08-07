@@ -1,10 +1,14 @@
 # Projection Worker Service Dependencies
-confluent-kafka==2.3.0
-asyncpg==0.29.0
-redis[hiredis]==5.0.1
-elasticsearch[async]==8.11.0
+# 
+# GHOST DEPENDENCY RESOLVED: 모든 핵심 의존성은 shared 패키지에서 중앙관리
+# - confluent-kafka: 메시지 큐 처리
+# - asyncpg: PostgreSQL 연결
+# - redis[hiredis]: 캐싱 및 상태 관리
+# - elasticsearch: 검색 인덱싱
+# - pydantic, python-dotenv, httpx: 공통 유틸리티
+#
+# 더 이상 개별 서비스가 외부 라이브러리 버전을 관리하지 않습니다.
+# 모든 의존성은 shared/pyproject.toml에서 중앙집중 관리됩니다.
 
-# Shared dependencies
-pydantic==2.5.0
-python-dotenv==1.0.0
-httpx==0.25.2
+# Shared package (includes all dependencies above)
+-e ../shared

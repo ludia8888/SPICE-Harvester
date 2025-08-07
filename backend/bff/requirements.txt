@@ -1,22 +1,22 @@
-# Core dependencies
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-httpx==0.25.2
-pydantic==2.5.0
-pydantic-settings==2.1.0
+# 🎯 BFF Service Dependencies - DUPLICATE DEPENDENCIES RESOLVED!
+#
+# ❌ 이전: fastapi, httpx, pydantic 등을 개별적으로 관리 → 버전 불일치 위험
+# ✅ 현재: shared/pyproject.toml에서 중앙집중 관리 → 단일 진실 공급원
+#
+# 현재 shared 패키지에서 제공하는 의존성:
+# - fastapi==0.104.1: API 프레임워크
+# - uvicorn[standard]==0.24.0: ASGI 서버  
+# - httpx==0.25.2: HTTP 클라이언트
+# - pydantic==2.5.0: 데이터 검증
+# - aiosqlite==0.19.0: SQLite 비동기 드라이버
+# - redis[hiredis]==5.0.1: 캐싱 및 세션 관리
+# - python-multipart==0.0.6: 멀티파트 폼 처리
+# - python-dotenv==1.0.0: 환경변수 로딩
+# - python-json-logger==2.0.7: 구조화된 로깅
+# - 기타 모든 공통 라이브러리
 
-# Database
-aiosqlite==0.19.0
-redis[hiredis]==5.0.1
+# 🔗 Shared package - 모든 의존성의 단일 진실 공급원
+-e ../shared
 
-# Utilities
-python-multipart==0.0.6
-python-dotenv==1.0.0
-
-# Logging
-python-json-logger==2.0.7
-
-# Development
-pytest==7.4.3
-pytest-asyncio==0.21.1
-pytest-cov==4.1.0
+# 📝 개발/테스트 의존성은 shared의 optional-dependencies 사용
+# 사용법: pip install -e ../shared[dev,test]

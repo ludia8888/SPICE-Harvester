@@ -1,43 +1,27 @@
 """
 Shared services module
 
+ANTI-PATTERN RESOLVED: 직접 경로 임포트 사용 원칙
+- 메모리 효율성: 필요한 서비스만 로드
+- 의존성 명확성: 각 모듈이 실제 사용하는 서비스만 임포트
+- 사이드 이펙트 방지: 불필요한 모듈 초기화 방지
+
+사용법:
+❌ from shared.services import ElasticsearchService  # 모든 서비스 로드됨
+✅ from shared.services.elasticsearch_service import ElasticsearchService  # 필요한 것만
+
 Common service utilities and factories for SPICE HARVESTER microservices.
+모든 임포트는 직접 경로를 사용하세요:
+- shared.services.redis_service
+- shared.services.elasticsearch_service  
+- shared.services.command_status_service
+- shared.services.storage_service
+- shared.services.background_task_manager
+- shared.services.websocket_service
+- shared.services.service_factory
 """
 
-from .redis_service import RedisService, create_redis_service
-from .command_status_service import CommandStatusService, CommandStatus
-from .sync_wrapper_service import SyncWrapperService
-from .websocket_service import (
-    WebSocketConnectionManager,
-    WebSocketNotificationService,
-    get_connection_manager,
-    get_notification_service,
-)
-# StorageService requires boto3 - make import conditional to avoid dependency issues
-try:
-    from .storage_service import StorageService, create_storage_service
-    _STORAGE_AVAILABLE = True
-except ImportError:
-    StorageService = None
-    create_storage_service = None
-    _STORAGE_AVAILABLE = False
-from .elasticsearch_service import ElasticsearchService, create_elasticsearch_service
+# __init__.py를 의도적으로 비워두어 불필요한 bulk import 방지
+# 각 서비스는 직접 경로로 임포트하세요.
 
-# Build __all__ list conditionally based on available dependencies
-__all__ = [
-    "RedisService",
-    "create_redis_service",
-    "CommandStatusService",
-    "CommandStatus",
-    "SyncWrapperService",
-    "WebSocketConnectionManager",
-    "WebSocketNotificationService",
-    "get_connection_manager",
-    "get_notification_service",
-    "ElasticsearchService",
-    "create_elasticsearch_service",
-]
-
-# Add storage services if available
-if _STORAGE_AVAILABLE:
-    __all__.extend(["StorageService", "create_storage_service"])
+__all__ = []  # 직접 경로 임포트 강제

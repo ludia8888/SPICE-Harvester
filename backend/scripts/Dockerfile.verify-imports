@@ -1,0 +1,20 @@
+# Example: How to add import verification to Dockerfile
+# Add this to your service Dockerfile after installing dependencies
+
+# Example for BFF service:
+# After pip install -r requirements.txt, add:
+
+# Verify imports at build time
+COPY scripts/verify-imports.py /tmp/verify-imports.py
+RUN python /tmp/verify-imports.py bff || \
+    (echo "❌ Import verification failed! Check for missing dependencies." && exit 1)
+
+# For other services, replace 'bff' with the service name:
+# - oms
+# - instance_worker
+# - ontology_worker
+# - message_relay
+# - projection_worker
+
+# This ensures that any missing dependencies are caught during
+# Docker build, not at runtime.

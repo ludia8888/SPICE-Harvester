@@ -15,15 +15,8 @@ Features:
 from typing import Annotated
 from fastapi import Depends
 
-# Import service classes and factories - make storage conditional to avoid boto3 dependency
-try:
-    from shared.services.storage_service import StorageService, create_storage_service
-    _STORAGE_AVAILABLE = True
-except ImportError:
-    StorageService = None
-    create_storage_service = None
-    _STORAGE_AVAILABLE = False
-
+# Import service classes and factories - all dependencies are now explicit in pyproject.toml
+from shared.services.storage_service import StorageService, create_storage_service
 from shared.services.redis_service import RedisService, create_redis_service
 from shared.services.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
 
@@ -43,28 +36,27 @@ async def get_settings_dependency() -> ApplicationSettings:
     return settings
 
 
-if _STORAGE_AVAILABLE:
-    async def get_storage_service(
-        container: ServiceContainer = Depends(get_container)
-    ) -> StorageService:
-        """
-        FastAPI dependency to get StorageService instance
+async def get_storage_service(
+    container: ServiceContainer = Depends(get_container)
+) -> StorageService:
+    """
+    FastAPI dependency to get StorageService instance
+    
+    Args:
+        container: Service container (injected by FastAPI)
         
-        Args:
-            container: Service container (injected by FastAPI)
-            
-        Returns:
-            StorageService: Storage service instance
-        """
-        # Register factory if not already registered
-        if not container.has(StorageService):
-            container.register_singleton(StorageService, create_storage_service)
+    Returns:
+        StorageService: Storage service instance
         
-        return await container.get(StorageService)
-else:
-    async def get_storage_service(*args, **kwargs):
-        """Fallback storage service when boto3 is not available"""
-        raise RuntimeError("StorageService requires boto3 - install it to use storage features")
+    Note:
+        boto3 is now a required dependency in shared/pyproject.toml.
+        Missing dependencies will fail at build/install time, not runtime.
+    """
+    # Register factory if not already registered
+    if not container.has(StorageService):
+        container.register_singleton(StorageService, create_storage_service)
+    
+    return await container.get(StorageService)
 
 
 async def get_redis_service(
@@ -105,11 +97,8 @@ async def get_elasticsearch_service(
     return await container.get(ElasticsearchService)
 
 
-# Type annotations for cleaner dependency injection - make storage conditional
-if _STORAGE_AVAILABLE:
-    StorageServiceDep = Annotated[StorageService, Depends(get_storage_service)]
-else:
-    StorageServiceDep = Annotated[type(None), Depends(get_storage_service)]  # Will raise error when used
+# Type annotations for cleaner dependency injection - storage is now always available
+StorageServiceDep = Annotated[StorageService, Depends(get_storage_service)]
 
 RedisServiceDep = Annotated[RedisService, Depends(get_redis_service)]
 ElasticsearchServiceDep = Annotated[ElasticsearchService, Depends(get_elasticsearch_service)]

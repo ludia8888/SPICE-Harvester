@@ -11,42 +11,13 @@ import os
 from typing import Optional, Dict, Any, List, Union
 from datetime import datetime
 from elasticsearch import AsyncElasticsearch
-# Handle different elasticsearch versions
-try:
-    from elasticsearch.exceptions import (
-        ElasticsearchException,
-        NotFoundError,
-        RequestError,
-        ConnectionError as ESConnectionError
-    )
-except ImportError:
-    # In newer versions, ElasticsearchException might be in a different location
-    try:
-        from elasticsearch import ElasticsearchException
-        from elasticsearch.exceptions import (
-            NotFoundError,
-            RequestError,
-            ConnectionError as ESConnectionError
-        )
-    except ImportError:
-        # Fallback - define a basic exception
-        class ElasticsearchException(Exception):
-            pass
-        
-        try:
-            from elasticsearch.exceptions import (
-                NotFoundError,
-                RequestError,
-                ConnectionError as ESConnectionError
-            )
-        except ImportError:
-            # Final fallback - define basic exceptions
-            class NotFoundError(Exception):
-                pass
-            class RequestError(Exception):
-                pass
-            class ESConnectionError(Exception):
-                pass
+# elasticsearch>=8.11.0 is now required in shared/pyproject.toml
+from elasticsearch.exceptions import (
+    ApiError as ElasticsearchException,  # ElasticsearchException renamed to ApiError in v9+
+    NotFoundError,
+    RequestError,
+    ConnectionError as ESConnectionError
+)
 from elasticsearch.helpers import async_bulk
 
 logger = logging.getLogger(__name__)

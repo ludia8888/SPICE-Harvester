@@ -29,7 +29,9 @@ from shared.dependencies.providers import (
 from shared.config.settings import ApplicationSettings
 from shared.utils.label_mapper import LabelMapper
 from shared.utils.jsonld import JSONToJSONLDConverter
-from shared.services import ElasticsearchService, RedisService, CommandStatusService
+from shared.services.elasticsearch_service import ElasticsearchService
+from shared.services.redis_service import RedisService
+from shared.services.command_status_service import CommandStatusService
 
 # OMS specific imports
 from oms.services.async_terminus import AsyncTerminusService

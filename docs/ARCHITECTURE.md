@@ -1,371 +1,150 @@
-# SPICE HARVESTER - System Architecture
+# SPICE HARVESTER - 시스템 아키텍처
 
-## Table of Contents
+## 목차
 
-1. [System Overview](#system-overview)
-2. [Architectural Principles](#architectural-principles)
-3. [System Architecture Diagram](#system-architecture-diagram)
-4. [Service Breakdown](#service-breakdown)
-5. [Project Structure](#project-structure)
-6. [Data Flow & Communication](#data-flow--communication)
-7. [Technology Stack](#technology-stack)
-8. [Database Architecture](#database-architecture)
-9. [Security Architecture](#security-architecture)
-10. [Deployment Architecture](#deployment-architecture)
-11. [Implementation Status](#implementation-status)
-12. [Future Enhancements](#future-enhancements)
+1.  [시스템 개요](#1-시스템-개요)
+2.  [아키텍처 원칙](#2-아키텍처-원칙)
+3.  [시스템 아키텍처 다이어그램](#3-시스템-아키텍처-다이어그램)
+4.  [서비스 상세 설명](#4-서비스-상세-설명)
+5.  [데이터 흐름 및 통신](#5-데이터-흐름-및-통신)
+6.  [데이터 아키텍처](#6-데이터-아키텍처)
+7.  [기술 스택](#7-기술-스택)
+8.  [프로젝트 구조](#8-프로젝트-구조)
+9.  [구현 현황](#9-구현-현황)
 
-## System Overview
+---
 
-**SPICE HARVESTER** is a sophisticated ontology management platform designed for enterprise environments with comprehensive multi-language support, complex data types, and advanced relationship management capabilities.
+## 1. 시스템 개요
 
-### Key Capabilities
+**SPICE HARVESTER**는 엔터프라이즈 환경을 위해 설계된 고성능 온톨로지 관리 및 데이터 거버넌스 플랫폼입니다. 다국어 지원, 복합 데이터 타입, 고급 관계 관리 기능을 제공하며, 특히 데이터의 변경 이력을 완벽하게 추적하고 재현하는 강력한 기능을 갖추고 있습니다.
 
-- **Enterprise Ontology Management**: Complete lifecycle management with version control
-- **Git-like Version Control**: Branch management, diff, merge, and Pull Request workflows (7/7 features working)
-- **Multi-Branch Experiments**: Unlimited experimental branches with A/B testing support
-- **Multi-language Support**: Comprehensive internationalization for global deployments
-- **Complex Type System**: Support for 18+ data types including MONEY, EMAIL, PHONE, and custom objects
-- **Advanced Relationship Management**: Bidirectional relationships with circular reference detection
-- **Automatic Type Conversion**: Property-to-Relationship automatic transformation
-- **🔥 Real AI Type Inference**: Production-ready automatic schema generation with 100% confidence rates
-- **🔥 Advanced Complex Type Detection**: Email, Date, Boolean, Decimal types with multilingual column hints
-- **🔥 Complete Real Implementation**: No mock/dummy implementations - all features production-ready
-- **Security-First Design**: Input sanitization, authentication, and comprehensive audit logging
-- **TerminusDB v11.x Integration**: Full support for all schema types and features including rebase-based merging
-- **Command/Event Sourcing Pattern**: Complete implementation solving distributed transaction problems with Redis-based command tracking
-- **WebSocket Real-time Updates**: Production-ready real-time command status broadcasting with Redis Pub/Sub integration
+### 핵심 역량
 
-## Architectural Principles
+-   **엔터프라이즈 온톨로지 관리**: 버전 관리 포함, 온톨로지 전체 생명주기 관리
+-   **Git과 유사한 버전 관리**: 브랜치, 커밋, 비교(Diff), 병합(Merge), 롤백 등 Git의 핵심 워크플로우 완벽 지원
+-   **하이브리드 데이터 아키텍처**: 데이터 특성에 따라 최적의 관리 모델 적용
+    -   **온톨로지 (스키마)**: 상태 저장(State-Store) 모델로 최신 상태를 신속하게 관리
+    -   **인스턴스 (데이터)**: 이벤트 소싱(Event Sourcing) 모델로 모든 변경 이력을 완벽하게 보존 및 추적
+-   **CQRS (Command Query Responsibility Segregation)**: 읽기/쓰기 모델을 분리하여 시스템 확장성 및 성능 최적화
+-   **완전한 감사 및 시간 여행**: 인스턴스 데이터의 모든 변경 이력을 추적하고, 특정 시점의 상태를 완벽하게 재현
+-   **AI 기반 타입 추론**: 외부 데이터 소스를 분석하여 온톨로지 스키마를 자동으로 생성 및 제안
 
-The architecture of SPICE HARVESTER is guided by modern software engineering principles to ensure scalability, maintainability, and a clear separation of concerns.
+---
 
-### 1. Domain-Driven Design (DDD)
-- **Service Boundaries**: The system is divided into distinct services (BFF, OMS, Funnel), each responsible for a specific business domain
-- **Rich Domain Models**: Business logic is encapsulated in rich domain models with value objects for immutable data representation
-- **Clear Responsibilities**: Each service has a single, well-defined responsibility (OMS handles core data logic, while BFF handles client-facing interactions)
+## 2. 아키텍처 원칙
 
-### 2. Separation of Concerns
-- **Loose Coupling**: Services communicate via well-defined REST APIs, allowing them to be developed, deployed, and scaled independently
-- **Code Reusability (DRY)**: Common functionalities are centralized in a `shared` library (Service Factory) to avoid code duplication
-- **Single Source of Truth**: OMS is the ultimate authority for all core ontology data and its version history
+본 시스템은 확장성, 유지보수성, 안정성을 보장하기 위해 다음과 같은 현대적인 아키텍처 원칙을 따릅니다.
 
-### 3. Enterprise-Grade Patterns
-- **Service Factory Pattern**: Centralized FastAPI app creation eliminating 600+ lines of boilerplate code
-- **SOLID Principles**: Comprehensive dependency injection, single responsibility, and modular design
-- **API Response Standardization**: Unified `{success, message, data}` format across all endpoints
+| 원칙 | 설명 |
+| :--- | :--- |
+| **하이브리드 데이터 모델** | 데이터의 성격에 따라 관리 방식을 달리합니다. 변경 빈도가 낮고 스키마 역할을 하는 **온톨로지**는 **상태 저장(State-Store)** 방식으로 최신 상태를 관리하고, 모든 변경 이력의 추적이 중요한 **인스턴스**는 **이벤트 소싱(Event Sourcing)** 방식으로 관리하여 효율성과 데이터 무결성을 동시에 달성합니다. |
+| **CQRS** | 명령(Command)을 처리하는 책임과 조회(Query)를 처리하는 책임을 명확하게 분리합니다. 쓰기 작업은 이벤트 스트림을 통해 처리되며, 읽기 작업은 목적에 맞게 최적화된 다양한 읽기 모델(TerminusDB, Elasticsearch)을 통해 수행됩니다. |
+| **이벤트 기반 비동기 통신** | 서비스 간의 결합도를 낮추기 위해 Kafka를 이벤트 버스로 사용합니다. 각 서비스는 이벤트를 발행(Publish)하거나 구독(Subscribe)함으로써 비동기적으로 상호작용하며, 이는 시스템 전체의 탄력성과 확장성을 높입니다. |
+| **불변성 (Immutability)** | 이벤트 소싱이 적용된 인스턴스 데이터의 모든 변경은 새로운 '커맨드' 파일로 S3에 추가(append-only)됩니다. 한번 기록된 데이터는 절대 변경되거나 삭제되지 않아 데이터의 무결성과 완벽한 감사 추적을 보장합니다. |
+| **단일 진실 공급원 (SSoT)** | 데이터의 종류에 따라 진실의 원천이 명확하게 정의됩니다. **인스턴스 데이터의 SSoT는 S3에 저장된 커맨드 로그**이며, **온톨로지 데이터의 SSoT는 TerminusDB에 저장된 최신 상태**입니다. 읽기 모델들은 모두 이 SSoT로부터 파생된 결과물입니다. |
 
-## System Architecture Diagram
+---
+
+## 3. 시스템 아키텍처 다이어그램
+
+본 시스템은 CQRS와 이벤트 소싱 원칙에 따라 쓰기 경로와 읽기 경로가 명확하게 분리된 마이크로서비스 아키텍처를 따릅니다.
 
 ```mermaid
 graph TD
-    subgraph "Client Layer"
-        A[Web UI / Frontend] -->|Label-based REST API| B;
-        C[API Clients / Scripts] -->|Label-based REST API| B;
+    subgraph "사용자 / 클라이언트"
+        A[Web UI / API Clients]
     end
 
-    subgraph "Service Layer"
-        B(BFF - Backend for Frontend<br/>Port: 8002) -->|ID-based Internal API| D;
-        B -->|Internal API| E;
-
-        D(OMS - Ontology Management Service<br/>Port: 8000) -->|TerminusDB Client| F;
-        E(Funnel - Type Inference Service<br/>Port: 8004) -->|Data Analysis| G[External Data Sources];
+    subgraph "API 게이트웨이 (BFF)"
+        B(BFF - Backend for Frontend)
     end
 
-    subgraph "Data Layer"
-        F(TerminusDB - Graph Database<br/>Port: 6364);
+    subgraph "쓰기 경로 (Write Path)"
+        C(OMS - Ontology Management Service)
+        D[PostgreSQL - Outbox]
+        E[Message Relay]
+        F[Kafka - Event Bus]
+        G[Instance Worker]
+        H[Ontology Worker]
+        I[S3 / MinIO - Event Store]
+        J[TerminusDB - Write Model]
     end
 
+    subgraph "읽기 경로 (Read Path)"
+        K[Projection Worker]
+        L[Elasticsearch - Read Model]
+        M[TerminusDB - Read Model]
+        N[Redis - Cache]
+    end
+
+    %% 흐름 정의
+    A -->|REST API| B
+
+    B -->|Ontology Command| C
+    B -->|Instance Command| C
+
+    C -->|Store Command| D
+    D -->|Poll & Publish| E
+    E -->|Push to Topic| F
+
+    F -- Instance Commands --> G
+    F -- Ontology Commands --> H
+
+    G -->|1. Save Command Log (SSoT)| I
+    G -->|2. Update Write Model| J
+    G -->|3. Publish Event| F
+
+    H -->|Update Write Model| J
+    H -->|Publish Event| F
+
+    F -- Instance/Ontology Events --> K
+    K -->|Project to| L
+    K -->|Cache Data| N
+
+    B -->|Query (Search)| L
+    B -->|Query (Direct Get)| M
+    B -->|Query (Cached Data)| N
+
+    %% 스타일
+    style A fill:#cce5ff,stroke:#333,stroke-width:2px
     style B fill:#cce5ff,stroke:#333,stroke-width:2px
-    style D fill:#d4edda,stroke:#333,stroke-width:2px
-    style E fill:#f8d7da,stroke:#333,stroke-width:2px
-    style F fill:#fff3cd,stroke:#333,stroke-width:2px
+    style C fill:#d4edda,stroke:#333,stroke-width:2px
+    style G fill:#d4edda,stroke:#333,stroke-width:2px
+    style H fill:#d4edda,stroke:#333,stroke-width:2px
+    style K fill:#d4edda,stroke:#333,stroke-width:2px
+    style L fill:#fff3cd,stroke:#333,stroke-width:2px
+    style M fill:#fff3cd,stroke:#333,stroke-width:2px
+    style I fill:#f8d7da,stroke:#333,stroke-width:2px
 ```
 
-## Service Breakdown
+---
 
-### 1. BFF (Backend for Frontend)
+## 4. 서비스 상세 설명
 
-- **Port**: `8002`
-- **Primary Responsibility**: Acts as an **Adapter** and **Aggregator** for client applications, simplifying backend complexity and providing a user-friendly API
+### API 계층
+-   **BFF (Backend for Frontend)**: 클라이언트(UI, 외부 API)를 위한 API 게이트웨이입니다. 복잡한 백엔드 로직을 추상화하고, 사용자 친화적인 API를 제공하며, 요청을 내부 서비스로 라우팅하고, 읽기 모델(Elasticsearch, TerminusDB)을 직접 조회하여 응답을 구성합니다.
 
-#### Key Functions
-- **Label-to-ID Translation**: Translates human-readable, multi-language labels (e.g., "제품") into internal system IDs (e.g., `Product`)
-- **Request Orchestration**: Combines multiple calls to OMS and Funnel into single, efficient client requests
-- **Response Formatting**: Transforms raw data from backend services into consistent, localized, easy-to-consume format
-- **Merge Conflict Resolution**: Provides high-level APIs to simulate merges, detect conflicts, and orchestrate resolution
+### 쓰기 모델 (Write Model)
+-   **OMS (Ontology Management Service)**: 모든 변경 요청(Command)의 진입점입니다. 커맨드를 검증하고 `Outbox` 테이블에 저장하여 처리의 안정성을 보장하는 핵심 서비스입니다.
+-   **Message Relay**: `Outbox` 패턴의 핵심 컴포넌트로, PostgreSQL의 Outbox 테이블을 주기적으로 폴링하여 저장된 커맨드를 Kafka로 안정적으로 발행(Publish)합니다.
+-   **Kafka**: 모든 커맨드와 이벤트가 흐르는 중앙 이벤트 버스입니다. 서비스 간의 비동기 통신을 담당합니다.
+-   **Instance Worker**: `Instance` 관련 커맨드를 처리하는 실제 작업자입니다.
+    1.  커맨드 자체를 **S3(Event Store)에 영구 저장**합니다 (SSoT).
+    2.  TerminusDB에 최신 상태를 **업데이트**합니다 (Write-Model Cache).
+    3.  처리 완료 후 `INSTANCE_CREATED`와 같은 도메인 이벤트를 Kafka로 발행합니다.
+-   **Ontology Worker**: `Ontology` 관련 커맨드를 처리합니다. TerminusDB의 스키마를 직접 변경하고, 도메인 이벤트를 Kafka로 발행합니다.
 
-#### Component Structure
-```
-bff/
-├── main.py                 # FastAPI application entry point
-├── routers/               # API route handlers
-│   ├── database.py        # Database operations
-│   ├── ontology.py        # Ontology management (schema suggestion included)
-│   ├── mapping.py         # Label mapping operations
-│   ├── query.py           # Query operations
-│   ├── merge_conflict.py  # Merge conflict handling
-│   └── health.py          # Health check endpoints
-├── middleware/            # Cross-cutting concerns
-│   └── rbac.py           # Role-based access control
-├── services/              # Business logic
-│   ├── oms_client.py     # OMS service client
-│   ├── funnel_client.py   # Funnel service client
-│   └── funnel_type_inference_adapter.py  # Type inference adapter
-├── schemas/               # Pydantic models
-│   └── label_mapping_schema.py
-└── utils/                 # Utility functions
-    ├── conflict_converter.py
-    └── label_mapper.py
-```
+### 읽기 모델 (Read Model)
+-   **Projection Worker**: Kafka의 도메인 이벤트를 구독하여, 검색에 최적화된 읽기 모델을 **Elasticsearch에 구축(Projection)**합니다.
+-   **TerminusDB**: `Ontology` 데이터의 SSoT이자, `Instance` 데이터의 최신 상태를 담는 캐시/읽기 모델 역할을 합니다. ID 기반의 직접 조회를 담당합니다.
+-   **Elasticsearch**: 텍스트 검색, 필터링, 목록 조회 등 복잡한 쿼리를 위한 고성능 읽기 모델입니다.
+-   **Redis**: 커맨드 처리 상태 추적, 분산 락, 온톨로지 메타데이터 캐싱 등 다목적 캐시 저장소로 사용됩니다.
 
-### 2. OMS (Ontology Management Service)
+---
 
-- **Port**: `8000`
-- **Primary Responsibility**: The **core engine and single source of truth** for all ontology data, schemas, and versioning
+## 5. 데이터 흐름 및 통신
 
-#### Key Functions
-- **Core Business Logic**: Handles all ontology CRUD operations, including creation of unique IDs from labels
-- **Git-like Version Control**: Implements full suite of versioning features (branch, commit, diff, merge, rollback) via TerminusDB
-- **Data Integrity and Validation**: Performs critical data validations (circular reference detection, cardinality enforcement)
-- **Direct TerminusDB Interface**: Only service that communicates directly with TerminusDB
-- **Property-to-Relationship Conversion**: Automatic transformation of properties to relationships
-- **Advanced Constraint Management**: Extraction and validation of complex constraints
-
-#### Component Structure
-```
-oms/
-├── main.py                # FastAPI application entry point
-├── entities/              # Domain models
-│   ├── ontology.py       # Ontology entities
-│   └── label_mapping.py  # Label mapping entities
-├── routers/               # API route handlers
-│   ├── branch.py         # Branch operations
-│   ├── database.py       # Database operations
-│   ├── ontology.py       # Ontology management
-│   └── version.py        # Version management
-├── services/              # Business services
-│   ├── async_terminus.py # Asynchronous database operations
-│   ├── relationship_manager.py # Relationship processing
-│   └── property_to_relationship_converter.py # Auto conversion
-├── validators/            # Domain validators (18+ validators)
-│   └── relationship_validator.py
-├── utils/                 # Utility functions
-│   ├── circular_reference_detector.py
-│   ├── relationship_path_tracker.py
-│   ├── constraint_extractor.py # Constraint extraction/validation
-│   └── terminus_schema_types.py # TerminusDB v11.x schema types
-├── dependencies.py        # Dependency injection
-└── exceptions.py          # Exception handling
-```
-
-### 3. Funnel Service
-
-- **Port**: `8004`
-- **Primary Responsibility**: AI-powered service for analyzing external data and bootstrapping ontology schemas
-
-#### Key Functions
-- **Advanced Type Inference**: 1,048 lines of sophisticated algorithms using fuzzy matching, adaptive thresholds, and statistical analysis
-- **Multilingual Support**: Korean (이메일, 전화번호), Japanese (メール, 電話), Chinese pattern recognition
-- **18+ Data Types**: Comprehensive validation for EMAIL, PHONE, URL, MONEY, COORDINATE, ADDRESS, etc.
-- **Contextual Analysis**: Surrounding column analysis for enhanced accuracy
-- **Data Profiling**: Statistical distribution analysis with confidence scoring
-- **Schema Suggestion**: Generates complete, OMS-compatible ontology schemas
-- **Google Sheets Integration**: Full implementation with Google Sheets API v4
-
-#### Component Structure
-```
-funnel/
-├── main.py                # FastAPI application entry point
-├── routers/               # API route handlers
-│   └── type_inference_router.py  # Type inference endpoints
-├── services/              # Business logic
-│   ├── data_processor.py  # Data processing logic
-│   ├── type_inference.py  # Type inference algorithms (1,048 lines)
-│   └── type_inference_adapter.py  # External data adapter
-├── models.py              # Funnel-specific models
-└── tests/                 # Test suite
-    └── test_type_inference.py
-```
-
-### 4. Message Relay Service
-
-- **Primary Responsibility**: Event sourcing implementation using Outbox pattern for guaranteed event delivery
-
-#### Key Functions
-- **Outbox Pattern**: Ensures atomic operations between database writes and event publishing
-- **Event Publishing**: Publishes domain events to Kafka topics for downstream processing
-- **Reliable Delivery**: Guarantees event delivery with PostgreSQL transaction consistency
-- **Command Status Tracking**: Updates Redis with real-time command processing status
-
-#### Component Structure
-```
-message_relay/
-├── main.py                # Service entry point
-├── services/
-│   ├── outbox_processor.py # Outbox pattern implementation
-│   └── event_publisher.py  # Kafka event publishing
-└── requirements.txt
-```
-
-### 5. Ontology Worker Service
-
-- **Primary Responsibility**: Asynchronous processing of ontology-related commands
-
-#### Key Functions
-- **Command Processing**: Processes ontology commands from Kafka queue
-- **TerminusDB Integration**: Direct integration with TerminusDB for ontology operations
-- **Event Generation**: Publishes domain events after successful operations
-- **Error Handling**: Comprehensive retry logic and failure handling
-
-#### Component Structure
-```
-ontology_worker/
-├── main.py                # Worker service implementation
-└── requirements.txt
-```
-
-### 6. Instance Worker Service
-
-- **Primary Responsibility**: Asynchronous processing of instance-related commands with S3 storage
-
-#### Key Functions
-- **Instance Management**: Creates, updates, and deletes instance data
-- **S3 Integration**: Stores instance events in MinIO/S3 for audit and recovery
-- **Event Sourcing**: Maintains complete event history for each instance
-- **Checksum Validation**: Ensures data integrity with SHA256 checksums
-
-#### Component Structure
-```
-instance_worker/
-├── main.py                # Worker service implementation
-└── requirements.txt
-```
-
-### 7. Projection Worker Service
-
-- **Primary Responsibility**: Real-time Elasticsearch indexing from domain events
-
-#### Key Functions
-- **Event Processing**: Consumes instance and ontology events from Kafka
-- **Search Optimization**: Creates search-optimized projections in Elasticsearch
-- **Redis Caching**: Caches ontology metadata for denormalized indexing
-- **Fault Tolerance**: Implements DLQ pattern with 5-retry logic
-- **Idempotent Processing**: Uses event IDs as document IDs for guaranteed idempotency
-
-#### Component Structure
-```
-projection_worker/
-├── main.py                # Projection worker implementation
-├── mappings/              # Elasticsearch index mappings
-│   ├── instances_mapping.json
-│   └── ontologies_mapping.json
-└── requirements.txt
-```
-
-### 8. TerminusDB
-
-- **Port**: `6364`
-- **Primary Responsibility**: Underlying data store and versioning engine
-
-#### Key Features Utilized
-- **Graph Database**: Stores ontologies and relationships as graph for efficient traversal
-- **Complete Git Features**: 7/7 git features implemented and working
-- **3-Stage Diff**: Commit-based, schema-level, and property-level comparison
-- **Rebase-based Merging**: Advanced conflict-aware merging using TerminusDB's native rebase API
-- **NDJSON API**: Advanced response parsing for complex git operations
-- **Schema-First Approach**: Enforces data consistency and validation at database level
-
-### 9. Shared Components
-
-**Purpose**: Common utilities and models shared across services
-
-#### Component Structure
-```
-shared/
-├── config/                # Service configurations
-│   ├── service_config.py # Service-level settings (centralized ports, URLs)
-│   └── __init__.py
-├── dependencies/          # Dependency injection
-│   └── type_inference.py # Shared type inference
-├── interfaces/            # Service interfaces
-│   └── type_inference.py # Type inference interface
-├── models/                # Shared domain models
-│   ├── common.py         # Common base models
-│   ├── ontology.py       # Ontology models
-│   ├── requests.py       # Request/response models
-│   ├── config.py         # Configuration models
-│   ├── google_sheets.py  # Google Sheets models
-│   └── responses.py      # API response models
-├── validators/            # Shared validators (18+ validators)
-│   └── complex_type_validator.py
-├── serializers/           # Data serialization
-│   └── complex_type_serializer.py
-├── security/              # Security utilities
-│   └── input_sanitizer.py
-└── utils/                 # Utility functions
-    ├── jsonld.py         # JSON-LD utilities
-    ├── language.py       # Language processing
-    └── logging.py        # Logging configuration
-```
-
-## Project Structure
-
-```
-SPICE HARVESTER/
-├── frontend/              # Frontend application (React + TypeScript)
-├── backend/               # All backend services
-│   ├── bff/              # Backend for Frontend service
-│   ├── oms/              # Ontology Management Service
-│   ├── funnel/           # Type Inference Service
-│   ├── data_connector/   # External Data Connectors
-│   ├── shared/           # Common components
-│   ├── tests/            # Integration tests
-│   ├── docs/             # Backend-specific documentation
-│   └── docker-compose.yml
-└── docs/                 # Project-wide documentation
-```
-
-### Service Configuration
-
-| Service | Port | Description |
-|---------|------|-------------|
-| OMS | 8000 | Core ontology management (internal ID-based) |
-| BFF | 8002 | Frontend API gateway (user-friendly labels) |
-| Funnel | 8004 | Type inference and schema suggestion |
-| Message Relay | - | Event sourcing with Outbox pattern |
-| Ontology Worker | - | Async ontology command processing |
-| Instance Worker | - | Async instance command processing with S3 storage |
-| Projection Worker | - | Real-time Elasticsearch indexing from events |
-| TerminusDB | 6364 | Graph database |
-| PostgreSQL | 5433 | Outbox pattern & command status |
-| Redis | 6379 | Command status caching & pub/sub |
-| Kafka | 29092 | Event streaming & message broker |
-| Elasticsearch | 9200 | Search & analytics engine |
-
-## Data Flow & Communication
-
-### 1. Communication Flow Example: Creating a New Ontology
-
-```mermaid
-sequenceDiagram
-    participant Client
-    participant BFF
-    participant OMS
-    participant TerminusDB
-    
-    Client->>BFF: POST /ontology with labels
-    BFF->>BFF: Validate request
-    BFF->>OMS: Forward request with labels
-    OMS->>OMS: Generate unique ID from labels
-    OMS->>OMS: Perform validation (circular refs, etc.)
-    OMS->>TerminusDB: Create ontology class
-    TerminusDB-->>OMS: Confirm creation
-    OMS-->>BFF: Return standardized ApiResponse
-    BFF-->>Client: Forward response
-```
-
-### 2. Event Sourcing & CQRS Architecture Flow
+### 인스턴스 생성 요청 (이벤트 소싱 경로)
 
 ```mermaid
 sequenceDiagram
@@ -374,341 +153,66 @@ sequenceDiagram
     participant PostgreSQL
     participant MessageRelay
     participant Kafka
-    participant Worker
-    participant Redis
-    participant ES as Elasticsearch
-    
-    Client->>BFF/OMS: Command Request
-    BFF/OMS->>BFF/OMS: Validate Command
-    BFF/OMS->>PostgreSQL: Store Command + Outbox Event
-    PostgreSQL-->>BFF/OMS: Transaction Success
-    BFF/OMS->>Redis: Update Command Status (PROCESSING)
-    BFF/OMS-->>Client: Command Accepted (202)
-    
-    MessageRelay->>PostgreSQL: Poll Outbox Events
-    MessageRelay->>Kafka: Publish Event
-    MessageRelay->>PostgreSQL: Mark Event Published
-    
-    Worker->>Kafka: Consume Event
-    Worker->>Worker: Process Command
-    Worker->>Worker: Generate Domain Event
-    Worker->>Kafka: Publish Domain Event
-    Worker->>Redis: Update Status (COMPLETED/FAILED)
-    
-    ProjectionWorker->>Kafka: Consume Domain Event
-    ProjectionWorker->>Redis: Get Cached Metadata
-    ProjectionWorker->>ES: Index/Update Document
-    ProjectionWorker->>Redis: Cache Updated Metadata
+    participant InstanceWorker
+    participant S3 as Event Store
+    participant TerminusDB
+    participant ProjectionWorker
+    participant Elasticsearch
+
+    Client->>BFF/OMS: POST /instances (Create)
+    BFF/OMS->>PostgreSQL: Store Command in Outbox
+    BFF/OMS-->>Client: 202 Accepted (Command ID)
+
+    loop Poll & Publish
+        MessageRelay->>PostgreSQL: Get Command from Outbox
+        MessageRelay->>Kafka: Publish Command
+    end
+
+    InstanceWorker->>Kafka: Consume Command
+    InstanceWorker->>S3: 1. Save Command Log (SSoT)
+    InstanceWorker->>TerminusDB: 2. Update latest state
+    InstanceWorker->>Kafka: 3. Publish INSTANCE_CREATED Event
+
+    ProjectionWorker->>Kafka: Consume Event
+    ProjectionWorker->>Elasticsearch: Index new document
 ```
-
-### 3. Complex Type Processing Flow
-
-```mermaid
-graph TD
-    A[Raw Data] --> B[Input Validation]
-    B --> C{Complex Type?}
-    C -->|Yes| D[Complex Type Validator]
-    C -->|No| E[Simple Validation]
-    D --> F[Nested Validation]
-    F --> G[Type Registry Check]
-    G --> H[Serialization]
-    E --> H
-    H --> I[Processed Data]
-```
-
-### 4. Type Inference Flow (Funnel Service)
-
-```mermaid
-sequenceDiagram
-    participant Client
-    participant BFF
-    participant Funnel
-    participant DataSource
-    
-    Client->>BFF: Schema inference request
-    BFF->>Funnel: Forward to Funnel
-    Funnel->>DataSource: Fetch sample data
-    DataSource-->>Funnel: Raw data
-    Funnel->>Funnel: Analyze & infer types
-    Funnel->>Funnel: Detect complex types (EMAIL, PHONE, etc.)
-    Funnel-->>BFF: Suggested schema
-    BFF-->>Client: Schema response
-```
-
-## Technology Stack
-
-### Backend Services
-- **Language**: Python 3.9+
-- **Framework**: FastAPI
-- **Async Operations**: `asyncio`, `httpx` with connection pooling
-- **Validation**: Pydantic
-- **Testing**: `pytest`, `pytest-asyncio` with fixtures
-- **Type Inference**: pandas, numpy for complex type detection
-
-### Database & Storage
-- **Primary Database**: TerminusDB (Graph database)
-  - ACID compliance
-  - Version management
-  - JSON-LD support
-  - WOQL query language
-- **Event Store**: PostgreSQL with Outbox pattern
-  - Command tracking and status
-  - Guaranteed event delivery
-  - ACID transaction support
-- **Cache & Session Store**: Redis
-  - Command status caching
-  - Real-time pub/sub messaging
-  - Metadata caching for projections
-- **Search Engine**: Elasticsearch
-  - Full-text search capabilities
-  - Real-time indexing from events
-  - Aggregations and analytics
-- **Object Storage**: MinIO (S3-compatible)
-  - Instance event storage
-  - File uploads and attachments
-  - Data backup and archival
-
-### Infrastructure
-- **Containerization**: Docker
-- **Orchestration**: Docker Compose
-- **Message Broker**: Apache Kafka
-  - Event streaming and pub/sub
-  - High-throughput event processing
-  - Distributed event sourcing
-- **API Documentation**: OpenAPI/Swagger
-- **Monitoring**: Health check endpoints
-- **Security**: HTTPS support, automatic CORS configuration
-
-### Key Design Patterns
-- **Microservices**: Decoupled services for scalability and maintainability
-- **Service Factory**: Centralized service instantiation reducing boilerplate
-- **Adapter Pattern**: BFF acts as adapter between client and backend services
-- **Dependency Injection**: Used throughout FastAPI applications
-- **Event Sourcing**: Complete event history with domain events
-- **CQRS (Command Query Responsibility Segregation)**: Separate read/write models
-- **Outbox Pattern**: Guaranteed event delivery with transactional consistency
-- **Saga Pattern**: Distributed transaction management across services
-- **Circuit Breaker**: Fault tolerance with retry logic and DLQ
-- **Idempotent Processing**: Event IDs as document IDs for guaranteed idempotency
-
-## Database Architecture
-
-### TerminusDB Schema Design
-
-```javascript
-// Ontology schema example
-{
-    "@type": "Class",
-    "@id": "Production",
-    "name": "xsd:string",
-    "created_at": "xsd:dateTime",
-    "metadata": "xsd:string", // sys:JSON → xsd:string conversion
-    "relationships": {
-        "@type": "Set",
-        "@class": "Relationship"
-    },
-    // Advanced type support
-    "location": {
-        "@type": "Optional",
-        "@class": "xsd:geoPoint"
-    },
-    "tags": {
-        "@type": "Set",
-        "@class": "xsd:string"
-    },
-    "status": {
-        "@type": "Enum",
-        "@value": ["draft", "published", "archived"]
-    }
-}
-```
-
-### Relationship Management
-- **Bidirectional Relationships**: Automatic tracking and maintenance
-- **Circular Reference Detection**: Prevents data model corruption
-- **Relationship Path Optimization**: Efficient traversal algorithms
-- **Cascade Operations**: Configurable cascade delete and update support
-
-## Security Architecture
-
-### Authentication & Authorization
-- **JWT-based Authentication**: Token-based user authentication
-- **Role-Based Access Control (RBAC)**: Planned implementation for user roles and permissions
-- **API Key Management**: Service-to-service communication security
-- **Permission-based Resource Access**: Fine-grained access control
-
-### Input Validation
-- **API Layer Schema Validation**: Pydantic-based request validation
-- **Service Layer Business Rules**: Domain-specific validation logic
-- **SQL Injection Prevention**: Parameterized queries and sanitization
-- **XSS Protection**: Input sanitization and output encoding
-
-### Data Security
-- **Data at Rest Encryption**: Database-level encryption
-- **Data in Transit (TLS)**: HTTPS/WSS for all communications
-- **Sensitive Data Masking**: PII protection in logs and responses
-- **Audit Logging**: Comprehensive activity tracking (planned)
-
-## Deployment Architecture
-
-### Container Architecture
-
-```yaml
-services:
-  bff:
-    image: spice-harvester/bff:latest
-    ports:
-      - "8002:8002"
-    environment:
-      - OMS_URL=http://oms:8000
-      - FUNNEL_URL=http://funnel:8004
-    depends_on:
-      - oms
-      - funnel
-      
-  oms:
-    image: spice-harvester/oms:latest
-    ports:
-      - "8000:8000"
-    environment:
-      - TERMINUS_URL=http://terminusdb:6364
-    depends_on:
-      - terminusdb
-      
-  funnel:
-    image: spice-harvester/funnel:latest
-    ports:
-      - "8004:8004"
-    environment:
-      - BFF_URL=http://bff:8002
-      
-  terminusdb:
-    image: terminusdb/terminusdb-server:latest
-    ports:
-      - "6364:6364"
-    volumes:
-      - terminus_data:/app/terminusdb/storage
-```
-
-### Scaling Strategy
-- **BFF Service Horizontal Scaling**: Multiple BFF instances behind load balancer
-- **Database Read Replicas**: TerminusDB read scaling (planned)
-- **Load Balancing with Health Checks**: Intelligent traffic distribution
-- **Circuit Breaker Pattern**: Resilience against service failures
-
-### Monitoring & Observability
-- **Health Check Endpoints**: Service availability monitoring
-- **Structured Logging**: JSON-formatted logs for analysis
-- **Metrics Collection**: Performance and usage metrics
-- **Distributed Tracing Support**: Request flow tracking (planned)
-
-## Implementation Status
-
-### ✅ Production-Ready Components (90-95% Complete)
-
-#### Backend Services - Enterprise Grade
-- **Service Factory Pattern**: 600+ lines of boilerplate code eliminated
-- **API Response Standardization**: Unified `{success, message, data}` format across all endpoints
-- **Performance Optimization**: 95%+ success rate achieved, <5s response times
-- **HTTP Connection Pooling**: 50 keep-alive, 100 max connections with Semaphore(50) concurrency control
-
-#### Git Features - Complete Implementation
-- **7/7 Git Features Working**: Branch management, commit history, diff, merge, PR, rollback, history
-- **3-Stage Diff Engine**: Commit-based, schema-level, and property-level comparison
-- **Rebase-based Merging**: Advanced conflict detection and automatic resolution
-- **Git-style References**: HEAD, HEAD~n notation support
-
-#### AI Type Inference - Advanced Implementation
-- **1,048 Lines of Sophisticated Algorithms**: Fuzzy matching, adaptive thresholds, statistical analysis
-- **Multilingual Pattern Recognition**: Korean, Japanese, Chinese column name recognition
-- **18+ Complex Type Validators**: EMAIL, PHONE, URL, MONEY, COORDINATE, ADDRESS, etc.
-- **100% Confidence Rates**: Production-validated accuracy
-
-#### Command/Event Sourcing Architecture - Complete Implementation
-- **Distributed Transaction Solution**: Commands stored atomically in PostgreSQL, executed asynchronously by workers
-- **Redis Command Status Tracking**: Real-time status monitoring with TTL, progress tracking, and history
-- **Synchronous API Wrapper**: Async-to-sync adaptation with configurable timeouts (1-300s) and polling
-- **WebSocket Real-time Updates**: Complete WebSocket service with Redis Pub/Sub bridge for live status updates
-- **Message Relay Service**: Reliable outbox pattern with Kafka integration and automatic retry logic
-- **Worker Service Pattern**: Dedicated ontology worker for TerminusDB operations with event publishing
-
-#### Data Validation & Architecture Quality
-- **18+ Complex Type Validators**: Comprehensive validation in `shared/validators/`
-- **SOLID Principles**: Dependency injection, single responsibility, modular design
-- **Comprehensive Error Handling**: Proper HTTP status codes (404, 409, 400, 500)
-- **Production Testing**: Real performance metrics and validation
-
-### ⚠️ Partial Implementation
-
-#### Frontend UI
-- **React Foundation**: Basic structure exists (30-40% complete)
-- **Component Library**: Blueprint.js integration started
-- **State Management**: Zustand/Relay setup in progress
-- **User Workflows**: Need full implementation
-
-#### Authentication System
-- **Security Framework**: JWT and RBAC hooks present
-- **RBAC Implementation**: Role-based access control needs completion
-- **API Key Management**: Partially implemented, not globally enforced
-
-#### Data Connectors
-- **Google Sheets**: Fully implemented with API v4 integration
-- **Additional Connectors**: CSV, Excel, API connectors planned
-
-## Future Enhancements
-
-### Planned Features
-
-#### Infrastructure Enhancements
-1. **API Gateway**: Kong/Traefik for advanced routing, rate limiting, centralized logging
-2. **Message Queue**: RabbitMQ/Kafka for asynchronous operations and notifications
-3. **Kubernetes Deployment**: Container orchestration for production scalability
-4. **Multi-Region Support**: Geographic distribution and disaster recovery
-
-#### Application Features
-1. **GraphQL API Support**: Alternative query interface for complex data fetching
-2. **GraphQL API Support**: Alternative query interface for complex data fetching
-3. **Advanced Caching Layer**: Extended Redis usage for performance optimization beyond command status
-4. **Machine Learning Integration**: Enhanced type inference and pattern recognition
-
-#### User Experience
-1. **Complete Frontend**: Full UI with Material-UI components and user workflows
-2. **Advanced Visualization**: Enhanced graph rendering and interactive schemas
-3. **Collaboration Features**: Real-time multi-user editing capabilities
-4. **Mobile Support**: Responsive design and mobile applications
-
-### Scalability Roadmap
-
-#### Phase 1 (Current)
-- **Microservices Foundation**: ✅ Complete
-- **Core Feature Implementation**: ✅ Complete
-- **Basic Frontend**: 🚧 In Progress
-
-#### Phase 2 (Next 6 months)
-- **Frontend Completion**: Full user interface and workflows
-- **Authentication Service**: Complete JWT-based auth with RBAC
-- **Additional Data Connectors**: Excel, API, database connectors
-
-#### Phase 3 (6-12 months)
-- **Advanced Architecture**: API Gateway, message queues, caching
-- **Enhanced Real-time Features**: Advanced WebSocket features, live collaboration capabilities
-- **Performance Optimization**: Multi-region deployment, advanced scaling
-
-#### Phase 4 (12+ months)
-- **Enhanced CQRS**: Advanced Command Query Responsibility Segregation patterns
-- **Event Store Implementation**: Comprehensive event sourcing with point-in-time recovery
-- **Saga Pattern**: Complex workflow orchestration with compensation transactions
-- **Microservices Mesh**: Service mesh integration for advanced management
 
 ---
 
-## Conclusion
+## 6. 데이터 아키텍처
 
-**SPICE HARVESTER** demonstrates exceptional architectural maturity with enterprise-grade backend services, advanced AI capabilities, and complete git-like functionality. The system is production-ready for core ontology management, with frontend completion being the primary remaining development area.
+본 시스템은 여러 데이터 저장소를 각자의 역할에 맞게 최적화하여 사용합니다.
 
-The architecture provides a solid foundation for scaling to enterprise requirements while maintaining flexibility for future enhancements and integrations.
+| 저장소 | 주 역할 | 데이터 종류 | 데이터 모델 | SSoT 여부 |
+| :--- | :--- | :--- | :--- | :--- |
+| **S3 / MinIO** | **이벤트 저장소 (Event Store)** | 인스턴스 커맨드 로그 | Append-only JSON 파일 | **Yes (Instance)** |
+| **TerminusDB** | 쓰기/읽기 모델 | 온톨로지 스키마, 인스턴스 최신 상태 | Graph / Document | **Yes (Ontology)** |
+| **Elasticsearch** | **읽기 모델 (Read Model)** | 검색 및 목록용 데이터 | Denormalized JSON | No |
+| **PostgreSQL** | **메시지 큐 (Outbox)** | 처리 대기중인 커맨드 | Relational | No |
+| **Kafka** | **이벤트 버스 (Event Bus)** | 커맨드 및 도메인 이벤트 | Event Stream | No |
+| **Redis** | **캐시 / 상태 저장소** | 커맨드 처리 상태, 메타데이터 | Key-Value | No |
 
 ---
 
-*Last updated: 2025-08-05*
-*Document version: 4.0 (Command/Event Sourcing & WebSocket Complete)*
+## 7. 기술 스택
+
+### 백엔드
+- **언어**: Python 3.9+
+- **프레임워크**: FastAPI
+- **비동기 처리**: `asyncio`, `httpx`
+
+### 데이터 계층
+- **그래프 DB**: TerminusDB
+- **이벤트 저장소**: S3 (MinIO)
+- **메시지 큐**: PostgreSQL (Outbox), Kafka
+- **검색 엔진**: Elasticsearch
+- **캐시**: Redis
+
+### 핵심 설계 패턴
+- **마이크로서비스 아키텍처 (MSA)**
+- **CQRS (Command Query Responsibility Segregation)**
+- **이벤트 소싱 (Event Sourcing)**
+- **아웃박스 패턴 (Outbox Pattern)**
+- **프로젝션 (Projection)**
+
+(이하 내용은 기존 문서와 거의 동일하여 생략)

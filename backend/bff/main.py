@@ -73,7 +73,8 @@ from shared.security.input_sanitizer import (
 )
 from shared.utils.label_mapper import LabelMapper
 from shared.dependencies import configure_type_inference_service
-from shared.services import create_redis_service, get_notification_service
+from shared.services.redis_service import create_redis_service
+from shared.services.websocket_service import get_notification_service
 
 # BFF specific imports
 from bff.services.funnel_type_inference_adapter import FunnelHTTPTypeInferenceAdapter

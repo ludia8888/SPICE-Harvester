@@ -26,7 +26,8 @@ from oms.database.postgres import db as postgres_db
 from oms.database.outbox import MessageType, OutboxService
 from shared.models.commands import CommandType, InstanceCommand, CommandResult, CommandStatus
 from shared.models.common import BaseResponse
-from shared.services import CommandStatusService, RedisService
+from shared.services.command_status_service import CommandStatusService
+from shared.services.redis_service import RedisService
 from shared.security.input_sanitizer import (
     SecurityViolationError,
     sanitize_input,

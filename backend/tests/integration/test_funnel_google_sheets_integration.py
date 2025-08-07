@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 import pytest
-from tests.utils.enhanced_assertions import EnhancedAssertions
+from tests.utils.assertions import EnhancedAssertions
 
 
 class TestFunnelGoogleSheetsIntegration(unittest.TestCase):

@@ -1,26 +1,19 @@
-# Core dependencies
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-httpx==0.25.2
-pydantic==2.5.0
-pydantic-settings==2.1.0
+# 🎯 OMS Service Dependencies - DUPLICATE DEPENDENCIES RESOLVED!
+#
+# ❌ 이전: terminusdb-client, asyncpg 등을 개별적으로 관리 → 버전 불일치 위험
+# ✅ 현재: shared/pyproject.toml에서 중앙집중 관리 → 단일 진실 공급원
+#
+# 현재 shared 패키지에서 제공하는 의존성:
+# - fastapi==0.104.1: API 프레임워크
+# - terminusdb-client==10.2.0: 그래프 DB 연결
+# - asyncpg==0.29.0: PostgreSQL 비동기 드라이버
+# - redis[hiredis]==5.0.1: 캐싱 및 세션 관리
+# - python-jose[cryptography]==3.3.0: JWT 인증
+# - passlib[bcrypt]==1.7.4 + bcrypt==4.1.1: 패스워드 해싱
+# - 기타 모든 공통 라이브러리 (pydantic, httpx, uvicorn 등)
 
-# Database
-aiosqlite==0.19.0
-terminusdb-client==10.2.0
-asyncpg==0.29.0
-redis[hiredis]==5.0.1
+# 🔗 Shared package - 모든 의존성의 단일 진실 공급원
+-e ../shared
 
-# Utilities
-python-multipart==0.0.6
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-bcrypt==4.1.1
-
-# Logging and monitoring
-python-json-logger==2.0.7
-
-# Development
-pytest==7.4.3
-pytest-asyncio==0.21.1
-pytest-cov==4.1.0
+# 📝 개발/테스트 의존성은 shared의 optional-dependencies 사용
+# 사용법: pip install -e ../shared[dev,test]

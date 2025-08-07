@@ -8,12 +8,24 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
-COPY bff/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Upgrade pip and install build tools
+RUN pip install --upgrade pip setuptools wheel
 
 # Copy shared modules first
 COPY shared /app/shared
+
+# Install shared package (temporarily hide pyproject.toml to force setup.py usage)
+RUN cd /app/shared && mv pyproject.toml pyproject.toml.bak && cd /app && pip install ./shared && cd /app/shared && mv pyproject.toml.bak pyproject.toml
+
+# Copy requirements first for better caching
+COPY bff/requirements.txt .
+
+# Remove shared package reference (already installed above) and install remaining dependencies if any
+RUN sed -i '/-e .*shared/d' requirements.txt && \
+    (if [ -s requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi)
+
+# Verify critical dependencies are installed
+RUN python -c "import uvicorn; import fastapi; import aiosqlite; print('All critical dependencies installed successfully!')"
 
 # Copy application code
 COPY bff /app/bff
@@ -32,4 +44,4 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD curl -f http://localhost:8002/health || exit 1
 
 # Run the application
-CMD ["uvicorn", "bff.main:app", "--host", "0.0.0.0", "--port", "8002", "--log-level", "info"]
+CMD ["python", "-m", "uvicorn", "bff.main:app", "--host", "0.0.0.0", "--port", "8002", "--log-level", "info"]

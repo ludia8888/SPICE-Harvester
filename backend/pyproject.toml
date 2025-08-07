@@ -20,47 +20,35 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
 ]
 
+# 🎯 SPICE HARVESTER Meta Package - DUPLICATE DEPENDENCIES RESOLVED!
+#
+# ❌ 이전: 개별 라이브러리 버전을 여기서 중복 관리 → shared와 버전 충돌
+# ✅ 현재: shared 패키지를 참조하는 메타 패키지로 역할 변경
+#
+# 이 패키지의 새로운 역할:
+# - 개발/테스트용 메타 패키지
+# - 모든 서비스의 공통 의존성은 shared/pyproject.toml에서 관리
+# - CI/CD 및 전체 프로젝트 빌드를 위한 엔트리포인트
+
 dependencies = [
-    "fastapi>=0.104.1",
-    "uvicorn[standard]>=0.24.0",
-    "httpx>=0.25.1",
-    "pydantic>=2.5.0",
-    "python-multipart>=0.0.6",
-    "python-jose[cryptography]>=3.3.0",
-    "passlib[bcrypt]>=1.7.4",
-    "aiofiles>=23.2.1",
-    "aiosqlite>=0.19.0",
-    "phonenumbers>=8.13.0",
-    "email-validator>=2.0.0",
-    "google-auth>=2.27.0",
-    "google-auth-oauthlib>=1.2.0",
-    "google-auth-httplib2>=0.2.0",
-    "google-api-python-client>=2.116.0",
-    "pandas>=2.1.3",
-    "numpy>=1.24.3",
-    "openpyxl>=3.1.2",
-    "python-dotenv>=1.0.0",
+    # 🔗 Shared package - 모든 외부 의존성의 단일 진실 공급원
+    "-e ./shared",
 ]
 
 [project.optional-dependencies]
+# 🔗 모든 개발/테스트 의존성은 shared 패키지에서 중앙관리
 dev = [
-    "pytest>=7.4.3",
-    "pytest-asyncio>=0.21.1",
-    "pytest-cov>=4.1.0",
-    "black>=23.11.0",
-    "isort>=5.12.0",
-    "flake8>=6.1.0",
-    "mypy>=1.7.0",
-    "pre-commit>=3.5.0",
+    "-e ./shared[dev]",   # shared의 개발 의존성 사용
 ]
 
 test = [
-    "pytest>=7.4.3",
-    "pytest-asyncio>=0.21.1",
-    "pytest-cov>=4.1.0",
-    "pytest-mock>=3.12.0",
-    "httpx>=0.25.1",
-    "faker>=20.0.3",
+    "-e ./shared[test]",  # shared의 테스트 의존성 사용
+    "psutil>=5.9.0",     # 프로젝트 전체 성능 테스트용 추가 라이브러리
+]
+
+# 🎯 전체 프로젝트 개발 환경 설정
+all = [
+    "-e ./shared[dev,test,docs]",  # 모든 의존성 포함
     "psutil>=5.9.0",
 ]
 

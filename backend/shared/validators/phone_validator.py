@@ -11,13 +11,9 @@ from .base_validator import BaseValidator, ValidationResult
 
 logger = logging.getLogger(__name__)
 
-try:
-    import phonenumbers
-    from phonenumbers import NumberParseException
-
-    PHONENUMBERS_AVAILABLE = True
-except ImportError:
-    PHONENUMBERS_AVAILABLE = False
+# phonenumbers is now a required dependency in shared/pyproject.toml
+import phonenumbers
+from phonenumbers import NumberParseException
 
 
 class PhoneValidator(BaseValidator):
@@ -37,18 +33,6 @@ class PhoneValidator(BaseValidator):
         if not isinstance(value, str):
             return ValidationResult(
                 is_valid=False, message=f"Expected string, got {type(value).__name__}"
-            )
-
-        if not PHONENUMBERS_AVAILABLE:
-            # Basic validation without phonenumbers library
-            if not re.match(self.PHONE_PATTERN, value):
-                return ValidationResult(is_valid=False, message="Invalid phone format")
-            normalized = re.sub(r"[- ()]", "", value)
-            return ValidationResult(
-                is_valid=True,
-                message="Phone validation passed",
-                normalized_value={"original": value, "normalized": normalized},
-                metadata={"type": "phone", "validation_method": "regex"},
             )
 
         # Use phonenumbers library for comprehensive validation
@@ -118,9 +102,6 @@ class PhoneValidator(BaseValidator):
         Returns:
             Formatted phone number
         """
-        if not PHONENUMBERS_AVAILABLE:
-            return phone
-
         try:
             parsed = phonenumbers.parse(phone, "US")
             if format_type == "international":

@@ -28,7 +28,7 @@ from oms.services.async_terminus import AsyncTerminusService
 from oms.database.outbox import OutboxService
 from oms.dependencies import OMSDependencyProvider
 from shared.models.config import ConnectionConfig
-from shared.services import CommandStatusService
+from shared.services.command_status_service import CommandStatusService
 
 
 def create_mock_async_terminus_service() -> Mock:

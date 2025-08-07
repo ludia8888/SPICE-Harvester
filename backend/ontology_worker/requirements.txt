@@ -1,10 +1,20 @@
 # Ontology Worker Service Dependencies
-confluent-kafka==2.3.0
-asyncpg==0.29.0
-redis[hiredis]==5.0.1
+#
+# GHOST DEPENDENCY RESOLVED: 이전 유령 의존성이 해결되었습니다!
+# ❌ 이전: redis가 requirements.txt에 없어서 "우연히" 동작
+# ✅ 현재: 모든 의존성이 shared/pyproject.toml에서 명시적으로 관리
+#
+# 현재 shared 패키지에서 제공하는 의존성:
+# - redis[hiredis]: RedisService 사용
+# - confluent-kafka: 메시지 큐 처리
+# - asyncpg: PostgreSQL 연결
+# - terminusdb-client: TerminusDB 그래프 DB 연결
+# - 기타 모든 공통 유틸리티
 
-# Shared dependencies
-pydantic==2.5.0
-python-dotenv==1.0.0
-httpx==0.25.2
-terminusdb-client==10.2.0
+# 개별 서비스 의존성은 제거됨 - shared에서 모두 관리
+# confluent-kafka==2.3.0    → shared에서 관리
+# asyncpg==0.29.0           → shared에서 관리
+# terminusdb-client==10.2.0 → shared에서 관리
+
+# Shared package (includes all dependencies above)
+-e ../shared

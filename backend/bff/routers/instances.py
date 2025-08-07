@@ -14,7 +14,7 @@ from bff.dependencies import (
 )
 from bff.services.oms_client import OMSClient
 from shared.security.input_sanitizer import validate_db_name, validate_class_id, validate_instance_id, sanitize_es_query
-from shared.services import ElasticsearchService
+from shared.services.elasticsearch_service import ElasticsearchService
 from shared.config.search_config import get_instances_index_name
 from elasticsearch.exceptions import ConnectionError as ESConnectionError, NotFoundError, RequestError
 

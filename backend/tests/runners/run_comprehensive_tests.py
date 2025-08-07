@@ -15,9 +15,14 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
+# Add backend directory to Python path for imports
+backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, backend_dir)
+
 # 테스트 모듈 import
-from test_comprehensive_production_integration import ProductionIntegrationTestSuite
-from test_production_performance_suite import ProductionPerformanceTestSuite
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from integration.test_comprehensive_production_integration import ProductionIntegrationTestSuite
+from performance.test_production_performance_suite import ProductionPerformanceTestSuite
 
 class ComprehensiveTestRunner:
     """종합 테스트 실행기"""

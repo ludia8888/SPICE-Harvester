@@ -21,10 +21,10 @@ from contextlib import asynccontextmanager
 
 from shared.config.settings import ApplicationSettings, Environment, DatabaseSettings, ServiceSettings
 from shared.dependencies import ServiceContainer
-from shared.services import (
-    StorageService, RedisService, ElasticsearchService, 
-    CommandStatusService
-)
+from shared.services.storage_service import StorageService
+from shared.services.redis_service import RedisService
+from shared.services.elasticsearch_service import ElasticsearchService
+from shared.services.command_status_service import CommandStatusService
 from shared.utils.label_mapper import LabelMapper
 from shared.utils.jsonld import JSONToJSONLDConverter
 
@@ -42,7 +42,7 @@ class TestApplicationSettings(ApplicationSettings):
     def __init__(self, **overrides):
         # Set test-safe defaults
         test_defaults = {
-            "environment": Environment.TESTING,
+            "environment": Environment.TEST,
             "debug": True,
             "database": DatabaseSettings(
                 host="localhost",
@@ -300,8 +300,8 @@ async def isolated_test_environment(**config_overrides):
     preventing test interference and providing clean test state.
     """
     with ConfigOverride(**config_overrides):
-        # Create isolated test settings
-        settings = TestApplicationSettings()
+        # Create isolated test settings with overrides
+        settings = TestApplicationSettings(**config_overrides)
         
         # Create isolated mock container
         container = MockServiceContainer(settings)
@@ -324,11 +324,11 @@ def setup_test_database_config(**overrides) -> TestApplicationSettings:
     """Create test settings with database configuration"""
     db_overrides = {
         "database": DatabaseSettings(
-            host=overrides.get("db_host", "localhost"),
-            port=overrides.get("db_port", 5432),
-            name=overrides.get("db_name", "test_db"),
-            user=overrides.get("db_user", "test_user"),
-            password=overrides.get("db_password", "test_password")
+            postgres_host=overrides.get("db_host", "localhost"),
+            postgres_port=overrides.get("db_port", 5432),
+            postgres_db=overrides.get("db_name", "test_db"),
+            postgres_user=overrides.get("db_user", "test_user"),
+            postgres_password=overrides.get("db_password", "test_password")
         )
     }
     return TestApplicationSettings(**db_overrides)
@@ -336,16 +336,23 @@ def setup_test_database_config(**overrides) -> TestApplicationSettings:
 
 def setup_test_service_config(**overrides) -> TestApplicationSettings:
     """Create test settings with service configuration"""
+    # Extract host and port from URL if provided
+    if "oms_url" in overrides:
+        url_parts = overrides["oms_url"].replace("http://", "").split(":")
+        oms_host = url_parts[0]
+        oms_port = int(url_parts[1]) if len(url_parts) > 1 else 8000
+    else:
+        oms_host = overrides.get("oms_host", "localhost")
+        oms_port = overrides.get("oms_port", 8000)
+    
     service_overrides = {
         "services": ServiceSettings(
-            terminus_url=overrides.get("terminus_url", "http://localhost:6363"),
-            oms_base_url=overrides.get("oms_url", "http://localhost:8001"),
-            bff_base_url=overrides.get("bff_url", "http://localhost:8000"),
-            redis_host=overrides.get("redis_host", "localhost"),
-            redis_port=overrides.get("redis_port", 6379),
-            redis_db=overrides.get("redis_db", 1),
-            elasticsearch_host=overrides.get("es_host", "localhost"),
-            elasticsearch_port=overrides.get("es_port", 9200)
+            oms_host=oms_host,
+            oms_port=oms_port,
+            bff_host=overrides.get("bff_host", "localhost"),
+            bff_port=overrides.get("bff_port", 8002),
+            funnel_host=overrides.get("funnel_host", "localhost"),
+            funnel_port=overrides.get("funnel_port", 8003)
         )
     }
     return TestApplicationSettings(**service_overrides)

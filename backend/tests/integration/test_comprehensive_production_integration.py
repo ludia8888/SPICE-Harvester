@@ -17,7 +17,10 @@ from typing import Dict, List, Any
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
-from tests.test_config import TestConfig
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from test_config import TestConfig
 
 # 테스트 설정
 OMS_BASE_URL = TestConfig.get_oms_base_url()

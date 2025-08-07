@@ -33,7 +33,7 @@ from shared.dependencies.providers import (
 from shared.config.settings import ApplicationSettings
 from shared.utils.label_mapper import LabelMapper
 from shared.utils.jsonld import JSONToJSONLDConverter
-from shared.services import ElasticsearchService
+from shared.services.elasticsearch_service import ElasticsearchService
 
 # BFF specific imports
 from bff.services.oms_client import OMSClient

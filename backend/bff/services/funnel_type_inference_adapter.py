@@ -11,7 +11,7 @@ from shared.interfaces.type_inference import ColumnAnalysisResult as InterfaceCo
 from shared.interfaces.type_inference import TypeInferenceInterface
 from shared.interfaces.type_inference import TypeInferenceResult as InterfaceTypeResult
 
-from .funnel_client import FunnelClient
+from bff.services.funnel_client import FunnelClient
 
 logger = logging.getLogger(__name__)
 

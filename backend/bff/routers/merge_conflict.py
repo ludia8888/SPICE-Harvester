@@ -23,15 +23,7 @@ from shared.security.input_sanitizer import (
 )
 
 # 충돌 변환기 import
-try:
-    from bff.utils.conflict_converter import ConflictConverter
-except ImportError:
-    # Fallback: 임시 ConflictConverter 클래스
-    class ConflictConverter:
-        async def convert_conflicts_to_foundry_format(
-            self, conflicts, db_name, source_branch, target_branch
-        ):
-            return []
+from bff.utils.conflict_converter import ConflictConverter
 
 
 logger = logging.getLogger(__name__)

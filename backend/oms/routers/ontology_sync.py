@@ -25,7 +25,7 @@ from oms.dependencies import (
 )
 from oms.database.postgres import db as postgres_db
 from oms.database.outbox import OutboxService
-from shared.services import CommandStatusService
+from shared.services.command_status_service import CommandStatusService
 from shared.services.sync_wrapper_service import SyncWrapperService
 from shared.models.sync_wrapper import SyncOptions, SyncResult
 from shared.models.ontology import (

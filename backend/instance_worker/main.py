@@ -29,10 +29,9 @@ from shared.models.events import (
 )
 from shared.models.config import ConnectionConfig
 from oms.services.async_terminus import AsyncTerminusService
-from shared.services import (
-    RedisService, create_redis_service, CommandStatusService,
-    StorageService, create_storage_service
-)
+from shared.services.redis_service import RedisService, create_redis_service
+from shared.services.command_status_service import CommandStatusService
+from shared.services.storage_service import StorageService, create_storage_service
 from shared.utils.id_generator import generate_instance_id
 
 # 로깅 설정

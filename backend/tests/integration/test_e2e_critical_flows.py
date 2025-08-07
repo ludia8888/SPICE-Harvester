@@ -4,6 +4,7 @@ Tests complete user workflows from start to finish across all services
 """
 
 import pytest
+import pytest_asyncio
 import httpx
 import asyncio
 import json
@@ -23,7 +24,7 @@ class TestCriticalUserFlows:
     OMS_BASE_URL = "http://localhost:8000"
     TIMEOUT = 60
     
-    @pytest.fixture(autouse=True)
+    @pytest_asyncio.fixture(autouse=True)
     async def setup_and_teardown(self):
         """Setup and teardown for each test"""
         # Setup
@@ -86,7 +87,7 @@ class TestCriticalUserFlows:
         }
         
         response = await self.client.post(
-            f"{self.BFF_BASE_URL}/api/v1/database",
+            f"{self.BFF_BASE_URL}/api/v1/databases",
             json=create_payload
         )
         

@@ -26,10 +26,8 @@ from shared.models.events import (
     InstanceEvent,
     OntologyEvent
 )
-from shared.services import (
-    RedisService, create_redis_service,
-    ElasticsearchService, create_elasticsearch_service
-)
+from shared.services.redis_service import RedisService, create_redis_service
+from shared.services.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
 
 # 로깅 설정
 logging.basicConfig(

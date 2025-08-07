@@ -8,13 +8,9 @@ from typing import Any, Dict, List, Optional
 from ..models.common import DataType
 from .base_validator import BaseValidator, ValidationResult
 
-try:
-    from email_validator import EmailNotValidError
-    from email_validator import validate_email as validate_email_lib
-
-    EMAIL_VALIDATOR_AVAILABLE = True
-except ImportError:
-    EMAIL_VALIDATOR_AVAILABLE = False
+# email-validator is now a required dependency in shared/pyproject.toml
+from email_validator import EmailNotValidError
+from email_validator import validate_email as validate_email_lib
 
 
 class EmailValidator(BaseValidator):
@@ -49,22 +45,17 @@ class EmailValidator(BaseValidator):
                     message=f"Email domain must be one of: {constraints['allowedDomains']}",
                 )
 
-        # Use email-validator library if available
-        if EMAIL_VALIDATOR_AVAILABLE:
-            try:
-                # Disable DNS check for validation
-                validated = validate_email_lib(value, check_deliverability=False)
-                result_data = {
-                    "email": validated.email,
-                    "local": validated.local_part,
-                    "domain": validated.domain,
-                }
-            except EmailNotValidError as e:
-                return ValidationResult(is_valid=False, message=f"Invalid email address: {str(e)}")
-        else:
-            # Fallback result
-            parts = value.split("@")
-            result_data = {"email": value, "local": parts[0], "domain": parts[1]}
+        # Use email-validator library for thorough validation
+        try:
+            # Disable DNS check for validation
+            validated = validate_email_lib(value, check_deliverability=False)
+            result_data = {
+                "email": validated.email,
+                "local": validated.local_part,
+                "domain": validated.domain,
+            }
+        except EmailNotValidError as e:
+            return ValidationResult(is_valid=False, message=f"Invalid email address: {str(e)}")
 
         return ValidationResult(
             is_valid=True,

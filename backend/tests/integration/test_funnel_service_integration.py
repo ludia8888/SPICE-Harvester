@@ -12,7 +12,7 @@ import logging
 
 import httpx
 import pytest
-from tests.utils.enhanced_assertions import EnhancedAssertions
+from tests.utils.assertions import EnhancedAssertions
 
 logger = logging.getLogger(__name__)
 

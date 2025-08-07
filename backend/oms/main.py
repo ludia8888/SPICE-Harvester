@@ -53,7 +53,9 @@ from oms.services.async_terminus import AsyncTerminusService
 from oms.database.postgres import db as postgres_db
 from oms.database.outbox import OutboxService
 from shared.models.config import ConnectionConfig
-from shared.services import RedisService, create_redis_service, CommandStatusService, ElasticsearchService
+from shared.services.redis_service import RedisService, create_redis_service
+from shared.services.command_status_service import CommandStatusService
+from shared.services.elasticsearch_service import ElasticsearchService
 from shared.models.requests import ApiResponse
 from shared.utils.jsonld import JSONToJSONLDConverter
 from shared.utils.label_mapper import LabelMapper
@@ -118,10 +120,10 @@ class OMSServiceContainer:
         """Initialize TerminusDB service with health check"""
         try:
             connection_info = ConnectionConfig(
-                server_url=self.settings.services.terminus_url,
-                user=self.settings.services.terminus_user,
-                account=self.settings.services.terminus_account,
-                key=self.settings.services.terminus_key,
+                server_url=self.settings.database.terminus_url,
+                user=self.settings.database.terminus_user,
+                account=self.settings.database.terminus_account,
+                key=self.settings.database.terminus_password,
             )
             
             terminus_service = AsyncTerminusService(connection_info)
@@ -191,9 +193,9 @@ class OMSServiceContainer:
         """Initialize Elasticsearch service"""
         try:
             elasticsearch_service = ElasticsearchService(
-                hosts=[f"{self.settings.services.elasticsearch_host}:{self.settings.services.elasticsearch_port}"],
-                username=self.settings.services.elasticsearch_username,
-                password=self.settings.services.elasticsearch_password
+                hosts=[f"{self.settings.database.elasticsearch_host}:{self.settings.database.elasticsearch_port}"],
+                username=self.settings.database.elasticsearch_username,
+                password=self.settings.database.elasticsearch_password
             )
             await elasticsearch_service.connect()
             

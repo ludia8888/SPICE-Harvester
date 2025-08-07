@@ -68,11 +68,11 @@ class BaseTerminusService:
             # 환경변수에서 연결 정보 로드
             import os
             self.connection_info = ConnectionConfig(
-                endpoint=os.getenv("TERMINUS_ENDPOINT", "http://localhost:6363"),
+                server_url=os.getenv("TERMINUS_SERVER_URL", "http://localhost:6363"),
                 account=os.getenv("TERMINUS_ACCOUNT", "admin"),
                 user=os.getenv("TERMINUS_USER", "admin"),
-                password=os.getenv("TERMINUS_PASSWORD", "root"),
-                use_ssl=os.getenv("TERMINUS_USE_SSL", "false").lower() == "true",
+                key=os.getenv("TERMINUS_KEY", "root"),
+                ssl_verify=os.getenv("TERMINUS_SSL_VERIFY", "true").lower() == "true",
             )
         
         # HTTP 클라이언트 설정
@@ -83,7 +83,7 @@ class BaseTerminusService:
         self._connected = False
         
         logger.info(
-            f"BaseTerminusService initialized with endpoint: {self.connection_info.endpoint}"
+            f"BaseTerminusService initialized with endpoint: {self.connection_info.server_url}"
         )
     
     async def _get_client(self) -> httpx.AsyncClient:
@@ -100,11 +100,11 @@ class BaseTerminusService:
             # 재시도 설정
             transport = httpx.AsyncHTTPTransport(
                 retries=3,
-                verify=False if not self.connection_info.use_ssl else True
+                verify=self.connection_info.ssl_verify
             )
             
             self._client = httpx.AsyncClient(
-                base_url=self.connection_info.endpoint,
+                base_url=self.connection_info.server_url,
                 timeout=timeout,
                 transport=transport,
                 follow_redirects=True,
@@ -125,7 +125,7 @@ class BaseTerminusService:
         
         # Basic Auth 사용
         import base64
-        credentials = f"{self.connection_info.user}:{self.connection_info.password}"
+        credentials = f"{self.connection_info.user}:{self.connection_info.key}"
         encoded_credentials = base64.b64encode(credentials.encode()).decode()
         self._auth_token = f"Basic {encoded_credentials}"
         

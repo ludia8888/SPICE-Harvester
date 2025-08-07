@@ -26,7 +26,8 @@ from shared.testing.config_fixtures import (
 # BFF specific imports
 from bff.services.oms_client import OMSClient
 from bff.dependencies import BFFDependencyProvider
-from shared.services.terminus_service import TerminusService
+# TerminusService is not in shared, but AsyncTerminusService is in OMS
+# For testing, we'll mock it directly
 from bff.services.funnel_type_inference_adapter import FunnelHTTPTypeInferenceAdapter
 # BFFServiceContainer is now integrated into the dependency system
 
@@ -103,7 +104,8 @@ def create_mock_oms_client() -> Mock:
 
 def create_mock_terminus_service() -> Mock:
     """Create mock TerminusService for testing"""
-    mock_terminus = AsyncMock(spec=TerminusService)
+    # Creating AsyncMock without spec since TerminusService is not available in BFF
+    mock_terminus = AsyncMock()
     
     # Mock all TerminusService methods
     mock_terminus.list_databases = AsyncMock(return_value=["test_db1", "test_db2"])

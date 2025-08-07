@@ -1,0 +1,203 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_backend"
+
+[project]
+name = "spice-shared"
+version = "0.1.0"
+description = "Shared components for SPICE HARVESTER microservices"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "SPICE HARVESTER Team", email = "team@spiceharvester.io"}
+]
+keywords = ["spice", "harvester", "shared", "microservices"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+# 🎯 SINGLE SOURCE OF TRUTH: 모든 MSA 서비스의 유일한 의존성 원천
+# 이전 문제: backend/pyproject.toml과 개별 requirements.txt가 서로 다른 버전 요구사항 정의
+# 해결: shared/pyproject.toml이 모든 외부 라이브러리 버전을 중앙집중 관리
+dependencies = [
+    # 🚀 Web Framework - MSA Core Stack
+    "fastapi==0.104.1",        # 통일된 버전: BFF, OMS, Funnel 등 모든 API 서비스
+    "uvicorn[standard]==0.24.0", # ASGI 서버 - 개발/프로덕션 환경 일관성
+    "httpx==0.25.2",           # HTTP 클라이언트 - 서비스 간 통신
+    
+    # 📋 Data Validation & Settings
+    "pydantic==2.5.0",         # 데이터 검증 - 모든 서비스 공통
+    "pydantic-settings==2.1.0", # 설정 관리
+    "python-dotenv==1.0.0",    # 환경변수 로딩
+    
+    # 🗄️ Database & Caching - GHOST DEPENDENCY RESOLVED
+    "redis[hiredis]==5.0.1",   # ✅ RedisService - 모든 워커에서 사용
+    "elasticsearch==8.11.0",   # ✅ ElasticsearchService - 검색 및 인덱싱
+    "asyncpg==0.29.0",        # ✅ PostgreSQL 비동기 드라이버 - 모든 워커
+    "aiosqlite==0.19.0",      # SQLite 비동기 드라이버 - 개발/테스트
+    
+    # 📬 Message Queue - GHOST DEPENDENCY RESOLVED  
+    "confluent-kafka==2.3.0", # ✅ 모든 워커 서비스의 메시지 큐 처리
+    
+    # 🧠 Graph Database - GHOST DEPENDENCY RESOLVED
+    "terminusdb-client==10.2.0", # ✅ 온톨로지/인스턴스 워커의 그래프 DB 연결
+    
+    # ☁️ Storage - GHOST DEPENDENCY RESOLVED
+    "boto3==1.34.14",         # ✅ S3 스토리지 서비스
+    "botocore==1.34.14",      # boto3 코어 의존성
+    
+    # 🔐 Authentication & Security
+    "python-jose[cryptography]==3.3.0", # JWT 토큰 처리
+    "passlib[bcrypt]==1.7.4",  # 패스워드 해싱
+    "bcrypt==4.1.1",          # 암호화 라이브러리
+    
+    # 🌐 HTTP & File Handling
+    "python-multipart==0.0.6", # 멀티파트 폼 데이터 처리
+    "aiofiles==23.2.1",       # 비동기 파일 처리
+    
+    # 📊 Data Processing
+    "pandas==2.1.3",          # 데이터 분석 - Funnel 서비스 등
+    "numpy==1.24.3",          # 수치 계산
+    "openpyxl==3.1.2",        # Excel 파일 처리
+    
+    # 🔍 Validation - CONDITIONAL IMPORT RESOLVED
+    "email-validator==2.0.0",  # ✅ 이메일 검증 - 조건부 임포트 제거됨
+    "phonenumbers==8.13.0",   # ✅ 전화번호 검증 - 조건부 임포트 제거됨
+    
+    # 🔗 Google APIs
+    "google-auth==2.27.0",
+    "google-auth-oauthlib==1.2.0", 
+    "google-auth-httplib2==0.2.0",
+    "google-api-python-client==2.116.0",
+    
+    # 📝 Logging
+    "python-json-logger==2.0.7", # 구조화된 로깅
+]
+
+[project.optional-dependencies]
+# Development dependencies
+dev = [
+    "pytest>=7.4.3",
+    "pytest-asyncio>=0.21.1",
+    "pytest-cov>=4.1.0",
+    "black>=23.12.0",
+    "isort>=5.13.0",
+    "mypy>=1.7.0",
+    "ruff>=0.1.8",
+]
+
+# Test dependencies
+test = [
+    "pytest==7.4.3",
+    "pytest-asyncio==0.21.1", 
+    "pytest-cov==4.1.0",
+    "pytest-mock==3.12.0",  # 모킹 라이브러리
+    "faker==20.1.0",        # 테스트 데이터 생성
+]
+
+# Documentation dependencies
+docs = [
+    "sphinx>=7.2.6",
+    "sphinx-rtd-theme>=2.0.0",
+    "sphinx-autodoc-typehints>=1.25.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/spiceharvester/backend"
+Documentation = "https://docs.spiceharvester.io"
+Repository = "https://github.com/spiceharvester/backend"
+Issues = "https://github.com/spiceharvester/backend/issues"
+
+[tool.setuptools]
+packages = ["shared"]
+
+[tool.setuptools.package-data]
+shared = ["py.typed"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # Directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--ignore=docs",
+    "--ignore=setup.py",
+    "--cov=shared",
+    "--cov-branch",
+    "--cov-report=term-missing:skip-covered",
+    "--cov-report=html",
+    "--cov-report=xml",
+    "--cov-fail-under=80",
+]
+
+[tool.coverage.run]
+source = ["shared"]
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "*/__init__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "def __str__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "if typing.TYPE_CHECKING:",
+]

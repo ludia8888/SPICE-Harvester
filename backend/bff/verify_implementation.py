@@ -19,7 +19,10 @@ def test_core_foundry_conflict_system():
     print("\n1️⃣ ConflictConverter 핵심 기능 검증")
 
     try:
-        # 직접 import
+        # 직접 import - use absolute path
+        import sys
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
         from bff.utils.conflict_converter import ConflictConverter, ConflictSeverity, PathType
 
         converter = ConflictConverter()
@@ -145,7 +148,7 @@ def test_core_foundry_conflict_system():
     print("\n3️⃣ 충돌 해결 옵션 생성 검증")
 
     try:
-        from conflict_converter import ConflictAnalysis
+        from bff.utils.conflict_converter import ConflictAnalysis
 
         # 다양한 시나리오 테스트
         test_scenarios = [
@@ -190,7 +193,7 @@ def test_core_foundry_conflict_system():
     print("\n4️⃣ API 라우터 구조 검증")
 
     try:
-        from main import app
+        from bff.main import app
 
         # 새로운 merge conflict 엔드포인트 확인
         merge_endpoints = []
