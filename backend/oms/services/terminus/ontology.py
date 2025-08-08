@@ -61,8 +61,8 @@ class OntologyService(BaseTerminusService):
                 "@type": "Class",
                 "@id": ontology.id,
                 "@documentation": {
-                    "@comment": ontology.description or f"{ontology.name} class",
-                    "@label": ontology.name
+                    "@comment": ontology.description or f"{ontology.label} class",
+                    "@label": ontology.label
                 }
             }
             
@@ -76,21 +76,25 @@ class OntologyService(BaseTerminusService):
             if ontology.relationships:
                 for rel in ontology.relationships:
                     rel_schema = self._create_relationship_schema(rel)
-                    schema_doc[rel.name] = rel_schema
+                    schema_doc[rel.predicate] = rel_schema  # Relationship uses 'predicate', not 'name'
             
             # 스키마 저장
-            endpoint = f"/api/document/{self.connection_info.account}/{db_name}?graph_type=schema"
+            endpoint = f"/api/document/{self.connection_info.account}/{db_name}?graph_type=schema&author=admin&message=Creating%20ontology%20{ontology.id}"
             
             await self._make_request("POST", endpoint, schema_doc)
             
             logger.info(f"Ontology '{ontology.id}' created in database '{db_name}'")
             
             # 응답 생성
-            return OntologyResponse(
-                **ontology.dict(),
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
-            )
+            # ontology.dict() already contains created_at and updated_at from OntologyBase
+            ontology_dict = ontology.dict()
+            # Only set timestamps if they don't exist
+            if 'created_at' not in ontology_dict or ontology_dict['created_at'] is None:
+                ontology_dict['created_at'] = datetime.utcnow()
+            if 'updated_at' not in ontology_dict or ontology_dict['updated_at'] is None:
+                ontology_dict['updated_at'] = datetime.utcnow()
+            
+            return OntologyResponse(**ontology_dict)
             
         except DuplicateOntologyError:
             raise
@@ -190,6 +194,12 @@ class OntologyService(BaseTerminusService):
             if not result:
                 return None
             
+            # Handle JSONL response - if result is a list, take the first element
+            if isinstance(result, list):
+                if len(result) == 0:
+                    return None
+                result = result[0]
+            
             # 결과 파싱
             return self._parse_ontology_document(result)
             
@@ -218,45 +228,33 @@ class OntologyService(BaseTerminusService):
             # 데이터베이스 존재 확인
             await self.db_service.ensure_db_exists(db_name)
             
-            # 모든 클래스 조회 SPARQL 쿼리
-            sparql_query = f"""
-            SELECT ?class ?label ?comment
-            WHERE {{
-                ?class a owl:Class .
-                OPTIONAL {{ ?class rdfs:label ?label }}
-                OPTIONAL {{ ?class rdfs:comment ?comment }}
-            }}
-            LIMIT {limit}
-            OFFSET {offset}
-            """
+            # Use document API to get all schema documents
+            endpoint = f"/api/document/{self.connection_info.account}/{db_name}?graph_type=schema"
             
-            endpoint = f"/api/sparql/{self.connection_info.account}/{db_name}"
-            result = await self._make_request("POST", endpoint, {"query": sparql_query})
+            try:
+                result = await self._make_request("GET", endpoint)
+            except Exception as e:
+                # If no schema documents exist, return empty list
+                if "404" in str(e):
+                    return []
+                raise
             
             ontologies = []
             
-            if isinstance(result, dict) and "results" in result:
-                bindings = result.get("results", {}).get("bindings", [])
+            # Handle the result - it should be a list of schema documents
+            if isinstance(result, list):
+                # Apply offset and limit manually
+                start_idx = offset
+                end_idx = offset + limit
                 
-                for binding in bindings:
-                    class_uri = binding.get("class", {}).get("value", "")
-                    class_id = class_uri.split("/")[-1] if "/" in class_uri else class_uri
-                    
-                    ontology = OntologyResponse(
-                        id=class_id,
-                        name=binding.get("label", {}).get("value", class_id),
-                        description=binding.get("comment", {}).get("value", ""),
-                        properties=[],
-                        relationships=[],
-                        created_at=datetime.utcnow(),
-                        updated_at=datetime.utcnow()
-                    )
-                    
-                    # 각 온톨로지의 상세 정보 가져오기
-                    detailed = await self.get_ontology(db_name, class_id)
-                    if detailed:
-                        ontology = detailed
-                    
+                for doc in result[start_idx:end_idx]:
+                    if isinstance(doc, dict) and "@type" in doc and doc["@type"] == "Class":
+                        ontology = self._parse_ontology_document(doc)
+                        ontologies.append(ontology)
+            elif isinstance(result, dict) and "@type" in result and result["@type"] == "Class":
+                # Single document returned
+                if offset == 0 and limit > 0:
+                    ontology = self._parse_ontology_document(result)
                     ontologies.append(ontology)
             
             return ontologies
@@ -302,8 +300,8 @@ class OntologyService(BaseTerminusService):
             schema.pop("@type")
             schema["@type"] = self._map_datatype_to_terminus(prop.type)
         
-        # 배열인 경우
-        if prop.is_array:
+        # 배열인 경우 (type이 array이거나 items 필드가 있는 경우)
+        if prop.type == "array" or prop.items is not None:
             base_schema = schema.copy()
             schema = {
                 "@type": "List",
@@ -316,20 +314,18 @@ class OntologyService(BaseTerminusService):
         """관계 스키마 생성"""
         schema = {
             "@type": "Optional",
-            "@class": rel.target_ontology,
+            "@class": rel.target,  # Relationship has 'target', not 'target_ontology'
             "@documentation": {
-                "@comment": rel.description or f"{rel.name} relationship",
-                "@label": rel.name
+                "@comment": rel.description or f"{rel.predicate} relationship",  # Use predicate instead of name
+                "@label": rel.label
             }
         }
         
-        # 필수 관계인 경우
-        if rel.required:
-            schema.pop("@type")
-            schema["@type"] = rel.target_ontology
+        # 관계는 Relationship 모델에 required 필드가 없으므로 
+        # 기본적으로 Optional로 처리
         
-        # 다중 관계인 경우
-        if rel.is_array:
+        # 다중 관계인 경우 (cardinality가 n으로 끝나는 경우: 1:n, n:m)
+        if rel.cardinality and (rel.cardinality.endswith(":n") or rel.cardinality.endswith(":m")):
             base_schema = schema.copy()
             schema = {
                 "@type": "Set",
@@ -343,7 +339,9 @@ class OntologyService(BaseTerminusService):
         mapping = {
             DataType.STRING: "xsd:string",
             DataType.INTEGER: "xsd:integer",
-            DataType.NUMBER: "xsd:decimal",
+            DataType.DECIMAL: "xsd:decimal",
+            DataType.FLOAT: "xsd:float",
+            DataType.DOUBLE: "xsd:double",
             DataType.BOOLEAN: "xsd:boolean",
             DataType.DATE: "xsd:date",
             DataType.DATETIME: "xsd:dateTime",
@@ -360,7 +358,7 @@ class OntologyService(BaseTerminusService):
         
         ontology = OntologyResponse(
             id=ontology_id,
-            name=documentation.get("@label", ontology_id),
+            label=documentation.get("@label", ontology_id),
             description=documentation.get("@comment", ""),
             properties=[],
             relationships=[],
@@ -382,20 +380,20 @@ class OntologyService(BaseTerminusService):
                     if class_type.startswith("xsd:") or class_type.startswith("sys:"):
                         prop = Property(
                             name=key,
-                            type=self._map_terminus_to_datatype(class_type),
+                            type=class_type,  # Keep the original type string like "xsd:string"
+                            label=value.get("@documentation", {}).get("@label", key),
                             description=value.get("@documentation", {}).get("@comment", ""),
-                            required=value.get("@type") != "Optional",
-                            is_array=False
+                            required=value.get("@type") != "Optional"
                         )
                         ontology.properties.append(prop)
                     else:
                         # 사용자 정의 클래스면 관계
                         rel = Relationship(
-                            name=key,
-                            target_ontology=class_type,
+                            predicate=key,
+                            target=class_type,
+                            label=value.get("@documentation", {}).get("@label", key),
                             description=value.get("@documentation", {}).get("@comment", ""),
-                            required=value.get("@type") != "Optional",
-                            is_array=value.get("@type") in ["Set", "List"]
+                            cardinality="n:m" if value.get("@type") == "Set" else "1:n"
                         )
                         ontology.relationships.append(rel)
         

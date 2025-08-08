@@ -175,6 +175,29 @@ class AsyncTerminusService:
         # 메타데이터 스키마 캐시로 성능 최적화
         self._metadata_schema_cache: set = set()  # 이미 생성된 DB의 메타데이터 스키마
 
+    async def check_connection(self) -> bool:
+        """연결 상태 확인"""
+        try:
+            # database_service를 통해 연결 확인
+            if hasattr(self.database_service, 'check_connection'):
+                return await self.database_service.check_connection()
+            else:
+                # 기본적으로 데이터베이스 목록 조회로 연결 확인
+                await self.list_databases()
+                return True
+        except Exception:
+            return False
+
+    async def connect(self) -> None:
+        """연결 설정"""
+        # database_service를 통해 연결
+        if hasattr(self.database_service, 'connect'):
+            await self.database_service.connect()
+
+    async def disconnect(self) -> None:
+        """연결 해제"""
+        await self.close()
+
     async def close(self):
         """모든 서비스 종료"""
         # Close all modular services
@@ -195,15 +218,16 @@ class AsyncTerminusService:
     # ==========================================
     
     @async_terminus_retry(max_retries=3)
-    async def create_database(self, db_name: str) -> bool:
+    async def create_database(self, db_name: str, description: str = "") -> bool:
         """데이터베이스 생성"""
-        result = await self.database_service.create_database(db_name)
+        result = await self.database_service.create_database(db_name, description)
         
-        # 성공 시 캐시 갱신
-        if result:
+        # 성공 시 캐시 갱신 및 True 반환
+        if result and isinstance(result, dict):
             self._db_cache.add(db_name)
-            
-        return result
+            return True
+        
+        return False
 
     @async_terminus_retry(max_retries=3)
     async def database_exists(self, db_name: str) -> bool:
@@ -283,7 +307,8 @@ class AsyncTerminusService:
         raise_if_missing: bool = True
     ) -> List[OntologyResponse]:
         """온톨로지 조회"""
-        return await self.ontology_service.get_ontology(db_name, class_id, raise_if_missing)
+        # OntologyService.get_ontology only takes 2 parameters
+        return await self.ontology_service.get_ontology(db_name, class_id)
 
     async def create_ontology(self, db_name: str, ontology_data: OntologyBase) -> OntologyResponse:
         """온톨로지 생성"""
@@ -301,6 +326,11 @@ class AsyncTerminusService:
     async def delete_ontology(self, db_name: str, class_id: str) -> bool:
         """온톨로지 삭제"""
         return await self.ontology_service.delete_ontology(db_name, class_id)
+
+    async def list_ontology_classes(self, db_name: str) -> List[OntologyResponse]:
+        """데이터베이스의 모든 온톨로지 목록 조회"""
+        # Use default limit and offset values
+        return await self.ontology_service.list_ontologies(db_name, limit=100, offset=0)
 
     # ==========================================
     # Version Control - Facade Methods

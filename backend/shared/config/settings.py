@@ -41,6 +41,25 @@ class DatabaseSettings(BaseSettings):
         env="TERMINUS_SERVER_URL",
         description="TerminusDB server URL"
     )
+    
+    def __init__(self, **kwargs):
+        """Initialize with manual environment variable override for Pydantic Settings v2.1.0 compatibility"""
+        import os
+        
+        # Manually override environment variables that aren't being read correctly
+        env_overrides = {
+            'terminus_url': os.getenv('TERMINUS_SERVER_URL'),
+            'terminus_user': os.getenv('TERMINUS_USER'),
+            'terminus_password': os.getenv('TERMINUS_KEY'),
+            'terminus_account': os.getenv('TERMINUS_ACCOUNT'),
+        }
+        
+        # Apply environment overrides only if the environment variable exists
+        for field_name, env_value in env_overrides.items():
+            if env_value is not None and field_name not in kwargs:
+                kwargs[field_name] = env_value
+        
+        super().__init__(**kwargs)
     terminus_user: str = Field(
         default="admin",
         env="TERMINUS_USER",

@@ -67,7 +67,7 @@ class ProductionPerformanceTestSuite:
                 f"{OMS_BASE_URL}/api/v1/database/create",
                 json={"name": self.test_db_name, "description": "Performance test database"}
             )
-            if response.status_code not in [200, 409]:
+            if response.status_code not in [200, 201, 409]:
                 raise Exception(f"성능 테스트 DB 생성 실패: {response.status_code}")
         
         print(f"✅ 성능 테스트 환경 준비 완료: {self.test_db_name}")

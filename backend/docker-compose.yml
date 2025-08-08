@@ -1,4 +1,128 @@
 services:
+  # PostgreSQL - Event Store Database
+  postgres:
+    image: postgres:15
+    container_name: spice_postgres
+    environment:
+      - POSTGRES_USER=spiceadmin
+      - POSTGRES_PASSWORD=spicepass123
+      - POSTGRES_DB=spicedb
+      - POSTGRES_INITDB_ARGS=--auth-host=trust --auth-local=trust
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+    networks:
+      - spice_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spiceadmin -d spicedb"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Redis - Background Task Queue and Cache
+  redis:
+    image: redis:7-alpine
+    container_name: spice_redis
+    environment:
+      - REDIS_PASSWORD=spicepass123
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - spice_network
+    command: redis-server --requirepass spicepass123
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "spicepass123", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Elasticsearch - Event Projections and Search
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.0
+    container_name: spice_elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - bootstrap.memory_lock=false
+      - "ES_JAVA_OPTS=-Xms256m -Xmx256m"
+      - http.host=0.0.0.0
+      - transport.host=localhost
+    ports:
+      - "9201:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - spice_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Kafka - Event Streaming and Message Queue
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: spice_kafka
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    networks:
+      - spice_network
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Zookeeper - Required for Kafka
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: spice_zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - spice_network
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # MinIO - S3-compatible Object Storage for Instance Events
+  minio:
+    image: minio/minio:latest
+    container_name: spice_minio
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - spice_network
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
   # TerminusDB
   terminusdb:
     image: terminusdb/terminusdb-server:latest
@@ -196,6 +320,10 @@ services:
     restart: unless-stopped
 
 volumes:
+  postgres_data:
+  redis_data:
+  elasticsearch_data:
+  minio_data:
   terminusdb_data:
   bff_data:
 

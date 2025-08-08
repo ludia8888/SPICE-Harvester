@@ -257,9 +257,15 @@ class InputSanitizer:
         if not isinstance(value, str):
             raise SecurityViolationError(f"Expected string, got {type(value)}")
 
-        # 필드명은 영문자, 숫자, 언더스코어만 허용
-        if not re.match(r"^[a-zA-Z][a-zA-Z0-9_]*$", value):
-            raise SecurityViolationError("Field name contains invalid characters")
+        # JSON-LD 필드 (@id, @type, @context 등) 허용
+        if value.startswith("@"):
+            # @로 시작하는 필드는 JSON-LD 필드로 간주
+            if not re.match(r"^@[a-zA-Z][a-zA-Z0-9_]*$", value):
+                raise SecurityViolationError("Invalid JSON-LD field name")
+        else:
+            # 일반 필드명은 영문자, 숫자, 언더스코어만 허용
+            if not re.match(r"^[a-zA-Z][a-zA-Z0-9_]*$", value):
+                raise SecurityViolationError("Field name contains invalid characters")
 
         if len(value) > 100:
             raise SecurityViolationError(f"Field name too long: {len(value)} > 100")

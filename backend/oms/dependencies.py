@@ -63,10 +63,10 @@ class OMSDependencyProvider:
         if not container.has(AsyncTerminusService):
             def create_terminus_service(settings: ApplicationSettings) -> AsyncTerminusService:
                 connection_info = ConnectionConfig(
-                    server_url=settings.services.terminus_url,
-                    user=settings.services.terminus_user,
-                    account=settings.services.terminus_account,
-                    key=settings.services.terminus_key,
+                    server_url=settings.database.terminus_url,
+                    user=settings.database.terminus_user,
+                    account=settings.database.terminus_account,
+                    key=settings.database.terminus_password,
                 )
                 return AsyncTerminusService(connection_info)
             

@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse
 
-from bff.dependencies import LabelMapper, get_label_mapper
+from bff.dependencies import LabelMapper, get_label_mapper, OMSClient, get_oms_client
 
 # Add shared path for common utilities
 from shared.models.requests import ApiResponse, MappingImportRequest
@@ -32,7 +32,7 @@ async def export_mappings(db_name: str, mapper: LabelMapper = Depends(get_label_
     """
     try:
         # 매핑 내보내기
-        mappings = mapper.export_mappings(db_name)
+        mappings = await mapper.export_mappings(db_name)
 
         return JSONResponse(
             content=mappings,
@@ -207,16 +207,13 @@ def _validate_business_logic(mapping_request: Any, sanitized_mappings: dict, db_
 
     return total_mappings
 
-async def _perform_validation(mapping_request: Any, mapper: LabelMapper, db_name: str) -> bool:
+async def _perform_validation(mapping_request: Any, mapper: LabelMapper, db_name: str, oms_client) -> bool:
     """
     실제 매핑 검증 수행
     온톨로지 ID와 레이블 간의 매핑이 유효한지 확인
     """
     try:
-        from bff.services.oms_client import OMSClient
-        
-        # OMS 클라이언트를 통해 실제 온톨로지 데이터 조회
-        oms_client = OMSClient()
+        # OMS 클라이언트는 dependency injection으로 전달받음
         
         # 1. 데이터베이스 존재 확인
         try:
@@ -252,7 +249,7 @@ async def _perform_validation(mapping_request: Any, mapper: LabelMapper, db_name
                 return False
         
         # 5. 중복 레이블 검증
-        existing_mappings = mapper.export_mappings(db_name)
+        existing_mappings = await mapper.export_mappings(db_name)
         existing_class_labels = {cls.get("label") for cls in existing_mappings.get("classes", [])}
         existing_prop_labels = {prop.get("label") for prop in existing_mappings.get("properties", [])}
         
@@ -276,7 +273,7 @@ async def _perform_validation(mapping_request: Any, mapper: LabelMapper, db_name
         logger.error(f"Validation failed with error: {e}")
         return False
 
-def _perform_mapping_import(
+async def _perform_mapping_import(
     mapper: LabelMapper, validated_mappings: dict, db_name: str
 ) -> tuple:
     """Perform the actual mapping import with backup and rollback."""
@@ -284,10 +281,10 @@ def _perform_mapping_import(
     
     try:
         # Backup current mappings before import
-        backup = mapper.export_mappings(db_name)
+        backup = await mapper.export_mappings(db_name)
         
         # Import new mappings
-        mapper.import_mappings(validated_mappings)
+        await mapper.import_mappings(validated_mappings)
         
         processing_time = (datetime.now() - start_time).total_seconds()
         return backup, processing_time, start_time
@@ -295,9 +292,9 @@ def _perform_mapping_import(
     except Exception as import_error:
         # Try to restore backup if import failed
         try:
-            backup = mapper.export_mappings(db_name)
+            backup = await mapper.export_mappings(db_name)
             if backup:
-                mapper.import_mappings(backup)
+                await mapper.import_mappings(backup)
                 logger.info(f"Restored backup mappings for {db_name} after import failure")
         except Exception as restore_error:
             logger.error(f"Failed to restore backup: {restore_error}")
@@ -309,7 +306,10 @@ def _perform_mapping_import(
 
 @router.post("/import", response_model=ApiResponse)
 async def import_mappings(
-    db_name: str, file: UploadFile = File(...), mapper: LabelMapper = Depends(get_label_mapper)
+    db_name: str, 
+    file: UploadFile = File(...), 
+    mapper: LabelMapper = Depends(get_label_mapper),
+    oms_client: OMSClient = Depends(get_oms_client)
 ):
     """
     Import label mappings from JSON file with enhanced security validation.
@@ -344,11 +344,11 @@ async def import_mappings(
             "relationships": mapping_request.relationships,
             "imported_at": start_time.isoformat(),
             "import_hash": content_hash,
-            "validation_passed": await _perform_validation(mapping_request, mapper, db_name),
+            "validation_passed": await _perform_validation(mapping_request, mapper, db_name, oms_client),
         }
         
         # Step 6: Perform import with backup
-        backup, processing_time, start_time = _perform_mapping_import(
+        backup, processing_time, start_time = await _perform_mapping_import(
             mapper, validated_mappings, db_name
         )
         
@@ -392,15 +392,14 @@ async def import_mappings(
 async def validate_mappings(
     db_name: str, 
     file: UploadFile = File(...), 
-    mapper: LabelMapper = Depends(get_label_mapper)
+    mapper: LabelMapper = Depends(get_label_mapper),
+    oms_client: OMSClient = Depends(get_oms_client)
 ):
     """
     매핑 검증 전용 엔드포인트
     실제 가져오기 없이 매핑 유효성만 검증합니다.
     """
     try:
-        from bff.services.oms_client import OMSClient
-        
         # Step 1: 파일 검증
         await _validate_file_upload(file)
         
@@ -414,7 +413,7 @@ async def validate_mappings(
         total_mappings = _validate_business_logic(mapping_request, sanitized_mappings, db_name)
         
         # Step 5: 실제 온톨로지와의 매핑 검증
-        oms_client = OMSClient()
+        # oms_client는 dependency injection으로 전달받음
         validation_details = {
             "unmapped_classes": [],
             "unmapped_properties": [],
@@ -482,7 +481,7 @@ async def validate_mappings(
                 })
         
         # 기존 매핑과의 충돌 검증
-        existing_mappings = mapper.export_mappings(db_name)
+        existing_mappings = await mapper.export_mappings(db_name)
         existing_class_labels = {cls.get("label"): cls.get("class_id") for cls in existing_mappings.get("classes", [])}
         existing_prop_labels = {prop.get("label"): prop.get("property_id") for prop in existing_mappings.get("properties", [])}
         
@@ -557,7 +556,7 @@ async def get_mappings_summary(db_name: str, mapper: LabelMapper = Depends(get_l
     """
     try:
         # 매핑 내보내기로 전체 데이터 가져오기
-        mappings = mapper.export_mappings(db_name)
+        mappings = await mapper.export_mappings(db_name)
 
         # 언어별 통계
         lang_stats = {}
@@ -612,11 +611,11 @@ async def clear_mappings(db_name: str, mapper: LabelMapper = Depends(get_label_m
     """
     try:
         # 먼저 백업용으로 현재 매핑 내보내기
-        backup = mapper.export_mappings(db_name)
+        backup = await mapper.export_mappings(db_name)
 
         # 모든 클래스의 매핑 삭제
         for cls in backup.get("classes", []):
-            mapper.remove_class(db_name, cls["class_id"])
+            await mapper.remove_class(db_name, cls["class_id"])
 
         return {
             "message": "레이블 매핑이 초기화되었습니다",

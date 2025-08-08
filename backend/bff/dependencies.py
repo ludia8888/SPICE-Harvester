@@ -59,7 +59,9 @@ class BFFDependencyProvider:
         # Register OMSClient factory if not already registered
         if not container.has(OMSClient):
             def create_oms_client(settings: ApplicationSettings) -> OMSClient:
-                return OMSClient(settings.services.oms_base_url)
+                # Use ServiceConfig.get_oms_url() instead of settings to properly handle OMS_BASE_URL
+                from shared.config.service_config import ServiceConfig
+                return OMSClient(ServiceConfig.get_oms_url())
             
             container.register_singleton(OMSClient, create_oms_client)
         

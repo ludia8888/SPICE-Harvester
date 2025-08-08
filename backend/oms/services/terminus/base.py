@@ -4,6 +4,7 @@ Base TerminusDB Service
 """
 
 import logging
+import json
 from typing import Any, Dict, Optional, Union
 import httpx
 from functools import wraps
@@ -209,8 +210,27 @@ class BaseTerminusService:
                 raise ValueError(error_msg)
             
             # 응답 파싱
-            if response.headers.get("content-type", "").startswith("application/json"):
-                return response.json()
+            content_type = response.headers.get("content-type", "")
+            if content_type.startswith("application/json"):
+                # Handle JSONL (JSON Lines) format - multiple JSON objects separated by newlines
+                response_text = response.text
+                logger.debug(f"Response content-type: {content_type}")
+                logger.debug(f"Response text preview: {response_text[:200]}...")
+                
+                if response_text and '\n' in response_text and not response_text.strip().startswith('['):
+                    # This is JSONL format
+                    logger.info("Detected JSONL format response")
+                    try:
+                        lines = response_text.strip().split('\n')
+                        result = [json.loads(line) for line in lines if line.strip()]
+                        logger.info(f"Successfully parsed {len(result)} JSONL entries")
+                        return result
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Failed to parse as JSONL: {e}")
+                        # Fall back to regular JSON parsing
+                        return response.json()
+                else:
+                    return response.json()
             else:
                 return response.text
                 

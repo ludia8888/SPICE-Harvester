@@ -104,8 +104,11 @@ async def create_ontology(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Ontology ID is required"
             )
 
-        # TerminusDB에 직접 저장 (create_ontology_class 사용)
-        result = await terminus.create_ontology_class(db_name, ontology_data)
+        # TerminusDB에 직접 저장 (create_ontology 사용)
+        # Convert dict to OntologyBase object
+        from shared.models.ontology import OntologyBase
+        ontology_obj = OntologyBase(**ontology_data)
+        result = await terminus.create_ontology(db_name, ontology_obj)
 
         # 레이블 매핑 등록 (다국어 지원)
         class_id = ontology_data.get("id")

@@ -559,8 +559,8 @@ if settings.is_development:
         return {
             "environment": settings.environment.value,
             "debug_mode": settings.debug,
-            "terminus_url": settings.services.terminus_url,
-            "terminus_user": settings.services.terminus_user,
+            "terminus_url": settings.database.terminus_url,
+            "terminus_user": settings.database.terminus_user,
             "database_settings": {
                 "host": settings.database.host,
                 "port": settings.database.port,

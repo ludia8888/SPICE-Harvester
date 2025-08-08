@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from bff.dependencies import get_oms_client, OMSClientDep
 from bff.services.oms_client import OMSClient
 from shared.models.requests import ApiResponse, DatabaseCreateRequest
-from shared.security.input_sanitizer import sanitize_input, validate_db_name
+from shared.security.input_sanitizer import sanitize_input, validate_db_name, SecurityViolationError
 
 # Add shared path for common utilities
 from shared.utils.language import get_accept_language
@@ -82,6 +82,13 @@ async def create_database(request: DatabaseCreateRequest, oms: OMSClient = OMSCl
             message=f"데이터베이스 '{request.name}'가 생성되었습니다",
             data={"name": request.name, "result": result},
         ).to_dict()
+    except SecurityViolationError as e:
+        # 보안 검증 실패는 400 Bad Request로 처리
+        logger.warning(f"Security validation failed for database '{request.name}': {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -140,6 +147,13 @@ async def delete_database(db_name: str, oms: OMSClient = OMSClientDep):
             "message": f"데이터베이스 '{validated_db_name}'이(가) 삭제되었습니다",
             "database": validated_db_name,
         }
+    except SecurityViolationError as e:
+        # 보안 검증 실패는 400 Bad Request로 처리
+        logger.warning(f"Security validation failed for database '{db_name}': {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -165,6 +179,15 @@ async def get_database(db_name: str, oms: OMSClient = OMSClientDep):
         result = await oms.get_database(db_name)
 
         return {"status": "success", "data": result}
+    except SecurityViolationError as e:
+        # 보안 검증 실패는 400 Bad Request로 처리
+        logger.warning(f"Security validation failed for database '{db_name}': {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to get database '{db_name}': {e}")
 
@@ -195,6 +218,15 @@ async def list_classes(
         classes = result.get("data", {}).get("ontologies", [])
 
         return {"classes": classes, "count": len(classes)}
+    except SecurityViolationError as e:
+        # 보안 검증 실패는 400 Bad Request로 처리
+        logger.warning(f"Security validation failed for database '{db_name}': {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to list classes for database '{db_name}': {e}")
 
@@ -223,8 +255,12 @@ async def create_class(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="클래스 ID (@id)가 필요합니다"
             )
 
+        # Convert @id to id for OMS (OMS expects 'id', not '@id')
+        oms_data = class_data.copy()
+        oms_data["id"] = oms_data.pop("@id", None)
+
         # OMS를 통해 클래스 생성
-        result = await oms.create_ontology(db_name, class_data)
+        result = await oms.create_ontology(db_name, oms_data)
 
         return {"status": "success", "@id": class_data.get("@id"), "data": result}
     except HTTPException:
