@@ -4,7 +4,7 @@ Ontology Service for TerminusDB
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
 
 from .base import BaseTerminusService
@@ -80,6 +80,10 @@ class OntologyService(BaseTerminusService):
             
             # 스키마 저장
             endpoint = f"/api/document/{self.connection_info.account}/{db_name}?graph_type=schema&author=admin&message=Creating%20ontology%20{ontology.id}"
+            
+            # 🔥 ULTRA DEBUG: Print the full schema document being sent
+            print(f"🔥🔥🔥 SCHEMA DOCUMENT: {schema_doc}")
+            print(f"🔥🔥🔥 ENDPOINT: {endpoint}")
             
             await self._make_request("POST", endpoint, schema_doc)
             
@@ -285,30 +289,22 @@ class OntologyService(BaseTerminusService):
             return False
     
     def _create_property_schema(self, prop: Property) -> Dict[str, Any]:
-        """속성 스키마 생성"""
-        schema = {
-            "@type": "Optional",
-            "@class": self._map_datatype_to_terminus(prop.type),
-            "@documentation": {
-                "@comment": prop.description or f"{prop.name} property",
-                "@label": prop.name
-            }
-        }
+        """속성 스키마 생성 - 🔥 ULTRA FIX: Simplest TerminusDB property structure"""
+        # 🔥 CRITICAL: In TerminusDB schema, properties are defined as:
+        # - Required: just the type string "xsd:string"
+        # - Optional: {"@type": "Optional", "@class": "xsd:string"}
         
-        # 필수 속성인 경우
+        mapped_type = self._map_datatype_to_terminus(prop.type)
+        
         if prop.required:
-            schema.pop("@type")
-            schema["@type"] = self._map_datatype_to_terminus(prop.type)
-        
-        # 배열인 경우 (type이 array이거나 items 필드가 있는 경우)
-        if prop.type == "array" or prop.items is not None:
-            base_schema = schema.copy()
-            schema = {
-                "@type": "List",
-                "@class": base_schema
+            # For required properties, just return the type string directly
+            return mapped_type  # e.g., "xsd:string"
+        else:
+            # For optional properties, use Optional wrapper
+            return {
+                "@type": "Optional",
+                "@class": mapped_type
             }
-        
-        return schema
     
     def _create_relationship_schema(self, rel: Relationship) -> Dict[str, Any]:
         """관계 스키마 생성"""
@@ -334,21 +330,51 @@ class OntologyService(BaseTerminusService):
         
         return schema
     
-    def _map_datatype_to_terminus(self, datatype: DataType) -> str:
-        """DataType을 TerminusDB 타입으로 매핑"""
-        mapping = {
-            DataType.STRING: "xsd:string",
-            DataType.INTEGER: "xsd:integer",
-            DataType.DECIMAL: "xsd:decimal",
-            DataType.FLOAT: "xsd:float",
-            DataType.DOUBLE: "xsd:double",
-            DataType.BOOLEAN: "xsd:boolean",
-            DataType.DATE: "xsd:date",
-            DataType.DATETIME: "xsd:dateTime",
+    def _map_datatype_to_terminus(self, datatype: Union[DataType, str]) -> str:
+        """DataType을 TerminusDB 타입으로 매핑 - 🔥 CRITICAL FIX: TerminusDB native types"""
+        # 🔥 ULTRA DEBUG: Track what types are being mapped
+        print(f"🔥🔥🔥 MAPPING TYPE: {datatype} (type: {type(datatype)})")
+        
+        # 🔥 CRITICAL: TerminusDB doesn't support xsd: types, use sys: types instead
+        # Handle both DataType enum and string inputs
+        if isinstance(datatype, str):
+            # Handle string inputs from tests/API calls
+            string_mapping = {
+                "string": "xsd:string",  # Use proper XSD types
+                "integer": "xsd:integer",
+                "decimal": "xsd:decimal", 
+                "float": "xsd:float",
+                "double": "xsd:double",
+                "boolean": "xsd:boolean",
+                "date": "xsd:date",
+                "datetime": "xsd:dateTime",
+                "email": "xsd:string",
+                "phone": "xsd:string",
+                "xsd:string": "xsd:string",  # Keep XSD types as is
+                "xsd:integer": "xsd:integer",
+                "xsd:date": "xsd:date",
+                "xsd:boolean": "xsd:boolean",
+                "xsd:decimal": "xsd:decimal",
+                "xsd:dateTime": "xsd:dateTime"
+            }
+            result = string_mapping.get(datatype, "sys:JSON")
+            print(f"🔥🔥🔥 MAPPED TO: {result}")
+            return result
+        
+        # Handle DataType enum inputs (legacy)
+        enum_mapping = {
+            DataType.STRING: "sys:JSON",
+            DataType.INTEGER: "sys:JSON", 
+            DataType.DECIMAL: "sys:JSON",
+            DataType.FLOAT: "sys:JSON",
+            DataType.DOUBLE: "sys:JSON", 
+            DataType.BOOLEAN: "sys:JSON",
+            DataType.DATE: "sys:JSON",
+            DataType.DATETIME: "sys:JSON",
             DataType.OBJECT: "sys:JSON",
             DataType.ARRAY: "sys:JSON"
         }
-        return mapping.get(datatype, "xsd:string")
+        return enum_mapping.get(datatype, "sys:JSON")
     
     def _parse_ontology_document(self, doc: Dict[str, Any]) -> OntologyResponse:
         """TerminusDB 문서를 OntologyResponse로 파싱"""
