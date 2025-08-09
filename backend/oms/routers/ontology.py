@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 
 # Modernized dependency injection imports
 from oms.dependencies import (
@@ -33,6 +34,7 @@ from oms.services.async_terminus import AsyncTerminusService
 from shared.utils.jsonld import JSONToJSONLDConverter
 from shared.utils.label_mapper import LabelMapper
 from shared.models.common import BaseResponse
+from shared.models.requests import ApiResponse
 
 # shared 모델 import
 from shared.models.ontology import (
@@ -85,9 +87,6 @@ async def create_ontology(
 ) -> OntologyResponse:
     """내부 ID 기반 온톨로지 생성"""
     # 🔥 ULTRA DEBUG! OMS received data
-    print(f"🔥🔥🔥 OMS create_ontology called! db_name={db_name}")
-    print(f"🔥🔥🔥 request data: {request}")
-    logger.warning(f"🔥🔥🔥 OMS create_ontology called! db_name={db_name}, request={request}")
     
     try:
         # 요청 데이터를 dict로 변환
@@ -104,8 +103,68 @@ async def create_ontology(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Ontology ID is required"
             )
 
+        # 레이블을 간단한 문자열로 처리 (Event Sourcing과 직접 생성 모두에서 사용)
+        label_data = ontology_data.get(
+            "label", ontology_data.get("rdfs:label", ontology_data.get("id"))
+        )
+        if isinstance(label_data, dict):
+            # 딕셔너리에서 적절한 언어의 문자열 추출
+            label = label_data.get("en") or label_data.get("ko") or list(label_data.values())[0] if label_data else ontology_data.get("id", "Unknown")
+        else:
+            label = str(label_data) if label_data else ontology_data.get("id", "Unknown")
+
+        # 설명을 간단한 문자열로 처리
+        description_data = ontology_data.get("description", ontology_data.get("rdfs:comment"))
+        description = None
+        if description_data:
+            if isinstance(description_data, dict):
+                description = description_data.get("en") or description_data.get("ko") or list(description_data.values())[0] if description_data else None
+            else:
+                description = str(description_data)
+
+        # Event Sourcing 모드: 명령만 발행 (비동기 처리)
+        if outbox_service:
+            try:
+                async with postgres_db.transaction() as conn:
+                    command = OntologyCommand(
+                        command_type=CommandType.CREATE_ONTOLOGY_CLASS,
+                        aggregate_id=f"{db_name}:{ontology_data.get('id')}",
+                        db_name=db_name,
+                        payload={
+                            "db_name": db_name,
+                            "class_id": ontology_data.get("id"),
+                            "label": label,
+                            "description": description,
+                            "properties": ontology_data.get("properties", []),
+                            "relationships": ontology_data.get("relationships", []),
+                            "parent_class": ontology_data.get("parent_class"),
+                            "abstract": ontology_data.get("abstract", False),
+                        },
+                        metadata={"source": "OMS", "user": "system"}
+                    )
+                    await outbox_service.publish_command(conn, command, topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC)
+                    logger.info(f"🔥 Published CREATE_ONTOLOGY_CLASS command for {db_name}:{ontology_data.get('id')}")
+                    
+                    # Event Sourcing 모드에서는 명령 ID와 상태 반환 (202 Accepted)
+                    return JSONResponse(
+                        status_code=status.HTTP_202_ACCEPTED,
+                        content=ApiResponse.accepted(
+                            message=f"온톨로지 '{ontology_data.get('id')}' 생성 명령이 접수되었습니다",
+                            data={
+                                "command_id": str(command.command_id),
+                                "ontology_id": ontology_data.get("id"),
+                                "database": db_name,
+                                "status": "processing",
+                                "mode": "event_sourcing"
+                            }
+                        ).to_dict()
+                    )
+            except Exception as e:
+                logger.error(f"Failed to publish CREATE_ONTOLOGY_CLASS command: {e}")
+                logger.warning("Falling back to direct creation due to Event Sourcing failure")
+
+        # 직접 생성 모드 (Event Sourcing 비활성화 또는 실패 시)
         # TerminusDB에 직접 저장 (create_ontology 사용)
-        # Convert dict to OntologyBase object
         from shared.models.ontology import OntologyBase
         ontology_obj = OntologyBase(**ontology_data)
         result = await terminus.create_ontology(db_name, ontology_obj)
@@ -136,51 +195,6 @@ async def create_ontology(
                 logger.warning(f"Failed to register labels for {class_id}: {e}")
                 # 레이블 등록 실패는 온톨로지 생성을 실패시키지 않음
 
-        # 레이블을 간단한 문자열로 처리
-        label_data = ontology_data.get(
-            "label", ontology_data.get("rdfs:label", ontology_data.get("id"))
-        )
-        if isinstance(label_data, dict):
-            # 딕셔너리에서 적절한 언어의 문자열 추출
-            label = label_data.get("en") or label_data.get("ko") or list(label_data.values())[0] if label_data else ontology_data.get("id", "Unknown")
-        else:
-            label = str(label_data) if label_data else ontology_data.get("id", "Unknown")
-
-        # 설명을 간단한 문자열로 처리
-        description_data = ontology_data.get("description", ontology_data.get("rdfs:comment"))
-        description = None
-        if description_data:
-            if isinstance(description_data, dict):
-                description = description_data.get("en") or description_data.get("ko") or list(description_data.values())[0] if description_data else None
-            else:
-                description = str(description_data)
-
-        # Outbox 명령 발행 (Event Sourcing)
-        if outbox_service:
-            try:
-                async with postgres_db.transaction() as conn:
-                    command = OntologyCommand(
-                        command_type=CommandType.CREATE_ONTOLOGY_CLASS,
-                        aggregate_id=f"{db_name}:{ontology_data.get('id')}",
-                        db_name=db_name,
-                        payload={
-                            "db_name": db_name,
-                            "class_id": ontology_data.get("id"),
-                            "label": label,
-                            "description": description,
-                            "properties": ontology_data.get("properties", []),
-                            "relationships": ontology_data.get("relationships", []),
-                            "parent_class": ontology_data.get("parent_class"),
-                            "abstract": ontology_data.get("abstract", False),
-                        },
-                        metadata={"source": "OMS", "user": "system"}
-                    )
-                    await outbox_service.publish_command(conn, command, topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC)
-                    logger.info(f"🔥 Published CREATE_ONTOLOGY_CLASS command for {db_name}:{ontology_data.get('id')}")
-            except Exception as e:
-                # 명령 발행 실패는 생성 작업을 실패시키지 않음
-                logger.error(f"Failed to publish outbox command: {e}")
-
         # 생성된 온톨로지 데이터를 OntologyResponse 형식으로 직접 변환
         return OntologyResponse(
             id=ontology_data.get("id"),
@@ -193,6 +207,7 @@ async def create_ontology(
             metadata={
                 "terminus_response": result,  # 원본 TerminusDB 응답 보존
                 "creation_timestamp": datetime.utcnow().isoformat(),
+                "mode": "direct"
             },
         )
 
@@ -210,9 +225,6 @@ async def create_ontology(
         
         error_msg = f"Failed to create ontology: {e}"
         traceback_str = traceback.format_exc()
-        logger.error(f"🔥🔥🔥 ERROR in create_ontology: {error_msg}")
-        logger.error(f"🔥🔥🔥 TRACEBACK:\n{traceback_str}")
-        logger.error(f"🔥🔥🔥 ontology_data was: {ontology_data}")
         
         # 🔥 ULTRA! 에러 타입에 따른 적절한 HTTP 상태 코드 반환
         if isinstance(e, DuplicateOntologyError) or "DocumentIdAlreadyExists" in str(e):

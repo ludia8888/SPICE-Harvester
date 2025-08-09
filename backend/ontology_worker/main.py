@@ -106,9 +106,16 @@ class OntologyWorker:
             
             command_type = command_data.get('command_type')
             
+            import sys
+            sys.stdout.flush()
+            sys.stdout.flush()
+            sys.stdout.flush()
+            
             # Command 유형별 처리
             if command_type == CommandType.CREATE_ONTOLOGY_CLASS:
+                sys.stdout.flush()
                 await self.handle_create_ontology(command_data)
+                sys.stdout.flush()
             elif command_type == CommandType.UPDATE_ONTOLOGY_CLASS:
                 await self.handle_update_ontology(command_data)
             elif command_type == CommandType.DELETE_ONTOLOGY_CLASS:
@@ -136,11 +143,18 @@ class OntologyWorker:
             
     async def handle_create_ontology(self, command_data: Dict[str, Any]) -> None:
         """온톨로지 생성 처리"""
+        import sys
+        sys.stdout.flush()
+        sys.stdout.flush()
+        
         payload = command_data.get('payload', {})
         db_name = payload.get('db_name')  # Fixed: get db_name from payload
         command_id = command_data.get('command_id')
         
-        logger.info(f"Creating ontology class: {payload.get('class_id')} in database: {db_name}")
+        sys.stdout.flush()
+        sys.stdout.flush()
+        sys.stdout.flush()
+        
         
         try:
             # TerminusDB에 온톨로지 생성
@@ -154,7 +168,9 @@ class OntologyWorker:
                 parent_class=payload.get('parent_class'),
                 abstract=payload.get('abstract', False)
             )
+            
             result = await self.terminus_service.create_ontology(db_name, ontology_obj)  # Fixed: call create_ontology with OntologyBase
+            
             
             # 성공 이벤트 생성
             event = OntologyEvent(
@@ -170,7 +186,6 @@ class OntologyWorker:
                     "relationships": payload.get('relationships', []),
                     "parent_class": payload.get('parent_class'),
                     "abstract": payload.get('abstract', False),
-                    "terminus_result": result.model_dump() if hasattr(result, 'model_dump') else str(result)
                 },
                 occurred_by=command_data.get('created_by', 'system')
             )
@@ -184,9 +199,8 @@ class OntologyWorker:
                     command_id=command_id,
                     result={
                         "class_id": payload.get('class_id'),
-                        "message": f"Successfully created ontology class: {payload.get('class_id')}",
-                        "terminus_result": result.model_dump() if hasattr(result, 'model_dump') else str(result)
-                    }
+                        "message": f"Successfully created ontology class: {payload.get('class_id')}"
+                        }
                 )
             
             logger.info(f"Successfully created ontology class: {payload.get('class_id')}")
@@ -228,7 +242,6 @@ class OntologyWorker:
                     "class_id": class_id,
                     "updates": updates,
                     "merged_data": merged_data,
-                    "terminus_result": result.model_dump() if hasattr(result, 'model_dump') else str(result)
                 },
                 occurred_by=command_data.get('created_by', 'system')
             )
@@ -244,8 +257,7 @@ class OntologyWorker:
                         "class_id": class_id,
                         "message": f"Successfully updated ontology class: {class_id}",
                         "updates": updates,
-                        "terminus_result": result.model_dump() if hasattr(result, 'model_dump') else str(result)
-                    }
+                        }
                 )
             
             logger.info(f"Successfully updated ontology class: {class_id}")
@@ -325,7 +337,6 @@ class OntologyWorker:
                     "db_name": db_name,
                     "label": payload.get('label'),
                     "description": payload.get('description'),
-                    "terminus_result": result.model_dump() if hasattr(result, 'model_dump') else str(result)
                 },
                 occurred_by=command_data.get('created_by', 'system')
             )
@@ -376,7 +387,7 @@ class OntologyWorker:
         """이벤트 발행"""
         self.producer.produce(
             topic=AppConfig.ONTOLOGY_EVENTS_TOPIC,
-            value=event.json(),
+            value=event.model_dump_json(),
             key=str(event.event_id).encode('utf-8')
         )
         self.producer.flush()

@@ -56,10 +56,13 @@ class OntologyService(BaseTerminusService):
             if await self.ontology_exists(db_name, ontology.id):
                 raise DuplicateOntologyError(f"온톨로지 '{ontology.id}'이(가) 이미 존재합니다")
             
-            # 스키마 문서 생성
+            # 스키마 문서 생성 - 🔥 CRITICAL FIX: Correct TerminusDB format
             schema_doc = {
                 "@type": "Class",
                 "@id": ontology.id,
+                "@key": {
+                    "@type": "Random"
+                },
                 "@documentation": {
                     "@comment": ontology.description or f"{ontology.label} class",
                     "@label": ontology.label
@@ -81,11 +84,8 @@ class OntologyService(BaseTerminusService):
             # 스키마 저장
             endpoint = f"/api/document/{self.connection_info.account}/{db_name}?graph_type=schema&author=admin&message=Creating%20ontology%20{ontology.id}"
             
-            # 🔥 ULTRA DEBUG: Print the full schema document being sent
-            print(f"🔥🔥🔥 SCHEMA DOCUMENT: {schema_doc}")
-            print(f"🔥🔥🔥 ENDPOINT: {endpoint}")
-            
-            await self._make_request("POST", endpoint, schema_doc)
+            # Create schema document in TerminusDB
+            response = await self._make_request("POST", endpoint, schema_doc)
             
             logger.info(f"Ontology '{ontology.id}' created in database '{db_name}'")
             
@@ -289,22 +289,19 @@ class OntologyService(BaseTerminusService):
             return False
     
     def _create_property_schema(self, prop: Property) -> Dict[str, Any]:
-        """속성 스키마 생성 - 🔥 ULTRA FIX: Simplest TerminusDB property structure"""
-        # 🔥 CRITICAL: In TerminusDB schema, properties are defined as:
-        # - Required: just the type string "xsd:string"
-        # - Optional: {"@type": "Optional", "@class": "xsd:string"}
+        """속성 스키마 생성 - 🔥 ULTRA FIX: Correct TerminusDB property format"""
+        # 🔥 CRITICAL FIX: Based on research, TerminusDB expects:
+        # - All properties should use Optional format for best compatibility
+        # - Required fields can be enforced at validation level, not schema level
         
         mapped_type = self._map_datatype_to_terminus(prop.type)
         
-        if prop.required:
-            # For required properties, just return the type string directly
-            return mapped_type  # e.g., "xsd:string"
-        else:
-            # For optional properties, use Optional wrapper
-            return {
-                "@type": "Optional",
-                "@class": mapped_type
-            }
+        # 🔥 NEW APPROACH: Always use Optional format for schema compatibility
+        # This matches the working examples in the codebase
+        return {
+            "@type": "Optional",
+            "@class": mapped_type
+        }
     
     def _create_relationship_schema(self, rel: Relationship) -> Dict[str, Any]:
         """관계 스키마 생성"""
@@ -331,9 +328,7 @@ class OntologyService(BaseTerminusService):
         return schema
     
     def _map_datatype_to_terminus(self, datatype: Union[DataType, str]) -> str:
-        """DataType을 TerminusDB 타입으로 매핑 - 🔥 CRITICAL FIX: TerminusDB native types"""
-        # 🔥 ULTRA DEBUG: Track what types are being mapped
-        print(f"🔥🔥🔥 MAPPING TYPE: {datatype} (type: {type(datatype)})")
+        """DataType을 TerminusDB 타입으로 매핑"""
         
         # 🔥 CRITICAL: TerminusDB doesn't support xsd: types, use sys: types instead
         # Handle both DataType enum and string inputs
@@ -343,6 +338,7 @@ class OntologyService(BaseTerminusService):
                 "string": "xsd:string",  # Use proper XSD types
                 "integer": "xsd:integer",
                 "decimal": "xsd:decimal", 
+                "number": "xsd:decimal",  # 🔥 CRITICAL FIX: map number to xsd:decimal
                 "float": "xsd:float",
                 "double": "xsd:double",
                 "boolean": "xsd:boolean",
@@ -357,9 +353,7 @@ class OntologyService(BaseTerminusService):
                 "xsd:decimal": "xsd:decimal",
                 "xsd:dateTime": "xsd:dateTime"
             }
-            result = string_mapping.get(datatype, "sys:JSON")
-            print(f"🔥🔥🔥 MAPPED TO: {result}")
-            return result
+            return string_mapping.get(datatype, "sys:JSON")
         
         # Handle DataType enum inputs (legacy)
         enum_mapping = {

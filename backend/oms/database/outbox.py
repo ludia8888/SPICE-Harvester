@@ -75,7 +75,7 @@ class OutboxService:
             command.aggregate_type,
             command.aggregate_id,
             topic,
-            command.json()
+            command.model_dump_json()
         )
         
         return message_id
@@ -111,7 +111,7 @@ class OutboxService:
             event.aggregate_type,
             event.aggregate_id,
             topic,
-            event.json()
+            event.model_dump_json()
         )
         
         return message_id

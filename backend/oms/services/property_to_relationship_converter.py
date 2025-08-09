@@ -36,8 +36,6 @@ class PropertyToRelationshipConverter:
         logger.info(f"🔄 Processing class data for property→relationship conversion: {class_data.get('id')}")
         
         # 🔥 ULTRA DEBUG! Input data analysis
-        logger.error(f"🔥🔥🔥 PropertyToRelationshipConverter.process_class_data() CALLED!")
-        logger.error(f"🔥🔥🔥 INPUT CLASS DATA: {json.dumps(class_data, indent=2, ensure_ascii=False)}")
         
         # 복사본 생성
         processed_data = class_data.copy()
@@ -46,9 +44,7 @@ class PropertyToRelationshipConverter:
         properties = class_data.get("properties", [])
         relationships = class_data.get("relationships", [])
         
-        logger.error(f"🔥🔥🔥 FOUND {len(properties)} PROPERTIES TO ANALYZE")
         for i, prop in enumerate(properties):
-            logger.error(f"🔥🔥🔥 PROPERTY {i+1}: {json.dumps(prop, indent=2, ensure_ascii=False)}")
         
         # 변환된 속성과 관계를 저장할 리스트
         final_properties = []
@@ -109,14 +105,8 @@ class PropertyToRelationshipConverter:
         logger.info(f"📊 Total relationships: {len(processed_data['relationships'])} (after deduplication)")
         
         # 🔥 ULTRA DEBUG! Output data analysis
-        logger.error(f"🔥🔥🔥 PropertyToRelationshipConverter.process_class_data() OUTPUT:")
-        logger.error(f"🔥🔥🔥 OUTPUT CLASS DATA: {json.dumps(processed_data, indent=2, ensure_ascii=False)}")
-        logger.error(f"🔥🔥🔥 FINAL PROPERTIES ({len(final_properties)}):")
         for i, prop in enumerate(final_properties):
-            logger.error(f"🔥🔥🔥   PROPERTY {i+1}: {json.dumps(prop, indent=2, ensure_ascii=False)}")
-        logger.error(f"🔥🔥🔥 CONVERTED RELATIONSHIPS ({len(converted_relationships)}):")
         for i, rel in enumerate(converted_relationships):
-            logger.error(f"🔥🔥🔥   RELATIONSHIP {i+1}: {json.dumps(rel, indent=2, ensure_ascii=False)}")
         
         return processed_data
     

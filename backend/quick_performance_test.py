@@ -29,6 +29,23 @@ async def test_event_sourcing_complete():
         ) as resp:
             result = await resp.json()
             print(f"   Database creation response: {resp.status}")
+            if resp.status == 202:
+                print(f"   ✅ Event Sourcing mode active - command accepted")
+            
+        # Wait for database to be created asynchronously
+        if resp.status == 202:
+            print(f"\n⏳ Waiting for database to be created...")
+            for i in range(10):  # Try for 10 seconds
+                await asyncio.sleep(1)
+                async with session.get(
+                    f"http://localhost:8000/api/v1/database/exists/{test_db}"
+                ) as check_resp:
+                    check_result = await check_resp.json()
+                    if check_result.get('data', {}).get('exists'):
+                        print(f"   ✅ Database created after {i+1} seconds")
+                        break
+            else:
+                print(f"   ⚠️ Database not created after 10 seconds")
             
         # 2. Create ontology class  
         print(f"\n2️⃣ Creating ontology class: {test_class}")

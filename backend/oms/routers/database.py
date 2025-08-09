@@ -9,6 +9,7 @@ from typing import Any, Dict, List
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import JSONResponse
 
 from oms.dependencies import TerminusServiceDep, OutboxServiceDep, get_outbox_service
 from oms.services.async_terminus import AsyncTerminusService
@@ -44,7 +45,7 @@ async def list_databases(terminus_service: AsyncTerminusService = TerminusServic
         )
 
 
-@router.post("/create", status_code=status.HTTP_201_CREATED)
+@router.post("/create")
 async def create_database(
     request: dict, 
     terminus_service: AsyncTerminusService = TerminusServiceDep,
@@ -76,11 +77,10 @@ async def create_database(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="설명이 너무 깁니다 (500자 이하)"
             )
 
-        # 데이터베이스 생성
-        result = await terminus_service.create_database(db_name, description=description)
-
-        # Event Sourcing: CREATE_DATABASE command 발행
+        # Event Sourcing 모드: 명령만 발행 (비동기 처리)
+        logger.info(f"🔥 DEBUG: outbox_service = {outbox_service is not None}")
         if outbox_service:
+            logger.info(f"🔥 Event Sourcing mode ACTIVE for database: {db_name}")
             try:
                 async with postgres_db.transaction() as conn:
                     command = DatabaseCommand(
@@ -94,14 +94,37 @@ async def create_database(
                     )
                     await outbox_service.publish_command(conn, command)
                     logger.info(f"🔥 Published CREATE_DATABASE command for {db_name}")
+                    
+                    # Event Sourcing 모드에서는 명령 ID와 상태 반환 (202 Accepted)
+                    return JSONResponse(
+                        status_code=status.HTTP_202_ACCEPTED,
+                        content=ApiResponse.accepted(
+                            message=f"데이터베이스 '{db_name}' 생성 명령이 접수되었습니다",
+                            data={
+                                "command_id": str(command.command_id),
+                                "database_name": db_name,
+                                "status": "processing",
+                                "mode": "event_sourcing"
+                            }
+                        ).to_dict()
+                    )
             except Exception as e:
                 logger.error(f"Failed to publish CREATE_DATABASE command: {e}")
-                # Continue - outbox failure is non-fatal
-
-        return ApiResponse.created(
-            message=f"데이터베이스 '{db_name}'이(가) 생성되었습니다",
-            data=result
-        ).to_dict()
+                # Event Sourcing 실패 시 직접 생성으로 폴백
+                logger.warning("Falling back to direct creation due to Event Sourcing failure")
+        else:
+            logger.warning(f"🔥 OutboxService is None - using direct creation mode")
+        
+        # 직접 생성 모드 (Event Sourcing 비활성화 또는 실패 시)
+        result = await terminus_service.create_database(db_name, description=description)
+        
+        return JSONResponse(
+            status_code=status.HTTP_201_CREATED,
+            content=ApiResponse.created(
+                message=f"데이터베이스 '{db_name}'이(가) 생성되었습니다",
+                data={**result, "mode": "direct"}
+            ).to_dict()
+        )
     except SecurityViolationError as e:
         logger.warning(f"Security violation in create_database: {e}")
         raise HTTPException(
@@ -170,10 +193,7 @@ async def delete_database(
                 detail=f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다",
             )
 
-        # 데이터베이스 삭제 실행
-        await terminus_service.delete_database(db_name)
-
-        # Event Sourcing: DELETE_DATABASE command 발행
+        # Event Sourcing 모드: 명령만 발행 (비동기 처리)
         if outbox_service:
             try:
                 async with postgres_db.transaction() as conn:
@@ -187,14 +207,35 @@ async def delete_database(
                     )
                     await outbox_service.publish_command(conn, command)
                     logger.info(f"🔥 Published DELETE_DATABASE command for {db_name}")
+                    
+                    # Event Sourcing 모드에서는 명령 ID와 상태 반환 (202 Accepted)
+                    return JSONResponse(
+                        status_code=status.HTTP_202_ACCEPTED,
+                        content=ApiResponse.accepted(
+                            message=f"데이터베이스 '{db_name}' 삭제 명령이 접수되었습니다",
+                            data={
+                                "command_id": str(command.command_id),
+                                "database_name": db_name,
+                                "status": "processing",
+                                "mode": "event_sourcing"
+                            }
+                        ).to_dict()
+                    )
             except Exception as e:
                 logger.error(f"Failed to publish DELETE_DATABASE command: {e}")
-                # Continue - outbox failure is non-fatal
+                # Event Sourcing 실패 시 직접 삭제로 폴백
+                logger.warning("Falling back to direct deletion due to Event Sourcing failure")
 
-        return ApiResponse.success(
-            message=f"데이터베이스 '{db_name}'이(가) 삭제되었습니다",
-            data={"database": db_name}
-        ).to_dict()
+        # 직접 삭제 모드 (Event Sourcing 비활성화 또는 실패 시)
+        await terminus_service.delete_database(db_name)
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=ApiResponse.success(
+                message=f"데이터베이스 '{db_name}'이(가) 삭제되었습니다",
+                data={"database": db_name, "mode": "direct"}
+            ).to_dict()
+        )
     except SecurityViolationError as e:
         logger.warning(f"Security violation in delete_database: {e}")
         raise HTTPException(

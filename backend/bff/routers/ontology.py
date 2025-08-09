@@ -103,8 +103,6 @@ async def create_ontology(
     레이블 기반으로 ID가 자동 생성됩니다.
     """
     # 🔥 ULTRA DEBUG! Force logging to check if route is called
-    print(f"🔥🔥🔥 CREATE_ONTOLOGY CALLED! db_name={db_name}, ontology={ontology}")
-    logger.warning(f"🔥🔥🔥 CREATE_ONTOLOGY CALLED! db_name={db_name}, ontology={ontology}")
     
     try:
         # 입력 데이터 보안 검증

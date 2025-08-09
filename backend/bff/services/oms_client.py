@@ -114,7 +114,6 @@ class OMSClient:
         try:
             # 🔥 ULTRA DEBUG! Log what we're sending to OMS
             import json
-            debug_log = f"🔥🔥🔥 OMSClient sending to OMS: {json.dumps(ontology_data, ensure_ascii=False, indent=2)}"
             logger.warning(debug_log)
             print(debug_log)
             

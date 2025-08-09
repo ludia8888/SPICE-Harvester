@@ -312,7 +312,14 @@ class AsyncTerminusService:
 
     async def create_ontology(self, db_name: str, ontology_data: OntologyBase) -> OntologyResponse:
         """온톨로지 생성"""
-        return await self.ontology_service.create_ontology(db_name, ontology_data)
+        # Create ontology using TerminusDB service
+        try:
+            result = await self.ontology_service.create_ontology(db_name, ontology_data)
+            logger.info(f"Successfully created ontology '{ontology_data.id}' in database '{db_name}'")
+            return result
+        except Exception as e:
+            logger.error(f"Failed to create ontology '{ontology_data.id}': {e}")
+            raise
 
     async def update_ontology(
         self, 
