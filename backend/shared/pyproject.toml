@@ -39,6 +39,7 @@ dependencies = [
     # 🗄️ Database & Caching - GHOST DEPENDENCY RESOLVED
     "redis[hiredis]==5.0.1",   # ✅ RedisService - 모든 워커에서 사용
     "elasticsearch==8.11.0",   # ✅ ElasticsearchService - 검색 및 인덱싱
+    "aiohttp==3.9.1",         # ✅ Elasticsearch async client dependency
     "asyncpg==0.29.0",        # ✅ PostgreSQL 비동기 드라이버 - 모든 워커
     "aiosqlite==0.19.0",      # SQLite 비동기 드라이버 - 개발/테스트
     

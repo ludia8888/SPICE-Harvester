@@ -18,6 +18,7 @@ import asyncpg
 
 from shared.config.service_config import ServiceConfig
 from shared.config.app_config import AppConfig
+from shared.config.settings import ApplicationSettings
 from shared.models.commands import (
     BaseCommand, CommandType, CommandStatus, 
     InstanceCommand
@@ -88,13 +89,14 @@ class InstanceWorker:
         await self.terminus_service.connect()
         
         # Redis 연결 설정
-        self.redis_service = create_redis_service()
+        settings = ApplicationSettings()
+        self.redis_service = create_redis_service(settings)
         await self.redis_service.connect()
         self.command_status_service = CommandStatusService(self.redis_service)
         logger.info("Redis connection established")
         
         # S3/MinIO 연결 설정
-        self.storage_service = create_storage_service()
+        self.storage_service = create_storage_service(settings)
         # 버킷 생성 (없으면)
         await self.storage_service.create_bucket(self.instance_bucket)
         logger.info(f"Storage service initialized with bucket: {self.instance_bucket}")

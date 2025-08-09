@@ -101,7 +101,7 @@ class TestCriticalUserFlows:
     
     # Infrastructure services (internal)
     POSTGRES_HOST = "localhost"
-    POSTGRES_PORT = 5432
+    POSTGRES_PORT = 5433  # Using spice-foundry-postgres on port 5433
     REDIS_HOST = "localhost"
     REDIS_PORT = 6379
     KAFKA_HOST = "localhost"
@@ -645,7 +645,7 @@ class TestCriticalUserFlows:
             
             # Check for command in outbox
             command_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM outbox WHERE message_type = $1 AND payload->>'database_name' = $2",
+                "SELECT COUNT(*) FROM spice_outbox.outbox WHERE message_type = $1 AND payload->>'database_name' = $2",
                 command_type, db_name
             )
             
@@ -1645,7 +1645,7 @@ class TestCriticalUserFlows:
             
             # Check for processed outbox entries
             processed_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM outbox WHERE processed = true AND payload->>'database_name' = $1",
+                "SELECT COUNT(*) FROM spice_outbox.outbox WHERE processed_at IS NOT NULL AND payload->>'database_name' = $1",
                 db_name
             )
             
@@ -1722,7 +1722,7 @@ class TestCriticalUserFlows:
             "test'; DROP TABLE databases; --",
             "test OR 1=1; --",
             "test'; INSERT INTO users VALUES ('admin', 'hacked'); --",
-            f"{db_name}'; UPDATE outbox SET processed=true; --"
+            f"{db_name}'; UPDATE spice_outbox.outbox SET processed_at=NOW(); --"
         ]
         
         for malicious_name in malicious_names:
@@ -1918,7 +1918,7 @@ class TestCriticalUserFlows:
                 
                 # Verify outbox events don't contain sensitive information
                 events = await conn.fetch(
-                    "SELECT payload FROM outbox WHERE payload->>'database_name' = $1 LIMIT 5",
+                    "SELECT payload FROM spice_outbox.outbox WHERE payload->>'database_name' = $1 LIMIT 5",
                     db_name
                 )
                 

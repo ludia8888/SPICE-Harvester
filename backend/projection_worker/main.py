@@ -21,6 +21,7 @@ from shared.config.search_config import (
     DEFAULT_INDEX_SETTINGS
 )
 from shared.config.app_config import AppConfig
+from shared.config.settings import ApplicationSettings
 from shared.models.events import (
     BaseEvent, EventType,
     InstanceEvent,
@@ -92,12 +93,13 @@ class ProjectionWorker:
         })
         
         # Redis 연결 설정 (온톨로지 캐싱용)
-        self.redis_service = create_redis_service()
+        settings = ApplicationSettings()
+        self.redis_service = create_redis_service(settings)
         await self.redis_service.connect()
         logger.info("Redis connection established")
         
         # Elasticsearch 연결 설정
-        self.elasticsearch_service = create_elasticsearch_service()
+        self.elasticsearch_service = create_elasticsearch_service(settings)
         await self.elasticsearch_service.connect()
         logger.info("Elasticsearch connection established")
         

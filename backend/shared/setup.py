@@ -29,6 +29,7 @@ setup(
         # 🗄️ Database & Caching
         "redis[hiredis]==5.0.1",
         "elasticsearch==8.11.0",
+        "aiohttp==3.9.1",  # Required for Elasticsearch async client
         "asyncpg==0.29.0",
         "aiosqlite==0.19.0",
         

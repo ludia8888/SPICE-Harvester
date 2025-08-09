@@ -15,6 +15,7 @@ import asyncpg
 
 from shared.config.service_config import ServiceConfig
 from shared.config.app_config import AppConfig
+from shared.config.settings import ApplicationSettings
 from shared.models.commands import (
     BaseCommand, CommandType, CommandStatus, 
     OntologyCommand, DatabaseCommand, BranchCommand
@@ -81,7 +82,8 @@ class OntologyWorker:
         await self.terminus_service.connect()
         
         # Redis 연결 설정
-        self.redis_service = create_redis_service()
+        settings = ApplicationSettings()
+        self.redis_service = create_redis_service(settings)
         await self.redis_service.connect()
         self.command_status_service = CommandStatusService(self.redis_service)
         logger.info("Redis connection established")
