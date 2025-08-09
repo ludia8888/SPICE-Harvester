@@ -80,7 +80,7 @@ async def test_event_sourcing_complete():
                 FROM spice_outbox.outbox
                 WHERE message_type = 'COMMAND'
                 AND payload->>'command_type' = 'CREATE_DATABASE'
-                AND payload->>'database_name' = $1
+                AND payload->'payload'->>'database_name' = $1
                 ORDER BY created_at DESC
                 LIMIT 1
             """, test_db)
@@ -99,8 +99,8 @@ async def test_event_sourcing_complete():
                 FROM spice_outbox.outbox
                 WHERE message_type = 'COMMAND'
                 AND payload->>'command_type' = 'CREATE_ONTOLOGY_CLASS'
-                AND payload->>'db_name' = $1
-                AND payload->>'class_id' = $2
+                AND payload->'payload'->>'db_name' = $1
+                AND payload->'payload'->>'class_id' = $2
                 ORDER BY created_at DESC
                 LIMIT 1
             """, test_db, test_class)
@@ -112,11 +112,12 @@ async def test_event_sourcing_complete():
                 print(f"      Retry count: {cmd['retry_count']}")
                 
                 # Verify payload structure
-                payload = json.loads(cmd['payload'])
-                if 'class_id' in payload:
-                    print(f"      ✅ Payload contains 'class_id': {payload['class_id']}")
+                full_payload = json.loads(cmd['payload'])
+                nested_payload = full_payload.get('payload', {})
+                if 'class_id' in nested_payload:
+                    print(f"      ✅ Payload contains 'class_id': {nested_payload['class_id']}")
                 else:
-                    print(f"      ❌ Payload missing 'class_id'! Keys: {list(payload.keys())}")
+                    print(f"      ❌ Payload missing 'class_id'! Keys: {list(nested_payload.keys())}")
             else:
                 print(f"   ⚠️  No CREATE_ONTOLOGY_CLASS command found for {test_db}:{test_class}")
                     
@@ -124,8 +125,8 @@ async def test_event_sourcing_complete():
             await conn.close()
             
         # 4. Wait a moment for processing
-        print(f"\n4️⃣ Waiting 3 seconds for Event Sourcing to process...")
-        await asyncio.sleep(3)
+        print(f"\n4️⃣ Waiting 7 seconds for Event Sourcing to process...")
+        await asyncio.sleep(7)
         
         # 5. Verify in TerminusDB
         print(f"\n5️⃣ Verifying in TerminusDB...")

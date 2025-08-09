@@ -240,12 +240,12 @@ services:
       dockerfile: ./message_relay/Dockerfile
     container_name: spice_message_relay
     environment:
-      - POSTGRES_HOST=${POSTGRES_HOST:-postgres}
-      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - POSTGRES_HOST=${POSTGRES_HOST:-host.docker.internal}
+      - POSTGRES_PORT=${POSTGRES_PORT:-5433}
       - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
       - POSTGRES_DB=${POSTGRES_DB:-spicedb}
-      - KAFKA_HOST=${KAFKA_HOST:-kafka}
+      - KAFKA_HOST=${KAFKA_HOST:-spice_kafka}
       - KAFKA_PORT=${KAFKA_PORT:-29092}
       - MESSAGE_RELAY_BATCH_SIZE=${MESSAGE_RELAY_BATCH_SIZE:-100}
       - MESSAGE_RELAY_POLL_INTERVAL=${MESSAGE_RELAY_POLL_INTERVAL:-5}
@@ -263,12 +263,15 @@ services:
       dockerfile: ./ontology_worker/Dockerfile
     container_name: spice_ontology_worker
     environment:
-      - KAFKA_HOST=${KAFKA_HOST:-kafka}
+      - KAFKA_HOST=${KAFKA_HOST:-spice_kafka}
       - KAFKA_PORT=${KAFKA_PORT:-29092}
-      - TERMINUS_SERVER_URL=${TERMINUS_SERVER_URL:-http://terminusdb:6363}
+      - TERMINUS_SERVER_URL=${TERMINUS_SERVER_URL:-http://spice_terminusdb:6363}
       - TERMINUS_USER=${TERMINUS_USER:-admin}
       - TERMINUS_ACCOUNT=${TERMINUS_ACCOUNT:-admin}
       - TERMINUS_KEY=${TERMINUS_KEY:-${TERMINUSDB_ADMIN_PASS:-admin123}}
+      - REDIS_HOST=${REDIS_HOST:-host.docker.internal}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-spicepass123}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       - terminusdb

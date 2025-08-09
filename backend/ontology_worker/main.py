@@ -136,15 +136,25 @@ class OntologyWorker:
             
     async def handle_create_ontology(self, command_data: Dict[str, Any]) -> None:
         """온톨로지 생성 처리"""
-        db_name = command_data.get('db_name')
         payload = command_data.get('payload', {})
+        db_name = payload.get('db_name')  # Fixed: get db_name from payload
         command_id = command_data.get('command_id')
         
         logger.info(f"Creating ontology class: {payload.get('class_id')} in database: {db_name}")
         
         try:
             # TerminusDB에 온톨로지 생성
-            result = await self.terminus_service.create_ontology_class(db_name, payload)
+            from shared.models.ontology import OntologyBase
+            ontology_obj = OntologyBase(
+                id=payload.get('class_id'),
+                label=payload.get('label'),
+                description=payload.get('description'),
+                properties=payload.get('properties', []),
+                relationships=payload.get('relationships', []),
+                parent_class=payload.get('parent_class'),
+                abstract=payload.get('abstract', False)
+            )
+            result = await self.terminus_service.create_ontology(db_name, ontology_obj)  # Fixed: call create_ontology with OntologyBase
             
             # 성공 이벤트 생성
             event = OntologyEvent(
@@ -160,7 +170,7 @@ class OntologyWorker:
                     "relationships": payload.get('relationships', []),
                     "parent_class": payload.get('parent_class'),
                     "abstract": payload.get('abstract', False),
-                    "terminus_result": result
+                    "terminus_result": result.model_dump() if hasattr(result, 'model_dump') else str(result)
                 },
                 occurred_by=command_data.get('created_by', 'system')
             )
@@ -175,7 +185,7 @@ class OntologyWorker:
                     result={
                         "class_id": payload.get('class_id'),
                         "message": f"Successfully created ontology class: {payload.get('class_id')}",
-                        "terminus_result": result
+                        "terminus_result": result.model_dump() if hasattr(result, 'model_dump') else str(result)
                     }
                 )
             
@@ -218,7 +228,7 @@ class OntologyWorker:
                     "class_id": class_id,
                     "updates": updates,
                     "merged_data": merged_data,
-                    "terminus_result": result
+                    "terminus_result": result.model_dump() if hasattr(result, 'model_dump') else str(result)
                 },
                 occurred_by=command_data.get('created_by', 'system')
             )
@@ -234,7 +244,7 @@ class OntologyWorker:
                         "class_id": class_id,
                         "message": f"Successfully updated ontology class: {class_id}",
                         "updates": updates,
-                        "terminus_result": result
+                        "terminus_result": result.model_dump() if hasattr(result, 'model_dump') else str(result)
                     }
                 )
             
@@ -294,7 +304,7 @@ class OntologyWorker:
     async def handle_create_database(self, command_data: Dict[str, Any]) -> None:
         """데이터베이스 생성 처리"""
         payload = command_data.get('payload', {})
-        db_name = payload.get('name')
+        db_name = payload.get('database_name')  # Fixed: was 'name', should be 'database_name'
         command_id = command_data.get('command_id')
         
         logger.info(f"Creating database: {db_name}")
@@ -303,8 +313,7 @@ class OntologyWorker:
             # TerminusDB에 데이터베이스 생성
             result = await self.terminus_service.create_database(
                 db_name,
-                payload.get('label'),
-                payload.get('description')
+                payload.get('description', '')  # Fixed: only pass 2 args, no label
             )
             
             # 성공 이벤트 생성
@@ -316,7 +325,7 @@ class OntologyWorker:
                     "db_name": db_name,
                     "label": payload.get('label'),
                     "description": payload.get('description'),
-                    "terminus_result": result
+                    "terminus_result": result.model_dump() if hasattr(result, 'model_dump') else str(result)
                 },
                 occurred_by=command_data.get('created_by', 'system')
             )
@@ -332,7 +341,7 @@ class OntologyWorker:
     async def handle_delete_database(self, command_data: Dict[str, Any]) -> None:
         """데이터베이스 삭제 처리"""
         payload = command_data.get('payload', {})
-        db_name = payload.get('name')
+        db_name = payload.get('database_name')  # Fixed: was 'name', should be 'database_name'
         command_id = command_data.get('command_id')
         
         logger.info(f"Deleting database: {db_name}")
