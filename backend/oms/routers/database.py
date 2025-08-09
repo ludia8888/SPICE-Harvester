@@ -1,16 +1,21 @@
 """
 데이터베이스 관리 라우터
 데이터베이스 생성, 삭제, 목록 조회 등을 담당
+Event Sourcing을 위한 Outbox 패턴 구현
 """
 
 import logging
 from typing import Any, Dict, List
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, status
 
-from oms.dependencies import TerminusServiceDep
+from oms.dependencies import TerminusServiceDep, OutboxServiceDep, get_outbox_service
 from oms.services.async_terminus import AsyncTerminusService
+from oms.database.outbox import OutboxService
+from oms.database.postgres import db as postgres_db
 from shared.models.requests import ApiResponse
+from shared.models.commands import DatabaseCommand, CommandType
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
 
 logger = logging.getLogger(__name__)
@@ -41,12 +46,14 @@ async def list_databases(terminus_service: AsyncTerminusService = TerminusServic
 
 @router.post("/create", status_code=status.HTTP_201_CREATED)
 async def create_database(
-    request: dict, terminus_service: AsyncTerminusService = TerminusServiceDep
+    request: dict, 
+    terminus_service: AsyncTerminusService = TerminusServiceDep,
+    outbox_service: OutboxService = OutboxServiceDep
 ):
     """
     새 데이터베이스 생성
 
-    지정된 이름으로 새 데이터베이스를 생성합니다.
+    지정된 이름으로 새 데이터베이스를 생성하고 Event Sourcing을 위한 Command를 발행합니다.
     """
     try:
         # 입력 데이터 보안 검증 및 정화
@@ -71,6 +78,25 @@ async def create_database(
 
         # 데이터베이스 생성
         result = await terminus_service.create_database(db_name, description=description)
+
+        # Event Sourcing: CREATE_DATABASE command 발행
+        if outbox_service:
+            try:
+                async with postgres_db.transaction() as conn:
+                    command = DatabaseCommand(
+                        command_type=CommandType.CREATE_DATABASE,
+                        aggregate_id=db_name,
+                        payload={
+                            "database_name": db_name,
+                            "description": description
+                        },
+                        metadata={"source": "OMS", "user": "system"}
+                    )
+                    await outbox_service.publish_command(conn, command)
+                    logger.info(f"🔥 Published CREATE_DATABASE command for {db_name}")
+            except Exception as e:
+                logger.error(f"Failed to publish CREATE_DATABASE command: {e}")
+                # Continue - outbox failure is non-fatal
 
         return ApiResponse.created(
             message=f"데이터베이스 '{db_name}'이(가) 생성되었습니다",
@@ -115,12 +141,14 @@ async def create_database(
 
 @router.delete("/{db_name}")
 async def delete_database(
-    db_name: str, terminus_service: AsyncTerminusService = TerminusServiceDep
+    db_name: str, 
+    terminus_service: AsyncTerminusService = TerminusServiceDep,
+    outbox_service: OutboxService = OutboxServiceDep
 ):
     """
     데이터베이스 삭제
 
-    지정된 데이터베이스를 삭제합니다.
+    지정된 데이터베이스를 삭제하고 Event Sourcing을 위한 Command를 발행합니다.
     주의: 이 작업은 되돌릴 수 없습니다!
     """
     try:
@@ -144,6 +172,24 @@ async def delete_database(
 
         # 데이터베이스 삭제 실행
         await terminus_service.delete_database(db_name)
+
+        # Event Sourcing: DELETE_DATABASE command 발행
+        if outbox_service:
+            try:
+                async with postgres_db.transaction() as conn:
+                    command = DatabaseCommand(
+                        command_type=CommandType.DELETE_DATABASE,
+                        aggregate_id=db_name,
+                        payload={
+                            "database_name": db_name
+                        },
+                        metadata={"source": "OMS", "user": "system"}
+                    )
+                    await outbox_service.publish_command(conn, command)
+                    logger.info(f"🔥 Published DELETE_DATABASE command for {db_name}")
+            except Exception as e:
+                logger.error(f"Failed to publish DELETE_DATABASE command: {e}")
+                # Continue - outbox failure is non-fatal
 
         return ApiResponse.success(
             message=f"데이터베이스 '{db_name}'이(가) 삭제되었습니다",

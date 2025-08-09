@@ -155,16 +155,15 @@ async def create_ontology(
             else:
                 description = str(description_data)
 
-        # Outbox 이벤트 발행 (선택적)
-        if outbox_service and postgres_db.pool:
+        # Outbox 명령 발행 (Event Sourcing)
+        if outbox_service:
             try:
                 async with postgres_db.transaction() as conn:
-                    await outbox_service.publish_event(
-                        connection=conn,
-                        event_type=EventType.ONTOLOGY_CLASS_CREATED,
-                        aggregate_type="OntologyClass",
-                        aggregate_id=ontology_data.get("id"),
-                        data={
+                    command = OntologyCommand(
+                        command_type=CommandType.CREATE_ONTOLOGY_CLASS,
+                        aggregate_id=f"{db_name}:{ontology_data.get('id')}",
+                        db_name=db_name,
+                        payload={
                             "db_name": db_name,
                             "class_id": ontology_data.get("id"),
                             "label": label,
@@ -174,16 +173,13 @@ async def create_ontology(
                             "parent_class": ontology_data.get("parent_class"),
                             "abstract": ontology_data.get("abstract", False),
                         },
-                        topic=AppConfig.ONTOLOGY_EVENTS_TOPIC,
-                        additional_context={
-                            "user": "system",  # TODO: 실제 사용자 정보 추가
-                            "source": "oms_api",
-                        }
+                        metadata={"source": "OMS", "user": "system"}
                     )
-                    logger.info(f"Published ONTOLOGY_CLASS_CREATED event for {ontology_data.get('id')}")
+                    await outbox_service.publish_command(conn, command, topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC)
+                    logger.info(f"🔥 Published CREATE_ONTOLOGY_CLASS command for {db_name}:{ontology_data.get('id')}")
             except Exception as e:
-                # 이벤트 발행 실패는 생성 작업을 실패시키지 않음
-                logger.error(f"Failed to publish outbox event: {e}")
+                # 명령 발행 실패는 생성 작업을 실패시키지 않음
+                logger.error(f"Failed to publish outbox command: {e}")
 
         # 생성된 온톨로지 데이터를 OntologyResponse 형식으로 직접 변환
         return OntologyResponse(
