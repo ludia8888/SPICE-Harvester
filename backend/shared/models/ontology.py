@@ -9,6 +9,9 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+# Import VersionedModelMixin for MVCC support
+from .base import VersionedModelMixin
+
 
 class Cardinality(Enum):
     """Cardinality enumeration"""
@@ -37,8 +40,12 @@ class QueryOperator(BaseModel):
         return data_type in self.applies_to
 
 
-class OntologyBase(BaseModel):
-    """Base ontology model"""
+class OntologyBase(VersionedModelMixin):
+    """
+    Base ontology model with MVCC support through version field.
+    
+    Inherits optimistic locking capabilities from VersionedModelMixin.
+    """
 
     id: str = Field(..., description="Ontology identifier")
     label: str = Field(..., description="English label")
@@ -50,6 +57,7 @@ class OntologyBase(BaseModel):
     properties: List['Property'] = Field(default_factory=list, description="Class properties")
     relationships: List['Relationship'] = Field(default_factory=list, description="Class relationships")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    # version field is inherited from VersionedModelMixin
 
     @field_validator("id")
     @classmethod
