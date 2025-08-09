@@ -140,7 +140,7 @@ class OntologyWorker:
         payload = command_data.get('payload', {})
         command_id = command_data.get('command_id')
         
-        logger.info(f"Creating ontology class: {payload.get('id')} in database: {db_name}")
+        logger.info(f"Creating ontology class: {payload.get('class_id')} in database: {db_name}")
         
         try:
             # TerminusDB에 온톨로지 생성
@@ -150,10 +150,10 @@ class OntologyWorker:
             event = OntologyEvent(
                 event_type=EventType.ONTOLOGY_CLASS_CREATED,
                 db_name=db_name,
-                class_id=payload.get('id'),
+                class_id=payload.get('class_id'),
                 command_id=command_id,
                 data={
-                    "class_id": payload.get('id'),
+                    "class_id": payload.get('class_id'),
                     "label": payload.get('label'),
                     "description": payload.get('description'),
                     "properties": payload.get('properties', []),
@@ -173,13 +173,13 @@ class OntologyWorker:
                 await self.command_status_service.complete_command(
                     command_id=command_id,
                     result={
-                        "class_id": payload.get('id'),
-                        "message": f"Successfully created ontology class: {payload.get('id')}",
+                        "class_id": payload.get('class_id'),
+                        "message": f"Successfully created ontology class: {payload.get('class_id')}",
                         "terminus_result": result
                     }
                 )
             
-            logger.info(f"Successfully created ontology class: {payload.get('id')}")
+            logger.info(f"Successfully created ontology class: {payload.get('class_id')}")
             
         except Exception as e:
             logger.error(f"Failed to create ontology class: {e}")
