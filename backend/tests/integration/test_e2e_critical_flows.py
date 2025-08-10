@@ -103,7 +103,7 @@ class TestCriticalUserFlows:
     POSTGRES_HOST = "localhost"
     POSTGRES_PORT = 5433  # Using spice-foundry-postgres on port 5433
     REDIS_HOST = "localhost"
-    REDIS_PORT = 6379
+    REDIS_PORT = 6380
     KAFKA_HOST = "localhost"
     KAFKA_PORT = 9092
     ELASTICSEARCH_HOST = "localhost"
@@ -150,7 +150,7 @@ class TestCriticalUserFlows:
     
     # 🟢 PRIORITY 4.1: Global Run ID System (resource isolation and tracking)
     # Generate unique run ID for this test session
-    _TEST_RUN_ID = os.getenv('TEST_RUN_ID', f"RUN_{int(time.time())}_{uuid.uuid4().hex[:8]}")
+    _TEST_RUN_ID = os.getenv('TEST_RUN_ID', f"run_{int(time.time())}_{uuid.uuid4().hex[:8]}")
     
     @classmethod
     def get_test_resource_name(cls, base_name: str) -> str:

@@ -79,9 +79,9 @@ class OntologyWorker:
             'compression.type': 'snappy',
         })
         
-        # TerminusDB 연결 설정
+        # TerminusDB 연결 설정 (admin credentials for database operations)
         connection_info = ConnectionConfig(
-            server_url=ServiceConfig.get_terminus_url(),
+            server_url="http://localhost:6363",  # Use healthy TerminusDB container
             user=os.getenv("TERMINUS_USER", "admin"),
             account=os.getenv("TERMINUS_ACCOUNT", "admin"),
             key=os.getenv("TERMINUS_KEY", "admin123"),

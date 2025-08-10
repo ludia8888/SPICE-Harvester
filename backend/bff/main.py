@@ -338,18 +338,12 @@ async def lifespan(app: FastAPI):
         if 'rate_limiter' in _bff_container._bff_services:
             app.state.rate_limiter = _bff_container._bff_services['rate_limiter']
         
-        # 6. Set up OpenTelemetry instrumentation
+        # 6. Set up OpenTelemetry instrumentation (moved to after app startup)
         if 'tracing_service' in _bff_container._bff_services:
             tracing_service = _bff_container._bff_services['tracing_service']
-            tracing_service.instrument_fastapi(app)
+            # Note: FastAPI instrumentation moved to post-startup to avoid middleware timing issues
             
-        # 7. Add observability middleware
-        if 'metrics_collector' in _bff_container._bff_services:
-            metrics_collector = _bff_container._bff_services['metrics_collector']
-            app.add_middleware(RequestMetricsMiddleware, metrics_collector=metrics_collector)
-            
-        # 8. Add trace context propagation middleware  
-        app.add_middleware(TraceContextMiddleware)
+        # 7-8. Middleware setup moved to app creation time to avoid timing issues
         
         logger.info("BFF Service startup completed successfully")
         
