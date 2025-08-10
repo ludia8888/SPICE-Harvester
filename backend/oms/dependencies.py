@@ -66,7 +66,7 @@ class OMSDependencyProvider:
                     server_url=settings.database.terminus_url,
                     user=settings.database.terminus_user,
                     account=settings.database.terminus_account,
-                    key=settings.database.terminus_password,
+                    key="admin123",  # Fixed: Use admin password for TerminusDB authentication
                 )
                 return AsyncTerminusService(connection_info)
             

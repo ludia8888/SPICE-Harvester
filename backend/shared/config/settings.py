@@ -37,7 +37,7 @@ class DatabaseSettings(BaseSettings):
     
     # TerminusDB Configuration
     terminus_url: str = Field(
-        default="http://localhost:6364",
+        default="http://localhost:6363",
         env="TERMINUS_SERVER_URL",
         description="TerminusDB server URL"
     )

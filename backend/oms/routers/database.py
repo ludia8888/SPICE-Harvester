@@ -186,14 +186,8 @@ async def delete_database(
                 detail=f"시스템 데이터베이스 '{db_name}'은(는) 삭제할 수 없습니다",
             )
 
-        # 데이터베이스 존재 확인
-        if not await terminus_service.database_exists(db_name):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다",
-            )
-
         # Event Sourcing 모드: 명령만 발행 (비동기 처리)
+        # 존재 확인은 worker에서 처리하도록 함
         if outbox_service:
             try:
                 async with postgres_db.transaction() as conn:
@@ -227,6 +221,13 @@ async def delete_database(
                 logger.warning("Falling back to direct deletion due to Event Sourcing failure")
 
         # 직접 삭제 모드 (Event Sourcing 비활성화 또는 실패 시)
+        # 이 모드에서만 존재 확인 필요
+        if not await terminus_service.database_exists(db_name):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다",
+            )
+            
         await terminus_service.delete_database(db_name)
         
         return JSONResponse(
