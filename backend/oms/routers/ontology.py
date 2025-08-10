@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
 # Modernized dependency injection imports
@@ -83,8 +83,9 @@ router = APIRouter(prefix="/ontology/{db_name}", tags=["Ontology Management"])
 @router.post("/create", response_model=OntologyResponse)
 @rate_limit(**RateLimitPresets.WRITE)
 async def create_ontology(
+    ontology_request: OntologyCreateRequest,
+    http_request: Request,
     db_name: str = Depends(ensure_database_exists),
-    request: OntologyCreateRequest = ...,
     terminus: AsyncTerminusService = TerminusServiceDep,
     converter: JSONToJSONLDConverter = JSONLDConverterDep,
     label_mapper=LabelMapperDep,
@@ -95,7 +96,7 @@ async def create_ontology(
     
     try:
         # 요청 데이터를 dict로 변환
-        ontology_data = request.model_dump()
+        ontology_data = ontology_request.model_dump()
 
         # 클래스 ID 검증
         class_id = ontology_data.get("id")

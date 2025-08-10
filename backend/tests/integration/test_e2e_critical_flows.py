@@ -457,7 +457,7 @@ class TestCriticalUserFlows:
         try:
             # Delete via OMS (which should trigger proper Event Sourcing cleanup)
             response = await self.client.delete(f"{self.OMS_BASE_URL}/api/v1/database/{db_name}")
-            if response.status_code == 200:
+            if response.status_code in [200, 202]:
                 # Verify cleanup propagated through Event Sourcing
                 await self._verify_database_deletion_propagation(db_name)
             logger.info(f"✅ Database {db_name} cleaned up with Event Sourcing validation")
@@ -742,7 +742,7 @@ class TestCriticalUserFlows:
             # Delete via OMS (triggers Event Sourcing cleanup)
             response = await client.delete(f"{self.OMS_BASE_URL}/api/v1/database/{db_name}")
             
-            if response.status_code == 200:
+            if response.status_code in [200, 202]:
                 # Wait for Event Sourcing propagation
                 async def deletion_propagated():
                     try:
@@ -841,7 +841,7 @@ class TestCriticalUserFlows:
                     for db_name in emergency_targets:
                         try:
                             del_response = await client.delete(f"{self.OMS_BASE_URL}/api/v1/database/{db_name}")
-                            if del_response.status_code == 200:
+                            if del_response.status_code in [200, 202]:
                                 logger.info(f"🆘 EMERGENCY: Successfully deleted {db_name}")
                             else:
                                 logger.error(f"🆘 EMERGENCY: Failed to delete {db_name} - HTTP {del_response.status_code}")
@@ -939,7 +939,7 @@ class TestCriticalUserFlows:
             f"{self.OMS_BASE_URL}/api/v1/database/{db_name}",
             timeout=self.API_TIMEOUT
         )
-        assert response.status_code == 200, f"Database deletion failed: {response.status_code} - {response.text}"
+        assert response.status_code == 202, f"Database deletion failed: {response.status_code} - {response.text}"
         
         deletion_time = time.time() - start_time
         assert deletion_time < self.TEST_SLO_DATABASE_DELETE, f"Database deletion took {deletion_time:.2f}s, exceeding {self.TEST_SLO_DATABASE_DELETE}s performance requirement"
@@ -2423,7 +2423,7 @@ class TestCriticalUserFlows:
             """Helper function to delete database"""
             try:
                 response = await self.client.delete(f"{self.OMS_BASE_URL}/api/v1/database/{name}")
-                return response.status_code in [200, 204]
+                return response.status_code in [200, 202, 204]
             except Exception:
                 return False
         

@@ -281,12 +281,31 @@ def rate_limit(
     Example:
         @router.get("/api/resource")
         @rate_limit(requests=100, window=60)
-        async def get_resource():
+        async def get_resource(request: Request = Depends()):
             return {"data": "resource"}
     """
     def decorator(func):
         @wraps(func)
-        async def wrapper(request: Request, *args, **kwargs):
+        async def wrapper(*args, **kwargs):
+            # 🔥 FIX! Find the Request object in function arguments
+            request = None
+            
+            # Look for Request object in positional args
+            for arg in args:
+                if isinstance(arg, Request):
+                    request = arg
+                    break
+            
+            # Look for Request object in keyword args
+            if request is None:
+                for key, value in kwargs.items():
+                    if isinstance(value, Request):
+                        request = value
+                        break
+            
+            # If no Request found, skip rate limiting (for non-HTTP contexts)
+            if request is None:
+                return await func(*args, **kwargs)
             # Get or create rate limiter
             if not hasattr(request.app.state, "rate_limiter"):
                 request.app.state.rate_limiter = RateLimiter()

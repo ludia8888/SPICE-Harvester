@@ -9,9 +9,17 @@ import os
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-import boto3
-from botocore.client import BaseClient
-from botocore.exceptions import ClientError
+try:
+    import boto3
+    from botocore.client import BaseClient
+    from botocore.exceptions import ClientError
+    HAS_BOTO3 = True
+except ImportError:
+    # boto3 not available - S3 storage will be disabled
+    boto3 = None
+    BaseClient = None
+    ClientError = Exception
+    HAS_BOTO3 = False
 
 from shared.models.commands import CommandType
 
@@ -58,6 +66,9 @@ class StorageService:
             region: 리전 (기본값: us-east-1)
             use_ssl: SSL 사용 여부
         """
+        if not HAS_BOTO3:
+            raise ImportError("boto3 is required for S3 storage functionality. Install with: pip install boto3")
+        
         self.endpoint_url = endpoint_url
         self.client: BaseClient = boto3.client(
             's3',
@@ -490,7 +501,7 @@ class StorageService:
         
 
 
-def create_storage_service(settings: 'ApplicationSettings') -> StorageService:
+def create_storage_service(settings: 'ApplicationSettings') -> Optional[StorageService]:
     """
     스토리지 서비스 팩토리 함수 (Anti-pattern 13 해결)
     
@@ -498,12 +509,16 @@ def create_storage_service(settings: 'ApplicationSettings') -> StorageService:
         settings: 중앙화된 애플리케이션 설정 객체
         
     Returns:
-        StorageService 인스턴스
+        StorageService 인스턴스 또는 None (boto3 없는 경우)
         
     Note:
         이 함수는 더 이상 내부에서 환경변수를 로드하지 않습니다.
         모든 설정은 ApplicationSettings를 통해 중앙화되어 관리됩니다.
     """
+    if not HAS_BOTO3:
+        # S3 storage is optional for local development
+        return None
+        
     return StorageService(
         endpoint_url=settings.storage.minio_endpoint_url,
         access_key=settings.storage.minio_access_key,

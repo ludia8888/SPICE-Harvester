@@ -12,25 +12,62 @@ from typing import Optional, Dict, Any, List
 from contextlib import contextmanager
 from functools import wraps
 
-from opentelemetry import trace as otel_trace
-from opentelemetry import context, baggage, metrics
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
-from opentelemetry.exporter.jaeger.thrift import JaegerExporter
-from opentelemetry.exporter.prometheus import PrometheusMetricReader
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-from opentelemetry.instrumentation.asyncpg import AsyncPGInstrumentor
-from opentelemetry.instrumentation.redis import RedisInstrumentor
-from opentelemetry.instrumentation.kafka import KafkaInstrumentor
-from opentelemetry.metrics import get_meter_provider, set_meter_provider
-from opentelemetry.propagate import set_global_textmap
-from opentelemetry.sdk.metrics import MeterProvider
-from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-from opentelemetry.trace import Status, StatusCode, get_tracer_provider, set_tracer_provider
-from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+try:
+    from opentelemetry import trace as otel_trace
+    from opentelemetry import context, baggage, metrics
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+    from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
+    from opentelemetry.exporter.jaeger.thrift import JaegerExporter
+    from opentelemetry.exporter.prometheus import PrometheusMetricReader
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+    from opentelemetry.instrumentation.asyncpg import AsyncPGInstrumentor
+    from opentelemetry.instrumentation.redis import RedisInstrumentor
+    from opentelemetry.instrumentation.kafka import KafkaInstrumentor
+    HAS_OPENTELEMETRY = True
+except ImportError:
+    # OpenTelemetry not available - tracing will be disabled
+    otel_trace = None
+    context = None
+    baggage = None
+    metrics = None
+    OTLPSpanExporter = None
+    OTLPMetricExporter = None
+    JaegerExporter = None
+    PrometheusMetricReader = None
+    FastAPIInstrumentor = None
+    HTTPXClientInstrumentor = None
+    AsyncPGInstrumentor = None
+    RedisInstrumentor = None
+    KafkaInstrumentor = None
+    HAS_OPENTELEMETRY = False
+
+if HAS_OPENTELEMETRY:
+    from opentelemetry.metrics import get_meter_provider, set_meter_provider
+    from opentelemetry.propagate import set_global_textmap
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+    from opentelemetry.trace import Status, StatusCode, get_tracer_provider, set_tracer_provider
+    from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+else:
+    # Stub classes for when OpenTelemetry is not available
+    get_meter_provider = None
+    set_meter_provider = None
+    set_global_textmap = None
+    MeterProvider = None
+    Resource = None
+    SERVICE_NAME = None
+    SERVICE_VERSION = None
+    TracerProvider = None
+    BatchSpanProcessor = None
+    ConsoleSpanExporter = None
+    Status = None
+    StatusCode = None
+    get_tracer_provider = None
+    set_tracer_provider = None
+    TraceContextTextMapPropagator = None
 
 from shared.config.settings import settings
 from shared.utils.app_logger import get_logger
@@ -66,15 +103,47 @@ class OpenTelemetryConfig:
     ENABLE_LOGS = os.getenv("OTEL_ENABLE_LOGS", "true").lower() == "true"
 
 
-class TracingService:
-    """
-    Service for managing OpenTelemetry tracing
-    Based on Context7 patterns for distributed systems
-    """
-    
-    def __init__(self, service_name: Optional[str] = None):
+if not HAS_OPENTELEMETRY:
+    # Minimal no-op implementation when OpenTelemetry is not available
+    class TracingService:
         """
-        Initialize tracing service
+        Minimal tracing service when OpenTelemetry is not available
+        Provides no-op implementations to prevent import errors
+        """
+        
+        def __init__(self, service_name: Optional[str] = None):
+            self.service_name = service_name or "spice-harvester"
+            self.logger = get_logger(__name__)
+            self.logger.info(f"TracingService initialized in no-op mode (OpenTelemetry not available)")
+        
+        def initialize(self): pass
+        def shutdown(self): pass
+        def instrument_clients(self): pass
+        def span(self, name: str, kind=None, attributes=None):
+            from contextlib import nullcontext
+            return nullcontext()
+        def trace(self, name=None, kind=None, attributes=None):
+            def decorator(func): return func
+            return decorator
+        def get_current_span(self): return None
+        def add_span_event(self, name: str, attributes=None): pass
+        def record_exception(self, exception: Exception): pass
+        def set_span_attribute(self, key: str, value): pass
+        def get_trace_id(self): return None
+        def get_span_id(self): return None
+        def inject_trace_context(self, headers: Dict[str, str]): return headers
+        def extract_trace_context(self, headers: Dict[str, str]): pass
+else:
+    # Full OpenTelemetry implementation  
+    class TracingService:
+        """
+        Service for managing OpenTelemetry tracing
+        Based on Context7 patterns for distributed systems
+        """
+        
+        def __init__(self, service_name: Optional[str] = None):
+            """
+            Initialize tracing service
         
         Args:
             service_name: Override default service name
@@ -262,7 +331,7 @@ class TracingService:
     def span(
         self,
         name: str,
-        kind: otel_trace.SpanKind = otel_trace.SpanKind.INTERNAL,
+        kind = None,
         attributes: Optional[Dict[str, Any]] = None
     ):
         """
@@ -297,7 +366,7 @@ class TracingService:
     def trace(
         self,
         name: Optional[str] = None,
-        kind: otel_trace.SpanKind = otel_trace.SpanKind.INTERNAL,
+        kind = None,
         attributes: Optional[Dict[str, Any]] = None
     ):
         """
@@ -445,7 +514,10 @@ def trace_endpoint(name: Optional[str] = None):
             pass
     """
     tracing = get_tracing_service()
-    return tracing.trace(name, kind=otel_trace.SpanKind.SERVER)
+    if HAS_OPENTELEMETRY:
+        return tracing.trace(name, kind=otel_trace.SpanKind.SERVER)
+    else:
+        return tracing.trace(name, kind=None)
 
 
 def trace_db_operation(name: Optional[str] = None):
@@ -458,7 +530,10 @@ def trace_db_operation(name: Optional[str] = None):
             pass
     """
     tracing = get_tracing_service()
-    return tracing.trace(name, kind=otel_trace.SpanKind.CLIENT, attributes={"db.system": "postgresql"})
+    if HAS_OPENTELEMETRY:
+        return tracing.trace(name, kind=otel_trace.SpanKind.CLIENT, attributes={"db.system": "postgresql"})
+    else:
+        return tracing.trace(name, kind=None, attributes={"db.system": "postgresql"})
 
 
 def trace_external_call(name: Optional[str] = None):
@@ -471,4 +546,7 @@ def trace_external_call(name: Optional[str] = None):
             pass
     """
     tracing = get_tracing_service()
-    return tracing.trace(name, kind=otel_trace.SpanKind.CLIENT)
+    if HAS_OPENTELEMETRY:
+        return tracing.trace(name, kind=otel_trace.SpanKind.CLIENT)
+    else:
+        return tracing.trace(name, kind=None)
