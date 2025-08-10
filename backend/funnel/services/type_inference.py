@@ -20,13 +20,13 @@ from shared.validators.complex_type_validator import ComplexTypeValidator
 logger = logging.getLogger(__name__)
 
 
-class FunnelTypeInferenceService:
+class PatternBasedTypeDetector:
     """
-    🔥 THINK ULTRA! Advanced AI Type Inference Service
+    🔥 THINK ULTRA! Pattern-Based Type Detection Service
 
-    고도화된 AI 알고리즘으로 데이터 타입을 지능적으로 추론합니다.
+    정규표현식과 패턴 매칭을 사용하여 데이터 타입을 추론합니다.
     
-    Advanced Features:
+    Pattern-Based Features:
     - 적응형 임계값 시스템 (Adaptive Thresholds)
     - 컨텍스트 기반 타입 추론 (Contextual Analysis)
     - 퍼지 매칭 알고리즘 (Fuzzy Pattern Matching)
@@ -35,7 +35,7 @@ class FunnelTypeInferenceService:
     - 통계 분포 분석 (Statistical Distribution Analysis)
 
     Architecture:
-    Data Connector → Advanced AI Engine → OMS/BFF
+    Data Connector → Pattern Matching Engine → OMS/BFF
     """
 
     # Date patterns to check
@@ -102,7 +102,7 @@ class FunnelTypeInferenceService:
         context_columns: Optional[Dict[str, List[Any]]] = None,
     ) -> ColumnAnalysisResult:
         """
-        🔥 고도화된 AI 알고리즘으로 컬럼 데이터를 지능적으로 분석하여 타입을 추론합니다.
+        🔥 패턴 매칭과 통계 분석으로 컬럼 데이터를 분석하여 타입을 추론합니다.
 
         Args:
             column_data: 컬럼의 샘플 데이터
@@ -111,7 +111,7 @@ class FunnelTypeInferenceService:
             context_columns: 주변 컬럼 데이터 (컨텍스트 분석용)
 
         Returns:
-            ColumnAnalysisResult with advanced AI analysis
+            ColumnAnalysisResult with pattern-based analysis
         """
         # 통계 정보 수집
         non_empty_values = [v for v in column_data if v is not None and str(v).strip() != ""]
@@ -136,7 +136,7 @@ class FunnelTypeInferenceService:
                 unique_count=0,
             )
 
-        # 🔥 Advanced AI Type Inference
+        # 🔥 Pattern-Based Type Detection
         inference_result = cls._infer_type_advanced(
             non_empty_values, 
             column_name, 
@@ -162,9 +162,9 @@ class FunnelTypeInferenceService:
         context_columns: Optional[Dict[str, List[Any]]] = None,
         sample_size: int = 0,
     ) -> TypeInferenceResult:
-        """🔥 Advanced AI Type Inference Engine
+        """🔥 Pattern-Based Type Detection Engine
         
-        Uses adaptive thresholds, contextual analysis, and sophisticated pattern matching.
+        Uses adaptive thresholds, contextual analysis, and regex pattern matching.
         """
         # Convert all values to strings for analysis
         str_values = [str(v).strip() for v in values]
@@ -178,7 +178,7 @@ class FunnelTypeInferenceService:
         # Enhanced column name hints with multilingual support
         name_hint_result = cls._check_column_name_hints_enhanced(column_name) if column_name else None
         
-        # 🔥 Advanced Type Detection with Adaptive Thresholds
+        # 🔥 Pattern-Based Type Detection with Adaptive Thresholds
         # 1. Boolean check (most specific)
         bool_result = cls._check_boolean_enhanced(str_values, adaptive_thresholds)
         if bool_result.confidence >= adaptive_thresholds['boolean']:
@@ -204,7 +204,7 @@ class FunnelTypeInferenceService:
         if datetime_result.confidence >= adaptive_thresholds['datetime']:
             return datetime_result
 
-        # 🔥 Advanced Complex Type Detection
+        # 🔥 Pattern-Based Complex Type Detection
         if include_complex_types:
             # Enhanced phone number detection
             phone_result = cls._check_phone_enhanced(str_values, adaptive_thresholds, column_name)
@@ -1045,3 +1045,7 @@ class FunnelTypeInferenceService:
             confidence=final_confidence,
             reason=f"Enhanced phone analysis: insufficient matches ({final_confidence*100:.1f}%)",
         )
+
+
+# Legacy alias for backward compatibility
+FunnelTypeInferenceService = PatternBasedTypeDetector

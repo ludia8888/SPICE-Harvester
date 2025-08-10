@@ -57,6 +57,10 @@ from shared.security.input_sanitizer import (
 # shared utils import
 from shared.utils.jsonld import JSONToJSONLDConverter
 
+# Rate limiting import
+from shared.middleware.rate_limiter import rate_limit, RateLimitPresets
+from shared.config.rate_limit_config import RateLimitConfig, EndpointCategory
+
 logger = logging.getLogger(__name__)
 
 
@@ -77,6 +81,7 @@ router = APIRouter(prefix="/ontology/{db_name}", tags=["Ontology Management"])
 
 
 @router.post("/create", response_model=OntologyResponse)
+@rate_limit(**RateLimitPresets.WRITE)
 async def create_ontology(
     db_name: str = Depends(ensure_database_exists),
     request: OntologyCreateRequest = ...,

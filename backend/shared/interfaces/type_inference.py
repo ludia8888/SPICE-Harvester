@@ -79,15 +79,15 @@ class RealTypeInferenceService(TypeInferenceInterface):
     """
     🔥 REAL IMPLEMENTATION! Production-ready type inference service.
     
-    Uses actual Funnel service algorithms for accurate type detection.
+    Uses pattern-based detection algorithms for accurate type identification.
     No more mock implementations!
     """
 
     def __init__(self):
-        """Initialize with real Funnel type inference service."""
+        """Initialize with real pattern-based type detection service."""
         # Import here to avoid circular dependencies
-        from funnel.services.type_inference import FunnelTypeInferenceService
-        self.funnel_service = FunnelTypeInferenceService
+        from funnel.services.type_inference import PatternBasedTypeDetector
+        self.funnel_service = PatternBasedTypeDetector
 
     def infer_column_type(
         self,

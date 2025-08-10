@@ -44,8 +44,6 @@ class PropertyToRelationshipConverter:
         properties = class_data.get("properties", [])
         relationships = class_data.get("relationships", [])
         
-        for i, prop in enumerate(properties):
-        
         # 변환된 속성과 관계를 저장할 리스트
         final_properties = []
         converted_relationships = []
@@ -105,8 +103,7 @@ class PropertyToRelationshipConverter:
         logger.info(f"📊 Total relationships: {len(processed_data['relationships'])} (after deduplication)")
         
         # 🔥 ULTRA DEBUG! Output data analysis
-        for i, prop in enumerate(final_properties):
-        for i, rel in enumerate(converted_relationships):
+        # Debug logging removed for now
         
         return processed_data
     

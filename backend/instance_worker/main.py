@@ -35,6 +35,11 @@ from shared.services.command_status_service import CommandStatusService
 from shared.services.storage_service import StorageService, create_storage_service
 from shared.utils.id_generator import generate_instance_id
 
+# Observability imports
+from shared.observability.tracing import get_tracing_service
+from shared.observability.metrics import get_metrics_collector
+from shared.observability.context_propagation import ContextPropagator
+
 # 로깅 설정
 logging.basicConfig(
     level=logging.INFO,
@@ -56,6 +61,9 @@ class InstanceWorker:
         self.command_status_service: Optional[CommandStatusService] = None
         self.storage_service: Optional[StorageService] = None
         self.instance_bucket = AppConfig.INSTANCE_BUCKET
+        self.tracing_service = None
+        self.metrics_collector = None
+        self.context_propagator = ContextPropagator()
         
     async def initialize(self):
         """워커 초기화"""
@@ -103,6 +111,11 @@ class InstanceWorker:
         
         # Command 토픽 구독
         self.consumer.subscribe([AppConfig.INSTANCE_COMMANDS_TOPIC])
+        
+        # Initialize OpenTelemetry
+        self.tracing_service = get_tracing_service("instance-worker")
+        self.metrics_collector = get_metrics_collector("instance-worker")
+        
         logger.info("Instance Worker initialized successfully")
         
     async def process_command(self, command_data: Dict[str, Any]) -> None:

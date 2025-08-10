@@ -39,7 +39,7 @@ class ElasticsearchService:
     
     def __init__(
         self,
-        host: str = "elasticsearch",
+        host: str = "localhost",
         port: int = 9200,
         username: Optional[str] = None,
         password: Optional[str] = None,
@@ -101,6 +101,15 @@ class ElasticsearchService:
         if not self._client:
             raise RuntimeError("Elasticsearch client not connected. Call connect() first.")
         return self._client
+    
+    async def get_cluster_health(self) -> Dict[str, Any]:
+        """Get Elasticsearch cluster health status."""
+        try:
+            health = await self.client.cluster.health()
+            return health
+        except Exception as e:
+            logger.error(f"Error getting cluster health: {e}")
+            raise
         
     # Index Operations
     
@@ -612,8 +621,10 @@ def create_elasticsearch_service_legacy(
     Returns:
         ElasticsearchService instance
     """
+    from shared.config.service_config import ServiceConfig
+    
     return ElasticsearchService(
-        host=host or os.getenv("ELASTICSEARCH_HOST", "elasticsearch"),
+        host=host or os.getenv("ELASTICSEARCH_HOST", "localhost"),
         port=port or int(os.getenv("ELASTICSEARCH_PORT", "9200")),
         username=username or os.getenv("ELASTICSEARCH_USERNAME"),
         password=password or os.getenv("ELASTICSEARCH_PASSWORD")

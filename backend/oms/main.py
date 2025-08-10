@@ -60,10 +60,18 @@ from shared.models.requests import ApiResponse
 from shared.utils.jsonld import JSONToJSONLDConverter
 from shared.utils.label_mapper import LabelMapper
 
+# Rate limiting middleware
+from shared.middleware.rate_limiter import rate_limit, RateLimitPresets, RateLimiter
+
+# Observability imports
+from shared.observability.tracing import get_tracing_service, trace_endpoint, trace_db_operation
+from shared.observability.metrics import get_metrics_collector, RequestMetricsMiddleware
+from shared.observability.context_propagation import TraceContextMiddleware
+
 # Router imports
 from oms.routers import (
     branch, database, ontology, version, ontology_async, 
-    ontology_sync, instance_async, instance
+    ontology_sync, instance_async, instance, pull_request
 )
 
 # Monitoring and observability routers
@@ -113,6 +121,12 @@ class OMSServiceContainer:
         
         # 6. Initialize Elasticsearch service
         await self._initialize_elasticsearch()
+        
+        # 7. Initialize Rate Limiter
+        await self._initialize_rate_limiter()
+        
+        # 8. Initialize Observability (Tracing & Metrics)
+        await self._initialize_observability()
         
         logger.info("OMS services initialized successfully")
     
@@ -193,7 +207,8 @@ class OMSServiceContainer:
         """Initialize Elasticsearch service"""
         try:
             elasticsearch_service = ElasticsearchService(
-                hosts=[f"{self.settings.database.elasticsearch_host}:{self.settings.database.elasticsearch_port}"],
+                host=self.settings.database.elasticsearch_host,
+                port=self.settings.database.elasticsearch_port,
                 username=self.settings.database.elasticsearch_username,
                 password=self.settings.database.elasticsearch_password
             )
@@ -207,11 +222,61 @@ class OMSServiceContainer:
             # Elasticsearch failure is non-fatal - basic functionality can work
             self._oms_services['elasticsearch_service'] = None
     
+    async def _initialize_rate_limiter(self) -> None:
+        """Initialize rate limiting service"""
+        try:
+            logger.info("Initializing rate limiter...")
+            
+            # Create rate limiter instance
+            rate_limiter = RateLimiter()
+            await rate_limiter.initialize()
+            
+            self._oms_services['rate_limiter'] = rate_limiter
+            logger.info("Rate limiter initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize rate limiter: {e}")
+            # Continue without rate limiting - service can still work
+    
+    async def _initialize_observability(self) -> None:
+        """Initialize observability with OpenTelemetry"""
+        try:
+            logger.info("Initializing observability (OpenTelemetry)...")
+            
+            # Initialize tracing service
+            tracing_service = get_tracing_service("oms-service")
+            
+            # Initialize metrics collector
+            metrics_collector = get_metrics_collector("oms-service")
+            
+            self._oms_services['tracing_service'] = tracing_service
+            self._oms_services['metrics_collector'] = metrics_collector
+            
+            logger.info("Observability initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize observability: {e}")
+            # Continue without observability - service can still work
+    
     async def shutdown_oms_services(self) -> None:
         """Shutdown OMS-specific services"""
         logger.info("Shutting down OMS services...")
         
         # Shutdown in reverse order of initialization
+        if 'tracing_service' in self._oms_services:
+            try:
+                self._oms_services['tracing_service'].shutdown()
+                logger.info("Tracing service shutdown")
+            except Exception as e:
+                logger.error(f"Error shutting down tracing: {e}")
+        
+        if 'rate_limiter' in self._oms_services:
+            try:
+                await self._oms_services['rate_limiter'].close()
+                logger.info("Rate limiter closed")
+            except Exception as e:
+                logger.error(f"Error closing rate limiter: {e}")
+        
         if 'elasticsearch_service' in self._oms_services and self._oms_services['elasticsearch_service']:
             try:
                 await self._oms_services['elasticsearch_service'].disconnect()
@@ -308,6 +373,23 @@ async def lifespan(app: FastAPI):
         # 4. Store container in app state for easy access
         app.state.container = container
         app.state.oms_container = _oms_container
+        
+        # 5. Store rate limiter in app state for decorators
+        if 'rate_limiter' in _oms_container._oms_services:
+            app.state.rate_limiter = _oms_container._oms_services['rate_limiter']
+        
+        # 6. Set up OpenTelemetry instrumentation
+        if 'tracing_service' in _oms_container._oms_services:
+            tracing_service = _oms_container._oms_services['tracing_service']
+            tracing_service.instrument_fastapi(app)
+            
+        # 7. Add observability middleware
+        if 'metrics_collector' in _oms_container._oms_services:
+            metrics_collector = _oms_container._oms_services['metrics_collector']
+            app.add_middleware(RequestMetricsMiddleware, metrics_collector=metrics_collector)
+            
+        # 8. Add trace context propagation middleware  
+        app.add_middleware(TraceContextMiddleware)
         
         logger.info("OMS Service startup completed successfully")
         
@@ -578,6 +660,7 @@ app.include_router(ontology_sync.router, prefix="/api/v1", tags=["sync-ontology"
 app.include_router(instance_async.router, prefix="/api/v1", tags=["async-instance"])
 app.include_router(instance.router, prefix="/api/v1", tags=["instance"])
 app.include_router(branch.router, prefix="/api/v1", tags=["branch"])
+app.include_router(pull_request.router, prefix="/api/v1", tags=["pull-requests"])
 app.include_router(version.router, prefix="/api/v1", tags=["version"])
 
 # Monitoring and observability endpoints (modernized architecture)

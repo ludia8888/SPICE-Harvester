@@ -1,0 +1,110 @@
+{
+  "mcpServers": {
+    "context7": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@context7/mcp-server"
+      ],
+      "env": {
+        "CONTEXT7_API_KEY": "${CONTEXT7_API_KEY}",
+        "CONTEXT7_WORKSPACE": "${CONTEXT7_WORKSPACE}"
+      },
+      "config": {
+        "autoConnect": true,
+        "reconnectInterval": 5000,
+        "maxReconnectAttempts": 10
+      }
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/isihyeon/Desktop/SPICE HARVESTER"
+      ],
+      "config": {
+        "allowedPaths": [
+          "/Users/isihyeon/Desktop/SPICE HARVESTER"
+        ],
+        "readOnly": false
+      }
+    },
+    "database": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres"
+      ],
+      "env": {
+        "POSTGRES_HOST": "localhost",
+        "POSTGRES_PORT": "5432",
+        "POSTGRES_USER": "spiceadmin",
+        "POSTGRES_PASSWORD": "spicepass123",
+        "POSTGRES_DB": "spicedb"
+      },
+      "config": {
+        "maxConnections": 10,
+        "connectionTimeout": 30000
+      }
+    },
+    "terminusdb": {
+      "command": "python",
+      "args": [
+        "/Users/isihyeon/Desktop/SPICE HARVESTER/backend/mcp/terminus_mcp_server.py"
+      ],
+      "env": {
+        "TERMINUS_SERVER_URL": "http://localhost:6363",
+        "TERMINUS_USER": "admin",
+        "TERMINUS_KEY": "admin123",
+        "TERMINUS_ACCOUNT": "admin"
+      },
+      "config": {
+        "capabilities": [
+          "ontology_management",
+          "version_control",
+          "query_execution",
+          "instance_management"
+        ]
+      }
+    },
+    "elasticsearch": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-elasticsearch"
+      ],
+      "env": {
+        "ELASTICSEARCH_HOST": "localhost",
+        "ELASTICSEARCH_PORT": "9201",
+        "ELASTICSEARCH_USERNAME": "elastic",
+        "ELASTICSEARCH_PASSWORD": ""
+      },
+      "config": {
+        "indices": [
+          "spice_instances_*",
+          "spice_ontologies_*"
+        ]
+      }
+    },
+    "git": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-git",
+        "--repository",
+        "/Users/isihyeon/Desktop/SPICE HARVESTER"
+      ],
+      "config": {
+        "autoFetch": true,
+        "fetchInterval": 300000
+      }
+    }
+  },
+  "globalSettings": {
+    "timeout": 30000,
+    "logLevel": "info",
+    "retryOnFailure": true,
+    "maxRetries": 3
+  }
+}

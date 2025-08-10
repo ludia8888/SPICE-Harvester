@@ -30,6 +30,11 @@ from oms.services.async_terminus import AsyncTerminusService
 from shared.services.redis_service import RedisService, create_redis_service
 from shared.services.command_status_service import CommandStatusService
 
+# Observability imports
+from shared.observability.tracing import get_tracing_service, trace_endpoint
+from shared.observability.metrics import get_metrics_collector
+from shared.observability.context_propagation import ContextPropagator
+
 # 로깅 설정
 logging.basicConfig(
     level=logging.INFO,
@@ -49,6 +54,9 @@ class OntologyWorker:
         self.terminus_service: Optional[AsyncTerminusService] = None
         self.redis_service: Optional[RedisService] = None
         self.command_status_service: Optional[CommandStatusService] = None
+        self.tracing_service = None
+        self.metrics_collector = None
+        self.context_propagator = ContextPropagator()
         
     async def initialize(self):
         """워커 초기화"""
@@ -90,6 +98,11 @@ class OntologyWorker:
         
         # Command 토픽 구독
         self.consumer.subscribe([AppConfig.ONTOLOGY_COMMANDS_TOPIC])
+        
+        # Initialize OpenTelemetry
+        self.tracing_service = get_tracing_service("ontology-worker")
+        self.metrics_collector = get_metrics_collector("ontology-worker")
+        
         logger.info("Ontology Worker initialized successfully")
         
     async def process_command(self, command_data: Dict[str, Any]) -> None:

@@ -30,6 +30,11 @@ from shared.models.events import (
 from shared.services.redis_service import RedisService, create_redis_service
 from shared.services.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
 
+# Observability imports
+from shared.observability.tracing import get_tracing_service
+from shared.observability.metrics import get_metrics_collector
+from shared.observability.context_propagation import ContextPropagator
+
 # 로깅 설정
 logging.basicConfig(
     level=logging.INFO,
@@ -48,6 +53,9 @@ class ProjectionWorker:
         self.producer: Optional[Producer] = None
         self.redis_service: Optional[RedisService] = None
         self.elasticsearch_service: Optional[ElasticsearchService] = None
+        self.tracing_service = None
+        self.metrics_collector = None
+        self.context_propagator = ContextPropagator()
         
         # 생성된 인덱스 캐시 (중복 생성 방지)
         self.created_indices = set()
@@ -110,6 +118,10 @@ class ProjectionWorker:
         topics = [AppConfig.INSTANCE_EVENTS_TOPIC, AppConfig.ONTOLOGY_EVENTS_TOPIC]
         self.consumer.subscribe(topics)
         logger.info(f"Subscribed to topics: {topics}")
+        
+        # Initialize OpenTelemetry
+        self.tracing_service = get_tracing_service("projection-worker")
+        self.metrics_collector = get_metrics_collector("projection-worker")
         
     async def _setup_indices(self):
         """매핑 파일 로드 (인덱스는 DB별로 동적 생성)"""

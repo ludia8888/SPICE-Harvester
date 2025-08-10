@@ -157,13 +157,20 @@ class BaseTerminusService:
             응답 데이터 (JSON 또는 텍스트)
         """
         client = await self._get_client()
-        auth_token = await self._authenticate()
         
         # 헤더 설정
         request_headers = {
-            "Authorization": auth_token,
             "Content-Type": "application/json",
         }
+        
+        # Only add auth if credentials are configured
+        logger.debug(f"Auth check: user={self.connection_info.user}, has_key={bool(self.connection_info.key)}, not_anonymous={self.connection_info.user != 'anonymous'}")
+        if self.connection_info.user and self.connection_info.key and self.connection_info.user != "anonymous":
+            auth_token = await self._authenticate()
+            request_headers["Authorization"] = auth_token
+            logger.debug("Added Authorization header")
+        else:
+            logger.debug("Skipping authentication")
         if headers:
             request_headers.update(headers)
         

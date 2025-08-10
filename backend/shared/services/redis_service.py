@@ -345,6 +345,16 @@ class RedisService:
             return json.loads(data)
         return None
         
+    async def set(self, key: str, value: str, ttl: Optional[int] = None) -> bool:
+        """Set key-value pair with optional TTL."""
+        if ttl:
+            return await self.client.setex(key, ttl, value)
+        return await self.client.set(key, value)
+    
+    async def get(self, key: str) -> Optional[str]:
+        """Get value for key."""
+        return await self.client.get(key)
+    
     async def delete(self, key: str) -> bool:
         """Delete key."""
         return await self.client.delete(key) > 0
@@ -450,8 +460,10 @@ def create_redis_service_legacy(
     Returns:
         RedisService instance
     """
+    from shared.config.service_config import ServiceConfig
+    
     return RedisService(
-        host=host or os.getenv("REDIS_HOST", "redis"),
-        port=port or int(os.getenv("REDIS_PORT", "6379")),
+        host=host or ServiceConfig.get_redis_host(),
+        port=port or ServiceConfig.get_redis_port(),
         password=password or os.getenv("REDIS_PASSWORD", "spicepass123")
     )

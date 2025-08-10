@@ -224,7 +224,7 @@ services:
       - SSL_KEY_PATH=${SSL_KEY_PATH:-}
       - VERIFY_SSL=${VERIFY_SSL:-false}
     ports:
-      - "8004:8003"
+      - "8003:8003"
     networks:
       - spice_network
     healthcheck:

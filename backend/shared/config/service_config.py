@@ -143,6 +143,25 @@ class ServiceConfig:
         host = os.getenv("KAFKA_HOST", "kafka" if ServiceConfig.is_docker_environment() else "localhost")
         port = os.getenv("KAFKA_PORT", "9092")
         return f"{host}:{port}"
+    
+    @staticmethod
+    def get_redis_host() -> str:
+        """Get Redis host from environment or default."""
+        return os.getenv("REDIS_HOST", "redis" if ServiceConfig.is_docker_environment() else "localhost")
+    
+    @staticmethod
+    def get_redis_port() -> int:
+        """Get Redis port from environment or default."""
+        return int(os.getenv("REDIS_PORT", "6379"))
+    
+    @staticmethod
+    def get_redis_url() -> str:
+        """Get Redis connection URL from environment or construct from host/port."""
+        if url := os.getenv("REDIS_URL"):
+            return url
+        host = ServiceConfig.get_redis_host()
+        port = ServiceConfig.get_redis_port()
+        return f"redis://{host}:{port}"
 
     @staticmethod
     def is_docker_environment() -> bool:

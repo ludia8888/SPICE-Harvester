@@ -200,13 +200,19 @@ class AsyncTerminusService:
 
     async def close(self):
         """모든 서비스 종료"""
-        # Close all modular services
-        await self.database_service.close()
-        await self.query_service.close()
-        await self.instance_service.close()
-        await self.ontology_service.close()
-        await self.version_control_service.close()
-        await self.document_service.close()
+        # Close all modular services using disconnect method
+        for service in [
+            self.database_service,
+            self.query_service,
+            self.instance_service,
+            self.ontology_service,
+            self.version_control_service,
+            self.document_service
+        ]:
+            if hasattr(service, 'disconnect'):
+                await service.disconnect()
+            elif hasattr(service, 'close'):
+                await service.close()
         
         # Close HTTP client if exists
         if self._client:

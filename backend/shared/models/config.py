@@ -26,10 +26,11 @@ class ConnectionConfig:
         """Post-initialization validation"""
         if not self.server_url:
             raise ValueError("server_url is required")
-        if not self.user:
-            raise ValueError("user is required")
-        if not self.key:
-            raise ValueError("key is required")
+        # Allow anonymous users without authentication
+        # if not self.user:
+        #     raise ValueError("user is required")
+        # if not self.key:
+        #     raise ValueError("key is required")
         if not self.account:
             raise ValueError("account is required")
         if self.timeout <= 0:
@@ -45,9 +46,9 @@ class ConnectionConfig:
         import os
 
         # Get environment variables with defaults
-        server_url = os.getenv("TERMINUS_SERVER_URL", "http://localhost:6364")
-        user = os.getenv("TERMINUS_USER", "admin")
-        key = os.getenv("TERMINUS_KEY", os.getenv("TERMINUSDB_ADMIN_PASS", "admin"))
+        server_url = os.getenv("TERMINUS_SERVER_URL", "http://localhost:6363")
+        user = os.getenv("TERMINUS_USER", "anonymous")
+        key = os.getenv("TERMINUS_KEY", os.getenv("TERMINUSDB_ADMIN_PASS", ""))
         account = os.getenv("TERMINUS_ACCOUNT", "admin")
         timeout = int(os.getenv("TERMINUS_TIMEOUT", "30"))
         database = os.getenv("TERMINUS_DATABASE")

@@ -30,6 +30,9 @@ class VersionControlService(BaseTerminusService):
         """
         데이터베이스의 모든 브랜치 목록 조회
         
+        Uses WOQL GetBranch query instead of deprecated GET /api/branch endpoint
+        which returns 405 Method Not Allowed in TerminusDB v11
+        
         Args:
             db_name: 데이터베이스 이름
             
@@ -39,39 +42,70 @@ class VersionControlService(BaseTerminusService):
         try:
             await self.db_service.ensure_db_exists(db_name)
             
-            endpoint = f"/api/branch/{self.connection_info.account}/{db_name}"
-            result = await self._make_request("GET", endpoint)
+            # Use WOQL GetBranch query instead of GET /api/branch
+            endpoint = f"/api/woql/{self.connection_info.account}/{db_name}"
+            query = {
+                "query": {
+                    "@type": "GetBranch"
+                }
+            }
+            
+            result = await self._make_request("POST", endpoint, query)
             
             branches = []
             
-            # 응답 파싱
-            if isinstance(result, list):
-                for branch_info in result:
-                    if isinstance(branch_info, str):
+            # Parse WOQL response
+            if isinstance(result, dict):
+                # Check for branches in result
+                if "branches" in result:
+                    # Format: {"branches": {"main": {...}, "dev": {...}}}
+                    for branch_name, branch_data in result["branches"].items():
                         branches.append({
-                            "name": branch_info,
-                            "head": None,
-                            "created": None
+                            "name": branch_name,
+                            "head": branch_data.get("head") if isinstance(branch_data, dict) else None,
+                            "created": branch_data.get("created") if isinstance(branch_data, dict) else None
                         })
-                    elif isinstance(branch_info, dict):
+                elif "bindings" in result:
+                    # Alternative format with bindings
+                    for binding in result["bindings"]:
+                        if "Branch" in binding:
+                            branches.append({
+                                "name": binding.get("Branch", ""),
+                                "head": binding.get("Head"),
+                                "created": binding.get("Created")
+                            })
+                elif "@graph" in result:
+                    # JSON-LD format
+                    for branch_info in result["@graph"]:
                         branches.append({
                             "name": branch_info.get("name", branch_info.get("@id", "")),
                             "head": branch_info.get("head"),
                             "created": branch_info.get("created")
                         })
-            elif isinstance(result, dict) and "@graph" in result:
-                # JSON-LD 형식
-                for branch_info in result["@graph"]:
-                    branches.append({
-                        "name": branch_info.get("name", branch_info.get("@id", "")),
-                        "head": branch_info.get("head"),
-                        "created": branch_info.get("created")
-                    })
+            elif isinstance(result, list):
+                # Simple list format
+                for item in result:
+                    if isinstance(item, str):
+                        branches.append({
+                            "name": item,
+                            "head": None,
+                            "created": None
+                        })
+                    elif isinstance(item, dict):
+                        branches.append({
+                            "name": item.get("name", item.get("branch", "")),
+                            "head": item.get("head"),
+                            "created": item.get("created")
+                        })
+            
+            # Default to main branch if no branches found
+            if not branches:
+                branches = [{"name": "main", "head": None, "created": None}]
             
             return branches
             
         except Exception as e:
-            logger.error(f"Failed to list branches: {e}")
+            logger.error(f"Failed to list branches using WOQL: {e}")
             raise DatabaseError(f"브랜치 목록 조회 실패: {e}")
     
     async def create_branch(

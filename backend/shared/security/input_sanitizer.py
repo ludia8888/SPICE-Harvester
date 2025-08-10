@@ -397,19 +397,39 @@ class InputSanitizer:
             return self.sanitize_string(str(value))
 
     def validate_database_name(self, db_name: str) -> str:
-        """데이터베이스 이름 검증"""
+        """
+        데이터베이스 이름 검증 - 엄격한 규칙 적용
+        
+        Rules:
+        - Must start with lowercase letter
+        - Can only contain lowercase letters, numbers, underscore, hyphen
+        - Length between 3-50 characters
+        - Cannot have consecutive special characters
+        """
         if not db_name or not isinstance(db_name, str):
             raise SecurityViolationError("Database name must be a non-empty string")
 
-        # 데이터베이스 이름은 영숫자, 한글(완성형+자음모음), 하이픈, 언더스코어만 허용
-        if not re.match(r"^[a-zA-Z0-9가-힣ㄱ-ㅎㅏ-ㅣ_-]+$", db_name):
-            raise SecurityViolationError("Database name contains invalid characters")
-
+        # Check length first
+        if len(db_name) < 3:
+            raise SecurityViolationError("Database name must be at least 3 characters long")
+        
         if len(db_name) > 50:
-            raise SecurityViolationError("Database name too long")
+            raise SecurityViolationError("Database name must not exceed 50 characters")
 
-        if db_name.startswith(("_", "-")) or db_name.endswith(("_", "-")):
-            raise SecurityViolationError("Database name cannot start or end with _ or -")
+        # Strict regex: lowercase letter start, lowercase/numbers/underscore/hyphen only
+        if not re.match(r"^[a-z][a-z0-9_-]*$", db_name):
+            raise SecurityViolationError(
+                "Database name must start with a lowercase letter and contain only "
+                "lowercase letters, numbers, underscores, and hyphens"
+            )
+
+        # Cannot end with special characters
+        if db_name.endswith(("_", "-")):
+            raise SecurityViolationError("Database name cannot end with underscore or hyphen")
+        
+        # Check for consecutive special characters
+        if re.search(r"[_-]{2,}", db_name):
+            raise SecurityViolationError("Database name cannot have consecutive special characters")
 
         return db_name
 

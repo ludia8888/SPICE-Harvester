@@ -20,6 +20,14 @@ from shared.services.service_factory import FUNNEL_SERVICE_INFO, create_fastapi_
 from funnel.routers.type_inference_router import router as type_inference_router
 from shared.utils.app_logger import get_logger
 
+# Rate limiting middleware
+from shared.middleware.rate_limiter import rate_limit, RateLimitPresets, RateLimiter
+
+# Observability imports
+from shared.observability.tracing import get_tracing_service, trace_endpoint
+from shared.observability.metrics import get_metrics_collector, RequestMetricsMiddleware
+from shared.observability.context_propagation import TraceContextMiddleware
+
 logger = get_logger(__name__)
 
 
@@ -27,7 +35,44 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI):
     """애플리케이션 시작/종료 이벤트"""
     logger.info("🚀 Funnel Service 시작")
+    
+    # Initialize Rate Limiter
+    try:
+        rate_limiter = RateLimiter()
+        await rate_limiter.initialize()
+        app.state.rate_limiter = rate_limiter
+        logger.info("Rate limiter initialized")
+    except Exception as e:
+        logger.error(f"Failed to initialize rate limiter: {e}")
+    
+    # Initialize OpenTelemetry
+    try:
+        tracing_service = get_tracing_service("funnel-service")
+        metrics_collector = get_metrics_collector("funnel-service")
+        
+        # Instrument FastAPI
+        tracing_service.instrument_fastapi(app)
+        
+        # Add middleware
+        app.add_middleware(RequestMetricsMiddleware, metrics_collector=metrics_collector)
+        app.add_middleware(TraceContextMiddleware)
+        
+        app.state.tracing_service = tracing_service
+        app.state.metrics_collector = metrics_collector
+        
+        logger.info("OpenTelemetry initialized")
+    except Exception as e:
+        logger.error(f"Failed to initialize OpenTelemetry: {e}")
+    
     yield
+    
+    # Cleanup
+    if hasattr(app.state, 'rate_limiter'):
+        await app.state.rate_limiter.close()
+    
+    if hasattr(app.state, 'tracing_service'):
+        app.state.tracing_service.shutdown()
+        
     logger.info("🔄 Funnel Service 종료")
 
 

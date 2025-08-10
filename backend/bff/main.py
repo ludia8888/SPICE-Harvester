@@ -76,6 +76,14 @@ from shared.dependencies import configure_type_inference_service
 from shared.services.redis_service import create_redis_service
 from shared.services.websocket_service import get_notification_service
 
+# Rate limiting middleware
+from shared.middleware.rate_limiter import rate_limit, RateLimitPresets, RateLimiter
+
+# Observability imports
+from shared.observability.tracing import get_tracing_service, trace_endpoint
+from shared.observability.metrics import get_metrics_collector, RequestMetricsMiddleware
+from shared.observability.context_propagation import TraceContextMiddleware
+
 # BFF specific imports
 from bff.services.funnel_type_inference_adapter import FunnelHTTPTypeInferenceAdapter
 from bff.services.oms_client import OMSClient
@@ -124,6 +132,12 @@ class BFFServiceContainer:
         
         # 4. Initialize WebSocket Notification Service
         await self._initialize_websocket_service()
+        
+        # 5. Initialize Rate Limiter
+        await self._initialize_rate_limiter()
+        
+        # 6. Initialize Observability (Tracing & Metrics)
+        await self._initialize_observability()
         
         logger.info("BFF services initialized successfully")
     
@@ -188,11 +202,61 @@ class BFFServiceContainer:
             logger.error(f"Failed to initialize WebSocket services: {e}")
             # Continue without WebSocket - service can still work without real-time updates
     
+    async def _initialize_rate_limiter(self) -> None:
+        """Initialize rate limiting service"""
+        try:
+            logger.info("Initializing rate limiter...")
+            
+            # Create rate limiter instance
+            rate_limiter = RateLimiter()
+            await rate_limiter.initialize()
+            
+            self._bff_services['rate_limiter'] = rate_limiter
+            logger.info("Rate limiter initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize rate limiter: {e}")
+            # Continue without rate limiting - service can still work
+    
+    async def _initialize_observability(self) -> None:
+        """Initialize observability with OpenTelemetry"""
+        try:
+            logger.info("Initializing observability (OpenTelemetry)...")
+            
+            # Initialize tracing service
+            tracing_service = get_tracing_service("bff-service")
+            
+            # Initialize metrics collector
+            metrics_collector = get_metrics_collector("bff-service")
+            
+            self._bff_services['tracing_service'] = tracing_service
+            self._bff_services['metrics_collector'] = metrics_collector
+            
+            logger.info("Observability initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize observability: {e}")
+            # Continue without observability - service can still work
+    
     async def shutdown_bff_services(self) -> None:
         """Shutdown BFF-specific services"""
         logger.info("Shutting down BFF services...")
         
         # Shutdown in reverse order of initialization
+        if 'tracing_service' in self._bff_services:
+            try:
+                self._bff_services['tracing_service'].shutdown()
+                logger.info("Tracing service shutdown")
+            except Exception as e:
+                logger.error(f"Error shutting down tracing: {e}")
+        
+        if 'rate_limiter' in self._bff_services:
+            try:
+                await self._bff_services['rate_limiter'].close()
+                logger.info("Rate limiter closed")
+            except Exception as e:
+                logger.error(f"Error closing rate limiter: {e}")
+        
         if 'websocket_service' in self._bff_services:
             try:
                 await self._bff_services['websocket_service'].stop()
@@ -270,6 +334,23 @@ async def lifespan(app: FastAPI):
         app.state.container = container
         app.state.bff_container = _bff_container
         
+        # 5. Store rate limiter in app state for decorators
+        if 'rate_limiter' in _bff_container._bff_services:
+            app.state.rate_limiter = _bff_container._bff_services['rate_limiter']
+        
+        # 6. Set up OpenTelemetry instrumentation
+        if 'tracing_service' in _bff_container._bff_services:
+            tracing_service = _bff_container._bff_services['tracing_service']
+            tracing_service.instrument_fastapi(app)
+            
+        # 7. Add observability middleware
+        if 'metrics_collector' in _bff_container._bff_services:
+            metrics_collector = _bff_container._bff_services['metrics_collector']
+            app.add_middleware(RequestMetricsMiddleware, metrics_collector=metrics_collector)
+            
+        # 8. Add trace context propagation middleware  
+        app.add_middleware(TraceContextMiddleware)
+        
         logger.info("BFF Service startup completed successfully")
         
         yield
@@ -332,6 +413,8 @@ def get_accept_language(request: Request) -> str:
 # to show the modernized dependency injection pattern
 
 @app.get("/database/{db_name}/ontology/{class_label}")
+@rate_limit(**RateLimitPresets.STANDARD)
+@trace_endpoint("get_ontology")
 async def get_ontology(
     db_name: str,
     class_label: str,
@@ -432,6 +515,8 @@ async def get_ontology(
 
 
 @app.get("/database/{db_name}/ontologies")
+@rate_limit(**RateLimitPresets.RELAXED)
+@trace_endpoint("list_ontologies")
 async def list_ontologies(
     db_name: str,
     request: Request,
