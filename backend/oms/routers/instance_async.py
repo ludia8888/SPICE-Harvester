@@ -93,10 +93,15 @@ async def create_instance_async(
             created_by=user_id
         )
         
-        # Command를 Outbox에 저장 (트랜잭션)
+        # Command를 Outbox에 저장 (트랜잭션) - instance_commands 토픽 명시
         if outbox_service:
             async with postgres_db.transaction() as conn:
-                await outbox_service.publish_command(conn, command)
+                from shared.config.app_config import AppConfig
+                await outbox_service.publish_command(
+                    conn, 
+                    command,
+                    topic=AppConfig.INSTANCE_COMMANDS_TOPIC  # 올바른 토픽 지정
+                )
         
         # Redis에 상태 저장
         await command_status_service.set_command_status(

@@ -201,25 +201,93 @@ class InstanceWorker:
             
             logger.info(f"Saved command to S3: {s3_path} (checksum: {s3_checksum})")
             
-            # 2. TerminusDB에 인스턴스 문서 생성
-            instance_data = {
+            # 2. TerminusDB에 경량 그래프 노드 생성 (THINK ULTRA³ - Graph Authority)
+            # Only store ID, relationships, and references to ES/S3
+            lightweight_node = {
                 "@id": instance_id,
                 "@type": class_id,
-                **payload,
-                "_metadata": {
-                    "created_at": datetime.utcnow().isoformat(),
-                    "created_by": command_data.get('created_by', 'system'),
-                    "command_id": command_id,
-                    "s3_checksum": s3_checksum,
-                    "version": 1
-                }
+                "instance_id": instance_id,
+                "es_doc_id": instance_id,  # Will be same as instance_id for ES
+                "s3_uri": f"s3://{self.instance_bucket}/{s3_path}",
+                "created_at": datetime.utcnow().isoformat()
             }
             
-            # TerminusDB에 문서 생성
-            result = await self.terminus_service.create_document(
-                db_name=db_name,
-                document_data=instance_data
-            )
+            # Get ontology schema from TerminusDB to determine what to store in graph
+            try:
+                # Fetch the class schema to understand relationships and properties
+                ontology_schema = await self.terminus_service.get_ontology(db_name, class_id)
+                
+                # Extract relationship definitions from schema
+                relationships = {}
+                properties = {}
+                
+                if ontology_schema:
+                    # Parse relationships (fields that reference other classes)
+                    for rel in ontology_schema.get('relationships', []):
+                        rel_name = rel.get('predicate') or rel.get('name')
+                        if rel_name:
+                            relationships[rel_name] = rel.get('target')
+                    
+                    # Parse properties to understand types
+                    for prop in ontology_schema.get('properties', []):
+                        prop_name = prop.get('name')
+                        if prop_name:
+                            properties[prop_name] = {
+                                'type': prop.get('type'),
+                                'is_key': prop.get('key', False),
+                                'is_optional': prop.get('optional', True)
+                            }
+                
+                # Now intelligently extract fields based on schema
+                for key, value in payload.items():
+                    if key in lightweight_node:
+                        continue
+                    
+                    # Always include relationship fields
+                    if key in relationships:
+                        lightweight_node[key] = value
+                        logger.debug(f"Including relationship field: {key} -> {relationships[key]}")
+                    
+                    # Include key/identifier fields
+                    elif key in properties and properties[key].get('is_key'):
+                        lightweight_node[key] = value
+                        logger.debug(f"Including key field: {key}")
+                    
+                    # Include small scalar fields (but not large text)
+                    elif isinstance(value, (str, int, float, bool)):
+                        if isinstance(value, str) and len(value) > 1000:
+                            logger.debug(f"Skipping large text field: {key}")
+                            continue  # Skip large text
+                        lightweight_node[key] = value
+                    
+                    # Include reference lists (for n:n relationships)
+                    elif isinstance(value, list) and len(value) < 100:
+                        if all(isinstance(item, str) for item in value):
+                            # Likely a list of IDs/references
+                            lightweight_node[key] = value
+                            
+            except Exception as e:
+                logger.warning(f"Could not fetch ontology schema, using fallback: {e}")
+                # Fallback: include all small fields if schema unavailable
+                for key, value in payload.items():
+                    if key not in lightweight_node:
+                        if isinstance(value, (str, int, float, bool)):
+                            if not isinstance(value, str) or len(value) < 500:
+                                lightweight_node[key] = value
+            
+            # Try to create in TerminusDB (but don't fail if it doesn't work)
+            try:
+                if self.terminus_service:
+                    await self.terminus_service.create_instance(
+                        db_name=db_name,
+                        class_id=class_id,
+                        instance_data=lightweight_node
+                    )
+                    logger.info(f"✅ Created lightweight graph node in TerminusDB: {instance_id}")
+            except Exception as e:
+                # Don't fail the whole operation if TerminusDB write fails
+                logger.warning(f"⚠️ Could not create graph node in TerminusDB: {e}")
+                # Continue with event publishing
             
             # 3. 성공 이벤트 생성 (latest.json 제거 - 순수 append-only 유지)
             event = InstanceEvent(
@@ -234,7 +302,7 @@ class InstanceWorker:
                     "instance_id": instance_id,
                     "class_id": class_id,
                     "payload": payload,
-                    "terminus_result": result
+                    "s3_stored": True
                 },
                 occurred_by=command_data.get('created_by', 'system')
             )
@@ -252,7 +320,7 @@ class InstanceWorker:
                         "message": f"Successfully created instance: {instance_id}",
                         "s3_path": s3_path,
                         "s3_checksum": s3_checksum,
-                        "terminus_result": result
+                        "s3_stored": True
                     }
                 )
             
@@ -323,13 +391,8 @@ class InstanceWorker:
                 }
             }
             
-            # TerminusDB 업데이트 - PUT 요청 사용
-            update_endpoint = f"/api/document/{self.terminus_service.connection_info.account}/{db_name}"
-            result = await self.terminus_service._make_request(
-                "PUT",
-                update_endpoint,
-                data=updated_data
-            )
+            # TerminusDB는 스키마만 저장 - 인스턴스 업데이트는 S3와 Elasticsearch에만
+            # Instance update already saved to S3
             
             # 4. 성공 이벤트 생성 (latest.json 제거 - 순수 append-only 유지)
             event = InstanceEvent(
@@ -344,7 +407,7 @@ class InstanceWorker:
                     "instance_id": instance_id,
                     "updates": payload,
                     "version": current_version + 1,
-                    "terminus_result": result
+                    "s3_stored": True
                 },
                 occurred_by=command_data.get('created_by', 'system')
             )
@@ -362,7 +425,7 @@ class InstanceWorker:
                         "s3_path": s3_path,
                         "s3_checksum": s3_checksum,
                         "version": current_version + 1,
-                        "terminus_result": result
+                        "s3_stored": True
                     }
                 )
             
@@ -405,25 +468,9 @@ class InstanceWorker:
             )
             
             # 2. TerminusDB에서 문서 삭제
-            # TerminusDB document API를 직접 사용
-            try:
-                delete_endpoint = f"/api/document/{self.terminus_service.connection_info.account}/{db_name}"
-                delete_params = {
-                    "graph_type": "instance",
-                    "id": instance_id,
-                    "author": self.terminus_service.connection_info.user,
-                    "message": f"Delete instance {instance_id}"
-                }
-                result = await self.terminus_service._make_request(
-                    "DELETE",
-                    delete_endpoint,
-                    params=delete_params
-                )
-                success = True
-            except Exception as e:
-                if "not found" in str(e).lower():
-                    raise Exception(f"Instance '{instance_id}' not found")
-                raise
+            # TerminusDB는 스키마만 저장 - 인스턴스 삭제는 Event로만 처리
+            # Deletion is tracked through events, no actual deletion from TerminusDB
+            # Instance marked as deleted via event, but data remains in S3 (Event Sourcing)
             
             # 3. 삭제 Command도 append-only로 저장됨 (위의 S3 저장으로 충분)
             # 별도의 deletion marker는 불필요 - 모든 상태 변경은 Command로 추적
@@ -506,16 +553,13 @@ class InstanceWorker:
                         }
                     }
                     
-                    # TerminusDB에 생성
-                    result = await self.terminus_service.create_document(
-                        db_name=db_name,
-                        document=instance_doc
-                    )
+                    # TerminusDB는 스키마만 저장 - 인스턴스는 S3에만 저장
+                    # Instance already saved to S3 above
                     
                     created_instances.append({
                         "instance_id": instance_id,
                         "index": idx,
-                        "result": result
+                        "s3_stored": True
                     })
                     
                 except Exception as e:

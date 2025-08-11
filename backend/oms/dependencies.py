@@ -156,6 +156,18 @@ class OMSDependencyProvider:
             import logging
             logger = logging.getLogger(__name__)
             logger.error(f"❌ OutboxService 초기화 실패: {type(e).__name__}: {e}")
+            
+            # 더 상세한 디버깅 정보 출력
+            from oms.database.postgres import db as postgres_db
+            logger.error(f"🔍 PostgreSQL URL: {postgres_db.connection_url}")
+            logger.error(f"🔍 Pool 상태: {postgres_db.pool is not None if hasattr(postgres_db, 'pool') else 'Unknown'}")
+            
+            # 환경 변수 확인
+            import os
+            logger.error(f"🔍 POSTGRES_HOST: {os.getenv('POSTGRES_HOST', 'not set')}")
+            logger.error(f"🔍 DOCKER_CONTAINER: {os.getenv('DOCKER_CONTAINER', 'not set')}")
+            logger.error(f"🔍 /.dockerenv exists: {os.path.exists('/.dockerenv')}")
+            
             logger.error(f"🔍 PostgreSQL 연결 또는 스키마 문제 가능성 - Event Sourcing 비활성화됨")
             import traceback
             logger.debug(f"Full traceback: {traceback.format_exc()}")

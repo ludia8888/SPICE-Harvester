@@ -15,6 +15,7 @@ from . import instance_async
 from . import websocket
 from . import tasks
 from . import admin
+from . import graph
 
 __all__ = [
     "database",
@@ -27,5 +28,6 @@ __all__ = [
     "instance_async",
     "websocket",
     "tasks",
-    "admin"
+    "admin",
+    "graph"
 ]
