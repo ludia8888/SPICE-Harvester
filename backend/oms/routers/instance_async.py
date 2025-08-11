@@ -60,7 +60,7 @@ class BulkInstanceCreateRequest(BaseModel):
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="메타데이터")
 
 
-@router.post("/{class_id}/create", response_model=CommandResult)
+@router.post("/{class_id}/create", response_model=CommandResult, status_code=status.HTTP_202_ACCEPTED)
 async def create_instance_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
@@ -96,7 +96,7 @@ async def create_instance_async(
         # Command를 Outbox에 저장 (트랜잭션)
         if outbox_service:
             async with postgres_db.transaction() as conn:
-                await outbox_service.publish_command(conn, command.dict())
+                await outbox_service.publish_command(conn, command)
         
         # Redis에 상태 저장
         await command_status_service.set_command_status(
@@ -137,7 +137,7 @@ async def create_instance_async(
         )
 
 
-@router.put("/{class_id}/{instance_id}/update", response_model=CommandResult)
+@router.put("/{class_id}/{instance_id}/update", response_model=CommandResult, status_code=status.HTTP_202_ACCEPTED)
 async def update_instance_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
@@ -173,7 +173,7 @@ async def update_instance_async(
         # Command를 Outbox에 저장
         if outbox_service:
             async with postgres_db.transaction() as conn:
-                await outbox_service.publish_command(conn, command.dict())
+                await outbox_service.publish_command(conn, command)
         
         # Redis에 상태 저장
         await command_status_service.set_command_status(
@@ -215,7 +215,7 @@ async def update_instance_async(
         )
 
 
-@router.delete("/{class_id}/{instance_id}/delete", response_model=CommandResult)
+@router.delete("/{class_id}/{instance_id}/delete", response_model=CommandResult, status_code=status.HTTP_202_ACCEPTED)
 async def delete_instance_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
@@ -248,7 +248,7 @@ async def delete_instance_async(
         # Command를 Outbox에 저장
         if outbox_service:
             async with postgres_db.transaction() as conn:
-                await outbox_service.publish_command(conn, command.dict())
+                await outbox_service.publish_command(conn, command)
         
         # Redis에 상태 저장
         await command_status_service.set_command_status(
@@ -290,7 +290,7 @@ async def delete_instance_async(
         )
 
 
-@router.post("/{class_id}/bulk-create", response_model=CommandResult)
+@router.post("/{class_id}/bulk-create", response_model=CommandResult, status_code=status.HTTP_202_ACCEPTED)
 async def bulk_create_instances_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
@@ -330,7 +330,7 @@ async def bulk_create_instances_async(
         # Command를 Outbox에 저장
         if outbox_service:
             async with postgres_db.transaction() as conn:
-                await outbox_service.publish_command(conn, command.dict())
+                await outbox_service.publish_command(conn, command)
         
         # Redis에 상태 저장
         await command_status_service.set_command_status(
@@ -549,7 +549,7 @@ async def _process_bulk_create_in_background(
         if outbox_service:
             from oms.database.postgres import db as postgres_db
             async with postgres_db.transaction() as conn:
-                await outbox_service.publish_command(conn, command.dict())
+                await outbox_service.publish_command(conn, command)
         
         # Update task status
         await command_status_service.set_command_status(

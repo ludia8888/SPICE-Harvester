@@ -352,3 +352,73 @@ class CommandStatusService:
         # For now, Redis TTL handles automatic cleanup
         logger.info(f"Cleanup requested for commands older than {days} days")
         return 0
+    
+    # Compatibility methods for legacy interface
+    async def set_command_status(
+        self,
+        command_id: str,
+        status: CommandStatus,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        Legacy compatibility method for setting command status.
+        
+        Args:
+            command_id: Command ID
+            status: Command status  
+            metadata: Metadata to store
+        """
+        if status == CommandStatus.PENDING:
+            # Create initial status with metadata
+            await self.create_command_status(
+                command_id=command_id,
+                command_type=metadata.get("command_type", "UNKNOWN") if metadata else "UNKNOWN",
+                aggregate_id=metadata.get("aggregate_id", command_id) if metadata else command_id,
+                payload=metadata or {},
+                user_id=metadata.get("created_by") if metadata else None
+            )
+        else:
+            # Update existing status
+            await self.update_status(
+                command_id=command_id,
+                status=status,
+                message=f"Status updated to {status}"
+            )
+    
+    async def get_command_status(self, command_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Legacy compatibility method for getting command status.
+        
+        Args:
+            command_id: Command ID
+            
+        Returns:
+            Status data or None
+        """
+        details = await self.get_command_details(command_id)
+        if not details:
+            return None
+            
+        return {
+            "status": details["status"],
+            "command_type": details.get("command_type"),
+            "aggregate_id": details.get("aggregate_id"),
+            "created_at": details.get("created_at"),
+            "updated_at": details.get("updated_at")
+        }
+    
+    async def get_command_result(self, command_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Legacy compatibility method for getting command result.
+        
+        Args:
+            command_id: Command ID
+            
+        Returns:
+            Result data or None
+        """
+        details = await self.get_command_details(command_id)
+        if not details:
+            return None
+            
+        return details.get("result")
