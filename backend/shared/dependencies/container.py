@@ -181,6 +181,50 @@ class ServiceContainer:
                 logger.error(f"Failed to create service {service_name}: {e}")
                 raise RuntimeError(f"Service creation failed for {service_name}: {e}")
     
+    def get_sync(self, service_type: Type[T]) -> T:
+        """
+        Get a service instance synchronously (for use in factory functions)
+        
+        This method is intended for use in factory functions where async/await
+        is not available. It only returns already created and initialized instances.
+        If a service hasn't been created yet, it raises an error.
+        
+        Args:
+            service_type: The service class/type to retrieve
+            
+        Returns:
+            Service instance (already initialized)
+            
+        Raises:
+            ValueError: If service is not registered
+            RuntimeError: If service is not yet created or initialized
+        """
+        service_name = service_type.__name__
+        
+        if service_name not in self._services:
+            raise ValueError(f"Service {service_name} is not registered")
+        
+        registration = self._services[service_name]
+        
+        # Only return existing, initialized instances for sync access
+        if registration.instance is not None and registration.initialized:
+            return registration.instance
+        
+        # For sync access, we require services to be pre-created and initialized
+        if registration.instance is None:
+            raise RuntimeError(
+                f"Service {service_name} has not been created yet. "
+                f"Services requiring async initialization must be created via async get() first."
+            )
+        
+        if not registration.initialized:
+            raise RuntimeError(
+                f"Service {service_name} exists but is not fully initialized. "
+                f"Async initialization is required before sync access."
+            )
+            
+        return registration.instance
+    
     def has(self, service_type: Type[T]) -> bool:
         """
         Check if a service is registered

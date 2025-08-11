@@ -172,15 +172,29 @@ class OMSDependencyProvider:
         """
         # Register CommandStatusService factory if not already registered
         if not container.has(CommandStatusService):
-            def create_command_status_service(settings: ApplicationSettings) -> CommandStatusService:
-                # CommandStatusService requires Redis service
-                redis_service = container.get_sync(RedisService)
+            async def create_command_status_service_async(settings: ApplicationSettings) -> CommandStatusService:
+                # CommandStatusService requires Redis service - use async access
+                redis_service = await container.get(RedisService)
                 return CommandStatusService(redis_service)
             
-            container.register_singleton(CommandStatusService, create_command_status_service)
+            # For CommandStatusService, we need to handle async factory creation differently
+            # since the factory itself needs async operations
+            pass  # We'll create it inline below
         
         try:
-            return await container.get(CommandStatusService)
+            # Check if already created
+            if container.is_created(CommandStatusService):
+                return await container.get(CommandStatusService)
+            
+            # Create CommandStatusService with Redis dependency
+            redis_service = await container.get(RedisService)
+            command_status_service = CommandStatusService(redis_service)
+            
+            # Register the created instance
+            container.register_instance(CommandStatusService, command_status_service)
+            
+            return command_status_service
+            
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

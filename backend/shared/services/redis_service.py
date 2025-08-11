@@ -75,6 +75,10 @@ class RedisService:
             logger.error(f"Failed to connect to Redis: {e}")
             raise
             
+    async def initialize(self) -> None:
+        """ServiceContainer-compatible initialization method."""
+        await self.connect()
+            
     async def disconnect(self) -> None:
         """Close Redis connection and pool."""
         try:

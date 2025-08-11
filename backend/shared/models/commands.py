@@ -53,6 +53,7 @@ class CommandStatus(str, Enum):
     PROCESSING = "PROCESSING"  # 처리 중
     COMPLETED = "COMPLETED"  # 완료
     FAILED = "FAILED"  # 실패
+    CANCELLED = "CANCELLED"  # 취소됨
     RETRYING = "RETRYING"  # 재시도 중
 
 

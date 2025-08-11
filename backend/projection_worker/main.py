@@ -274,6 +274,10 @@ class ProjectionWorker:
                 await self._handle_ontology_class_updated(ontology_data, event_id, event_data)
             elif event_type == EventType.ONTOLOGY_CLASS_DELETED.value:
                 await self._handle_ontology_class_deleted(ontology_data, event_id, event_data)
+            elif event_type == EventType.DATABASE_CREATED.value:
+                await self._handle_database_created(ontology_data, event_id, event_data)
+            elif event_type == EventType.DATABASE_DELETED.value:
+                await self._handle_database_deleted(ontology_data, event_id, event_data)
             else:
                 logger.warning(f"Unknown ontology event type: {event_type}")
                 
@@ -546,6 +550,109 @@ class ProjectionWorker:
                 
         except Exception as e:
             logger.error(f"Failed to handle ontology class deleted: {e}")
+            raise
+            
+    async def _handle_database_created(self, db_data: Dict[str, Any], event_id: str, event_data: Dict[str, Any]):
+        """데이터베이스 생성 이벤트 처리"""
+        try:
+            db_name = db_data.get('db_name') or event_data.get('db_name')
+            if not db_name:
+                raise ValueError("db_name is required for database creation")
+                
+            # 데이터베이스 생성 시 기본 인덱스들을 미리 준비
+            logger.info(f"Database created: {db_name}, preparing Elasticsearch indices")
+            
+            # 인스턴스와 온톨로지 인덱스를 미리 생성
+            await self._ensure_index_exists(db_name, "instances")
+            await self._ensure_index_exists(db_name, "ontologies")
+            
+            # 데이터베이스 메타데이터 문서 생성 (검색 가능한 데이터베이스 목록 관리)
+            metadata_index = "spice_database_metadata"
+            metadata_doc = {
+                'database_name': db_name,
+                'description': db_data.get('description', ''),
+                'created_at': datetime.utcnow().isoformat(),
+                'created_by': event_data.get('occurred_by', 'system'),
+                'event_id': event_id,
+                'status': 'active'
+            }
+            
+            # 메타데이터 인덱스 확인 및 생성
+            if not await self.elasticsearch_service.index_exists(metadata_index):
+                await self.elasticsearch_service.create_index(
+                    metadata_index,
+                    mappings={
+                        "properties": {
+                            "database_name": {"type": "keyword"},
+                            "description": {"type": "text"},
+                            "created_at": {"type": "date"},
+                            "created_by": {"type": "keyword"},
+                            "event_id": {"type": "keyword"},
+                            "status": {"type": "keyword"}
+                        }
+                    },
+                    settings=DEFAULT_INDEX_SETTINGS
+                )
+            
+            # 메타데이터 문서 인덱싱
+            await self.elasticsearch_service.index_document(
+                metadata_index,
+                metadata_doc,
+                doc_id=db_name,
+                refresh=True
+            )
+            
+            logger.info(f"Database creation processed: {db_name}, indices prepared and metadata indexed")
+            
+        except Exception as e:
+            logger.error(f"Failed to handle database created: {e}")
+            raise
+            
+    async def _handle_database_deleted(self, db_data: Dict[str, Any], event_id: str, event_data: Dict[str, Any]):
+        """데이터베이스 삭제 이벤트 처리"""
+        try:
+            db_name = db_data.get('db_name') or event_data.get('db_name')
+            if not db_name:
+                raise ValueError("db_name is required for database deletion")
+                
+            logger.info(f"Database deleted: {db_name}, cleaning up Elasticsearch indices")
+            
+            # 관련 인덱스들 삭제
+            instances_index = get_instances_index_name(db_name)
+            ontologies_index = get_ontologies_index_name(db_name)
+            
+            # 인덱스 삭제 (존재하는 경우에만)
+            if await self.elasticsearch_service.index_exists(instances_index):
+                await self.elasticsearch_service.delete_index(instances_index)
+                logger.info(f"Deleted instances index: {instances_index}")
+                
+            if await self.elasticsearch_service.index_exists(ontologies_index):
+                await self.elasticsearch_service.delete_index(ontologies_index)
+                logger.info(f"Deleted ontologies index: {ontologies_index}")
+            
+            # 메타데이터에서 데이터베이스 상태 업데이트 (완전 삭제 대신 비활성화)
+            metadata_index = "spice_database_metadata"
+            if await self.elasticsearch_service.index_exists(metadata_index):
+                await self.elasticsearch_service.update_document(
+                    metadata_index,
+                    db_name,
+                    doc={
+                        'status': 'deleted',
+                        'deleted_at': datetime.utcnow().isoformat(),
+                        'deleted_by': event_data.get('occurred_by', 'system'),
+                        'deletion_event_id': event_id
+                    },
+                    refresh=True
+                )
+            
+            # 생성된 인덱스 캐시에서 제거
+            self.created_indices.discard(instances_index)
+            self.created_indices.discard(ontologies_index)
+            
+            logger.info(f"Database deletion processed: {db_name}, indices cleaned up and metadata updated")
+            
+        except Exception as e:
+            logger.error(f"Failed to handle database deleted: {e}")
             raise
             
     async def _get_class_label(self, class_id: str, db_name: str) -> Optional[str]:
