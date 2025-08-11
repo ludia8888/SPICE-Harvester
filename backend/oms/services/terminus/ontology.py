@@ -289,43 +289,55 @@ class OntologyService(BaseTerminusService):
             return False
     
     def _create_property_schema(self, prop: Property) -> Dict[str, Any]:
-        """속성 스키마 생성 - 🔥 ULTRA FIX: Correct TerminusDB property format"""
-        # 🔥 CRITICAL FIX: Based on research, TerminusDB expects:
-        # - All properties should use Optional format for best compatibility
-        # - Required fields can be enforced at validation level, not schema level
+        """속성 스키마 생성 - TerminusDB 공식 패턴 준수"""
+        # TerminusDB 공식 패턴:
+        # - 스칼라 타입은 직접 지정 (예: "xsd:string")
+        # - Optional이 필요한 경우만 {"@type": "Optional", "@class": "xsd:string"}
         
         mapped_type = self._map_datatype_to_terminus(prop.type)
         
-        # 🔥 NEW APPROACH: Always use Optional format for schema compatibility
-        # This matches the working examples in the codebase
-        return {
-            "@type": "Optional",
-            "@class": mapped_type
-        }
+        # 필수 속성: 타입 직접 반환
+        if prop.required:
+            return mapped_type  # "xsd:string" 형태로 직접 반환
+        else:
+            # 옵셔널 속성: Optional로 감싸기
+            return {
+                "@type": "Optional",
+                "@class": mapped_type
+            }
     
     def _create_relationship_schema(self, rel: Relationship) -> Dict[str, Any]:
-        """관계 스키마 생성"""
-        schema = {
-            "@type": "Optional",
-            "@class": rel.target,  # Relationship has 'target', not 'target_ontology'
-            "@documentation": {
-                "@comment": rel.description or f"{rel.predicate} relationship",  # Use predicate instead of name
-                "@label": rel.label
-            }
-        }
+        """관계 스키마 생성 - TerminusDB 공식 패턴 준수"""
+        # TerminusDB 공식 패턴:
+        # - 1:1 필수: "Person" (타겟 클래스 직접 지정)
+        # - 1:1 옵셔널: {"@type": "Optional", "@class": "Person"}
+        # - 1:N: {"@type": "Set", "@class": "Person"}
+        # - N:M: {"@type": "Set", "@class": "Person"}
         
-        # 관계는 Relationship 모델에 required 필드가 없으므로 
-        # 기본적으로 Optional로 처리
+        # 카디널리티 분석
+        cardinality = rel.cardinality or "n:1"  # 기본값: n:1
         
-        # 다중 관계인 경우 (cardinality가 n으로 끝나는 경우: 1:n, n:m)
-        if rel.cardinality and (rel.cardinality.endswith(":n") or rel.cardinality.endswith(":m")):
-            base_schema = schema.copy()
-            schema = {
-                "@type": "Set",
-                "@class": base_schema
+        # 다중 관계 (1:n, n:m)
+        if cardinality.endswith(":n") or cardinality.endswith(":m"):
+            return {
+                "@type": "Set",  # 집합 타입 (순서/중복 없음)
+                "@class": rel.target
             }
         
-        return schema
+        # 단일 관계 (1:1, n:1)
+        # Relationship 모델에 required 필드가 없으므로 기본적으로 Optional로 처리
+        # 하지만 특정 패턴 검사로 필수 여부 판단 가능
+        required = getattr(rel, 'required', False)
+        
+        if required:
+            # 필수 관계: 타겟 클래스 직접 반환
+            return rel.target
+        else:
+            # 옵셔널 관계
+            return {
+                "@type": "Optional",
+                "@class": rel.target
+            }
     
     def _map_datatype_to_terminus(self, datatype: Union[DataType, str]) -> str:
         """DataType을 TerminusDB 타입으로 매핑"""

@@ -118,7 +118,8 @@ class ServiceConfig:
         if url := os.getenv("TERMINUS_SERVER_URL"):
             return url
         protocol = ServiceConfig.get_protocol()
-        return f"{protocol}://localhost:6363"
+        # FIXED: TerminusDB는 6364 포트에서 실행 중
+        return f"{protocol}://localhost:6364"
     
     @staticmethod
     def get_postgres_url() -> str:

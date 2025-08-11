@@ -1,0 +1,236 @@
+{
+  "@context": {
+    "@vocab": "https://example.org/sh/"
+  },
+  "@type": "Ontology",
+  "entities": [
+    {
+      "@id": "Product",
+      "properties": [
+        "product_id",
+        "client_id",
+        "name",
+        "category",
+        "hs_code",
+        "unit_cost",
+        "unit_price",
+        "weight_g"
+      ]
+    },
+    {
+      "@id": "SKU",
+      "properties": [
+        "sku_id",
+        "product_id",
+        "supplier_id",
+        "color",
+        "size",
+        "barcode"
+      ]
+    },
+    {
+      "@id": "Warehouse",
+      "properties": [
+        "warehouse_id",
+        "name",
+        "country",
+        "city"
+      ]
+    },
+    {
+      "@id": "Location",
+      "properties": [
+        "location_id",
+        "warehouse_id",
+        "type"
+      ]
+    },
+    {
+      "@id": "Inbound",
+      "properties": [
+        "inbound_id",
+        "sku_id",
+        "supplier_id",
+        "warehouse_id",
+        "eta_date",
+        "arrival_date",
+        "qty_expected",
+        "qty_received",
+        "cost_per_unit"
+      ]
+    },
+    {
+      "@id": "Receipt",
+      "properties": [
+        "receipt_id",
+        "inbound_id",
+        "sku_id",
+        "location_id",
+        "qty"
+      ]
+    },
+    {
+      "@id": "Order",
+      "properties": [
+        "order_id",
+        "client_id",
+        "order_datetime",
+        "ship_from_warehouse",
+        "ship_to_country",
+        "currency",
+        "service_level",
+        "payment_status"
+      ]
+    },
+    {
+      "@id": "OrderItem",
+      "properties": [
+        "order_id",
+        "line_no",
+        "sku_id",
+        "qty",
+        "unit_price"
+      ]
+    },
+    {
+      "@id": "Tracking",
+      "properties": [
+        "order_id",
+        "carrier",
+        "tracking_number",
+        "ship_datetime",
+        "est_delivery_date",
+        "status",
+        "weight_g"
+      ]
+    },
+    {
+      "@id": "InventorySnapshot",
+      "properties": [
+        "snapshot_date",
+        "warehouse_id",
+        "sku_id",
+        "qty_counted"
+      ]
+    },
+    {
+      "@id": "Return",
+      "properties": [
+        "order_id",
+        "reason",
+        "created_at"
+      ]
+    },
+    {
+      "@id": "Exception",
+      "properties": [
+        "order_id",
+        "type",
+        "description",
+        "severity",
+        "created_at"
+      ]
+    },
+    {
+      "@id": "Event",
+      "properties": [
+        "event_id",
+        "event_type",
+        "entity_id",
+        "payload",
+        "created_at",
+        "cause_event_id"
+      ]
+    },
+    {
+      "@id": "Outbox",
+      "properties": [
+        "command_id",
+        "command_type",
+        "topic",
+        "key",
+        "payload",
+        "created_at",
+        "cause_event_id"
+      ]
+    },
+    {
+      "@id": "Client",
+      "properties": [
+        "client_id",
+        "brand_name",
+        "vertical"
+      ]
+    },
+    {
+      "@id": "Supplier",
+      "properties": [
+        "supplier_id",
+        "name",
+        "country"
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "from": "SKU",
+      "to": "Product",
+      "type": "BELONGS_TO"
+    },
+    {
+      "from": "SKU",
+      "to": "Supplier",
+      "type": "SUPPLIED_BY"
+    },
+    {
+      "from": "Inbound",
+      "to": "SKU",
+      "type": "FOR_SKU"
+    },
+    {
+      "from": "Inbound",
+      "to": "Warehouse",
+      "type": "TO_WAREHOUSE"
+    },
+    {
+      "from": "Receipt",
+      "to": "Inbound",
+      "type": "OF_INBOUND"
+    },
+    {
+      "from": "Receipt",
+      "to": "Location",
+      "type": "PUTAWAY_TO"
+    },
+    {
+      "from": "OrderItem",
+      "to": "Order",
+      "type": "ITEM_OF"
+    },
+    {
+      "from": "OrderItem",
+      "to": "SKU",
+      "type": "SKU_OF"
+    },
+    {
+      "from": "Order",
+      "to": "Warehouse",
+      "type": "SHIP_FROM"
+    },
+    {
+      "from": "Tracking",
+      "to": "Order",
+      "type": "TRACKS"
+    },
+    {
+      "from": "InventorySnapshot",
+      "to": "SKU",
+      "type": "SNAP_OF"
+    },
+    {
+      "from": "Product",
+      "to": "Client",
+      "type": "OWNED_BY"
+    }
+  ]
+}
