@@ -37,7 +37,7 @@ class DatabaseSettings(BaseSettings):
     
     # TerminusDB Configuration
     terminus_url: str = Field(
-        default="http://localhost:6363",
+        default="http://localhost:6364",
         env="TERMINUS_SERVER_URL",
         description="TerminusDB server URL"
     )
@@ -47,7 +47,7 @@ class DatabaseSettings(BaseSettings):
         description="TerminusDB username"
     )
     terminus_password: str = Field(
-        default="",
+        default="admin",
         env="TERMINUS_KEY",
         description="TerminusDB password/key"
     )
@@ -116,7 +116,7 @@ class DatabaseSettings(BaseSettings):
         description="Redis host"
     )
     redis_port: int = Field(
-        default=6380,
+        default=6379,
         env="REDIS_PORT",
         description="Redis port"
     )

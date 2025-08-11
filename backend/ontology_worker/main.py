@@ -81,10 +81,10 @@ class OntologyWorker:
         
         # TerminusDB 연결 설정 (admin credentials for database operations)
         connection_info = ConnectionConfig(
-            server_url="http://localhost:6363",  # Use healthy TerminusDB container
+            server_url=ServiceConfig.get_terminus_url(),  # Use ServiceConfig for correct endpoint
             user=os.getenv("TERMINUS_USER", "admin"),
             account=os.getenv("TERMINUS_ACCOUNT", "admin"),
-            key=os.getenv("TERMINUS_KEY", "admin123"),
+            key=os.getenv("TERMINUS_KEY", "admin"),
         )
         self.terminus_service = AsyncTerminusService(connection_info)
         await self.terminus_service.connect()

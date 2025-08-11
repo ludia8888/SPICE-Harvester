@@ -91,7 +91,7 @@ BFFAdapterServiceDep = Depends(get_bff_adapter)
 @router.post("/ontology", response_model=OntologyResponse)
 async def create_ontology(
     db_name: str,
-    ontology: Dict[str, Any],  # Accept raw dict to preserve target field
+    ontology: OntologyCreateRequestBFF,  # 🔥 FIXED: Use proper Pydantic validation
     mapper: LabelMapper = LabelMapperDep,
     terminus: TerminusService = TerminusServiceDep,
     jsonld_conv: JSONToJSONLDConverter = JSONLDConverterDep,
@@ -101,15 +101,13 @@ async def create_ontology(
 
     새로운 온톨로지 클래스를 생성합니다.
     레이블 기반으로 ID가 자동 생성됩니다.
-    """
-    # 🔥 ULTRA DEBUG! Force logging to check if route is called
-    
+    """    
     try:
         # 입력 데이터 보안 검증
         db_name = validate_db_name(db_name)
         
-        # 입력 데이터 처리 (이미 dict 형태)
-        ontology_dict = ontology.copy()  # Make a copy to avoid modifying the original
+        # 입력 데이터 처리 (Pydantic model에서 dict로 변환)
+        ontology_dict = ontology.dict(exclude_unset=True)  # Convert Pydantic model to dict
         ontology_dict = sanitize_input(ontology_dict)
 
         # ID 생성 또는 검증
@@ -156,13 +154,11 @@ async def create_ontology(
                         if 'description' in prop:
                             prop['description'] = extract_string_value(prop['description'], 'property description')
                         
-                        # 🔥 ULTRA! BFF uses 'label' but OMS requires 'name'
+                        # Generate property name from label if missing
                         if 'name' not in prop and 'label' in prop:
-                            # Generate name from label
                             prop['name'] = generate_simple_id(prop['label'], use_timestamp_for_korean=False)
-                            logger.info(f"🔥 Generated property name '{prop['name']}' from label '{prop['label']}'")
                         
-                        # 🔥 ULTRA! Convert STRING to xsd:string for OMS
+                        # Convert generic types to XSD types for OMS compatibility
                         if prop.get('type') == 'STRING':
                             prop['type'] = 'xsd:string'
                         elif prop.get('type') == 'INTEGER':
@@ -198,14 +194,8 @@ async def create_ontology(
         # Apply transformation
         transform_properties_for_oms(ontology_dict)
         
-        # 🔥 ULTRA DEBUG! Write to file to verify transformation
-        debug_file = f"/tmp/bff_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        with open(debug_file, 'w') as f:
-            f.write(f"BEFORE transformation: {json.dumps(ontology, ensure_ascii=False, indent=2)}\n\n")
-            f.write(f"AFTER transformation: {json.dumps(ontology_dict, ensure_ascii=False, indent=2)}\n")
-        
-        # Log transformed data for debugging
-        logger.info(f"🔥 ULTRA DEBUG! Sending to OMS: {json.dumps(ontology_dict, ensure_ascii=False, indent=2)}")
+        # Log ontology creation request
+        logger.info(f"Creating ontology '{ontology_dict.get('id')}' in database '{db_name}'")
         
         # 온톨로지 생성
         result = await terminus.create_class(db_name, ontology_dict)
@@ -305,13 +295,12 @@ async def list_ontologies(
         # 온톨로지 목록 조회
         ontologies = await terminus.list_classes(db_name)
         
-        # 🔥 ULTRA DEBUG!
-        logger.info(f"🔥 ontologies type: {type(ontologies)}")
-        logger.info(f"🔥 ontologies content: {ontologies[:2] if ontologies else 'empty'}")
+        # Log ontology retrieval result
+        logger.info(f"Retrieved {len(ontologies) if ontologies else 0} ontologies from database '{db_name}'")
 
         # 배치 레이블 정보 추가 (N+1 쿼리 문제 해결)
-        # 🔥 ULTRA! Skip label mapping for now to fix the issue
-        labeled_ontologies = ontologies  # await mapper.convert_to_display_batch(db_name, ontologies, lang)
+        # Apply label mapping for better display
+        labeled_ontologies = await mapper.convert_to_display_batch(db_name, ontologies, lang)
 
         return {
             "total": len(labeled_ontologies),

@@ -126,8 +126,8 @@ class ServiceConfig:
         if url := os.getenv("POSTGRES_URL"):
             return url
         
-        host = os.getenv("POSTGRES_HOST", "postgres" if ServiceConfig.is_docker_environment() else "localhost")
-        port = os.getenv("POSTGRES_PORT", "5432")
+        host = os.getenv("POSTGRES_HOST", "spice_postgres" if ServiceConfig.is_docker_environment() else "localhost")
+        port = os.getenv("POSTGRES_PORT", "5433")
         user = os.getenv("POSTGRES_USER", "spiceadmin")
         password = os.getenv("POSTGRES_PASSWORD", "spicepass123")
         database = os.getenv("POSTGRES_DB", "spicedb")

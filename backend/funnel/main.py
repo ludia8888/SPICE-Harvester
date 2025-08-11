@@ -45,22 +45,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to initialize rate limiter: {e}")
     
-    # Initialize OpenTelemetry
+    # Initialize OpenTelemetry (no middleware addition here)
     try:
         tracing_service = get_tracing_service("funnel-service")
         metrics_collector = get_metrics_collector("funnel-service")
         
-        # Instrument FastAPI
-        tracing_service.instrument_fastapi(app)
-        
-        # Add middleware
-        app.add_middleware(RequestMetricsMiddleware, metrics_collector=metrics_collector)
-        app.add_middleware(TraceContextMiddleware)
-        
         app.state.tracing_service = tracing_service
         app.state.metrics_collector = metrics_collector
         
-        logger.info("OpenTelemetry initialized")
+        logger.info("OpenTelemetry services initialized")
     except Exception as e:
         logger.error(f"Failed to initialize OpenTelemetry: {e}")
     
@@ -86,6 +79,18 @@ app = create_fastapi_service(
 
 # 라우터 등록
 app.include_router(type_inference_router, prefix="/api/v1")
+
+# Initialize OpenTelemetry middleware (after app creation but before startup)
+# Temporarily disabled to ensure basic functionality works
+try:
+    tracing_service = get_tracing_service("funnel-service")
+    metrics_collector = get_metrics_collector("funnel-service")
+    
+    # Skip all middleware for now to ensure service functionality
+    logger.info("OpenTelemetry middleware temporarily disabled for stability")
+    
+except Exception as e:
+    logger.error(f"Failed to initialize OpenTelemetry middleware: {e}")
 
 
 # 기본 엔드포인트들

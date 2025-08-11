@@ -458,7 +458,11 @@ async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"예상치 못한 오류 발생: {exc}")
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"status": "error", "message": "내부 서버 오류가 발생했습니다"},
+        content={
+            "status": "error",
+            "message": "내부 서버 오류가 발생했습니다",
+            "detail": "서버에서 처리 중 오류가 발생했습니다"
+        },
     )
 
 

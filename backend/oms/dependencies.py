@@ -66,7 +66,7 @@ class OMSDependencyProvider:
                     server_url=settings.database.terminus_url,
                     user=settings.database.terminus_user,
                     account=settings.database.terminus_account,
-                    key="admin123",  # Fixed: Use admin password for TerminusDB authentication
+                    key=settings.database.terminus_password,  # Use actual password from settings
                 )
                 return AsyncTerminusService(connection_info)
             
@@ -150,8 +150,15 @@ class OMSDependencyProvider:
         
         try:
             return await container.get(OutboxService)
-        except Exception:
+        except Exception as e:
             # Outbox service is optional - return None if not available
+            # 하지만 오류 원인을 로깅하여 디버깅 지원
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"❌ OutboxService 초기화 실패: {type(e).__name__}: {e}")
+            logger.error(f"🔍 PostgreSQL 연결 또는 스키마 문제 가능성 - Event Sourcing 비활성화됨")
+            import traceback
+            logger.debug(f"Full traceback: {traceback.format_exc()}")
             return None
     
     @staticmethod

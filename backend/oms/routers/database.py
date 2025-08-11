@@ -78,9 +78,8 @@ async def create_database(
             )
 
         # Event Sourcing 모드: 명령만 발행 (비동기 처리)
-        logger.info(f"🔥 DEBUG: outbox_service = {outbox_service is not None}")
         if outbox_service:
-            logger.info(f"🔥 Event Sourcing mode ACTIVE for database: {db_name}")
+            logger.info(f"Event Sourcing mode enabled for database creation: {db_name}")
             try:
                 async with postgres_db.transaction() as conn:
                     command = DatabaseCommand(
@@ -93,7 +92,7 @@ async def create_database(
                         metadata={"source": "OMS", "user": "system"}
                     )
                     await outbox_service.publish_command(conn, command)
-                    logger.info(f"🔥 Published CREATE_DATABASE command for {db_name}")
+                    logger.info(f"Published CREATE_DATABASE command for {db_name}")
                     
                     # Event Sourcing 모드에서는 명령 ID와 상태 반환 (202 Accepted)
                     return JSONResponse(
@@ -118,11 +117,17 @@ async def create_database(
         # 직접 생성 모드 (Event Sourcing 비활성화 또는 실패 시)
         result = await terminus_service.create_database(db_name, description=description)
         
+        # 🔥 FIXED: result는 bool이므로 dict처럼 언팩하지 말고 적절한 데이터 구조 생성
         return JSONResponse(
             status_code=status.HTTP_201_CREATED,
             content=ApiResponse.created(
                 message=f"데이터베이스 '{db_name}'이(가) 생성되었습니다",
-                data={**result, "mode": "direct"}
+                data={
+                    "database_name": db_name,
+                    "description": description,
+                    "created": result,
+                    "mode": "direct"
+                }
             ).to_dict()
         )
     except SecurityViolationError as e:
@@ -200,7 +205,7 @@ async def delete_database(
                         metadata={"source": "OMS", "user": "system"}
                     )
                     await outbox_service.publish_command(conn, command)
-                    logger.info(f"🔥 Published DELETE_DATABASE command for {db_name}")
+                    logger.info(f"Published DELETE_DATABASE command for {db_name}")
                     
                     # Event Sourcing 모드에서는 명령 ID와 상태 반환 (202 Accepted)
                     return JSONResponse(

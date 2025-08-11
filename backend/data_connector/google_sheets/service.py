@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import httpx
+from confluent_kafka import Producer
 
 from .models import (
     GoogleSheetDataUpdate,
@@ -34,13 +35,15 @@ logger = logging.getLogger(__name__)
 class GoogleSheetsService:
     """Google Sheets API 서비스"""
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, producer: Producer, api_key: Optional[str] = None):
         """
         초기화
 
         Args:
+            producer: Kafka Producer instance
             api_key: Google API Key (환경변수 대체 가능)
         """
+        self.producer = producer
         self.api_key = api_key or os.getenv("GOOGLE_API_KEY", "")
         if not self.api_key:
             logger.warning("Google API key not configured. Only public sheets will be accessible.")
@@ -292,7 +295,7 @@ class GoogleSheetsService:
                         timestamp=format_datetime_iso(datetime.utcnow()),
                     )
 
-                    # TODO: Send notification (webhook, message queue, etc.)
+                    # Send notification to Kafka
                     await self._notify_data_change(update)
 
                 # Update polling info
@@ -306,19 +309,23 @@ class GoogleSheetsService:
 
     async def _notify_data_change(self, update: GoogleSheetDataUpdate):
         """
-        데이터 변경 알림
+        데이터 변경을 Kafka에 알림
 
         Args:
             update: 변경 정보
         """
-        # TODO: Implement notification mechanism
-        # Options:
-        # 1. Send to message queue (RabbitMQ, Kafka)
-        # 2. Call webhook endpoint
-        # 3. Update database
-        # 4. Send WebSocket notification
+        try:
+            topic = "google-sheets-updates"
+            value = update.json()
+            key = update.sheet_id.encode("utf-8")
 
-        logger.info(f"Data change notification: {update.json()}")
+            self.producer.produce(topic=topic, value=value, key=key)
+            self.producer.flush()
+            logger.info(f"Successfully produced data change event to Kafka topic '{topic}'")
+
+        except Exception as e:
+            logger.error(f"Failed to produce message to Kafka: {e}")
+
 
     async def unregister_sheet(self, sheet_id: str) -> bool:
         """

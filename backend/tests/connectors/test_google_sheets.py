@@ -6,6 +6,7 @@ import pytest
 import httpx
 from datetime import datetime
 from unittest.mock import Mock, patch, AsyncMock
+from confluent_kafka import Producer
 
 # No need for sys.path.insert - using proper spice_harvester package imports
 from data_connector.google_sheets.service import GoogleSheetsService
@@ -79,9 +80,14 @@ class TestGoogleSheetsService:
     """Google Sheets 서비스 테스트"""
     
     @pytest.fixture
-    def service(self):
+    def mock_producer(self):
+        """Mock Kafka Producer"""
+        return Mock(spec=Producer)
+    
+    @pytest.fixture
+    def service(self, mock_producer):
         """서비스 인스턴스"""
-        return GoogleSheetsService(api_key="test_api_key")
+        return GoogleSheetsService(producer=mock_producer, api_key="test_api_key")
     
     @pytest.fixture
     def mock_sheet_metadata(self):

@@ -28,6 +28,7 @@ from oms.database.outbox import MessageType, OutboxService
 from shared.models.commands import CommandType, OntologyCommand
 from shared.models.events import EventType
 from shared.config.app_config import AppConfig
+from shared.security.input_sanitizer import validate_db_name
 
 # OMS 서비스 import
 from oms.services.async_terminus import AsyncTerminusService
@@ -83,9 +84,8 @@ router = APIRouter(prefix="/ontology/{db_name}", tags=["Ontology Management"])
 @router.post("/create", response_model=OntologyResponse)
 @rate_limit(**RateLimitPresets.WRITE)
 async def create_ontology(
-    ontology_request: OntologyCreateRequest,
-    http_request: Request,
-    db_name: str = Depends(ensure_database_exists),
+    db_name: str,  # 🔥 FIXED: URL path parameter first
+    ontology_request: OntologyCreateRequest,  # Request body second
     terminus: AsyncTerminusService = TerminusServiceDep,
     converter: JSONToJSONLDConverter = JSONLDConverterDep,
     label_mapper=LabelMapperDep,
@@ -95,6 +95,14 @@ async def create_ontology(
     # 🔥 ULTRA DEBUG! OMS received data
     
     try:
+        # 🔥 FIXED: 데이터베이스 존재 확인 (dependency 제거로 인해 수동 처리)
+        db_name = validate_db_name(db_name)
+        if not await terminus.database_exists(db_name):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다"
+            )
+        
         # 요청 데이터를 dict로 변환
         ontology_data = ontology_request.model_dump()
 

@@ -119,6 +119,7 @@ if not HAS_OPENTELEMETRY:
         def initialize(self): pass
         def shutdown(self): pass
         def instrument_clients(self): pass
+        def instrument_fastapi(self, app): pass
         def span(self, name: str, kind=None, attributes=None):
             from contextlib import nullcontext
             return nullcontext()

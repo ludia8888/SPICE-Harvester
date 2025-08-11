@@ -69,10 +69,10 @@ class BaseTerminusService:
             # 환경변수에서 연결 정보 로드
             import os
             self.connection_info = ConnectionConfig(
-                server_url=os.getenv("TERMINUS_SERVER_URL", "http://localhost:6363"),
+                server_url=os.getenv("TERMINUS_SERVER_URL", "http://localhost:6364"),
                 account=os.getenv("TERMINUS_ACCOUNT", "admin"),
                 user=os.getenv("TERMINUS_USER", "admin"),
-                key=os.getenv("TERMINUS_KEY", "root"),
+                key=os.getenv("TERMINUS_KEY", "admin"),
                 ssl_verify=os.getenv("TERMINUS_SSL_VERIFY", "true").lower() == "true",
             )
         

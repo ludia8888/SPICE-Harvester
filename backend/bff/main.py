@@ -30,6 +30,7 @@ from typing import Any, Dict, Optional
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
+from confluent_kafka import Producer
 
 # Centralized configuration and dependency injection
 from shared.config.settings import settings, ApplicationSettings
@@ -87,9 +88,12 @@ from shared.observability.context_propagation import TraceContextMiddleware
 # BFF specific imports
 from bff.services.funnel_type_inference_adapter import FunnelHTTPTypeInferenceAdapter
 from bff.services.oms_client import OMSClient
+
+# Data connector imports
+from data_connector.google_sheets.service import GoogleSheetsService
 from bff.routers import (
     database, health, mapping, merge_conflict, ontology, query, 
-    instances, instance_async, websocket, tasks, admin
+    instances, instance_async, websocket, tasks, admin, data_connector
 )
 
 # Monitoring and observability routers
@@ -138,6 +142,12 @@ class BFFServiceContainer:
         
         # 6. Initialize Observability (Tracing & Metrics)
         await self._initialize_observability()
+        
+        # 7. Initialize Kafka Producer
+        await self._initialize_kafka_producer()
+        
+        # 8. Initialize Google Sheets Service
+        await self._initialize_google_sheets_service()
         
         logger.info("BFF services initialized successfully")
     
@@ -238,6 +248,60 @@ class BFFServiceContainer:
             logger.error(f"Failed to initialize observability: {e}")
             # Continue without observability - service can still work
     
+    async def _initialize_kafka_producer(self) -> None:
+        """Initialize Kafka producer"""
+        try:
+            logger.info("Initializing Kafka producer...")
+            
+            # Kafka configuration from settings
+            kafka_config = {
+                'bootstrap.servers': self.settings.kafka.bootstrap_servers,
+                'client.id': 'bff-service',
+                'acks': 'all',
+                'retries': 3,
+                'retry.backoff.ms': 100,
+                'batch.size': 16384,
+                'linger.ms': 10,
+                'compression.type': 'snappy'
+            }
+            
+            # Create Kafka producer
+            producer = Producer(kafka_config)
+            
+            self._bff_services['kafka_producer'] = producer
+            logger.info("Kafka producer initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize Kafka producer: {e}")
+            # Continue without Kafka - service can still work in limited mode
+    
+    async def _initialize_google_sheets_service(self) -> None:
+        """Initialize Google Sheets service"""
+        try:
+            logger.info("Initializing Google Sheets service...")
+            
+            # Get Kafka producer
+            producer = self._bff_services.get('kafka_producer')
+            if not producer:
+                logger.warning("Kafka producer not available for Google Sheets service")
+                return
+            
+            # Get Google API key from settings
+            google_api_key = getattr(self.settings, 'google_api_key', None)
+            
+            # Create Google Sheets service
+            google_sheets_service = GoogleSheetsService(
+                producer=producer,
+                api_key=google_api_key
+            )
+            
+            self._bff_services['google_sheets_service'] = google_sheets_service
+            logger.info("Google Sheets service initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize Google Sheets service: {e}")
+            # Continue without Google Sheets - service can still work
+    
     async def shutdown_bff_services(self) -> None:
         """Shutdown BFF-specific services"""
         logger.info("Shutting down BFF services...")
@@ -287,6 +351,21 @@ class BFFServiceContainer:
             except Exception as e:
                 logger.error(f"Error closing OMS client: {e}")
         
+        if 'google_sheets_service' in self._bff_services:
+            try:
+                # Google Sheets service doesn't need explicit cleanup
+                logger.info("Google Sheets service cleaned up")
+            except Exception as e:
+                logger.error(f"Error cleaning up Google Sheets service: {e}")
+        
+        if 'kafka_producer' in self._bff_services:
+            try:
+                producer = self._bff_services['kafka_producer']
+                producer.flush(timeout=5)  # Wait up to 5 seconds for delivery
+                logger.info("Kafka producer flushed and closed")
+            except Exception as e:
+                logger.error(f"Error closing Kafka producer: {e}")
+        
         self._bff_services.clear()
         logger.info("BFF services shutdown completed")
     
@@ -301,6 +380,18 @@ class BFFServiceContainer:
         if 'label_mapper' not in self._bff_services:
             raise RuntimeError("Label mapper not initialized")
         return self._bff_services['label_mapper']
+    
+    def get_kafka_producer(self) -> Producer:
+        """Get Kafka producer instance"""
+        if 'kafka_producer' not in self._bff_services:
+            raise RuntimeError("Kafka producer not initialized")
+        return self._bff_services['kafka_producer']
+    
+    def get_google_sheets_service(self) -> GoogleSheetsService:
+        """Get Google Sheets service instance"""
+        if 'google_sheets_service' not in self._bff_services:
+            raise RuntimeError("Google Sheets service not initialized")
+        return self._bff_services['google_sheets_service']
 
 
 # Global BFF service container (replaces global variables)
@@ -393,6 +484,26 @@ async def get_label_mapper() -> LabelMapper:
             detail="BFF services not initialized"
         )
     return _bff_container.get_label_mapper()
+
+
+async def get_kafka_producer() -> Producer:
+    """Get Kafka producer from BFF container"""
+    if _bff_container is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="BFF services not initialized"
+        )
+    return _bff_container.get_kafka_producer()
+
+
+async def get_google_sheets_service() -> GoogleSheetsService:
+    """Get Google Sheets service from BFF container"""
+    if _bff_container is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="BFF services not initialized"
+        )
+    return _bff_container.get_google_sheets_service()
 
 
 # Utility function (moved from inline)
@@ -646,6 +757,7 @@ app.include_router(instance_async.router, prefix="/api/v1", tags=["async-instanc
 app.include_router(websocket.router, prefix="/api/v1", tags=["websocket"])
 app.include_router(tasks.router, prefix="/api/v1", tags=["background-tasks"])
 app.include_router(admin.router, prefix="/api/v1", tags=["admin"])
+app.include_router(data_connector.router, prefix="/api/v1", tags=["data-connector"])
 
 # Monitoring and observability endpoints (modernized architecture)
 app.include_router(monitoring.router, prefix="/api/v1/monitoring", tags=["monitoring"])

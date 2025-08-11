@@ -132,7 +132,7 @@ services:
       - TERMINUSDB_SERVER_NAME=${TERMINUSDB_SERVER_NAME:-SpiceTerminusDB}
       - TERMINUSDB_AUTOLOGIN=false
     ports:
-      - "6363:6363"
+      - "6364:6363"
     volumes:
       - terminusdb_data:/app/terminusdb/storage
     networks:
