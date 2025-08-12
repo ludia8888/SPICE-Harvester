@@ -155,15 +155,26 @@ class ConsistencyTokenService:
         """
         Store token metadata for validation
         """
-        key = f"consistency_token:{token.command_id}"
+        # CLAUDE RULE FIX: Store using abbreviated command_id that matches token
+        # Store both full and abbreviated for compatibility
         data = asdict(token)
         
-        # Store with 1 hour TTL
+        # Store with abbreviated command_id (matches what's in token)
+        abbreviated_key = f"consistency_token:{token.command_id[:8]}"
         await self.redis_client.setex(
-            key,
+            abbreviated_key,
             3600,
             json.dumps(data)
         )
+        
+        # Also store with full command_id for backwards compatibility
+        if len(token.command_id) > 8:
+            full_key = f"consistency_token:{token.command_id}"
+            await self.redis_client.setex(
+                full_key,
+                3600,
+                json.dumps(data)
+            )
     
     async def wait_for_consistency(
         self,

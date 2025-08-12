@@ -263,8 +263,9 @@ class InstanceWorker:
             
             # 2. TerminusDB에 경량 그래프 노드 생성 (THINK ULTRA³ - Graph Authority)
             # Only store ID, relationships, and references to ES/S3
+            # CLAUDE RULE FIX: Use proper TerminusDB ID format with class prefix
             lightweight_node = {
-                "@id": instance_id,
+                "@id": f"{class_id}/{instance_id}",  # FIXED: Proper format for TerminusDB
                 "@type": class_id,
                 "instance_id": instance_id,
                 "es_doc_id": instance_id,  # Will be same as instance_id for ES

@@ -67,10 +67,18 @@ class DocumentService(BaseTerminusService):
             endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
             params = {"graph_type": graph_type}
             
+            # CLAUDE RULE FIX: Always add author parameter (required by TerminusDB API)
             if author:
                 params["author"] = author
+            else:
+                # Default author if not provided
+                params["author"] = "system"
+                
             if message:
                 params["message"] = message
+            
+            # Debug logging to verify params
+            logger.info(f"Creating document with params: {params}")
             
             # @type 확인 및 추가
             if "@type" not in document and "type" in document:
@@ -128,8 +136,11 @@ class DocumentService(BaseTerminusService):
                 "id": doc_id
             }
             
+            # CLAUDE RULE FIX: Always add author parameter
             if author:
                 params["author"] = author
+            else:
+                params["author"] = "system"
             if message:
                 params["message"] = message
             
@@ -182,8 +193,11 @@ class DocumentService(BaseTerminusService):
                 "id": doc_id
             }
             
+            # CLAUDE RULE FIX: Always add author parameter
             if author:
                 params["author"] = author
+            else:
+                params["author"] = "system"
             if message:
                 params["message"] = message
             
