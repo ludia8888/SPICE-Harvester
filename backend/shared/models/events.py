@@ -3,7 +3,7 @@ Event Models for Command/Event Sourcing Pattern
 실행 결과(사실)를 나타내는 모델들
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, Optional
 from uuid import UUID, uuid4
@@ -60,9 +60,13 @@ class BaseEvent(BaseModel):
     command_id: Optional[UUID] = Field(None, description="원인이 된 명령 ID")
     data: Dict[str, Any] = Field(..., description="이벤트 데이터")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="메타데이터")
-    occurred_at: datetime = Field(default_factory=datetime.utcnow, description="발생 시각")
+    occurred_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="발생 시각")
     occurred_by: Optional[str] = Field(None, description="발생자")
     version: int = Field(1, description="이벤트 버전")
+    
+    # Production-ready fields for ES+CQRS invariants
+    sequence_number: Optional[int] = Field(None, description="Per-aggregate sequence number for ordering")
+    schema_version: Optional[str] = Field(None, description="Schema version for migration support")
     
     class Config:
         json_encoders = {

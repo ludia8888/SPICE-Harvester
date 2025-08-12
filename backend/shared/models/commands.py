@@ -3,7 +3,7 @@ Command Models for Command/Event Sourcing Pattern
 명령(의도)을 나타내는 모델들
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, Optional
 from uuid import UUID, uuid4
@@ -65,7 +65,7 @@ class BaseCommand(BaseModel):
     aggregate_id: str = Field(..., description="대상 엔티티 ID")
     payload: Dict[str, Any] = Field(..., description="명령 데이터")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="메타데이터")
-    created_at: datetime = Field(default_factory=datetime.utcnow, description="생성 시각")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="생성 시각")
     created_by: Optional[str] = Field(None, description="생성자")
     version: int = Field(1, description="명령 버전")
     checksum: Optional[str] = Field(None, description="페이로드 체크섬 (SHA256)")

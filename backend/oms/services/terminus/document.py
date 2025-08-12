@@ -535,3 +535,92 @@ class DocumentService(BaseTerminusService):
         except Exception as e:
             logger.error(f"Failed to search documents: {e}")
             raise DatabaseError(f"문서 검색 실패: {e}")
+    
+    async def create_instance(
+        self,
+        db_name: str,
+        class_id: str,
+        instance_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Create an instance document (alias for create_document)
+        
+        Args:
+            db_name: Database name
+            class_id: Class/Type ID
+            instance_data: Instance data
+            
+        Returns:
+            Created instance info
+        """
+        # Ensure @type is set to the class_id
+        if "@type" not in instance_data:
+            instance_data["@type"] = class_id
+        
+        # Ensure @id is set
+        if "@id" not in instance_data and "instance_id" in instance_data:
+            instance_data["@id"] = instance_data["instance_id"]
+        
+        return await self.create_document(
+            db_name=db_name,
+            document=instance_data,
+            graph_type="instance",
+            author="system",
+            message=f"Created instance of {class_id}"
+        )
+    
+    async def update_instance(
+        self,
+        db_name: str,
+        class_id: str,
+        instance_id: str,
+        update_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Update an instance document (alias for update_document)
+        
+        Args:
+            db_name: Database name
+            class_id: Class/Type ID
+            instance_id: Instance ID
+            update_data: Update data
+            
+        Returns:
+            Updated instance info
+        """
+        # Ensure @id and @type are set
+        update_data["@id"] = instance_id
+        update_data["@type"] = class_id
+        
+        return await self.update_document(
+            db_name=db_name,
+            document=update_data,
+            graph_type="instance",
+            author="system",
+            message=f"Updated instance {instance_id}"
+        )
+    
+    async def delete_instance(
+        self,
+        db_name: str,
+        class_id: str,
+        instance_id: str
+    ) -> bool:
+        """
+        Delete an instance document (alias for delete_document)
+        
+        Args:
+            db_name: Database name
+            class_id: Class/Type ID
+            instance_id: Instance ID
+            
+        Returns:
+            True if deleted successfully
+        """
+        return await self.delete_document(
+            db_name=db_name,
+            doc_id=instance_id,
+            graph_type="instance",
+            author="system",
+            message=f"Deleted instance {instance_id}"
+        )

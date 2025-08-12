@@ -46,17 +46,20 @@ class ServiceConfig:
     @staticmethod
     def get_oms_host() -> str:
         """Get OMS host from environment or default."""
-        return os.getenv("OMS_HOST", "localhost")
+        # FIXED: Use 127.0.0.1 instead of localhost to avoid IPv6 issues
+        return os.getenv("OMS_HOST", "127.0.0.1")
 
     @staticmethod
     def get_bff_host() -> str:
         """Get BFF host from environment or default."""
-        return os.getenv("BFF_HOST", "localhost")
+        # FIXED: Use 127.0.0.1 instead of localhost to avoid IPv6 issues
+        return os.getenv("BFF_HOST", "127.0.0.1")
 
     @staticmethod
     def get_funnel_host() -> str:
         """Get Funnel host from environment or default."""
-        return os.getenv("FUNNEL_HOST", "localhost")
+        # FIXED: Use 127.0.0.1 instead of localhost to avoid IPv6 issues
+        return os.getenv("FUNNEL_HOST", "127.0.0.1")
 
     @staticmethod
     def get_oms_url() -> str:
@@ -118,8 +121,9 @@ class ServiceConfig:
         if url := os.getenv("TERMINUS_SERVER_URL"):
             return url
         protocol = ServiceConfig.get_protocol()
-        # FIXED: TerminusDB는 6364 포트에서 실행 중
-        return f"{protocol}://localhost:6364"
+        # FIXED: TerminusDB는 6363 포트에서 실행 중
+        # FIXED: Use 127.0.0.1 instead of localhost to avoid IPv6 issues
+        return f"{protocol}://127.0.0.1:6363"
     
     @staticmethod
     def get_postgres_url() -> str:
@@ -127,7 +131,8 @@ class ServiceConfig:
         if url := os.getenv("POSTGRES_URL"):
             return url
         
-        host = os.getenv("POSTGRES_HOST", "spice_postgres" if ServiceConfig.is_docker_environment() else "localhost")
+        # FIXED: Use 127.0.0.1 instead of localhost to avoid IPv6 issues
+        host = os.getenv("POSTGRES_HOST", "spice_postgres" if ServiceConfig.is_docker_environment() else "127.0.0.1")
         port = os.getenv("POSTGRES_PORT", "5433")
         user = os.getenv("POSTGRES_USER", "spiceadmin")
         password = os.getenv("POSTGRES_PASSWORD", "spicepass123")
@@ -141,14 +146,16 @@ class ServiceConfig:
         if servers := os.getenv("KAFKA_BOOTSTRAP_SERVERS"):
             return servers
         
-        host = os.getenv("KAFKA_HOST", "kafka" if ServiceConfig.is_docker_environment() else "localhost")
+        # FIXED: Use 127.0.0.1 instead of localhost to avoid IPv6 issues
+        host = os.getenv("KAFKA_HOST", "kafka" if ServiceConfig.is_docker_environment() else "127.0.0.1")
         port = os.getenv("KAFKA_PORT", "9092")
         return f"{host}:{port}"
     
     @staticmethod
     def get_redis_host() -> str:
         """Get Redis host from environment or default."""
-        return os.getenv("REDIS_HOST", "redis" if ServiceConfig.is_docker_environment() else "localhost")
+        # FIXED: Use 127.0.0.1 instead of localhost to avoid IPv6 issues
+        return os.getenv("REDIS_HOST", "redis" if ServiceConfig.is_docker_environment() else "127.0.0.1")
     
     @staticmethod
     def get_redis_port() -> int:
@@ -171,7 +178,11 @@ class ServiceConfig:
 
         In Docker, services communicate using service names instead of localhost.
         """
-        return os.path.exists("/.dockerenv") or os.getenv("DOCKER_CONTAINER") == "true"
+        # FIXED: Check environment variable more carefully
+        docker_env = os.getenv("DOCKER_CONTAINER", "").lower()
+        if docker_env in ("false", "0", "no", "off"):
+            return False
+        return os.path.exists("/.dockerenv") or docker_env == "true"
 
     @staticmethod
     def get_service_url(service_name: str) -> str:
