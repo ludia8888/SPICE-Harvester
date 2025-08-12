@@ -39,6 +39,7 @@ from shared.utils.id_generator import generate_instance_id
 from shared.services.idempotency_service import IdempotencyService
 from shared.services.schema_versioning import SchemaVersioningService
 from shared.services.sequence_service import SequenceService
+from shared.config.kafka_config import KafkaEOSConfig, TransactionalProducer
 
 # Observability imports
 from shared.observability.tracing import get_tracing_service
@@ -80,24 +81,37 @@ class InstanceWorker:
         # Debug log
         logger.info(f"Kafka bootstrap servers: {self.kafka_servers}")
         
-        # Kafka Consumer 설정
-        self.consumer = Consumer({
-            'bootstrap.servers': self.kafka_servers,
-            'group.id': 'instance-worker-group',
-            'auto.offset.reset': 'earliest',
-            'enable.auto.commit': False,
-            'max.poll.interval.ms': 300000,  # 5분
-            'session.timeout.ms': 45000,  # 45초
-        })
+        # THINK ULTRA: Kafka EOS v2 Consumer configuration
+        self.consumer = Consumer(
+            KafkaEOSConfig.get_consumer_config(
+                service_name='instance-worker',
+                group_id='instance-worker-group',
+                read_committed=True,  # Only read committed messages
+                auto_commit=False  # Manual commit for exactly-once
+            )
+        )
         
-        # Kafka Producer 설정 (Event 발행용)
-        self.producer = Producer({
-            'bootstrap.servers': self.kafka_servers,
-            'client.id': 'instance-worker',
-            'acks': 'all',
-            'retries': 3,
-            'compression.type': 'snappy',
-        })
+        # THINK ULTRA: Kafka EOS v2 Producer configuration with transactional support
+        producer_config = KafkaEOSConfig.get_producer_config(
+            service_name='instance-worker',
+            instance_id=str(uuid4())[:8],  # Unique instance ID for this worker
+            enable_transactions=True  # Enable exactly-once semantics
+        )
+        self.producer = Producer(producer_config)
+        
+        # Initialize transactional producer wrapper
+        self.transactional_producer = TransactionalProducer(
+            self.producer,
+            enable_transactions=True
+        )
+        
+        # Initialize transactions (must be done once before any transaction)
+        try:
+            self.transactional_producer.init_transactions(timeout=30.0)
+            logger.info("✅ Kafka transactional producer initialized (EOS v2)")
+        except Exception as e:
+            logger.warning(f"Transactional init failed (falling back to idempotent mode): {e}")
+            # Producer will still work in idempotent mode without transactions
         
         # TerminusDB 연결 설정
         connection_info = ConnectionConfig(
@@ -773,10 +787,13 @@ class InstanceWorker:
         
     async def publish_event(self, event: BaseEvent) -> None:
         """이벤트 발행"""
+        # THINK ULTRA: Use aggregate_id as partition key for ordering guarantee
+        partition_key = event.aggregate_id if hasattr(event, 'aggregate_id') and event.aggregate_id else str(event.event_id)
+        
         self.producer.produce(
             topic=AppConfig.INSTANCE_EVENTS_TOPIC,
             value=event.model_dump_json(),
-            key=str(event.event_id).encode('utf-8')
+            key=partition_key.encode('utf-8')  # FIXED: partition by aggregate_id for per-aggregate ordering
         )
         self.producer.flush()
         

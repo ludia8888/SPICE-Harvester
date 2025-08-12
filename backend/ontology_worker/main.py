@@ -398,10 +398,13 @@ class OntologyWorker:
             
     async def publish_event(self, event: BaseEvent) -> None:
         """이벤트 발행"""
+        # THINK ULTRA: Use aggregate_id as partition key for ordering guarantee
+        partition_key = event.aggregate_id if hasattr(event, 'aggregate_id') and event.aggregate_id else str(event.event_id)
+        
         self.producer.produce(
             topic=AppConfig.ONTOLOGY_EVENTS_TOPIC,
             value=event.model_dump_json(),
-            key=str(event.event_id).encode('utf-8')
+            key=partition_key.encode('utf-8')  # FIXED: partition by aggregate_id for per-aggregate ordering
         )
         self.producer.flush()
         
