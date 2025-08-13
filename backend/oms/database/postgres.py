@@ -56,8 +56,94 @@ class PostgresDatabase:
                 f"PostgreSQL connection pool created with MVCC support "
                 f"(default isolation: {self.default_isolation.value})"
             )
+            
+            # Ensure outbox table exists
+            await self.ensure_outbox_table()
+            
         except Exception as e:
             logger.error(f"Failed to create PostgreSQL connection pool: {e}")
+            raise
+    
+    async def ensure_outbox_table(self) -> None:
+        """
+        🔥 THINK ULTRA! Ensure outbox table and schema exist for Event Sourcing
+        
+        This method creates the spice_outbox schema and outbox table if they don't exist.
+        This ensures the application works in both Docker and local environments.
+        """
+        if not self.pool:
+            raise RuntimeError("Database pool not initialized")
+        
+        try:
+            async with self.pool.acquire() as connection:
+                # Create schema if not exists
+                await connection.execute("""
+                    CREATE SCHEMA IF NOT EXISTS spice_outbox
+                """)
+                
+                # Create outbox table if not exists
+                await connection.execute("""
+                    CREATE TABLE IF NOT EXISTS spice_outbox.outbox (
+                        id VARCHAR(255) PRIMARY KEY,
+                        message_type VARCHAR(50) NOT NULL,
+                        aggregate_type VARCHAR(255) NOT NULL,
+                        aggregate_id VARCHAR(255) NOT NULL,
+                        topic VARCHAR(255) NOT NULL,
+                        payload TEXT NOT NULL,
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                        processed_at TIMESTAMP WITH TIME ZONE,
+                        retry_count INTEGER DEFAULT 0,
+                        last_retry_at TIMESTAMP WITH TIME ZONE,
+                        entity_version INTEGER
+                    )
+                """)
+                
+                # Create indexes if not exists
+                await connection.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_outbox_unprocessed 
+                    ON spice_outbox.outbox(created_at) 
+                    WHERE processed_at IS NULL
+                """)
+                
+                await connection.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_outbox_aggregate 
+                    ON spice_outbox.outbox(aggregate_type, aggregate_id)
+                """)
+                
+                await connection.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_outbox_message_type 
+                    ON spice_outbox.outbox(message_type, processed_at) 
+                    WHERE processed_at IS NULL
+                """)
+                
+                await connection.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_outbox_topic 
+                    ON spice_outbox.outbox(topic)
+                """)
+                
+                logger.info("✅ Outbox table and indexes ensured in spice_outbox schema")
+                
+                # Verify table exists
+                table_exists = await connection.fetchval("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_schema = 'spice_outbox' 
+                        AND table_name = 'outbox'
+                    )
+                """)
+                
+                if table_exists:
+                    # Get row count for logging
+                    count = await connection.fetchval("""
+                        SELECT COUNT(*) FROM spice_outbox.outbox
+                    """)
+                    logger.info(f"📊 Outbox table verified: {count} existing records")
+                else:
+                    logger.error("❌ Failed to create outbox table")
+                    raise RuntimeError("Outbox table creation failed")
+                    
+        except Exception as e:
+            logger.error(f"Failed to ensure outbox table: {e}")
             raise
             
     async def disconnect(self) -> None:

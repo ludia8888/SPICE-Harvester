@@ -197,6 +197,9 @@ class DatabaseSettings(BaseSettings):
     @property
     def redis_url(self) -> str:
         """Construct Redis URL"""
+        # If Redis password is empty, don't include auth
+        if not self.redis_password:
+            return f"redis://{self.redis_host}:{self.redis_port}"
         return f"redis://:{self.redis_password}@{self.redis_host}:{self.redis_port}"
 
 class ServiceSettings(BaseSettings):
