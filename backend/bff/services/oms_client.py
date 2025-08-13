@@ -126,7 +126,7 @@ class OMSClient:
             
             # Send data as-is to OMS (no format conversion needed)
             response = await self.client.post(
-                f"/api/v1/ontology/{db_name}/create", json=ontology_data
+                f"/api/v1/database/{db_name}/ontology", json=ontology_data
             )
             response.raise_for_status()
             return response.json()
@@ -137,7 +137,7 @@ class OMSClient:
     async def get_ontology(self, db_name: str, class_id: str) -> Dict[str, Any]:
         """온톨로지 조회"""
         try:
-            url = f"/api/v1/ontology/{db_name}/{class_id}"
+            url = f"/api/v1/database/{db_name}/ontology/{class_id}"
             logger.info(f"Requesting OMS: GET {self.base_url}{url}")
             response = await self.client.get(url)
             logger.info(f"OMS response status: {response.status_code}")
@@ -150,7 +150,7 @@ class OMSClient:
     async def list_ontologies(self, db_name: str) -> Dict[str, Any]:
         """온톨로지 목록 조회"""
         try:
-            response = await self.client.get(f"/api/v1/ontology/{db_name}/list")
+            response = await self.client.get(f"/api/v1/database/{db_name}/ontology")
             response.raise_for_status()
             return response.json()
         except Exception as e:
@@ -193,7 +193,7 @@ class OMSClient:
         """온톨로지 업데이트"""
         try:
             response = await self.client.put(
-                f"/api/v1/ontology/{db_name}/{class_id}", json=update_data
+                f"/api/v1/database/{db_name}/ontology/{class_id}", json=update_data
             )
             response.raise_for_status()
             return response.json()
@@ -204,7 +204,7 @@ class OMSClient:
     async def delete_ontology(self, db_name: str, class_id: str) -> Dict[str, Any]:
         """온톨로지 삭제"""
         try:
-            response = await self.client.delete(f"/api/v1/ontology/{db_name}/{class_id}")
+            response = await self.client.delete(f"/api/v1/database/{db_name}/ontology/{class_id}")
             response.raise_for_status()
             # 실제 삭제 응답 반환
             if response.text:
@@ -219,7 +219,7 @@ class OMSClient:
     async def query_ontologies(self, db_name: str, query: Dict[str, Any]) -> Dict[str, Any]:
         """온톨로지 쿼리"""
         try:
-            response = await self.client.post(f"/api/v1/ontology/{db_name}/query", json=query)
+            response = await self.client.post(f"/api/v1/database/{db_name}/ontology/query", json=query)
             response.raise_for_status()
             return response.json()
         except Exception as e:
@@ -300,7 +300,7 @@ class OMSClient:
     async def get_class_metadata(self, db_name: str, class_id: str) -> Dict[str, Any]:
         """클래스의 메타데이터 가져오기"""
         try:
-            response = await self.client.get(f"/api/v1/ontology/{db_name}/class/{class_id}")
+            response = await self.client.get(f"/api/v1/database/{db_name}/ontology/{class_id}")
             response.raise_for_status()
             ontology_data = response.json()
             
@@ -324,7 +324,7 @@ class OMSClient:
         """클래스의 메타데이터 업데이트"""
         try:
             # Get current class data
-            response = await self.client.get(f"/api/v1/ontology/{db_name}/class/{class_id}")
+            response = await self.client.get(f"/api/v1/database/{db_name}/ontology/{class_id}")
             response.raise_for_status()
             current_data = response.json()
             
@@ -342,7 +342,7 @@ class OMSClient:
                 
                 # Update the class with new metadata
                 response = await self.client.put(
-                    f"/api/v1/ontology/{db_name}/class/{class_id}",
+                    f"/api/v1/database/{db_name}/ontology/{class_id}",
                     json=update_data
                 )
                 response.raise_for_status()

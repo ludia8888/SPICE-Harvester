@@ -406,7 +406,7 @@ class TerminusService:
         """고급 관계 관리 기능을 포함한 온톨로지 생성 - OMS API 호출"""
         try:
             response = await self.oms_client.client.post(
-                f"/api/v1/ontology/{db_name}/create-advanced",
+                f"/api/v1/database/{db_name}/ontology/create-advanced",
                 json=ontology_data,
                 params={
                     "auto_generate_inverse": auto_generate_inverse,

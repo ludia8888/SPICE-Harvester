@@ -78,10 +78,10 @@ async def _ensure_database_exists(db_name: str, terminus: AsyncTerminusService):
         )
 
 
-router = APIRouter(prefix="/ontology/{db_name}", tags=["Ontology Management"])
+router = APIRouter(prefix="/database/{db_name}/ontology", tags=["Ontology Management"])
 
 
-@router.post("/create", response_model=OntologyResponse)
+@router.post("", response_model=OntologyResponse)
 @rate_limit(**RateLimitPresets.WRITE)
 async def create_ontology(
     ontology_request: OntologyCreateRequest,  # Request body first (no default)
@@ -261,7 +261,7 @@ async def create_ontology(
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.get("/list")
+@router.get("")
 async def list_ontologies(
     db_name: str = Depends(ensure_database_exists),
     class_type: str = "sys:Class",

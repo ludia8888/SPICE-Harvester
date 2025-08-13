@@ -205,13 +205,13 @@ async def create_ontology(
         
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                f"{oms_url}/api/v1/ontology/{db_name}/create",
+                f"{oms_url}/api/v1/database/{db_name}/ontology",
                 json=ontology_dict,
                 headers={"Content-Type": "application/json"}
             ) as response:
-                if response.status == 200:
+                if response.status in [200, 202]:  # Accept both 200 (direct) and 202 (Event Sourcing)
                     result = await response.json()
-                    logger.info(f"OMS create result: {result}")
+                    logger.info(f"OMS create result (status {response.status}): {result}")
                 else:
                     error_text = await response.text()
                     logger.error(f"OMS API failed with status {response.status}: {error_text}")
@@ -235,8 +235,14 @@ async def create_ontology(
 
         # OMS 응답에서 생성된 데이터 추출
         if isinstance(result, dict):
-            # OMS가 data 필드를 반환하는 경우
-            if "data" in result and result.get("status") == "success":
+            # Event Sourcing 202 response
+            if result.get("status") == "accepted" and "data" in result:
+                # Event Sourcing mode - use the ontology_id from response
+                event_data = result["data"]
+                class_id = event_data.get("ontology_id", class_id)
+                logger.info(f"Event Sourcing: ontology {class_id} creation accepted with command_id {event_data.get('command_id')}")
+            # Direct mode 200 response
+            elif "data" in result and result.get("status") == "success":
                 created_data = result["data"]
                 # 생성된 ID 사용
                 if "id" in created_data:
