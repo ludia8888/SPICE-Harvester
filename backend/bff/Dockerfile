@@ -30,6 +30,9 @@ RUN python -c "import uvicorn; import fastapi; import aiosqlite; print('All crit
 # Copy application code
 COPY bff /app/bff
 
+# Copy data_connector module
+COPY data_connector /app/data_connector
+
 # Create data directory for SQLite
 RUN mkdir -p /app/data
 

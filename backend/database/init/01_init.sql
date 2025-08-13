@@ -40,5 +40,5 @@ CREATE INDEX IF NOT EXISTS idx_outbox_retry ON spice_outbox.outbox (retry_count,
 WHERE processed_at IS NULL AND retry_count > 0;
 
 -- 권한 설정
-GRANT ALL PRIVILEGES ON SCHEMA spice_outbox TO spiceadmin;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA spice_outbox TO spiceadmin;
+GRANT ALL PRIVILEGES ON SCHEMA spice_outbox TO admin;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA spice_outbox TO admin;

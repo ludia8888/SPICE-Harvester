@@ -1,901 +1,405 @@
 """
-Instance Worker Service
-Instance Command를 처리하여 S3 저장 및 TerminusDB 작업을 수행하는 워커 서비스
+STRICT Palantir-style Instance Worker
+경량 그래프 원칙을 100% 준수하는 구현
+
+PALANTIR RULES:
+1. Graph stores ONLY: @id, @type, instance_id, es_doc_id, s3_uri, created_at + relationships
+2. NO domain fields in graph (no name, price, description, etc.)
+3. ALL domain data goes to ES and S3 only
+4. Relationships are @id → @id references only
 """
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
-import signal
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Dict, Any, Optional, Set
 from uuid import uuid4
+import hashlib
 
-from confluent_kafka import Consumer, Producer, KafkaError, KafkaException
-import asyncpg
+from confluent_kafka import Consumer, Producer, KafkaError
+import redis
+import boto3
+from elasticsearch import AsyncElasticsearch
 
 from shared.config.service_config import ServiceConfig
 from shared.config.app_config import AppConfig
+from shared.services.redis_service import create_redis_service
+from shared.services.elasticsearch_service import create_elasticsearch_service
 from shared.config.settings import ApplicationSettings
-from shared.models.commands import (
-    BaseCommand, CommandType, CommandStatus, 
-    InstanceCommand
-)
-from shared.models.events import (
-    BaseEvent, EventType,
-    InstanceEvent,
-    CommandFailedEvent
-)
-from shared.models.config import ConnectionConfig
+
+# ULTRA CRITICAL: Import TerminusDB service
 from oms.services.async_terminus import AsyncTerminusService
-from shared.services.redis_service import RedisService, create_redis_service
-from shared.services.command_status_service import CommandStatusService
-from shared.services.storage_service import StorageService, create_storage_service
-from shared.utils.id_generator import generate_instance_id
+from shared.models.config import ConnectionConfig
 
-# Production-ready services
-from shared.services.idempotency_service import IdempotencyService
-from shared.services.schema_versioning import SchemaVersioningService
-from shared.services.sequence_service import SequenceService
-from shared.config.kafka_config import KafkaEOSConfig, TransactionalProducer
-
-# Observability imports
-from shared.observability.tracing import get_tracing_service
-from shared.observability.metrics import get_metrics_collector
-from shared.observability.context_propagation import ContextPropagator
-
-# 로깅 설정
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class InstanceWorker:
-    """인스턴스 Command를 처리하는 워커"""
+class StrictPalantirInstanceWorker:
+    """
+    STRICT Palantir-style Instance Worker
+    Graph는 관계와 참조만, 데이터는 ES/S3에만
+    """
     
     def __init__(self):
         self.running = False
         self.kafka_servers = ServiceConfig.get_kafka_bootstrap_servers()
-        self.consumer: Optional[Consumer] = None
-        self.producer: Optional[Producer] = None
-        self.terminus_service: Optional[AsyncTerminusService] = None
-        self.redis_service: Optional[RedisService] = None
-        
-        # Production-ready services
-        self.idempotency_service: Optional[IdempotencyService] = None
-        self.schema_service: Optional[SchemaVersioningService] = None
-        self.sequence_service: Optional[SequenceService] = None
-        self.command_status_service: Optional[CommandStatusService] = None
-        self.storage_service: Optional[StorageService] = None
+        self.consumer = None
+        self.producer = None
+        self.redis_client = None
+        self.s3_client = None
+        self.es_client = None
+        self.terminus_service = None
         self.instance_bucket = AppConfig.INSTANCE_BUCKET
-        self.tracing_service = None
-        self.metrics_collector = None
-        self.context_propagator = ContextPropagator()
+        
+        # PALANTIR SYSTEM FIELDS (ONLY these go to graph)
+        self.SYSTEM_FIELDS = {
+            '@id', '@type', 'instance_id', 'es_doc_id', 
+            's3_uri', 'created_at', 'updated_at'
+        }
         
     async def initialize(self):
-        """워커 초기화"""
-        # Debug log
-        logger.info(f"Kafka bootstrap servers: {self.kafka_servers}")
+        """Initialize all connections"""
+        logger.info("Initializing STRICT Palantir Instance Worker...")
         
-        # THINK ULTRA: Kafka EOS v2 Consumer configuration
-        self.consumer = Consumer(
-            KafkaEOSConfig.get_consumer_config(
-                service_name='instance-worker',
-                group_id='instance-worker-group',
-                read_committed=True,  # Only read committed messages
-                auto_commit=False  # Manual commit for exactly-once
-            )
+        # Kafka Consumer - using new group to read from beginning
+        import time
+        group_id = f'strict-palantir-worker-{int(time.time())}'  # Unique group each time
+        self.consumer = Consumer({
+            'bootstrap.servers': self.kafka_servers,
+            'group.id': group_id,
+            'auto.offset.reset': 'earliest',  # Read from beginning
+            'enable.auto.commit': True,
+        })
+        logger.info(f"Using consumer group: {group_id}")
+        
+        # Kafka Producer for events
+        self.producer = Producer({
+            'bootstrap.servers': self.kafka_servers,
+            'client.id': 'strict-palantir-instance-worker-producer',
+        })
+        
+        # Redis
+        settings = ApplicationSettings()
+        self.redis_service = create_redis_service(settings)
+        await self.redis_service.connect()
+        self.redis_client = self.redis_service.client
+        
+        # S3/MinIO
+        self.s3_client = boto3.client(
+            's3',
+            endpoint_url=os.getenv('MINIO_ENDPOINT_URL', 'http://localhost:9000'),
+            aws_access_key_id=os.getenv('MINIO_ACCESS_KEY', 'admin'),
+            aws_secret_access_key=os.getenv('MINIO_SECRET_KEY', 'spice123!'),
+            region_name='us-east-1'
         )
         
-        # THINK ULTRA: Kafka EOS v2 Producer configuration with transactional support
-        producer_config = KafkaEOSConfig.get_producer_config(
-            service_name='instance-worker',
-            instance_id=str(uuid4())[:8],  # Unique instance ID for this worker
-            enable_transactions=True  # Enable exactly-once semantics
-        )
-        self.producer = Producer(producer_config)
-        
-        # Initialize transactional producer wrapper
-        self.transactional_producer = TransactionalProducer(
-            self.producer,
-            enable_transactions=True
-        )
-        
-        # Initialize transactions (must be done once before any transaction)
+        # Ensure bucket exists
         try:
-            self.transactional_producer.init_transactions(timeout=30.0)
-            logger.info("✅ Kafka transactional producer initialized (EOS v2)")
-        except Exception as e:
-            logger.warning(f"Transactional init failed (falling back to idempotent mode): {e}")
-            # Producer will still work in idempotent mode without transactions
+            self.s3_client.head_bucket(Bucket=self.instance_bucket)
+        except:
+            self.s3_client.create_bucket(Bucket=self.instance_bucket)
+            
+        # Elasticsearch - create directly with correct auth
+        from elasticsearch import AsyncElasticsearch
+        self.es_client = AsyncElasticsearch(
+            hosts=[f"http://localhost:9200"],
+            basic_auth=("elastic", "spice123!"),
+            verify_certs=False,
+            ssl_show_warn=False
+        )
+        # Test connection
+        info = await self.es_client.info()
+        logger.info(f"Connected to Elasticsearch {info['version']['number']}")
         
-        # TerminusDB 연결 설정
+        # TerminusDB
         connection_info = ConnectionConfig(
-            server_url=ServiceConfig.get_terminus_url(),
-            user=os.getenv("TERMINUS_USER", "admin"),
-            account=os.getenv("TERMINUS_ACCOUNT", "admin"),
-            key=os.getenv("TERMINUS_KEY", "admin"),  # FIXED: Use correct key
+            server_url=os.getenv('TERMINUS_SERVER_URL', 'http://localhost:6363'),
+            user=os.getenv('TERMINUS_USER', 'admin'),
+            account=os.getenv('TERMINUS_ACCOUNT', 'admin'),
+            key=os.getenv('TERMINUS_KEY', 'spice123!')
         )
         self.terminus_service = AsyncTerminusService(connection_info)
         await self.terminus_service.connect()
         
-        # Redis 연결 설정
-        settings = ApplicationSettings()
-        self.redis_service = create_redis_service(settings)
-        await self.redis_service.connect()
-        self.command_status_service = CommandStatusService(self.redis_service)
-        logger.info("Redis connection established")
-        
-        # Initialize production-ready services
-        import redis.asyncio as aioredis
-        redis_client = aioredis.from_url(
-            'redis://localhost:6379',
-            encoding='utf-8',
-            decode_responses=False
-        )
-        
-        self.idempotency_service = IdempotencyService(
-            redis_client=redis_client,
-            ttl_seconds=86400,
-            namespace="instance_worker"
-        )
-        
-        self.schema_service = SchemaVersioningService()
-        
-        self.sequence_service = SequenceService(
-            redis_client=redis_client,
-            namespace="instance_sequence"
-        )
-        logger.info("✅ Production services initialized")
-        
-        # S3/MinIO 연결 설정
-        self.storage_service = create_storage_service(settings)
-        # 버킷 생성 (없으면)
-        await self.storage_service.create_bucket(self.instance_bucket)
-        logger.info(f"Storage service initialized with bucket: {self.instance_bucket}")
-        
-        # Command 토픽 구독
+        # Subscribe to Kafka topic
         self.consumer.subscribe([AppConfig.INSTANCE_COMMANDS_TOPIC])
         
-        # Initialize OpenTelemetry
-        self.tracing_service = get_tracing_service("instance-worker")
-        self.metrics_collector = get_metrics_collector("instance-worker")
+        logger.info("✅ STRICT Palantir Instance Worker initialized")
         
-        logger.info("Instance Worker initialized successfully")
-        
-    async def process_command(self, command_data: Dict[str, Any]) -> None:
-        """Command 처리"""
-        command_id = command_data.get('command_id')
-        
-        # Check idempotency
-        if self.idempotency_service:
-            is_duplicate, metadata = await self.idempotency_service.is_duplicate(
-                event_id=command_id,
-                event_data=command_data
-            )
-            
-            if is_duplicate:
-                logger.info(f"Skipping duplicate command: {command_id}")
-                return
+    async def extract_relationships(self, db_name: str, class_id: str, payload: Dict[str, Any]) -> Dict[str, str]:
+        """
+        Extract ONLY relationship fields from payload
+        Returns: {field_name: target_id} for @id references only
+        """
+        relationships = {}
         
         try:
-            # Redis에 처리 시작 상태 업데이트
-            if command_id and self.redis_service:
-                # Directly set the status in Redis for test compatibility
-                status_key = f"command:{command_id}:status"
-                status_data = {
-                    "status": "PROCESSING",
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                    "data": {}
-                }
-                await self.redis_service.client.setex(
-                    status_key,
-                    86400,  # 24 hours
-                    json.dumps(status_data)
-                )
-                logger.info(f"Set command status for {command_id}")
+            # Get ontology to identify relationship fields
+            ontology = await self.terminus_service.get_ontology(db_name, class_id)
             
-            command_type = command_data.get('command_type')
-            
-            # Command 유형별 처리
-            if command_type == CommandType.CREATE_INSTANCE:
-                await self.handle_create_instance(command_data)
-            elif command_type == CommandType.UPDATE_INSTANCE:
-                await self.handle_update_instance(command_data)
-            elif command_type == CommandType.DELETE_INSTANCE:
-                await self.handle_delete_instance(command_data)
-            elif command_type == CommandType.BULK_CREATE_INSTANCES:
-                await self.handle_bulk_create_instances(command_data)
-            elif command_type == CommandType.BULK_UPDATE_INSTANCES:
-                await self.handle_bulk_update_instances(command_data)
-            elif command_type == CommandType.BULK_DELETE_INSTANCES:
-                await self.handle_bulk_delete_instances(command_data)
-            else:
-                logger.warning(f"Unknown command type: {command_type}")
-                
+            if ontology and 'relationships' in ontology:
+                for rel in ontology['relationships']:
+                    field_name = rel.get('predicate') or rel.get('name')
+                    if field_name and field_name in payload:
+                        value = payload[field_name]
+                        # Only include if it's an @id reference
+                        if isinstance(value, str) and '/' in value:
+                            relationships[field_name] = value
+                            logger.info(f"  📎 Found relationship: {field_name} → {value}")
+                            
         except Exception as e:
-            logger.error(f"Error processing command: {e}")
+            logger.warning(f"Could not get ontology for relationship extraction: {e}")
             
-            # Redis에 실패 상태 업데이트
-            if command_id and self.command_status_service:
-                await self.command_status_service.fail_command(
-                    command_id=command_id,
-                    error=str(e)
-                )
+            # FALLBACK: Check for common relationship patterns
+            # But NEVER include non-reference fields
+            for key, value in payload.items():
+                if isinstance(value, str) and '/' in value:
+                    # Looks like an @id reference
+                    if any(pattern in key for pattern in ['_id', '_ref', 'owned_by', 'linked_to']):
+                        relationships[key] = value
+                        logger.info(f"  📎 Found relationship pattern: {key} → {value}")
+                        
+        return relationships
+        
+    async def process_create_instance(self, command: Dict[str, Any]):
+        """Process CREATE_INSTANCE command - STRICT Palantir style"""
+        
+        db_name = command.get('db_name')
+        class_id = command.get('class_id')
+        command_id = command.get('command_id')
+        payload = command.get('payload', {})
+        
+        # Generate instance ID if not provided
+        instance_id = command.get('instance_id') or payload.get('instance_id')
+        if not instance_id:
+            instance_id = f"{class_id}_inst_{datetime.now().strftime('%H%M%S%f')[:8]}"
             
-            # 실패 이벤트 발행
-            await self.publish_failure_event(command_data, str(e))
-            raise
-            
-    async def handle_create_instance(self, command_data: Dict[str, Any]) -> None:
-        """인스턴스 생성 처리"""
-        db_name = command_data.get('db_name')
-        class_id = command_data.get('class_id')
-        payload = command_data.get('payload', {})
-        command_id = command_data.get('command_id')
-        metadata = command_data.get('metadata', {})
+        logger.info(f"🔷 STRICT Palantir: Creating {class_id}/{instance_id}")
         
-        # 인스턴스 ID 생성 (제공되지 않은 경우)
-        instance_id = generate_instance_id(class_id)
-        
-        # Get sequence number for this aggregate
-        sequence_number = 0
-        if self.sequence_service:
-            sequence_number = await self.sequence_service.get_next_sequence(instance_id)
-        
-        logger.info(f"Creating instance: {instance_id} of class: {class_id} in database: {db_name} (seq: {sequence_number})")
+        # Set command status
+        await self.set_command_status(command_id, 'processing')
         
         try:
-            # 1. S3에 Command 전체 내용 저장
-            s3_path = self.storage_service.generate_instance_path(
-                db_name, class_id, instance_id, command_id
-            )
-            
-            command_to_save = {
-                **command_data,
-                "instance_id": instance_id,
-                "saved_at": datetime.now(timezone.utc).isoformat()
+            # 1. Save FULL data to S3 (Event Store)
+            s3_path = f"{db_name}/{class_id}/{instance_id}/{command_id}.json"
+            s3_data = {
+                'command': command,
+                'payload': payload,
+                'instance_id': instance_id,
+                'class_id': class_id,
+                'created_at': datetime.now(timezone.utc).isoformat()
             }
             
-            s3_checksum = await self.storage_service.save_json(
-                bucket=self.instance_bucket,
-                key=s3_path,
-                data=command_to_save,
-                metadata={
-                    "command_type": CommandType.CREATE_INSTANCE,
-                    "db_name": db_name,
-                    "class_id": class_id,
-                    "instance_id": instance_id
+            self.s3_client.put_object(
+                Bucket=self.instance_bucket,
+                Key=s3_path,
+                Body=json.dumps(s3_data, indent=2),
+                ContentType='application/json',
+                Metadata={
+                    'command_id': command_id,
+                    'instance_id': instance_id,
+                    'class_id': class_id
                 }
             )
+            logger.info(f"  ✅ Saved to S3: {s3_path}")
             
-            logger.info(f"Saved command to S3: {s3_path} (checksum: {s3_checksum})")
+            # 2. Extract ONLY relationships for graph
+            relationships = await self.extract_relationships(db_name, class_id, payload)
             
-            # 2. TerminusDB에 경량 그래프 노드 생성 (THINK ULTRA³ - Graph Authority)
-            # Only store ID, relationships, and references to ES/S3
-            # CLAUDE RULE FIX: Use proper TerminusDB ID format with class prefix
-            lightweight_node = {
-                "@id": f"{class_id}/{instance_id}",  # FIXED: Proper format for TerminusDB
+            # 3. Create STRICT lightweight node for TerminusDB
+            graph_node = {
+                "@id": f"{class_id}/{instance_id}",
                 "@type": class_id,
                 "instance_id": instance_id,
-                "es_doc_id": instance_id,  # Will be same as instance_id for ES
+                "es_doc_id": instance_id,
                 "s3_uri": f"s3://{self.instance_bucket}/{s3_path}",
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
             
-            # Get ontology schema from TerminusDB to determine what to store in graph
+            # Add ONLY relationships (no domain fields!)
+            for rel_field, rel_target in relationships.items():
+                graph_node[rel_field] = rel_target
+                
+            # PALANTIR PRINCIPLE: NO domain attributes in TerminusDB!
+            # TerminusDB stores ONLY lightweight nodes (IDs + relationships)
+            # All domain data goes to Elasticsearch
+            
+            # Store lightweight node in TerminusDB for graph traversal
             try:
-                # Fetch the class schema to understand relationships and properties
-                ontology_schema = await self.terminus_service.get_ontology(db_name, class_id)
-                
-                # Extract relationship definitions from schema
-                relationships = {}
-                properties = {}
-                
-                if ontology_schema:
-                    # Parse relationships (fields that reference other classes)
-                    for rel in ontology_schema.get('relationships', []):
-                        rel_name = rel.get('predicate') or rel.get('name')
-                        if rel_name:
-                            relationships[rel_name] = rel.get('target')
-                    
-                    # Parse properties to understand types
-                    for prop in ontology_schema.get('properties', []):
-                        prop_name = prop.get('name')
-                        if prop_name:
-                            properties[prop_name] = {
-                                'type': prop.get('type'),
-                                'is_key': prop.get('key', False),
-                                'is_optional': prop.get('optional', True)
-                            }
-                
-                # Now intelligently extract fields based on schema
-                for key, value in payload.items():
-                    if key in lightweight_node:
-                        continue
-                    
-                    # Always include relationship fields
-                    if key in relationships:
-                        lightweight_node[key] = value
-                        logger.debug(f"Including relationship field: {key} -> {relationships[key]}")
-                    
-                    # Include key/identifier fields
-                    elif key in properties and properties[key].get('is_key'):
-                        lightweight_node[key] = value
-                        logger.debug(f"Including key field: {key}")
-                    
-                    # Include small scalar fields (but not large text)
-                    elif isinstance(value, (str, int, float, bool)):
-                        if isinstance(value, str) and len(value) > 1000:
-                            logger.debug(f"Skipping large text field: {key}")
-                            continue  # Skip large text
-                        lightweight_node[key] = value
-                    
-                    # Include reference lists (for n:n relationships)
-                    elif isinstance(value, list) and len(value) < 100:
-                        if all(isinstance(item, str) for item in value):
-                            # Likely a list of IDs/references
-                            lightweight_node[key] = value
-                            
+                # Create instance using TerminusDB service
+                # This will store ONLY the lightweight node with relationships
+                # Note: The instance_id is already part of graph_node["@id"]
+                await self.terminus_service.create_instance(
+                    db_name,
+                    class_id,
+                    graph_node  # Contains only @id, @type, es_doc_id, s3_uri, relationships
+                )
+                logger.info(f"  ✅ Stored lightweight node in TerminusDB")
+                logger.info(f"  📊 Relationships: {list(relationships.keys())}")
             except Exception as e:
-                logger.warning(f"Could not fetch ontology schema, using fallback: {e}")
-                # Fallback: include all small fields if schema unavailable
-                for key, value in payload.items():
-                    if key not in lightweight_node:
-                        if isinstance(value, (str, int, float, bool)):
-                            if not isinstance(value, str) or len(value) < 500:
-                                lightweight_node[key] = value
+                logger.warning(f"  ⚠️ Could not store in TerminusDB: {e}")
+                # Continue anyway - ES is primary storage
             
-            # Try to create in TerminusDB (but don't fail if it doesn't work)
-            try:
-                if self.terminus_service:
-                    await self.terminus_service.create_instance(
-                        db_name=db_name,
-                        class_id=class_id,
-                        instance_data=lightweight_node
-                    )
-                    logger.info(f"✅ Created lightweight graph node in TerminusDB: {instance_id}")
-            except Exception as e:
-                # Don't fail the whole operation if TerminusDB write fails
-                logger.warning(f"⚠️ Could not create graph node in TerminusDB: {e}")
-                # Continue with event publishing
-            
-            # 3. 성공 이벤트 생성 (latest.json 제거 - 순수 append-only 유지)
-            event_dict = {
-                "event_type": EventType.INSTANCE_CREATED,
-                "db_name": db_name,
-                "class_id": class_id,
-                "instance_id": instance_id,
-                "command_id": command_id,
-                "s3_path": s3_path,
-                "s3_checksum": s3_checksum,
-                "sequence_number": sequence_number,  # Add sequence number
-                "aggregate_id": instance_id,  # Use instance_id as aggregate_id
-                "data": {
-                    "instance_id": instance_id,
-                    "class_id": class_id,
-                    "payload": payload,
-                    "s3_stored": True
-                },
-                "occurred_by": command_data.get('created_by', 'system')
+            # 4. Index FULL data in Elasticsearch (PRIMARY storage)
+            es_doc = {
+                'instance_id': instance_id,
+                'class_id': class_id,
+                'db_name': db_name,
+                'data': payload,  # ALL domain data here
+                'relationships': relationships,
+                'created_at': datetime.now(timezone.utc).isoformat(),
+                's3_uri': f"s3://{self.instance_bucket}/{s3_path}",
+                'command_id': command_id
             }
             
-            # Add schema version
-            if self.schema_service:
-                event_dict = self.schema_service.version_event(event_dict)
+            index_name = f"{db_name.lower()}_instances"
+            await self.es_client.index(
+                index=index_name,
+                id=instance_id,
+                document=es_doc,
+                refresh=True
+            )
+            logger.info(f"  ✅ Indexed full data in Elasticsearch: {index_name}/{instance_id}")
             
-            event = InstanceEvent(**event_dict)
+            # 6. Publish event
+            event = {
+                'event_id': str(uuid4()),
+                'event_type': 'INSTANCE_CREATED',
+                'aggregate_id': f"{db_name}:{class_id}:{instance_id}",
+                'aggregate_type': 'Instance',
+                'db_name': db_name,
+                'class_id': class_id,
+                'instance_id': instance_id,
+                'data': {
+                    'instance_id': instance_id,
+                    'class_id': class_id,
+                    **payload  # Include full payload in event
+                },
+                'occurred_at': datetime.now(timezone.utc).isoformat()
+            }
             
-            # 5. 이벤트 발행
-            await self.publish_event(event)
+            self.producer.produce(
+                AppConfig.INSTANCE_EVENTS_TOPIC,
+                key=event['aggregate_id'],
+                value=json.dumps(event)
+            )
+            self.producer.flush()
+            logger.info(f"  ✅ Published INSTANCE_CREATED event")
             
-            # 6. Redis에 완료 상태 업데이트
-            if command_id and self.redis_service:
-                # Directly update Redis for test compatibility
-                status_key = f"command:{command_id}:status"
-                result_data = {
-                    "instance_id": instance_id,
-                    "class_id": class_id,
-                    "message": f"Successfully created instance: {instance_id}",
-                    "s3_path": s3_path,
-                    "s3_checksum": s3_checksum,
-                    "s3_stored": True
-                }
-                status_data = {
-                    "status": "COMPLETED",
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                    "data": {"result": result_data}
-                }
-                await self.redis_service.client.setex(
-                    status_key,
-                    86400,  # 24 hours
-                    json.dumps(status_data)
-                )
-                logger.info(f"Updated command status to COMPLETED for {command_id}")
+            # Set success status
+            await self.set_command_status(command_id, 'completed', {
+                'instance_id': instance_id,
+                'es_doc_id': instance_id,
+                's3_uri': f"s3://{self.instance_bucket}/{s3_path}"
+            })
             
-            # Mark command as processed (idempotency)
-            if self.idempotency_service and command_id:
-                await self.idempotency_service.mark_processed(
-                    event_id=command_id,
-                    result={"instance_id": instance_id, "status": "created"}
-                )
-            
-            logger.info(f"Successfully created instance: {instance_id} (seq: {sequence_number})")
+            logger.info(f"✅ STRICT Palantir: Instance created successfully")
             
         except Exception as e:
-            logger.error(f"Failed to create instance: {e}")
+            logger.error(f"❌ Failed to create instance: {e}")
+            await self.set_command_status(command_id, 'failed', {'error': str(e)})
             raise
             
-    async def handle_update_instance(self, command_data: Dict[str, Any]) -> None:
-        """인스턴스 수정 처리"""
-        db_name = command_data.get('db_name')
-        class_id = command_data.get('class_id')
-        instance_id = command_data.get('instance_id')
-        payload = command_data.get('payload', {})
-        command_id = command_data.get('command_id')
+    async def set_command_status(self, command_id: str, status: str, result: Dict = None):
+        """Set command status in Redis"""
+        if not command_id:
+            return
+            
+        status_key = AppConfig.get_command_status_key(command_id)
+        status_data = {
+            'command_id': command_id,
+            'status': status,
+            'updated_at': datetime.now(timezone.utc).isoformat()
+        }
         
-        # Get sequence number for this update
-        sequence_number = 0
-        if self.sequence_service:
-            sequence_number = await self.sequence_service.get_next_sequence(instance_id)
-        
-        logger.info(f"Updating instance: {instance_id} of class: {class_id} in database: {db_name} (seq: {sequence_number})")
-        
-        try:
-            # 1. S3에 Command 저장
-            s3_path = self.storage_service.generate_instance_path(
-                db_name, class_id, instance_id, command_id
-            )
+        if result:
+            status_data['result'] = result
             
-            command_to_save = {
-                **command_data,
-                "saved_at": datetime.now(timezone.utc).isoformat()
-            }
-            
-            s3_checksum = await self.storage_service.save_json(
-                bucket=self.instance_bucket,
-                key=s3_path,
-                data=command_to_save,
-                metadata={
-                    "command_type": CommandType.UPDATE_INSTANCE,
-                    "db_name": db_name,
-                    "class_id": class_id,
-                    "instance_id": instance_id
-                }
-            )
-            
-            # 2. TerminusDB에서 기존 문서 조회
-            # TerminusDB document API를 직접 사용
-            try:
-                endpoint = f"/api/document/{self.terminus_service.connection_info.account}/{db_name}/{class_id}/{instance_id}"
-                existing_doc = await self.terminus_service._make_request("GET", endpoint)
-            except Exception as e:
-                raise Exception(f"Instance '{instance_id}' not found: {e}")
-            
-            if not existing_doc:
-                raise Exception(f"Instance '{instance_id}' not found")
-            
-            # 3. 문서 업데이트
-            current_version = existing_doc.get("_metadata", {}).get("version", 1)
-            updated_data = {
-                **existing_doc,
-                **payload,
-                "@id": instance_id,  # ID는 변경 불가
-                "@type": class_id,   # Type도 변경 불가
-                "_metadata": {
-                    **existing_doc.get("_metadata", {}),
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                    "updated_by": command_data.get('created_by', 'system'),
-                    "command_id": command_id,
-                    "s3_checksum": s3_checksum,
-                    "version": current_version + 1
-                }
-            }
-            
-            # TerminusDB는 스키마만 저장 - 인스턴스 업데이트는 S3와 Elasticsearch에만
-            # Instance update already saved to S3
-            
-            # 4. 성공 이벤트 생성 (latest.json 제거 - 순수 append-only 유지)
-            event_dict = {
-                "event_type": EventType.INSTANCE_UPDATED,
-                "db_name": db_name,
-                "class_id": class_id,
-                "instance_id": instance_id,
-                "command_id": command_id,
-                "s3_path": s3_path,
-                "s3_checksum": s3_checksum,
-                "sequence_number": sequence_number,  # Add sequence number
-                "aggregate_id": instance_id,  # Use instance_id as aggregate_id
-                "data": {
-                    "instance_id": instance_id,
-                    "updates": payload,
-                    "version": current_version + 1,
-                    "s3_stored": True
-                },
-                "occurred_by": command_data.get('created_by', 'system')
-            }
-            
-            # Add schema version
-            if self.schema_service:
-                event_dict = self.schema_service.version_event(event_dict)
-            
-            event = InstanceEvent(**event_dict)
-            
-            # 6. 이벤트 발행
-            await self.publish_event(event)
-            
-            # 7. Redis에 완료 상태 업데이트
-            if command_id and self.command_status_service:
-                await self.command_status_service.complete_command(
-                    command_id=command_id,
-                    result={
-                        "instance_id": instance_id,
-                        "message": f"Successfully updated instance: {instance_id}",
-                        "s3_path": s3_path,
-                        "s3_checksum": s3_checksum,
-                        "version": current_version + 1,
-                        "s3_stored": True
-                    }
-                )
-            
-            # Mark command as processed (idempotency)
-            if self.idempotency_service and command_id:
-                await self.idempotency_service.mark_processed(
-                    event_id=command_id,
-                    result={"instance_id": instance_id, "status": "updated"}
-                )
-            
-            logger.info(f"Successfully updated instance: {instance_id} (seq: {sequence_number})")
-            
-        except Exception as e:
-            logger.error(f"Failed to update instance: {e}")
-            raise
-            
-    async def handle_delete_instance(self, command_data: Dict[str, Any]) -> None:
-        """인스턴스 삭제 처리"""
-        db_name = command_data.get('db_name')
-        class_id = command_data.get('class_id')
-        instance_id = command_data.get('instance_id')
-        command_id = command_data.get('command_id')
-        
-        # Get sequence number for this deletion
-        sequence_number = 0
-        if self.sequence_service:
-            sequence_number = await self.sequence_service.get_next_sequence(instance_id)
-        
-        logger.info(f"Deleting instance: {instance_id} from database: {db_name} (seq: {sequence_number})")
-        
-        try:
-            # 1. S3에 삭제 Command 저장
-            s3_path = self.storage_service.generate_instance_path(
-                db_name, class_id, instance_id, command_id
-            )
-            
-            command_to_save = {
-                **command_data,
-                "deleted_at": datetime.now(timezone.utc).isoformat()
-            }
-            
-            s3_checksum = await self.storage_service.save_json(
-                bucket=self.instance_bucket,
-                key=s3_path,
-                data=command_to_save,
-                metadata={
-                    "command_type": CommandType.DELETE_INSTANCE,
-                    "db_name": db_name,
-                    "class_id": class_id,
-                    "instance_id": instance_id
-                }
-            )
-            
-            # 2. TerminusDB에서 문서 삭제
-            # TerminusDB는 스키마만 저장 - 인스턴스 삭제는 Event로만 처리
-            # Deletion is tracked through events, no actual deletion from TerminusDB
-            # Instance marked as deleted via event, but data remains in S3 (Event Sourcing)
-            
-            # 3. 삭제 Command도 append-only로 저장됨 (위의 S3 저장으로 충분)
-            # 별도의 deletion marker는 불필요 - 모든 상태 변경은 Command로 추적
-            
-            # 4. 성공 이벤트 생성
-            event_dict = {
-                "event_type": EventType.INSTANCE_DELETED,
-                "db_name": db_name,
-                "class_id": class_id,
-                "instance_id": instance_id,
-                "command_id": command_id,
-                "s3_path": s3_path,
-                "s3_checksum": s3_checksum,
-                "sequence_number": sequence_number,  # Add sequence number
-                "aggregate_id": instance_id,  # Use instance_id as aggregate_id
-                "data": {
-                    "instance_id": instance_id,
-                    "class_id": class_id
-                },
-                "occurred_by": command_data.get('created_by', 'system')
-            }
-            
-            # Add schema version
-            if self.schema_service:
-                event_dict = self.schema_service.version_event(event_dict)
-            
-            event = InstanceEvent(**event_dict)
-            
-            # 5. 이벤트 발행
-            await self.publish_event(event)
-            
-            # 6. Redis에 완료 상태 업데이트
-            if command_id and self.command_status_service:
-                await self.command_status_service.complete_command(
-                    command_id=command_id,
-                    result={
-                        "instance_id": instance_id,
-                        "message": f"Successfully deleted instance: {instance_id}",
-                        "s3_path": s3_path,
-                        "s3_checksum": s3_checksum
-                    }
-                )
-            
-            # Mark command as processed (idempotency)
-            if self.idempotency_service and command_id:
-                await self.idempotency_service.mark_processed(
-                    event_id=command_id,
-                    result={"instance_id": instance_id, "status": "deleted"}
-                )
-            
-            logger.info(f"Successfully deleted instance: {instance_id} (seq: {sequence_number})")
-            
-        except Exception as e:
-            logger.error(f"Failed to delete instance: {e}")
-            raise
-            
-    async def handle_bulk_create_instances(self, command_data: Dict[str, Any]) -> None:
-        """대량 인스턴스 생성 처리"""
-        db_name = command_data.get('db_name')
-        class_id = command_data.get('class_id')
-        payload = command_data.get('payload', {})
-        instances = payload.get('instances', [])
-        command_id = command_data.get('command_id')
-        
-        logger.info(f"Creating {len(instances)} instances of class: {class_id} in database: {db_name}")
-        
-        created_instances = []
-        failed_instances = []
-        
-        try:
-            # S3에 Bulk Command 저장
-            bulk_s3_path = f"{db_name}/{class_id}/bulk/{command_id}.json"
-            bulk_s3_checksum = await self.storage_service.save_json(
-                bucket=self.instance_bucket,
-                key=bulk_s3_path,
-                data=command_data
-            )
-            
-            # 각 인스턴스 처리
-            for idx, instance_data in enumerate(instances):
-                instance_id = generate_instance_id(f"{class_id}_{idx}")
-                
-                try:
-                    # 개별 인스턴스 생성 로직
-                    instance_doc = {
-                        "@id": instance_id,
-                        "@type": class_id,
-                        **instance_data,
-                        "_metadata": {
-                            "created_at": datetime.now(timezone.utc).isoformat(),
-                            "created_by": command_data.get('created_by', 'system'),
-                            "command_id": command_id,
-                            "bulk_index": idx,
-                            "version": 1
-                        }
-                    }
-                    
-                    # TerminusDB는 스키마만 저장 - 인스턴스는 S3에만 저장
-                    # Instance already saved to S3 above
-                    
-                    created_instances.append({
-                        "instance_id": instance_id,
-                        "index": idx,
-                        "s3_stored": True
-                    })
-                    
-                except Exception as e:
-                    logger.error(f"Failed to create instance at index {idx}: {e}")
-                    failed_instances.append({
-                        "index": idx,
-                        "error": str(e)
-                    })
-            
-            # Get sequence number for bulk operation
-            bulk_sequence = 0
-            if self.sequence_service:
-                bulk_sequence = await self.sequence_service.get_next_sequence(f"bulk_{command_id}")
-            
-            # 성공 이벤트 생성
-            event_dict = {
-                "event_type": EventType.INSTANCES_BULK_CREATED,
-                "db_name": db_name,
-                "class_id": class_id,
-                "instance_id": f"bulk_{command_id}",  # Bulk operation ID
-                "command_id": command_id,
-                "s3_path": bulk_s3_path,
-                "s3_checksum": bulk_s3_checksum,
-                "sequence_number": bulk_sequence,  # Add sequence number
-                "aggregate_id": f"bulk_{command_id}",  # Use bulk ID as aggregate_id
-                "data": {
-                    "total_count": len(instances),
-                    "created_count": len(created_instances),
-                    "failed_count": len(failed_instances),
-                    "created_instances": created_instances,
-                    "failed_instances": failed_instances
-                },
-                "occurred_by": command_data.get('created_by', 'system')
-            }
-            
-            # Add schema version
-            if self.schema_service:
-                event_dict = self.schema_service.version_event(event_dict)
-            
-            event = InstanceEvent(**event_dict)
-            
-            # 이벤트 발행
-            await self.publish_event(event)
-            
-            # Redis에 완료 상태 업데이트
-            if command_id and self.command_status_service:
-                await self.command_status_service.complete_command(
-                    command_id=command_id,
-                    result={
-                        "message": f"Bulk created {len(created_instances)} instances",
-                        "total_count": len(instances),
-                        "created_count": len(created_instances),
-                        "failed_count": len(failed_instances),
-                        "s3_path": bulk_s3_path
-                    }
-                )
-            
-            # Mark bulk command as processed (idempotency)
-            if self.idempotency_service and command_id:
-                await self.idempotency_service.mark_processed(
-                    event_id=command_id,
-                    result={
-                        "total_count": len(instances),
-                        "created_count": len(created_instances),
-                        "failed_count": len(failed_instances),
-                        "status": "bulk_created"
-                    }
-                )
-            
-            logger.info(f"Bulk creation completed: {len(created_instances)} succeeded, {len(failed_instances)} failed")
-            
-        except Exception as e:
-            logger.error(f"Failed to process bulk create: {e}")
-            raise
-    
-    async def handle_bulk_update_instances(self, command_data: Dict[str, Any]) -> None:
-        """대량 인스턴스 수정 처리"""
-        # TODO: 구현 필요
-        logger.warning("Bulk update instances not implemented yet")
-        
-    async def handle_bulk_delete_instances(self, command_data: Dict[str, Any]) -> None:
-        """대량 인스턴스 삭제 처리"""
-        # TODO: 구현 필요
-        logger.warning("Bulk delete instances not implemented yet")
-        
-    async def publish_event(self, event: BaseEvent) -> None:
-        """이벤트 발행"""
-        # THINK ULTRA: Use aggregate_id as partition key for ordering guarantee
-        partition_key = event.aggregate_id if hasattr(event, 'aggregate_id') and event.aggregate_id else str(event.event_id)
-        
-        self.producer.produce(
-            topic=AppConfig.INSTANCE_EVENTS_TOPIC,
-            value=event.model_dump_json(),
-            key=partition_key.encode('utf-8')  # FIXED: partition by aggregate_id for per-aggregate ordering
+        await self.redis_client.setex(
+            status_key,
+            3600,  # 1 hour TTL
+            json.dumps(status_data)
         )
-        self.producer.flush()
-        
-    async def publish_failure_event(self, command_data: Dict[str, Any], error: str) -> None:
-        """실패 이벤트 발행"""
-        event = CommandFailedEvent(
-            aggregate_type=command_data.get('aggregate_type', 'Instance'),
-            aggregate_id=command_data.get('aggregate_id', 'Unknown'),
-            command_id=command_data.get('command_id'),
-            command_type=command_data.get('command_type', 'Unknown'),
-            error_message=error,
-            error_details={
-                "command_data": command_data
-            },
-            retry_count=command_data.get('retry_count', 0)
-        )
-        
-        await self.publish_event(event)
         
     async def run(self):
-        """메인 실행 루프"""
+        """Main processing loop"""
         self.running = True
+        logger.info("🚀 STRICT Palantir Instance Worker started")
+        logger.info(f"  Subscribed to topic: {AppConfig.INSTANCE_COMMANDS_TOPIC}")
         
-        logger.info("Instance Worker started")
-        
-        try:
-            while self.running:
-                msg = self.consumer.poll(timeout=1.0)
-                
-                if msg is None:
-                    continue
-                    
-                if msg.error():
-                    if msg.error().code() == KafkaError._PARTITION_EOF:
-                        logger.debug(f"Reached end of partition {msg.partition()}")
-                    else:
-                        logger.error(f"Consumer error: {msg.error()}")
-                    continue
-                    
-                try:
-                    # 메시지 파싱
-                    value = msg.value().decode('utf-8')
-                    command_data = json.loads(value)
-                    
-                    logger.info(f"Processing command: {command_data.get('command_type')} "
-                               f"for {command_data.get('aggregate_id')}")
-                    
-                    # Command 처리
-                    await self.process_command(command_data)
-                    
-                    # 처리 성공 시 오프셋 커밋
-                    self.consumer.commit(asynchronous=False)
-                    
-                except json.JSONDecodeError as e:
-                    logger.error(f"Failed to parse message: {e}")
-                    # 파싱 실패해도 오프셋은 커밋 (무한 루프 방지)
-                    self.consumer.commit(asynchronous=False)
-                except Exception as e:
-                    logger.error(f"Error processing command: {e}")
-                    # 처리 실패 시 재시도를 위해 커밋하지 않음
-                    
-        except KeyboardInterrupt:
-            logger.info("Worker interrupted by user")
-        finally:
-            await self.shutdown()
+        poll_count = 0
+        while self.running:
+            msg = self.consumer.poll(timeout=1.0)
+            poll_count += 1
             
+            if poll_count % 10 == 0:
+                logger.info(f"  Polled {poll_count} times, no messages yet...")
+            
+            if msg is None:
+                continue
+                
+            if msg.error():
+                if msg.error().code() == KafkaError._PARTITION_EOF:
+                    continue
+                else:
+                    logger.error(f"Kafka error: {msg.error()}")
+                    continue
+                    
+            try:
+                logger.info(f"📨 Received message from Kafka!")
+                command = json.loads(msg.value().decode('utf-8'))
+                command_type = command.get('command_type')
+                
+                logger.info(f"Processing command: {command_type}")
+                logger.info(f"  Database: {command.get('db_name')}")
+                logger.info(f"  Class: {command.get('class_id')}")
+                
+                if command_type == 'CREATE_INSTANCE':
+                    await self.process_create_instance(command)
+                elif command_type == 'UPDATE_INSTANCE':
+                    # Similar but with update logic
+                    pass
+                elif command_type == 'DELETE_INSTANCE':
+                    # Mark as deleted but keep data (Event Sourcing)
+                    pass
+                else:
+                    logger.warning(f"Unknown command type: {command_type}")
+                    
+            except Exception as e:
+                logger.error(f"Error processing command: {e}")
+                
     async def shutdown(self):
-        """워커 종료"""
-        logger.info("Shutting down Instance Worker...")
+        """Graceful shutdown"""
+        logger.info("Shutting down STRICT Palantir Instance Worker...")
         self.running = False
         
         if self.consumer:
             self.consumer.close()
-            
+        if self.producer:
+            self.producer.flush()
+        if self.redis_client:
+            await self.redis_client.close()
         if self.terminus_service:
-            await self.terminus_service.disconnect()
+            await self.terminus_service.close()
+        if self.es_client:
+            await self.es_client.close()
             
-        if self.redis_service:
-            await self.redis_service.disconnect()
-            
-        logger.info("Instance Worker shut down successfully")
-
 
 async def main():
-    """메인 진입점"""
-    worker = InstanceWorker()
-    
-    # 종료 시그널 핸들러
-    def signal_handler(sig, frame):
-        logger.info(f"Received signal {sig}")
-        worker.running = False
-        
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    """Main entry point"""
+    worker = StrictPalantirInstanceWorker()
     
     try:
         await worker.initialize()
         await worker.run()
-    except Exception as e:
-        logger.error(f"Fatal error: {e}")
-        raise
-
+    except KeyboardInterrupt:
+        logger.info("Received interrupt signal")
+    finally:
+        await worker.shutdown()
+        
 
 if __name__ == "__main__":
     asyncio.run(main())

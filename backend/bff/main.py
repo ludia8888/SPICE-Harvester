@@ -154,7 +154,11 @@ class BFFServiceContainer:
     async def _initialize_oms_client(self) -> None:
         """Initialize OMS client with health check"""
         try:
-            oms_client = OMSClient(self.settings.services.oms_base_url)
+            # Use ServiceConfig.get_oms_url() to properly handle OMS_BASE_URL env var
+            from shared.config.service_config import ServiceConfig
+            oms_url = ServiceConfig.get_oms_url()
+            logger.info(f"Initializing OMS client with URL: {oms_url}")
+            oms_client = OMSClient(oms_url)
             
             # Test connection
             is_healthy = await oms_client.check_health()
@@ -168,7 +172,8 @@ class BFFServiceContainer:
         except (httpx.HTTPError, httpx.TimeoutException, ConnectionError) as e:
             logger.error(f"OMS service connection failed: {e}")
             # Create client anyway for fallback scenarios
-            self._bff_services['oms_client'] = OMSClient(self.settings.services.oms_base_url)
+            from shared.config.service_config import ServiceConfig
+            self._bff_services['oms_client'] = OMSClient(ServiceConfig.get_oms_url())
     
     async def _initialize_label_mapper(self) -> None:
         """Initialize label mapper"""

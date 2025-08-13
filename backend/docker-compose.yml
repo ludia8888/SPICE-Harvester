@@ -1,13 +1,14 @@
+version: '3.8'
+
 services:
-  # PostgreSQL - Event Store Database
+  # PostgreSQL - 표준화된 인증 정보
   postgres:
     image: postgres:15
     container_name: spice_postgres
     environment:
-      - POSTGRES_USER=spiceadmin
-      - POSTGRES_PASSWORD=spicepass123
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=spice123!
       - POSTGRES_DB=spicedb
-      - POSTGRES_INITDB_ARGS=--auth-host=trust --auth-local=trust
     ports:
       - "5432:5432"
     volumes:
@@ -16,54 +17,53 @@ services:
     networks:
       - spice_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U spiceadmin -d spicedb"]
+      test: ["CMD-SHELL", "pg_isready -U admin -d spicedb"]
       interval: 30s
       timeout: 10s
       retries: 5
 
-  # Redis - Background Task Queue and Cache
+  # Redis - 표준화된 인증 정보
   redis:
     image: redis:7-alpine
     container_name: spice_redis
-    environment:
-      - REDIS_PASSWORD=spicepass123
+    command: redis-server --requirepass spice123!
     ports:
-      - "6380:6379"
+      - "6379:6379"
     volumes:
       - redis_data:/data
     networks:
       - spice_network
-    command: redis-server --requirepass spicepass123
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "spicepass123", "ping"]
+      test: ["CMD", "redis-cli", "-a", "spice123!", "ping"]
       interval: 30s
       timeout: 10s
       retries: 5
 
-  # Elasticsearch - Event Projections and Search
+  # Elasticsearch - 표준화된 인증 정보
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:7.17.0
     container_name: spice_elasticsearch
     environment:
       - discovery.type=single-node
-      - xpack.security.enabled=false
+      - xpack.security.enabled=true
+      - xpack.security.authc.api_key.enabled=true
+      - ELASTIC_PASSWORD=spice123!
       - bootstrap.memory_lock=false
-      - "ES_JAVA_OPTS=-Xms256m -Xmx256m"
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
       - http.host=0.0.0.0
-      - transport.host=localhost
     ports:
-      - "9201:9200"
+      - "9200:9200"
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
     networks:
       - spice_network
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      test: ["CMD-SHELL", "curl -u elastic:spice123! -f http://localhost:9200/_cluster/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
 
-  # Kafka - Event Streaming and Message Queue
+  # Kafka
   kafka:
     image: confluentinc/cp-kafka:7.4.0
     container_name: spice_kafka
@@ -87,13 +87,15 @@ services:
       timeout: 10s
       retries: 5
 
-  # Zookeeper - Required for Kafka
+  # Zookeeper
   zookeeper:
     image: confluentinc/cp-zookeeper:7.4.0
     container_name: spice_zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
     networks:
       - spice_network
     healthcheck:
@@ -102,13 +104,13 @@ services:
       timeout: 10s
       retries: 5
 
-  # MinIO - S3-compatible Object Storage for Instance Events
+  # MinIO - 표준화된 인증 정보
   minio:
     image: minio/minio:latest
     container_name: spice_minio
     environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin123
+      - MINIO_ROOT_USER=admin
+      - MINIO_ROOT_PASSWORD=spice123!
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -123,52 +125,66 @@ services:
       timeout: 10s
       retries: 5
 
-  # TerminusDB
+  # TerminusDB - 표준화된 인증 정보
   terminusdb:
     image: terminusdb/terminusdb-server:latest
     container_name: spice_terminusdb
     environment:
-      - TERMINUSDB_ADMIN_PASS=${TERMINUSDB_ADMIN_PASS:-admin123}
-      - TERMINUSDB_SERVER_NAME=${TERMINUSDB_SERVER_NAME:-SpiceTerminusDB}
+      - TERMINUSDB_ADMIN_PASS=spice123!
+      - TERMINUSDB_SERVER_NAME=SpiceTerminusDB
       - TERMINUSDB_AUTOLOGIN=false
     ports:
-      - "6364:6363"
+      - "6363:6363"
     volumes:
       - terminusdb_data:/app/terminusdb/storage
     networks:
       - spice_network
     healthcheck:
-      test: ["CMD", "true"]
+      test: ["CMD-SHELL", "test -f /app/terminusdb/storage/SYSTEM/system.db || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
 
-  # OMS (Ontology Management Service)
+  # OMS (Ontology Management Service) - 표준화된 인증 정보
   oms:
     build:
       context: .
       dockerfile: ./oms/Dockerfile
     container_name: spice_oms
     environment:
-      - TERMINUS_SERVER_URL=${TERMINUS_SERVER_URL:-http://terminusdb:6363}
-      - TERMINUS_USER=${TERMINUS_USER:-admin}
-      - TERMINUS_ACCOUNT=${TERMINUS_ACCOUNT:-admin}
-      - TERMINUS_KEY=${TERMINUS_KEY:-${TERMINUSDB_ADMIN_PASS:-admin123}}
-      - POSTGRES_HOST=${POSTGRES_HOST:-host.docker.internal}
-      - POSTGRES_PORT=${POSTGRES_PORT:-5433}
-      - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
-      - POSTGRES_DB=${POSTGRES_DB:-spicedb}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - USE_HTTPS=${USE_HTTPS:-false}
-      - SSL_CERT_PATH=${SSL_CERT_PATH:-}
-      - SSL_KEY_PATH=${SSL_KEY_PATH:-}
-      - VERIFY_SSL=${VERIFY_SSL:-false}
+      # TerminusDB
+      - TERMINUS_SERVER_URL=http://terminusdb:6363
+      - TERMINUS_USER=admin
+      - TERMINUS_ACCOUNT=admin
+      - TERMINUS_KEY=spice123!
+      # PostgreSQL
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=spice123!
+      - POSTGRES_DB=spicedb
+      # Kafka
+      - KAFKA_HOST=kafka
+      - KAFKA_PORT=29092
+      # Redis
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=spice123!
+      # Elasticsearch
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+      - ELASTICSEARCH_USERNAME=elastic
+      - ELASTICSEARCH_PASSWORD=spice123!
+      # Service
+      - LOG_LEVEL=INFO
+      - DOCKER_CONTAINER=true
     ports:
       - "8000:8000"
     depends_on:
-      terminusdb:
-        condition: service_healthy
+      - terminusdb
+      - postgres
+      - redis
+      - elasticsearch
     networks:
       - spice_network
     healthcheck:
@@ -176,30 +192,23 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-    # volumes:
-      # - ./shared:/app/shared  # No longer needed with proper package install
 
-  # BFF (Backend for Frontend)
+  # BFF
   bff:
     build:
       context: .
       dockerfile: ./bff/Dockerfile
     container_name: spice_bff
     environment:
-      - OMS_BASE_URL=${OMS_BASE_URL:-http://oms:8000}
-      - FUNNEL_BASE_URL=${FUNNEL_BASE_URL:-http://funnel:8003}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - USE_HTTPS=${USE_HTTPS:-false}
-      - SSL_CERT_PATH=${SSL_CERT_PATH:-}
-      - SSL_KEY_PATH=${SSL_KEY_PATH:-}
-      - VERIFY_SSL=${VERIFY_SSL:-false}
+      - OMS_BASE_URL=http://oms:8000
+      - FUNNEL_BASE_URL=http://funnel:8003
+      - LOG_LEVEL=INFO
+      - DOCKER_CONTAINER=true
     ports:
       - "8002:8002"
     depends_on:
-      oms:
-        condition: service_healthy
-      funnel:
-        condition: service_healthy
+      - oms
+      - funnel
     networks:
       - spice_network
     healthcheck:
@@ -207,22 +216,16 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-    volumes:
-      # - ./shared:/app/shared  # No longer needed with proper package install
-      - bff_data:/app/data
 
-  # Funnel (Type Inference Service)
+  # Funnel
   funnel:
     build:
       context: .
       dockerfile: ./funnel/Dockerfile
     container_name: spice_funnel
     environment:
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - USE_HTTPS=${USE_HTTPS:-false}
-      - SSL_CERT_PATH=${SSL_CERT_PATH:-}
-      - SSL_KEY_PATH=${SSL_KEY_PATH:-}
-      - VERIFY_SSL=${VERIFY_SSL:-false}
+      - LOG_LEVEL=INFO
+      - DOCKER_CONTAINER=true
     ports:
       - "8003:8003"
     networks:
@@ -232,97 +235,115 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      
-  # Message Relay Service (Outbox Pattern)
+
+  # Message Relay - 표준화된 인증 정보
   message-relay:
     build:
       context: .
       dockerfile: ./message_relay/Dockerfile
     container_name: spice_message_relay
     environment:
-      - POSTGRES_HOST=${POSTGRES_HOST:-host.docker.internal}
-      - POSTGRES_PORT=${POSTGRES_PORT:-5433}
-      - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
-      - POSTGRES_DB=${POSTGRES_DB:-spicedb}
-      - KAFKA_HOST=${KAFKA_HOST:-spice_kafka}
-      - KAFKA_PORT=${KAFKA_PORT:-29092}
-      - MESSAGE_RELAY_BATCH_SIZE=${MESSAGE_RELAY_BATCH_SIZE:-100}
-      - MESSAGE_RELAY_POLL_INTERVAL=${MESSAGE_RELAY_POLL_INTERVAL:-5}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=spice123!
+      - POSTGRES_DB=spicedb
+      - KAFKA_HOST=kafka
+      - KAFKA_PORT=29092
+      - MESSAGE_RELAY_BATCH_SIZE=100
+      - MESSAGE_RELAY_POLL_INTERVAL=5
+      - LOG_LEVEL=INFO
+      - DOCKER_CONTAINER=true
     depends_on:
-      - oms
+      - postgres
+      - kafka
     networks:
       - spice_network
     restart: unless-stopped
-    
-  # Ontology Worker Service (Command Processing)
+
+  # Ontology Worker - 표준화된 인증 정보
   ontology-worker:
     build:
       context: .
       dockerfile: ./ontology_worker/Dockerfile
     container_name: spice_ontology_worker
     environment:
-      - KAFKA_HOST=${KAFKA_HOST:-spice_kafka}
-      - KAFKA_PORT=${KAFKA_PORT:-29092}
-      - TERMINUS_SERVER_URL=${TERMINUS_SERVER_URL:-http://spice_terminusdb:6363}
-      - TERMINUS_USER=${TERMINUS_USER:-admin}
-      - TERMINUS_ACCOUNT=${TERMINUS_ACCOUNT:-admin}
-      - TERMINUS_KEY=${TERMINUS_KEY:-${TERMINUSDB_ADMIN_PASS:-admin123}}
-      - REDIS_HOST=${REDIS_HOST:-host.docker.internal}
-      - REDIS_PORT=${REDIS_PORT:-6379}
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-spicepass123}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - KAFKA_HOST=kafka
+      - KAFKA_PORT=29092
+      - TERMINUS_SERVER_URL=http://terminusdb:6363
+      - TERMINUS_USER=admin
+      - TERMINUS_ACCOUNT=admin
+      - TERMINUS_KEY=spice123!
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=spice123!
+      - LOG_LEVEL=INFO
+      - DOCKER_CONTAINER=true
     depends_on:
       - terminusdb
-      - message-relay
+      - kafka
+      - redis
     networks:
       - spice_network
     restart: unless-stopped
 
+  # Instance Worker - 표준화된 인증 정보
   instance-worker:
     build:
       context: .
       dockerfile: ./instance_worker/Dockerfile
     container_name: spice_instance_worker
     environment:
-      - KAFKA_HOST=${KAFKA_HOST:-kafka}
-      - KAFKA_PORT=${KAFKA_PORT:-29092}
-      - TERMINUS_SERVER_URL=${TERMINUS_SERVER_URL:-http://terminusdb:6363}
-      - TERMINUS_USER=${TERMINUS_USER:-admin}
-      - TERMINUS_ACCOUNT=${TERMINUS_ACCOUNT:-admin}
-      - TERMINUS_KEY=${TERMINUS_KEY:-${TERMINUSDB_ADMIN_PASS:-admin123}}
-      - MINIO_ENDPOINT_URL=${MINIO_ENDPOINT_URL:-http://minio:9000}
-      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
-      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
-      - INSTANCE_BUCKET=${INSTANCE_BUCKET:-instance-events}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - KAFKA_HOST=kafka
+      - KAFKA_PORT=29092
+      - TERMINUS_SERVER_URL=http://terminusdb:6363
+      - TERMINUS_USER=admin
+      - TERMINUS_ACCOUNT=admin
+      - TERMINUS_KEY=spice123!
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=spice123!
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+      - ELASTICSEARCH_USERNAME=elastic
+      - ELASTICSEARCH_PASSWORD=spice123!
+      - MINIO_ENDPOINT_URL=http://minio:9000
+      - MINIO_ACCESS_KEY=admin
+      - MINIO_SECRET_KEY=spice123!
+      - INSTANCE_BUCKET=instance-events
+      - LOG_LEVEL=INFO
+      - DOCKER_CONTAINER=true
     depends_on:
       - terminusdb
-      - message-relay
+      - kafka
+      - elasticsearch
+      - minio
     networks:
       - spice_network
     restart: unless-stopped
 
-  # Projection Worker Service (Event Sourcing to Elasticsearch)
+  # Projection Worker - 표준화된 인증 정보
   projection-worker:
     build:
       context: .
       dockerfile: ./projection_worker/Dockerfile
     container_name: spice_projection_worker
     environment:
-      - KAFKA_HOST=${KAFKA_HOST:-kafka}
-      - KAFKA_PORT=${KAFKA_PORT:-29092}
-      - ELASTICSEARCH_HOST=${ELASTICSEARCH_HOST:-elasticsearch}
-      - ELASTICSEARCH_PORT=${ELASTICSEARCH_PORT:-9200}
-      - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_USERNAME:-elastic}
-      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-elasticpass123}
-      - REDIS_HOST=${REDIS_HOST:-redis}
-      - REDIS_PORT=${REDIS_PORT:-6379}
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-spicepass123}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - KAFKA_HOST=kafka
+      - KAFKA_PORT=29092
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+      - ELASTICSEARCH_USERNAME=elastic
+      - ELASTICSEARCH_PASSWORD=spice123!
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=spice123!
+      - LOG_LEVEL=INFO
+      - DOCKER_CONTAINER=true
     depends_on:
-      - message-relay
+      - kafka
+      - elasticsearch
+      - redis
     networks:
       - spice_network
     restart: unless-stopped
@@ -333,7 +354,6 @@ volumes:
   elasticsearch_data:
   minio_data:
   terminusdb_data:
-  bff_data:
 
 networks:
   spice_network:

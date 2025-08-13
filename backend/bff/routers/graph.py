@@ -69,7 +69,7 @@ class SimpleGraphQueryRequest(BaseModel):
 
 
 # Import needed dependencies
-from oms.services.async_terminus import AsyncTerminusService
+from shared.services.async_terminus import AsyncTerminusService
 from shared.models.config import ConnectionConfig
 
 # Dependency for GraphFederationServiceWOQL (REAL WOQL)
@@ -82,8 +82,12 @@ async def get_graph_federation_service() -> GraphFederationServiceWOQL:
     
     if _graph_service is None:
         # Initialize TerminusDB service
+        # Use Docker service names when running in container
+        is_docker = os.getenv("DOCKER_CONTAINER", "false").lower() == "true"
+        terminus_url = "http://terminusdb:6363" if is_docker else os.getenv("TERMINUS_SERVER_URL", "http://localhost:6363")
+        
         connection_info = ConnectionConfig(
-            server_url=os.getenv("TERMINUS_SERVER_URL", "http://localhost:6363"),
+            server_url=terminus_url,
             user=os.getenv("TERMINUS_USER", "admin"),
             account=os.getenv("TERMINUS_ACCOUNT", "admin"),
             key=os.getenv("TERMINUS_KEY", "admin")
@@ -93,13 +97,17 @@ async def get_graph_federation_service() -> GraphFederationServiceWOQL:
         await terminus_service.connect()
         
         # Initialize REAL WOQL GraphFederationService
-        es_host = os.getenv("ELASTICSEARCH_HOST", "localhost")
-        es_port = int(os.getenv("ELASTICSEARCH_PORT", "9201"))
+        es_host = "elasticsearch" if is_docker else os.getenv("ELASTICSEARCH_HOST", "localhost")
+        es_port = int(os.getenv("ELASTICSEARCH_PORT", "9200"))
+        es_username = os.getenv("ELASTICSEARCH_USERNAME", "elastic")
+        es_password = os.getenv("ELASTICSEARCH_PASSWORD", "spice123!")
         
         _graph_service = GraphFederationServiceWOQL(
             terminus_service=terminus_service,
             es_host=es_host,
-            es_port=es_port
+            es_port=es_port,
+            es_username=es_username,
+            es_password=es_password
         )
         
         logger.info(f"✅ GraphFederationServiceWOQL (REAL WOQL) initialized (ES: {es_host}:{es_port})")
@@ -284,7 +292,7 @@ async def find_relationship_paths(
         
         # Use REAL WOQL to query schema relationships
         # THINK ULTRA³ - This is now using REAL schema discovery!
-        from oms.services.async_terminus import AsyncTerminusService
+        from shared.services.async_terminus import AsyncTerminusService
         from shared.models.config import ConnectionConfig
         
         # Get TerminusDB connection details from environment
@@ -353,7 +361,7 @@ async def graph_service_health(
         es_healthy = False
         async with aiohttp.ClientSession() as session:
             try:
-                async with session.get(f"{graph_service.es_url}/_cluster/health") as resp:
+                async with session.get(f"{graph_service.es_url}/_cluster/health", auth=graph_service.es_auth) as resp:
                     if resp.status == 200:
                         es_health = await resp.json()
                         es_healthy = es_health.get("status") in ["green", "yellow"]

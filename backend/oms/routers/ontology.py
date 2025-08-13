@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Path
 from fastapi.responses import JSONResponse
 
 # Modernized dependency injection imports
@@ -84,8 +84,8 @@ router = APIRouter(prefix="/ontology/{db_name}", tags=["Ontology Management"])
 @router.post("/create", response_model=OntologyResponse)
 @rate_limit(**RateLimitPresets.WRITE)
 async def create_ontology(
-    db_name: str,  # 🔥 FIXED: URL path parameter first
-    ontology_request: OntologyCreateRequest,  # Request body second
+    ontology_request: OntologyCreateRequest,  # Request body first (no default)
+    db_name: str = Path(..., description="Database name"),  # URL path parameter
     terminus: AsyncTerminusService = TerminusServiceDep,
     converter: JSONToJSONLDConverter = JSONLDConverterDep,
     label_mapper=LabelMapperDep,
@@ -420,9 +420,9 @@ async def get_ontology(
 
 @router.put("/{class_id}", response_model=OntologyResponse)
 async def update_ontology(
+    ontology_data: OntologyUpdateRequest,
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
-    ontology_data: OntologyUpdateRequest = ...,
     terminus: AsyncTerminusService = TerminusServiceDep,
     converter: JSONToJSONLDConverter = JSONLDConverterDep,
     outbox_service: Optional[OutboxService] = OutboxServiceDep,
@@ -554,8 +554,8 @@ async def delete_ontology(
 
 @router.post("/query", response_model=QueryResponse)
 async def query_ontologies(
+    query: QueryRequestInternal,
     db_name: str = Depends(ValidatedDatabaseName),
-    query: QueryRequestInternal = ...,
     terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     """내부 ID 기반 온톨로지 쿼리"""
@@ -640,8 +640,8 @@ async def query_ontologies(
 
 @router.post("/create-advanced", response_model=OntologyResponse)
 async def create_ontology_with_advanced_relationships(
-    db_name: str,
     request: OntologyCreateRequest,
+    db_name: str = Path(..., description="Database name"),
     auto_generate_inverse: bool = True,
     validate_relationships: bool = True,
     check_circular_references: bool = True,
@@ -745,8 +745,8 @@ async def create_ontology_with_advanced_relationships(
 
 @router.post("/validate-relationships")
 async def validate_ontology_relationships(
-    db_name: str,
     request: OntologyCreateRequest,
+    db_name: str = Path(..., description="Database name"),
     terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     """
@@ -791,7 +791,7 @@ async def validate_ontology_relationships(
 
 @router.post("/detect-circular-references")
 async def detect_circular_references(
-    db_name: str,
+    db_name: str = Path(..., description="Database name"),
     new_ontology: Optional[OntologyCreateRequest] = None,
     terminus: AsyncTerminusService = TerminusServiceDep,
 ):
@@ -839,8 +839,8 @@ async def detect_circular_references(
 
 @router.get("/relationship-paths/{start_entity}")
 async def find_relationship_paths(
-    db_name: str,
     start_entity: str,
+    db_name: str = Path(..., description="Database name"),
     end_entity: Optional[str] = None,
     max_depth: int = 5,
     path_type: str = "shortest",
@@ -898,8 +898,8 @@ async def find_relationship_paths(
 
 @router.get("/reachable-entities/{start_entity}")
 async def get_reachable_entities(
-    db_name: str,
     start_entity: str,
+    db_name: str = Path(..., description="Database name"),
     max_depth: int = 3,
     terminus: AsyncTerminusService = TerminusServiceDep,
 ):

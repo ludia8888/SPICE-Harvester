@@ -69,6 +69,17 @@ setup(
         
         # 📝 Logging
         "python-json-logger==2.0.7",
+        
+        # 📊 Observability - OpenTelemetry
+        "opentelemetry-api==1.23.0",
+        "opentelemetry-sdk==1.23.0",
+        "opentelemetry-instrumentation==0.44b0",
+        "opentelemetry-instrumentation-fastapi==0.44b0",
+        "opentelemetry-instrumentation-httpx==0.44b0",
+        "opentelemetry-instrumentation-asyncio==0.44b0",
+        "opentelemetry-exporter-otlp==1.23.0",
+        "opentelemetry-exporter-jaeger==1.21.0",
+        "prometheus-client==0.19.0",
     ],
     package_data={
         "shared": ["py.typed"],

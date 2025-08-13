@@ -44,7 +44,7 @@ class MessageRelay:
             'acks': 'all',  # 모든 replica가 메시지를 받을 때까지 대기
             'retries': 3,
             'max.in.flight.requests.per.connection': 1,  # 순서 보장
-            'compression.type': 'snappy',
+            # REMOVED: 'compression.type': 'snappy',  # Python consumers can't read Snappy!
         })
         
         # Kafka 토픽 생성 확인
@@ -66,7 +66,7 @@ class MessageRelay:
                 replication_factor=1,
                 config={
                     'retention.ms': '604800000',  # 7일 보관
-                    'compression.type': 'snappy'
+                    # REMOVED: 'compression.type': 'snappy'  # Python consumers can't read Snappy!
                 }
             )
         ]

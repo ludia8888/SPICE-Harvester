@@ -11,8 +11,7 @@ This service uses the CORRECT WOQL format that actually works:
 import logging
 import httpx
 import aiohttp
-from typing import Dict, Any, List, Optional, Tuple
-from oms.services.async_terminus import AsyncTerminusService
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +26,15 @@ class GraphFederationServiceWOQL:
     
     def __init__(
         self,
-        terminus_service: AsyncTerminusService,
+        terminus_service: Any,  # Will be AsyncTerminusService from OMS
         es_host: str = "localhost",
-        es_port: int = 9201
+        es_port: int = 9200,
+        es_username: str = "elastic",
+        es_password: str = "changeme"
     ):
         self.terminus = terminus_service
         self.es_url = f"http://{es_host}:{es_port}"
+        self.es_auth = aiohttp.BasicAuth(es_username, es_password)
         # Get auth from terminus service
         self.auth = (terminus_service.connection_info.user, terminus_service.connection_info.key)
         self.terminus_url = terminus_service.connection_info.server_url
@@ -43,7 +45,9 @@ class GraphFederationServiceWOQL:
         start_class: str,
         hops: List[Tuple[str, str]],  # [(predicate, target_class), ...]
         filters: Optional[Dict[str, Any]] = None,
-        limit: int = 100
+        limit: int = 100,
+        include_documents: bool = True,
+        include_audit: bool = False
     ) -> Dict[str, Any]:
         """
         Execute multi-hop graph query with ES federation using REAL WOQL
@@ -119,19 +123,30 @@ class GraphFederationServiceWOQL:
                     prev_var = target_var
                     prev_id = target_id
         
-        # Step 4: Fetch documents from Elasticsearch
-        documents = await self._fetch_es_documents(db_name, list(es_doc_ids))
+        # Step 4: Optionally fetch documents from Elasticsearch
+        documents = {}
+        audit_records = {}
         
-        # Step 5: Combine results
+        if include_documents and es_doc_ids:
+            documents = await self._fetch_es_documents(db_name, list(es_doc_ids))
+        
+        # Step 5: Optionally fetch audit records
+        if include_audit and es_doc_ids:
+            audit_records = await self._fetch_audit_records(db_name, list(es_doc_ids))
+        
+        # Step 6: Combine results
         result_nodes = []
         for node in nodes.values():
             es_doc_id = node["es_doc_id"]
             node_data = {
                 "id": node["id"],
                 "type": node["type"],
-                "es_doc_id": es_doc_id,
-                "data": documents.get(es_doc_id)
+                "es_doc_id": es_doc_id
             }
+            if include_documents:
+                node_data["data"] = documents.get(es_doc_id)
+            if include_audit:
+                node_data["audit"] = audit_records.get(es_doc_id)
             result_nodes.append(node_data)
         
         return {
@@ -150,48 +165,77 @@ class GraphFederationServiceWOQL:
         self,
         db_name: str,
         class_name: str,
-        filters: Optional[Dict[str, Any]] = None
+        filters: Optional[Dict[str, Any]] = None,
+        include_documents: bool = True,
+        include_audit: bool = False
     ) -> Dict[str, Any]:
         """
-        Simple single-class query using REAL WOQL
+        Simple single-class query - PALANTIR STYLE
+        TerminusDB has lightweight nodes (IDs + relationships),
+        Elasticsearch has full domain data
         """
-        logger.info(f"📊 REAL WOQL Simple query: {class_name}")
+        logger.info(f"📊 PALANTIR Query: {class_name} via WOQL -> ES enrichment")
         
-        # Build WOQL query
+        # PALANTIR PRINCIPLE: Lightweight nodes in TerminusDB, full data in ES
+        # Step 1: Query TerminusDB for instance IDs using WOQL
+        
+        # Step 1: Build WOQL query to get instance IDs from TerminusDB
         woql_query = self._build_simple_woql(class_name, filters)
         
-        # Execute query
-        async with httpx.AsyncClient() as client:
-            request_body = {"query": woql_query}
-            
-            response = await client.post(
-                f"{self.terminus_url}/api/woql/admin/{db_name}",
-                json=request_body,
-                auth=self.auth
-            )
-            
-            if response.status_code != 200:
-                logger.error(f"WOQL query failed: {response.status_code}")
-                return {"class": class_name, "count": 0, "documents": []}
-            
-            result = response.json()
-            bindings = result.get("bindings", [])
-        
-        # Extract instance IDs
+        # Step 2: Execute WOQL to get lightweight nodes
         es_doc_ids = []
-        for binding in bindings:
-            if "v:X" in binding:
-                instance_id = binding["v:X"]
-                es_doc_id = self._extract_es_doc_id(instance_id)
-                es_doc_ids.append(es_doc_id)
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                request_body = {"query": woql_query}
+                response = await client.post(
+                    f"{self.terminus_url}/api/woql/{self.auth[0]}/{db_name}",
+                    json=request_body,
+                    auth=self.auth
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    bindings = result.get("bindings", [])
+                    logger.info(f"WOQL returned {len(bindings)} lightweight nodes")
+                    
+                    # Extract es_doc_ids from the bindings
+                    for binding in bindings:
+                        # Look for the instance variable (usually v:X)
+                        for key, value in binding.items():
+                            if key.startswith("v:") and isinstance(value, str):
+                                # Extract ID from format "Class/ID"
+                                es_doc_id = self._extract_es_doc_id(value)
+                                es_doc_ids.append(es_doc_id)
+                else:
+                    logger.warning(f"WOQL query failed: {response.status_code}")
+        except Exception as e:
+            logger.error(f"Error executing WOQL: {e}")
         
-        # Fetch from ES
-        documents = await self._fetch_es_documents(db_name, es_doc_ids)
+        # Step 3: Fetch full documents from Elasticsearch
+        documents = {}
+        audit_records = {}
+        
+        if include_documents and es_doc_ids:
+            documents = await self._fetch_es_documents(db_name, es_doc_ids)
+        
+        if include_audit and es_doc_ids:
+            audit_records = await self._fetch_audit_records(db_name, es_doc_ids)
+        
+        # Step 4: Prepare results combining WOQL IDs with ES data
+        result_docs = []
+        for doc_id in es_doc_ids:
+            doc_data = {"id": doc_id}
+            if include_documents:
+                doc_data["data"] = documents.get(doc_id)
+            if include_audit:
+                doc_data["audit"] = audit_records.get(doc_id)
+            result_docs.append(doc_data)
         
         return {
             "class": class_name,
-            "count": len(documents),
-            "documents": list(documents.values())
+            "count": len(result_docs),
+            "documents": result_docs
         }
     
     def _build_simple_woql(
@@ -439,7 +483,8 @@ class GraphFederationServiceWOQL:
             return {}
         
         documents = {}
-        index_name = f"instances_{db_name.replace('-', '_')}"
+        # FIX: Correct ES index name format
+        index_name = f"{db_name.replace('-', '_')}_instances"
         
         async with aiohttp.ClientSession() as session:
             # Use ES _mget for bulk fetch
@@ -450,7 +495,8 @@ class GraphFederationServiceWOQL:
             try:
                 async with session.post(
                     f"{self.es_url}/{index_name}/_mget",
-                    json=mget_body
+                    json=mget_body,
+                    auth=self.es_auth
                 ) as resp:
                     if resp.status == 200:
                         result = await resp.json()
@@ -465,3 +511,54 @@ class GraphFederationServiceWOQL:
         
         logger.info(f"Fetched {len(documents)} documents from Elasticsearch")
         return documents
+    
+    async def _fetch_audit_records(
+        self,
+        db_name: str,
+        doc_ids: List[str]
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Fetch audit records from Elasticsearch audit index"""
+        
+        if not doc_ids:
+            return {}
+        
+        audit_records = {}
+        index_name = f"audit-{db_name.lower()}"
+        
+        async with aiohttp.ClientSession() as session:
+            # Query audit records for these aggregate IDs
+            query_body = {
+                "query": {
+                    "terms": {
+                        "aggregate_id": doc_ids
+                    }
+                },
+                "size": 1000,
+                "sort": [
+                    {"timestamp": {"order": "desc"}}
+                ]
+            }
+            
+            try:
+                async with session.post(
+                    f"{self.es_url}/{index_name}/_search",
+                    json=query_body,
+                    auth=self.es_auth
+                ) as resp:
+                    if resp.status == 200:
+                        result = await resp.json()
+                        # Group audit records by aggregate_id
+                        for hit in result.get("hits", {}).get("hits", []):
+                            source = hit["_source"]
+                            agg_id = source.get("aggregate_id")
+                            if agg_id:
+                                if agg_id not in audit_records:
+                                    audit_records[agg_id] = []
+                                audit_records[agg_id].append(source)
+                    else:
+                        logger.warning(f"Failed to fetch audit records: {resp.status}")
+            except Exception as e:
+                logger.error(f"Error fetching audit records: {e}")
+        
+        logger.info(f"Fetched audit records for {len(audit_records)} entities")
+        return audit_records

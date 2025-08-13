@@ -133,7 +133,7 @@ class ServiceConfig:
         
         # FIXED: Use 127.0.0.1 instead of localhost to avoid IPv6 issues
         host = os.getenv("POSTGRES_HOST", "spice_postgres" if ServiceConfig.is_docker_environment() else "127.0.0.1")
-        port = os.getenv("POSTGRES_PORT", "5433")
+        port = os.getenv("POSTGRES_PORT", "5432")
         user = os.getenv("POSTGRES_USER", "spiceadmin")
         password = os.getenv("POSTGRES_PASSWORD", "spicepass123")
         database = os.getenv("POSTGRES_DB", "spicedb")

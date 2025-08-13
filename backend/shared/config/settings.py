@@ -29,7 +29,7 @@ class DatabaseSettings(BaseSettings):
     """Database configuration settings"""
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -37,25 +37,37 @@ class DatabaseSettings(BaseSettings):
     
     # TerminusDB Configuration
     terminus_url: str = Field(
-        default="http://localhost:6364",
-        env="TERMINUS_SERVER_URL",
+        default="http://localhost:6363",
         description="TerminusDB server URL"
     )
     terminus_user: str = Field(
         default="anonymous",
-        env="TERMINUS_USER",
         description="TerminusDB username"
     )
     terminus_password: str = Field(
         default="admin",
-        env="TERMINUS_KEY",
         description="TerminusDB password/key"
     )
     terminus_account: str = Field(
         default="admin",
-        env="TERMINUS_ACCOUNT",
         description="TerminusDB account"
     )
+    
+    @validator('terminus_url', pre=True, always=True)
+    def get_terminus_url(cls, v):
+        return os.getenv("TERMINUS_SERVER_URL", v or "http://localhost:6363")
+    
+    @validator('terminus_user', pre=True, always=True)
+    def get_terminus_user(cls, v):
+        return os.getenv("TERMINUS_USER", v or "anonymous")
+        
+    @validator('terminus_password', pre=True, always=True)
+    def get_terminus_password(cls, v):
+        return os.getenv("TERMINUS_KEY", v or "admin")
+        
+    @validator('terminus_account', pre=True, always=True)
+    def get_terminus_account(cls, v):
+        return os.getenv("TERMINUS_ACCOUNT", v or "admin")
     terminus_timeout: int = Field(
         default=30,
         env="TERMINUS_TIMEOUT",
@@ -191,7 +203,7 @@ class ServiceSettings(BaseSettings):
     """Service configuration settings"""
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -299,7 +311,7 @@ class StorageSettings(BaseSettings):
     """Storage configuration settings"""
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -339,7 +351,7 @@ class CacheSettings(BaseSettings):
     """Cache and TTL configuration settings"""
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -367,7 +379,7 @@ class SecuritySettings(BaseSettings):
     """Security configuration settings"""
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -395,7 +407,7 @@ class PerformanceSettings(BaseSettings):
     """Performance and optimization settings"""
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -430,7 +442,7 @@ class TestSettings(BaseSettings):
     """Test environment configuration"""
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -452,7 +464,7 @@ class GoogleSheetsSettings(BaseSettings):
     """Google Sheets integration settings"""
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -474,7 +486,7 @@ class ApplicationSettings(BaseSettings):
     """Main application settings - aggregates all other settings"""
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"

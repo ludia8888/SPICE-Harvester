@@ -197,9 +197,28 @@ async def create_ontology(
         # Log ontology creation request
         logger.info(f"Creating ontology '{ontology_dict.get('id')}' in database '{db_name}'")
         
-        # 온톨로지 생성
-        result = await terminus.create_class(db_name, ontology_dict)
-        logger.info(f"OMS create result: {result}")
+        # 온톨로지 생성 - OMS API를 통해 생성
+        import aiohttp
+        from shared.config.service_config import ServiceConfig
+        
+        oms_url = ServiceConfig.get_oms_url()
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{oms_url}/api/v1/ontology/{db_name}/create",
+                json=ontology_dict,
+                headers={"Content-Type": "application/json"}
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    logger.info(f"OMS create result: {result}")
+                else:
+                    error_text = await response.text()
+                    logger.error(f"OMS API failed with status {response.status}: {error_text}")
+                    raise HTTPException(
+                        status_code=response.status,
+                        detail=f"OMS API failed: {error_text}"
+                    )
 
         # 레이블 매핑 등록
         await mapper.register_class(db_name, class_id, ontology_dict.get('label', ''), ontology_dict.get('description'))
