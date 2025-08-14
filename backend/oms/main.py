@@ -52,6 +52,7 @@ from shared.services.service_factory import OMS_SERVICE_INFO, create_fastapi_ser
 from oms.services.async_terminus import AsyncTerminusService
 from oms.database.postgres import db as postgres_db
 from oms.database.outbox import OutboxService
+from oms.services.event_store import event_store
 from shared.models.config import ConnectionConfig
 from shared.services.redis_service import RedisService, create_redis_service
 from shared.services.command_status_service import CommandStatusService
@@ -104,31 +105,54 @@ class OMSServiceContainer:
         """Initialize OMS-specific services"""
         logger.info("Initializing OMS-specific services...")
         
-        # 1. Initialize TerminusDB service
+        # 1. Initialize S3/MinIO Event Store (SSoT) - CRITICAL: This goes first!
+        await self._initialize_event_store()
+        
+        # 2. Initialize TerminusDB service
         await self._initialize_terminus_service()
         
-        # 2. Initialize JSON-LD converter
+        # 3. Initialize JSON-LD converter
         await self._initialize_jsonld_converter()
         
-        # 3. Initialize Label Mapper
+        # 4. Initialize Label Mapper
         await self._initialize_label_mapper()
         
-        # 4. Initialize PostgreSQL and Outbox service
+        # 5. Initialize PostgreSQL and Outbox service
         await self._initialize_postgres_and_outbox()
         
-        # 5. Initialize Redis and Command Status service
+        # 6. Initialize Redis and Command Status service
         await self._initialize_redis_and_command_status()
         
-        # 6. Initialize Elasticsearch service
+        # 7. Initialize Elasticsearch service
         await self._initialize_elasticsearch()
         
-        # 7. Initialize Rate Limiter
+        # 8. Initialize Rate Limiter
         await self._initialize_rate_limiter()
         
-        # 8. Initialize Observability (Tracing & Metrics)
+        # 9. Initialize Observability (Tracing & Metrics)
         await self._initialize_observability()
         
         logger.info("OMS services initialized successfully")
+    
+    async def _initialize_event_store(self) -> None:
+        """
+        Initialize S3/MinIO Event Store - The REAL Single Source of Truth.
+        PostgreSQL Outbox is NOT an event store, just delivery guarantee!
+        """
+        try:
+            logger.info("🔥 Initializing S3/MinIO Event Store (SSoT)...")
+            
+            # Connect to MinIO/S3
+            await event_store.connect()
+            
+            self._oms_services['event_store'] = event_store
+            logger.info("✅ S3/MinIO Event Store connected - This is the SSoT!")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to connect to S3/MinIO Event Store: {e}")
+            logger.warning("⚠️ Running without Event Store - falling back to legacy mode")
+            # Continue without Event Store for backward compatibility
+            self._oms_services['event_store'] = None
     
     async def _initialize_terminus_service(self) -> None:
         """Initialize TerminusDB service with health check"""
@@ -263,6 +287,13 @@ class OMSServiceContainer:
         logger.info("Shutting down OMS services...")
         
         # Shutdown in reverse order of initialization
+        if 'event_store' in self._oms_services and self._oms_services['event_store']:
+            try:
+                # Event Store doesn't have explicit disconnect, but we can log
+                logger.info("✅ Event Store references cleaned up")
+            except Exception as e:
+                logger.error(f"Error cleaning up Event Store: {e}")
+        
         if 'tracing_service' in self._oms_services:
             try:
                 self._oms_services['tracing_service'].shutdown()

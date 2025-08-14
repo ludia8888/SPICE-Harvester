@@ -19,10 +19,12 @@ from oms.dependencies import (
     JSONLDConverterDep,
     LabelMapperDep,
     OutboxServiceDep,
+    EventStoreDep,  # Added for S3/MinIO Event Store
     ValidatedDatabaseName,
     ValidatedClassId,
     ensure_database_exists
 )
+from oms.services.migration_helper import migration_helper
 from oms.database.postgres import db as postgres_db
 from oms.database.outbox import MessageType, OutboxService
 from shared.models.commands import CommandType, OntologyCommand
@@ -156,8 +158,15 @@ async def create_ontology(
                         },
                         metadata={"source": "OMS", "user": "system"}
                     )
-                    await outbox_service.publish_command(conn, command, topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC)
-                    logger.info(f"🔥 Published CREATE_ONTOLOGY_CLASS command for {db_name}:{ontology_data.get('id')}")
+                    # 🔥 MIGRATION: Use migration helper for gradual S3 adoption
+                    migration_result = await migration_helper.handle_command_with_migration(
+                        connection=conn,
+                        command=command,
+                        outbox_service=outbox_service,
+                        topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC,
+                        actor="system"
+                    )
+                    logger.info(f"🔥 Published CREATE_ONTOLOGY_CLASS command for {db_name}:{ontology_data.get('id')} - Migration: {migration_result['migration_mode']}")
                     
                     # Event Sourcing 모드에서는 명령 ID와 상태 반환 (202 Accepted)
                     return JSONResponse(
@@ -451,28 +460,40 @@ async def update_ontology(
         # TerminusDB 업데이트
         result = await terminus.update_ontology(db_name, class_id, jsonld_data)
 
-        # Outbox 이벤트 발행 (선택적)
+        # 🔥 MIGRATION: Use migration helper for Event Sourcing with S3/MinIO
         if outbox_service and postgres_db.pool:
             try:
                 async with postgres_db.transaction() as conn:
-                    await outbox_service.publish_event(
-                        connection=conn,
-                        event_type=EventType.ONTOLOGY_CLASS_UPDATED,
+                    # Create update command
+                    from shared.models.commands import OntologyCommand
+                    import uuid
+                    
+                    command = OntologyCommand(
+                        command_id=str(uuid.uuid4()),
+                        command_type=CommandType.UPDATE_ONTOLOGY_CLASS,
                         aggregate_type="OntologyClass",
                         aggregate_id=class_id,
-                        data={
+                        payload={
                             "db_name": db_name,
                             "class_id": class_id,
                             "updates": sanitized_data,
                             "merged_data": merged_data,
                         },
-                        topic=AppConfig.ONTOLOGY_EVENTS_TOPIC,
-                        additional_context={
+                        metadata={
                             "user": "system",  # TODO: 실제 사용자 정보 추가
                             "source": "oms_api",
                         }
                     )
-                    logger.info(f"Published ONTOLOGY_CLASS_UPDATED event for {class_id}")
+                    
+                    # Use migration helper for dual-write pattern
+                    migration_result = await migration_helper.handle_command_with_migration(
+                        connection=conn,
+                        command=command,
+                        outbox_service=outbox_service,
+                        topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC,
+                        actor="system"
+                    )
+                    logger.info(f"🔥 Published UPDATE_ONTOLOGY_CLASS command for {class_id} - Migration: {migration_result['migration_mode']}")
             except Exception as e:
                 # 이벤트 발행 실패는 업데이트 작업을 실패시키지 않음
                 logger.error(f"Failed to publish outbox event: {e}")
@@ -513,26 +534,38 @@ async def delete_ontology(
                 detail=f"온톨로지 '{class_id}'를 찾을 수 없습니다",
             )
 
-        # Outbox 이벤트 발행 (선택적)
+        # 🔥 MIGRATION: Use migration helper for Event Sourcing with S3/MinIO
         if outbox_service and postgres_db.pool:
             try:
                 async with postgres_db.transaction() as conn:
-                    await outbox_service.publish_event(
-                        connection=conn,
-                        event_type=EventType.ONTOLOGY_CLASS_DELETED,
+                    # Create delete command
+                    from shared.models.commands import OntologyCommand
+                    import uuid
+                    
+                    command = OntologyCommand(
+                        command_id=str(uuid.uuid4()),
+                        command_type=CommandType.DELETE_ONTOLOGY_CLASS,
                         aggregate_type="OntologyClass",
                         aggregate_id=class_id,
-                        data={
+                        payload={
                             "db_name": db_name,
                             "class_id": class_id,
                         },
-                        topic=AppConfig.ONTOLOGY_EVENTS_TOPIC,
-                        additional_context={
+                        metadata={
                             "user": "system",  # TODO: 실제 사용자 정보 추가
                             "source": "oms_api",
                         }
                     )
-                    logger.info(f"Published ONTOLOGY_CLASS_DELETED event for {class_id}")
+                    
+                    # Use migration helper for dual-write pattern
+                    migration_result = await migration_helper.handle_command_with_migration(
+                        connection=conn,
+                        command=command,
+                        outbox_service=outbox_service,
+                        topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC,
+                        actor="system"
+                    )
+                    logger.info(f"🔥 Published DELETE_ONTOLOGY_CLASS command for {class_id} - Migration: {migration_result['migration_mode']}")
             except Exception as e:
                 # 이벤트 발행 실패는 삭제 작업을 실패시키지 않음
                 logger.error(f"Failed to publish outbox event: {e}")

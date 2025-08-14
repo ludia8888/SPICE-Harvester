@@ -2,6 +2,11 @@
 STRICT Palantir-style Instance Worker
 경량 그래프 원칙을 100% 준수하는 구현
 
+🔥 MIGRATION: Enhanced to support S3/MinIO Event Store
+- Can read events directly from S3 when reference is provided
+- Falls back to PostgreSQL payload for backward compatibility
+- Gradual migration from embedded payloads to S3 references
+
 PALANTIR RULES:
 1. Graph stores ONLY: @id, @type, instance_id, es_doc_id, s3_uri, created_at + relationships
 2. NO domain fields in graph (no name, price, description, etc.)
@@ -21,6 +26,7 @@ import hashlib
 from confluent_kafka import Consumer, Producer, KafkaError
 import redis
 import boto3
+import aioboto3
 from elasticsearch import AsyncElasticsearch
 
 from shared.config.service_config import ServiceConfig
@@ -41,6 +47,8 @@ class StrictPalantirInstanceWorker:
     """
     STRICT Palantir-style Instance Worker
     Graph는 관계와 참조만, 데이터는 ES/S3에만
+    
+    🔥 MIGRATION: Now supports reading from S3/MinIO Event Store
     """
     
     def __init__(self):
@@ -53,6 +61,11 @@ class StrictPalantirInstanceWorker:
         self.es_client = None
         self.terminus_service = None
         self.instance_bucket = AppConfig.INSTANCE_BUCKET
+        
+        # 🔥 S3/MinIO Event Store configuration
+        self.s3_event_store_enabled = os.getenv("ENABLE_S3_EVENT_STORE", "false").lower() == "true"
+        self.event_store_bucket = "spice-event-store"
+        self.aioboto_session = None
         
         # PALANTIR SYSTEM FIELDS (ONLY these go to graph)
         self.SYSTEM_FIELDS = {
@@ -124,11 +137,85 @@ class StrictPalantirInstanceWorker:
         self.terminus_service = AsyncTerminusService(connection_info)
         await self.terminus_service.connect()
         
+        # 🔥 Initialize aioboto3 for async S3 operations (Event Store)
+        if self.s3_event_store_enabled:
+            self.aioboto_session = aioboto3.Session()
+            logger.info(f"🔥 S3/MinIO Event Store ENABLED - bucket: {self.event_store_bucket}")
+        else:
+            logger.info("⚠️ S3/MinIO Event Store DISABLED - using legacy payload mode")
+        
         # Subscribe to Kafka topic
         self.consumer.subscribe([AppConfig.INSTANCE_COMMANDS_TOPIC])
         
         logger.info("✅ STRICT Palantir Instance Worker initialized")
         
+    async def read_event_from_s3(self, s3_reference: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        🔥 Read event from S3/MinIO Event Store
+        
+        Args:
+            s3_reference: Dictionary with bucket, key, and endpoint
+            
+        Returns:
+            Event payload from S3 or None if failed
+        """
+        if not self.s3_event_store_enabled or not self.aioboto_session:
+            return None
+            
+        try:
+            bucket = s3_reference.get('bucket', self.event_store_bucket)
+            key = s3_reference.get('key')
+            
+            if not key:
+                logger.warning("No S3 key provided in reference")
+                return None
+            
+            async with self.aioboto_session.client(
+                's3',
+                endpoint_url=os.getenv('MINIO_ENDPOINT_URL', 'http://localhost:9000'),
+                aws_access_key_id=os.getenv('MINIO_ACCESS_KEY', 'admin'),
+                aws_secret_access_key=os.getenv('MINIO_SECRET_KEY', 'spice123!'),
+                use_ssl=False
+            ) as s3:
+                response = await s3.get_object(Bucket=bucket, Key=key)
+                content = await response['Body'].read()
+                event_data = json.loads(content)
+                
+                logger.info(f"🔥 Read event from S3: {key}")
+                return event_data
+                
+        except Exception as e:
+            logger.error(f"Failed to read event from S3: {e}")
+            return None
+    
+    async def extract_payload_from_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        🔥 Extract payload from message, preferring S3 if available
+        
+        Supports both:
+        - New format: Read from S3 using reference
+        - Legacy format: Use embedded payload
+        """
+        # Check if this is the new format with S3 reference
+        if 's3_reference' in message and self.s3_event_store_enabled:
+            s3_ref = message['s3_reference']
+            logger.info(f"🔥 Message has S3 reference, attempting to read from Event Store")
+            
+            # Try to read from S3
+            event_data = await self.read_event_from_s3(s3_ref)
+            if event_data:
+                # Return the payload from S3 event
+                return event_data.get('payload', {})
+            else:
+                logger.warning("Failed to read from S3, falling back to embedded payload")
+        
+        # Fall back to embedded payload (legacy or fallback)
+        if 'payload' in message:
+            return message['payload']
+        
+        # Very old format - the message itself is the command
+        return message
+    
     async def extract_relationships(self, db_name: str, class_id: str, payload: Dict[str, Any]) -> Dict[str, str]:
         """
         Extract ONLY relationship fields from payload
@@ -350,7 +437,15 @@ class StrictPalantirInstanceWorker:
                     
             try:
                 logger.info(f"📨 Received message from Kafka!")
-                command = json.loads(msg.value().decode('utf-8'))
+                raw_message = json.loads(msg.value().decode('utf-8'))
+                
+                # 🔥 MIGRATION: Handle both new and legacy message formats
+                # New format has metadata with storage_mode
+                storage_mode = raw_message.get('metadata', {}).get('storage_mode', 'legacy')
+                logger.info(f"🔥 Message storage mode: {storage_mode}")
+                
+                # Extract the actual command payload
+                command = await self.extract_payload_from_message(raw_message)
                 command_type = command.get('command_type')
                 
                 logger.info(f"Processing command: {command_type}")

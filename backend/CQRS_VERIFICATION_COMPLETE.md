@@ -1,5 +1,8 @@
 # 🔥 CQRS & Multi-Hop Query Verification Complete
 
+> ⚠️ **CRITICAL CORRECTION**: PostgreSQL is NOT an Event Store! It's only for delivery guarantee.
+> The real Event Store (SSoT) is S3/MinIO with immutable event logs.
+
 ## ✅ YES! CQRS가 완벽하게 보장됩니다!
 
 ### 1. CQRS Implementation Verified ✅
@@ -49,16 +52,18 @@ Multi-hop traversal successful ✅
 ### 3. Palantir Architecture Confirmed ✅
 
 **Data Storage Separation:**
+- **S3/MinIO**: Event Store - Single Source of Truth (SSoT)
 - **TerminusDB**: Lightweight nodes (IDs + relationships only)
 - **Elasticsearch**: Full document data
-- **PostgreSQL**: Event store (outbox pattern)
+- **PostgreSQL**: Delivery guarantee ONLY (NOT event store!)
 - **Redis**: Caching layer
 
-**Event Flow:**
+**Event Flow (CORRECTED):**
 ```
 User Request 
   → OMS API (202 Accepted)
-  → PostgreSQL Outbox
+  → S3/MinIO Event Store (SSoT) ← EVENTS STORED HERE FIRST!
+  → PostgreSQL Outbox (delivery guarantee only)
   → Message Relay
   → Kafka Topics
   → Workers
@@ -68,7 +73,8 @@ User Request
 ### 4. Production Readiness ✅
 
 **All Systems Operational:**
-- ✅ PostgreSQL: Outbox table with 8+ records
+- ✅ S3/MinIO: Event Store (SSoT) - immutable event log
+- ✅ PostgreSQL: Outbox for delivery guarantee (NOT event store!)
 - ✅ Redis: 38 keys, no authentication
 - ✅ Elasticsearch: All indices created
 - ✅ Kafka: 23 topics, all required topics present
@@ -102,7 +108,11 @@ User Request
 
 1. **CQRS 완벽 구현**: Command와 Query가 완전히 분리되어 있음
 2. **멀티홉 쿼리 작동**: Graph Federation을 통해 복잡한 관계 탐색 가능
-3. **Palantir 아키텍처**: TerminusDB(그래프) + Elasticsearch(데이터) 완벽 통합
+3. **Palantir 아키텍처 (CORRECTED)**: 
+   - S3/MinIO: 불변 이벤트 로그 (SSoT)
+   - TerminusDB: 그래프 관계 (권위 레이어)
+   - Elasticsearch: 검색/조회 인덱스
+   - PostgreSQL: 전달 보증만 (NOT Event Store!)
 4. **프로덕션 준비 완료**: 모든 시스템 정상 작동, 54/54 검증 통과
 
 ---

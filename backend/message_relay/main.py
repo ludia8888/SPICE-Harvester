@@ -1,6 +1,11 @@
 """
 Message Relay Service
 Outbox 테이블에서 이벤트를 읽어 Kafka로 전송하는 서비스
+
+🔥 MIGRATION: Enhanced to include S3/MinIO Event Store references
+- Kafka messages now include S3 event references
+- Consumers can gradually migrate to reading from S3
+- PostgreSQL payload still included for backward compatibility
 """
 
 import asyncio
@@ -8,7 +13,8 @@ import json
 import logging
 import os
 import signal
-from typing import Optional
+from typing import Optional, Dict, Any
+from datetime import datetime
 
 import asyncpg
 from confluent_kafka import Producer, KafkaError
@@ -26,7 +32,10 @@ logger = logging.getLogger(__name__)
 
 
 class MessageRelay:
-    """Outbox Pattern Message Relay Service"""
+    """Outbox Pattern Message Relay Service
+    
+    🔥 MIGRATION: Enhanced with S3/MinIO Event Store integration
+    """
     
     def __init__(self):
         self.running = False
@@ -34,6 +43,11 @@ class MessageRelay:
         self.kafka_servers = ServiceConfig.get_kafka_bootstrap_servers()
         self.producer: Optional[Producer] = None
         self.conn: Optional[asyncpg.Connection] = None
+        
+        # 🔥 S3/MinIO Event Store configuration
+        self.s3_enabled = os.getenv("ENABLE_S3_EVENT_STORE", "false").lower() == "true"
+        self.s3_bucket = "spice-event-store"
+        self.minio_endpoint = ServiceConfig.get_minio_endpoint() if self.s3_enabled else None
         
     async def initialize(self):
         """서비스 초기화"""
@@ -52,6 +66,14 @@ class MessageRelay:
         
         # PostgreSQL 연결
         self.conn = await asyncpg.connect(self.postgres_url)
+        
+        # 🔥 Log S3/MinIO Event Store configuration
+        if self.s3_enabled:
+            logger.info(f"🔥 S3/MinIO Event Store ENABLED - endpoint: {self.minio_endpoint}, bucket: {self.s3_bucket}")
+            logger.info("🔥 Messages will include S3 references for gradual migration")
+        else:
+            logger.info("⚠️ S3/MinIO Event Store DISABLED - using legacy mode")
+            
         logger.info("Message Relay initialized successfully")
         
     async def ensure_kafka_topics(self):
@@ -95,6 +117,48 @@ class MessageRelay:
             logger.error(f"Message delivery failed: {err}")
         else:
             logger.debug(f"Message delivered to {msg.topic()} [{msg.partition()}]")
+    
+    def _build_s3_reference(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """🔥 Build S3/MinIO Event Store reference for a message
+        
+        Returns a reference to where the event is stored in S3/MinIO
+        """
+        try:
+            # Parse the payload to extract event details
+            payload = json.loads(message['payload']) if isinstance(message['payload'], str) else message['payload']
+            
+            # Extract event metadata
+            event_id = message['id']
+            aggregate_type = payload.get('aggregate_type', 'unknown')
+            aggregate_id = payload.get('aggregate_id', 'unknown')
+            
+            # Get timestamp from payload or use current time
+            timestamp_str = payload.get('timestamp') or payload.get('created_at')
+            if timestamp_str:
+                # Parse timestamp (handle various formats)
+                if isinstance(timestamp_str, str):
+                    # Simple parsing - you might need more robust parsing
+                    dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                else:
+                    dt = datetime.utcnow()
+            else:
+                dt = datetime.utcnow()
+            
+            # Build S3 key path (matching event_store.py structure)
+            s3_key = (
+                f"events/{dt.year:04d}/{dt.month:02d}/{dt.day:02d}/"
+                f"{aggregate_type}/{aggregate_id}/{event_id}.json"
+            )
+            
+            return {
+                "bucket": self.s3_bucket,
+                "key": s3_key,
+                "endpoint": self.minio_endpoint,
+                "event_id": str(event_id)
+            }
+        except Exception as e:
+            logger.warning(f"Failed to build S3 reference: {e}")
+            return None
             
     async def process_events(self):
         """Outbox 테이블에서 메시지(Command/Event)를 읽어 Kafka로 전송"""
@@ -123,10 +187,35 @@ class MessageRelay:
             
             for message in messages:
                 try:
+                    # 🔥 MIGRATION: Build enriched message with S3 reference
+                    kafka_message = {
+                        "message_type": message['message_type'],
+                        "payload": json.loads(message['payload']) if isinstance(message['payload'], str) else message['payload'],
+                        "metadata": {
+                            "relay_timestamp": datetime.utcnow().isoformat(),
+                            "retry_count": message['retry_count'] or 0
+                        }
+                    }
+                    
+                    # Add S3 reference if enabled
+                    if self.s3_enabled:
+                        s3_ref = self._build_s3_reference(message)
+                        if s3_ref:
+                            kafka_message["s3_reference"] = s3_ref
+                            kafka_message["metadata"]["storage_mode"] = "dual_write"
+                            logger.debug(f"Added S3 reference: {s3_ref['key']}")
+                        else:
+                            kafka_message["metadata"]["storage_mode"] = "postgres_only"
+                    else:
+                        kafka_message["metadata"]["storage_mode"] = "legacy"
+                    
+                    # Serialize to JSON
+                    kafka_value = json.dumps(kafka_message)
+                    
                     # Kafka로 메시지 발행
                     self.producer.produce(
                         topic=message['topic'],
-                        value=message['payload'],
+                        value=kafka_value,
                         key=str(message['id']).encode('utf-8'),
                         callback=self.delivery_report
                     )
@@ -142,7 +231,8 @@ class MessageRelay:
                     )
                     
                     processed_count += 1
-                    logger.info(f"Relayed {message['message_type']} {message['id']} to topic {message['topic']}")
+                    storage_mode = kafka_message["metadata"].get("storage_mode", "unknown")
+                    logger.info(f"🔥 Relayed {message['message_type']} {message['id']} to topic {message['topic']} (mode: {storage_mode})")
                     
                 except Exception as e:
                     # 에러 발생 시 재시도 카운트 증가

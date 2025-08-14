@@ -1,6 +1,11 @@
 """
 Projection Worker Service
 Instance와 Ontology 이벤트를 Elasticsearch에 프로젝션하는 워커 서비스
+
+🔥 MIGRATION: Enhanced to support S3/MinIO Event Store
+- Can read events directly from S3 when reference is provided
+- Falls back to PostgreSQL payload for backward compatibility
+- Gradual migration from embedded payloads to S3 references
 """
 
 import asyncio
@@ -13,6 +18,7 @@ from typing import Optional, Dict, Any, List
 from uuid import uuid4
 
 from confluent_kafka import Consumer, Producer, KafkaError, KafkaException
+import aioboto3
 
 from shared.config.service_config import ServiceConfig
 from shared.config.search_config import (
@@ -44,7 +50,10 @@ logger = logging.getLogger(__name__)
 
 
 class ProjectionWorker:
-    """Instance와 Ontology 이벤트를 Elasticsearch에 프로젝션하는 워커"""
+    """Instance와 Ontology 이벤트를 Elasticsearch에 프로젝션하는 워커
+    
+    🔥 MIGRATION: Now supports reading from S3/MinIO Event Store
+    """
     
     def __init__(self):
         self.running = False
@@ -56,6 +65,11 @@ class ProjectionWorker:
         self.tracing_service = None
         self.metrics_collector = None
         self.context_propagator = ContextPropagator()
+        
+        # 🔥 S3/MinIO Event Store configuration
+        self.s3_event_store_enabled = os.getenv("ENABLE_S3_EVENT_STORE", "false").lower() == "true"
+        self.event_store_bucket = "spice-event-store"
+        self.aioboto_session = None
         
         # 생성된 인덱스 캐시 (중복 생성 방지)
         self.created_indices = set()
@@ -76,7 +90,11 @@ class ProjectionWorker:
             'lock_failures': 0,
             'elasticsearch_queries': 0,
             'fallback_queries': 0,
-            'total_lock_wait_time': 0.0
+            'total_lock_wait_time': 0.0,
+            # 🔥 S3 Event Store metrics
+            's3_reads': 0,
+            's3_read_failures': 0,
+            'payload_fallbacks': 0
         }
         
     async def initialize(self):
@@ -122,6 +140,84 @@ class ProjectionWorker:
         # Initialize OpenTelemetry
         self.tracing_service = get_tracing_service("projection-worker")
         self.metrics_collector = get_metrics_collector("projection-worker")
+        
+        # 🔥 Initialize aioboto3 for async S3 operations (Event Store)
+        if self.s3_event_store_enabled:
+            self.aioboto_session = aioboto3.Session()
+            logger.info(f"🔥 S3/MinIO Event Store ENABLED - bucket: {self.event_store_bucket}")
+            logger.info("🔥 Projection Worker will read events from S3 when available")
+        else:
+            logger.info("⚠️ S3/MinIO Event Store DISABLED - using legacy payload mode")
+        
+    async def read_event_from_s3(self, s3_reference: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        🔥 Read event from S3/MinIO Event Store
+        
+        Args:
+            s3_reference: Dictionary with bucket, key, and endpoint
+            
+        Returns:
+            Event payload from S3 or None if failed
+        """
+        if not self.s3_event_store_enabled or not self.aioboto_session:
+            return None
+            
+        try:
+            bucket = s3_reference.get('bucket', self.event_store_bucket)
+            key = s3_reference.get('key')
+            
+            if not key:
+                logger.warning("No S3 key provided in reference")
+                return None
+            
+            async with self.aioboto_session.client(
+                's3',
+                endpoint_url=os.getenv('MINIO_ENDPOINT_URL', 'http://localhost:9000'),
+                aws_access_key_id=os.getenv('MINIO_ACCESS_KEY', 'admin'),
+                aws_secret_access_key=os.getenv('MINIO_SECRET_KEY', 'spice123!'),
+                use_ssl=False
+            ) as s3:
+                response = await s3.get_object(Bucket=bucket, Key=key)
+                content = await response['Body'].read()
+                event_data = json.loads(content)
+                
+                self.cache_metrics['s3_reads'] += 1
+                logger.info(f"🔥 Read event from S3: {key}")
+                return event_data
+                
+        except Exception as e:
+            self.cache_metrics['s3_read_failures'] += 1
+            logger.error(f"Failed to read event from S3: {e}")
+            return None
+    
+    async def extract_payload_from_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        🔥 Extract payload from message, preferring S3 if available
+        
+        Supports both:
+        - New format: Read from S3 using reference
+        - Legacy format: Use embedded payload
+        """
+        # Check if this is the new format with S3 reference
+        if 's3_reference' in message and self.s3_event_store_enabled:
+            s3_ref = message['s3_reference']
+            logger.info(f"🔥 Message has S3 reference, attempting to read from Event Store")
+            
+            # Try to read from S3
+            event_data = await self.read_event_from_s3(s3_ref)
+            if event_data:
+                # Return the payload from S3 event
+                return event_data.get('payload', {})
+            else:
+                logger.warning("Failed to read from S3, falling back to embedded payload")
+                self.cache_metrics['payload_fallbacks'] += 1
+        
+        # Fall back to embedded payload (legacy or fallback)
+        if 'payload' in message:
+            return message['payload']
+        
+        # Very old format - the message itself is the event
+        return message
         
     async def _setup_indices(self):
         """매핑 파일 로드 (인덱스는 DB별로 동적 생성)"""
@@ -221,7 +317,15 @@ class ProjectionWorker:
     async def _process_event(self, msg):
         """이벤트 처리"""
         try:
-            event_data = json.loads(msg.value().decode('utf-8'))
+            raw_message = json.loads(msg.value().decode('utf-8'))
+            
+            # 🔥 MIGRATION: Handle both new and legacy message formats
+            # New format has metadata with storage_mode
+            storage_mode = raw_message.get('metadata', {}).get('storage_mode', 'legacy')
+            logger.info(f"🔥 Message storage mode: {storage_mode}")
+            
+            # Extract the actual event payload
+            event_data = await self.extract_payload_from_message(raw_message)
             event_type = event_data.get('event_type')
             topic = msg.topic()
             
@@ -940,6 +1044,17 @@ class ProjectionWorker:
     async def _shutdown(self):
         """워커 종료"""
         logger.info("Shutting down Projection Worker...")
+        
+        # 🔥 Log S3 Event Store metrics
+        if self.s3_event_store_enabled:
+            logger.info("🔥 S3/MinIO Event Store Metrics:")
+            logger.info(f"  - S3 reads: {self.cache_metrics['s3_reads']}")
+            logger.info(f"  - S3 read failures: {self.cache_metrics['s3_read_failures']}")
+            logger.info(f"  - Payload fallbacks: {self.cache_metrics['payload_fallbacks']}")
+            
+            if self.cache_metrics['s3_reads'] > 0:
+                success_rate = (self.cache_metrics['s3_reads'] - self.cache_metrics['s3_read_failures']) / self.cache_metrics['s3_reads'] * 100
+                logger.info(f"  - S3 read success rate: {success_rate:.1f}%")
         
         self.running = False
         

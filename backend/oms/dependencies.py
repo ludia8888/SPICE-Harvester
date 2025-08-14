@@ -36,6 +36,7 @@ from shared.services.command_status_service import CommandStatusService
 # OMS specific imports
 from oms.services.async_terminus import AsyncTerminusService
 from oms.database.outbox import OutboxService
+from oms.services.event_store import EventStore, event_store
 from shared.models.config import ConnectionConfig
 
 # Import validation functions
@@ -174,6 +175,19 @@ class OMSDependencyProvider:
             return None
     
     @staticmethod
+    async def get_event_store(
+        container: ServiceContainer = Depends(get_container)
+    ) -> EventStore:
+        """
+        Get S3/MinIO Event Store - The REAL Single Source of Truth.
+        PostgreSQL Outbox is NOT an event store, just delivery guarantee!
+        
+        This is the authoritative event storage, not PostgreSQL!
+        """
+        # Event store is a global singleton
+        return event_store
+    
+    @staticmethod
     async def get_command_status_service(
         container: ServiceContainer = Depends(get_container)
     ) -> CommandStatusService:
@@ -219,6 +233,7 @@ TerminusServiceDep = Depends(OMSDependencyProvider.get_terminus_service)
 JSONLDConverterDep = Depends(OMSDependencyProvider.get_jsonld_converter)
 LabelMapperDep = Depends(OMSDependencyProvider.get_label_mapper)
 OutboxServiceDep = Depends(OMSDependencyProvider.get_outbox_service)
+EventStoreDep = Depends(OMSDependencyProvider.get_event_store)
 CommandStatusServiceDep = Depends(OMSDependencyProvider.get_command_status_service)
 
 

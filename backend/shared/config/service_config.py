@@ -183,6 +183,24 @@ class ServiceConfig:
         if docker_env in ("false", "0", "no", "off"):
             return False
         return os.path.exists("/.dockerenv") or docker_env == "true"
+    
+    @staticmethod
+    def get_minio_endpoint() -> str:
+        """Get MinIO/S3 endpoint URL."""
+        if url := os.getenv("MINIO_ENDPOINT_URL"):
+            return url
+        host = "minio" if ServiceConfig.is_docker_environment() else "localhost"
+        return f"http://{host}:9000"
+    
+    @staticmethod
+    def get_minio_access_key() -> str:
+        """Get MinIO/S3 access key."""
+        return os.getenv("MINIO_ACCESS_KEY", "admin")
+    
+    @staticmethod
+    def get_minio_secret_key() -> str:
+        """Get MinIO/S3 secret key."""
+        return os.getenv("MINIO_SECRET_KEY", "spice123!")
 
     @staticmethod
     def get_service_url(service_name: str) -> str:

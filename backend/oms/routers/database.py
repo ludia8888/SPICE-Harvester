@@ -11,13 +11,15 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import JSONResponse
 
-from oms.dependencies import TerminusServiceDep, OutboxServiceDep, get_outbox_service
+from oms.dependencies import TerminusServiceDep, OutboxServiceDep, get_outbox_service, EventStoreDep
 from oms.services.async_terminus import AsyncTerminusService
+from oms.services.migration_helper import migration_helper
 from oms.database.outbox import OutboxService
 from oms.database.postgres import db as postgres_db
 from shared.models.requests import ApiResponse
 from shared.models.commands import DatabaseCommand, CommandType
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
+from shared.config.app_config import AppConfig
 
 logger = logging.getLogger(__name__)
 
@@ -91,8 +93,15 @@ async def create_database(
                         },
                         metadata={"source": "OMS", "user": "system"}
                     )
-                    await outbox_service.publish_command(conn, command)
-                    logger.info(f"Published CREATE_DATABASE command for {db_name}")
+                    # 🔥 MIGRATION: Use migration helper for gradual S3 adoption
+                    migration_result = await migration_helper.handle_command_with_migration(
+                        connection=conn,
+                        command=command,
+                        outbox_service=outbox_service,
+                        topic=AppConfig.DATABASE_COMMANDS_TOPIC,
+                        actor="system"
+                    )
+                    logger.info(f"🔥 Published CREATE_DATABASE command for {db_name} - Migration: {migration_result['migration_mode']}")
                     
                     # Event Sourcing 모드에서는 명령 ID와 상태 반환 (202 Accepted)
                     return JSONResponse(
@@ -204,8 +213,15 @@ async def delete_database(
                         },
                         metadata={"source": "OMS", "user": "system"}
                     )
-                    await outbox_service.publish_command(conn, command)
-                    logger.info(f"Published DELETE_DATABASE command for {db_name}")
+                    # 🔥 MIGRATION: Use migration helper for gradual S3 adoption
+                    migration_result = await migration_helper.handle_command_with_migration(
+                        connection=conn,
+                        command=command,
+                        outbox_service=outbox_service,
+                        topic=AppConfig.DATABASE_COMMANDS_TOPIC,
+                        actor="system"
+                    )
+                    logger.info(f"🔥 Published DELETE_DATABASE command for {db_name} - Migration: {migration_result['migration_mode']}")
                     
                     # Event Sourcing 모드에서는 명령 ID와 상태 반환 (202 Accepted)
                     return JSONResponse(

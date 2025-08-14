@@ -16,11 +16,13 @@ from oms.dependencies import (
     LabelMapperDep,
     TerminusServiceDep,
     OutboxServiceDep,
+    EventStoreDep,  # Added for S3/MinIO Event Store
     CommandStatusServiceDep,
     ValidatedDatabaseName,
     ValidatedClassId,
     ensure_database_exists
 )
+from oms.services.migration_helper import migration_helper
 from shared.dependencies.providers import RedisServiceDep
 from oms.database.postgres import db as postgres_db
 from oms.database.outbox import MessageType, OutboxService
@@ -93,15 +95,23 @@ async def create_instance_async(
             created_by=user_id
         )
         
-        # Command를 Outbox에 저장 (트랜잭션) - instance_commands 토픽 명시
+        # 🔥 MIGRATION: Use migration helper for gradual S3 adoption
+        from shared.config.app_config import AppConfig
+        
         if outbox_service:
             async with postgres_db.transaction() as conn:
-                from shared.config.app_config import AppConfig
-                await outbox_service.publish_command(
-                    conn, 
-                    command,
-                    topic=AppConfig.INSTANCE_COMMANDS_TOPIC  # 올바른 토픽 지정
+                # Use migration helper for dual-write pattern
+                migration_result = await migration_helper.handle_command_with_migration(
+                    connection=conn,
+                    command=command,
+                    outbox_service=outbox_service,
+                    topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
+                    actor=user_id
                 )
+                
+                # Log migration status for monitoring
+                logger.info(f"Migration result: {migration_result['migration_mode']} - "
+                          f"Storage: {', '.join(migration_result['storage'])}")
         
         # Redis에 상태 저장
         await command_status_service.set_command_status(
@@ -175,10 +185,21 @@ async def update_instance_async(
             created_by=user_id
         )
         
-        # Command를 Outbox에 저장
+        # 🔥 MIGRATION: Use migration helper for gradual S3 adoption
+        from shared.config.app_config import AppConfig
+        
         if outbox_service:
             async with postgres_db.transaction() as conn:
-                await outbox_service.publish_command(conn, command)
+                # Use migration helper for dual-write pattern
+                migration_result = await migration_helper.handle_command_with_migration(
+                    connection=conn,
+                    command=command,
+                    outbox_service=outbox_service,
+                    topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
+                    actor=user_id
+                )
+                
+                logger.info(f"Migration: {migration_result['migration_mode']}")
         
         # Redis에 상태 저장
         await command_status_service.set_command_status(
@@ -250,10 +271,21 @@ async def delete_instance_async(
             created_by=user_id
         )
         
-        # Command를 Outbox에 저장
+        # 🔥 MIGRATION: Use migration helper for gradual S3 adoption
+        from shared.config.app_config import AppConfig
+        
         if outbox_service:
             async with postgres_db.transaction() as conn:
-                await outbox_service.publish_command(conn, command)
+                # Use migration helper for dual-write pattern
+                migration_result = await migration_helper.handle_command_with_migration(
+                    connection=conn,
+                    command=command,
+                    outbox_service=outbox_service,
+                    topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
+                    actor=user_id
+                )
+                
+                logger.info(f"Migration: {migration_result['migration_mode']}")
         
         # Redis에 상태 저장
         await command_status_service.set_command_status(
@@ -332,10 +364,21 @@ async def bulk_create_instances_async(
             created_by=user_id
         )
         
-        # Command를 Outbox에 저장
+        # 🔥 MIGRATION: Use migration helper for gradual S3 adoption
+        from shared.config.app_config import AppConfig
+        
         if outbox_service:
             async with postgres_db.transaction() as conn:
-                await outbox_service.publish_command(conn, command)
+                # Use migration helper for dual-write pattern
+                migration_result = await migration_helper.handle_command_with_migration(
+                    connection=conn,
+                    command=command,
+                    outbox_service=outbox_service,
+                    topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
+                    actor=user_id
+                )
+                
+                logger.info(f"Migration: {migration_result['migration_mode']}")
         
         # Redis에 상태 저장
         await command_status_service.set_command_status(
