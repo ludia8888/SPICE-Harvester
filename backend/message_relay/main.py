@@ -14,7 +14,7 @@ import logging
 import os
 import signal
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 import asyncpg
 from confluent_kafka import Producer, KafkaError
@@ -140,9 +140,9 @@ class MessageRelay:
                     # Simple parsing - you might need more robust parsing
                     dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
                 else:
-                    dt = datetime.utcnow()
+                    dt = datetime.now(timezone.utc)
             else:
-                dt = datetime.utcnow()
+                dt = datetime.now(timezone.utc)
             
             # Build S3 key path (matching event_store.py structure)
             s3_key = (
@@ -192,7 +192,7 @@ class MessageRelay:
                         "message_type": message['message_type'],
                         "payload": json.loads(message['payload']) if isinstance(message['payload'], str) else message['payload'],
                         "metadata": {
-                            "relay_timestamp": datetime.utcnow().isoformat(),
+                            "relay_timestamp": datetime.now(timezone.utc).isoformat(),
                             "retry_count": message['retry_count'] or 0
                         }
                     }

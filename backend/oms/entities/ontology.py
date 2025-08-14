@@ -4,7 +4,7 @@
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 # Using simple strings for labels and descriptions
@@ -89,23 +89,23 @@ class Ontology:
     def __post_init__(self):
         """초기화 후 처리"""
         if self.created_at is None:
-            self.created_at = datetime.utcnow()
+            self.created_at = datetime.now(timezone.utc)
         if self.updated_at is None:
-            self.updated_at = datetime.utcnow()
+            self.updated_at = datetime.now(timezone.utc)
 
     def add_property(self, property: Property) -> None:
         """속성 추가"""
         if any(p.name == property.name for p in self.properties):
             raise ValueError(f"Property '{property.name}' already exists")
         self.properties.append(property)
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(timezone.utc)
 
     def remove_property(self, property_name: str) -> bool:
         """속성 제거"""
         initial_count = len(self.properties)
         self.properties = [p for p in self.properties if p.name != property_name]
         if len(self.properties) < initial_count:
-            self.updated_at = datetime.utcnow()
+            self.updated_at = datetime.now(timezone.utc)
             return True
         return False
 
@@ -116,7 +116,7 @@ class Ontology:
         if not relationship.is_valid_cardinality():
             raise ValueError(f"Invalid cardinality: {relationship.cardinality}")
         self.relationships.append(relationship)
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(timezone.utc)
 
     def validate(self) -> List[str]:
         """엔티티 유효성 검증"""

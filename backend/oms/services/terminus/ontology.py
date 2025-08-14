@@ -5,7 +5,7 @@ Ontology Service for TerminusDB
 
 import logging
 from typing import Any, Dict, List, Optional, Union
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .base import BaseTerminusService
 from .database import DatabaseService
@@ -94,9 +94,9 @@ class OntologyService(BaseTerminusService):
             ontology_dict = ontology.dict()
             # Only set timestamps if they don't exist
             if 'created_at' not in ontology_dict or ontology_dict['created_at'] is None:
-                ontology_dict['created_at'] = datetime.utcnow()
+                ontology_dict['created_at'] = datetime.now(timezone.utc)
             if 'updated_at' not in ontology_dict or ontology_dict['updated_at'] is None:
-                ontology_dict['updated_at'] = datetime.utcnow()
+                ontology_dict['updated_at'] = datetime.now(timezone.utc)
             
             return OntologyResponse(**ontology_dict)
             
@@ -394,8 +394,8 @@ class OntologyService(BaseTerminusService):
             description=documentation.get("@comment", ""),
             properties=[],
             relationships=[],
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
         
         # 속성과 관계 파싱

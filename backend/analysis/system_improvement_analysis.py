@@ -6,7 +6,7 @@ Analyzes current SPICE HARVESTER system and identifies improvements
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Dict, List, Any
 
 # Simulating Context7 analysis since we can't actually connect
@@ -23,7 +23,7 @@ class SystemAnalyzer:
         
         # Simulate Context7 analysis of current codebase
         analysis = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(datetime.UTC).isoformat(),
             "system": "SPICE HARVESTER",
             "version": "1.0.0",
             "components_analyzed": [

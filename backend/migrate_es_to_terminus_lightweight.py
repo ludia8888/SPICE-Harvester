@@ -56,7 +56,7 @@ class ESToTerminusMigrator:
             server_url="http://localhost:6363",
             user="admin",
             account="admin",
-            key="admin"
+            key="spice123!"
         )
         
         self.terminus_service = AsyncTerminusService(connection_info)
@@ -269,7 +269,7 @@ async def verify_migration(db_name: str):
         server_url="http://localhost:6363",
         user="admin",
         account="admin",
-        key="admin"
+        key="spice123!"
     )
     
     terminus_service = AsyncTerminusService(connection_info)
@@ -330,7 +330,7 @@ async def main():
         server_url="http://localhost:6363",
         user="admin",
         account="admin",
-        key="admin"
+        key="spice123!"
     )
     
     terminus_service = AsyncTerminusService(connection_info)

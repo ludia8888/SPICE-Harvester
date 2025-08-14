@@ -79,25 +79,33 @@ class OntologyWorker:
             'compression.type': 'snappy',
         })
         
-        # TerminusDB 연결 설정 (admin credentials for database operations)
+        # TerminusDB 연결 설정 - 올바른 인증 정보 사용
         connection_info = ConnectionConfig(
             server_url=ServiceConfig.get_terminus_url(),  # Use ServiceConfig for correct endpoint
             user=os.getenv("TERMINUS_USER", "admin"),
             account=os.getenv("TERMINUS_ACCOUNT", "admin"),
-            key=os.getenv("TERMINUS_KEY", "admin"),
+            key=os.getenv("TERMINUS_KEY", "spice123!"),  # 올바른 비밀번호 사용
         )
         self.terminus_service = AsyncTerminusService(connection_info)
         await self.terminus_service.connect()
         
-        # Redis 연결 설정
-        settings = ApplicationSettings()
-        self.redis_service = create_redis_service(settings)
-        await self.redis_service.connect()
-        self.command_status_service = CommandStatusService(self.redis_service)
-        logger.info("Redis connection established")
+        # Redis 연결 설정 (선택적 - 실패해도 계속 진행)
+        try:
+            settings = ApplicationSettings()
+            self.redis_service = create_redis_service(settings)
+            await self.redis_service.connect()
+            self.command_status_service = CommandStatusService(self.redis_service)
+            logger.info("Redis connection established")
+        except Exception as e:
+            logger.warning(f"Redis connection failed, continuing without command status tracking: {e}")
+            self.redis_service = None
+            self.command_status_service = None
         
-        # Command 토픽 구독
-        self.consumer.subscribe([AppConfig.ONTOLOGY_COMMANDS_TOPIC])
+        # Command 토픽 구독 - 온톨로지와 데이터베이스 명령 모두 처리
+        self.consumer.subscribe([
+            AppConfig.ONTOLOGY_COMMANDS_TOPIC,
+            AppConfig.DATABASE_COMMANDS_TOPIC
+        ])
         
         # Initialize OpenTelemetry
         self.tracing_service = get_tracing_service("ontology-worker")
@@ -419,7 +427,12 @@ class OntologyWorker:
             error_details={
                 "command_data": command_data
             },
-            retry_count=command_data.get('retry_count', 0)
+            retry_count=command_data.get('retry_count', 0),
+            data={  # 필수 필드 추가
+                "command_type": command_data.get('command_type', 'Unknown'),
+                "error": error,
+                "command_data": command_data
+            }
         )
         
         await self.publish_event(event)
@@ -447,7 +460,16 @@ class OntologyWorker:
                 try:
                     # 메시지 파싱
                     value = msg.value().decode('utf-8')
-                    command_data = json.loads(value)
+                    message = json.loads(value)
+                    
+                    # Message Relay wraps commands in an envelope - unwrap it
+                    if isinstance(message, dict) and 'payload' in message and 'message_type' in message:
+                        # This is a wrapped message from Message Relay
+                        command_data = message['payload']
+                        logger.info(f"Unwrapped message from relay: {message.get('message_type')}")
+                    else:
+                        # Direct command message (backward compatibility)
+                        command_data = message
                     
                     logger.info(f"Processing command: {command_data.get('command_type')} "
                                f"for {command_data.get('aggregate_id')}")

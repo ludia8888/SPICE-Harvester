@@ -13,7 +13,7 @@ Aligned with Palantir Foundry architecture:
 
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, AsyncIterator, Optional, Dict, Any
 from pathlib import Path
 import asyncio
@@ -405,7 +405,7 @@ class EventStore:
             "aggregate_type": aggregate_type,
             "aggregate_id": aggregate_id,
             "version": version,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "state": state
         }
         

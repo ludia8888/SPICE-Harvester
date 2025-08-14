@@ -3,7 +3,7 @@
 Data Connector와 OMS/BFF 사이의 데이터 처리 레이어
 """
 
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -127,7 +127,7 @@ class FunnelDataProcessor:
         }
 
         return DatasetAnalysisResponse(
-            columns=analysis_results, analysis_metadata=metadata, timestamp=datetime.utcnow()
+            columns=analysis_results, analysis_metadata=metadata, timestamp=datetime.now(datetime.UTC)
         )
 
     def generate_schema_suggestion(
@@ -197,7 +197,7 @@ class FunnelDataProcessor:
 
         # 클래스 이름 생성
         if not class_name:
-            class_name = "GeneratedClass" + datetime.utcnow().strftime("%Y%m%d%H%M%S")
+            class_name = "GeneratedClass" + datetime.now(datetime.UTC).strftime("%Y%m%d%H%M%S")
 
         return {
             "id": self._generate_class_id(class_name),
@@ -208,7 +208,7 @@ class FunnelDataProcessor:
             "properties": properties,
             "metadata": {
                 "generated_by": "funnel",
-                "generation_date": datetime.utcnow().isoformat(),
+                "generation_date": datetime.now(datetime.UTC).isoformat(),
                 "confidence_scores": {
                     result.column_name: result.inferred_type.confidence
                     for result in analysis_results

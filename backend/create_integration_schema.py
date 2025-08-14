@@ -18,7 +18,7 @@ async def create_schema():
         server_url="http://localhost:6363",
         user="admin",
         account="admin",
-        key="admin"
+        key="spice123!"
     )
     
     service = AsyncTerminusService(connection_info)

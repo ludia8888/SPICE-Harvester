@@ -108,3 +108,7 @@ node_modules/
 .env.production.local
 # SSL certificates
 ssl/
+
+# Archived legacy code and tests
+archived_tests/
+tests_archive/

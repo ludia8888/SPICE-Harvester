@@ -4,7 +4,7 @@
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 # Using simple strings for labels
@@ -83,18 +83,18 @@ class LabelMapping:
             created_at=(
                 datetime.fromisoformat(doc["created_at"])
                 if doc.get("created_at")
-                else datetime.utcnow()
+                else datetime.now(timezone.utc)
             ),
             updated_at=(
                 datetime.fromisoformat(doc["updated_at"])
                 if doc.get("updated_at")
-                else datetime.utcnow()
+                else datetime.now(timezone.utc)
             ),
         )
 
     def update_timestamp(self) -> None:
         """업데이트 타임스탬프 갱신"""
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(timezone.utc)
 
     @staticmethod
     def generate_id(

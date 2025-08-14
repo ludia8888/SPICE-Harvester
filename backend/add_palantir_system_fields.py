@@ -153,7 +153,7 @@ async def add_system_fields_to_all_ontologies(db_name: str) -> Dict[str, Any]:
         server_url=os.getenv("TERMINUS_SERVER_URL", "http://localhost:6363"),
         user="admin",
         account="admin",
-        key="admin"
+        key="spice123!"
     )
     
     terminus_service = AsyncTerminusService(connection_info)

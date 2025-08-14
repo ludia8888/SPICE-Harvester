@@ -156,7 +156,7 @@ class MigrationHelper:
         elif self.s3_enabled:
             return "s3_only"
         else:
-            return "legacy_postgresql"
+            return "legacy"
     
     async def read_with_fallback(
         self,

@@ -32,7 +32,7 @@ class ConsistencyChecker:
     
     def __init__(
         self,
-        es_url: str = "http://localhost:9201",
+        es_url: str = "http://localhost:9200",
         tdb_url: str = "http://localhost:6363",
         redis_url: str = "redis://localhost:6379",
         s3_endpoint: str = "http://localhost:9000",

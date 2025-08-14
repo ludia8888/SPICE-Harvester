@@ -133,7 +133,7 @@ class DatabaseSettings(BaseSettings):
         description="Redis port"
     )
     redis_password: Optional[str] = Field(
-        default=None,
+        default="spice123!",
         env="REDIS_PASSWORD",
         description="Redis password"
     )
@@ -155,7 +155,7 @@ class DatabaseSettings(BaseSettings):
         description="Elasticsearch username"
     )
     elasticsearch_password: Optional[str] = Field(
-        default="elasticpass123",
+        default="spice123!",
         env="ELASTICSEARCH_PASSWORD",
         description="Elasticsearch password"
     )
@@ -191,7 +191,9 @@ class DatabaseSettings(BaseSettings):
     
     @property
     def elasticsearch_url(self) -> str:
-        """Construct Elasticsearch URL"""
+        """Construct Elasticsearch URL with authentication"""
+        if self.elasticsearch_username and self.elasticsearch_password:
+            return f"http://{self.elasticsearch_username}:{self.elasticsearch_password}@{self.elasticsearch_host}:{self.elasticsearch_port}"
         return f"http://{self.elasticsearch_host}:{self.elasticsearch_port}"
     
     @property
@@ -327,12 +329,12 @@ class StorageSettings(BaseSettings):
         description="MinIO/S3 endpoint URL"
     )
     minio_access_key: str = Field(
-        default="minioadmin",
+        default="admin",
         env="MINIO_ACCESS_KEY",
         description="MinIO/S3 access key"
     )
     minio_secret_key: str = Field(
-        default="minioadmin123",
+        default="spice123!",
         env="MINIO_SECRET_KEY",
         description="MinIO/S3 secret key"
     )

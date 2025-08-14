@@ -35,6 +35,7 @@ from shared.models.events import (
 )
 from shared.services.redis_service import RedisService, create_redis_service
 from shared.services.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
+from shared.services.projection_manager import ProjectionManager
 
 # Observability imports
 from shared.observability.tracing import get_tracing_service
@@ -62,6 +63,7 @@ class ProjectionWorker:
         self.producer: Optional[Producer] = None
         self.redis_service: Optional[RedisService] = None
         self.elasticsearch_service: Optional[ElasticsearchService] = None
+        self.projection_manager: Optional[ProjectionManager] = None
         self.tracing_service = None
         self.metrics_collector = None
         self.context_propagator = ContextPropagator()
@@ -148,6 +150,21 @@ class ProjectionWorker:
             logger.info("🔥 Projection Worker will read events from S3 when available")
         else:
             logger.info("⚠️ S3/MinIO Event Store DISABLED - using legacy payload mode")
+        
+        # 🎯 Initialize ProjectionManager for materialized views
+        try:
+            # ProjectionManager는 GraphFederationServiceWOQL이 필요하므로
+            # 실제 프로덕션에서는 별도로 초기화하도록 설계됨
+            # 여기서는 스켈레톤만 준비
+            logger.info("🎯 ProjectionManager ready for initialization when graph service is available")
+            # TODO: Initialize ProjectionManager when GraphFederationServiceWOQL is available
+            # self.projection_manager = ProjectionManager(
+            #     graph_service=graph_service,
+            #     es_service=self.elasticsearch_service,
+            #     redis_service=self.redis_service
+            # )
+        except Exception as e:
+            logger.warning(f"ProjectionManager initialization skipped: {e}")
         
     async def read_event_from_s3(self, s3_reference: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """

@@ -190,11 +190,11 @@ class StrictPalantirInstanceWorker:
     
     async def extract_payload_from_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """
-        🔥 Extract payload from message, preferring S3 if available
+        🔥 Extract command from message, preferring S3 if available
         
         Supports both:
         - New format: Read from S3 using reference
-        - Legacy format: Use embedded payload
+        - Legacy format: Use embedded command data
         """
         # Check if this is the new format with S3 reference
         if 's3_reference' in message and self.s3_event_store_enabled:
@@ -204,10 +204,24 @@ class StrictPalantirInstanceWorker:
             # Try to read from S3
             event_data = await self.read_event_from_s3(s3_ref)
             if event_data:
-                # Return the payload from S3 event
-                return event_data.get('payload', {})
+                # Return the full command from S3 event
+                return event_data
             else:
-                logger.warning("Failed to read from S3, falling back to embedded payload")
+                logger.warning("Failed to read from S3, falling back to embedded data")
+        
+        # For messages that have command fields at root level (from Kafka)
+        if 'command_type' in message and 'db_name' in message:
+            # This is a command message - merge root fields with payload
+            command = {
+                'command_id': message.get('command_id'),
+                'command_type': message.get('command_type'),
+                'db_name': message.get('db_name'),
+                'class_id': message.get('class_id'),
+                'instance_id': message.get('instance_id'),
+                'payload': message.get('payload', {}),
+                'metadata': message.get('metadata', {})
+            }
+            return command
         
         # Fall back to embedded payload (legacy or fallback)
         if 'payload' in message:
@@ -305,6 +319,14 @@ class StrictPalantirInstanceWorker:
                 "s3_uri": f"s3://{self.instance_bucket}/{s3_path}",
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
+            
+            # Include primary key field (e.g., product_id for Product)
+            # This is required by TerminusDB schema
+            if class_id == "Product" and "product_id" in payload:
+                graph_node["product_id"] = payload["product_id"]
+            elif class_id == "Client" and "client_id" in payload:
+                graph_node["client_id"] = payload["client_id"]
+            # Add more class-specific primary keys as needed
             
             # Add ONLY relationships (no domain fields!)
             for rel_field, rel_target in relationships.items():
@@ -439,6 +461,10 @@ class StrictPalantirInstanceWorker:
                 logger.info(f"📨 Received message from Kafka!")
                 raw_message = json.loads(msg.value().decode('utf-8'))
                 
+                # Debug: Log the raw message structure
+                logger.info(f"📦 Raw message keys: {list(raw_message.keys())}")
+                logger.info(f"📦 Raw message type: {type(raw_message)}")
+                
                 # 🔥 MIGRATION: Handle both new and legacy message formats
                 # New format has metadata with storage_mode
                 storage_mode = raw_message.get('metadata', {}).get('storage_mode', 'legacy')
@@ -446,6 +472,10 @@ class StrictPalantirInstanceWorker:
                 
                 # Extract the actual command payload
                 command = await self.extract_payload_from_message(raw_message)
+                
+                # Debug: Log extracted command
+                logger.info(f"📦 Extracted command keys: {list(command.keys()) if command else 'None'}")
+                
                 command_type = command.get('command_type')
                 
                 logger.info(f"Processing command: {command_type}")

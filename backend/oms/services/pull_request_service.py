@@ -12,7 +12,7 @@ SOLID Principles:
 
 import logging
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 from oms.services.terminus.base import BaseTerminusService
@@ -147,7 +147,7 @@ class PullRequestService(BaseTerminusService):
                 "diff": diff,
                 "conflicts": conflicts,
                 "has_conflicts": bool(conflicts),
-                "created_at": datetime.utcnow().isoformat()
+                "created_at": datetime.now(timezone.utc).isoformat()
             }
             
         except MVCCError as e:
@@ -326,7 +326,7 @@ class PullRequestService(BaseTerminusService):
                 "id": pr_id,
                 "status": PullRequestStatus.MERGED,
                 "merge_commit": merge_commit,
-                "merged_at": datetime.utcnow().isoformat(),
+                "merged_at": datetime.now(timezone.utc).isoformat(),
                 "merged_by": author,
                 "source_branch": pr_data['source_branch'],
                 "target_branch": pr_data['target_branch']
@@ -470,7 +470,7 @@ class PullRequestService(BaseTerminusService):
             return {
                 "id": pr_id,
                 "status": PullRequestStatus.CLOSED,
-                "closed_at": datetime.utcnow().isoformat(),
+                "closed_at": datetime.now(timezone.utc).isoformat(),
                 "reason": reason
             }
             

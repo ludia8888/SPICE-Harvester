@@ -6,7 +6,7 @@ S3 호환 객체 스토리지 연동 서비스
 import hashlib
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 try:
@@ -145,7 +145,7 @@ class StorageService:
         object_metadata.update({
             'checksum': checksum,
             'content-type': 'application/json',
-            'created-at': datetime.utcnow().isoformat()
+            'created-at': datetime.now(timezone.utc).isoformat()
         })
         
         # S3에 업로드

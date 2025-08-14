@@ -10,7 +10,7 @@ import sys
 
 # 환경 변수 설정 (로컬 실행용)
 os.environ["POSTGRES_HOST"] = "localhost"
-os.environ["POSTGRES_PORT"] = "5433"
+os.environ["POSTGRES_PORT"] = "5432"
 os.environ["POSTGRES_USER"] = "spiceadmin"
 os.environ["POSTGRES_PASSWORD"] = "spicepass123"
 os.environ["POSTGRES_DB"] = "spicedb"
@@ -68,7 +68,7 @@ async def main():
 
 if __name__ == "__main__":
     logger.info("Message Relay 로컬 실행 준비...")
-    logger.info(f"PostgreSQL: localhost:5433")
+    logger.info(f"PostgreSQL: localhost:5432")
     logger.info(f"Kafka: localhost:9092")
     
     asyncio.run(main())

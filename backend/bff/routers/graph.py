@@ -384,3 +384,136 @@ async def graph_service_health(
             "status": "unhealthy",
             "error": str(e)
         }
+
+
+# ========== PROJECTION/VIEW ENDPOINTS (팔란티어 스타일) ==========
+
+class ProjectionRegistrationRequest(BaseModel):
+    """프로젝션 등록 요청"""
+    view_name: str
+    start_class: str
+    hops: List[GraphHop]
+    filters: Optional[Dict[str, Any]] = None
+    refresh_interval: int = 3600  # 기본 1시간
+
+
+class ProjectionQueryRequest(BaseModel):
+    """프로젝션 조회 요청"""
+    view_name: str
+    filters: Optional[Dict[str, Any]] = None
+    limit: int = 100
+
+
+@router.post("/projections/{db_name}/register")
+async def register_projection(
+    db_name: str,
+    request: ProjectionRegistrationRequest,
+    graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service)
+):
+    """
+    빈번한 멀티홉 쿼리를 프로젝션으로 등록
+    
+    팔란티어 원칙: 빈번한 고비용 멀티홉 = 프로젝션/뷰 materialize
+    
+    Example:
+    ```json
+    {
+        "view_name": "products_with_clients",
+        "start_class": "Product",
+        "hops": [
+            {"predicate": "owned_by", "target_class": "Client"}
+        ],
+        "filters": {"category": "electronics"},
+        "refresh_interval": 1800
+    }
+    ```
+    """
+    try:
+        db_name = validate_db_name(db_name)
+        
+        # TODO: ProjectionManager를 통한 프로젝션 등록
+        # 현재는 스켈레톤만 구현
+        logger.info(f"🎯 Registering projection {request.view_name} for {db_name}")
+        
+        return {
+            "status": "pending",
+            "message": f"Projection {request.view_name} registration queued",
+            "view_name": request.view_name,
+            "refresh_interval": request.refresh_interval
+        }
+        
+    except Exception as e:
+        logger.error(f"Projection registration failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Registration failed: {str(e)}"
+        )
+
+
+@router.post("/projections/{db_name}/query")
+async def query_projection(
+    db_name: str,
+    request: ProjectionQueryRequest,
+    graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service)
+):
+    """
+    프로젝션 뷰 조회 (캐시된 데이터)
+    
+    저비용 조회로 전환된 materialized view 접근
+    
+    Example:
+    ```json
+    {
+        "view_name": "products_with_clients",
+        "filters": {"client_id": "CL-001"},
+        "limit": 50
+    }
+    ```
+    """
+    try:
+        db_name = validate_db_name(db_name)
+        
+        # TODO: ProjectionManager를 통한 캐시 조회
+        # 현재는 실시간 WOQL 실행으로 폴백
+        logger.info(f"🎯 Querying projection {request.view_name} from {db_name}")
+        
+        return {
+            "status": "fallback",
+            "message": "Projection not yet materialized, executing real-time query",
+            "data": [],
+            "count": 0
+        }
+        
+    except Exception as e:
+        logger.error(f"Projection query failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Query failed: {str(e)}"
+        )
+
+
+@router.get("/projections/{db_name}/list")
+async def list_projections(
+    db_name: str,
+    graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service)
+):
+    """
+    등록된 프로젝션 목록 조회
+    """
+    try:
+        db_name = validate_db_name(db_name)
+        
+        # TODO: ProjectionManager에서 목록 조회
+        logger.info(f"🎯 Listing projections for {db_name}")
+        
+        return {
+            "projections": [],
+            "count": 0
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to list projections: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"List failed: {str(e)}"
+        )

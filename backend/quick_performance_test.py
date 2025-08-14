@@ -84,7 +84,7 @@ async def test_event_sourcing_complete():
         print(f"\n3️⃣ Checking PostgreSQL outbox table...")
         conn = await asyncpg.connect(
             host='localhost',
-            port=5433,
+            port=5432,
             user='spiceadmin',
             password='spicepass123',
             database='spicedb'

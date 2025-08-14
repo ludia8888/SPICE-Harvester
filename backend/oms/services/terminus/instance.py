@@ -36,8 +36,7 @@ class InstanceService(BaseTerminusService):
         """
         특정 클래스의 인스턴스 목록을 효율적으로 조회
         
-        N+1 Query 문제를 방지하기 위해 CONSTRUCT 쿼리를 사용하여
-        완전히 조립된 인스턴스 객체들을 반환합니다.
+        TerminusDB Document API를 사용하여 인스턴스를 조회합니다.
         
         Args:
             db_name: 데이터베이스 이름
@@ -52,97 +51,84 @@ class InstanceService(BaseTerminusService):
         try:
             await self.db_service.ensure_db_exists(db_name)
             
-            # CONSTRUCT 쿼리로 한 번에 모든 데이터 가져오기
+            # Document API를 사용하여 인스턴스 조회
+            endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
+            params = {
+                "type": class_id,
+                "graph_type": "instance",
+                "count": limit,
+                "skip": offset
+            }
+            
+            # 검색어가 있는 경우 필터 추가 (TerminusDB는 query 파라미터 지원)
             if search:
-                # 검색어가 있는 경우
-                search_escaped = search.replace('"', '\\"').replace("'", "\\'")
-                sparql_query = f"""
-                CONSTRUCT {{
-                    ?instance ?property ?value .
-                }}
-                WHERE {{
-                    ?instance a <{class_id}> .
-                    ?instance ?property ?value .
-                    FILTER(
-                        isLiteral(?value) && 
-                        regex(str(?value), "{search_escaped}", "i")
-                    )
-                }}
-                LIMIT {limit}
-                OFFSET {offset}
-                """
-            else:
-                # 전체 조회
-                sparql_query = f"""
-                CONSTRUCT {{
-                    ?instance ?property ?value .
-                }}
-                WHERE {{
-                    ?instance a <{class_id}> .
-                    ?instance ?property ?value .
-                }}
-                LIMIT {limit}
-                OFFSET {offset}
-                """
+                params["query"] = search
             
-            # SPARQL 실행
-            endpoint = f"/api/sparql/{self.connection_info.account}/{db_name}"
-            result = await self._make_request("POST", endpoint, {"query": sparql_query})
+            # Document API 호출
+            result = await self._make_request("GET", endpoint, params=params)
             
-            # 결과를 인스턴스별로 그룹화
-            instances_map = {}
+            # Handle empty or text responses
+            if result is None or result == "" or (isinstance(result, str) and not result.strip()):
+                logger.info(f"No instances found for class {class_id} in database {db_name}")
+                return {
+                    "instances": [],
+                    "total": 0,
+                    "limit": limit,
+                    "offset": offset
+                }
             
+            # Try to parse if it's a string that looks like JSON
+            if isinstance(result, str):
+                try:
+                    import json
+                    result = json.loads(result)
+                except json.JSONDecodeError:
+                    logger.warning(f"Received non-JSON response: {result[:100]}")
+                    return {
+                        "instances": [],
+                        "total": 0,
+                        "limit": limit,
+                        "offset": offset
+                    }
+            
+            # 결과 처리
+            instances = []
             if isinstance(result, list):
-                for triple in result:
-                    subject = triple.get("subject", triple.get("@subject"))
-                    predicate = triple.get("predicate", triple.get("@predicate"))
-                    obj = triple.get("object", triple.get("@object"))
+                # 결과가 리스트인 경우 (여러 문서)
+                instances = result
+            elif isinstance(result, dict):
+                # 결과가 단일 문서인 경우
+                if "@id" in result:
+                    instances = [result]
+                else:
+                    # 페이징된 결과일 수 있음
+                    instances = result.get("documents", [])
+            
+            # 인스턴스 정리 (불필요한 메타데이터 제거)
+            cleaned_instances = []
+            for inst in instances:
+                if isinstance(inst, dict):
+                    # @id에서 인스턴스 ID 추출
+                    if "@id" in inst:
+                        instance_id = inst["@id"].split("/")[-1] if "/" in inst["@id"] else inst["@id"]
+                        inst["instance_id"] = instance_id
                     
-                    if subject and predicate and obj:
-                        # 인스턴스 ID 추출
-                        instance_id = subject.split("/")[-1] if "/" in subject else subject
-                        
-                        if instance_id not in instances_map:
-                            instances_map[instance_id] = {
-                                "instance_id": instance_id,
-                                "class_id": class_id,
-                                "@type": class_id
-                            }
-                        
-                        # 속성 이름 추출
-                        prop_name = predicate.split("/")[-1] if "/" in predicate else predicate
-                        prop_name = prop_name.split("#")[-1] if "#" in prop_name else prop_name
-                        
-                        # rdf:type은 이미 처리했으므로 스킵
-                        if prop_name not in ["type", "rdf:type", "@type"]:
-                            # 값 처리
-                            if isinstance(obj, dict):
-                                value = obj.get("@value", obj.get("value", obj))
-                            else:
-                                value = obj
-                            
-                            instances_map[instance_id][prop_name] = value
+                    # class_id 확인/추가
+                    if "@type" not in inst:
+                        inst["@type"] = class_id
+                    inst["class_id"] = class_id
+                    
+                    cleaned_instances.append(inst)
             
-            # 리스트로 변환
-            instances = list(instances_map.values())
-            
-            # 총 개수 조회 (별도 COUNT 쿼리)
-            count_query = f"""
-            SELECT (COUNT(DISTINCT ?instance) as ?count)
-            WHERE {{
-                ?instance a <{class_id}> .
-            }}
-            """
-            count_result = await self._make_request("POST", endpoint, {"query": count_query})
-            
-            total_count = 0
-            if isinstance(count_result, dict) and "results" in count_result:
-                bindings = count_result.get("results", {}).get("bindings", [])
-                if bindings and "count" in bindings[0]:
-                    total_count = int(bindings[0]["count"]["value"])
+            # 총 개수 조회 (Document API는 별도의 count 엔드포인트가 없으므로 추정)
+            # 실제 구현에서는 더 정확한 카운트를 위해 별도 쿼리나 메타데이터 사용
+            total_count = len(cleaned_instances)
+            if len(cleaned_instances) == limit:
+                # 더 많은 결과가 있을 수 있음
+                total_count = offset + limit + 1  # 최소 추정치
             
             return {
-                "instances": instances,
+                "instances": cleaned_instances,
                 "total": total_count
             }
             
@@ -193,8 +179,8 @@ class InstanceService(BaseTerminusService):
                 }}
                 """
             
-            # SPARQL 실행
-            endpoint = f"/api/sparql/{self.connection_info.account}/{db_name}"
+            # WOQL 실행 (TerminusDB는 SPARQL이 아닌 WOQL 사용)
+            endpoint = f"/api/woql/{self.connection_info.account}/{db_name}"
             result = await self._make_request("POST", endpoint, {"query": sparql_query})
             
             if not result:
@@ -259,8 +245,8 @@ class InstanceService(BaseTerminusService):
             }}
             """
             
-            # SPARQL 실행
-            endpoint = f"/api/sparql/{self.connection_info.account}/{db_name}"
+            # WOQL 실행 (TerminusDB는 SPARQL이 아닌 WOQL 사용)
+            endpoint = f"/api/woql/{self.connection_info.account}/{db_name}"
             result = await self._make_request("POST", endpoint, {"query": sparql_query})
             
             # 결과에서 count 추출

@@ -10,7 +10,7 @@ PostgreSQL is NOT an event store!
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 from shared.utils.logging import get_logger
@@ -63,7 +63,7 @@ class CorrectedCommandHandler:
             aggregate_type=f"{database_name}.{class_name}",
             aggregate_id=aggregate_id,
             aggregate_version=current_version + 1,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             actor=actor,
             payload={
                 "database_name": database_name,
@@ -117,7 +117,7 @@ class CorrectedCommandHandler:
             aggregate_type=aggregate_type,
             aggregate_id=instance_id,
             aggregate_version=current_version + 1,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             actor=actor,
             payload={
                 "database_name": database_name,
@@ -161,12 +161,12 @@ class CorrectedCommandHandler:
             aggregate_type=aggregate_type,
             aggregate_id=instance_id,
             aggregate_version=current_version + 1,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             actor=actor,
             payload={
                 "database_name": database_name,
                 "class_name": class_name,
-                "deleted_at": datetime.utcnow().isoformat()
+                "deleted_at": datetime.now(timezone.utc).isoformat()
             }
         )
         

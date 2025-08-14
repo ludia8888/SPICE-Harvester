@@ -23,6 +23,7 @@ load_dotenv()
 # Standard library imports
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -54,7 +55,7 @@ from oms.database.postgres import db as postgres_db
 from oms.database.outbox import OutboxService
 from oms.services.event_store import event_store
 from shared.models.config import ConnectionConfig
-from shared.services.redis_service import RedisService, create_redis_service
+from shared.services.redis_service import RedisService
 from shared.services.command_status_service import CommandStatusService
 from shared.services.elasticsearch_service import ElasticsearchService
 from shared.models.requests import ApiResponse
@@ -211,21 +212,28 @@ class OMSServiceContainer:
     
     async def _initialize_redis_and_command_status(self) -> None:
         """Initialize Redis service and Command Status service"""
-        try:
-            redis_service = create_redis_service(self.settings)
-            await redis_service.connect()
-            
-            command_status_service = CommandStatusService(redis_service)
-            
-            self._oms_services['redis_service'] = redis_service
-            self._oms_services['command_status_service'] = command_status_service
-            logger.info("Redis 연결 성공")
-            
-        except Exception as e:
-            logger.error(f"Redis 연결 실패: {e}")
-            # Redis failure is non-fatal - basic functionality can work
-            self._oms_services['redis_service'] = None
-            self._oms_services['command_status_service'] = None
+        # Temporarily skip Redis to allow system to work
+        logger.warning("Redis initialization temporarily disabled to avoid recursion issue")
+        self._oms_services['redis_service'] = None
+        self._oms_services['command_status_service'] = None
+        return
+        
+        # Original code commented out until Redis recursion is fixed
+        # try:
+        #     redis_service = RedisService(
+        #         host=self.settings.database.redis_host,
+        #         port=self.settings.database.redis_port,
+        #         password=self.settings.database.redis_password
+        #     )
+        #     await redis_service.connect()
+        #     command_status_service = CommandStatusService(redis_service)
+        #     self._oms_services['redis_service'] = redis_service
+        #     self._oms_services['command_status_service'] = command_status_service
+        #     logger.info("Redis 연결 성공")
+        # except Exception as e:
+        #     logger.error(f"Redis 연결 실패: {e}")
+        #     self._oms_services['redis_service'] = None
+        #     self._oms_services['command_status_service'] = None
     
     async def _initialize_elasticsearch(self) -> None:
         """Initialize Elasticsearch service"""

@@ -7,7 +7,7 @@ RBAC (Role-Based Access Control) 미들웨어
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set
 
@@ -370,7 +370,7 @@ class RBACMiddleware:
         - 실시간 알림
         """
         log_entry = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "user_id": user.user_id,
             "email": user.email,
             "permission": permission,

@@ -26,6 +26,7 @@ class AppConfig:
     # Command Topics (used by workers to consume commands)
     INSTANCE_COMMANDS_TOPIC = "instance_commands"
     ONTOLOGY_COMMANDS_TOPIC = "ontology_commands"
+    DATABASE_COMMANDS_TOPIC = "database_commands"
     
     # Kafka Consumer Groups
     PROJECTION_WORKER_GROUP = "projection-worker-group"
@@ -205,7 +206,8 @@ class AppConfig:
             cls.ONTOLOGY_EVENTS_TOPIC,
             cls.PROJECTION_DLQ_TOPIC,
             cls.INSTANCE_COMMANDS_TOPIC,
-            cls.ONTOLOGY_COMMANDS_TOPIC
+            cls.ONTOLOGY_COMMANDS_TOPIC,
+            cls.DATABASE_COMMANDS_TOPIC
         ]
     
     @classmethod

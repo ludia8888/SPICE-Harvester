@@ -4,7 +4,7 @@ OMS 비동기 인스턴스 라우터 - Command Pattern 기반
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
@@ -68,7 +68,7 @@ async def create_instance_async(
     class_id: str = Depends(ValidatedClassId),
     request: InstanceCreateRequest = ...,
     outbox_service: Optional[OutboxService] = OutboxServiceDep,
-    command_status_service: CommandStatusService = CommandStatusServiceDep,
+    command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
     user_id: Optional[str] = None,
 ):
     """
@@ -90,7 +90,7 @@ async def create_instance_async(
             metadata={
                 **request.metadata,
                 "user_id": user_id,
-                "created_at": datetime.utcnow().isoformat()
+                "created_at": datetime.now(timezone.utc).isoformat()
             },
             created_by=user_id
         )
@@ -113,19 +113,22 @@ async def create_instance_async(
                 logger.info(f"Migration result: {migration_result['migration_mode']} - "
                           f"Storage: {', '.join(migration_result['storage'])}")
         
-        # Redis에 상태 저장
-        await command_status_service.set_command_status(
-            command_id=str(command.command_id),
-            status=CommandStatus.PENDING,
-            metadata={
-                "command_type": command.command_type,
-                "db_name": db_name,
-                "class_id": class_id,
-                "aggregate_id": command.aggregate_id,
-                "created_at": command.created_at.isoformat(),
-                "created_by": user_id
-            }
-        )
+        # Redis에 상태 저장 (if available)
+        if command_status_service:
+            await command_status_service.set_command_status(
+                command_id=str(command.command_id),
+                status=CommandStatus.PENDING,
+                metadata={
+                    "command_type": command.command_type,
+                    "db_name": db_name,
+                    "class_id": class_id,
+                    "aggregate_id": command.aggregate_id,
+                    "created_at": command.created_at.isoformat(),
+                    "created_by": user_id
+                }
+            )
+        else:
+            logger.warning(f"Command status tracking disabled for command {command.command_id}")
         
         # 응답
         return CommandResult(
@@ -159,7 +162,7 @@ async def update_instance_async(
     instance_id: str = ...,
     request: InstanceUpdateRequest = ...,
     outbox_service: Optional[OutboxService] = OutboxServiceDep,
-    command_status_service: CommandStatusService = CommandStatusServiceDep,
+    command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
     user_id: Optional[str] = None,
 ):
     """
@@ -180,7 +183,7 @@ async def update_instance_async(
             metadata={
                 **request.metadata,
                 "user_id": user_id,
-                "updated_at": datetime.utcnow().isoformat()
+                "updated_at": datetime.now(timezone.utc).isoformat()
             },
             created_by=user_id
         )
@@ -211,7 +214,7 @@ async def update_instance_async(
                 "class_id": class_id,
                 "instance_id": instance_id,
                 "aggregate_id": command.aggregate_id,
-                "updated_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
                 "updated_by": user_id
             }
         )
@@ -247,7 +250,7 @@ async def delete_instance_async(
     class_id: str = Depends(ValidatedClassId),
     instance_id: str = ...,
     outbox_service: Optional[OutboxService] = OutboxServiceDep,
-    command_status_service: CommandStatusService = CommandStatusServiceDep,
+    command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
     user_id: Optional[str] = None,
 ):
     """
@@ -266,7 +269,7 @@ async def delete_instance_async(
             payload={},  # 삭제는 payload 필요 없음
             metadata={
                 "user_id": user_id,
-                "deleted_at": datetime.utcnow().isoformat()
+                "deleted_at": datetime.now(timezone.utc).isoformat()
             },
             created_by=user_id
         )
@@ -297,7 +300,7 @@ async def delete_instance_async(
                 "class_id": class_id,
                 "instance_id": instance_id,
                 "aggregate_id": command.aggregate_id,
-                "deleted_at": datetime.utcnow().isoformat(),
+                "deleted_at": datetime.now(timezone.utc).isoformat(),
                 "deleted_by": user_id
             }
         )
@@ -334,7 +337,7 @@ async def bulk_create_instances_async(
     request: BulkInstanceCreateRequest = ...,
     background_tasks: BackgroundTasks = BackgroundTasks(),
     outbox_service: Optional[OutboxService] = OutboxServiceDep,
-    command_status_service: CommandStatusService = CommandStatusServiceDep,
+    command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
     user_id: Optional[str] = None,
 ):
     """
@@ -359,7 +362,7 @@ async def bulk_create_instances_async(
             metadata={
                 **request.metadata,
                 "user_id": user_id,
-                "created_at": datetime.utcnow().isoformat()
+                "created_at": datetime.now(timezone.utc).isoformat()
             },
             created_by=user_id
         )
@@ -434,7 +437,7 @@ async def bulk_create_instances_async(
 async def get_instance_command_status(
     db_name: str = Depends(ensure_database_exists),
     command_id: str = ...,
-    command_status_service: CommandStatusService = CommandStatusServiceDep,
+    command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
 ):
     """
     인스턴스 명령의 상태 조회
@@ -522,7 +525,7 @@ async def bulk_create_instances_with_tracking(
     request: BulkInstanceCreateRequest = ...,
     background_tasks: BackgroundTasks = BackgroundTasks(),
     outbox_service: Optional[OutboxService] = OutboxServiceDep,
-    command_status_service: CommandStatusService = CommandStatusServiceDep,
+    command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
     user_id: Optional[str] = None,
 ):
     """
@@ -587,7 +590,7 @@ async def _process_bulk_create_in_background(
             metadata={
                 **metadata,
                 "user_id": user_id,
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
                 "background_task_id": task_id
             },
             created_by=user_id

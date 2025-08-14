@@ -165,12 +165,14 @@ class BaseTerminusService:
         
         # Only add auth if credentials are configured
         logger.debug(f"Auth check: user={self.connection_info.user}, has_key={bool(self.connection_info.key)}, not_anonymous={self.connection_info.user != 'anonymous'}")
-        if self.connection_info.user and self.connection_info.key and self.connection_info.user != "anonymous":
+        # TerminusDB allows empty password for admin user
+        # Check if user is set and not anonymous (key can be empty string)
+        if self.connection_info.user and self.connection_info.user != "anonymous":
             auth_token = await self._authenticate()
             request_headers["Authorization"] = auth_token
-            logger.debug("Added Authorization header")
+            logger.debug(f"Added Authorization header for user: {self.connection_info.user}")
         else:
-            logger.debug("Skipping authentication")
+            logger.debug("Skipping authentication - using anonymous access")
         if headers:
             request_headers.update(headers)
         

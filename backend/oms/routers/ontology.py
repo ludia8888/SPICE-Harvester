@@ -705,10 +705,13 @@ async def create_ontology_with_advanced_relationships(
         # 데이터베이스 존재 여부 확인
         await _ensure_database_exists(db_name, terminus)
 
+        # Convert dict to OntologyBase object
+        ontology_obj = OntologyBase(**ontology_data)
+        
         # 🔥 고급 관계 관리 기능으로 온톨로지 생성
         result = await terminus.create_ontology_with_advanced_relationships(
             db_name=db_name,
-            ontology_data=ontology_data,
+            ontology_data=ontology_obj,
             auto_generate_inverse=auto_generate_inverse,
             validate_relationships=validate_relationships,
             check_circular_references=check_circular_references,

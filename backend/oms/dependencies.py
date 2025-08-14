@@ -196,24 +196,42 @@ class OMSDependencyProvider:
         
         This replaces the global command_status_service variable and get_command_status_service() function.
         """
-        # Register CommandStatusService factory if not already registered
-        if not container.has(CommandStatusService):
-            async def create_command_status_service_async(settings: ApplicationSettings) -> CommandStatusService:
-                # CommandStatusService requires Redis service - use async access
-                redis_service = await container.get(RedisService)
-                return CommandStatusService(redis_service)
-            
-            # For CommandStatusService, we need to handle async factory creation differently
-            # since the factory itself needs async operations
-            pass  # We'll create it inline below
+        import logging
+        logger = logging.getLogger(__name__)
         
         try:
             # Check if already created
-            if container.is_created(CommandStatusService):
+            if container.has(CommandStatusService) and container.is_created(CommandStatusService):
                 return await container.get(CommandStatusService)
             
-            # Create CommandStatusService with Redis dependency
-            redis_service = await container.get(RedisService)
+            # Try to get Redis service directly from shared container
+            redis_service = None
+            try:
+                # First try from container
+                if container.has(RedisService):
+                    redis_service = await container.get(RedisService)
+            except Exception as e:
+                logger.warning(f"Could not get Redis from container: {e}")
+            
+            # If Redis not available, try direct connection
+            if redis_service is None:
+                try:
+                    from shared.services.redis_service import RedisService as RedisServiceClass
+                    redis_service = RedisServiceClass()
+                    if not await redis_service.connect():
+                        logger.warning("Redis connection failed")
+                        redis_service = None
+                except Exception as e:
+                    logger.warning(f"Direct Redis connection failed: {e}")
+                    redis_service = None
+            
+            if redis_service is None:
+                # If Redis is not available, return None
+                # This allows the system to continue without command status tracking
+                logger.warning("Redis service not available, command status tracking disabled")
+                return None
+            
+            # Create command status service
             command_status_service = CommandStatusService(redis_service)
             
             # Register the created instance
@@ -222,10 +240,9 @@ class OMSDependencyProvider:
             return command_status_service
             
         except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Command 상태 추적 서비스가 초기화되지 않았습니다: {str(e)}",
-            )
+            logger.error(f"Failed to get command status service: {e}")
+            # Don't raise HTTPException, just return None to allow system to continue
+            return None
 
 
 # Type-safe dependency annotations for cleaner injection

@@ -74,13 +74,17 @@ async def get_class_instances(
         
         logger.info(f"Getting instances for class {class_id} in database {db_name}")
         
-        # 최적화된 인스턴스 조회 (검증된 search 사용)
+        # 최적화된 인스턴스 조회 (검증된 search를 filter_conditions로 전달)
+        filter_conditions = None
+        if validated_search:
+            filter_conditions = {"search": validated_search}
+            
         result = await terminus.get_class_instances_optimized(
             db_name=db_name,
             class_id=class_id,
             limit=limit,
             offset=offset,
-            search=validated_search
+            filter_conditions=filter_conditions
         )
         
         return {
