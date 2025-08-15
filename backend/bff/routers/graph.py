@@ -90,7 +90,7 @@ async def get_graph_federation_service() -> GraphFederationServiceWOQL:
             server_url=terminus_url,
             user=os.getenv("TERMINUS_USER", "admin"),
             account=os.getenv("TERMINUS_ACCOUNT", "admin"),
-            key=os.getenv("TERMINUS_KEY", "admin")
+            key=os.getenv("TERMINUS_KEY", "spice123!")  # Fixed: correct password
         )
         
         terminus_service = AsyncTerminusService(connection_info)
@@ -258,6 +258,73 @@ async def execute_simple_graph_query(
         )
     except Exception as e:
         logger.error(f"Simple graph query failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Query failed: {str(e)}"
+        )
+
+
+@router.post("/graph-query/{db_name}/multi-hop", response_model=Dict[str, Any])
+async def execute_multi_hop_query(
+    db_name: str,
+    query: Dict[str, Any],
+    request: Request,
+    graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service)
+):
+    """
+    Execute multi-hop graph query with Federation
+    
+    Query format:
+    {
+        "start_class": "Product",
+        "hops": [("owned_by", "Client")],
+        "filters": {"category": "Software"},
+        "include_documents": true
+    }
+    """
+    try:
+        # Validate database name
+        db_name = validate_db_name(db_name)
+        
+        start_class = query.get("start_class")
+        hops = query.get("hops", [])
+        filters = query.get("filters", {})
+        include_documents = query.get("include_documents", True)
+        include_audit = query.get("include_audit", False)
+        limit = query.get("limit", 100)
+        
+        if not start_class:
+            raise ValueError("start_class is required")
+        
+        logger.info(f"🚀 Multi-hop query: {start_class} -> {hops}")
+        
+        # Convert hop list to proper format
+        hop_tuples = [(h[0], h[1]) for h in hops] if hops else []
+        
+        # Execute multi-hop query
+        result = await graph_service.multi_hop_query(
+            db_name=db_name,
+            start_class=start_class,
+            hops=hop_tuples,
+            filters=filters,
+            limit=limit,
+            include_documents=include_documents,
+            include_audit=include_audit
+        )
+        
+        return {
+            "status": "success",
+            "data": result
+        }
+        
+    except ValueError as e:
+        logger.error(f"Invalid multi-hop query: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid query: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Multi-hop query failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Query failed: {str(e)}"

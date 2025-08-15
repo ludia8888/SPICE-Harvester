@@ -267,25 +267,38 @@ class StrictPalantirInstanceWorker:
             # Get ontology to identify relationship fields
             ontology = await self.terminus_service.get_ontology(db_name, class_id)
             
-            if ontology and 'relationships' in ontology:
-                for rel in ontology['relationships']:
-                    field_name = rel.get('predicate') or rel.get('name')
-                    if field_name and field_name in payload:
-                        value = payload[field_name]
-                        # Only include if it's an @id reference
-                        if isinstance(value, str) and '/' in value:
-                            relationships[field_name] = value
-                            logger.info(f"  📎 Found relationship: {field_name} → {value}")
+            if ontology:
+                # Check for relationships in OMS format (has 'relationships' key)
+                if 'relationships' in ontology:
+                    for rel in ontology['relationships']:
+                        field_name = rel.get('predicate') or rel.get('name')
+                        if field_name and field_name in payload:
+                            value = payload[field_name]
+                            # Only include if it's an @id reference
+                            if isinstance(value, str) and '/' in value:
+                                relationships[field_name] = value
+                                logger.info(f"  📎 Found relationship: {field_name} → {value}")
+                
+                # Also check for TerminusDB schema format (relationships as properties with @class)
+                else:
+                    for key, value_def in ontology.items():
+                        if isinstance(value_def, dict) and '@class' in value_def and key in payload:
+                            value = payload[key]
+                            # Only include if it's an @id reference
+                            if isinstance(value, str) and '/' in value:
+                                relationships[key] = value
+                                logger.info(f"  📎 Found relationship: {key} → {value}")
                             
         except Exception as e:
             logger.warning(f"Could not get ontology for relationship extraction: {e}")
             
-            # FALLBACK: Check for common relationship patterns
-            # But NEVER include non-reference fields
-            for key, value in payload.items():
-                if isinstance(value, str) and '/' in value:
-                    # Looks like an @id reference
-                    if any(pattern in key for pattern in ['_id', '_ref', 'owned_by', 'linked_to']):
+        # FALLBACK: Always check for common relationship patterns
+        # This ensures relationships work even without schema
+        for key, value in payload.items():
+            if isinstance(value, str) and '/' in value:
+                # Looks like an @id reference
+                if any(pattern in key for pattern in ['_by', '_to', '_ref', 'contains', 'linked']):
+                    if key not in relationships:  # Don't duplicate
                         relationships[key] = value
                         logger.info(f"  📎 Found relationship pattern: {key} → {value}")
                         
