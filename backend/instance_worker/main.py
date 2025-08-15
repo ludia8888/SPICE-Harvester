@@ -8,10 +8,11 @@ STRICT Palantir-style Instance Worker
 - Gradual migration from embedded payloads to S3 references
 
 PALANTIR RULES:
-1. Graph stores ONLY: @id, @type, instance_id, es_doc_id, s3_uri, created_at + relationships
+1. Graph stores ONLY: @id, @type, primary_key + relationships
 2. NO domain fields in graph (no name, price, description, etc.)
 3. ALL domain data goes to ES and S3 only
 4. Relationships are @id → @id references only
+5. ES stores terminus_id for Federation lookup
 """
 
 import asyncio
@@ -67,11 +68,8 @@ class StrictPalantirInstanceWorker:
         self.event_store_bucket = "spice-event-store"
         self.aioboto_session = None
         
-        # PALANTIR SYSTEM FIELDS (ONLY these go to graph)
-        self.SYSTEM_FIELDS = {
-            '@id', '@type', 'instance_id', 'es_doc_id', 
-            's3_uri', 'created_at', 'updated_at'
-        }
+        # PALANTIR PRINCIPLE: Only business concepts in graph
+        # No system fields or storage details
         
     async def initialize(self):
         """Initialize all connections"""
@@ -236,6 +234,28 @@ class StrictPalantirInstanceWorker:
         # Very old format - the message itself is the command
         return message
     
+    def get_primary_key_value(self, class_id: str, payload: Dict[str, Any]) -> str:
+        """
+        Extract primary key value dynamically based on class naming convention
+        Pattern: {class_name.lower()}_id
+        """
+        # Standard pattern: class_name_id (e.g., product_id, client_id, order_id)
+        expected_key = f"{class_id.lower()}_id"
+        
+        if expected_key in payload:
+            return str(payload[expected_key])
+        
+        # Fallback: Look for any field ending with _id
+        for key, value in payload.items():
+            if key.endswith('_id') and value:
+                logger.info(f"Using fallback primary key: {key} = {value}")
+                return str(value)
+        
+        # Last resort: Generate a unique ID
+        generated_id = f"{class_id.lower()}_{uuid4().hex[:8]}"
+        logger.warning(f"No primary key found for {class_id}, generated: {generated_id}")
+        return generated_id
+    
     async def extract_relationships(self, db_name: str, class_id: str, payload: Dict[str, Any]) -> Dict[str, str]:
         """
         Extract ONLY relationship fields from payload
@@ -279,10 +299,11 @@ class StrictPalantirInstanceWorker:
         command_id = command.get('command_id')
         payload = command.get('payload', {})
         
-        # Generate instance ID if not provided
-        instance_id = command.get('instance_id') or payload.get('instance_id')
-        if not instance_id:
-            instance_id = f"{class_id}_inst_{datetime.now().strftime('%H%M%S%f')[:8]}"
+        # Extract primary key value dynamically
+        primary_key_value = self.get_primary_key_value(class_id, payload)
+        
+        # Use primary key as instance ID for consistency
+        instance_id = primary_key_value
             
         logger.info(f"🔷 STRICT Palantir: Creating {class_id}/{instance_id}")
         
@@ -316,23 +337,16 @@ class StrictPalantirInstanceWorker:
             # 2. Extract ONLY relationships for graph
             relationships = await self.extract_relationships(db_name, class_id, payload)
             
-            # 3. Create STRICT lightweight node for TerminusDB
+            # 3. Create PURE lightweight node for TerminusDB (NO system fields!)
             graph_node = {
-                "@id": f"{class_id}/{instance_id}",
+                "@id": f"{class_id}/{primary_key_value}",
                 "@type": class_id,
-                "instance_id": instance_id,
-                "es_doc_id": instance_id,
-                "s3_uri": f"s3://{self.instance_bucket}/{s3_path}",
-                "created_at": datetime.now(timezone.utc).isoformat()
             }
             
-            # Include primary key field (e.g., product_id for Product)
-            # This is required by TerminusDB schema
-            if class_id == "Product" and "product_id" in payload:
-                graph_node["product_id"] = payload["product_id"]
-            elif class_id == "Client" and "client_id" in payload:
-                graph_node["client_id"] = payload["client_id"]
-            # Add more class-specific primary keys as needed
+            # Add the primary key field dynamically
+            primary_key_field = f"{class_id.lower()}_id"
+            if primary_key_field in payload:
+                graph_node[primary_key_field] = payload[primary_key_field]
             
             # Add ONLY relationships (no domain fields!)
             for rel_field, rel_target in relationships.items():
@@ -359,8 +373,12 @@ class StrictPalantirInstanceWorker:
                 # Continue anyway - ES is primary storage
             
             # 4. Index FULL data in Elasticsearch (PRIMARY storage)
+            # Add terminus_id for Federation (graph node reference)
+            terminus_id = f"{class_id}/{primary_key_value}"
+            
             es_doc = {
                 'instance_id': instance_id,
+                'terminus_id': terminus_id,  # For Federation with TerminusDB
                 'class_id': class_id,
                 'db_name': db_name,
                 'data': payload,  # ALL domain data here

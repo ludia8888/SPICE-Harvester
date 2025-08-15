@@ -90,12 +90,14 @@ class GraphFederationServiceWOQL:
             start_var = f"v:{start_class}"
             if start_var in binding:
                 node_id = binding[start_var]
+                # Use terminus_id for ES lookup (same as graph node ID)
+                terminus_id = node_id
                 nodes[node_id] = {
                     "id": node_id,
                     "type": start_class,
-                    "es_doc_id": self._extract_es_doc_id(node_id)
+                    "terminus_id": terminus_id
                 }
-                es_doc_ids.add(nodes[node_id]["es_doc_id"])
+                es_doc_ids.add(terminus_id)
             
             # Extract hop nodes and edges using the actual variable names
             prev_var = start_var
@@ -104,12 +106,14 @@ class GraphFederationServiceWOQL:
             for predicate, target_class, target_var in hop_variables:
                 if target_var in binding:
                     target_id = binding[target_var]
+                    # Use terminus_id for ES lookup (same as graph node ID)
+                    terminus_id = target_id
                     nodes[target_id] = {
                         "id": target_id,
                         "type": target_class,
-                        "es_doc_id": self._extract_es_doc_id(target_id)
+                        "terminus_id": terminus_id
                     }
-                    es_doc_ids.add(nodes[target_id]["es_doc_id"])
+                    es_doc_ids.add(terminus_id)
                     
                     # Add edge
                     if prev_id:
@@ -137,16 +141,16 @@ class GraphFederationServiceWOQL:
         # Step 6: Combine results
         result_nodes = []
         for node in nodes.values():
-            es_doc_id = node["es_doc_id"]
+            terminus_id = node["terminus_id"]
             node_data = {
                 "id": node["id"],
                 "type": node["type"],
-                "es_doc_id": es_doc_id
+                "terminus_id": terminus_id
             }
             if include_documents:
-                node_data["data"] = documents.get(es_doc_id)
+                node_data["data"] = documents.get(terminus_id)
             if include_audit:
-                node_data["audit"] = audit_records.get(es_doc_id)
+                node_data["audit"] = audit_records.get(terminus_id)
             result_nodes.append(node_data)
         
         return {
@@ -199,14 +203,14 @@ class GraphFederationServiceWOQL:
                     bindings = result.get("bindings", [])
                     logger.info(f"WOQL returned {len(bindings)} lightweight nodes")
                     
-                    # Extract es_doc_ids from the bindings
+                    # Extract terminus_ids from the bindings
                     for binding in bindings:
                         # Look for the instance variable (usually v:X)
                         for key, value in binding.items():
                             if key.startswith("v:") and isinstance(value, str):
-                                # Extract ID from format "Class/ID"
-                                es_doc_id = self._extract_es_doc_id(value)
-                                es_doc_ids.append(es_doc_id)
+                                # Use the full terminus_id (Class/ID format)
+                                terminus_id = value
+                                es_doc_ids.append(terminus_id)
                 else:
                     logger.warning(f"WOQL query failed: {response.status_code}")
         except Exception as e:
@@ -477,7 +481,7 @@ class GraphFederationServiceWOQL:
         db_name: str,
         doc_ids: List[str]
     ) -> Dict[str, Dict[str, Any]]:
-        """Fetch documents from Elasticsearch by IDs"""
+        """Fetch documents from Elasticsearch by terminus_ids"""
         
         if not doc_ids:
             return {}
@@ -487,23 +491,29 @@ class GraphFederationServiceWOQL:
         index_name = f"{db_name.replace('-', '_')}_instances"
         
         async with aiohttp.ClientSession() as session:
-            # Use ES _mget for bulk fetch
-            mget_body = {
-                "ids": doc_ids
+            # Use query to fetch by terminus_id field
+            query_body = {
+                "query": {
+                    "terms": {
+                        "terminus_id.keyword": doc_ids
+                    }
+                },
+                "size": len(doc_ids)
             }
             
             try:
                 async with session.post(
-                    f"{self.es_url}/{index_name}/_mget",
-                    json=mget_body,
+                    f"{self.es_url}/{index_name}/_search",
+                    json=query_body,
                     auth=self.es_auth
                 ) as resp:
                     if resp.status == 200:
                         result = await resp.json()
-                        for doc in result.get("docs", []):
-                            if doc.get("found"):
-                                doc_id = doc["_id"]
-                                documents[doc_id] = doc["_source"]
+                        for hit in result.get("hits", {}).get("hits", []):
+                            source = hit["_source"]
+                            terminus_id = source.get("terminus_id")
+                            if terminus_id:
+                                documents[terminus_id] = source
                     else:
                         logger.warning(f"Failed to fetch ES documents: {resp.status}")
             except Exception as e:
