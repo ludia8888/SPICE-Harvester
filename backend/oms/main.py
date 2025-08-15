@@ -73,7 +73,7 @@ from shared.observability.context_propagation import TraceContextMiddleware
 # Router imports
 from oms.routers import (
     branch, database, ontology, version,
-    instance_async, instance, pull_request
+    instance_async, instance, pull_request, query
 )
 
 # Monitoring and observability routers
@@ -692,6 +692,7 @@ if settings.is_development:
 # Router registration
 app.include_router(database.router, prefix="/api/v1", tags=["database"])
 app.include_router(ontology.router, prefix="/api/v1", tags=["ontology"])
+app.include_router(query.router, prefix="/api/v1", tags=["query"])
 app.include_router(instance_async.router, prefix="/api/v1", tags=["async-instance"])
 app.include_router(instance.router, prefix="/api/v1", tags=["instance"])
 app.include_router(branch.router, prefix="/api/v1", tags=["branch"])

@@ -94,11 +94,17 @@ class StrictPalantirInstanceWorker:
             'client.id': 'strict-palantir-instance-worker-producer',
         })
         
-        # Redis
+        # Redis (optional - don't fail if not available)
         settings = ApplicationSettings()
-        self.redis_service = create_redis_service(settings)
-        await self.redis_service.connect()
-        self.redis_client = self.redis_service.client
+        try:
+            self.redis_service = create_redis_service(settings)
+            await self.redis_service.connect()
+            self.redis_client = self.redis_service.client
+            logger.info("Redis connected successfully")
+        except Exception as e:
+            logger.warning(f"Redis connection failed, continuing without Redis: {e}")
+            self.redis_service = None
+            self.redis_client = None
         
         # S3/MinIO
         self.s3_client = boto3.client(
@@ -427,11 +433,12 @@ class StrictPalantirInstanceWorker:
         if result:
             status_data['result'] = result
             
-        await self.redis_client.setex(
-            status_key,
-            3600,  # 1 hour TTL
-            json.dumps(status_data)
-        )
+        if self.redis_client:
+            await self.redis_client.setex(
+                status_key,
+                3600,  # 1 hour TTL
+                json.dumps(status_data)
+            )
         
     async def run(self):
         """Main processing loop"""
