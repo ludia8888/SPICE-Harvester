@@ -15,6 +15,7 @@ from . import instance_async
 from . import websocket
 from . import tasks
 from . import admin
+from . import command_status
 from . import graph
 from . import lineage
 from . import audit
@@ -31,6 +32,7 @@ __all__ = [
     "websocket",
     "tasks",
     "admin",
+    "command_status",
     "graph",
     "lineage",
     "audit",

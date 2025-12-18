@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from shared.models.ontology import (
@@ -304,6 +305,7 @@ async def create_ontology(
                 event_data = result["data"]
                 class_id = event_data.get("ontology_id", class_id)
                 logger.info(f"Event Sourcing: ontology {class_id} creation accepted with command_id {event_data.get('command_id')}")
+                return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=result)
             # Direct mode 200 response
             elif "data" in result and result.get("status") == "success":
                 created_data = result["data"]
@@ -545,10 +547,13 @@ async def update_ontology(
         update_data["id"] = class_id
 
         # 온톨로지 업데이트
-        await terminus.update_class(db_name, class_id, update_data, expected_seq=expected_seq)
+        result = await terminus.update_class(db_name, class_id, update_data, expected_seq=expected_seq)
 
-        # 레이블 매핑 업데이트
+        # 레이블 매핑 업데이트 (BFF-local read model; update immediately on accept as well)
         await mapper.update_mappings(db_name, update_data)
+
+        if isinstance(result, dict) and result.get("status") == "accepted":
+            return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=result)
 
         return {
             "message": f"온톨로지 '{class_label}'이(가) 수정되었습니다",
@@ -556,16 +561,8 @@ async def update_ontology(
             "updated_fields": list(update_data.keys()),
         }
 
-    except HTTPException as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"온톨로지 '{e.ontology_id}'을(를) 찾을 수 없습니다",
-        )
-    except HTTPException as e:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"유효성 검증 실패: {e.message}",
-        )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to update ontology: {e}")
         raise HTTPException(
@@ -601,10 +598,13 @@ async def delete_ontology(
             class_id = class_label
 
         # 온톨로지 삭제
-        await terminus.delete_class(db_name, class_id, expected_seq=expected_seq)
+        result = await terminus.delete_class(db_name, class_id, expected_seq=expected_seq)
 
-        # 레이블 매핑 삭제
+        # 레이블 매핑 삭제 (BFF-local read model; delete immediately on accept as well)
         await mapper.remove_class(db_name, class_id)
+
+        if isinstance(result, dict) and result.get("status") == "accepted":
+            return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=result)
 
         return {"message": f"온톨로지 '{class_label}'이(가) 삭제되었습니다", "id": class_id}
 

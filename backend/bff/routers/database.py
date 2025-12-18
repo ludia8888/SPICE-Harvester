@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
+from fastapi.responses import JSONResponse
 
 # Modernized dependency injection imports
 from bff.dependencies import get_oms_client, OMSClientDep
@@ -67,6 +68,10 @@ async def create_database(request: DatabaseCreateRequest, oms: OMSClient = OMSCl
         logger.info(f"📡 BFF: Calling OMS to create database - URL: {oms.base_url}")
         result = await oms.create_database(request.name, request.description)
         logger.info(f"✅ BFF: OMS response received: {result}")
+
+        # Event Sourcing mode: pass through async contract (202 + command_id)
+        if isinstance(result, dict) and result.get("status") == "accepted":
+            return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=result)
 
         # 자동 커밋: 데이터베이스 생성 기록
         try:
@@ -130,7 +135,11 @@ async def delete_database(
             )
 
         # OMS를 통해 데이터베이스 삭제
-        await oms.delete_database(validated_db_name, expected_seq=expected_seq)
+        result = await oms.delete_database(validated_db_name, expected_seq=expected_seq)
+
+        # Event Sourcing mode: pass through async contract (202 + command_id)
+        if isinstance(result, dict) and result.get("status") == "accepted":
+            return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=result)
 
         # 자동 커밋: 데이터베이스 삭제 기록
         # 참고: 데이터베이스가 삭제되었으므로 메타데이터나 로그 시스템에 기록

@@ -93,7 +93,7 @@ from bff.services.oms_client import OMSClient
 from data_connector.google_sheets.service import GoogleSheetsService
 from bff.routers import (
     database, health, mapping, merge_conflict, ontology, query, 
-    instances, instance_async, websocket, tasks, admin, data_connector, graph, lineage, audit
+    instances, instance_async, websocket, tasks, admin, data_connector, command_status, graph, lineage, audit
 )
 
 # Monitoring and observability routers
@@ -762,6 +762,7 @@ app.include_router(health.router, prefix="/api/v1", tags=["health"])
 app.include_router(merge_conflict.router, prefix="/api/v1", tags=["merge-conflict"])
 app.include_router(instances.router, prefix="/api/v1", tags=["instances"])
 app.include_router(instance_async.router, prefix="/api/v1", tags=["async-instances"])
+app.include_router(command_status.router, prefix="/api/v1", tags=["command-status"])
 app.include_router(websocket.router, prefix="/api/v1", tags=["websocket"])
 app.include_router(tasks.router, prefix="/api/v1", tags=["background-tasks"])
 app.include_router(admin.router, prefix="/api/v1", tags=["admin"])
@@ -776,6 +777,7 @@ app.include_router(config_monitoring.router, prefix="/api/v1/config", tags=["con
 
 # Health endpoint at root for compatibility
 app.include_router(health.router, tags=["health"])
+app.include_router(websocket.router, tags=["websocket"])
 
 
 if __name__ == "__main__":
