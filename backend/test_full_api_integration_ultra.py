@@ -12,12 +12,13 @@
 """
 
 import asyncio
-import aiohttp
+from datetime import datetime
 import json
 import time
-from datetime import datetime
 
-async def test_full_api_integration():
+import aiohttp
+
+async def run_full_api_integration():
     print("🔥 THINK ULTRA: COMPLETE API INTEGRATION TEST")
     print("=" * 80)
     
@@ -528,10 +529,10 @@ async def test_full_api_integration():
         
         print("\n🎯 CONCLUSION: Full API integration working perfectly!")
 
-# Run the test
-print("\n🚀 Starting Full API Integration Test...")
-print("   This will test all service interactions via APIs only")
-print("   No direct bash commands or database manipulation")
-print("")
+if __name__ == "__main__":
+    print("\n🚀 Starting Full API Integration Test...")
+    print("   This will test all service interactions via APIs only")
+    print("   No direct bash commands or database manipulation")
+    print("")
 
-asyncio.run(test_full_api_integration())
+    asyncio.run(run_full_api_integration())

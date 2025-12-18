@@ -247,7 +247,17 @@ async def _ensure_database_exists(db_name: str, terminus: AsyncTerminusService):
 router = APIRouter(prefix="/database/{db_name}/ontology", tags=["Ontology Management"])
 
 
-@router.post("", response_model=OntologyResponse)
+@router.post(
+    "",
+    response_model=ApiResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        status.HTTP_202_ACCEPTED: {"model": ApiResponse, "description": "Event-sourcing mode (async)"},
+        status.HTTP_400_BAD_REQUEST: {"model": ApiResponse},
+        status.HTTP_404_NOT_FOUND: {"description": "Database not found"},
+        status.HTTP_409_CONFLICT: {"description": "OCC conflict"},
+    },
+)
 @rate_limit(**RateLimitPresets.WRITE)
 async def create_ontology(
     ontology_request: OntologyCreateRequest,  # Request body first (no default)
@@ -255,11 +265,9 @@ async def create_ontology(
     db_name: str = Path(..., description="Database name"),  # URL path parameter
     branch: str = Query("main", description="Target branch (default: main)"),
     terminus: AsyncTerminusService = TerminusServiceDep,
-    converter: JSONToJSONLDConverter = JSONLDConverterDep,
-    label_mapper=LabelMapperDep,
     event_store=EventStoreDep,
     command_status_service=CommandStatusServiceDep,
-) -> OntologyResponse:
+) -> ApiResponse:
     """내부 ID 기반 온톨로지 생성"""
     # 🔥 ULTRA DEBUG! OMS received data
     
@@ -400,49 +408,9 @@ async def create_ontology(
                 ).to_dict(),
             )
 
-        # 직접 생성 모드 (Event Sourcing 비활성화 시)
-        # TerminusDB에 직접 저장 (create_ontology 사용)
-        from shared.models.ontology import OntologyBase
-        ontology_data["label"] = label_i18n
-        ontology_data["description"] = description_i18n or None
-        ontology_obj = OntologyBase(**ontology_data)
-        result = await terminus.create_ontology(db_name, ontology_obj)
-
-        # 레이블 매핑 등록 (다국어 지원)
-        class_id = ontology_data.get("id")
-        if class_id:
-            try:
-                # 레이블 정보 추출 및 등록
-                await label_mapper.register_class(db_name, class_id, raw_label, raw_description)
-
-                # 속성 레이블 등록 (있는 경우)
-                properties = ontology_data.get("properties", {})
-                if isinstance(properties, dict):
-                    for prop_name, prop_info in properties.items():
-                        if isinstance(prop_info, dict) and "label" in prop_info:
-                            await label_mapper.register_property(
-                                db_name, class_id, prop_name, prop_info["label"]
-                            )
-
-                logger.info(f"Registered labels for ontology: {class_id}")
-            except Exception as e:
-                logger.warning(f"Failed to register labels for {class_id}: {e}")
-                # 레이블 등록 실패는 온톨로지 생성을 실패시키지 않음
-
-        # 생성된 온톨로지 데이터를 OntologyResponse 형식으로 직접 변환
-        return OntologyResponse(
-            id=ontology_data.get("id"),
-            label=label_i18n,
-            description=description_i18n or None,
-            properties=ontology_data.get("properties", []),
-            relationships=ontology_data.get("relationships", []),
-            parent_class=ontology_data.get("parent_class"),
-            abstract=ontology_data.get("abstract", False),
-            metadata={
-                "terminus_response": result,  # 원본 TerminusDB 응답 보존
-                "creation_timestamp": datetime.now(timezone.utc).isoformat(),
-                "mode": "direct"
-            },
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="ENABLE_EVENT_SOURCING=false is no longer supported for ontology writes.",
         )
 
     except SecurityViolationError as e:
@@ -791,7 +759,17 @@ async def get_ontology(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.put("/{class_id}", response_model=OntologyResponse)
+@router.put(
+    "/{class_id}",
+    response_model=ApiResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        status.HTTP_202_ACCEPTED: {"model": ApiResponse, "description": "Event-sourcing mode (async)"},
+        status.HTTP_400_BAD_REQUEST: {"model": ApiResponse},
+        status.HTTP_404_NOT_FOUND: {"description": "Ontology not found"},
+        status.HTTP_409_CONFLICT: {"description": "OCC conflict"},
+    },
+)
 async def update_ontology(
     ontology_data: OntologyUpdateRequest,
     request: Request,
@@ -800,10 +778,9 @@ async def update_ontology(
     branch: str = Query("main", description="Target branch (default: main)"),
     expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
     terminus: AsyncTerminusService = TerminusServiceDep,
-    converter: JSONToJSONLDConverter = JSONLDConverterDep,
     event_store=EventStoreDep,
     command_status_service=CommandStatusServiceDep,
-):
+) -> ApiResponse:
     """내부 ID 기반 온톨로지 업데이트"""
     try:
         enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
@@ -967,24 +944,10 @@ async def update_ontology(
                 ).to_dict(),
             )
 
-        # Direct update mode
-        from shared.models.ontology import OntologyBase
-
-        existing_dict = existing.model_dump() if hasattr(existing, "model_dump") else dict(existing)
-        merged_data = {**existing_dict, **sanitized_data}
-        merged_data["id"] = class_id  # ID는 변경 불가
-
-        # LocalizedText merge: allow partial updates like {"en": "..."} without dropping {"ko": "..."}.
-        for key in ("label", "description"):
-            incoming = sanitized_data.get(key)
-            existing_value = existing_dict.get(key)
-            if isinstance(existing_value, dict) and isinstance(incoming, dict):
-                merged = dict(existing_value)
-                merged.update(incoming)
-                merged_data[key] = merged
-
-        ontology_obj = OntologyBase(**merged_data)
-        return await terminus.update_ontology(db_name, class_id, ontology_obj, branch=branch)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="ENABLE_EVENT_SOURCING=false is no longer supported for ontology writes.",
+        )
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in update_ontology: {e}")
@@ -1112,14 +1075,10 @@ async def delete_ontology(
                 ).to_dict(),
             )
 
-        # Direct delete mode
-        success = await terminus.delete_ontology(db_name, class_id, branch=branch)
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"온톨로지 '{class_id}'를 찾을 수 없습니다",
-            )
-        return BaseResponse(status="success", message=f"온톨로지 '{class_id}'가 삭제되었습니다")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="ENABLE_EVENT_SOURCING=false is no longer supported for ontology writes.",
+        )
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in delete_ontology: {e}")
@@ -1220,16 +1179,30 @@ async def query_ontologies(
 # 🔥 THINK ULTRA! Enhanced Relationship Management Endpoints
 
 
-@router.post("/create-advanced", response_model=OntologyResponse)
+@router.post(
+    "/create-advanced",
+    response_model=ApiResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        status.HTTP_202_ACCEPTED: {"model": ApiResponse, "description": "Event-sourcing mode (async)"},
+        status.HTTP_400_BAD_REQUEST: {"model": ApiResponse},
+        status.HTTP_404_NOT_FOUND: {"description": "Database not found"},
+        status.HTTP_409_CONFLICT: {"description": "OCC conflict"},
+    },
+)
+@rate_limit(**RateLimitPresets.WRITE)
 async def create_ontology_with_advanced_relationships(
-    request: OntologyCreateRequest,
+    ontology_request: OntologyCreateRequest,
+    request: Request,
     db_name: str = Path(..., description="Database name"),
-    auto_generate_inverse: bool = True,
-    validate_relationships: bool = True,
-    check_circular_references: bool = True,
+    branch: str = Query("main", description="Target branch (default: main)"),
+    auto_generate_inverse: bool = Query(False, description="(Not implemented) Auto-generate inverse metadata"),
+    validate_relationships: bool = Query(True, description="Validate relationships against current schema"),
+    check_circular_references: bool = Query(True, description="Reject introducing critical schema cycles"),
     terminus: AsyncTerminusService = TerminusServiceDep,
-    label_mapper=LabelMapperDep,
-) -> OntologyResponse:
+    event_store=EventStoreDep,
+    command_status_service=CommandStatusServiceDep,
+) -> ApiResponse:
     """
     🔥 고급 관계 관리 기능을 포함한 온톨로지 생성
 
@@ -1240,76 +1213,144 @@ async def create_ontology_with_advanced_relationships(
     - 카디널리티 일관성 검증
     """
     try:
-        # 입력 데이터 보안 검증
+        if auto_generate_inverse:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail=(
+                    "auto_generate_inverse is not implemented yet. TerminusDB schema documents discard "
+                    "per-property custom metadata, so inverse metadata needs a dedicated projection store."
+                ),
+            )
+        enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
+        branch = validate_branch_name(branch)
+        lang = get_accept_language(request)
+
         db_name = validate_db_name(db_name)
+        if not await terminus.database_exists(db_name):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다"
+            )
 
-        # 요청 데이터를 dict로 변환
-        ontology_data = request.model_dump()
-
-        # 클래스 ID 검증
+        ontology_data = ontology_request.model_dump(mode="json")
         class_id = ontology_data.get("id")
         if class_id:
             ontology_data["id"] = validate_class_id(class_id)
 
-        # 데이터베이스 존재 여부 확인
-        await _ensure_database_exists(db_name, terminus)
+        if not ontology_data.get("id"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ontology ID is required")
 
-        # Convert dict to OntologyBase object
-        ontology_obj = OntologyBase(**ontology_data)
-        
-        # 🔥 고급 관계 관리 기능으로 온톨로지 생성
-        result = await terminus.create_ontology_with_advanced_relationships(
-            db_name=db_name,
-            ontology_data=ontology_obj,
-            auto_generate_inverse=auto_generate_inverse,
-            validate_relationships=validate_relationships,
-            check_circular_references=check_circular_references,
+        raw_label = ontology_data.get("label", ontology_data.get("rdfs:label", ontology_data.get("id")))
+        raw_description = ontology_data.get("description", ontology_data.get("rdfs:comment"))
+
+        label_i18n = coerce_localized_text(raw_label)
+        description_i18n = coerce_localized_text(raw_description) if raw_description is not None else {}
+
+        label_display = select_localized_text(label_i18n, lang=lang) or str(ontology_data.get("id") or "Unknown")
+
+        lint_report = lint_ontology_create(
+            class_id=str(ontology_data.get("id")),
+            label=label_display,
+            abstract=bool(ontology_data.get("abstract", False)),
+            properties=list(ontology_request.properties or []),
+            relationships=list(ontology_request.relationships or []),
+            config=OntologyLinterConfig.from_env(),
         )
+        if not lint_report.ok:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ApiResponse.error(
+                    message="온톨로지 스키마 검증에 실패했습니다",
+                    errors=[issue.message for issue in lint_report.errors],
+                ).to_dict()
+                | {"data": {"lint_report": lint_report.model_dump()}},
+            )
 
-        # 레이블 매핑 등록
-        if class_id:
-            try:
-                label_info = ontology_data.get("label", class_id)
-                description_info = ontology_data.get("description", "")
-                await label_mapper.register_class(db_name, class_id, label_info, description_info)
-                logger.info(f"Registered labels for advanced ontology: {class_id}")
-            except Exception as e:
-                logger.warning(f"Failed to register labels for {class_id}: {e}")
-
-        # 레이블을 간단한 문자열로 처리
-        label_data = ontology_data.get("label", class_id)
-        if isinstance(label_data, dict):
-            label = label_data.get("en") or label_data.get("ko") or list(label_data.values())[0] if label_data else class_id or "Unknown"
-        else:
-            label = str(label_data) if label_data else class_id or "Unknown"
-
-        # 설명을 간단한 문자열로 처리
-        description_data = ontology_data.get("description")
-        description = None
-        if description_data:
-            if isinstance(description_data, dict):
-                description = description_data.get("en") or description_data.get("ko") or list(description_data.values())[0] if description_data else None
-            else:
-                description = str(description_data)
-
-        # OntologyResponse 를 직접 생성
-        return OntologyResponse(
-            id=class_id,
-            label=label,
-            description=description,
-            properties=ontology_data.get("properties", []),
-            relationships=ontology_data.get("relationships", []),
-            parent_class=ontology_data.get("parent_class"),
-            abstract=ontology_data.get("abstract", False),
-            metadata={
-                "terminus_response": result,
-                "creation_timestamp": datetime.now(timezone.utc).isoformat(),
-                "advanced_features": {
-                    "auto_generate_inverse": auto_generate_inverse,
-                    "validate_relationships": validate_relationships,
-                    "check_circular_references": check_circular_references,
+        if enable_event_sourcing:
+            ontology_version = await _resolve_ontology_version(terminus, db_name=db_name, branch=branch)
+            command = OntologyCommand(
+                command_type=CommandType.CREATE_ONTOLOGY_CLASS,
+                aggregate_id=f"{db_name}:{branch}:{ontology_data.get('id')}",
+                db_name=db_name,
+                branch=branch,
+                expected_seq=0,
+                payload={
+                    "db_name": db_name,
+                    "branch": branch,
+                    "class_id": ontology_data.get("id"),
+                    "label": label_i18n,
+                    "description": description_i18n or None,
+                    "properties": ontology_data.get("properties", []),
+                    "relationships": ontology_data.get("relationships", []),
+                    "parent_class": ontology_data.get("parent_class"),
+                    "abstract": ontology_data.get("abstract", False),
+                    "advanced_options": {
+                        "auto_generate_inverse": bool(auto_generate_inverse),
+                        "validate_relationships": bool(validate_relationships),
+                        "check_circular_references": bool(check_circular_references),
+                    },
                 },
-            },
+                metadata={"source": "OMS", "user": "system", "ontology": ontology_version},
+                created_by=_extract_actor(request),
+            )
+
+            envelope = EventEnvelope.from_command(
+                command,
+                actor=_extract_actor(request) or "system",
+                kafka_topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC,
+                metadata={"service": "oms", "mode": "event_sourcing", "variant": "advanced"},
+            )
+            try:
+                await event_store.append_event(envelope)
+            except OptimisticConcurrencyError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "error": "optimistic_concurrency_conflict",
+                        "aggregate_id": e.aggregate_id,
+                        "expected_seq": e.expected_last_sequence,
+                        "actual_seq": e.actual_last_sequence,
+                    },
+                )
+
+            if command_status_service:
+                try:
+                    await command_status_service.set_command_status(
+                        command_id=str(command.command_id),
+                        status=CommandStatus.PENDING,
+                        metadata={
+                            "command_type": command.command_type,
+                            "aggregate_id": command.aggregate_id,
+                            "db_name": db_name,
+                            "branch": branch,
+                            "class_id": ontology_data.get("id"),
+                            "created_at": command.created_at.isoformat(),
+                            "created_by": command.created_by or "system",
+                            "advanced_options": command.payload.get("advanced_options"),
+                        },
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to persist command status (continuing without Redis): {e}")
+
+            return JSONResponse(
+                status_code=status.HTTP_202_ACCEPTED,
+                content=ApiResponse.accepted(
+                    message=f"온톨로지 '{ontology_data.get('id')}' 생성(advanced) 명령이 접수되었습니다",
+                    data={
+                        "command_id": str(command.command_id),
+                        "ontology_id": ontology_data.get("id"),
+                        "database": db_name,
+                        "branch": branch,
+                        "status": "processing",
+                        "mode": "event_sourcing",
+                        "advanced_options": command.payload.get("advanced_options"),
+                    },
+                ).to_dict(),
+            )
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="ENABLE_EVENT_SOURCING=false is no longer supported for ontology writes.",
         )
 
     except SecurityViolationError as e:

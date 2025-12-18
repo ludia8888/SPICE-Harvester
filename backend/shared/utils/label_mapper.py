@@ -227,7 +227,7 @@ class LabelMapper:
                                 label_text,
                                 lang,
                                 desc_text,
-                                datetime.now(timezone.utc).replace(tzinfo=None),
+                                datetime.now(timezone.utc).isoformat(),
                             ),
                         )
 
@@ -646,7 +646,7 @@ class LabelMapper:
                         property_id,
                         label_text,
                         lang,
-                        datetime.now(timezone.utc).replace(tzinfo=None),
+                        datetime.now(timezone.utc).isoformat(),
                     ),
                 )
 
@@ -678,7 +678,7 @@ class LabelMapper:
                         predicate,
                         label_text,
                         lang,
-                        datetime.now(timezone.utc).replace(tzinfo=None),
+                        datetime.now(timezone.utc).isoformat(),
                     ),
                 )
 

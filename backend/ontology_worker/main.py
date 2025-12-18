@@ -43,7 +43,6 @@ from shared.utils.ontology_version import build_ontology_version
 # Observability imports
 from shared.observability.tracing import get_tracing_service, trace_endpoint
 from shared.observability.metrics import get_metrics_collector
-from shared.observability.context_propagation import ContextPropagator
 
 # 로깅 설정
 logging.basicConfig(
@@ -76,7 +75,6 @@ class OntologyWorker:
         self.audit_store: Optional[AuditLogStore] = None
         self.tracing_service = None
         self.metrics_collector = None
-        self.context_propagator = ContextPropagator()
 
     @staticmethod
     def _coerce_commit_id(value: Any) -> Optional[str]:
@@ -163,14 +161,17 @@ class OntologyWorker:
             self.redis_service = None
             self.command_status_service = None
 
-        if self.enable_event_sourcing:
-            try:
-                self.event_store = EventStore()
-                await self.event_store.connect()
-                logger.info("✅ Event Store connected (domain events will be appended to S3/MinIO)")
-            except Exception as e:
-                logger.warning(f"⚠️ Event Store connection failed, falling back to direct Kafka publish: {e}")
-                self.event_store = None
+        # Event Sourcing is now mandatory for write-side correctness.
+        # Legacy "direct Kafka publish" paths are removed because they break SSoT.
+        if not self.enable_event_sourcing:
+            raise RuntimeError(
+                "ENABLE_EVENT_SOURCING=false is no longer supported. "
+                "Enable Event Sourcing and provide a reachable Event Store (MinIO/S3)."
+            )
+
+        self.event_store = EventStore()
+        await self.event_store.connect()
+        logger.info("✅ Event Store connected (domain events will be appended to S3/MinIO)")
 
         # Durable processed-events registry (idempotency + ordering guard)
         if self.enable_processed_event_registry:
@@ -300,9 +301,20 @@ class OntologyWorker:
             
             # Idempotent create: if it already exists, treat as success.
             try:
-                await self.terminus_service.create_ontology(
-                    db_name, ontology_obj, branch=branch
-                )  # Fixed: call create_ontology with OntologyBase
+                advanced = payload.get("advanced_options") or {}
+                if advanced:
+                    await self.terminus_service.create_ontology_with_advanced_relationships(
+                        db_name=db_name,
+                        ontology_data=ontology_obj,
+                        branch=branch,
+                        auto_generate_inverse=bool(advanced.get("auto_generate_inverse", False)),
+                        validate_relationships=bool(advanced.get("validate_relationships", True)),
+                        check_circular_references=bool(advanced.get("check_circular_references", True)),
+                    )
+                else:
+                    await self.terminus_service.create_ontology(
+                        db_name, ontology_obj, branch=branch
+                    )  # Fixed: call create_ontology with OntologyBase
             except Exception as e:
                 existing = await self.terminus_service.get_ontology(
                     db_name, payload.get("class_id"), branch=branch
@@ -832,25 +844,15 @@ class OntologyWorker:
 
     async def publish_event(self, event: BaseEvent) -> None:
         """이벤트 발행 (Event Sourcing: S3/MinIO -> EventPublisher -> Kafka)."""
-        if self.enable_event_sourcing and self.event_store:
-            envelope = self._to_domain_envelope(event, kafka_topic=AppConfig.ONTOLOGY_EVENTS_TOPIC)
-            await self.event_store.append_event(envelope)
-            logger.info(
-                f"✅ Stored domain event {envelope.event_id} [{envelope.event_type}] "
-                f"(seq={envelope.sequence_number}) for {envelope.aggregate_type}/{envelope.aggregate_id}"
-            )
-            return
+        if not self.event_store:
+            raise RuntimeError("Event Store not initialized (ENABLE_EVENT_SOURCING requires Event Store)")
 
-        # Fallback: direct Kafka publish (legacy)
-        partition_key = (
-            event.aggregate_id if hasattr(event, "aggregate_id") and event.aggregate_id else str(event.event_id)
+        envelope = self._to_domain_envelope(event, kafka_topic=AppConfig.ONTOLOGY_EVENTS_TOPIC)
+        await self.event_store.append_event(envelope)
+        logger.info(
+            f"✅ Stored domain event {envelope.event_id} [{envelope.event_type}] "
+            f"(seq={envelope.sequence_number}) for {envelope.aggregate_type}/{envelope.aggregate_id}"
         )
-        self.producer.produce(
-            topic=AppConfig.ONTOLOGY_EVENTS_TOPIC,
-            value=event.model_dump_json(),
-            key=partition_key.encode("utf-8"),
-        )
-        self.producer.flush()
         
     async def publish_failure_event(self, command_data: Dict[str, Any], error: str) -> None:
         """실패 이벤트 발행"""

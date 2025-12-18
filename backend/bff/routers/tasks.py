@@ -215,7 +215,7 @@ async def get_task_metrics(
     )
 
 
-@router.post("/{task_id}/retry")
+@router.post("/{task_id}/retry", include_in_schema=False)
 async def retry_task(
     task_id: str,
     task_manager: BackgroundTaskManager = Depends(get_task_manager)
@@ -239,14 +239,17 @@ async def retry_task(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Can only retry failed tasks. Current status: {task.status.value}"
         )
-    
-    # Note: Actual retry logic would need to be implemented
-    # This would involve re-creating the task with the same parameters
-    return {
-        "message": f"Task {task_id} retry initiated",
-        "original_task_id": task_id,
-        "note": "Retry functionality requires implementation based on task type"
-    }
+
+    # Enterprise correctness: do not pretend we can requeue a completed/failed in-process task.
+    # BackgroundTaskManager retries are implemented *during execution* (within the same process),
+    # but manual retry requires a durable task spec (callable + args) which is not persisted today.
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail=(
+            "Manual task retry is not supported. "
+            "Tasks auto-retry while running (in-process); after failure, create a new task/command instead."
+        ),
+    )
 
 
 @router.get("/{task_id}/result")

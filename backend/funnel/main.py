@@ -23,11 +23,6 @@ from shared.utils.app_logger import get_logger
 # Rate limiting middleware
 from shared.middleware.rate_limiter import rate_limit, RateLimitPresets, RateLimiter
 
-# Observability imports
-from shared.observability.tracing import get_tracing_service, trace_endpoint
-from shared.observability.metrics import get_metrics_collector, RequestMetricsMiddleware
-from shared.observability.context_propagation import TraceContextMiddleware
-
 logger = get_logger(__name__)
 
 
@@ -45,27 +40,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to initialize rate limiter: {e}")
     
-    # Initialize OpenTelemetry (no middleware addition here)
-    try:
-        tracing_service = get_tracing_service("funnel-service")
-        metrics_collector = get_metrics_collector("funnel-service")
-        
-        app.state.tracing_service = tracing_service
-        app.state.metrics_collector = metrics_collector
-        
-        logger.info("OpenTelemetry services initialized")
-    except Exception as e:
-        logger.error(f"Failed to initialize OpenTelemetry: {e}")
-    
     yield
     
     # Cleanup
     if hasattr(app.state, 'rate_limiter'):
         await app.state.rate_limiter.close()
     
-    if hasattr(app.state, 'tracing_service'):
-        app.state.tracing_service.shutdown()
-        
     logger.info("🔄 Funnel Service 종료")
 
 
@@ -79,18 +59,6 @@ app = create_fastapi_service(
 
 # 라우터 등록
 app.include_router(type_inference_router, prefix="/api/v1")
-
-# Initialize OpenTelemetry middleware (after app creation but before startup)
-# Temporarily disabled to ensure basic functionality works
-try:
-    tracing_service = get_tracing_service("funnel-service")
-    metrics_collector = get_metrics_collector("funnel-service")
-    
-    # Skip all middleware for now to ensure service functionality
-    logger.info("OpenTelemetry middleware temporarily disabled for stability")
-    
-except Exception as e:
-    logger.error(f"Failed to initialize OpenTelemetry middleware: {e}")
 
 
 # 기본 엔드포인트들

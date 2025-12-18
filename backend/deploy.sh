@@ -7,6 +7,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 echo "🚀 Starting SPICE System Deployment..."
 
@@ -28,6 +29,52 @@ fi
 # Parse command line arguments
 ACTION="${1:-up}"
 ENVIRONMENT="${2:-production}"
+
+# Load repo-root `.env` (port overrides, etc) but don't override explicit env vars.
+load_dotenv_defaults() {
+    local dotenv_path="$1"
+    [[ -f "$dotenv_path" ]] || return 0
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line#"${line%%[![:space:]]*}"}" # ltrim
+        line="${line%"${line##*[![:space:]]}"}" # rtrim
+
+        [[ -z "$line" ]] && continue
+        [[ "$line" == \#* ]] && continue
+
+        line="${line#export }"
+
+        if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+            local key="${BASH_REMATCH[1]}"
+            local value="${BASH_REMATCH[2]}"
+
+            if [[ "$value" =~ ^\"(.*)\"$ ]]; then
+                value="${BASH_REMATCH[1]}"
+            elif [[ "$value" =~ ^\'(.*)\'$ ]]; then
+                value="${BASH_REMATCH[1]}"
+            fi
+
+            if [[ -z "${!key:-}" ]]; then
+                export "$key=$value"
+            fi
+        fi
+    done <"$dotenv_path"
+}
+
+load_dotenv_defaults "$REPO_ROOT/.env"
+
+# Compose-aligned defaults (local host ports may be overridden by `.env`)
+POSTGRES_PORT_HOST="${POSTGRES_PORT_HOST:-5433}"
+REDIS_PORT_HOST="${REDIS_PORT_HOST:-6379}"
+ELASTICSEARCH_PORT_HOST="${ELASTICSEARCH_PORT_HOST:-9200}"
+MINIO_PORT_HOST="${MINIO_PORT_HOST:-9000}"
+MINIO_CONSOLE_PORT_HOST="${MINIO_CONSOLE_PORT_HOST:-9001}"
+KAFKA_PORT_HOST="${KAFKA_PORT_HOST:-9092}"
+
+OMS_URL="${OMS_BASE_URL:-http://localhost:8000}"
+BFF_URL="${BFF_BASE_URL:-http://localhost:8002}"
+FUNNEL_URL="${FUNNEL_BASE_URL:-http://localhost:8003}"
+MINIO_URL="${MINIO_ENDPOINT_URL:-http://localhost:${MINIO_PORT_HOST}}"
 
 # Compose file selection:
 # - Default: docker-compose.yml
@@ -80,20 +127,21 @@ start_services() {
 
     echo "⏳ Waiting for services to be healthy..."
     # Prefer explicit HTTP health checks (more reliable than parsing compose output).
-    wait_for_url "MinIO" "http://localhost:9000/minio/health/live" 90
-    wait_for_url "OMS" "http://localhost:8000/health" 120
-    wait_for_url "BFF" "http://localhost:8002/api/v1/health" 120
-    wait_for_url "Funnel" "http://localhost:8003/health" 120
-    wait_for_url "Elasticsearch" "http://localhost:9200/_cluster/health" 120 || true
+    wait_for_url "MinIO" "${MINIO_URL%/}/minio/health/live" 90
+    wait_for_url "OMS" "${OMS_URL%/}/health" 120
+    wait_for_url "BFF" "${BFF_URL%/}/api/v1/health" 120
+    wait_for_url "Funnel" "${FUNNEL_URL%/}/health" 120
+    wait_for_url "Elasticsearch" "http://localhost:${ELASTICSEARCH_PORT_HOST}/_cluster/health" 120 || true
     
     echo "✅ All services are running!"
     echo ""
     echo "📍 Service URLs:"
     echo "   - TerminusDB: http://localhost:6363"
-    echo "   - OMS API: http://localhost:8000"
-    echo "   - BFF API: http://localhost:8002"
-    echo "   - Funnel API: http://localhost:8003"
-    echo "   - MinIO Console: http://localhost:9001"
+    echo "   - OMS API: ${OMS_URL%/}"
+    echo "   - BFF API: ${BFF_URL%/}"
+    echo "   - Funnel API: ${FUNNEL_URL%/}"
+    echo "   - MinIO: ${MINIO_URL%/}"
+    echo "   - MinIO Console: http://localhost:${MINIO_CONSOLE_PORT_HOST}"
     echo ""
     echo "📊 View logs: ${COMPOSE_CMD[*]} -f $COMPOSE_FILE logs -f"
 }

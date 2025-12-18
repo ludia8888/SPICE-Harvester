@@ -29,7 +29,7 @@ def get_default_language() -> str:
     Returns:
         Default language code
     """
-    return "en"
+    return "ko"
 
 
 def is_supported_language(lang: str) -> bool:

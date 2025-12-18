@@ -5,11 +5,12 @@ Verify that TerminusDB has nodes for Federation to work
 """
 
 import asyncio
-import aiohttp
 import json
+
+import aiohttp
 import time
 
-async def test_lightweight_architecture():
+async def run_lightweight_architecture():
     print("🔥 TESTING LIGHTWEIGHT NODES ARCHITECTURE")
     print("=" * 70)
     
@@ -203,5 +204,6 @@ async def test_lightweight_architecture():
         print("   • Federation returns 0 = No nodes in TerminusDB to query")
         print("   • ES has duplicates = Multiple workers running")
 
-print("\n🚀 Starting lightweight nodes architecture test...")
-asyncio.run(test_lightweight_architecture())
+if __name__ == "__main__":
+    print("\n🚀 Starting lightweight nodes architecture test...")
+    asyncio.run(run_lightweight_architecture())

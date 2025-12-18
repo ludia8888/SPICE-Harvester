@@ -13,7 +13,7 @@ import hmac
 import logging
 import os
 from typing import Dict, Any, Optional, Literal
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
@@ -1112,20 +1112,48 @@ async def cleanup_old_replay_results(
     This helps manage Redis memory usage by removing expired results.
     """
     try:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=int(older_than_hours))
+
         # Scan for replay result keys
         pattern = "replay_result:*"
         keys = await redis_service.scan_keys(pattern)
         
         deleted_count = 0
+        skipped_count = 0
+        unreadable_count = 0
         for key in keys:
-            # Delete the key (results should have TTL anyway)
-            if await redis_service.delete(key):
-                deleted_count += 1
+            payload = await redis_service.get_json(key)
+            if not payload:
+                # Key exists but payload missing/unreadable; delete best-effort to reduce clutter.
+                if await redis_service.delete(key):
+                    deleted_count += 1
+                continue
+
+            replayed_at_raw = payload.get("replayed_at")
+            if not replayed_at_raw:
+                skipped_count += 1
+                continue
+
+            try:
+                replayed_at = datetime.fromisoformat(str(replayed_at_raw))
+                if replayed_at.tzinfo is None:
+                    replayed_at = replayed_at.replace(tzinfo=timezone.utc)
+                replayed_at = replayed_at.astimezone(timezone.utc)
+            except Exception:
+                unreadable_count += 1
+                continue
+
+            if replayed_at < cutoff:
+                if await redis_service.delete(key):
+                    deleted_count += 1
         
         return {
             "message": f"Cleaned up {deleted_count} old replay results",
             "scanned_keys": len(keys),
-            "deleted_keys": deleted_count
+            "deleted_keys": deleted_count,
+            "skipped_keys": skipped_count,
+            "unreadable_keys": unreadable_count,
+            "cutoff": cutoff.isoformat(),
         }
         
     except Exception as e:

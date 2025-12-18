@@ -347,6 +347,19 @@ def rate_limit(
                 strategy=strategy,
                 tokens=cost
             )
+
+            # Observability: record rate limit checks/rejections (best-effort).
+            metrics = getattr(getattr(request, "app", None), "state", None)
+            metrics = getattr(metrics, "metrics_collector", None) if metrics else None
+            if metrics is not None and hasattr(metrics, "record_rate_limit"):
+                try:
+                    metrics.record_rate_limit(
+                        endpoint=request.url.path,
+                        rejected=not allowed,
+                        strategy=strategy,
+                    )
+                except Exception:
+                    pass
             
             # Add rate limit headers
             headers = {

@@ -190,25 +190,23 @@ async def create_instance_async(
             created_by=user_id
         )
         
-        enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
-        if enable_event_sourcing:
-            try:
-                await _append_command_event(
-                    command,
-                    event_store=event_store,
-                    topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
-                    actor=user_id,
-                )
-            except OptimisticConcurrencyError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "error": "optimistic_concurrency_conflict",
-                        "aggregate_id": e.aggregate_id,
-                        "expected_seq": e.expected_last_sequence,
-                        "actual_seq": e.actual_last_sequence,
-                    },
-                )
+        try:
+            await _append_command_event(
+                command,
+                event_store=event_store,
+                topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
+                actor=user_id,
+            )
+        except OptimisticConcurrencyError as e:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "optimistic_concurrency_conflict",
+                    "aggregate_id": e.aggregate_id,
+                    "expected_seq": e.expected_last_sequence,
+                    "actual_seq": e.actual_last_sequence,
+                },
+            )
         
         # Redis에 상태 저장 (if available)
         if command_status_service:
@@ -306,25 +304,23 @@ async def update_instance_async(
             created_by=user_id
         )
         
-        enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
-        if enable_event_sourcing:
-            try:
-                await _append_command_event(
-                    command,
-                    event_store=event_store,
-                    topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
-                    actor=user_id,
-                )
-            except OptimisticConcurrencyError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "error": "optimistic_concurrency_conflict",
-                        "aggregate_id": e.aggregate_id,
-                        "expected_seq": e.expected_last_sequence,
-                        "actual_seq": e.actual_last_sequence,
-                    },
-                )
+        try:
+            await _append_command_event(
+                command,
+                event_store=event_store,
+                topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
+                actor=user_id,
+            )
+        except OptimisticConcurrencyError as e:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "optimistic_concurrency_conflict",
+                    "aggregate_id": e.aggregate_id,
+                    "expected_seq": e.expected_last_sequence,
+                    "actual_seq": e.actual_last_sequence,
+                },
+            )
         
         # Redis에 상태 저장
         if command_status_service:
@@ -415,25 +411,23 @@ async def delete_instance_async(
             created_by=user_id
         )
         
-        enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
-        if enable_event_sourcing:
-            try:
-                await _append_command_event(
-                    command,
-                    event_store=event_store,
-                    topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
-                    actor=user_id,
-                )
-            except OptimisticConcurrencyError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "error": "optimistic_concurrency_conflict",
-                        "aggregate_id": e.aggregate_id,
-                        "expected_seq": e.expected_last_sequence,
-                        "actual_seq": e.actual_last_sequence,
-                    },
-                )
+        try:
+            await _append_command_event(
+                command,
+                event_store=event_store,
+                topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
+                actor=user_id,
+            )
+        except OptimisticConcurrencyError as e:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "optimistic_concurrency_conflict",
+                    "aggregate_id": e.aggregate_id,
+                    "expected_seq": e.expected_last_sequence,
+                    "actual_seq": e.actual_last_sequence,
+                },
+            )
         
         # Redis에 상태 저장
         if command_status_service:
@@ -532,13 +526,22 @@ async def bulk_create_instances_async(
             created_by=user_id
         )
         
-        enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
-        if enable_event_sourcing:
+        try:
             await _append_command_event(
                 command,
                 event_store=event_store,
                 topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
                 actor=user_id,
+            )
+        except OptimisticConcurrencyError as e:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "optimistic_concurrency_conflict",
+                    "aggregate_id": e.aggregate_id,
+                    "expected_seq": e.expected_last_sequence,
+                    "actual_seq": e.actual_last_sequence,
+                },
             )
         
         # Redis에 상태 저장
@@ -807,14 +810,12 @@ async def _process_bulk_create_in_background(
             created_by=user_id
         )
         
-        enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
-        if enable_event_sourcing:
-            await _append_command_event(
-                command,
-                event_store=event_store,
-                topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
-                actor=user_id,
-            )
+        await _append_command_event(
+            command,
+            event_store=event_store,
+            topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
+            actor=user_id,
+        )
         
         # Update task status (best-effort; Redis may be unavailable)
         if command_status_service:

@@ -5,9 +5,10 @@
 
 import logging
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from bff.dependencies import get_oms_client
+from bff.services.oms_client import OMSClient
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ async def root():
 
 
 @router.get("/health")
-async def health_check():
+async def health_check(oms_client: OMSClient = Depends(get_oms_client)):
     """
     헬스체크 엔드포인트
 
@@ -38,8 +39,7 @@ async def health_check():
     from shared.models.requests import ApiResponse
 
     try:
-        # OMS 연결 확인
-        get_oms_client()
+        oms_connected = await oms_client.check_health()
 
         # 표준화된 헬스체크 응답 생성
         health_response = ApiResponse.health_check(
@@ -47,7 +47,7 @@ async def health_check():
         )
 
         # OMS 연결 상태 추가
-        health_response.data["oms_connected"] = True
+        health_response.data["oms_connected"] = bool(oms_connected)
 
         return health_response.to_dict()
 

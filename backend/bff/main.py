@@ -30,7 +30,6 @@ from typing import Any, Dict, Optional
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
-from fastapi.openapi.utils import get_openapi
 from confluent_kafka import Producer
 
 # Centralized configuration and dependency injection
@@ -80,11 +79,6 @@ from shared.services.websocket_service import get_notification_service
 
 # Rate limiting middleware
 from shared.middleware.rate_limiter import rate_limit, RateLimitPresets, RateLimiter
-
-# Observability imports
-from shared.observability.tracing import get_tracing_service, trace_endpoint
-from shared.observability.metrics import get_metrics_collector, RequestMetricsMiddleware
-from shared.observability.context_propagation import TraceContextMiddleware
 
 # BFF specific imports
 from bff.services.funnel_type_inference_adapter import FunnelHTTPTypeInferenceAdapter
@@ -140,14 +134,11 @@ class BFFServiceContainer:
         
         # 5. Initialize Rate Limiter
         await self._initialize_rate_limiter()
-        
-        # 6. Initialize Observability (Tracing & Metrics)
-        await self._initialize_observability()
-        
-        # 7. Initialize Kafka Producer
+
+        # 6. Initialize Kafka Producer
         await self._initialize_kafka_producer()
         
-        # 8. Initialize Google Sheets Service
+        # 7. Initialize Google Sheets Service
         await self._initialize_google_sheets_service()
         
         logger.info("BFF services initialized successfully")
@@ -234,26 +225,6 @@ class BFFServiceContainer:
             logger.error(f"Failed to initialize rate limiter: {e}")
             # Continue without rate limiting - service can still work
     
-    async def _initialize_observability(self) -> None:
-        """Initialize observability with OpenTelemetry"""
-        try:
-            logger.info("Initializing observability (OpenTelemetry)...")
-            
-            # Initialize tracing service
-            tracing_service = get_tracing_service("bff-service")
-            
-            # Initialize metrics collector
-            metrics_collector = get_metrics_collector("bff-service")
-            
-            self._bff_services['tracing_service'] = tracing_service
-            self._bff_services['metrics_collector'] = metrics_collector
-            
-            logger.info("Observability initialized successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize observability: {e}")
-            # Continue without observability - service can still work
-    
     async def _initialize_kafka_producer(self) -> None:
         """Initialize Kafka producer"""
         try:
@@ -324,13 +295,6 @@ class BFFServiceContainer:
         logger.info("Shutting down BFF services...")
         
         # Shutdown in reverse order of initialization
-        if 'tracing_service' in self._bff_services:
-            try:
-                self._bff_services['tracing_service'].shutdown()
-                logger.info("Tracing service shutdown")
-            except Exception as e:
-                logger.error(f"Error shutting down tracing: {e}")
-        
         if 'rate_limiter' in self._bff_services:
             try:
                 await self._bff_services['rate_limiter'].close()
@@ -445,14 +409,8 @@ async def lifespan(app: FastAPI):
         # 5. Store rate limiter in app state for decorators
         if 'rate_limiter' in _bff_container._bff_services:
             app.state.rate_limiter = _bff_container._bff_services['rate_limiter']
-        
-        # 6. Set up OpenTelemetry instrumentation (moved to after app startup)
-        if 'tracing_service' in _bff_container._bff_services:
-            tracing_service = _bff_container._bff_services['tracing_service']
-            # Note: FastAPI instrumentation moved to post-startup to avoid middleware timing issues
-            
-        # 7-8. Middleware setup moved to app creation time to avoid timing issues
-        
+
+        # 6. Middleware setup is handled during app creation (service_factory)
         logger.info("BFF Service startup completed successfully")
         
         yield
@@ -545,64 +503,6 @@ app.include_router(graph.router)  # Graph router has its own /api/v1 prefix
 # Monitoring and observability endpoints (modernized architecture)
 app.include_router(monitoring.router, prefix="/api/v1/monitoring")
 app.include_router(config_monitoring.router, prefix="/api/v1/config")
-
-
-def _install_openapi_language_contract(app: FastAPI) -> None:
-    """
-    FE contract: every BFF endpoint supports output language selection.
-
-    Implementation is handled via `shared.utils.language.get_accept_language()` (query param + header),
-    but we also patch OpenAPI so frontend devs can discover the contract in Swagger.
-    """
-
-    def custom_openapi():
-        if app.openapi_schema:
-            return app.openapi_schema
-
-        schema = get_openapi(
-            title=app.title,
-            version=app.version,
-            description=app.description,
-            routes=app.routes,
-        )
-
-        lang_param = {
-            "name": "lang",
-            "in": "query",
-            "required": False,
-            "schema": {"type": "string", "enum": ["en", "ko"]},
-            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
-        }
-        accept_language_param = {
-            "name": "Accept-Language",
-            "in": "header",
-            "required": False,
-            "schema": {"type": "string"},
-            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
-            "example": "en-US,en;q=0.9,ko;q=0.8",
-        }
-
-        for path, methods in (schema.get("paths") or {}).items():
-            if not str(path).startswith("/api/v1"):
-                continue
-            for method, operation in (methods or {}).items():
-                if method.lower() not in {"get", "post", "put", "patch", "delete"}:
-                    continue
-                params = operation.setdefault("parameters", [])
-                has_lang = any(p.get("in") == "query" and p.get("name") == "lang" for p in params)
-                has_accept = any(p.get("in") == "header" and p.get("name") == "Accept-Language" for p in params)
-                if not has_lang:
-                    params.append(lang_param)
-                if not has_accept:
-                    params.append(accept_language_param)
-
-        app.openapi_schema = schema
-        return app.openapi_schema
-
-    app.openapi = custom_openapi
-
-
-_install_openapi_language_contract(app)
 
 
 if __name__ == "__main__":

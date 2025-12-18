@@ -13,9 +13,12 @@ from typing import Any, Callable, Dict, List, Optional
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
+from starlette.responses import Response
 
 from shared.config.service_config import ServiceConfig
 from shared.models.requests import ApiResponse
+from shared.i18n.middleware import install_i18n_middleware
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +94,18 @@ def create_fastapi_service(
         lifespan=lifespan_func,
         openapi_tags=openapi_tags
     )
+
+    # Install i18n language negotiation + best-effort response localization
+    install_i18n_middleware(app)
+
+    # Expose output language selection in OpenAPI for all services
+    _install_openapi_language_contract(app)
+
+    # Observability (real, no cargo-cult):
+    # - request spans (if OpenTelemetry available)
+    # - Prometheus /metrics endpoint (always, via prometheus-client)
+    # - request metrics middleware
+    _install_observability(app, service_info)
     
     # Configure CORS
     _configure_cors(app)
@@ -110,6 +125,56 @@ def create_fastapi_service(
     logger.info(f"✅ {service_info.name} FastAPI 앱 생성 완료")
     
     return app
+
+
+def _install_openapi_language_contract(app: FastAPI) -> None:
+    """
+    Add `?lang=en|ko` and `Accept-Language` to OpenAPI so clients discover i18n support.
+    """
+
+    def custom_openapi():
+        if app.openapi_schema:
+            return app.openapi_schema
+
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
+
+        lang_param = {
+            "name": "lang",
+            "in": "query",
+            "required": False,
+            "schema": {"type": "string", "enum": ["en", "ko"]},
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
+        }
+        accept_language_param = {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": False,
+            "schema": {"type": "string"},
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8",
+        }
+
+        for _, methods in (schema.get("paths") or {}).items():
+            for method, operation in (methods or {}).items():
+                if method.lower() not in {"get", "post", "put", "patch", "delete"}:
+                    continue
+                params = operation.setdefault("parameters", [])
+                has_lang = any(p.get("in") == "query" and p.get("name") == "lang" for p in params)
+                has_accept = any(p.get("in") == "header" and p.get("name") == "Accept-Language" for p in params)
+                if not has_lang:
+                    params.append(lang_param)
+                if not has_accept:
+                    params.append(accept_language_param)
+
+        app.openapi_schema = schema
+        return app.openapi_schema
+
+    app.openapi = custom_openapi
 
 
 def _configure_cors(app: FastAPI) -> None:
@@ -170,6 +235,49 @@ def _add_debug_endpoints(app: FastAPI) -> None:
     async def debug_cors():
         """CORS 설정 디버그 정보"""
         return ServiceConfig.get_cors_debug_info()
+
+
+def _install_observability(app: FastAPI, service_info: ServiceInfo) -> None:
+    """
+    Install tracing + metrics in a way that is:
+    - actually invoked in runtime paths
+    - safe when optional deps are missing
+    - observable (/metrics exists; tracing logs warn when exporters missing)
+    """
+
+    try:
+        from shared.observability.tracing import get_tracing_service
+        from shared.observability.metrics import (
+            PROMETHEUS_CONTENT_TYPE_LATEST,
+            RequestMetricsMiddleware,
+            get_metrics_collector,
+            prometheus_latest,
+        )
+    except Exception as e:  # pragma: no cover - env dependent
+        logger.warning(f"Observability disabled (import failed): {e}")
+        return
+
+    # Tracing (best-effort; does not block app startup)
+    try:
+        tracing_service = get_tracing_service(service_info.name)
+        tracing_service.instrument_fastapi(app)
+        app.state.tracing_service = tracing_service
+    except Exception as e:
+        logger.warning(f"Tracing initialization failed (continuing without tracing): {e}")
+
+    # Metrics (Prometheus)
+    try:
+        metrics_collector = get_metrics_collector(service_info.name)
+        app.state.metrics_collector = metrics_collector
+
+        # Request metrics middleware (call_next style)
+        app.middleware("http")(RequestMetricsMiddleware(metrics_collector))
+    except Exception as e:
+        logger.warning(f"Metrics initialization failed (continuing without request metrics): {e}")
+
+    @app.get("/metrics", include_in_schema=False)
+    async def prometheus_metrics():
+        return Response(content=prometheus_latest(), media_type=PROMETHEUS_CONTENT_TYPE_LATEST)
 
 
 def create_uvicorn_config(service_info: ServiceInfo, reload: bool = True) -> Dict[str, Any]:

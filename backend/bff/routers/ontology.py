@@ -138,24 +138,11 @@ from bff.dependencies import (
     LabelMapper,
     JSONToJSONLDConverter
 )
-from bff.services.adapter_service import BFFAdapterService
 from bff.services.oms_client import OMSClient
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/database/{db_name}", tags=["Ontology Management"])
-
-
-# Dependency for BFF Adapter Service
-def get_bff_adapter(
-    terminus_service: TerminusService = TerminusServiceDep,
-    label_mapper: LabelMapper = LabelMapperDep
-) -> BFFAdapterService:
-    """Get BFF Adapter Service instance"""
-    return BFFAdapterService(terminus_service, label_mapper)
-
-# Type-safe dependency annotation for BFF Adapter Service
-BFFAdapterServiceDep = Depends(get_bff_adapter)
 
 
 @router.post(
@@ -795,12 +782,26 @@ async def get_ontology_schema(
 # 🔥 THINK ULTRA! BFF Enhanced Relationship Management Endpoints
 
 
-@router.post("/ontology-advanced", response_model=OntologyResponse)
+@router.post(
+    "/ontology-advanced",
+    response_model=ApiResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        status.HTTP_200_OK: {"model": ApiResponse, "description": "Direct mode (legacy)"},
+        status.HTTP_202_ACCEPTED: {"model": ApiResponse, "description": "Event-sourcing mode (async)"},
+        status.HTTP_409_CONFLICT: {"description": "Conflict (already exists / OCC)"},
+    },
+)
 async def create_ontology_with_relationship_validation(
     db_name: str,
     ontology: OntologyCreateRequestBFF,
     request: Request,
-    adapter: BFFAdapterService = BFFAdapterServiceDep,
+    branch: str = Query("main", description="Target branch (default: main)"),
+    auto_generate_inverse: bool = Query(False, description="(Not implemented) Auto-generate inverse metadata"),
+    validate_relationships: bool = Query(True, description="Validate relationships against current schema"),
+    check_circular_references: bool = Query(True, description="Reject introducing critical schema cycles"),
+    mapper: LabelMapper = LabelMapperDep,
+    terminus: TerminusService = TerminusServiceDep,
 ):
     """
     🔥 고급 관계 검증을 포함한 온톨로지 생성 (BFF 레이어 - 리팩토링됨)
@@ -814,23 +815,131 @@ async def create_ontology_with_relationship_validation(
     - 순환 참조 탐지
     - 다국어 레이블 매핑
     """
+    lang = get_accept_language(request)
+
     try:
-        lang = get_accept_language(request)
-        # BFF Adapter를 통해 모든 로직 위임 (중복 제거)
-        return await adapter.create_advanced_ontology(
-            db_name=db_name,
-            ontology_data=ontology.model_dump(exclude_unset=True),
-            language=lang,
+        if auto_generate_inverse:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail=(
+                    "auto_generate_inverse is not implemented yet. TerminusDB schema documents discard "
+                    "per-property custom metadata, so inverse metadata needs a dedicated projection store."
+                ),
+            )
+        db_name = validate_db_name(db_name)
+        branch = validate_branch_name(branch)
+
+        from shared.utils.id_generator import generate_simple_id
+
+        def _localized_to_string(value: Any) -> str:
+            if isinstance(value, str):
+                return value
+            if isinstance(value, dict):
+                return (
+                    str(value.get("en") or "").strip()
+                    or str(value.get("ko") or "").strip()
+                    or next((str(v).strip() for v in value.values() if v and str(v).strip()), "")
+                )
+            return str(value).strip() if value is not None else ""
+
+        ontology_dict = ontology.model_dump(exclude_unset=True)
+        ontology_dict = sanitize_input(ontology_dict)
+
+        if ontology_dict.get("id"):
+            class_id = validate_class_id(ontology_dict["id"])
+        else:
+            class_id = generate_simple_id(
+                label=_localized_to_string(ontology_dict.get("label", "")),
+                use_timestamp_for_korean=True,
+                default_fallback="UnnamedClass",
+            )
+        ontology_dict["id"] = class_id
+
+        # Convert relationship targets from labels -> ids when mappings exist.
+        for rel in ontology_dict.get("relationships", []) or []:
+            if not isinstance(rel, dict):
+                continue
+            target = rel.get("target")
+            if isinstance(target, str) and target.strip():
+                mapped = await mapper.get_class_id(db_name, target, lang)
+                if mapped:
+                    rel["target"] = mapped
+
+        # Reuse the same OMS compatibility transformations as `/ontology`.
+        def transform_properties_for_oms(data: Dict[str, Any]) -> None:
+            if 'properties' in data and isinstance(data['properties'], list):
+                for prop in data['properties']:
+                    if not isinstance(prop, dict):
+                        continue
+
+                    if 'name' not in prop and 'label' in prop:
+                        prop['name'] = generate_simple_id(
+                            _localized_to_string(prop.get("label")),
+                            use_timestamp_for_korean=False,
+                        )
+
+                    if prop.get('type') == 'STRING':
+                        prop['type'] = 'xsd:string'
+                    elif prop.get('type') == 'INTEGER':
+                        prop['type'] = 'xsd:integer'
+                    elif prop.get('type') == 'DECIMAL':
+                        prop['type'] = 'xsd:decimal'
+                    elif prop.get('type') == 'BOOLEAN':
+                        prop['type'] = 'xsd:boolean'
+                    elif prop.get('type') == 'DATETIME':
+                        prop['type'] = 'xsd:dateTime'
+
+                    if prop.get('type') == 'link' and 'target' in prop:
+                        prop['linkTarget'] = prop.pop('target')
+
+                    if prop.get('type') == 'array' and 'items' in prop:
+                        items = prop['items']
+                        if isinstance(items, dict) and items.get('type') == 'link' and 'target' in items:
+                            items['linkTarget'] = items.pop('target')
+
+        transform_properties_for_oms(ontology_dict)
+
+        forward_headers: Dict[str, str] = {}
+        for key in ("X-Admin-Token", "X-Change-Reason", "X-Admin-Actor", "X-Actor", "Authorization"):
+            value = request.headers.get(key)
+            if value:
+                forward_headers[key] = value
+
+        result = await terminus.create_ontology_with_advanced_relationships(
+            db_name,
+            ontology_dict,
+            branch=branch,
+            auto_generate_inverse=auto_generate_inverse,
+            validate_relationships=validate_relationships,
+            check_circular_references=check_circular_references,
+            headers=forward_headers or None,
         )
 
+        await mapper.register_class(db_name, class_id, ontology_dict.get('label', ''), ontology_dict.get('description'))
+        for prop in ontology_dict.get('properties', []):
+            if isinstance(prop, dict):
+                await mapper.register_property(db_name, class_id, prop.get('name', ''), prop.get('label', ''))
+        for rel in ontology_dict.get('relationships', []):
+            if isinstance(rel, dict):
+                await mapper.register_relationship(db_name, rel.get('predicate', ''), rel.get('label', ''))
+
+        if isinstance(result, dict) and result.get("status") == "accepted":
+            return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=result)
+        if isinstance(result, dict) and "status" in result and "message" in result:
+            return JSONResponse(status_code=status.HTTP_200_OK, content=result)
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=ApiResponse.success(
+                message=f"온톨로지 '{class_id}'이(가) 생성되었습니다",
+                data={"ontology_id": class_id, "ontology": result, "mode": "direct"},
+            ).to_dict(),
+        )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to create ontology with advanced relationships: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"고급 온톨로지 생성 실패: {str(e)}",
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"고급 온톨로지 생성 실패: {str(e)}")
 
 
 @router.post("/validate-relationships")
@@ -838,30 +947,49 @@ async def validate_ontology_relationships_bff(
     db_name: str,
     ontology: OntologyCreateRequestBFF,
     request: Request,
-    adapter: BFFAdapterService = BFFAdapterServiceDep,
+    branch: str = Query("main", description="Target branch (default: main)"),
+    mapper: LabelMapper = LabelMapperDep,
+    terminus: TerminusService = TerminusServiceDep,
 ):
     """
     🔥 온톨로지 관계 검증 (BFF 레이어 - 리팩토링됨)
 
     이제 중복 로직 없이 BFF Adapter를 통해 OMS로 모든 비즈니스 로직을 위임합니다.
     """
-    try:
-        lang = get_accept_language(request)
-        # BFF Adapter를 통해 모든 로직 위임 (중복 제거)
-        return await adapter.validate_relationships(
-            db_name=db_name,
-            validation_data=ontology.model_dump(exclude_unset=True),
-            language=lang,
-        )
+    lang = get_accept_language(request)
 
+    try:
+        db_name = validate_db_name(db_name)
+        branch = validate_branch_name(branch)
+        payload = sanitize_input(ontology.model_dump(exclude_unset=True))
+
+        if not payload.get("id"):
+            from shared.utils.id_generator import generate_simple_id
+
+            raw_label = payload.get("label") or ""
+            label_str = raw_label if isinstance(raw_label, str) else (raw_label.get("en") or raw_label.get("ko") or "")
+            payload["id"] = generate_simple_id(
+                label=str(label_str),
+                use_timestamp_for_korean=True,
+                default_fallback="UnnamedClass",
+            )
+
+        for rel in payload.get("relationships", []) or []:
+            if not isinstance(rel, dict):
+                continue
+            target = rel.get("target")
+            if isinstance(target, str) and target.strip():
+                mapped = await mapper.get_class_id(db_name, target, lang)
+                if mapped:
+                    rel["target"] = mapped
+
+        result = await terminus.validate_relationships(db_name, payload, branch=branch)
+        return ApiResponse.success(message="관계 검증이 완료되었습니다", data=result).to_dict()
     except HTTPException:
         raise
-
     except Exception as e:
         logger.error(f"Failed to validate relationships: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"관계 검증 실패: {str(e)}"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"관계 검증 실패: {str(e)}")
 
 
 @router.post("/check-circular-references")
@@ -869,33 +997,43 @@ async def check_circular_references_bff(
     db_name: str,
     request: Request,
     ontology: Optional[OntologyCreateRequestBFF] = None,
-    adapter: BFFAdapterService = BFFAdapterServiceDep,
+    branch: str = Query("main", description="Target branch (default: main)"),
+    mapper: LabelMapper = LabelMapperDep,
+    terminus: TerminusService = TerminusServiceDep,
 ):
     """
     🔥 순환 참조 탐지 (BFF 레이어 - 리팩토링됨)
 
     이제 중복 로직 없이 BFF Adapter를 통해 OMS로 모든 비즈니스 로직을 위임합니다.
     """
+    lang = get_accept_language(request)
+
     try:
-        lang = get_accept_language(request)
-        # 새 온톨로지 데이터 준비
-        detection_data = {}
-        if ontology:
-            detection_data = ontology.model_dump(exclude_unset=True)
+        db_name = validate_db_name(db_name)
+        branch = validate_branch_name(branch)
 
-        # BFF Adapter를 통해 모든 로직 위임 (중복 제거)
-        return await adapter.detect_circular_references(
-            db_name=db_name,
-            detection_data=detection_data,
-            language=lang,
-        )
+        new_ontology: Optional[Dict[str, Any]] = None
+        if ontology is not None:
+            payload = sanitize_input(ontology.model_dump(exclude_unset=True))
 
+            for rel in payload.get("relationships", []) or []:
+                if not isinstance(rel, dict):
+                    continue
+                target = rel.get("target")
+                if isinstance(target, str) and target.strip():
+                    mapped = await mapper.get_class_id(db_name, target, lang)
+                    if mapped:
+                        rel["target"] = mapped
+
+            new_ontology = payload
+
+        result = await terminus.detect_circular_references(db_name, branch=branch, new_ontology=new_ontology)
+        return ApiResponse.success(message="순환 참조 탐지가 완료되었습니다", data=result).to_dict()
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to check circular references: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"순환 참조 탐지 실패: {str(e)}",
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"순환 참조 탐지 실패: {str(e)}")
 
 
 @router.get("/relationship-network/analyze")
@@ -919,11 +1057,13 @@ async def analyze_relationship_network_bff(
         analysis_result = await terminus.analyze_relationship_network(db_name)
 
         # 사용자 친화적 형태로 변환
-        summary = analysis_result.get("relationship_summary", {})
-        validation = analysis_result.get("validation_summary", {})
-        cycles = analysis_result.get("cycle_analysis", {})
-        graph = analysis_result.get("graph_summary", {})
-        recommendations = analysis_result.get("recommendations", [])
+        # OMS returns canonical keys: summary/graph_structure/validation/cycle_analysis.
+        # Keep backwards compatibility if older shapes are returned.
+        summary = analysis_result.get("summary") or analysis_result.get("relationship_summary") or {}
+        validation = analysis_result.get("validation") or analysis_result.get("validation_summary") or {}
+        cycles = analysis_result.get("cycle_analysis") or {}
+        graph = analysis_result.get("graph_structure") or analysis_result.get("graph_summary") or {}
+        recommendations = analysis_result.get("recommendations") or []
 
         # 건강성 점수 계산 (0-100)
         health_score = 100

@@ -296,6 +296,79 @@ class TestCoreOntologyManagement:
 
             await _wait_for_ontology_present(session, db_name=db_name, ontology_id="TestProduct")
 
+    @pytest.mark.asyncio
+    async def test_ontology_creation_advanced_relationships(self):
+        """Test advanced ontology creation path is truly event-sourced and functional."""
+        async with aiohttp.ClientSession() as session:
+            db_name = f"test_adv_ontology_db_{uuid.uuid4().hex[:8]}"
+
+            async with session.post(
+                f"{OMS_URL}/api/v1/database/create",
+                json={"name": db_name, "description": "Advanced ontology test"},
+            ) as resp:
+                assert resp.status == 202
+
+            await _wait_for_db_exists(session, db_name=db_name, expected=True)
+
+            # Create target class first so relationship validation can succeed.
+            customer = {
+                "id": "Customer",
+                "label": "Customer",
+                "description": "Customer for relationship target",
+                "properties": [{"name": "customer_id", "type": "string", "label": "Customer ID", "required": True}],
+                "relationships": [],
+            }
+            async with session.post(f"{OMS_URL}/api/v1/database/{db_name}/ontology", json=customer) as resp:
+                assert resp.status == 202
+                body = await resp.json()
+                assert body.get("status") == "accepted"
+
+            await _wait_for_ontology_present(session, db_name=db_name, ontology_id="Customer")
+
+            product_adv = {
+                "id": "AdvProduct",
+                "label": "Advanced Product",
+                "description": "Product created via create-advanced endpoint",
+                "properties": [{"name": "product_id", "type": "string", "label": "Product ID", "required": True}],
+                "relationships": [
+                    {
+                        "predicate": "owned_by",
+                        "target": "Customer",
+                        "label": "Owned By",
+                        "cardinality": "n:1",
+                    }
+                ],
+            }
+
+            async with session.post(
+                f"{OMS_URL}/api/v1/database/{db_name}/ontology/create-advanced",
+                json=product_adv,
+                params={
+                    "validate_relationships": "true",
+                    "check_circular_references": "true",
+                    "branch": "main",
+                },
+            ) as resp:
+                assert resp.status == 202
+                body = await resp.json()
+                assert body.get("status") == "accepted"
+                command_id = (body.get("data") or {}).get("command_id")
+                assert command_id
+
+            await _wait_for_ontology_present(session, db_name=db_name, ontology_id="AdvProduct")
+            await _wait_for_command_terminal_state(session, command_id=str(command_id))
+
+            # Verify the relationship network analyzer works end-to-end (no broken method wiring).
+            async with session.get(f"{OMS_URL}/api/v1/database/{db_name}/ontology/analyze-network") as resp:
+                assert resp.status == 200
+                body = await resp.json()
+                assert body.get("status") == "success"
+                analysis = body.get("data") or {}
+                assert "summary" in analysis
+                assert "graph_structure" in analysis
+                assert "validation" in analysis
+                assert "cycle_analysis" in analysis
+
 
 class TestBFFGraphFederation:
     """Test suite for BFF Graph Federation capabilities"""

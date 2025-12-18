@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from shared.models.ontology import Property, Relationship
 from shared.models.ontology_lint import LintIssue, LintReport, LintSeverity
+from shared.i18n import m
 
 _SNAKE_CASE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
@@ -159,9 +160,12 @@ def lint_ontology_create(
             _issue(
                 LintSeverity.WARNING,
                 "ONT010",
-                "클래스 ID가 snake_case가 아닙니다. (권장: 소문자+숫자+_ 조합)",
+                m(
+                    en="Class ID is not snake_case. (recommended: lowercase + digits + _)",
+                    ko="클래스 ID가 snake_case가 아닙니다. (권장: 소문자+숫자+_ 조합)",
+                ),
                 path="id",
-                suggestion="예: 'customer' 또는 'purchase_order'",
+                suggestion=m(en="Example: 'customer' or 'purchase_order'", ko="예: 'customer' 또는 'purchase_order'"),
             )
         )
 
@@ -175,10 +179,19 @@ def lint_ontology_create(
                 _issue(
                     LintSeverity.ERROR,
                     "ONT001",
-                    "기본키(primary key) 속성이 없습니다. 인스턴스를 안정적으로 식별할 수 있어야 합니다.",
+                    m(
+                        en="Missing primary key field. Instances must be stably identifiable.",
+                        ko="기본키(primary key) 속성이 없습니다. 인스턴스를 안정적으로 식별할 수 있어야 합니다.",
+                    ),
                     path="properties",
-                    suggestion=f"예: properties에 '{expected_pk}'(xsd:string) 추가",
-                    rationale="기본키가 없으면 중복/병합/업데이트 시 데이터가 꼬일 가능성이 큽니다.",
+                    suggestion=m(
+                        en=f"Example: add '{expected_pk}' (xsd:string) to properties",
+                        ko=f"예: properties에 '{expected_pk}'(xsd:string) 추가",
+                    ),
+                    rationale=m(
+                        en="Without a primary key, duplicates/merges/updates become unreliable.",
+                        ko="기본키가 없으면 중복/병합/업데이트 시 데이터가 꼬일 가능성이 큽니다.",
+                    ),
                 )
             )
         elif len(id_like) > 1 and not pk_candidates:
@@ -186,9 +199,15 @@ def lint_ontology_create(
                 _issue(
                     LintSeverity.WARNING,
                     "ONT003",
-                    "여러 개의 '*_id' 후보가 있습니다. primary_key를 명시하면 혼동을 줄일 수 있습니다.",
+                    m(
+                        en="Multiple '*_id' candidates found. Setting primary_key explicitly reduces ambiguity.",
+                        ko="여러 개의 '*_id' 후보가 있습니다. primary_key를 명시하면 혼동을 줄일 수 있습니다.",
+                    ),
                     path="properties",
-                    suggestion="가장 대표 식별자 1개에 primary_key=true를 지정하세요",
+                    suggestion=m(
+                        en="Choose one canonical identifier and set primary_key=true.",
+                        ko="가장 대표 식별자 1개에 primary_key=true를 지정하세요",
+                    ),
                     metadata={"id_like_fields": [p.name for p in id_like]},
                 )
             )
@@ -200,10 +219,19 @@ def lint_ontology_create(
             _issue(
                 sev,
                 "ONT020",
-                "클래스명이 '상태/이벤트/로그'처럼 보입니다. 엔티티(Entity)와 이벤트(Event/State)를 섞지 않는 것을 권장합니다.",
+                m(
+                    en="Class name looks like a 'state/event/log'. Avoid mixing entities with events/states.",
+                    ko="클래스명이 '상태/이벤트/로그'처럼 보입니다. 엔티티(Entity)와 이벤트(Event/State)를 섞지 않는 것을 권장합니다.",
+                ),
                 path="label",
-                suggestion="엔티티는 '명사형'으로, 이벤트/상태는 별도 모델(액션/이벤트/상태 열거형)로 분리하세요",
-                rationale="온톨로지는 '현실 개체' 중심이 될수록 검색/관계/권한/감사에 유리합니다.",
+                suggestion=m(
+                    en="Use a noun for entities; model events/states separately (action/event/state enum).",
+                    ko="엔티티는 '명사형'으로, 이벤트/상태는 별도 모델(액션/이벤트/상태 열거형)로 분리하세요",
+                ),
+                rationale=m(
+                    en="Entity-centric ontologies improve search/relations/authorization/auditability.",
+                    ko="온톨로지는 '현실 개체' 중심이 될수록 검색/관계/권한/감사에 유리합니다.",
+                ),
                 metadata={"triggers": sorted(triggers)},
             )
         )
@@ -215,9 +243,12 @@ def lint_ontology_create(
                     _issue(
                         LintSeverity.WARNING,
                         "ONT030",
-                        "속성명이 snake_case가 아닙니다. (권장)",
+                        m(
+                            en="Property name is not snake_case. (recommended)",
+                            ko="속성명이 snake_case가 아닙니다. (권장)",
+                        ),
                         path=f"properties[{idx}].name",
-                        suggestion="예: 'total_amount', 'created_at'",
+                        suggestion=m(en="Example: 'total_amount', 'created_at'", ko="예: 'total_amount', 'created_at'"),
                     )
                 )
 
@@ -227,9 +258,12 @@ def lint_ontology_create(
                     _issue(
                         LintSeverity.WARNING,
                         "ONT031",
-                        "관계(predicate)명이 snake_case가 아닙니다. (권장)",
+                        m(
+                            en="Relationship predicate is not snake_case. (recommended)",
+                            ko="관계(predicate)명이 snake_case가 아닙니다. (권장)",
+                        ),
                         path=f"relationships[{idx}].predicate",
-                        suggestion="예: 'owned_by', 'belongs_to'",
+                        suggestion=m(en="Example: 'owned_by', 'belongs_to'", ko="예: 'owned_by', 'belongs_to'"),
                     )
                 )
 
@@ -268,7 +302,10 @@ def lint_ontology_update(
             _issue(
                 LintSeverity.WARNING,
                 "ONT901",
-                "속성 삭제는 고위험 변경입니다. (기존 데이터/쿼리/프로젝션에 영향)",
+                m(
+                    en="Removing properties is a high-risk change. (impacts existing data/queries/projections)",
+                    ko="속성 삭제는 고위험 변경입니다. (기존 데이터/쿼리/프로젝션에 영향)",
+                ),
                 path="properties",
                 metadata={"removed_properties": removed_props},
             )
@@ -289,7 +326,10 @@ def lint_ontology_update(
             _issue(
                 LintSeverity.WARNING,
                 "ONT902",
-                "속성 타입 변경은 고위험 변경입니다. (파싱/검증/인덱싱 오류 가능)",
+                m(
+                    en="Changing property types is high-risk. (may break parsing/validation/indexing)",
+                    ko="속성 타입 변경은 고위험 변경입니다. (파싱/검증/인덱싱 오류 가능)",
+                ),
                 path="properties",
                 metadata={"type_changes": [{"name": n, "from": f, "to": t} for n, f, t in type_changes]},
             )
@@ -300,7 +340,10 @@ def lint_ontology_update(
             _issue(
                 LintSeverity.WARNING,
                 "ONT903",
-                "required 변경은 고위험 변경입니다. (기존 데이터가 validation에 실패할 수 있음)",
+                m(
+                    en="Changing `required` is high-risk. (existing data may fail validation)",
+                    ko="required 변경은 고위험 변경입니다. (기존 데이터가 validation에 실패할 수 있음)",
+                ),
                 path="properties",
                 metadata={
                     "required_changes": [{"name": n, "from": f, "to": t} for n, f, t in required_changes]
@@ -316,7 +359,10 @@ def lint_ontology_update(
                 _issue(
                     LintSeverity.ERROR,
                     "ONT920",
-                    "업데이트 결과 기본키 후보가 0개가 됩니다. 인스턴스 식별이 불가능해질 수 있습니다.",
+                    m(
+                        en="Update removes all primary key candidates. Instances may become unidentifiable.",
+                        ko="업데이트 결과 기본키 후보가 0개가 됩니다. 인스턴스 식별이 불가능해질 수 있습니다.",
+                    ),
                     path="properties",
                 )
             )
@@ -330,4 +376,3 @@ def lint_ontology_update(
         warnings=warnings,
         infos=infos,
     )
-

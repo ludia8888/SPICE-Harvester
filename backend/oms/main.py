@@ -63,11 +63,6 @@ from shared.utils.label_mapper import LabelMapper
 # Rate limiting middleware
 from shared.middleware.rate_limiter import rate_limit, RateLimitPresets, RateLimiter
 
-# Observability imports
-from shared.observability.tracing import get_tracing_service, trace_endpoint, trace_db_operation
-from shared.observability.metrics import get_metrics_collector, RequestMetricsMiddleware
-from shared.observability.context_propagation import TraceContextMiddleware
-
 # Router imports
 from oms.routers import (
     branch, database, ontology, version,
@@ -124,9 +119,6 @@ class OMSServiceContainer:
         # 7. Initialize Rate Limiter
         await self._initialize_rate_limiter()
         
-        # 8. Initialize Observability (Tracing & Metrics)
-        await self._initialize_observability()
-        
         logger.info("OMS services initialized successfully")
     
     async def _initialize_event_store(self) -> None:
@@ -144,9 +136,10 @@ class OMSServiceContainer:
             
         except Exception as e:
             logger.error(f"❌ Failed to connect to S3/MinIO Event Store: {e}")
-            logger.warning("⚠️ Running without Event Store - falling back to legacy mode")
-            # Continue without Event Store for backward compatibility
-            self._oms_services['event_store'] = None
+            raise RuntimeError(
+                "Event Store is required (Event Sourcing SSoT). "
+                "Start MinIO/S3 and verify credentials/endpoints."
+            ) from e
     
     async def _initialize_terminus_service(self) -> None:
         """Initialize TerminusDB service with health check"""
@@ -246,26 +239,6 @@ class OMSServiceContainer:
             logger.error(f"Failed to initialize rate limiter: {e}")
             # Continue without rate limiting - service can still work
     
-    async def _initialize_observability(self) -> None:
-        """Initialize observability with OpenTelemetry"""
-        try:
-            logger.info("Initializing observability (OpenTelemetry)...")
-            
-            # Initialize tracing service
-            tracing_service = get_tracing_service("oms-service")
-            
-            # Initialize metrics collector
-            metrics_collector = get_metrics_collector("oms-service")
-            
-            self._oms_services['tracing_service'] = tracing_service
-            self._oms_services['metrics_collector'] = metrics_collector
-            
-            logger.info("Observability initialized successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize observability: {e}")
-            # Continue without observability - service can still work
-    
     async def shutdown_oms_services(self) -> None:
         """Shutdown OMS-specific services"""
         logger.info("Shutting down OMS services...")
@@ -277,13 +250,6 @@ class OMSServiceContainer:
                 logger.info("✅ Event Store references cleaned up")
             except Exception as e:
                 logger.error(f"Error cleaning up Event Store: {e}")
-        
-        if 'tracing_service' in self._oms_services:
-            try:
-                self._oms_services['tracing_service'].shutdown()
-                logger.info("Tracing service shutdown")
-            except Exception as e:
-                logger.error(f"Error shutting down tracing: {e}")
         
         if 'rate_limiter' in self._oms_services:
             try:
@@ -381,14 +347,8 @@ async def lifespan(app: FastAPI):
         # 5. Store rate limiter in app state for decorators
         if 'rate_limiter' in _oms_container._oms_services:
             app.state.rate_limiter = _oms_container._oms_services['rate_limiter']
-        
-        # 6. Set up OpenTelemetry instrumentation (moved to after app startup)
-        if 'tracing_service' in _oms_container._oms_services:
-            tracing_service = _oms_container._oms_services['tracing_service']
-            # Note: FastAPI instrumentation moved to post-startup to avoid middleware timing issues
-            
-        # 7-8. Middleware setup moved to app creation time to avoid timing issues
-        
+
+        # 6. Middleware setup is handled during app creation (service_factory)
         logger.info("OMS Service startup completed successfully")
         
         yield

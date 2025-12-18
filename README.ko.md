@@ -96,14 +96,14 @@ Tip: 아래 예시는 편의를 위해 `jq`를 사용합니다.
 
 이 문서의 예시는 “현재 계약된 경로”를 그대로 사용합니다. (향후 `/api/v1/databases/{db_name}/...`로 통일 예정)
 
-⚠️ **비동기 Write(202) vs 즉시 반영(200/201)**  
-기본 설정(`ENABLE_EVENT_SOURCING=true`)에서는 대부분의 write가 **202 Accepted + command_id**로 반환되며, 아래를 폴링해 완료를 확인해야 합니다.  
-`GET /api/v1/commands/{command_id}/status` → `COMPLETED`
+⚠️ **비동기 Write(202)**  
+현재 지원되는 시스템 포지션에서는 core write가 모두 **202 Accepted + command_id**로 반환되며, 아래를 폴링해 완료를 확인해야 합니다.  
+`GET /api/v1/commands/{command_id}/status` → `COMPLETED`  
+(직접쓰기 `ENABLE_EVENT_SOURCING=false`는 core write 경로에서 지원하지 않습니다.)
 
 Tip: `command_id` 위치가 응답 타입에 따라 다를 수 있습니다. (예: DB/온톨로지 `ApiResponse`는 `.data.command_id`, 인스턴스 `CommandResult`는 `.command_id`)
 
-직접쓰기 모드(`ENABLE_EVENT_SOURCING=false`)에서는 DB/온톨로지 등 일부 write가 `200/201`로 즉시 반영될 수 있습니다.  
-다만 `/api/v1/database/{db_name}/instances/...`(Async Instance) API는 “커맨드 제출” API이므로 **항상 202로 취급**하는 것이 안전합니다.
+`/api/v1/database/{db_name}/instances/...`(Async Instance) API는 “커맨드 제출” API이므로 **항상 202로 취급**하는 것이 안전합니다.
 
 ```bash
 DB=demo_db_$(date +%s)

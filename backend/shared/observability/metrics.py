@@ -6,17 +6,46 @@ This module provides metrics collection for monitoring system performance.
 """
 
 import time
-from typing import Dict, Optional, Any, Callable
+from typing import Dict, Optional, Any
 from functools import wraps
 from contextlib import contextmanager
 
 from opentelemetry import metrics
 from opentelemetry.metrics import Counter, Histogram, UpDownCounter, ObservableGauge
 from prometheus_client import Counter as PrometheusCounter, Histogram as PrometheusHistogram, Gauge
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from shared.utils.app_logger import get_logger
 
 logger = get_logger(__name__)
+
+_PROM_COUNTERS: Dict[str, PrometheusCounter] = {}
+_PROM_HISTOGRAMS: Dict[str, PrometheusHistogram] = {}
+_PROM_GAUGES: Dict[str, Gauge] = {}
+
+
+def _prom_counter(name: str, description: str, *, labelnames: tuple[str, ...]) -> PrometheusCounter:
+    metric = _PROM_COUNTERS.get(name)
+    if metric is None:
+        metric = PrometheusCounter(name, description, labelnames=labelnames)
+        _PROM_COUNTERS[name] = metric
+    return metric
+
+
+def _prom_histogram(name: str, description: str, *, labelnames: tuple[str, ...]) -> PrometheusHistogram:
+    metric = _PROM_HISTOGRAMS.get(name)
+    if metric is None:
+        metric = PrometheusHistogram(name, description, labelnames=labelnames)
+        _PROM_HISTOGRAMS[name] = metric
+    return metric
+
+
+def _prom_gauge(name: str, description: str, *, labelnames: tuple[str, ...]) -> Gauge:
+    metric = _PROM_GAUGES.get(name)
+    if metric is None:
+        metric = Gauge(name, description, labelnames=labelnames)
+        _PROM_GAUGES[name] = metric
+    return metric
 
 
 class MetricsCollector:
@@ -34,6 +63,7 @@ class MetricsCollector:
         self.service_name = service_name
         self.meter = metrics.get_meter(service_name, "1.0.0")
         self._metrics: Dict[str, Any] = {}
+        self._prom: Dict[str, Any] = {}
         self._initialize_metrics()
         
     def _initialize_metrics(self) -> None:
@@ -148,6 +178,54 @@ class MetricsCollector:
             )
             
             logger.info(f"Metrics initialized for service: {self.service_name}")
+
+            # Prometheus fallback/primary export (used by /metrics).
+            # Keep names stable and prefixed to avoid collisions.
+            self._prom["http_requests_total"] = _prom_counter(
+                "spice_http_requests_total",
+                "Total number of HTTP requests",
+                labelnames=("service", "method", "endpoint", "status_code"),
+            )
+            self._prom["http_request_duration_seconds"] = _prom_histogram(
+                "spice_http_request_duration_seconds",
+                "HTTP request duration in seconds",
+                labelnames=("service", "method", "endpoint"),
+            )
+            self._prom["db_queries_total"] = _prom_counter(
+                "spice_db_queries_total",
+                "Total number of database queries",
+                labelnames=("service", "operation", "table", "success"),
+            )
+            self._prom["db_query_duration_seconds"] = _prom_histogram(
+                "spice_db_query_duration_seconds",
+                "Database query duration in seconds",
+                labelnames=("service", "operation", "table"),
+            )
+            self._prom["cache_access_total"] = _prom_counter(
+                "spice_cache_access_total",
+                "Cache access count (hit/miss)",
+                labelnames=("service", "cache", "result"),
+            )
+            self._prom["events_total"] = _prom_counter(
+                "spice_events_total",
+                "Events published/processed",
+                labelnames=("service", "event_type", "action"),
+            )
+            self._prom["event_processing_duration_seconds"] = _prom_histogram(
+                "spice_event_processing_duration_seconds",
+                "Event processing duration in seconds",
+                labelnames=("service", "event_type"),
+            )
+            self._prom["rate_limit_total"] = _prom_counter(
+                "spice_rate_limit_total",
+                "Rate limit checks/rejections",
+                labelnames=("service", "endpoint", "strategy", "result"),
+            )
+            self._prom["business_total"] = _prom_counter(
+                "spice_business_total",
+                "Business counters",
+                labelnames=("service", "metric"),
+            )
             
         except Exception as e:
             logger.error(f"Failed to initialize metrics: {e}")
@@ -190,6 +268,16 @@ class MetricsCollector:
                 
         except Exception as e:
             logger.error(f"Failed to record request metrics: {e}")
+
+        try:
+            self._prom["http_requests_total"].labels(
+                self.service_name, method, endpoint, str(status_code)
+            ).inc()
+            self._prom["http_request_duration_seconds"].labels(
+                self.service_name, method, endpoint
+            ).observe(duration)
+        except Exception as e:
+            logger.error(f"Failed to record Prometheus request metrics: {e}")
     
     def record_db_query(
         self,
@@ -219,6 +307,16 @@ class MetricsCollector:
             self._metrics["db_query_duration"].record(duration, attributes)
         except Exception as e:
             logger.error(f"Failed to record database metrics: {e}")
+
+        try:
+            self._prom["db_queries_total"].labels(
+                self.service_name, operation, table, str(bool(success))
+            ).inc()
+            self._prom["db_query_duration_seconds"].labels(
+                self.service_name, operation, table
+            ).observe(duration)
+        except Exception as e:
+            logger.error(f"Failed to record Prometheus DB metrics: {e}")
     
     def record_cache_access(self, hit: bool, cache_name: str = "default") -> None:
         """
@@ -237,6 +335,13 @@ class MetricsCollector:
                 self._metrics["cache_misses"].add(1, attributes)
         except Exception as e:
             logger.error(f"Failed to record cache metrics: {e}")
+
+        try:
+            self._prom["cache_access_total"].labels(
+                self.service_name, cache_name, "hit" if hit else "miss"
+            ).inc()
+        except Exception as e:
+            logger.error(f"Failed to record Prometheus cache metrics: {e}")
     
     def record_event(
         self,
@@ -266,6 +371,15 @@ class MetricsCollector:
                     self._metrics["event_processing_duration"].record(duration, attributes)
         except Exception as e:
             logger.error(f"Failed to record event metrics: {e}")
+
+        try:
+            self._prom["events_total"].labels(self.service_name, event_type, action).inc()
+            if action == "processed" and duration:
+                self._prom["event_processing_duration_seconds"].labels(self.service_name, event_type).observe(
+                    duration
+                )
+        except Exception as e:
+            logger.error(f"Failed to record Prometheus event metrics: {e}")
     
     def record_rate_limit(
         self,
@@ -293,6 +407,16 @@ class MetricsCollector:
                 self._metrics["rate_limit_rejections"].add(1, attributes)
         except Exception as e:
             logger.error(f"Failed to record rate limit metrics: {e}")
+
+        try:
+            self._prom["rate_limit_total"].labels(
+                self.service_name,
+                endpoint,
+                strategy,
+                "rejected" if rejected else "allowed",
+            ).inc()
+        except Exception as e:
+            logger.error(f"Failed to record Prometheus rate limit metrics: {e}")
     
     def record_business_metric(
         self,
@@ -323,6 +447,11 @@ class MetricsCollector:
                 metric.record(value, attrs)
         except Exception as e:
             logger.error(f"Failed to record business metric {metric_name}: {e}")
+
+        try:
+            self._prom["business_total"].labels(self.service_name, metric_name).inc(float(value) if value else 1.0)
+        except Exception as e:
+            logger.error(f"Failed to record Prometheus business metric {metric_name}: {e}")
     
     @contextmanager
     def timer(self, metric_name: str, attributes: Optional[Dict[str, str]] = None):
@@ -411,7 +540,7 @@ class RequestMetricsMiddleware:
     FastAPI middleware for automatic request metrics collection
     """
     
-    def __init__(self, app, metrics_collector: MetricsCollector):
+    def __init__(self, metrics_collector: MetricsCollector):
         """
         Initialize middleware
         
@@ -419,7 +548,6 @@ class RequestMetricsMiddleware:
             app: FastAPI application
             metrics_collector: MetricsCollector instance
         """
-        self.app = app
         self.metrics = metrics_collector
         
     async def __call__(self, request, call_next):
@@ -464,6 +592,16 @@ class RequestMetricsMiddleware:
                 request_size=request_size
             )
             raise
+
+
+def prometheus_latest() -> bytes:
+    """
+    Render Prometheus metrics for `/metrics`.
+    """
+    return generate_latest()
+
+
+PROMETHEUS_CONTENT_TYPE_LATEST = CONTENT_TYPE_LATEST
 
 
 # Global metrics collector

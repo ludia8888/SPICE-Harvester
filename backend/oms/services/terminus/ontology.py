@@ -365,11 +365,38 @@ class OntologyService(BaseTerminusService):
         # 카디널리티 분석
         cardinality = rel.cardinality or "n:1"  # 기본값: n:1
         
+        label_i18n = coerce_localized_text(rel.label)
+        description_i18n = coerce_localized_text(rel.description) if rel.description else {}
+
+        label_display = (
+            select_localized_text(label_i18n, lang="en")
+            or select_localized_text(label_i18n, lang="ko")
+            or rel.predicate
+        )
+        description_display = (
+            select_localized_text(description_i18n, lang="en")
+            or select_localized_text(description_i18n, lang="ko")
+            or ""
+        )
+
+        documentation: Dict[str, Any] = {
+            "@label": label_display,
+            "@comment": description_display,
+            "@label_i18n": label_i18n,
+            "@comment_i18n": description_i18n,
+        }
+
+        if rel.inverse_predicate:
+            documentation["inverse_predicate"] = rel.inverse_predicate
+        if rel.inverse_label:
+            documentation["inverse_label_i18n"] = coerce_localized_text(rel.inverse_label)
+
         # 다중 관계 (1:n, n:m)
         if cardinality.endswith(":n") or cardinality.endswith(":m"):
             return {
                 "@type": "Set",  # 집합 타입 (순서/중복 없음)
-                "@class": rel.target
+                "@class": rel.target,
+                "@documentation": documentation,
             }
         
         # 단일 관계 (1:1, n:1)
@@ -378,14 +405,18 @@ class OntologyService(BaseTerminusService):
         required = getattr(rel, 'required', False)
         
         if required:
-            # 필수 관계: 타겟 클래스 직접 반환
-            return rel.target
-        else:
-            # 옵셔널 관계
+            # 필수 관계: TerminusDB는 bare string 형태도 허용하지만, 문서화를 위해 dict 형태를 사용.
             return {
-                "@type": "Optional",
-                "@class": rel.target
+                "@class": rel.target,
+                "@documentation": documentation,
             }
+
+        # 옵셔널 관계
+        return {
+            "@type": "Optional",
+            "@class": rel.target,
+            "@documentation": documentation,
+        }
     
     def _map_datatype_to_terminus(self, datatype: Union[DataType, str]) -> str:
         """DataType을 TerminusDB 타입으로 매핑"""
@@ -462,7 +493,7 @@ class OntologyService(BaseTerminusService):
                             name=key,
                             type=value,
                             label=key,
-                            description="",
+                            description=None,
                             required=True,
                         )
                     )
@@ -473,7 +504,7 @@ class OntologyService(BaseTerminusService):
                             predicate=key,
                             target=value,
                             label=key,
-                            description="",
+                            description=None,
                             cardinality="1:1",
                         )
                     )
@@ -484,22 +515,59 @@ class OntologyService(BaseTerminusService):
                     
                     # TerminusDB 기본 타입이면 속성
                     if class_type.startswith("xsd:") or class_type.startswith("sys:"):
+                        prop_doc = value.get("@documentation", {}) if isinstance(value, dict) else {}
+                        prop_label_i18n = prop_doc.get("@label_i18n")
+                        prop_comment_i18n = prop_doc.get("@comment_i18n")
+                        raw_comment = (
+                            prop_comment_i18n
+                            if isinstance(prop_comment_i18n, dict) and prop_comment_i18n
+                            else prop_doc.get("@comment")
+                        )
+                        if isinstance(raw_comment, str) and not raw_comment.strip():
+                            raw_comment = None
+
                         prop = Property(
                             name=key,
                             type=class_type,  # Keep the original type string like "xsd:string"
-                            label=value.get("@documentation", {}).get("@label", key),
-                            description=value.get("@documentation", {}).get("@comment", ""),
+                            label=(
+                                prop_label_i18n
+                                if isinstance(prop_label_i18n, dict) and prop_label_i18n
+                                else prop_doc.get("@label", key)
+                            ),
+                            description=raw_comment,
                             required=value.get("@type") != "Optional"
                         )
                         ontology.properties.append(prop)
                     else:
                         # 사용자 정의 클래스면 관계
+                        rel_doc = value.get("@documentation", {}) if isinstance(value, dict) else {}
+                        rel_label_i18n = rel_doc.get("@label_i18n")
+                        rel_comment_i18n = rel_doc.get("@comment_i18n")
+                        inverse_label_i18n = rel_doc.get("inverse_label_i18n")
+                        raw_rel_comment = (
+                            rel_comment_i18n
+                            if isinstance(rel_comment_i18n, dict) and rel_comment_i18n
+                            else rel_doc.get("@comment")
+                        )
+                        if isinstance(raw_rel_comment, str) and not raw_rel_comment.strip():
+                            raw_rel_comment = None
+
                         rel = Relationship(
                             predicate=key,
                             target=class_type,
-                            label=value.get("@documentation", {}).get("@label", key),
-                            description=value.get("@documentation", {}).get("@comment", ""),
-                            cardinality="n:m" if value.get("@type") == "Set" else "1:n"
+                            label=(
+                                rel_label_i18n
+                                if isinstance(rel_label_i18n, dict) and rel_label_i18n
+                                else rel_doc.get("@label", key)
+                            ),
+                            description=raw_rel_comment,
+                            cardinality="n:m" if value.get("@type") == "Set" else "1:n",
+                            inverse_predicate=rel_doc.get("inverse_predicate"),
+                            inverse_label=(
+                                inverse_label_i18n
+                                if isinstance(inverse_label_i18n, dict) and inverse_label_i18n
+                                else rel_doc.get("inverse_label")
+                            ),
                         )
                         ontology.relationships.append(rel)
         

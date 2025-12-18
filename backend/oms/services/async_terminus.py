@@ -7,7 +7,7 @@ httpx를 사용한 비동기 TerminusDB 클라이언트 구현
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import wraps
 from typing import Any, Dict, List, Optional
 
@@ -370,41 +370,66 @@ class AsyncTerminusService:
         ontology_data: OntologyBase,
         *,
         branch: str = "main",
-        auto_generate_inverse: bool = True,
+        auto_generate_inverse: bool = False,
         validate_relationships: bool = True,
         check_circular_references: bool = True
     ) -> OntologyResponse:
-        """고급 관계 관리 기능으로 온톨로지 생성 - Production Ready Implementation"""
-        # For now, delegate to create_ontology since advanced features are optional
-        # This prevents 500 errors while maintaining the API contract
         try:
-            # Validate relationships if requested
+            if auto_generate_inverse:
+                raise OntologyValidationError(
+                    "auto_generate_inverse is not implemented yet. TerminusDB schema documents discard "
+                    "per-property custom metadata, so inverse metadata needs a dedicated projection store."
+                )
+
+            # 2) Optional: validate relationship integrity against current DB schema.
+            existing_ontologies: List[OntologyResponse] = []
+            if validate_relationships or check_circular_references:
+                try:
+                    existing = await self.get_ontology(db_name, class_id=None, raise_if_missing=False, branch=branch)
+                    existing_ontologies = existing if isinstance(existing, list) else []
+                except Exception as e:
+                    # Validation is part of the "advanced" contract; fail fast if we can't
+                    # obtain the reference graph (prevents silent schema corruption).
+                    raise OntologyValidationError(
+                        f"Failed to load existing ontologies for validation (db={db_name}, branch={branch}): {e}"
+                    )
+
             if validate_relationships and ontology_data.relationships:
-                for rel in ontology_data.relationships:
-                    if not rel.target:
-                        raise ValueError(f"Relationship '{rel.predicate}' has no target")
-                    if rel.cardinality not in ["1:1", "1:n", "n:1", "n:m"]:
-                        raise ValueError(f"Invalid cardinality '{rel.cardinality}' for relationship '{rel.predicate}'")
-            
-            # Auto-generate inverse relationships if requested
-            if auto_generate_inverse and ontology_data.relationships:
-                for rel in ontology_data.relationships:
-                    if rel.inverse_predicate and not any(
-                        r.predicate == rel.inverse_predicate for r in ontology_data.relationships
-                    ):
-                        # Add inverse relationship placeholder
-                        logger.info(f"Would generate inverse relationship '{rel.inverse_predicate}' for '{rel.predicate}'")
-            
-            # Check circular references if requested
+                validator = RelationshipValidator(existing_ontologies=existing_ontologies)
+                ontology_for_validation = OntologyResponse(**ontology_data.model_dump(mode="json"))
+                results = validator.validate_ontology_relationships(ontology_for_validation)
+                errors = [r for r in results if r.severity == ValidationSeverity.ERROR]
+                if errors:
+                    raise OntologyValidationError(
+                        "Relationship validation failed: "
+                        + "; ".join(f"{e.code}: {e.message}" for e in errors[:20])
+                    )
+
+            # 3) Optional: prevent introducing critical cycles.
             if check_circular_references and ontology_data.relationships:
-                # Simple check for self-referencing relationships
+                detector = CircularReferenceDetector(max_cycle_depth=10)
+                detector.build_relationship_graph(existing_ontologies)
+
+                critical_cycles = []
                 for rel in ontology_data.relationships:
-                    if rel.target == ontology_data.id:
-                        logger.warning(f"Circular reference detected: '{ontology_data.id}' -> '{rel.target}'")
-            
-            # Create the ontology using standard method
+                    cycles = detector.detect_cycle_for_new_relationship(
+                        source=ontology_data.id,
+                        target=rel.target,
+                        predicate=rel.predicate,
+                    )
+                    critical_cycles.extend([c for c in cycles if c.severity == "critical"])
+
+                if critical_cycles:
+                    first = critical_cycles[0]
+                    raise OntologyValidationError(
+                        f"Schema cycle check failed (critical cycle): {first.message}"
+                    )
+
             result = await self.ontology_service.create_ontology(db_name, ontology_data, branch=branch)
-            logger.info(f"Successfully created ontology '{ontology_data.id}' with advanced features in database '{db_name}'")
+            logger.info(
+                f"Successfully created ontology '{ontology_data.id}' with advanced relationship options "
+                f"(db={db_name}, branch={branch})"
+            )
             return result
         except Exception as e:
             logger.error(f"Failed to create ontology with advanced relationships '{ontology_data.id}': {e}")
@@ -591,32 +616,326 @@ class AsyncTerminusService:
     # Relationship Management - Direct Methods
     # ==========================================
     
-    def validate_relationships(
-        self, 
-        ontologies: List[OntologyResponse], 
-        fix_issues: bool = False
+    async def validate_relationships(
+        self,
+        db_name: str,
+        ontology_data: Dict[str, Any],
+        *,
+        branch: str = "main",
+        fix_issues: bool = False,
     ) -> Dict[str, Any]:
-        """관계 유효성 검증"""
-        return self.relationship_validator.validate_ontologies(ontologies, fix_issues)
+        """Validate ontology relationships against current schema (no write)."""
+        existing = await self.get_ontology(db_name, class_id=None, raise_if_missing=False, branch=branch)
+        existing_ontologies: List[OntologyResponse] = existing if isinstance(existing, list) else []
 
-    def detect_circular_references(
-        self, 
-        ontologies: List[OntologyResponse]
-    ) -> List[List[str]]:
-        """순환 참조 감지"""
-        return self.circular_detector.detect_cycles(ontologies)
+        payload = dict(ontology_data or {})
+        if not payload.get("id"):
+            from shared.utils.id_generator import generate_simple_id
 
-    def find_relationship_paths(
-        self, 
-        ontologies: List[OntologyResponse],
-        source_class: str,
-        target_class: str,
-        path_type: PathType = PathType.SHORTEST
-    ) -> List[PathQuery]:
-        """관계 경로 찾기"""
-        return self.path_tracker.find_paths(
-            ontologies, source_class, target_class, path_type
+            label_value = payload.get("label") or "UnnamedClass"
+            label_str = ""
+            if isinstance(label_value, str):
+                label_str = label_value.strip()
+            elif isinstance(label_value, dict):
+                label_str = (
+                    str(label_value.get("en") or "").strip()
+                    or str(label_value.get("ko") or "").strip()
+                    or next((str(v).strip() for v in label_value.values() if v and str(v).strip()), "")
+                )
+
+            payload["id"] = generate_simple_id(
+                label=label_str,
+                use_timestamp_for_korean=True,
+                default_fallback="UnnamedClass",
+            )
+
+        candidate = OntologyResponse(**OntologyBase(**payload).model_dump(mode="json"))
+
+        validator = RelationshipValidator(existing_ontologies=existing_ontologies)
+        results = validator.validate_ontology_relationships(candidate)
+
+        def _serialize(result: Any) -> Dict[str, Any]:
+            severity = result.severity.value if hasattr(result.severity, "value") else str(result.severity)
+            return {
+                "severity": severity,
+                "code": result.code,
+                "message": result.message,
+                "field": result.field,
+                "related_objects": result.related_objects,
+            }
+
+        serialized = [_serialize(r) for r in results]
+        errors = [r for r in serialized if r["severity"] == ValidationSeverity.ERROR.value]
+        warnings = [r for r in serialized if r["severity"] == ValidationSeverity.WARNING.value]
+        info = [r for r in serialized if r["severity"] == ValidationSeverity.INFO.value]
+
+        if fix_issues:
+            # No automatic fixer exists yet; be explicit so this never becomes a silent no-op.
+            logger.info("fix_issues requested but no fixer is implemented; returning analysis only")
+
+        return {
+            "ok": len(errors) == 0,
+            "db_name": db_name,
+            "branch": branch,
+            "class_id": candidate.id,
+            "issues": serialized,
+            "errors": errors,
+            "warnings": warnings,
+            "info": info,
+            "summary": {
+                "total": len(serialized),
+                "errors": len(errors),
+                "warnings": len(warnings),
+                "info": len(info),
+                "fix_issues_requested": bool(fix_issues),
+                "fix_issues_applied": False,
+            },
+            "analysis_timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    async def detect_circular_references(
+        self,
+        db_name: str,
+        *,
+        branch: str = "main",
+        include_new_ontology: Optional[Dict[str, Any]] = None,
+        max_cycle_depth: int = 10,
+    ) -> Dict[str, Any]:
+        """Detect circular references across ontology relationship graph (no write)."""
+        existing = await self.get_ontology(db_name, class_id=None, raise_if_missing=False, branch=branch)
+        ontologies: List[OntologyResponse] = existing if isinstance(existing, list) else []
+
+        if include_new_ontology:
+            payload = dict(include_new_ontology)
+            if not payload.get("id"):
+                from shared.utils.id_generator import generate_simple_id
+
+                label_value = payload.get("label") or "UnnamedClass"
+                label_str = ""
+                if isinstance(label_value, str):
+                    label_str = label_value.strip()
+                elif isinstance(label_value, dict):
+                    label_str = (
+                        str(label_value.get("en") or "").strip()
+                        or str(label_value.get("ko") or "").strip()
+                        or next((str(v).strip() for v in label_value.values() if v and str(v).strip()), "")
+                    )
+                payload["id"] = generate_simple_id(
+                    label=label_str,
+                    use_timestamp_for_korean=True,
+                    default_fallback="UnnamedClass",
+                )
+
+            candidate = OntologyResponse(**OntologyBase(**payload).model_dump(mode="json"))
+            ontologies = [*ontologies, candidate]
+
+        detector = CircularReferenceDetector(max_cycle_depth=max_cycle_depth)
+        detector.build_relationship_graph(ontologies)
+        cycles = detector.detect_all_cycles()
+
+        serialized_cycles: List[Dict[str, Any]] = []
+        for cycle in cycles:
+            serialized_cycles.append(
+                {
+                    "cycle_type": cycle.cycle_type.value if hasattr(cycle.cycle_type, "value") else str(cycle.cycle_type),
+                    "path": cycle.path,
+                    "predicates": cycle.predicates,
+                    "length": cycle.length,
+                    "severity": cycle.severity,
+                    "message": cycle.message,
+                    "can_break": cycle.can_break,
+                }
+            )
+
+        critical = [c for c in serialized_cycles if c.get("severity") == "critical"]
+        warning = [c for c in serialized_cycles if c.get("severity") == "warning"]
+        info = [c for c in serialized_cycles if c.get("severity") not in {"critical", "warning"}]
+
+        return {
+            "db_name": db_name,
+            "branch": branch,
+            "cycles": serialized_cycles,
+            "summary": {
+                "total_cycles": len(serialized_cycles),
+                "critical_cycles": len(critical),
+                "warning_cycles": len(warning),
+                "info_cycles": len(info),
+                "max_cycle_depth": max_cycle_depth,
+            },
+            "analysis_timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    async def find_relationship_paths(
+        self,
+        *,
+        db_name: str,
+        start_entity: str,
+        end_entity: Optional[str] = None,
+        max_depth: int = 5,
+        path_type: str = "shortest",
+        branch: str = "main",
+    ) -> Dict[str, Any]:
+        """Find relationship paths between entities in the ontology graph (no write)."""
+        existing = await self.get_ontology(db_name, class_id=None, raise_if_missing=False, branch=branch)
+        ontologies: List[OntologyResponse] = existing if isinstance(existing, list) else []
+
+        tracker = RelationshipPathTracker()
+        tracker.build_graph(ontologies)
+
+        pt_norm = str(path_type or "").strip().lower()
+        if pt_norm in {"shortest"}:
+            pt = PathType.SHORTEST
+        elif pt_norm in {"all", "all_paths", "allpaths"}:
+            pt = PathType.ALL_PATHS
+        elif pt_norm in {"weighted"}:
+            pt = PathType.WEIGHTED
+        elif pt_norm in {"semantic"}:
+            pt = PathType.SEMANTIC
+        else:
+            raise ValueError(f"Unsupported path_type: {path_type}")
+
+        query = PathQuery(
+            start_entity=start_entity,
+            end_entity=end_entity,
+            max_depth=max_depth,
+            path_type=pt,
         )
+        paths = tracker.find_paths(query)
+
+        serialized_paths: List[Dict[str, Any]] = []
+        lengths: List[int] = []
+        for path in paths:
+            serialized_paths.append(
+                {
+                    "start_entity": path.start_entity,
+                    "end_entity": path.end_entity,
+                    "entities": path.entities,
+                    "predicates": path.predicates,
+                    "length": path.length,
+                    "total_weight": path.total_weight,
+                    "path_type": path.path_type.value if hasattr(path.path_type, "value") else str(path.path_type),
+                    "confidence": path.confidence,
+                    "semantic_score": path.semantic_score,
+                    "readable": path.to_readable_string(),
+                }
+            )
+            lengths.append(int(path.length))
+
+        avg_len = (sum(lengths) / len(lengths)) if lengths else 0.0
+
+        return {
+            "db_name": db_name,
+            "branch": branch,
+            "query": {
+                "start_entity": start_entity,
+                "end_entity": end_entity,
+                "max_depth": max_depth,
+                "path_type": pt.value,
+            },
+            "paths": serialized_paths,
+            "statistics": {
+                "total_paths": len(serialized_paths),
+                "min_length": min(lengths) if lengths else 0,
+                "max_length": max(lengths) if lengths else 0,
+                "average_length": avg_len,
+            },
+            "analysis_timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    async def analyze_relationship_network(
+        self,
+        db_name: str,
+        *,
+        branch: str = "main",
+    ) -> Dict[str, Any]:
+        """Analyze relationship network health and statistics (no write)."""
+        existing = await self.get_ontology(db_name, class_id=None, raise_if_missing=False, branch=branch)
+        ontologies: List[OntologyResponse] = existing if isinstance(existing, list) else []
+
+        all_relationships: List[Relationship] = []
+        relationship_types: set[str] = set()
+        entities: set[str] = set()
+
+        for ontology in ontologies:
+            entities.add(ontology.id)
+            for rel in ontology.relationships or []:
+                all_relationships.append(rel)
+                relationship_types.add(rel.predicate)
+                if rel.target:
+                    entities.add(rel.target)
+
+        summary = self.relationship_manager.generate_relationship_summary(all_relationships)
+
+        validator = RelationshipValidator(existing_ontologies=ontologies)
+        validation_results = validator.validate_multiple_ontologies(ontologies) if ontologies else []
+        error_count = sum(1 for r in validation_results if r.severity == ValidationSeverity.ERROR)
+        warning_count = sum(1 for r in validation_results if r.severity == ValidationSeverity.WARNING)
+
+        detector = CircularReferenceDetector(max_cycle_depth=10)
+        detector.build_relationship_graph(ontologies)
+        cycles = detector.detect_all_cycles()
+        critical_cycles = [c for c in cycles if c.severity == "critical"]
+        warning_cycles = [c for c in cycles if c.severity == "warning"]
+
+        total_entities = len(entities) if entities else len(ontologies)
+        total_relationships = len(all_relationships)
+        avg_connections = (total_relationships / total_entities) if total_entities else 0.0
+
+        recommendations: List[str] = []
+        if error_count:
+            recommendations.append(f"❌ Relationship validation errors detected: {error_count}")
+        if warning_count:
+            recommendations.append(f"⚠️ Relationship validation warnings detected: {warning_count}")
+        if critical_cycles:
+            recommendations.append(f"❌ Critical cycles detected in relationship graph: {len(critical_cycles)}")
+        if warning_cycles:
+            recommendations.append(f"⚠️ Cycles detected (warning): {len(warning_cycles)}")
+        if not recommendations:
+            recommendations.append("📝 Relationship network looks healthy")
+
+        return {
+            "db_name": db_name,
+            "branch": branch,
+            "ontology_count": len(ontologies),
+            "summary": summary,
+            "graph_structure": {
+                "total_entities": total_entities,
+                "total_relationships": total_relationships,
+                "relationship_types": sorted(relationship_types),
+                "average_connections_per_entity": avg_connections,
+            },
+            "validation": {
+                "errors": error_count,
+                "warnings": warning_count,
+                "issues_sample": [
+                    {
+                        "severity": r.severity.value if hasattr(r.severity, "value") else str(r.severity),
+                        "code": r.code,
+                        "message": r.message,
+                        "field": r.field,
+                    }
+                    for r in validation_results[:25]
+                ],
+            },
+            "cycle_analysis": {
+                "total_cycles": len(cycles),
+                "critical_cycles": len(critical_cycles),
+                "warning_cycles": len(warning_cycles),
+                "cycles_sample": [
+                    {
+                        "cycle_type": c.cycle_type.value if hasattr(c.cycle_type, "value") else str(c.cycle_type),
+                        "path": c.path,
+                        "predicates": c.predicates,
+                        "length": c.length,
+                        "severity": c.severity,
+                        "message": c.message,
+                    }
+                    for c in cycles[:10]
+                ],
+            },
+            "recommendations": recommendations,
+            "analysis_timestamp": datetime.now(timezone.utc).isoformat(),
+        }
 
     def convert_properties_to_relationships(
         self, 

@@ -442,9 +442,12 @@ class TerminusService:
         self,
         db_name: str,
         ontology_data: Dict[str, Any],
-        auto_generate_inverse: bool = True,
+        *,
+        branch: str = "main",
+        auto_generate_inverse: bool = False,
         validate_relationships: bool = True,
         check_circular_references: bool = True,
+        headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """고급 관계 관리 기능을 포함한 온톨로지 생성 - OMS API 호출"""
         try:
@@ -452,15 +455,116 @@ class TerminusService:
                 f"/api/v1/database/{db_name}/ontology/create-advanced",
                 json=ontology_data,
                 params={
+                    "branch": branch,
                     "auto_generate_inverse": auto_generate_inverse,
                     "validate_relationships": validate_relationships,
                     "check_circular_references": check_circular_references,
                 },
+                headers=headers,
             )
             response.raise_for_status()
             return response.json()
         except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
             raise RuntimeError(f"고급 온톨로지 생성 실패 ({db_name}): {e}")
+
+    async def validate_relationships(
+        self,
+        db_name: str,
+        ontology_data: Dict[str, Any],
+        *,
+        branch: str = "main",
+        headers: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """온톨로지 관계 검증 - OMS API 호출 (no write)."""
+        try:
+            response = await self.oms_client.client.post(
+                f"/api/v1/database/{db_name}/ontology/validate-relationships",
+                json=ontology_data,
+                params={"branch": branch},
+                headers=headers,
+            )
+            response.raise_for_status()
+            body = response.json()
+            if isinstance(body, dict) and "data" in body:
+                return body["data"]
+            return body
+        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
+            raise RuntimeError(f"관계 검증 실패 ({db_name}): {e}")
+
+    async def detect_circular_references(
+        self,
+        db_name: str,
+        *,
+        branch: str = "main",
+        new_ontology: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """순환 참조 탐지 - OMS API 호출 (no write)."""
+        try:
+            response = await self.oms_client.client.post(
+                f"/api/v1/database/{db_name}/ontology/detect-circular-references",
+                json=new_ontology,
+                params={"branch": branch},
+                headers=headers,
+            )
+            response.raise_for_status()
+            body = response.json()
+            if isinstance(body, dict) and "data" in body:
+                return body["data"]
+            return body
+        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
+            raise RuntimeError(f"순환 참조 탐지 실패 ({db_name}): {e}")
+
+    async def analyze_relationship_network(
+        self,
+        db_name: str,
+        *,
+        branch: str = "main",
+        headers: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """관계 네트워크 분석 - OMS API 호출 (no write)."""
+        try:
+            response = await self.oms_client.client.get(
+                f"/api/v1/database/{db_name}/ontology/analyze-network",
+                params={"branch": branch},
+                headers=headers,
+            )
+            response.raise_for_status()
+            body = response.json()
+            if isinstance(body, dict) and "data" in body:
+                return body["data"]
+            return body
+        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
+            raise RuntimeError(f"관계 네트워크 분석 실패 ({db_name}): {e}")
+
+    async def find_relationship_paths(
+        self,
+        db_name: str,
+        start_entity: str,
+        end_entity: Optional[str] = None,
+        max_depth: int = 5,
+        path_type: str = "shortest",
+        *,
+        branch: str = "main",
+        headers: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """관계 경로 탐색 - OMS API 호출 (no write)."""
+        params: Dict[str, Any] = {"max_depth": max_depth, "path_type": path_type, "branch": branch}
+        if end_entity:
+            params["end_entity"] = end_entity
+        try:
+            response = await self.oms_client.client.get(
+                f"/api/v1/database/{db_name}/ontology/relationship-paths/{start_entity}",
+                params=params,
+                headers=headers,
+            )
+            response.raise_for_status()
+            body = response.json()
+            if isinstance(body, dict) and "data" in body:
+                return body["data"]
+            return body
+        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
+            raise RuntimeError(f"관계 경로 탐색 실패 ({db_name}): {e}")
 
 
 async def get_terminus_service(

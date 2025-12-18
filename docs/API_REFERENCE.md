@@ -85,17 +85,17 @@ This mix is historical (routers were added at different times) and is a **known 
   - Also supported: `Accept-Language: en-US,en;q=0.9,ko;q=0.8`
   - If both are present, `?lang` wins.
 - When a translation is missing, the API falls back to the other supported language.
+- Default (when neither is provided): `ko`
 
 ### Write mode (202 vs 200/201)
 
-Most “write” endpoints behave differently depending on deployment mode:
+All “write” endpoints in the supported system posture are **async**:
 
-- `ENABLE_EVENT_SOURCING=true` (default): **async** writes → HTTP `202` + `command_id` (poll required)
-- `ENABLE_EVENT_SOURCING=false`: **direct** writes → HTTP `200/201` (no polling; changes are applied immediately)
+- Writes submit a command and return HTTP `202` + `command_id` (poll required)
+- Direct write mode (`ENABLE_EVENT_SOURCING=false`) is **not supported** for core write paths (you may see `5xx` if you try)
 
 Notes:
-- This doc labels endpoints as “async in event-sourcing mode” when the status code depends on the mode.
-- **Async instance endpoints** always represent command submission, even if the backend is running in direct mode.
+- This API reference assumes **event-sourcing mode** as the only supported production posture.
 
 ### Standard Response: `ApiResponse`
 
@@ -292,8 +292,10 @@ Notes:
 - `GET /api/v1/tasks/{task_id}` — get task status
 - `GET /api/v1/tasks/{task_id}/result` — get task result (if stored)
 - `DELETE /api/v1/tasks/{task_id}` — cancel task
-- `POST /api/v1/tasks/{task_id}/retry` — retry task
 - `GET /api/v1/tasks/metrics/summary` — metrics summary
+
+Notes:
+- Manual task retry is intentionally **not exposed** (task specs are not durably persisted today). Re-submit a new command instead.
 
 ### Command Status (**Stable**)
 - `GET /api/v1/commands/{command_id}/status` — poll async command status/result
@@ -319,9 +321,9 @@ Notes:
 
 ### Database Management (**Stable**)
 - `GET /api/v1/databases` — list databases
-- `POST /api/v1/databases` — create database (async in event-sourcing mode)
+- `POST /api/v1/databases` — create database (**HTTP 202**)
 - `GET /api/v1/databases/{db_name}` — get database info
-- `DELETE /api/v1/databases/{db_name}` — delete database (async in event-sourcing mode; requires `expected_seq`)
+- `DELETE /api/v1/databases/{db_name}` — delete database (**HTTP 202**; requires `expected_seq`)
 - `GET /api/v1/databases/{db_name}/branches` — list branches
 - `POST /api/v1/databases/{db_name}/branches` — create branch
 - `GET /api/v1/databases/{db_name}/branches/{branch_name}` — get branch info
@@ -372,24 +374,25 @@ Notes:
 - `GET /api/v1/monitoring/health/liveness` — k8s liveness
 - `GET /api/v1/monitoring/health/readiness` — k8s readiness
 - `GET /api/v1/monitoring/status` — status overview
-- `GET /api/v1/monitoring/metrics` — service metrics
-- `GET /api/v1/monitoring/dependencies` — service dependencies
+- `GET /api/v1/monitoring/metrics` — redirects to `/metrics` (Prometheus scrape target)
 - `GET /api/v1/monitoring/config` — config overview
 - `GET /api/v1/monitoring/background-tasks/active` — active background tasks
 - `GET /api/v1/monitoring/background-tasks/health` — background task health
 - `GET /api/v1/monitoring/background-tasks/metrics` — background task metrics
-- `POST /api/v1/monitoring/services/{service_name}/restart` — restart a service (dev/ops only)
+
+Notes:
+- Dependency graph and “restart service” APIs are intentionally **not exposed** (avoid fake controls). Use `/health/detailed` and `/status` instead.
 
 ### Ontology Management (**Stable**)
-- `POST /api/v1/database/{db_name}/ontology?branch=<branch>` — create ontology class (async in event-sourcing mode)
+- `POST /api/v1/database/{db_name}/ontology?branch=<branch>` — create ontology class (**HTTP 202**)
 - `POST /api/v1/database/{db_name}/ontology/validate?branch=<branch>` — validate ontology create (lint report, no write)
 - `GET /api/v1/database/{db_name}/ontology/{class_label}?branch=<branch>` — get ontology class
 - `POST /api/v1/database/{db_name}/ontology/{class_label}/validate?branch=<branch>` — validate ontology update (lint+diff, no write)
-- `PUT /api/v1/database/{db_name}/ontology/{class_label}?branch=<branch>&expected_seq=...` — update ontology (async in event-sourcing mode; requires `expected_seq`)
-- `DELETE /api/v1/database/{db_name}/ontology/{class_label}?branch=<branch>&expected_seq=...` — delete ontology (async in event-sourcing mode; requires `expected_seq`)
+- `PUT /api/v1/database/{db_name}/ontology/{class_label}?branch=<branch>&expected_seq=...` — update ontology (**HTTP 202**; requires `expected_seq`)
+- `DELETE /api/v1/database/{db_name}/ontology/{class_label}?branch=<branch>&expected_seq=...` — delete ontology (**HTTP 202**; requires `expected_seq`)
 - `GET /api/v1/database/{db_name}/ontology/list?branch=<branch>` — list ontologies
 - `GET /api/v1/database/{db_name}/ontology/{class_id}/schema?branch=<branch>&format=json|jsonld|owl` — schema export
-- `POST /api/v1/database/{db_name}/ontology-advanced` — advanced relationship validation + inverse generation (direct)
+- `POST /api/v1/database/{db_name}/ontology-advanced` — advanced relationship validation (async 202); `auto_generate_inverse=true` returns `501`
 - `POST /api/v1/database/{db_name}/validate-relationships` — validate relationships (pre-flight)
 - `POST /api/v1/database/{db_name}/check-circular-references` — detect circular refs (pre-flight)
 - `GET /api/v1/database/{db_name}/relationship-network/analyze` — relationship network analysis

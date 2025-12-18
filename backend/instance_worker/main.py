@@ -157,14 +157,17 @@ class StrictPalantirInstanceWorker:
         else:
             logger.warning("⚠️ ProcessedEventRegistry disabled (duplicates may re-apply side-effects)")
 
-        if self.enable_event_sourcing:
-            try:
-                self.event_store = EventStore()
-                await self.event_store.connect()
-                logger.info("✅ Event Store connected (domain events will be appended to S3/MinIO)")
-            except Exception as e:
-                logger.warning(f"⚠️ Event Store connection failed, falling back to direct Kafka publish: {e}")
-                self.event_store = None
+        # Event Sourcing is now mandatory for write-side correctness.
+        # Legacy "direct Kafka publish" paths are removed because they break SSoT.
+        if not self.enable_event_sourcing:
+            raise RuntimeError(
+                "ENABLE_EVENT_SOURCING=false is no longer supported. "
+                "Enable Event Sourcing and provide a reachable Event Store (MinIO/S3)."
+            )
+
+        self.event_store = EventStore()
+        await self.event_store.connect()
+        logger.info("✅ Event Store connected (domain events will be appended to S3/MinIO)")
 
         # First-class lineage/audit (best-effort; do not fail the worker)
         if self.enable_lineage:
@@ -757,17 +760,9 @@ class StrictPalantirInstanceWorker:
             },
         )
 
-        if self.enable_event_sourcing and self.event_store:
-            await self.event_store.append_event(envelope)
-        else:
-            if not self.producer:
-                raise RuntimeError("Kafka producer not initialized")
-            self.producer.produce(
-                AppConfig.INSTANCE_EVENTS_TOPIC,
-                key=aggregate_id,
-                value=envelope.as_json(),
-            )
-            self.producer.flush()
+        if not self.event_store:
+            raise RuntimeError("Event Store not initialized (ENABLE_EVENT_SOURCING requires Event Store)")
+        await self.event_store.append_event(envelope)
 
         return {
             "instance_id": instance_id,
@@ -1085,20 +1080,10 @@ class StrictPalantirInstanceWorker:
                 },
             )
 
-            if self.enable_event_sourcing and self.event_store:
-                await self.event_store.append_event(envelope)
-                logger.info(
-                    f"  ✅ Stored INSTANCE_CREATED in Event Store (seq={envelope.sequence_number})"
-                )
-            else:
-                # Fallback: direct Kafka publish (still use canonical EventEnvelope format).
-                self.producer.produce(
-                    AppConfig.INSTANCE_EVENTS_TOPIC,
-                    key=aggregate_id,
-                    value=envelope.as_json(),
-                )
-                self.producer.flush()
-                logger.info("  ✅ Published INSTANCE_CREATED event (fallback; not persisted in Event Store)")
+            if not self.event_store:
+                raise RuntimeError("Event Store not initialized (ENABLE_EVENT_SOURCING requires Event Store)")
+            await self.event_store.append_event(envelope)
+            logger.info(f"  ✅ Stored INSTANCE_CREATED in Event Store (seq={envelope.sequence_number})")
             
             # Set success status
             await self.set_command_status(command_id, 'completed', {
@@ -1676,17 +1661,10 @@ class StrictPalantirInstanceWorker:
             },
         )
 
-        if self.enable_event_sourcing and self.event_store:
-            await self.event_store.append_event(envelope)
-            logger.info(f"  ✅ Stored INSTANCE_UPDATED in Event Store (seq={envelope.sequence_number})")
-        else:
-            self.producer.produce(
-                AppConfig.INSTANCE_EVENTS_TOPIC,
-                key=aggregate_id,
-                value=envelope.as_json(),
-            )
-            self.producer.flush()
-            logger.info("  ✅ Published INSTANCE_UPDATED event (fallback; not persisted in Event Store)")
+        if not self.event_store:
+            raise RuntimeError("Event Store not initialized (ENABLE_EVENT_SOURCING requires Event Store)")
+        await self.event_store.append_event(envelope)
+        logger.info(f"  ✅ Stored INSTANCE_UPDATED in Event Store (seq={envelope.sequence_number})")
 
         await self.set_command_status(
             command_id,
@@ -1939,17 +1917,10 @@ class StrictPalantirInstanceWorker:
             },
         )
 
-        if self.enable_event_sourcing and self.event_store:
-            await self.event_store.append_event(envelope)
-            logger.info(f"  ✅ Stored INSTANCE_DELETED in Event Store (seq={envelope.sequence_number})")
-        else:
-            self.producer.produce(
-                AppConfig.INSTANCE_EVENTS_TOPIC,
-                key=aggregate_id,
-                value=envelope.as_json(),
-            )
-            self.producer.flush()
-            logger.info("  ✅ Published INSTANCE_DELETED event (fallback; not persisted in Event Store)")
+        if not self.event_store:
+            raise RuntimeError("Event Store not initialized (ENABLE_EVENT_SOURCING requires Event Store)")
+        await self.event_store.append_event(envelope)
+        logger.info(f"  ✅ Stored INSTANCE_DELETED in Event Store (seq={envelope.sequence_number})")
 
         await self.set_command_status(command_id, "completed", {"instance_id": instance_id})
             

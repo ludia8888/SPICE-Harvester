@@ -8,12 +8,13 @@ Verifies:
 """
 
 import asyncio
-import aiohttp
+from datetime import datetime
 import json
 import time
-from datetime import datetime
 
-async def test_palantir_federation():
+import aiohttp
+
+async def run_palantir_federation():
     print("🔥 TESTING PALANTIR-STYLE FEDERATION")
     print("=" * 70)
     
@@ -197,5 +198,6 @@ async def test_palantir_federation():
         print("   • Federation via terminus_id ✅")
         print("   • Clean separation of concerns ✅")
 
-print("\n🚀 Running Palantir Federation test...")
-asyncio.run(test_palantir_federation())
+if __name__ == "__main__":
+    print("\n🚀 Running Palantir Federation test...")
+    asyncio.run(run_palantir_federation())

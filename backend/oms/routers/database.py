@@ -5,9 +5,7 @@ Event Sourcing: S3/MinIO Event Store(SSoT)에 Command 이벤트를 저장
 """
 
 import logging
-import os
 from typing import Any, Dict, List, Optional
-from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, status, Query
 from fastapi.responses import JSONResponse
@@ -50,7 +48,6 @@ async def list_databases(terminus_service: AsyncTerminusService = TerminusServic
 @router.post("/create")
 async def create_database(
     request: dict, 
-    terminus_service: AsyncTerminusService = TerminusServiceDep,
     event_store=EventStoreDep,
     command_status_service=CommandStatusServiceDep,
 ):
@@ -80,80 +77,60 @@ async def create_database(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="설명이 너무 깁니다 (500자 이하)"
             )
 
-        enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
+        command = DatabaseCommand(
+            command_type=CommandType.CREATE_DATABASE,
+            aggregate_id=db_name,
+            expected_seq=0,
+            payload={"database_name": db_name, "description": description},
+            metadata={"source": "OMS", "user": "system"},
+        )
 
-        if enable_event_sourcing:
-            command = DatabaseCommand(
-                command_type=CommandType.CREATE_DATABASE,
-                aggregate_id=db_name,
-                expected_seq=0,
-                payload={"database_name": db_name, "description": description},
-                metadata={"source": "OMS", "user": "system"},
+        envelope = EventEnvelope.from_command(
+            command,
+            actor="system",
+            kafka_topic=AppConfig.DATABASE_COMMANDS_TOPIC,
+            metadata={"service": "oms", "mode": "event_sourcing"},
+        )
+        try:
+            await event_store.append_event(envelope)
+        except OptimisticConcurrencyError as e:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "optimistic_concurrency_conflict",
+                    "aggregate_id": e.aggregate_id,
+                    "expected_seq": e.expected_last_sequence,
+                    "actual_seq": e.actual_last_sequence,
+                },
             )
 
-            envelope = EventEnvelope.from_command(
-                command,
-                actor="system",
-                kafka_topic=AppConfig.DATABASE_COMMANDS_TOPIC,
-                metadata={"service": "oms", "mode": "event_sourcing"},
-            )
+        if command_status_service:
             try:
-                await event_store.append_event(envelope)
-            except OptimisticConcurrencyError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "error": "optimistic_concurrency_conflict",
-                        "aggregate_id": e.aggregate_id,
-                        "expected_seq": e.expected_last_sequence,
-                        "actual_seq": e.actual_last_sequence,
+                await command_status_service.set_command_status(
+                    command_id=str(command.command_id),
+                    status=CommandStatus.PENDING,
+                    metadata={
+                        "command_type": command.command_type,
+                        "aggregate_id": command.aggregate_id,
+                        "db_name": db_name,
+                        "created_at": command.created_at.isoformat(),
+                        "created_by": command.created_by or "system",
                     },
                 )
+            except Exception as e:
+                logger.warning(f"Failed to persist command status (continuing without Redis): {e}")
 
-            if command_status_service:
-                try:
-                    await command_status_service.set_command_status(
-                        command_id=str(command.command_id),
-                        status=CommandStatus.PENDING,
-                        metadata={
-                            "command_type": command.command_type,
-                            "aggregate_id": command.aggregate_id,
-                            "db_name": db_name,
-                            "created_at": command.created_at.isoformat(),
-                            "created_by": command.created_by or "system",
-                        },
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to persist command status (continuing without Redis): {e}")
-
-            return JSONResponse(
-                status_code=status.HTTP_202_ACCEPTED,
-                content=ApiResponse.accepted(
-                    message=f"데이터베이스 '{db_name}' 생성 명령이 접수되었습니다",
-                    data={
-                        "command_id": str(command.command_id),
-                        "database_name": db_name,
-                        "status": "processing",
-                        "mode": "event_sourcing",
-                    },
-                ).to_dict(),
-            )
-        
-        # 직접 생성 모드 (Event Sourcing 비활성화 또는 실패 시)
-        result = await terminus_service.create_database(db_name, description=description)
-        
-        # 🔥 FIXED: result는 bool이므로 dict처럼 언팩하지 말고 적절한 데이터 구조 생성
         return JSONResponse(
-            status_code=status.HTTP_201_CREATED,
-            content=ApiResponse.created(
-                message=f"데이터베이스 '{db_name}'이(가) 생성되었습니다",
+            status_code=status.HTTP_202_ACCEPTED,
+            content=ApiResponse.accepted(
+                message=f"데이터베이스 '{db_name}' 생성 명령이 접수되었습니다",
                 data={
+                    "command_id": str(command.command_id),
                     "database_name": db_name,
-                    "description": description,
-                    "created": result,
-                    "mode": "direct"
-                }
-            ).to_dict()
+                    "status": "processing",
+                    "mode": "event_sourcing",
+                },
+            ).to_dict(),
         )
     except SecurityViolationError as e:
         logger.warning(f"Security violation in create_database: {e}")
@@ -196,7 +173,6 @@ async def create_database(
 async def delete_database(
     db_name: str,
     expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
-    terminus_service: AsyncTerminusService = TerminusServiceDep,
     event_store=EventStoreDep,
     command_status_service=CommandStatusServiceDep,
 ):
@@ -218,83 +194,61 @@ async def delete_database(
                 detail=f"시스템 데이터베이스 '{db_name}'은(는) 삭제할 수 없습니다",
             )
 
-        enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
+        # Event Sourcing mode: emit command only (async). Existence is checked by workers.
+        command = DatabaseCommand(
+            command_type=CommandType.DELETE_DATABASE,
+            aggregate_id=db_name,
+            expected_seq=expected_seq,
+            payload={"database_name": db_name},
+            metadata={"source": "OMS", "user": "system"},
+        )
 
-        # Event Sourcing 모드: 명령만 발행 (비동기 처리)
-        # 존재 확인은 worker에서 처리하도록 함
-        if enable_event_sourcing:
-            command = DatabaseCommand(
-                command_type=CommandType.DELETE_DATABASE,
-                aggregate_id=db_name,
-                expected_seq=expected_seq,
-                payload={"database_name": db_name},
-                metadata={"source": "OMS", "user": "system"},
+        envelope = EventEnvelope.from_command(
+            command,
+            actor="system",
+            kafka_topic=AppConfig.DATABASE_COMMANDS_TOPIC,
+            metadata={"service": "oms", "mode": "event_sourcing"},
+        )
+        try:
+            await event_store.append_event(envelope)
+        except OptimisticConcurrencyError as e:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "optimistic_concurrency_conflict",
+                    "aggregate_id": e.aggregate_id,
+                    "expected_seq": e.expected_last_sequence,
+                    "actual_seq": e.actual_last_sequence,
+                },
             )
 
-            envelope = EventEnvelope.from_command(
-                command,
-                actor="system",
-                kafka_topic=AppConfig.DATABASE_COMMANDS_TOPIC,
-                metadata={"service": "oms", "mode": "event_sourcing"},
-            )
+        if command_status_service:
             try:
-                await event_store.append_event(envelope)
-            except OptimisticConcurrencyError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "error": "optimistic_concurrency_conflict",
-                        "aggregate_id": e.aggregate_id,
-                        "expected_seq": e.expected_last_sequence,
-                        "actual_seq": e.actual_last_sequence,
+                await command_status_service.set_command_status(
+                    command_id=str(command.command_id),
+                    status=CommandStatus.PENDING,
+                    metadata={
+                        "command_type": command.command_type,
+                        "aggregate_id": command.aggregate_id,
+                        "db_name": db_name,
+                        "created_at": command.created_at.isoformat(),
+                        "created_by": command.created_by or "system",
                     },
                 )
+            except Exception as e:
+                logger.warning(f"Failed to persist command status (continuing without Redis): {e}")
 
-            if command_status_service:
-                try:
-                    await command_status_service.set_command_status(
-                        command_id=str(command.command_id),
-                        status=CommandStatus.PENDING,
-                        metadata={
-                            "command_type": command.command_type,
-                            "aggregate_id": command.aggregate_id,
-                            "db_name": db_name,
-                            "created_at": command.created_at.isoformat(),
-                            "created_by": command.created_by or "system",
-                        },
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to persist command status (continuing without Redis): {e}")
-
-            return JSONResponse(
-                status_code=status.HTTP_202_ACCEPTED,
-                content=ApiResponse.accepted(
-                    message=f"데이터베이스 '{db_name}' 삭제 명령이 접수되었습니다",
-                    data={
-                        "command_id": str(command.command_id),
-                        "database_name": db_name,
-                        "status": "processing",
-                        "mode": "event_sourcing",
-                    },
-                ).to_dict(),
-            )
-
-        # 직접 삭제 모드 (Event Sourcing 비활성화 또는 실패 시)
-        # 이 모드에서만 존재 확인 필요
-        if not await terminus_service.database_exists(db_name):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다",
-            )
-            
-        await terminus_service.delete_database(db_name)
-        
         return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content=ApiResponse.success(
-                message=f"데이터베이스 '{db_name}'이(가) 삭제되었습니다",
-                data={"database": db_name, "mode": "direct"}
-            ).to_dict()
+            status_code=status.HTTP_202_ACCEPTED,
+            content=ApiResponse.accepted(
+                message=f"데이터베이스 '{db_name}' 삭제 명령이 접수되었습니다",
+                data={
+                    "command_id": str(command.command_id),
+                    "database_name": db_name,
+                    "status": "processing",
+                    "mode": "event_sourcing",
+                },
+            ).to_dict(),
         )
     except SecurityViolationError as e:
         logger.warning(f"Security violation in delete_database: {e}")

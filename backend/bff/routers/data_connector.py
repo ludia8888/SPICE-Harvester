@@ -8,7 +8,7 @@ specifically for Google Sheets integration with Kafka messaging.
 import logging
 from typing import Dict, Any, Union
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from confluent_kafka import Producer
 
 from data_connector.google_sheets.service import GoogleSheetsService
@@ -55,6 +55,7 @@ async def get_google_sheets_service() -> GoogleSheetsService:
 @trace_endpoint("extract_google_sheet_grid")
 async def extract_google_sheet_grid(
     request: GoogleSheetGridRequest,
+    http_request: Request,
     google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service),
 ) -> SheetGrid:
     try:
@@ -107,6 +108,7 @@ async def extract_google_sheet_grid(
 @trace_endpoint("preview_google_sheet_for_funnel")
 async def preview_google_sheet_for_funnel(
     request: GoogleSheetPreviewRequest,
+    http_request: Request,
     limit: int = 10,
     google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service),
 ) -> GoogleSheetPreviewResponse:
@@ -145,6 +147,7 @@ async def preview_google_sheet_for_funnel(
 @trace_endpoint("register_google_sheet")
 async def register_google_sheet(
     sheet_data: Dict[str, Any],
+    http_request: Request,
     google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service)
 ) -> Dict[str, Any]:
     """
@@ -234,6 +237,7 @@ async def register_google_sheet(
 @trace_endpoint("preview_google_sheet")
 async def preview_google_sheet(
     sheet_id: str,
+    http_request: Request,
     worksheet_name: str = None,
     limit: int = 10,
     google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service)
@@ -288,6 +292,7 @@ async def preview_google_sheet(
 @rate_limit(**RateLimitPresets.RELAXED)
 @trace_endpoint("list_registered_sheets")
 async def list_registered_sheets(
+    http_request: Request,
     database_name: str = None,
     google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service)
 ) -> Dict[str, Any]:
@@ -335,6 +340,7 @@ async def list_registered_sheets(
 @trace_endpoint("unregister_google_sheet")
 async def unregister_google_sheet(
     sheet_id: str,
+    http_request: Request,
     google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service)
 ) -> Dict[str, str]:
     """

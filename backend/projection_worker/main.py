@@ -41,7 +41,6 @@ from shared.utils.ontology_version import split_ref_commit
 # Observability imports
 from shared.observability.tracing import get_tracing_service
 from shared.observability.metrics import get_metrics_collector
-from shared.observability.context_propagation import ContextPropagator
 
 # 로깅 설정
 logging.basicConfig(
@@ -72,7 +71,6 @@ class ProjectionWorker:
         self.projection_manager: Optional[ProjectionManager] = None
         self.tracing_service = None
         self.metrics_collector = None
-        self.context_propagator = ContextPropagator()
 
         # Durable idempotency (Postgres)
         self.enable_processed_event_registry = (
