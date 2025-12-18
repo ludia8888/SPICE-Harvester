@@ -512,3 +512,42 @@ class ProcessedEventRegistry:
                 f"status={existing.get('status') if existing else None}, "
                 f"owner={existing.get('owner') if existing else None})"
             )
+
+
+def validate_lease_settings() -> None:
+    heartbeat_raw = os.getenv("PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS", "30")
+    lease_raw = os.getenv("PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS", "900")
+    try:
+        heartbeat = int(heartbeat_raw)
+        lease = int(lease_raw)
+    except ValueError as exc:
+        raise RuntimeError(
+            "ProcessedEventRegistry lease settings must be integers. "
+            f"Got heartbeat={heartbeat_raw!r}, lease={lease_raw!r}."
+        ) from exc
+
+    if heartbeat <= 0 or lease <= 0:
+        raise RuntimeError(
+            "ProcessedEventRegistry lease settings must be positive. "
+            f"Got heartbeat={heartbeat}, lease={lease}."
+        )
+
+    if heartbeat >= lease:
+        raise RuntimeError(
+            "ProcessedEventRegistry heartbeat interval must be smaller than lease timeout. "
+            f"Got heartbeat={heartbeat}, lease={lease}."
+        )
+
+
+def validate_registry_enabled() -> None:
+    enabled = os.getenv("ENABLE_PROCESSED_EVENT_REGISTRY", "true").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if not enabled:
+        raise RuntimeError(
+            "ENABLE_PROCESSED_EVENT_REGISTRY=false is not supported. "
+            "ProcessedEventRegistry is required for idempotency and ordering safety."
+        )

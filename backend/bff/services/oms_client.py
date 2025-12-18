@@ -4,6 +4,7 @@ BFF에서 OMS와 통신하기 위한 HTTP 클라이언트
 """
 
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -31,14 +32,26 @@ class OMSClient:
         ssl_config = ServiceConfig.get_client_ssl_config()
 
         # HTTPX 클라이언트 생성
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        auth_token = self._get_auth_token()
+        if auth_token:
+            headers["X-Admin-Token"] = auth_token
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
             timeout=30.0,
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            headers=headers,
             verify=ssl_config.get("verify", True),
         )
 
         logger.info(f"OMS Client initialized with base URL: {self.base_url}")
+
+    @staticmethod
+    def _get_auth_token() -> Optional[str]:
+        for key in ("OMS_CLIENT_TOKEN", "OMS_ADMIN_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN"):
+            value = (os.getenv(key) or "").strip()
+            if value:
+                return value
+        return None
 
     async def close(self):
         """클라이언트 연결 종료"""

@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 import signal
 from contextlib import suppress
 from datetime import datetime, timezone
@@ -34,7 +35,12 @@ from oms.services.async_terminus import AsyncTerminusService
 from oms.services.event_store import EventStore
 from shared.services.redis_service import RedisService, create_redis_service
 from shared.services.command_status_service import CommandStatusService
-from shared.services.processed_event_registry import ClaimDecision, ProcessedEventRegistry
+from shared.services.processed_event_registry import (
+    ClaimDecision,
+    ProcessedEventRegistry,
+    validate_registry_enabled,
+    validate_lease_settings,
+)
 from shared.services.lineage_store import LineageStore
 from shared.services.audit_log_store import AuditLogStore
 from shared.security.input_sanitizer import validate_branch_name
@@ -75,6 +81,7 @@ class OntologyWorker:
         self.audit_store: Optional[AuditLogStore] = None
         self.tracing_service = None
         self.metrics_collector = None
+        self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ontology-worker-kafka")
 
     @staticmethod
     def _coerce_commit_id(value: Any) -> Optional[str]:
@@ -117,18 +124,28 @@ class OntologyWorker:
             ok = await self.processed_event_registry.heartbeat(handler=handler, event_id=event_id)
             if not ok:
                 return
+
+    async def _consumer_call(self, func, *args, **kwargs):
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._consumer_executor, lambda: func(*args, **kwargs))
         
     async def initialize(self):
         """워커 초기화"""
+        validate_registry_enabled()
+        validate_lease_settings()
+
         # Kafka Consumer 설정
-        self.consumer = Consumer({
-            'bootstrap.servers': self.kafka_servers,
-            'group.id': 'ontology-worker-group',
-            'auto.offset.reset': 'earliest',
-            'enable.auto.commit': False,
-            'max.poll.interval.ms': 300000,  # 5분
-            'session.timeout.ms': 45000,  # 45초
-        })
+        self.consumer = await self._consumer_call(
+            Consumer,
+            {
+                'bootstrap.servers': self.kafka_servers,
+                'group.id': 'ontology-worker-group',
+                'auto.offset.reset': 'earliest',
+                'enable.auto.commit': False,
+                'max.poll.interval.ms': 300000,  # 5분
+                'session.timeout.ms': 45000,  # 45초
+            },
+        )
         
         # Kafka Producer 설정 (Event 발행용)
         self.producer = Producer({
@@ -174,12 +191,9 @@ class OntologyWorker:
         logger.info("✅ Event Store connected (domain events will be appended to S3/MinIO)")
 
         # Durable processed-events registry (idempotency + ordering guard)
-        if self.enable_processed_event_registry:
-            self.processed_event_registry = ProcessedEventRegistry()
-            await self.processed_event_registry.connect()
-            logger.info("✅ ProcessedEventRegistry connected (Postgres)")
-        else:
-            logger.warning("⚠️ ProcessedEventRegistry disabled (duplicates may re-apply side-effects)")
+        self.processed_event_registry = ProcessedEventRegistry()
+        await self.processed_event_registry.connect()
+        logger.info("✅ ProcessedEventRegistry connected (Postgres)")
 
         # First-class lineage/audit (best-effort; do not fail the worker)
         if self.enable_lineage:
@@ -201,10 +215,10 @@ class OntologyWorker:
                 self.audit_store = None
         
         # Command 토픽 구독 - 온톨로지와 데이터베이스 명령 모두 처리
-        self.consumer.subscribe([
-            AppConfig.ONTOLOGY_COMMANDS_TOPIC,
-            AppConfig.DATABASE_COMMANDS_TOPIC
-        ])
+        await self._consumer_call(
+            self.consumer.subscribe,
+            [AppConfig.ONTOLOGY_COMMANDS_TOPIC, AppConfig.DATABASE_COMMANDS_TOPIC],
+        )
         
         # Initialize OpenTelemetry
         self.tracing_service = get_tracing_service("ontology-worker")
@@ -883,7 +897,7 @@ class OntologyWorker:
         
         try:
             while self.running:
-                msg = self.consumer.poll(timeout=1.0)
+                msg = await self._consumer_call(self.consumer.poll, timeout=1.0)
                 
                 if msg is None:
                     continue
@@ -909,14 +923,14 @@ class OntologyWorker:
                     except Exception as e:
                         logger.error(f"Failed to parse EventEnvelope JSON: {e}")
                         # Poison pill: commit to avoid infinite retry loop.
-                        self.consumer.commit(asynchronous=False)
+                        await self._consumer_call(self.consumer.commit, asynchronous=False)
                         continue
 
                     kind = envelope.metadata.get("kind") if isinstance(envelope.metadata, dict) else None
                     if kind != "command":
                         logger.error(f"Unexpected envelope kind for command topic: {kind}")
                         # Poison pill: commit to avoid infinite retry loop.
-                        self.consumer.commit(asynchronous=False)
+                        await self._consumer_call(self.consumer.commit, asynchronous=False)
                         continue
 
                     command_data = dict(envelope.data or {})
@@ -946,14 +960,16 @@ class OntologyWorker:
                                 f"Skipping {claim.decision.value} command event_id={registry_event_id} "
                                 f"(aggregate_id={registry_aggregate_id}, seq={registry_sequence})"
                             )
-                            self.consumer.commit(asynchronous=False)
+                            await self._consumer_call(self.consumer.commit, asynchronous=False)
                             continue
                         if claim.decision == ClaimDecision.IN_PROGRESS:
                             logger.info(
                                 f"Command {registry_event_id} is in progress elsewhere; retrying later"
                             )
                             await asyncio.sleep(2)
-                            self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
+                            await self._consumer_call(
+                                self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
+                            )
                             continue
                         registry_claimed = True
                         registry_attempt_count = int(claim.attempt_count or 1)
@@ -980,7 +996,7 @@ class OntologyWorker:
                             )
                         
                         # 처리 성공 시 오프셋 커밋
-                        self.consumer.commit(asynchronous=False)
+                        await self._consumer_call(self.consumer.commit, asynchronous=False)
                     finally:
                         if heartbeat_task:
                             heartbeat_task.cancel()
@@ -990,7 +1006,7 @@ class OntologyWorker:
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse message: {e}")
                     # 파싱 실패해도 오프셋은 커밋 (무한 루프 방지)
-                    self.consumer.commit(asynchronous=False)
+                    await self._consumer_call(self.consumer.commit, asynchronous=False)
                 except Exception as e:
                     logger.error(f"Error processing command: {e}")
                     if registry_claimed and self.processed_event_registry and registry_event_id:
@@ -1028,14 +1044,16 @@ class OntologyWorker:
                             f"(attempt {attempt_count}/{max_attempts})"
                         )
                         await asyncio.sleep(backoff_s)
-                        self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
+                        await self._consumer_call(
+                            self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
+                        )
                         continue
 
                     logger.error(
                         f"Skipping failed command event_id={registry_event_id} after {attempt_count} attempts "
                         f"(retryable={retryable}); committing offset to avoid poison pill"
                     )
-                    self.consumer.commit(message=msg, asynchronous=False)
+                    await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
                     continue
                     
         except KeyboardInterrupt:
@@ -1049,7 +1067,7 @@ class OntologyWorker:
         self.running = False
         
         if self.consumer:
-            self.consumer.close()
+            await self._consumer_call(self.consumer.close)
             
         if self.terminus_service:
             await self.terminus_service.disconnect()
@@ -1059,6 +1077,7 @@ class OntologyWorker:
 
         if self.processed_event_registry:
             await self.processed_event_registry.close()
+        self._consumer_executor.shutdown(wait=True, cancel_futures=True)
             
         logger.info("Ontology Worker shut down successfully")
 

@@ -19,6 +19,7 @@ from shared.services.websocket_service import (
     get_notification_service,
     WebSocketConnectionManager
 )
+from bff.middleware.auth import enforce_bff_websocket_auth
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ async def websocket_command_updates(
     command_id: str,
     client_id: Optional[str] = Query(default=None),
     user_id: Optional[str] = Query(default=None),
+    token: Optional[str] = Query(default=None, description="Auth token (X-Admin-Token/Bearer)"),
     manager: WebSocketConnectionManager = Depends(get_ws_manager)
 ):
     """
@@ -47,6 +49,9 @@ async def websocket_command_updates(
         client_id: 클라이언트 고유 ID (선택사항, 자동 생성)
         user_id: 사용자 ID (선택사항, 인증 시 사용)
     """
+    if not await enforce_bff_websocket_auth(websocket, token):
+        return
+
     # 입력 검증 (Security Enhancement)
     if client_id:
         if len(client_id) > 50 or not re.match(r"^[a-zA-Z0-9_-]+$", client_id):
@@ -112,6 +117,7 @@ async def websocket_user_commands(
     websocket: WebSocket,
     user_id: str = Query(..., description="사용자 ID (필수)"),
     client_id: Optional[str] = Query(default=None),
+    token: Optional[str] = Query(default=None, description="Auth token (X-Admin-Token/Bearer)"),
     manager: WebSocketConnectionManager = Depends(get_ws_manager)
 ):
     """
@@ -121,6 +127,9 @@ async def websocket_user_commands(
         user_id: 사용자 ID (필수)
         client_id: 클라이언트 고유 ID (선택사항, 자동 생성)
     """
+    if not await enforce_bff_websocket_auth(websocket, token):
+        return
+
     # 입력 검증 (Security Enhancement)
     if len(user_id) > 50 or not re.match(r"^[a-zA-Z0-9_-]+$", user_id):
         await websocket.close(code=4000, reason="Invalid user_id format")

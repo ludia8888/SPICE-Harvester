@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Set, List, Union
@@ -37,7 +38,12 @@ from shared.services.command_status_service import (
 from shared.config.settings import ApplicationSettings
 from shared.models.event_envelope import EventEnvelope
 from shared.security.input_sanitizer import validate_branch_name, validate_class_id, validate_instance_id
-from shared.services.processed_event_registry import ClaimDecision, ProcessedEventRegistry
+from shared.services.processed_event_registry import (
+    ClaimDecision,
+    ProcessedEventRegistry,
+    validate_registry_enabled,
+    validate_lease_settings,
+)
 from shared.services.lineage_store import LineageStore
 from shared.services.audit_log_store import AuditLogStore
 from shared.utils.chaos import maybe_crash
@@ -84,6 +90,7 @@ class StrictPalantirInstanceWorker:
         self.enable_audit_logs = os.getenv("ENABLE_AUDIT_LOGS", "true").strip().lower() in {"1", "true", "yes", "on"}
         self.lineage_store: Optional[LineageStore] = None
         self.audit_store: Optional[AuditLogStore] = None
+        self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="instance-worker-kafka")
         
         # PALANTIR PRINCIPLE: Only business concepts in graph
         # No system fields or storage details
@@ -91,17 +98,23 @@ class StrictPalantirInstanceWorker:
     async def initialize(self):
         """Initialize all connections"""
         logger.info("Initializing STRICT Palantir Instance Worker...")
+
+        validate_registry_enabled()
+        validate_lease_settings()
         
         # Kafka Consumer - stable consumer group (at-least-once with manual commit)
         group_id = os.getenv("INSTANCE_WORKER_GROUP", "instance-worker-group")
-        self.consumer = Consumer({
-            'bootstrap.servers': self.kafka_servers,
-            'group.id': group_id,
-            'auto.offset.reset': 'earliest',  # Read from beginning
-            'enable.auto.commit': False,
-            'max.poll.interval.ms': 300000,  # 5 minutes
-            'session.timeout.ms': 45000,  # 45 seconds
-        })
+        self.consumer = await self._consumer_call(
+            Consumer,
+            {
+                'bootstrap.servers': self.kafka_servers,
+                'group.id': group_id,
+                'auto.offset.reset': 'earliest',  # Read from beginning
+                'enable.auto.commit': False,
+                'max.poll.interval.ms': 300000,  # 5 minutes
+                'session.timeout.ms': 45000,  # 45 seconds
+            },
+        )
         logger.info(f"Using consumer group: {group_id}")
         
         # Kafka Producer for events
@@ -150,12 +163,9 @@ class StrictPalantirInstanceWorker:
         await self.terminus_service.connect()
 
         # Durable processed-events registry (idempotency + ordering guard)
-        if self.enable_processed_event_registry:
-            self.processed_event_registry = ProcessedEventRegistry()
-            await self.processed_event_registry.connect()
-            logger.info("✅ ProcessedEventRegistry connected (Postgres)")
-        else:
-            logger.warning("⚠️ ProcessedEventRegistry disabled (duplicates may re-apply side-effects)")
+        self.processed_event_registry = ProcessedEventRegistry()
+        await self.processed_event_registry.connect()
+        logger.info("✅ ProcessedEventRegistry connected (Postgres)")
 
         # Event Sourcing is now mandatory for write-side correctness.
         # Legacy "direct Kafka publish" paths are removed because they break SSoT.
@@ -189,7 +199,7 @@ class StrictPalantirInstanceWorker:
                 self.audit_store = None
         
         # Subscribe to Kafka topic
-        self.consumer.subscribe([AppConfig.INSTANCE_COMMANDS_TOPIC])
+        await self._consumer_call(self.consumer.subscribe, [AppConfig.INSTANCE_COMMANDS_TOPIC])
         
         logger.info("✅ STRICT Palantir Instance Worker initialized")
 
@@ -198,6 +208,10 @@ class StrictPalantirInstanceWorker:
 
     async def _s3_read_body(self, body) -> bytes:
         return await asyncio.to_thread(body.read)
+
+    async def _consumer_call(self, func, *args, **kwargs):
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._consumer_executor, lambda: func(*args, **kwargs))
         
     async def extract_payload_from_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -2054,7 +2068,7 @@ class StrictPalantirInstanceWorker:
         
         poll_count = 0
         while self.running:
-            msg = self.consumer.poll(timeout=1.0)
+            msg = await self._consumer_call(self.consumer.poll, timeout=1.0)
             poll_count += 1
             
             if poll_count % 10 == 0:
@@ -2086,7 +2100,7 @@ class StrictPalantirInstanceWorker:
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse Kafka message JSON: {e}")
                     # Poison pill: commit to avoid infinite retry loop.
-                    self.consumer.commit(msg, asynchronous=False)
+                    await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
                     continue
 
                 # Extract the actual command payload (canonical EventEnvelope only)
@@ -2094,7 +2108,7 @@ class StrictPalantirInstanceWorker:
                     command = await self.extract_payload_from_message(raw_message)
                 except Exception as e:
                     logger.error(f"Invalid command envelope; committing offset to avoid poison pill: {e}")
-                    self.consumer.commit(msg, asynchronous=False)
+                    await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
                     continue
 
                 command_type = command.get("command_type")
@@ -2109,7 +2123,7 @@ class StrictPalantirInstanceWorker:
                             status_data = json.loads(status_raw)
                             if str(status_data.get("status", "")).upper() == "COMPLETED":
                                 logger.info(f"Skipping already completed command {command_id}")
-                                self.consumer.commit(msg, asynchronous=False)
+                                await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
                                 continue
                     except Exception as e:
                         logger.warning(f"Failed to read command status for {command_id}: {e}")
@@ -2135,12 +2149,14 @@ class StrictPalantirInstanceWorker:
                             f"Skipping {claim.decision.value} command event_id={registry_event_id} "
                             f"(aggregate_id={registry_aggregate_id}, seq={registry_sequence})"
                         )
-                        self.consumer.commit(msg, asynchronous=False)
+                        await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
                         continue
                     if claim.decision == ClaimDecision.IN_PROGRESS:
                         logger.info(f"Command {registry_event_id} is in progress elsewhere; retrying later")
                         await asyncio.sleep(2)
-                        self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
+                        await self._consumer_call(
+                            self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
+                        )
                         continue
                     registry_claimed = True
                     maybe_crash("instance_worker:after_claim", logger=logger)
@@ -2174,7 +2190,7 @@ class StrictPalantirInstanceWorker:
                         sequence_number=int(registry_sequence) if registry_sequence is not None else None,
                     )
 
-                self.consumer.commit(msg, asynchronous=False)
+                await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
 
             except Exception as e:
                 logger.error(f"Error processing command: {e}")
@@ -2207,7 +2223,9 @@ class StrictPalantirInstanceWorker:
                         f"(attempt {attempt_count}/{max_attempts})"
                     )
                     await asyncio.sleep(backoff_s)
-                    self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
+                    await self._consumer_call(
+                        self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
+                    )
                     continue
 
                 try:
@@ -2219,7 +2237,7 @@ class StrictPalantirInstanceWorker:
                     f"Skipping failed command event_id={registry_event_id} after {attempt_count} attempts "
                     f"(retryable={retryable}); committing offset to avoid poison pill"
                 )
-                self.consumer.commit(message=msg, asynchronous=False)
+                await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
                 continue
 
             finally:
@@ -2234,7 +2252,7 @@ class StrictPalantirInstanceWorker:
         self.running = False
         
         if self.consumer:
-            self.consumer.close()
+            await self._consumer_call(self.consumer.close)
         if self.producer:
             self.producer.flush()
         if self.redis_client:
@@ -2243,6 +2261,7 @@ class StrictPalantirInstanceWorker:
             await self.terminus_service.close()
         if self.processed_event_registry:
             await self.processed_event_registry.close()
+        self._consumer_executor.shutdown(wait=True, cancel_futures=True)
             
 
 async def main():

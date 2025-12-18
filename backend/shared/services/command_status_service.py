@@ -5,6 +5,7 @@ Manages command lifecycle states and provides status tracking functionality.
 """
 
 import logging
+import os
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 from enum import Enum
@@ -40,7 +41,20 @@ class CommandStatusService:
     
     def __init__(self, redis_service: RedisService):
         self.redis = redis_service
-        self.default_ttl = 86400  # 24 hours
+        ttl_raw = (os.getenv("COMMAND_STATUS_TTL_SECONDS") or "").strip()
+        if not ttl_raw:
+            self.default_ttl = 0
+        else:
+            try:
+                self.default_ttl = int(ttl_raw)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Invalid COMMAND_STATUS_TTL_SECONDS value: {ttl_raw!r}"
+                ) from exc
+            if self.default_ttl < 0:
+                raise ValueError(
+                    f"COMMAND_STATUS_TTL_SECONDS must be >= 0 (got {self.default_ttl})"
+                )
         
     async def create_command_status(
         self,

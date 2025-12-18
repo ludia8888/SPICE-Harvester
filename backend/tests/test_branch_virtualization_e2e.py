@@ -26,6 +26,7 @@ import aiohttp
 import pytest
 
 from shared.config.search_config import get_instances_index_name
+from tests.utils.auth import bff_auth_headers, oms_auth_headers
 
 
 if os.getenv("RUN_LIVE_BRANCH_VIRTUALIZATION", "").strip().lower() not in {"1", "true", "yes", "on"}:
@@ -38,6 +39,11 @@ if os.getenv("RUN_LIVE_BRANCH_VIRTUALIZATION", "").strip().lower() not in {"1", 
 
 OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhost:8000").rstrip("/")
 BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
+OMS_HEADERS = oms_auth_headers()
+BFF_HEADERS = bff_auth_headers()
+if OMS_HEADERS.get("X-Admin-Token") != BFF_HEADERS.get("X-Admin-Token"):
+    raise AssertionError("BFF/OMS auth tokens differ; tests require a single admin token.")
+AUTH_HEADERS = BFF_HEADERS
 
 
 async def _get_write_side_last_sequence(*, aggregate_type: str, aggregate_id: str) -> Optional[int]:
@@ -215,7 +221,7 @@ async def _wait_for_graph_node(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_branch_virtualization_overlay_copy_on_write():
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
         db_name = f"test_branch_viz_{uuid.uuid4().hex[:10]}"
         class_id = "Product"
 
@@ -361,4 +367,3 @@ async def test_branch_virtualization_overlay_copy_on_write():
             except Exception:
                 # Avoid masking test failures; cleanup can be retried manually.
                 pass
-

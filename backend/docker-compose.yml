@@ -190,6 +190,8 @@ services:
       # Service
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
+      - OMS_REQUIRE_AUTH=${OMS_REQUIRE_AUTH:-true}
+      - ADMIN_TOKEN=${ADMIN_TOKEN:?ADMIN_TOKEN is required}
     ports:
       - "8000:8000"
     depends_on:
@@ -231,6 +233,8 @@ services:
       - KAFKA_PORT=29092
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
+      - BFF_REQUIRE_AUTH=${BFF_REQUIRE_AUTH:-true}
+      - ADMIN_TOKEN=${ADMIN_TOKEN:?ADMIN_TOKEN is required}
     ports:
       - "8002:8002"
     depends_on:

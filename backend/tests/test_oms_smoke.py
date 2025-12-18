@@ -24,6 +24,7 @@ import aiohttp
 import pytest
 
 from oms.services.event_store import EventStore
+from tests.utils.auth import oms_auth_headers
 
 
 if os.getenv("RUN_LIVE_OMS_SMOKE", "").strip().lower() not in {"1", "true", "yes", "on"}:
@@ -35,6 +36,7 @@ if os.getenv("RUN_LIVE_OMS_SMOKE", "").strip().lower() not in {"1", "true", "yes
 
 
 OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhost:8000").rstrip("/")
+OMS_HEADERS = oms_auth_headers()
 
 
 async def _assert_command_event_has_ontology_stamp(*, event_id: str) -> None:
@@ -175,7 +177,7 @@ async def _wait_for_instance_count(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_oms_end_to_end_smoke():
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(headers=OMS_HEADERS) as session:
         db_name = f"test_oms_smoke_{uuid.uuid4().hex[:10]}"
         branch_name = "feature/oms_smoke"
         class_id = "Product"

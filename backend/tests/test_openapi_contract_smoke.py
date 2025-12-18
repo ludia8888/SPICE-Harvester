@@ -34,6 +34,7 @@ from typing import Any, Dict, Iterable, Optional, Tuple
 import aiohttp
 import pytest
 
+from tests.utils.auth import bff_auth_headers
 
 BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
 
@@ -41,9 +42,13 @@ BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhos
 SMOKE_GOOGLE_SHEET_URL = (os.getenv("SMOKE_GOOGLE_SHEET_URL") or "").strip()
 SMOKE_GOOGLE_SHEET_API_KEY = (os.getenv("SMOKE_GOOGLE_SHEET_API_KEY") or "").strip()
 SMOKE_OPENAI_ENABLED = (os.getenv("OPENAI_API_KEY") or "").strip() != ""
-SMOKE_ADMIN_TOKEN = (
-    (os.getenv("SMOKE_ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or os.getenv("ADMIN_TOKEN") or "").strip()
+_ENV_SMOKE_TOKEN = (
+    (os.getenv("SMOKE_ADMIN_TOKEN") or os.getenv("BFF_ADMIN_TOKEN") or os.getenv("ADMIN_TOKEN") or "").strip()
 )
+BFF_HEADERS = bff_auth_headers()
+if _ENV_SMOKE_TOKEN and _ENV_SMOKE_TOKEN != BFF_HEADERS.get("X-Admin-Token"):
+    raise AssertionError("SMOKE_ADMIN_TOKEN differs from BFF auth token.")
+SMOKE_ADMIN_TOKEN = _ENV_SMOKE_TOKEN or (BFF_HEADERS.get("X-Admin-Token") or "")
 
 
 def _load_repo_dotenv() -> Dict[str, str]:
@@ -271,8 +276,10 @@ async def _request(
     kwargs: Dict[str, Any] = {}
     if plan.params:
         kwargs["params"] = plan.params
+    headers: Dict[str, str] = dict(BFF_HEADERS)
     if plan.headers:
-        kwargs["headers"] = plan.headers
+        headers.update(plan.headers)
+    kwargs["headers"] = headers
     if plan.form is not None:
         kwargs["data"] = plan.form
     else:
@@ -843,7 +850,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
 @pytest.mark.asyncio
 async def test_openapi_stable_contract_smoke():
     # Basic reachability check (no mocks).
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(headers=BFF_HEADERS) as session:
         try:
             async with session.get(f"{BFF_URL}/api/v1/health") as resp:
                 if resp.status != 200:
@@ -851,7 +858,7 @@ async def test_openapi_stable_contract_smoke():
         except Exception as e:  # pragma: no cover
             pytest.skip(f"BFF not reachable at {BFF_URL}: {e}")
 
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(headers=BFF_HEADERS) as session:
         async with session.get(f"{BFF_URL}/openapi.json") as resp:
             assert resp.status == 200, f"Failed to fetch OpenAPI: {resp.status} {await resp.text()}"
             spec = await resp.json()
@@ -898,7 +905,10 @@ async def test_openapi_stable_contract_smoke():
     failures: list[str] = []
     executed: set[Tuple[str, str]] = set()
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
+    async with aiohttp.ClientSession(
+        timeout=aiohttp.ClientTimeout(total=60),
+        headers=BFF_HEADERS,
+    ) as session:
         # ---- Deterministic setup (also counts toward coverage) ----
         try:
             # Create DB (async ES mode) and wait

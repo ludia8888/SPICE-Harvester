@@ -146,6 +146,58 @@ class TokenBucket:
             }
 
 
+class LocalTokenBucket:
+    """In-memory token bucket for degraded mode when Redis is unavailable."""
+
+    def __init__(self, capacity: int, refill_rate: float, max_entries: int) -> None:
+        self.capacity = capacity
+        self.refill_rate = refill_rate
+        self._max_entries = max_entries
+        # key -> (tokens, last_refill_ts, last_seen_ts)
+        self._state: Dict[str, Tuple[float, float, float]] = {}
+
+    def _evict_if_needed(self) -> None:
+        if len(self._state) <= self._max_entries:
+            return
+        # Drop oldest entries by last_seen.
+        overflow = len(self._state) - self._max_entries
+        for key, _ in sorted(self._state.items(), key=lambda item: item[1][2])[:overflow]:
+            self._state.pop(key, None)
+
+    async def consume(self, key: str, tokens: int = 1) -> Tuple[bool, Dict[str, Any]]:
+        now = time.time()
+        current = self._state.get(key)
+        if current is None:
+            available = float(self.capacity)
+            last_refill = now
+        else:
+            available, last_refill, _ = current
+            elapsed = max(0.0, now - last_refill)
+            available = min(float(self.capacity), available + (elapsed * self.refill_rate))
+            last_refill = now
+
+        if available >= tokens:
+            available -= tokens
+            allowed = True
+            reset_in = 0
+        else:
+            allowed = False
+            needed = tokens - available
+            reset_in = (needed / self.refill_rate) if self.refill_rate > 0 else 1
+
+        self._state[key] = (available, last_refill, now)
+        self._evict_if_needed()
+
+        return allowed, {
+            "remaining": int(available),
+            "capacity": self.capacity,
+            "reset_in": reset_in,
+            "refill_rate": self.refill_rate,
+            "mode": "local",
+            "degraded": True,
+        }
+
+
 class RateLimiter:
     """
     Rate limiting middleware for FastAPI
@@ -162,7 +214,9 @@ class RateLimiter:
         self.redis_url = redis_url or ServiceConfig.get_redis_url()
         self.redis_client: Optional[redis.Redis] = None
         self.buckets: Dict[str, TokenBucket] = {}
+        self._local_buckets: Dict[str, LocalTokenBucket] = {}
         self.fail_open = os.getenv("RATE_LIMIT_FAIL_OPEN", "false").lower() in ("true", "1", "yes", "on")
+        self._local_max_entries = int(os.getenv("RATE_LIMIT_LOCAL_MAX_ENTRIES", "10000"))
         # Redis reconnect guard.
         self._next_retry_at: float = 0.0
         self._last_init_error: Optional[str] = None
@@ -224,6 +278,16 @@ class RateLimiter:
             )
             
         return self.buckets[bucket_key]
+
+    def get_local_bucket(self, bucket_type: str, capacity: int, refill_rate: float) -> LocalTokenBucket:
+        bucket_key = f"{bucket_type}:{capacity}:{refill_rate}:local"
+        if bucket_key not in self._local_buckets:
+            self._local_buckets[bucket_key] = LocalTokenBucket(
+                capacity=capacity,
+                refill_rate=refill_rate,
+                max_entries=self._local_max_entries,
+            )
+        return self._local_buckets[bucket_key]
     
     def get_client_id(self, request: Request, strategy: str = "ip") -> str:
         """
@@ -284,22 +348,32 @@ class RateLimiter:
         if not self.redis_client:
             await self.initialize()
         if not self.redis_client:
-            info = {
-                "remaining": capacity,
-                "capacity": capacity,
-                "reset_in": 1,
-                "refill_rate": refill_rate,
-                "disabled": True,
-                "error": self._last_init_error,
-            }
             if self.fail_open:
-                return True, info
-            return False, info
+                return True, {
+                    "remaining": capacity,
+                    "capacity": capacity,
+                    "reset_in": 1,
+                    "refill_rate": refill_rate,
+                    "disabled": True,
+                    "error": self._last_init_error,
+                }
+            client_id = self.get_client_id(request, strategy)
+            bucket = self.get_local_bucket(strategy, capacity, refill_rate)
+            allowed, info = await bucket.consume(client_id, tokens)
+            info["error"] = self._last_init_error
+            return allowed, info
             
         client_id = self.get_client_id(request, strategy)
         bucket = self.get_bucket(strategy, capacity, refill_rate)
-        
-        return await bucket.consume(client_id, tokens)
+
+        allowed, info = await bucket.consume(client_id, tokens)
+        if info.get("disabled") and not self.fail_open:
+            local_bucket = self.get_local_bucket(strategy, capacity, refill_rate)
+            allowed, local_info = await local_bucket.consume(client_id, tokens)
+            local_info["error"] = info.get("error")
+            return allowed, local_info
+
+        return allowed, info
 
 
 def rate_limit(
@@ -385,6 +459,11 @@ def rate_limit(
                 "X-RateLimit-Remaining": str(max(0, info.get("remaining", 0))),
                 "X-RateLimit-Reset": str(int(time.time() + info.get("reset_in", 0)))
             }
+            mode = info.get("mode")
+            if mode:
+                headers["X-RateLimit-Mode"] = str(mode)
+            if info.get("degraded"):
+                headers["X-RateLimit-Degraded"] = "true"
             if info.get("disabled"):
                 headers["X-RateLimit-Disabled"] = "true"
             request.state.rate_limit_headers = headers

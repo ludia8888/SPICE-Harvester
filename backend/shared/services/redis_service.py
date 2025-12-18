@@ -107,7 +107,7 @@ class RedisService:
         command_id: str,
         status: str,
         data: Optional[Dict[str, Any]] = None,
-        ttl: int = 86400  # 24 hours default
+        ttl: int = 0
     ) -> None:
         """
         Set command status with optional data.
@@ -126,11 +126,11 @@ class RedisService:
             "data": data or {}
         }
         
-        await self.client.setex(
-            key,
-            ttl,
-            json.dumps(value)
-        )
+        payload = json.dumps(value)
+        if ttl and ttl > 0:
+            await self.client.setex(key, ttl, payload)
+        else:
+            await self.client.set(key, payload)
         
         # Publish status update for real-time notifications
         await self.publish_command_update(command_id, value)
@@ -183,7 +183,7 @@ class RedisService:
         self,
         command_id: str,
         result: Dict[str, Any],
-        ttl: int = 86400
+        ttl: int = 0
     ) -> None:
         """
         Store command execution result.
@@ -195,11 +195,11 @@ class RedisService:
         """
         from shared.config.app_config import AppConfig
         key = AppConfig.get_command_result_key(command_id)
-        await self.client.setex(
-            key,
-            ttl,
-            json.dumps(result)
-        )
+        payload = json.dumps(result)
+        if ttl and ttl > 0:
+            await self.client.setex(key, ttl, payload)
+        else:
+            await self.client.set(key, payload)
         
     async def get_command_result(self, command_id: str) -> Optional[Dict[str, Any]]:
         """

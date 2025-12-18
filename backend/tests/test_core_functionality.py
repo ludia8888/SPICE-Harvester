@@ -16,6 +16,8 @@ import time
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
+from tests.utils.auth import bff_auth_headers, oms_auth_headers
+
 # Real service endpoints
 OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhost:8000").rstrip("/")
 BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
@@ -41,6 +43,12 @@ ELASTICSEARCH_URL = os.getenv(
     f"http://{os.getenv('ELASTICSEARCH_HOST', 'localhost')}:{os.getenv('ELASTICSEARCH_PORT', '9200')}",
 )
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+
+BFF_HEADERS = bff_auth_headers()
+OMS_HEADERS = oms_auth_headers()
+if BFF_HEADERS.get("X-Admin-Token") != OMS_HEADERS.get("X-Admin-Token"):
+    raise AssertionError("BFF/OMS auth tokens differ; tests require a single admin token.")
+AUTH_HEADERS = BFF_HEADERS
 
 
 async def _get_write_side_last_sequence(*, aggregate_type: str, aggregate_id: str) -> int:
@@ -192,7 +200,7 @@ class TestCoreOntologyManagement:
     @pytest.mark.asyncio
     async def test_database_lifecycle(self):
         """Test complete database lifecycle with Event Sourcing"""
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
             db_name = f"test_db_{uuid.uuid4().hex[:8]}"
             command_id: Optional[str] = None
             
@@ -233,7 +241,7 @@ class TestCoreOntologyManagement:
     @pytest.mark.asyncio
     async def test_ontology_creation(self):
         """Test ontology creation with complex types"""
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
             db_name = f"test_ontology_db_{uuid.uuid4().hex[:8]}"
             
             # Create database first
@@ -299,7 +307,7 @@ class TestCoreOntologyManagement:
     @pytest.mark.asyncio
     async def test_ontology_creation_advanced_relationships(self):
         """Test advanced ontology creation path is truly event-sourced and functional."""
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
             db_name = f"test_adv_ontology_db_{uuid.uuid4().hex[:8]}"
 
             async with session.post(
@@ -377,7 +385,7 @@ class TestBFFGraphFederation:
     @pytest.mark.asyncio
     async def test_schema_suggestion(self):
         """Test ML-driven schema suggestion"""
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
             sample_data = [
                 {"name": "iPhone 15", "price": 999.99, "in_stock": True},
                 {"name": "Samsung S24", "price": 899.99, "in_stock": False},
@@ -412,7 +420,7 @@ class TestBFFGraphFederation:
     @pytest.mark.asyncio
     async def test_graph_query_federation(self):
         """Test federated graph queries with Elasticsearch"""
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
             # This would require a test database with data
             # For now, just verify the endpoint is accessible
             async with session.post(
@@ -610,7 +618,7 @@ class TestHealthEndpoints:
     @pytest.mark.asyncio
     async def test_oms_health(self):
         """Test OMS health endpoint"""
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
             async with session.get(f"{OMS_URL}/health") as resp:
                 assert resp.status == 200
                 result = await resp.json()
@@ -620,7 +628,7 @@ class TestHealthEndpoints:
     @pytest.mark.asyncio
     async def test_bff_health(self):
         """Test BFF health endpoint"""
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
             async with session.get(f"{BFF_URL}/api/v1/health") as resp:
                 assert resp.status == 200
                 result = await resp.json()
@@ -630,7 +638,7 @@ class TestHealthEndpoints:
     @pytest.mark.asyncio
     async def test_funnel_health(self):
         """Test Funnel health endpoint"""
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
             async with session.get(f"{FUNNEL_URL}/health") as resp:
                 assert resp.status == 200
                 result = await resp.json()

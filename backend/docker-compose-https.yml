@@ -37,6 +37,8 @@ services:
       - TERMINUS_ACCOUNT=${TERMINUS_ACCOUNT:-admin}
       - TERMINUS_KEY=${TERMINUS_KEY:-admin123}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - OMS_REQUIRE_AUTH=${OMS_REQUIRE_AUTH:-true}
+      - ADMIN_TOKEN=${ADMIN_TOKEN:?ADMIN_TOKEN is required}
       - USE_HTTPS=${USE_HTTPS:-true}
       - SSL_CERT_PATH=/ssl/oms/server.crt
       - SSL_KEY_PATH=/ssl/oms/server.key
@@ -67,6 +69,8 @@ services:
       - OMS_BASE_URL=${OMS_BASE_URL:-https://oms:8000}
       - FUNNEL_BASE_URL=${FUNNEL_BASE_URL:-https://funnel:8003}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - BFF_REQUIRE_AUTH=${BFF_REQUIRE_AUTH:-true}
+      - ADMIN_TOKEN=${ADMIN_TOKEN:?ADMIN_TOKEN is required}
       - USE_HTTPS=${USE_HTTPS:-true}
       - SSL_CERT_PATH=/ssl/bff/server.crt
       - SSL_KEY_PATH=/ssl/bff/server.key

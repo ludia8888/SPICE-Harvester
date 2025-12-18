@@ -53,14 +53,15 @@ async def test_command_status_falls_back_to_registry():
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_command_status_falls_back_to_event_store_when_no_registry():
+async def test_command_status_falls_back_to_event_store_when_registry_has_no_record():
     command_id = str(uuid4())
+    registry = DummyRegistry(None)
     event_store = DummyEventStore(key="events/commands/abc.json")
 
     result = await get_command_status(
         command_id=command_id,
         command_status_service=None,
-        processed_event_registry=None,
+        processed_event_registry=registry,
         event_store=event_store,
     )
 

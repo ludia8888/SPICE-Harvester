@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 import signal
 from contextlib import suppress
 from datetime import datetime, timezone
@@ -32,7 +33,12 @@ from shared.models.events import (
 from shared.services.redis_service import RedisService, create_redis_service
 from shared.services.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
 from shared.services.projection_manager import ProjectionManager
-from shared.services.processed_event_registry import ClaimDecision, ProcessedEventRegistry
+from shared.services.processed_event_registry import (
+    ClaimDecision,
+    ProcessedEventRegistry,
+    validate_registry_enabled,
+    validate_lease_settings,
+)
 from shared.services.lineage_store import LineageStore
 from shared.services.audit_log_store import AuditLogStore
 from shared.utils.chaos import maybe_crash
@@ -71,6 +77,7 @@ class ProjectionWorker:
         self.projection_manager: Optional[ProjectionManager] = None
         self.tracing_service = None
         self.metrics_collector = None
+        self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="projection-worker-kafka")
 
         # Durable idempotency (Postgres)
         self.enable_processed_event_registry = (
@@ -245,18 +252,28 @@ class ProjectionWorker:
             ok = await self.processed_event_registry.heartbeat(handler=handler, event_id=event_id)
             if not ok:
                 return
+
+    async def _consumer_call(self, func, *args, **kwargs):
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._consumer_executor, lambda: func(*args, **kwargs))
         
     async def initialize(self):
         """워커 초기화"""
+        validate_registry_enabled()
+        validate_lease_settings()
+
         # Kafka Consumer 설정 (멀티 토픽 구독)
-        self.consumer = Consumer({
-            'bootstrap.servers': self.kafka_servers,
-            'group.id': 'projection-worker-group',
-            'auto.offset.reset': 'earliest',
-            'enable.auto.commit': False,
-            'max.poll.interval.ms': 300000,  # 5분
-            'session.timeout.ms': 45000,  # 45초
-        })
+        self.consumer = await self._consumer_call(
+            Consumer,
+            {
+                'bootstrap.servers': self.kafka_servers,
+                'group.id': 'projection-worker-group',
+                'auto.offset.reset': 'earliest',
+                'enable.auto.commit': False,
+                'max.poll.interval.ms': 300000,  # 5분
+                'session.timeout.ms': 45000,  # 45초
+            },
+        )
         
         # Kafka Producer 설정 (실패 이벤트 발행용)
         self.producer = Producer({
@@ -279,12 +296,9 @@ class ProjectionWorker:
         logger.info("Elasticsearch connection established")
 
         # Durable processed-events registry (idempotency + ordering guard)
-        if self.enable_processed_event_registry:
-            self.processed_event_registry = ProcessedEventRegistry()
-            await self.processed_event_registry.connect()
-            logger.info("✅ ProcessedEventRegistry connected (Postgres)")
-        else:
-            logger.warning("⚠️ ProcessedEventRegistry disabled (duplicates may re-apply side-effects)")
+        self.processed_event_registry = ProcessedEventRegistry()
+        await self.processed_event_registry.connect()
+        logger.info("✅ ProcessedEventRegistry connected (Postgres)")
 
         # First-class lineage/audit (best-effort; do not fail the worker)
         if self.enable_lineage:
@@ -310,7 +324,7 @@ class ProjectionWorker:
         
         # 토픽 구독
         topics = [AppConfig.INSTANCE_EVENTS_TOPIC, AppConfig.ONTOLOGY_EVENTS_TOPIC]
-        self.consumer.subscribe(topics)
+        await self._consumer_call(self.consumer.subscribe, topics)
         logger.info(f"Subscribed to topics: {topics}")
         
         # Initialize OpenTelemetry
@@ -410,7 +424,7 @@ class ProjectionWorker:
         
         try:
             while self.running:
-                msg = self.consumer.poll(timeout=1.0)
+                msg = await self._consumer_call(self.consumer.poll, timeout=1.0)
                 if msg is None:
                     continue
                     
@@ -426,7 +440,7 @@ class ProjectionWorker:
                     await self._process_event(msg)
                     # 성공 시 오프셋 커밋
                     maybe_crash("projection_worker:before_commit", logger=logger)
-                    self.consumer.commit(msg)
+                    await self._consumer_call(self.consumer.commit, msg)
                     # Clear retry state for this offset
                     key = f"{msg.topic()}:{msg.partition()}:{msg.offset()}"
                     self.retry_count.pop(key, None)
@@ -2160,7 +2174,9 @@ class ProjectionWorker:
                 logger.info(f"Lease in progress elsewhere; retrying later: {key}")
                 await asyncio.sleep(2)
                 if self.consumer:
-                    self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
+                    await self._consumer_call(
+                        self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
+                    )
                 return
 
             # Transient infra failures (e.g. Elasticsearch down): retry indefinitely with capped backoff.
@@ -2173,7 +2189,9 @@ class ProjectionWorker:
                 )
                 await asyncio.sleep(backoff_s)
                 if self.consumer:
-                    self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
+                    await self._consumer_call(
+                        self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
+                    )
                 return
 
             retry_count = self.retry_count.get(key, 0) + 1
@@ -2184,7 +2202,9 @@ class ProjectionWorker:
                 await asyncio.sleep(min(retry_count * 2, 30))  # capped backoff (avoid max.poll.interval issues)
                 # Rewind to the failed offset so we don't accidentally commit past it.
                 if self.consumer:
-                    self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
+                    await self._consumer_call(
+                        self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
+                    )
                 return
                 
             # 최대 재시도 횟수 초과 시 DLQ로 전송
@@ -2196,7 +2216,7 @@ class ProjectionWorker:
                 del self.retry_count[key]
                 
             # 오프셋 커밋 (DLQ 전송 후)
-            self.consumer.commit(msg)
+            await self._consumer_call(self.consumer.commit, msg)
             
         except Exception as e:
             logger.error(f"Error in retry handling: {e}")
@@ -2233,7 +2253,8 @@ class ProjectionWorker:
         self.running = False
         
         if self.consumer:
-            self.consumer.close()
+            await self._consumer_call(self.consumer.close)
+        self._consumer_executor.shutdown(wait=True, cancel_futures=True)
             
         if self.producer:
             self.producer.flush()

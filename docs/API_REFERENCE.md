@@ -427,7 +427,8 @@ WebSocket routes are not represented in OpenAPI.
 
 ### Subscribe a command
 
-- `WS /ws/commands/{command_id}`
+- `WS /api/v1/ws/commands/{command_id}`
+  - If auth is enabled, pass `?token=<admin_token>` or `X-Admin-Token` header.
 
 Client receives:
 - `connection_established`
@@ -435,7 +436,8 @@ Client receives:
 
 ### Subscribe all commands of a user
 
-- `WS /ws/commands?user_id=...`
+- `WS /api/v1/ws/commands?user_id=...`
+  - If auth is enabled, pass `?token=<admin_token>` or `X-Admin-Token` header.
 
 ## Key Flows (FE recipes)
 

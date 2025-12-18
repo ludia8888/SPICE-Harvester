@@ -19,6 +19,7 @@ from typing import List, AsyncIterator, Optional, Dict, Any, AsyncGenerator
 from datetime import timedelta
 import os
 import hashlib
+from urllib.parse import urlparse
 
 import aioboto3
 from botocore.exceptions import ClientError
@@ -73,13 +74,24 @@ class EventStore:
         """Initialize S3/MinIO connection"""
         try:
             self.session = aioboto3.Session()
-            
+
+            parsed = urlparse(self.endpoint_url)
+            scheme = (parsed.scheme or "http").lower()
+            use_ssl = scheme == "https"
+            require_tls = os.getenv("EVENT_STORE_REQUIRE_TLS", "false").strip().lower() in {"1", "true", "yes", "on"}
+            if require_tls and not use_ssl:
+                raise RuntimeError(
+                    f"Event Store requires TLS but endpoint is not https: {self.endpoint_url}"
+                )
+            verify_ssl = os.getenv("EVENT_STORE_SSL_VERIFY", "true").strip().lower() in {"1", "true", "yes", "on"}
+
             async with self.session.client(
                 's3',
                 endpoint_url=self.endpoint_url,
                 aws_access_key_id=self.access_key,
                 aws_secret_access_key=self.secret_key,
-                use_ssl=False
+                use_ssl=use_ssl,
+                verify=verify_ssl if use_ssl else None,
             ) as s3:
                 # Ensure bucket exists
                 try:

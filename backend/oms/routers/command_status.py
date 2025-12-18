@@ -41,18 +41,18 @@ async def _fallback_from_registry(
     *,
     command_uuid: UUID,
     registry: Optional[ProcessedEventRegistry],
-) -> Optional[CommandResult]:
+) -> tuple[Optional[CommandResult], bool]:
     if not registry:
-        return None
+        return None, False
 
     try:
         record = await registry.get_event_record(event_id=str(command_uuid))
     except Exception as e:
         logger.warning(f"ProcessedEventRegistry lookup failed for {command_uuid}: {e}")
-        return None
+        return None, False
 
     if not record:
-        return None
+        return None, True
 
     status_value = str(record.get("status") or "")
     parsed_status = _map_registry_status(status_value)
@@ -60,20 +60,23 @@ async def _fallback_from_registry(
     if status_value == "skipped_stale" and not error:
         error = "stale_event"
 
-    return CommandResult(
-        command_id=command_uuid,
-        status=parsed_status,
-        error=error,
-        result={
-            "message": f"Command status derived from processed_event_registry ({status_value})",
-            "source": "processed_event_registry",
-            "handler": record.get("handler"),
-            "status": status_value,
-            "attempt_count": record.get("attempt_count"),
-            "started_at": record.get("started_at"),
-            "processed_at": record.get("processed_at"),
-            "heartbeat_at": record.get("heartbeat_at"),
-        },
+    return (
+        CommandResult(
+            command_id=command_uuid,
+            status=parsed_status,
+            error=error,
+            result={
+                "message": f"Command status derived from processed_event_registry ({status_value})",
+                "source": "processed_event_registry",
+                "handler": record.get("handler"),
+                "status": status_value,
+                "attempt_count": record.get("attempt_count"),
+                "started_at": record.get("started_at"),
+                "processed_at": record.get("processed_at"),
+                "heartbeat_at": record.get("heartbeat_at"),
+            },
+        ),
+        True,
     )
 
 
@@ -99,9 +102,11 @@ async def get_command_status(
 
     try:
         status_info = None
+        status_available = False
         if command_status_service:
             try:
                 status_info = await command_status_service.get_command_status(command_id)
+                status_available = True
             except Exception as e:
                 logger.warning(f"CommandStatusService failed, falling back (command_id={command_id}): {e}")
                 status_info = None
@@ -136,12 +141,18 @@ async def get_command_status(
                     },
                 )
 
-        fallback = await _fallback_from_registry(
+        fallback, registry_available = await _fallback_from_registry(
             command_uuid=command_uuid,
             registry=processed_event_registry,
         )
         if fallback:
             return fallback
+
+        if not status_available and not registry_available:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Command status tracking is unavailable (Redis/Postgres unavailable)",
+            )
 
         try:
             key = await event_store.get_event_object_key(event_id=str(command_uuid))
@@ -158,12 +169,6 @@ async def get_command_status(
                 )
         except Exception as e:
             logger.warning(f"Event store lookup failed for {command_uuid}: {e}")
-
-        if not command_status_service and not processed_event_registry:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Command status tracking is unavailable (Redis/Postgres unavailable)",
-            )
 
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

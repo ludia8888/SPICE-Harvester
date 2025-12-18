@@ -258,13 +258,17 @@ async def create_ontology(
         from shared.config.service_config import ServiceConfig
         
         oms_url = ServiceConfig.get_oms_url()
+        headers = {"Content-Type": "application/json"}
+        auth_token = OMSClient._get_auth_token()
+        if auth_token:
+            headers["X-Admin-Token"] = auth_token
         
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 f"{oms_url}/api/v1/database/{db_name}/ontology",
                 json=ontology_dict,
                 params={"branch": branch},
-                headers={"Content-Type": "application/json"}
+                headers=headers,
             ) as response:
                 if response.status in [200, 202]:  # Accept both 200 (direct) and 202 (Event Sourcing)
                     result = await response.json()

@@ -48,6 +48,7 @@ from shared.dependencies.providers import (
 
 # Service factory import
 from shared.services.service_factory import OMS_SERVICE_INFO, create_fastapi_service, run_service
+from oms.middleware.auth import install_oms_auth_middleware, ensure_oms_auth_configured
 
 # OMS specific imports  
 from oms.services.async_terminus import AsyncTerminusService
@@ -330,6 +331,8 @@ async def lifespan(app: FastAPI):
     logger.info("OMS Service startup beginning...")
     
     try:
+        ensure_oms_auth_configured()
+
         # 1. Initialize the main dependency injection container
         container = await initialize_container(settings)
         
@@ -376,6 +379,7 @@ app = create_fastapi_service(
     include_health_check=False,  # Handled by existing health endpoint
     include_logging_middleware=True
 )
+install_oms_auth_middleware(app)
 
 
 # Error handlers (unchanged from original)
