@@ -80,6 +80,9 @@ from shared.services.websocket_service import get_notification_service
 # Rate limiting middleware
 from shared.middleware.rate_limiter import rate_limit, RateLimitPresets, RateLimiter
 
+# Auth middleware
+from bff.middleware.auth import install_bff_auth_middleware, ensure_bff_auth_configured
+
 # BFF specific imports
 from bff.services.funnel_type_inference_adapter import FunnelHTTPTypeInferenceAdapter
 from bff.services.oms_client import OMSClient
@@ -392,6 +395,8 @@ async def lifespan(app: FastAPI):
     logger.info("BFF Service startup beginning...")
     
     try:
+        ensure_bff_auth_configured()
+
         # 1. Initialize the main dependency injection container
         container = await initialize_container(settings)
         
@@ -438,6 +443,7 @@ app = create_fastapi_service(
     include_health_check=False,  # Handled by existing router
     include_logging_middleware=True
 )
+install_bff_auth_middleware(app)
 
 
 # Modern dependency injection functions

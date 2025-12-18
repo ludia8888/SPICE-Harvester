@@ -4,16 +4,12 @@ Implements Token Bucket algorithm with Redis backend
 Based on Context7 recommendations for API security
 """
 
-import asyncio
 import hashlib
-import json
+import os
 import time
 from typing import Optional, Dict, Any, Tuple
 from functools import wraps
-from datetime import datetime, timedelta
-
-from fastapi import Request, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Request, HTTPException, status
 import redis.asyncio as redis
 
 from shared.config.service_config import ServiceConfig
@@ -37,7 +33,8 @@ class TokenBucket:
         redis_client: redis.Redis,
         capacity: int,
         refill_rate: float,
-        key_prefix: str = "rate_limit"
+        key_prefix: str = "rate_limit",
+        fail_open: bool = False,
     ):
         """
         Initialize Token Bucket
@@ -52,6 +49,7 @@ class TokenBucket:
         self.capacity = capacity
         self.refill_rate = refill_rate
         self.key_prefix = key_prefix
+        self.fail_open = fail_open
         
     async def consume(self, key: str, tokens: int = 1) -> Tuple[bool, Dict[str, Any]]:
         """
@@ -129,8 +127,23 @@ class TokenBucket:
             
         except Exception as e:
             logger.error(f"Rate limiter error: {e}")
-            # On error, allow the request but log it
-            return True, {"remaining": -1, "capacity": self.capacity}
+            if self.fail_open:
+                return True, {
+                    "remaining": self.capacity,
+                    "capacity": self.capacity,
+                    "reset_in": 0,
+                    "refill_rate": self.refill_rate,
+                    "disabled": True,
+                    "error": str(e),
+                }
+            return False, {
+                "remaining": 0,
+                "capacity": self.capacity,
+                "reset_in": 1,
+                "refill_rate": self.refill_rate,
+                "disabled": True,
+                "error": str(e),
+            }
 
 
 class RateLimiter:
@@ -149,7 +162,8 @@ class RateLimiter:
         self.redis_url = redis_url or ServiceConfig.get_redis_url()
         self.redis_client: Optional[redis.Redis] = None
         self.buckets: Dict[str, TokenBucket] = {}
-        # Fail-open when Redis is unavailable (best-effort protection).
+        self.fail_open = os.getenv("RATE_LIMIT_FAIL_OPEN", "false").lower() in ("true", "1", "yes", "on")
+        # Redis reconnect guard.
         self._next_retry_at: float = 0.0
         self._last_init_error: Optional[str] = None
         
@@ -178,7 +192,8 @@ class RateLimiter:
         except Exception as e:
             self.redis_client = None
             self._last_init_error = str(e)
-            logger.warning(f"Rate limiter Redis unavailable (fail-open): {e}")
+            mode = "fail-open" if self.fail_open else "fail-closed"
+            logger.warning(f"Rate limiter Redis unavailable ({mode}): {e}")
 
     async def close(self):
         """Close Redis connection"""
@@ -204,7 +219,8 @@ class RateLimiter:
                 self.redis_client,
                 capacity,
                 refill_rate,
-                key_prefix=f"bucket:{bucket_type}"
+                key_prefix=f"bucket:{bucket_type}",
+                fail_open=self.fail_open,
             )
             
         return self.buckets[bucket_key]
@@ -268,15 +284,17 @@ class RateLimiter:
         if not self.redis_client:
             await self.initialize()
         if not self.redis_client:
-            # Fail-open when Redis is down: do not block API traffic.
-            return True, {
+            info = {
                 "remaining": capacity,
                 "capacity": capacity,
-                "reset_in": 0,
+                "reset_in": 1,
                 "refill_rate": refill_rate,
                 "disabled": True,
                 "error": self._last_init_error,
             }
+            if self.fail_open:
+                return True, info
+            return False, info
             
         client_id = self.get_client_id(request, strategy)
         bucket = self.get_bucket(strategy, capacity, refill_rate)
@@ -367,26 +385,40 @@ def rate_limit(
                 "X-RateLimit-Remaining": str(max(0, info.get("remaining", 0))),
                 "X-RateLimit-Reset": str(int(time.time() + info.get("reset_in", 0)))
             }
+            if info.get("disabled"):
+                headers["X-RateLimit-Disabled"] = "true"
+            request.state.rate_limit_headers = headers
             
             if not allowed:
                 # Rate limit exceeded
                 retry_after = int(info.get("reset_in", 1))
                 headers["Retry-After"] = str(retry_after)
-                
+                if info.get("disabled"):
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail={
+                            "error": "rate_limiter_unavailable",
+                            "retry_after": retry_after,
+                            "limit": requests,
+                            "window": window,
+                        },
+                        headers=headers,
+                    )
+
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     detail={
                         "error": "Rate limit exceeded",
                         "retry_after": retry_after,
                         "limit": requests,
-                        "window": window
+                        "window": window,
                     },
-                    headers=headers
+                    headers=headers,
                 )
             
             # Call endpoint normally (do not inject Request twice).
             response = await func(*args, **kwargs)
-            if isinstance(response, JSONResponse):
+            if hasattr(response, "headers"):
                 for key, value in headers.items():
                     response.headers[key] = value
                     
@@ -394,6 +426,18 @@ def rate_limit(
             
         return wrapper
     return decorator
+
+
+def install_rate_limit_headers_middleware(app: FastAPI) -> None:
+    @app.middleware("http")
+    async def _rate_limit_headers_middleware(request: Request, call_next):
+        response = await call_next(request)
+        headers = getattr(request.state, "rate_limit_headers", None)
+        if headers:
+            for key, value in headers.items():
+                if key not in response.headers:
+                    response.headers[key] = value
+        return response
 
 
 # Preset rate limit configurations based on Context7 patterns

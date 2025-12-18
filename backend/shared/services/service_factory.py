@@ -19,6 +19,7 @@ from starlette.responses import Response
 from shared.config.service_config import ServiceConfig
 from shared.models.requests import ApiResponse
 from shared.i18n.middleware import install_i18n_middleware
+from shared.middleware.rate_limiter import install_rate_limit_headers_middleware
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,7 @@ def create_fastapi_service(
 
     # Install i18n language negotiation + best-effort response localization
     install_i18n_middleware(app)
+    install_rate_limit_headers_middleware(app)
 
     # Expose output language selection in OpenAPI for all services
     _install_openapi_language_contract(app)

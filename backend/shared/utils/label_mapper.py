@@ -838,15 +838,21 @@ class LabelMapper:
         else:
             raise ValueError("class_id 또는 class_label이 제공되어야 합니다")
 
-        internal_query = {
-            "class_id": class_id,
-            "filters": [],
-            "select": query.get("select"),
-            "limit": query.get("limit"),
-            "offset": query.get("offset"),
-            "order_by": query.get("order_by"),
-            "order_direction": query.get("order_direction"),
-        }
+        # Important: do not forward explicit nulls to downstream validators.
+        # OMS uses QueryInput validators that reject `order_direction=null`, etc.
+        internal_query: Dict[str, Any] = {"class_id": class_id, "filters": []}
+
+        if query.get("select") is not None:
+            internal_query["select"] = query.get("select")
+        if query.get("limit") is not None:
+            internal_query["limit"] = query.get("limit")
+        if query.get("offset") is not None:
+            internal_query["offset"] = query.get("offset")
+        if query.get("order_by") is not None:
+            internal_query["order_by"] = query.get("order_by")
+
+        # Preserve explicit direction; otherwise use the QueryInput default.
+        internal_query["order_direction"] = query.get("order_direction") or "asc"
 
         # 필터 변환
         for filter_item in query.get("filters", []):
@@ -869,9 +875,9 @@ class LabelMapper:
             internal_query["filters"].append(internal_filter)
 
         # SELECT 필드 변환
-        if internal_query["select"]:
+        if internal_query.get("select"):
             internal_select = []
-            for field_label in internal_query["select"]:
+            for field_label in internal_query.get("select") or []:
                 property_id = await self.get_property_id(db_name, class_id, field_label, lang)
                 if not property_id:
                     predicate = await self.get_predicate(db_name, field_label, lang)
@@ -882,8 +888,8 @@ class LabelMapper:
             internal_query["select"] = internal_select
 
         # ORDER BY 필드 변환
-        if internal_query["order_by"]:
-            order_field = internal_query["order_by"]
+        if internal_query.get("order_by"):
+            order_field = internal_query.get("order_by")
             property_id = await self.get_property_id(db_name, class_id, order_field, lang)
             if not property_id:
                 predicate = await self.get_predicate(db_name, order_field, lang)

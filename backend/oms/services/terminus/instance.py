@@ -4,6 +4,7 @@ Instance Service for TerminusDB
 """
 
 import logging
+import json
 from typing import Any, Dict, List, Optional
 
 from .base import BaseTerminusService
@@ -156,7 +157,7 @@ class InstanceService(BaseTerminusService):
         """
         개별 인스턴스를 효율적으로 조회
         
-        CONSTRUCT 쿼리를 사용하여 모든 속성을 한 번에 가져옵니다.
+        TerminusDB Document API를 사용하여 단일 문서를 조회합니다.
         
         Args:
             db_name: 데이터베이스 이름
@@ -168,64 +169,81 @@ class InstanceService(BaseTerminusService):
         """
         try:
             await self.db_service.ensure_db_exists(db_name)
-            
-            # CONSTRUCT 쿼리로 인스턴스의 모든 데이터 가져오기
-            if class_id:
-                sparql_query = f"""
-                CONSTRUCT {{
-                    <{instance_id}> ?property ?value .
-                }}
-                WHERE {{
-                    <{instance_id}> a <{class_id}> .
-                    <{instance_id}> ?property ?value .
-                }}
-                """
-            else:
-                sparql_query = f"""
-                CONSTRUCT {{
-                    <{instance_id}> ?property ?value .
-                }}
-                WHERE {{
-                    <{instance_id}> ?property ?value .
-                }}
-                """
-            
-            # WOQL 실행 (TerminusDB는 SPARQL이 아닌 WOQL 사용)
-            endpoint = f"/api/woql/{self.connection_info.account}/{db_name}{self._branch_descriptor(branch)}"
-            result = await self._make_request("POST", endpoint, {"query": sparql_query})
-            
-            if not result:
-                return None
-            
-            # 결과를 단일 인스턴스 객체로 조립
-            instance_data = {
-                "instance_id": instance_id
-            }
-            
-            if isinstance(result, list):
-                for triple in result:
-                    predicate = triple.get("predicate", triple.get("@predicate"))
-                    obj = triple.get("object", triple.get("@object"))
-                    
-                    if predicate and obj:
-                        # 속성 이름 추출
-                        prop_name = predicate.split("/")[-1] if "/" in predicate else predicate
-                        prop_name = prop_name.split("#")[-1] if "#" in prop_name else prop_name
-                        
-                        # 값 처리
-                        if isinstance(obj, dict):
-                            value = obj.get("@value", obj.get("value", obj))
-                        else:
-                            value = obj
-                        
-                        # 특별한 속성 처리
-                        if prop_name in ["type", "rdf:type"]:
-                            instance_data["class_id"] = value.split("/")[-1] if "/" in value else value
-                            instance_data["@type"] = instance_data["class_id"]
-                        else:
-                            instance_data[prop_name] = value
-            
-            return instance_data if len(instance_data) > 1 else None
+
+            endpoint = (
+                f"/api/document/{self.connection_info.account}/{db_name}{self._branch_descriptor(branch)}"
+            )
+
+            candidates: List[str] = []
+            if instance_id and "/" in instance_id:
+                candidates.append(instance_id)
+            if class_id and instance_id and "/" not in instance_id:
+                candidates.append(f"{class_id}/{instance_id}")
+            if instance_id and instance_id not in candidates:
+                candidates.append(instance_id)
+
+            last_error: Optional[Exception] = None
+            for doc_id in candidates:
+                params = {"graph_type": "instance", "id": doc_id}
+                try:
+                    result = await self._make_request("GET", endpoint, params=params)
+                except ValueError as e:
+                    # Treat "not found" as a miss and try the next candidate.
+                    last_error = e
+                    msg = str(e).lower()
+                    if "404" in msg or "not found" in msg or "documentnotfound" in msg:
+                        continue
+                    raise
+
+                if result is None or result == "" or (isinstance(result, str) and not result.strip()):
+                    continue
+
+                if isinstance(result, str):
+                    try:
+                        result = json.loads(result)
+                    except json.JSONDecodeError:
+                        continue
+
+                doc: Optional[Dict[str, Any]] = None
+                if isinstance(result, list):
+                    if result and isinstance(result[0], dict):
+                        doc = result[0]
+                elif isinstance(result, dict):
+                    # Terminus sometimes returns {"documents": [...]}
+                    if "@id" in result or "@type" in result:
+                        doc = result
+                    elif isinstance(result.get("documents"), list) and result["documents"]:
+                        if isinstance(result["documents"][0], dict):
+                            doc = result["documents"][0]
+
+                if not doc or not isinstance(doc, dict):
+                    continue
+
+                doc_id_value = doc.get("@id") or doc.get("id") or doc_id
+                short_instance_id = (
+                    doc_id_value.split("/")[-1] if isinstance(doc_id_value, str) and "/" in doc_id_value else doc_id_value
+                )
+                doc["instance_id"] = short_instance_id
+
+                if class_id:
+                    doc["class_id"] = class_id
+                    doc["@type"] = doc.get("@type") or class_id
+                else:
+                    # Best-effort class inference.
+                    inferred = None
+                    raw_type = doc.get("@type")
+                    if isinstance(raw_type, str) and raw_type:
+                        inferred = raw_type.split("/")[-1] if "/" in raw_type else raw_type
+                    elif isinstance(doc_id_value, str) and "/" in doc_id_value:
+                        inferred = doc_id_value.split("/")[0]
+                    if inferred:
+                        doc["class_id"] = inferred
+                        doc["@type"] = doc.get("@type") or inferred
+
+                return doc
+
+            # Not found
+            return None
             
         except Exception as e:
             logger.error(f"Failed to get optimized instance: {e}")

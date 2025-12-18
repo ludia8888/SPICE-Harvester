@@ -112,6 +112,14 @@ def _translate_known(text: str, *, target_lang: str) -> Optional[str]:
         "Authentication required.": {"en": "Authentication required.", "ko": "인증이 필요합니다"},
         "Service is healthy": {"en": "Service is healthy.", "ko": "서비스가 정상입니다."},
         "Service is healthy.": {"en": "Service is healthy.", "ko": "서비스가 정상입니다."},
+        "백엔드 포 프론트엔드 서비스": {
+            "en": "Backend for Frontend service.",
+            "ko": "백엔드 포 프론트엔드 서비스",
+        },
+        "도메인 독립적인 온톨로지 관리 서비스": {
+            "en": "Domain-agnostic ontology management service.",
+            "ko": "도메인 독립적인 온톨로지 관리 서비스",
+        },
     }
 
     normalized = text.strip()

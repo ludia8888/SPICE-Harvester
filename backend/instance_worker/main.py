@@ -135,9 +135,9 @@ class StrictPalantirInstanceWorker:
         
         # Ensure bucket exists
         try:
-            self.s3_client.head_bucket(Bucket=self.instance_bucket)
+            await self._s3_call(self.s3_client.head_bucket, Bucket=self.instance_bucket)
         except:
-            self.s3_client.create_bucket(Bucket=self.instance_bucket)
+            await self._s3_call(self.s3_client.create_bucket, Bucket=self.instance_bucket)
         
         # TerminusDB
         connection_info = ConnectionConfig(
@@ -192,6 +192,12 @@ class StrictPalantirInstanceWorker:
         self.consumer.subscribe([AppConfig.INSTANCE_COMMANDS_TOPIC])
         
         logger.info("✅ STRICT Palantir Instance Worker initialized")
+
+    async def _s3_call(self, func, *args, **kwargs):
+        return await asyncio.to_thread(func, *args, **kwargs)
+
+    async def _s3_read_body(self, body) -> bytes:
+        return await asyncio.to_thread(body.read)
         
     async def extract_payload_from_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -552,7 +558,8 @@ class StrictPalantirInstanceWorker:
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        put_resp = self.s3_client.put_object(
+        put_resp = await self._s3_call(
+            self.s3_client.put_object,
             Bucket=self.instance_bucket,
             Key=s3_path,
             Body=json.dumps(s3_data, indent=2),
@@ -851,7 +858,8 @@ class StrictPalantirInstanceWorker:
                 'created_at': datetime.now(timezone.utc).isoformat()
             }
             
-            put_resp = self.s3_client.put_object(
+            put_resp = await self._s3_call(
+                self.s3_client.put_object,
                 Bucket=self.instance_bucket,
                 Key=s3_path,
                 Body=json.dumps(s3_data, indent=2),
@@ -1413,13 +1421,24 @@ class StrictPalantirInstanceWorker:
 
                 objs = []
                 for prefix in prefixes:
-                    resp = self.s3_client.list_objects_v2(Bucket=self.instance_bucket, Prefix=prefix)
+                    resp = await self._s3_call(
+                        self.s3_client.list_objects_v2,
+                        Bucket=self.instance_bucket,
+                        Prefix=prefix,
+                    )
                     objs.extend(list((resp or {}).get("Contents") or []))
                 objs.sort(key=lambda o: o.get("LastModified") or datetime.fromtimestamp(0, tz=timezone.utc))
                 snapshot_key = (objs[-1].get("Key") if objs else None)
                 if snapshot_key:
-                    obj = self.s3_client.get_object(Bucket=self.instance_bucket, Key=snapshot_key)
-                    raw = obj.get("Body").read()
+                    obj = await self._s3_call(
+                        self.s3_client.get_object,
+                        Bucket=self.instance_bucket,
+                        Key=snapshot_key,
+                    )
+                    body = obj.get("Body")
+                    if body is None:
+                        raise RuntimeError(f"S3 snapshot missing body for key={snapshot_key}")
+                    raw = await self._s3_read_body(body)
                     doc = json.loads(raw.decode("utf-8"))
                     if isinstance(doc, dict):
                         if doc.get("deleted_at") or (
@@ -1454,7 +1473,8 @@ class StrictPalantirInstanceWorker:
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         try:
-            put_resp = self.s3_client.put_object(
+            put_resp = await self._s3_call(
+                self.s3_client.put_object,
                 Bucket=self.instance_bucket,
                 Key=s3_path,
                 Body=json.dumps(s3_data, ensure_ascii=False, indent=2).encode("utf-8"),
@@ -1793,7 +1813,8 @@ class StrictPalantirInstanceWorker:
         s3_written = False
         tombstone_resp: Optional[Dict[str, Any]] = None
         try:
-            tombstone_resp = self.s3_client.put_object(
+            tombstone_resp = await self._s3_call(
+                self.s3_client.put_object,
                 Bucket=self.instance_bucket,
                 Key=s3_path,
                 Body=json.dumps(

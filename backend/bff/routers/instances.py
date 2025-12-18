@@ -212,63 +212,66 @@ async def get_class_sample_values(
         # 입력 데이터 보안 검증
         db_name = validate_db_name(db_name)
         class_id = validate_class_id(class_id)
-        
-        # 특정 속성만 조회하는 쿼리
+
+        logger.info(f"Collecting sample values for class {class_id} in database {db_name}")
+
+        # Use optimized OMS instance listing (Document API) and compute samples in-process.
+        payload = await oms_client.get_class_instances(db_name, class_id, limit=limit, offset=0)
+        instances = payload.get("instances", []) if isinstance(payload, dict) else []
+        if not isinstance(instances, list):
+            instances = []
+
+        def _normalize_field(name: str) -> str:
+            if not name:
+                return name
+            if "/" in name:
+                name = name.rsplit("/", 1)[-1]
+            if "#" in name:
+                name = name.rsplit("#", 1)[-1]
+            return name
+
         if property_name:
-            query = f"""
-            SELECT ?value
-            WHERE {{
-                ?instance a <{class_id}> .
-                ?instance <{property_name}> ?value .
-            }}
-            LIMIT {limit}
-            """
-        else:
-            # 모든 속성 조회
-            query = f"""
-            SELECT ?property ?value
-            WHERE {{
-                ?instance a <{class_id}> .
-                ?instance ?property ?value .
-            }}
-            LIMIT {limit}
-            """
-        
-        logger.info(f"Querying sample values for class {class_id} in database {db_name}")
-        
-        # OMS API 호출
-        result = await oms_client.query_ontologies(db_name, query)
-        
-        # 결과 포맷팅
-        if property_name:
-            # 단일 속성 값들
-            values = []
-            if result and 'results' in result:
-                values = [row.get('value', '') for row in result['results']]
-            
+            key = _normalize_field(property_name)
+            values: List[Any] = []
+            for inst in instances:
+                if not isinstance(inst, dict):
+                    continue
+                if key not in inst:
+                    continue
+                v = inst.get(key)
+                if isinstance(v, list):
+                    values.extend(v)
+                else:
+                    values.append(v)
+
             return {
                 "class_id": class_id,
                 "property": property_name,
                 "total": len(values),
-                "values": values
+                "values": values,
             }
-        else:
-            # 속성별 값들
-            property_values = {}
-            if result and 'results' in result:
-                for row in result['results']:
-                    prop = row.get('property', '').split('/')[-1]
-                    value = row.get('value', '')
-                    
-                    if prop not in property_values:
-                        property_values[prop] = []
-                    property_values[prop].append(value)
-            
-            return {
-                "class_id": class_id,
-                "total": len(property_values),
-                "property_values": property_values
-            }
+
+        property_values: Dict[str, List[Any]] = {}
+        exclude_keys = {"@id", "@type", "class_id", "instance_id"}
+        for inst in instances:
+            if not isinstance(inst, dict):
+                continue
+            for k, v in inst.items():
+                if k in exclude_keys:
+                    continue
+                if v is None:
+                    continue
+                bucket = property_values.setdefault(k, [])
+                if isinstance(v, list):
+                    bucket.extend(v)
+                else:
+                    bucket.append(v)
+
+        return {
+            "class_id": class_id,
+            "total": len(property_values),
+            "property_values": property_values,
+        }
         
     except HTTPException:
         raise

@@ -74,10 +74,16 @@ class ProcessedEventRegistry:
         )
         await self.ensure_schema()
 
+    async def initialize(self) -> None:
+        await self.connect()
+
     async def close(self) -> None:
         if self._pool:
             await self._pool.close()
             self._pool = None
+
+    async def shutdown(self) -> None:
+        await self.close()
 
     async def ensure_schema(self) -> None:
         if not self._pool:
@@ -349,6 +355,45 @@ class ProcessedEventRegistry:
             )
             return row is not None
 
+    async def get_event_record(self, *, event_id: str) -> Optional[dict]:
+        if not self._pool:
+            raise RuntimeError("ProcessedEventRegistry not connected")
+
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT handler,
+                       status,
+                       last_error,
+                       attempt_count,
+                       started_at,
+                       processed_at,
+                       heartbeat_at,
+                       aggregate_id,
+                       sequence_number
+                FROM {self._schema}.processed_events
+                WHERE event_id = $1
+                """,
+                event_id,
+            )
+
+        if not rows:
+            return None
+
+        def _rank(row) -> tuple[int, datetime]:
+            status = str(row["status"])
+            order = {"failed": 4, "processing": 3, "done": 2, "skipped_stale": 1}.get(status, 0)
+            ts = (
+                row["processed_at"]
+                or row["heartbeat_at"]
+                or row["started_at"]
+                or datetime.fromtimestamp(0, tz=timezone.utc)
+            )
+            return order, ts
+
+        best = max(rows, key=_rank)
+        return dict(best)
+
     async def mark_done(
         self,
         *,
@@ -452,7 +497,7 @@ class ProcessedEventRegistry:
             # If we lost the lease/owner or the event is already finalized, never overwrite.
             existing = await conn.fetchrow(
                 f"""
-                SELECT status
+                SELECT status, owner
                 FROM {self._schema}.processed_events
                 WHERE handler = $1 AND event_id = $2
                 """,
@@ -461,3 +506,9 @@ class ProcessedEventRegistry:
             )
             if existing and str(existing["status"]) in {"done", "skipped_stale"}:
                 return
+            raise RuntimeError(
+                "mark_failed rejected "
+                f"(handler={handler}, event_id={event_id}, "
+                f"status={existing.get('status') if existing else None}, "
+                f"owner={existing.get('owner') if existing else None})"
+            )

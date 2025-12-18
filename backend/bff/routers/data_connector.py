@@ -205,11 +205,10 @@ async def register_google_sheet(
         
         logger.info(f"Successfully registered Google Sheet: {registration_result.sheet_id}")
         
-        return ApiResponse(
-            success=True,
+        return ApiResponse.success(
             message="Google Sheet registered successfully",
-            data=registration_result
-        )
+            data=registration_result.model_dump(mode="json"),
+        ).to_dict()
         
     except HTTPException:
         raise
@@ -256,18 +255,27 @@ async def preview_google_sheet(
     try:
         logger.info(f"Previewing Google Sheet: {sheet_id}, worksheet: {worksheet_name}")
 
-        sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
+        # This endpoint is intended as "preview registered sheet".
+        # If not registered, fail fast without external calls.
+        registered = await google_sheets_service.get_registered_sheets()
+        sheet = next((s for s in registered if s.sheet_id == sheet_id), None)
+        if not sheet:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Sheet is not registered",
+            )
+
+        sheet_url = sheet.sheet_url
         preview_result = await google_sheets_service.preview_sheet(
             sheet_url,
-            worksheet_name=worksheet_name,
+            worksheet_name=worksheet_name or sheet.worksheet_name,
             limit=limit,
         )
 
-        return ApiResponse(
-            success=True,
+        return ApiResponse.success(
             message="Sheet preview retrieved successfully",
-            data=preview_result.model_dump()
-        )
+            data=preview_result.model_dump(mode="json"),
+        ).to_dict()
         
     except ValueError as e:
         logger.error(f"Invalid sheet ID or worksheet: {e}")
@@ -275,6 +283,8 @@ async def preview_google_sheet(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid parameters: {str(e)}"
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to preview Google Sheet: {e}")
         raise HTTPException(
@@ -312,16 +322,17 @@ async def list_registered_sheets(
         if database_name:
             registered_sheets = [s for s in registered_sheets if s.database_name == database_name]
 
-        return ApiResponse(
-            success=True,
-            message="Registered sheets retrieved successfully", 
+        return ApiResponse.success(
+            message="Registered sheets retrieved successfully",
             data={
-                "sheets": [s.model_dump() for s in registered_sheets],
+                "sheets": [s.model_dump(mode="json") for s in registered_sheets],
                 "count": len(registered_sheets),
-                "database_filter": database_name
-            }
-        )
+                "database_filter": database_name,
+            },
+        ).to_dict()
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to list registered sheets: {e}")
         raise HTTPException(
@@ -362,11 +373,10 @@ async def unregister_google_sheet(
                 detail="Sheet is not registered",
             )
 
-        return ApiResponse(
-            success=True,
+        return ApiResponse.success(
             message="Google Sheet unregistered successfully",
-            data={"sheet_id": sheet_id, "status": "unregistered"}
-        )
+            data={"sheet_id": sheet_id, "status": "unregistered"},
+        ).to_dict()
         
     except ValueError as e:
         logger.error(f"Invalid sheet ID: {e}")
@@ -374,6 +384,8 @@ async def unregister_google_sheet(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid sheet ID: {str(e)}"
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to unregister Google Sheet: {e}")
         raise HTTPException(

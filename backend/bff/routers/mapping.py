@@ -11,16 +11,32 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from bff.dependencies import LabelMapper, get_label_mapper, OMSClient, get_oms_client
 
 # Add shared path for common utilities
-from shared.models.requests import ApiResponse, MappingImportRequest
+from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/database/{db_name}/mappings", tags=["Label Mappings"])
+
+
+class MappingImportPayload(BaseModel):
+    """
+    Label mapping bundle file schema.
+
+    This matches the shape produced by `LabelMapper.export_mappings()`:
+    - db_name
+    - classes/properties/relationships arrays (each item is a dict row)
+    """
+
+    db_name: Optional[str] = None
+    classes: List[Dict[str, Any]] = Field(default_factory=list)
+    properties: List[Dict[str, Any]] = Field(default_factory=list)
+    relationships: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 @router.post("/export")
@@ -146,11 +162,13 @@ def _sanitize_and_validate_schema(raw_mappings: dict, db_name: str) -> Any:
 
     # Schema validation using Pydantic
     try:
-        mapping_request = MappingImportRequest(
-            db_name=db_name,
-            classes=sanitized_mappings.get("classes", []),
-            properties=sanitized_mappings.get("properties", []),
-            relationships=sanitized_mappings.get("relationships", []),
+        mapping_request = MappingImportPayload.model_validate(
+            {
+                "db_name": db_name,
+                "classes": sanitized_mappings.get("classes", []),
+                "properties": sanitized_mappings.get("properties", []),
+                "relationships": sanitized_mappings.get("relationships", []),
+            }
         )
     except Exception as e:
         logger.error(f"Schema validation failed: {e}")
@@ -278,6 +296,7 @@ async def _perform_mapping_import(
 ) -> tuple:
     """Perform the actual mapping import with backup and rollback."""
     start_time = datetime.now()
+    backup = None
     
     try:
         # Backup current mappings before import
@@ -292,7 +311,6 @@ async def _perform_mapping_import(
     except Exception as import_error:
         # Try to restore backup if import failed
         try:
-            backup = await mapper.export_mappings(db_name)
             if backup:
                 await mapper.import_mappings(backup)
                 logger.info(f"Restored backup mappings for {db_name} after import failure")

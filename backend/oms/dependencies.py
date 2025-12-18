@@ -17,7 +17,7 @@ Key improvements:
 """
 
 import os
-from typing import Annotated
+from typing import Annotated, Optional
 from fastapi import HTTPException, status, Path, Depends
 
 # Modern dependency injection imports
@@ -33,6 +33,7 @@ from shared.utils.jsonld import JSONToJSONLDConverter
 from shared.services.elasticsearch_service import ElasticsearchService
 from shared.services.redis_service import RedisService
 from shared.services.command_status_service import CommandStatusService
+from shared.services.processed_event_registry import ProcessedEventRegistry
 
 # OMS specific imports
 from oms.services.async_terminus import AsyncTerminusService
@@ -200,6 +201,30 @@ class OMSDependencyProvider:
             # Don't raise HTTPException, just return None to allow system to continue
             return None
 
+    @staticmethod
+    async def get_processed_event_registry(
+        container: ServiceContainer = Depends(get_container),
+    ) -> Optional[ProcessedEventRegistry]:
+        import logging
+        logger = logging.getLogger(__name__)
+
+        try:
+            if container.has(ProcessedEventRegistry) and container.is_created(ProcessedEventRegistry):
+                return await container.get(ProcessedEventRegistry)
+
+            registry = ProcessedEventRegistry()
+            try:
+                await registry.connect()
+            except Exception as e:
+                logger.warning(f"ProcessedEventRegistry connection failed: {e}")
+                return None
+
+            container.register_instance(ProcessedEventRegistry, registry)
+            return registry
+        except Exception as e:
+            logger.warning(f"Failed to get ProcessedEventRegistry: {e}")
+            return None
+
 
 # Type-safe dependency annotations for cleaner injection
 TerminusServiceDep = Depends(OMSDependencyProvider.get_terminus_service)
@@ -207,6 +232,7 @@ JSONLDConverterDep = Depends(OMSDependencyProvider.get_jsonld_converter)
 LabelMapperDep = Depends(OMSDependencyProvider.get_label_mapper)
 EventStoreDep = Depends(OMSDependencyProvider.get_event_store)
 CommandStatusServiceDep = Depends(OMSDependencyProvider.get_command_status_service)
+ProcessedEventRegistryDep = Depends(OMSDependencyProvider.get_processed_event_registry)
 
 
 # Validation Dependencies (modernized)
@@ -291,6 +317,7 @@ async def check_oms_dependencies_health(
             ("elasticsearch_service", ElasticsearchService),
             ("redis_service", RedisService),
             ("command_status_service", CommandStatusService),
+            ("processed_event_registry", ProcessedEventRegistry),
         ]
         
         for service_name, service_type in services_to_check:

@@ -695,10 +695,16 @@ async def delete_ontology(
         )
 
     except HTTPException as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"온톨로지 '{e.ontology_id}'을(를) 찾을 수 없습니다",
-        )
+        raise
+    except httpx.HTTPStatusError as e:
+        detail: Any = e.response.text
+        try:
+            detail_json = e.response.json()
+            if isinstance(detail_json, dict):
+                detail = detail_json.get("detail") or detail_json
+        except Exception:
+            pass
+        raise HTTPException(status_code=e.response.status_code, detail=detail) from e
     except Exception as e:
         logger.error(f"Failed to delete ontology: {e}")
         raise HTTPException(
@@ -2896,12 +2902,22 @@ async def save_mapping_metadata(
         db_name = validate_db_name(db_name)
         class_id = validate_class_id(class_id)
         sanitized_metadata = sanitize_input(metadata)
-        
-        # 기존 메타데이터 가져오기
-        existing_metadata = await oms.get_class_metadata(db_name, class_id)
-        
-        # 매핑 이력 업데이트
-        mapping_history = existing_metadata.get("mapping_history", [])
+
+        # Fetch current ontology to merge metadata safely.
+        ontology_resp = await oms.get_ontology(db_name, class_id)
+        class_data = (ontology_resp.get("data") or {}) if isinstance(ontology_resp, dict) else {}
+        existing_meta = class_data.get("metadata") if isinstance(class_data, dict) else None
+        if not isinstance(existing_meta, dict):
+            existing_meta = {}
+
+        # Back-compat: older code paths may have stored mapping fields at top-level.
+        for k in ("mapping_history", "last_mapping_date", "total_mappings", "mapping_sources"):
+            if k in class_data and k not in existing_meta:
+                existing_meta[k] = class_data.get(k)
+
+        mapping_history = existing_meta.get("mapping_history", []) or []
+        if not isinstance(mapping_history, list):
+            mapping_history = []
         
         # 새 매핑 정보 추가
         new_mapping_entry = {
@@ -2920,7 +2936,7 @@ async def save_mapping_metadata(
         
         # 메타데이터 업데이트
         updated_metadata = {
-            **existing_metadata,
+            **existing_meta,
             "mapping_history": mapping_history,
             "last_mapping_date": new_mapping_entry["timestamp"],
             "total_mappings": sum(entry.get("mappings_count", 0) for entry in mapping_history),
@@ -2931,8 +2947,62 @@ async def save_mapping_metadata(
             ))
         }
         
-        # OMS를 통해 메타데이터 저장
-        await oms.update_class_metadata(db_name, class_id, updated_metadata)
+        async def _get_expected_seq() -> int:
+            import asyncpg
+            import os
+            import re
+
+            from shared.config.service_config import ServiceConfig
+
+            schema = os.getenv("EVENT_STORE_SEQUENCE_SCHEMA", "spice_event_registry")
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", schema):
+                raise ValueError(f"Invalid EVENT_STORE_SEQUENCE_SCHEMA: {schema!r}")
+
+            prefix = (os.getenv("EVENT_STORE_SEQUENCE_HANDLER_PREFIX", "write_side") or "write_side").strip()
+            handler = f"{prefix}:OntologyClass"
+            aggregate_id = f"{db_name}:main:{class_id}"
+
+            conn = await asyncpg.connect(ServiceConfig.get_postgres_url())
+            try:
+                value = await conn.fetchval(
+                    f"""
+                    SELECT last_sequence
+                    FROM {schema}.aggregate_versions
+                    WHERE handler = $1 AND aggregate_id = $2
+                    """,
+                    handler,
+                    aggregate_id,
+                )
+                return int(value or 0)
+            finally:
+                await conn.close()
+
+        # Persist metadata via the official ontology update endpoint (async command) with OCC.
+        # We auto-resolve expected_seq from Postgres to keep this endpoint usable without extra client plumbing.
+        update_result = None
+        for attempt in range(3):
+            expected_seq = await _get_expected_seq()
+            try:
+                update_result = await oms.update_ontology(
+                    db_name,
+                    class_id,
+                    {"metadata": updated_metadata},
+                    expected_seq=expected_seq,
+                    branch="main",
+                )
+                break
+            except httpx.HTTPStatusError as e:
+                status_code = getattr(e.response, "status_code", 500)
+                if status_code == 409 and attempt < 2:
+                    continue
+                detail: Any = e.response.text
+                try:
+                    detail_json = e.response.json()
+                    if isinstance(detail_json, dict):
+                        detail = detail_json.get("detail") or detail_json
+                except Exception:
+                    pass
+                raise HTTPException(status_code=status_code, detail=detail) from e
         
         logger.info(f"Saved mapping metadata for class {class_id}: {new_mapping_entry['mappings_count']} mappings from {new_mapping_entry['source_file']}")
         
@@ -2942,7 +3012,8 @@ async def save_mapping_metadata(
             "data": {
                 "class_id": class_id,
                 "mapping_entry": new_mapping_entry,
-                "total_history_entries": len(mapping_history)
+                "total_history_entries": len(mapping_history),
+                "update": update_result,
             }
         }
         

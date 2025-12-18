@@ -18,6 +18,7 @@ from oms.dependencies import (
     TerminusServiceDep,
     EventStoreDep,  # Added for S3/MinIO Event Store
     CommandStatusServiceDep,
+    ProcessedEventRegistryDep,
     ValidatedDatabaseName,
     ValidatedClassId,
     ensure_database_exists
@@ -27,6 +28,7 @@ from shared.config.app_config import AppConfig
 from shared.models.commands import CommandType, InstanceCommand, CommandResult, CommandStatus
 from shared.models.common import BaseResponse
 from shared.services.command_status_service import CommandStatusService
+from shared.services.processed_event_registry import ProcessedEventRegistry
 from shared.services.redis_service import RedisService
 from shared.models.event_envelope import EventEnvelope
 from shared.services.aggregate_sequence_allocator import OptimisticConcurrencyError
@@ -43,6 +45,59 @@ from shared.security.input_sanitizer import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/instances/{db_name}/async", tags=["Async Instance Management"])
+
+
+def _map_registry_status(status_value: str) -> CommandStatus:
+    status_value = (status_value or "").lower()
+    if status_value == "processing":
+        return CommandStatus.PROCESSING
+    if status_value == "done":
+        return CommandStatus.COMPLETED
+    if status_value == "failed":
+        return CommandStatus.FAILED
+    if status_value == "skipped_stale":
+        return CommandStatus.FAILED
+    return CommandStatus.PENDING
+
+
+async def _fallback_from_registry(
+    *,
+    command_uuid: UUID,
+    registry: Optional[ProcessedEventRegistry],
+) -> Optional[CommandResult]:
+    if not registry:
+        return None
+
+    try:
+        record = await registry.get_event_record(event_id=str(command_uuid))
+    except Exception as e:
+        logger.warning(f"ProcessedEventRegistry lookup failed for {command_uuid}: {e}")
+        return None
+
+    if not record:
+        return None
+
+    status_value = str(record.get("status") or "")
+    parsed_status = _map_registry_status(status_value)
+    error = record.get("last_error")
+    if status_value == "skipped_stale" and not error:
+        error = "stale_event"
+
+    return CommandResult(
+        command_id=command_uuid,
+        status=parsed_status,
+        error=error,
+        result={
+            "message": f"Command status derived from processed_event_registry ({status_value})",
+            "source": "processed_event_registry",
+            "handler": record.get("handler"),
+            "status": status_value,
+            "attempt_count": record.get("attempt_count"),
+            "started_at": record.get("started_at"),
+            "processed_at": record.get("processed_at"),
+            "heartbeat_at": record.get("heartbeat_at"),
+        },
+    )
 
 
 def _coerce_commit_id(value: Any) -> Optional[str]:
@@ -609,17 +664,13 @@ async def get_instance_command_status(
     db_name: str = Depends(ensure_database_exists),
     command_id: str = ...,
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
+    processed_event_registry: Optional[ProcessedEventRegistry] = ProcessedEventRegistryDep,
+    event_store=EventStoreDep,
 ):
     """
     인스턴스 명령의 상태 조회
     """
     try:
-        if not command_status_service:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Command status tracking is disabled (Redis unavailable)",
-            )
-
         try:
             command_uuid = UUID(command_id)
         except Exception:
@@ -628,35 +679,64 @@ async def get_instance_command_status(
                 detail="Invalid command_id (must be UUID)",
             )
 
-        # Redis에서 상태 조회
-        status_info = await command_status_service.get_command_status(command_id)
-        
-        if not status_info:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Command not found: {command_id}"
-            )
-        
-        # 결과 조회
-        result = await command_status_service.get_command_result(command_id)
+        status_info = None
+        if command_status_service:
+            status_info = await command_status_service.get_command_status(command_id)
+            if status_info:
+                # 결과 조회
+                result = await command_status_service.get_command_result(command_id)
 
-        raw_status = status_info.get("status", CommandStatus.PENDING)
-        if hasattr(raw_status, "value"):
-            raw_status = raw_status.value
+                raw_status = status_info.get("status", CommandStatus.PENDING)
+                if hasattr(raw_status, "value"):
+                    raw_status = raw_status.value
+
+                try:
+                    parsed_status = CommandStatus(raw_status)
+                except Exception:
+                    parsed_status = CommandStatus.PENDING
+
+                return CommandResult(
+                    command_id=command_uuid,
+                    status=parsed_status,
+                    error=status_info.get("error"),
+                    result=result or {
+                        "message": f"Command is {raw_status}",
+                        **status_info
+                    }
+                )
+
+        fallback = await _fallback_from_registry(
+            command_uuid=command_uuid,
+            registry=processed_event_registry,
+        )
+        if fallback:
+            return fallback
 
         try:
-            parsed_status = CommandStatus(raw_status)
-        except Exception:
-            parsed_status = CommandStatus.PENDING
+            key = await event_store.get_event_object_key(event_id=str(command_uuid))
+            if key:
+                return CommandResult(
+                    command_id=command_uuid,
+                    status=CommandStatus.PENDING,
+                    error=None,
+                    result={
+                        "message": "Command accepted (event store lookup)",
+                        "source": "event_store",
+                        "event_key": key,
+                    },
+                )
+        except Exception as e:
+            logger.warning(f"Event store lookup failed for {command_uuid}: {e}")
 
-        return CommandResult(
-            command_id=command_uuid,
-            status=parsed_status,
-            error=status_info.get("error"),
-            result=result or {
-                "message": f"Command is {raw_status}",
-                **status_info
-            }
+        if not command_status_service and not processed_event_registry:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Command status tracking is unavailable (Redis/Postgres unavailable)",
+            )
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Command not found: {command_id}"
         )
         
     except HTTPException:

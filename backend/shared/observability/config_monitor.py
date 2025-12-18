@@ -190,7 +190,7 @@ class ConfigurationMonitor:
             ConfigValidationRule(
                 name="redis_auth_in_prod",
                 description="Redis should have authentication in production",
-                key_path="services.redis_password", 
+                key_pattern="services.redis_password",
                 validator=lambda x: not self.settings.is_production or (x is not None and len(str(x)) > 0),
                 severity=ConfigSeverity.WARNING,
                 recommendation="Enable Redis authentication in production"
@@ -227,26 +227,28 @@ class ConfigurationMonitor:
         config_dict["environment"] = self.settings.environment.value
         config_dict["debug"] = self.settings.debug
         
-        # Database settings
+        # Database settings (prefer postgres_* fields from DatabaseSettings)
+        db_settings = self.settings.database
         config_dict["database"] = {
-            "host": self.settings.database.host,
-            "port": self.settings.database.port,
-            "name": self.settings.database.name,
-            "user": self.settings.database.user,
+            "host": getattr(db_settings, "host", None) or getattr(db_settings, "postgres_host", None),
+            "port": getattr(db_settings, "port", None) or getattr(db_settings, "postgres_port", None),
+            "name": getattr(db_settings, "name", None) or getattr(db_settings, "postgres_db", None),
+            "user": getattr(db_settings, "user", None) or getattr(db_settings, "postgres_user", None),
             # Don't include password in snapshot for security
         }
         
         # Service settings
+        service_settings = self.settings.services
         config_dict["services"] = {
-            "terminus_url": self.settings.services.terminus_url,
-            "oms_base_url": self.settings.services.oms_base_url,
-            "bff_base_url": self.settings.services.bff_base_url,
-            "redis_host": self.settings.services.redis_host,
-            "redis_port": self.settings.services.redis_port,
-            "redis_db": self.settings.services.redis_db,
-            "elasticsearch_host": self.settings.services.elasticsearch_host,
-            "elasticsearch_port": self.settings.services.elasticsearch_port,
-            "elasticsearch_username": self.settings.services.elasticsearch_username,
+            "terminus_url": getattr(self.settings.database, "terminus_url", None),
+            "oms_base_url": getattr(service_settings, "oms_base_url", None),
+            "bff_base_url": getattr(service_settings, "bff_base_url", None),
+            "redis_host": getattr(self.settings.database, "redis_host", None),
+            "redis_port": getattr(self.settings.database, "redis_port", None),
+            "redis_db": getattr(self.settings.database, "redis_db", None),
+            "elasticsearch_host": getattr(self.settings.database, "elasticsearch_host", None),
+            "elasticsearch_port": getattr(self.settings.database, "elasticsearch_port", None),
+            "elasticsearch_username": getattr(self.settings.database, "elasticsearch_username", None),
             # Don't include passwords/keys in snapshot for security
         }
         
@@ -472,7 +474,9 @@ class ConfigurationMonitor:
         
         # Check database password strength
         if self.settings.is_production:
-            db_password = getattr(self.settings.database, 'password', '')
+            db_password = getattr(self.settings.database, 'password', None)
+            if db_password is None:
+                db_password = getattr(self.settings.database, 'postgres_password', '')
             if not db_password or len(db_password) < 12:
                 issues.append({
                     "type": "weak_database_password",
@@ -527,7 +531,7 @@ class ConfigurationMonitor:
         
         # Check if Redis authentication is configured in production
         if self.settings.is_production:
-            redis_password = getattr(self.settings.services, 'redis_password', None)
+            redis_password = getattr(self.settings.database, 'redis_password', None)
             if not redis_password:
                 issues.append({
                     "type": "redis_no_auth",

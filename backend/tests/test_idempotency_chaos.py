@@ -14,12 +14,31 @@ from __future__ import annotations
 
 import asyncio
 import os
+from contextlib import contextmanager
 from uuid import uuid4
 
 import pytest
 from typing import Optional
 
 from shared.services.processed_event_registry import ClaimDecision, ProcessedEventRegistry
+
+
+@contextmanager
+def _set_env(**updates):
+    original = {key: os.environ.get(key) for key in updates}
+    for key, value in updates.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+    try:
+        yield
+    finally:
+        for key, value in original.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def _get_postgres_url_candidates() -> list[str]:
@@ -50,7 +69,13 @@ async def _make_registry(*, dsn: str, schema: str, lease_timeout_seconds: int) -
         except Exception as e:
             last_error = e
             continue
-    pytest.skip(f"Postgres not available (candidates={_get_postgres_url_candidates()!r}): {last_error}")
+    msg = (
+        "Postgres not available for idempotency chaos tests "
+        f"(candidates={_get_postgres_url_candidates()!r}): {last_error}"
+    )
+    if os.getenv("SKIP_POSTGRES_TESTS", "").lower() in ("true", "1", "yes", "on"):
+        pytest.skip(msg)
+    pytest.fail(msg)
 
 
 async def _truncate(reg: ProcessedEventRegistry, schema: str) -> None:
@@ -62,231 +87,267 @@ async def _truncate(reg: ProcessedEventRegistry, schema: str) -> None:
 
 @pytest.mark.chaos
 @pytest.mark.asyncio
-async def test_registry_duplicate_delivery_causes_one_side_effect(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.delenv("PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS", raising=False)
-    monkeypatch.setenv("PROCESSED_EVENT_PG_POOL_MIN", "1")
-    monkeypatch.setenv("PROCESSED_EVENT_PG_POOL_MAX", "2")
+async def test_registry_duplicate_delivery_causes_one_side_effect():
+    with _set_env(
+        PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS=None,
+        PROCESSED_EVENT_PG_POOL_MIN="1",
+        PROCESSED_EVENT_PG_POOL_MAX="2",
+    ):
+        reg = await _make_registry(dsn=DEFAULT_POSTGRES_URL, schema=TEST_SCHEMA, lease_timeout_seconds=5)
+        try:
+            await _truncate(reg, TEST_SCHEMA)
 
-    reg = await _make_registry(dsn=DEFAULT_POSTGRES_URL, schema=TEST_SCHEMA, lease_timeout_seconds=5)
-    try:
-        await _truncate(reg, TEST_SCHEMA)
+            handler = "chaos:worker"
+            event_id = f"evt-{uuid4().hex}"
+            aggregate_id = f"agg-{uuid4().hex}"
+            seq = 1
 
-        handler = "chaos:worker"
-        event_id = f"evt-{uuid4().hex}"
-        aggregate_id = f"agg-{uuid4().hex}"
-        seq = 1
-
-        # First delivery -> claim + side-effect + mark_done
-        first = await reg.claim(
-            handler=handler,
-            event_id=event_id,
-            aggregate_id=aggregate_id,
-            sequence_number=seq,
-        )
-        assert first.decision == ClaimDecision.CLAIMED
-        await reg.mark_done(
-            handler=handler,
-            event_id=event_id,
-            aggregate_id=aggregate_id,
-            sequence_number=seq,
-        )
-
-        # Redeliveries (publisher dup / kafka redelivery / restart) must be no-op.
-        for _ in range(5):
-            again = await reg.claim(
+            # First delivery -> claim + side-effect + mark_done
+            first = await reg.claim(
                 handler=handler,
                 event_id=event_id,
                 aggregate_id=aggregate_id,
                 sequence_number=seq,
             )
-            assert again.decision == ClaimDecision.DUPLICATE_DONE
-
-        async with reg._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT status, attempt_count
-                FROM {TEST_SCHEMA}.processed_events
-                WHERE handler = $1 AND event_id = $2
-                """,
-                handler,
-                event_id,
+            assert first.decision == ClaimDecision.CLAIMED
+            await reg.mark_done(
+                handler=handler,
+                event_id=event_id,
+                aggregate_id=aggregate_id,
+                sequence_number=seq,
             )
-            assert row is not None
-            assert row["status"] == "done"
-            assert int(row["attempt_count"]) == 1
-    finally:
-        await _truncate(reg, TEST_SCHEMA)
-        await reg.close()
+
+            # Redeliveries (publisher dup / kafka redelivery / restart) must be no-op.
+            for _ in range(5):
+                again = await reg.claim(
+                    handler=handler,
+                    event_id=event_id,
+                    aggregate_id=aggregate_id,
+                    sequence_number=seq,
+                )
+                assert again.decision == ClaimDecision.DUPLICATE_DONE
+
+            async with reg._pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    f"""
+                    SELECT status, attempt_count
+                    FROM {TEST_SCHEMA}.processed_events
+                    WHERE handler = $1 AND event_id = $2
+                    """,
+                    handler,
+                    event_id,
+                )
+                assert row is not None
+                assert row["status"] == "done"
+                assert int(row["attempt_count"]) == 1
+        finally:
+            await _truncate(reg, TEST_SCHEMA)
+            await reg.close()
 
 
 @pytest.mark.chaos
 @pytest.mark.asyncio
-async def test_registry_reclaims_stuck_processing_after_lease_timeout(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.delenv("PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS", raising=False)
-    monkeypatch.setenv("PROCESSED_EVENT_PG_POOL_MIN", "1")
-    monkeypatch.setenv("PROCESSED_EVENT_PG_POOL_MAX", "2")
+async def test_registry_reclaims_stuck_processing_after_lease_timeout():
+    with _set_env(
+        PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS=None,
+        PROCESSED_EVENT_PG_POOL_MIN="1",
+        PROCESSED_EVENT_PG_POOL_MAX="2",
+    ):
+        reg1 = await _make_registry(dsn=DEFAULT_POSTGRES_URL, schema=TEST_SCHEMA, lease_timeout_seconds=1)
+        reg2 = await _make_registry(dsn=DEFAULT_POSTGRES_URL, schema=TEST_SCHEMA, lease_timeout_seconds=1)
+        try:
+            await _truncate(reg1, TEST_SCHEMA)
+            handler = "chaos:worker"
+            event_id = f"evt-{uuid4().hex}"
+            aggregate_id = f"agg-{uuid4().hex}"
+            seq = 1
 
-    reg1 = await _make_registry(dsn=DEFAULT_POSTGRES_URL, schema=TEST_SCHEMA, lease_timeout_seconds=1)
-    reg2 = await _make_registry(dsn=DEFAULT_POSTGRES_URL, schema=TEST_SCHEMA, lease_timeout_seconds=1)
-    try:
-        await _truncate(reg1, TEST_SCHEMA)
+            claimed = await reg1.claim(
+                handler=handler,
+                event_id=event_id,
+                aggregate_id=aggregate_id,
+                sequence_number=seq,
+            )
+            assert claimed.decision == ClaimDecision.CLAIMED
 
-        handler = "chaos:worker"
-        event_id = f"evt-{uuid4().hex}"
-        aggregate_id = f"agg-{uuid4().hex}"
-        seq = 1
+            # Simulate crash: leave status=processing but make heartbeat stale so another worker can reclaim.
+            async with reg1._pool.acquire() as conn:
+                await conn.execute(
+                    f"""
+                    UPDATE {TEST_SCHEMA}.processed_events
+                    SET heartbeat_at = NOW() - INTERVAL '30 seconds'
+                    WHERE handler = $1 AND event_id = $2
+                    """,
+                    handler,
+                    event_id,
+                )
 
-        claimed = await reg1.claim(
-            handler=handler,
-            event_id=event_id,
-            aggregate_id=aggregate_id,
-            sequence_number=seq,
-        )
-        assert claimed.decision == ClaimDecision.CLAIMED
+            reclaimed = await reg2.claim(
+                handler=handler,
+                event_id=event_id,
+                aggregate_id=aggregate_id,
+                sequence_number=seq,
+            )
+            assert reclaimed.decision == ClaimDecision.CLAIMED
+            assert reclaimed.attempt_count == 2
 
-        # Simulate crash: leave status=processing but make heartbeat stale so another worker can reclaim.
-        async with reg1._pool.acquire() as conn:
-            await conn.execute(
-                f"""
-                UPDATE {TEST_SCHEMA}.processed_events
-                SET heartbeat_at = NOW() - INTERVAL '30 seconds'
-                WHERE handler = $1 AND event_id = $2
-                """,
-                handler,
-                event_id,
+            await reg2.mark_done(
+                handler=handler,
+                event_id=event_id,
+                aggregate_id=aggregate_id,
+                sequence_number=seq,
             )
 
-        reclaimed = await reg2.claim(
-            handler=handler,
-            event_id=event_id,
-            aggregate_id=aggregate_id,
-            sequence_number=seq,
-        )
-        assert reclaimed.decision == ClaimDecision.CLAIMED
-        assert reclaimed.attempt_count == 2
-
-        await reg2.mark_done(
-            handler=handler,
-            event_id=event_id,
-            aggregate_id=aggregate_id,
-            sequence_number=seq,
-        )
-
-        async with reg1._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                SELECT status, owner, attempt_count
-                FROM {TEST_SCHEMA}.processed_events
-                WHERE handler = $1 AND event_id = $2
-                """,
-                handler,
-                event_id,
-            )
-            assert row is not None
-            assert row["status"] == "done"
-            assert row["owner"] == reg2._owner
-            assert int(row["attempt_count"]) == 2
-    finally:
-        await _truncate(reg1, TEST_SCHEMA)
-        await reg1.close()
-        await reg2.close()
+            async with reg1._pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    f"""
+                    SELECT status, owner, attempt_count
+                    FROM {TEST_SCHEMA}.processed_events
+                    WHERE handler = $1 AND event_id = $2
+                    """,
+                    handler,
+                    event_id,
+                )
+                assert row is not None
+                assert row["status"] == "done"
+                assert row["owner"] == reg2._owner
+                assert int(row["attempt_count"]) == 2
+        finally:
+            await _truncate(reg1, TEST_SCHEMA)
+            await reg1.close()
+            await reg2.close()
 
 
 @pytest.mark.chaos
 @pytest.mark.asyncio
-async def test_registry_concurrent_claim_has_single_winner(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.delenv("PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS", raising=False)
-    monkeypatch.setenv("PROCESSED_EVENT_PG_POOL_MIN", "1")
-    monkeypatch.setenv("PROCESSED_EVENT_PG_POOL_MAX", "2")
+async def test_registry_concurrent_claim_has_single_winner():
+    with _set_env(
+        PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS=None,
+        PROCESSED_EVENT_PG_POOL_MIN="1",
+        PROCESSED_EVENT_PG_POOL_MAX="2",
+    ):
+        reg1 = await _make_registry(dsn=DEFAULT_POSTGRES_URL, schema=TEST_SCHEMA, lease_timeout_seconds=10)
+        reg2 = await _make_registry(dsn=DEFAULT_POSTGRES_URL, schema=TEST_SCHEMA, lease_timeout_seconds=10)
+        try:
+            await _truncate(reg1, TEST_SCHEMA)
+            handler = "chaos:worker"
+            event_id = f"evt-{uuid4().hex}"
+            aggregate_id = f"agg-{uuid4().hex}"
+            seq = 1
 
-    reg1 = await _make_registry(dsn=DEFAULT_POSTGRES_URL, schema=TEST_SCHEMA, lease_timeout_seconds=10)
-    reg2 = await _make_registry(dsn=DEFAULT_POSTGRES_URL, schema=TEST_SCHEMA, lease_timeout_seconds=10)
-    try:
-        await _truncate(reg1, TEST_SCHEMA)
+            r1, r2 = await asyncio.gather(
+                reg1.claim(
+                    handler=handler,
+                    event_id=event_id,
+                    aggregate_id=aggregate_id,
+                    sequence_number=seq,
+                ),
+                reg2.claim(
+                    handler=handler,
+                    event_id=event_id,
+                    aggregate_id=aggregate_id,
+                    sequence_number=seq,
+                ),
+            )
 
-        handler = "chaos:worker"
-        event_id = f"evt-{uuid4().hex}"
-        aggregate_id = f"agg-{uuid4().hex}"
-        seq = 1
+            winners = [r for r in (r1, r2) if r.decision == ClaimDecision.CLAIMED]
+            assert len(winners) == 1
 
-        r1, r2 = await asyncio.gather(
-            reg1.claim(
-                handler=handler,
-                event_id=event_id,
-                aggregate_id=aggregate_id,
-                sequence_number=seq,
-            ),
-            reg2.claim(
-                handler=handler,
-                event_id=event_id,
-                aggregate_id=aggregate_id,
-                sequence_number=seq,
-            ),
-        )
+            losers = [r for r in (r1, r2) if r.decision != ClaimDecision.CLAIMED]
+            assert len(losers) == 1
+            assert losers[0].decision == ClaimDecision.IN_PROGRESS
 
-        winners = [r for r in (r1, r2) if r.decision == ClaimDecision.CLAIMED]
-        assert len(winners) == 1
+            # Cleanup: only the winner (owner) can release the lease.
+            if r1.decision == ClaimDecision.CLAIMED:
+                await reg1.mark_failed(handler=handler, event_id=event_id, error="cleanup")
+            else:
+                await reg2.mark_failed(handler=handler, event_id=event_id, error="cleanup")
+        finally:
+            await _truncate(reg1, TEST_SCHEMA)
+            await reg1.close()
+            await reg2.close()
 
-        losers = [r for r in (r1, r2) if r.decision != ClaimDecision.CLAIMED]
-        assert len(losers) == 1
-        assert losers[0].decision == ClaimDecision.IN_PROGRESS
 
-        # Cleanup: only the winner (owner) can release the lease.
-        if r1.decision == ClaimDecision.CLAIMED:
+@pytest.mark.chaos
+@pytest.mark.asyncio
+async def test_registry_mark_failed_owner_mismatch_raises():
+    with _set_env(
+        PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS=None,
+        PROCESSED_EVENT_PG_POOL_MIN="1",
+        PROCESSED_EVENT_PG_POOL_MAX="2",
+    ):
+        reg1 = await _make_registry(dsn=DEFAULT_POSTGRES_URL, schema=TEST_SCHEMA, lease_timeout_seconds=10)
+        reg2 = await _make_registry(dsn=DEFAULT_POSTGRES_URL, schema=TEST_SCHEMA, lease_timeout_seconds=10)
+        try:
+            await _truncate(reg1, TEST_SCHEMA)
+
+            handler = "chaos:worker"
+            event_id = f"evt-{uuid4().hex}"
+
+            claim = await reg1.claim(handler=handler, event_id=event_id)
+            assert claim.decision == ClaimDecision.CLAIMED
+
+            with pytest.raises(RuntimeError):
+                await reg2.mark_failed(handler=handler, event_id=event_id, error="boom")
+
             await reg1.mark_failed(handler=handler, event_id=event_id, error="cleanup")
-        else:
-            await reg2.mark_failed(handler=handler, event_id=event_id, error="cleanup")
-    finally:
-        await _truncate(reg1, TEST_SCHEMA)
-        await reg1.close()
-        await reg2.close()
+        finally:
+            await _truncate(reg1, TEST_SCHEMA)
+            await reg1.close()
+            await reg2.close()
 
 
 @pytest.mark.chaos
 @pytest.mark.asyncio
-async def test_registry_sequence_guard_is_monotonic(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.delenv("PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS", raising=False)
-    monkeypatch.setenv("PROCESSED_EVENT_PG_POOL_MIN", "1")
-    monkeypatch.setenv("PROCESSED_EVENT_PG_POOL_MAX", "2")
+async def test_registry_sequence_guard_is_monotonic():
+    with _set_env(
+        PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS=None,
+        PROCESSED_EVENT_PG_POOL_MIN="1",
+        PROCESSED_EVENT_PG_POOL_MAX="2",
+    ):
+        reg = await _make_registry(dsn=DEFAULT_POSTGRES_URL, schema=TEST_SCHEMA, lease_timeout_seconds=10)
+        try:
+            await _truncate(reg, TEST_SCHEMA)
 
-    reg = await _make_registry(dsn=DEFAULT_POSTGRES_URL, schema=TEST_SCHEMA, lease_timeout_seconds=10)
-    try:
-        await _truncate(reg, TEST_SCHEMA)
+            handler = "chaos:worker"
+            aggregate_id = f"agg-{uuid4().hex}"
 
-        handler = "chaos:worker"
-        aggregate_id = f"agg-{uuid4().hex}"
+            # Two events can be in-flight concurrently; the later mark_done must not regress the version.
+            e10 = f"evt-{uuid4().hex}"
+            e11 = f"evt-{uuid4().hex}"
 
-        # Two events can be in-flight concurrently; the later mark_done must not regress the version.
-        e10 = f"evt-{uuid4().hex}"
-        e11 = f"evt-{uuid4().hex}"
+            c10 = await reg.claim(handler=handler, event_id=e10, aggregate_id=aggregate_id, sequence_number=10)
+            c11 = await reg.claim(handler=handler, event_id=e11, aggregate_id=aggregate_id, sequence_number=11)
+            assert c10.decision == ClaimDecision.CLAIMED
+            assert c11.decision == ClaimDecision.CLAIMED
 
-        c10 = await reg.claim(handler=handler, event_id=e10, aggregate_id=aggregate_id, sequence_number=10)
-        c11 = await reg.claim(handler=handler, event_id=e11, aggregate_id=aggregate_id, sequence_number=11)
-        assert c10.decision == ClaimDecision.CLAIMED
-        assert c11.decision == ClaimDecision.CLAIMED
+            # Out-of-order completion: 11 completes before 10.
+            await reg.mark_done(handler=handler, event_id=e11, aggregate_id=aggregate_id, sequence_number=11)
+            await reg.mark_done(handler=handler, event_id=e10, aggregate_id=aggregate_id, sequence_number=10)
 
-        # Out-of-order completion: 11 completes before 10.
-        await reg.mark_done(handler=handler, event_id=e11, aggregate_id=aggregate_id, sequence_number=11)
-        await reg.mark_done(handler=handler, event_id=e10, aggregate_id=aggregate_id, sequence_number=10)
+            async with reg._pool.acquire() as conn:
+                last_seq = await conn.fetchval(
+                    f"""
+                    SELECT last_sequence
+                    FROM {TEST_SCHEMA}.aggregate_versions
+                    WHERE handler = $1 AND aggregate_id = $2
+                    """,
+                    handler,
+                    aggregate_id,
+                )
+                assert int(last_seq) == 11
 
-        async with reg._pool.acquire() as conn:
-            last_seq = await conn.fetchval(
-                f"""
-                SELECT last_sequence
-                FROM {TEST_SCHEMA}.aggregate_versions
-                WHERE handler = $1 AND aggregate_id = $2
-                """,
-                handler,
-                aggregate_id,
+            # Now an older event must be rejected as stale (guardrail against out-of-order delivery).
+            stale = await reg.claim(
+                handler=handler,
+                event_id=f"evt-{uuid4().hex}",
+                aggregate_id=aggregate_id,
+                sequence_number=10,
             )
-            assert int(last_seq) == 11
-
-        # Now an older event must be rejected as stale (guardrail against out-of-order delivery).
-        stale = await reg.claim(handler=handler, event_id=f"evt-{uuid4().hex}", aggregate_id=aggregate_id, sequence_number=10)
-        assert stale.decision == ClaimDecision.STALE
-    finally:
-        await _truncate(reg, TEST_SCHEMA)
-        await reg.close()
+            assert stale.decision == ClaimDecision.STALE
+        finally:
+            await _truncate(reg, TEST_SCHEMA)
+            await reg.close()
 
 
 class _FakeRedisService:
@@ -349,7 +410,7 @@ async def test_command_status_endpoint_exposes_failure_reason():
 
 
 @pytest.mark.chaos
-def test_event_store_rejects_event_id_reuse_with_different_command_payload(monkeypatch: pytest.MonkeyPatch):
+def test_event_store_rejects_event_id_reuse_with_different_command_payload():
     from oms.services.event_store import EventStore
     from shared.models.event_envelope import EventEnvelope
 
@@ -374,9 +435,9 @@ def test_event_store_rejects_event_id_reuse_with_different_command_payload(monke
     different = base.model_copy(deep=True)
     different.data = {"payload": {"x": 2}}
 
-    monkeypatch.delenv("EVENT_STORE_IDEMPOTENCY_MISMATCH_MODE", raising=False)
-    with pytest.raises(RuntimeError, match="event_id reuse"):
-        store._enforce_idempotency_contract(base, different, source="test")
+    with _set_env(EVENT_STORE_IDEMPOTENCY_MISMATCH_MODE=None):
+        with pytest.raises(RuntimeError, match="event_id reuse"):
+            store._enforce_idempotency_contract(base, different, source="test")
 
-    monkeypatch.setenv("EVENT_STORE_IDEMPOTENCY_MISMATCH_MODE", "warn")
-    store._enforce_idempotency_contract(base, different, source="test")
+    with _set_env(EVENT_STORE_IDEMPOTENCY_MISMATCH_MODE="warn"):
+        store._enforce_idempotency_contract(base, different, source="test")

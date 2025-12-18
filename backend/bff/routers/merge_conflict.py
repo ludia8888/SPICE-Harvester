@@ -4,6 +4,7 @@ Foundry-style 병합 충돌 해결 API
 """
 
 import inspect
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -132,6 +133,36 @@ async def simulate_merge(
             logger.warning(f"역방향 diff 분석 실패: {e}")
             reverse_diff_data = {"data": {"changes": []}}
 
+        def _coerce_changes(raw: Any) -> List[Dict[str, Any]]:
+            if raw is None:
+                return []
+            if isinstance(raw, list):
+                return [c for c in raw if isinstance(c, dict)]
+            if isinstance(raw, dict):
+                # Some Terminus versions return {"changes": [...]}.
+                inner = raw.get("changes")
+                if isinstance(inner, list):
+                    return [c for c in inner if isinstance(c, dict)]
+                return []
+            if isinstance(raw, str):
+                text = raw.strip()
+                if not text:
+                    return []
+                if text.lower() in {"matches", "match"}:
+                    return []
+                # Best-effort JSON decode (some endpoints return JSON-encoded strings).
+                try:
+                    parsed = json.loads(text)
+                except Exception:
+                    return []
+                return _coerce_changes(parsed)
+            return []
+
+        source_changes_raw = (diff_data.get("data", {}) or {}).get("changes", [])
+        source_changes = _coerce_changes(source_changes_raw)
+        target_changes_raw = (reverse_diff_data.get("data", {}) or {}).get("changes", [])
+        target_changes = _coerce_changes(target_changes_raw)
+
         # 4. 공통 조상 찾기 (Three-way merge를 위한)
         common_ancestor = None
         try:
@@ -149,8 +180,8 @@ async def simulate_merge(
 
         # 5. 충돌 감지 엔진 실행 (공통 조상 정보 포함)
         conflicts = await _detect_merge_conflicts(
-            diff_data.get("data", {}).get("changes", []),
-            reverse_diff_data.get("data", {}).get("changes", []),
+            source_changes,
+            target_changes,
             common_ancestor=common_ancestor,
             db_name=db_name,
             oms_client=oms_client,
@@ -163,7 +194,6 @@ async def simulate_merge(
         )
 
         # 7. 병합 통계 계산
-        source_changes = diff_data.get("data", {}).get("changes", [])
         merge_stats = {
             "changes_to_apply": len(source_changes),
             "conflicts_detected": len(foundry_conflicts),

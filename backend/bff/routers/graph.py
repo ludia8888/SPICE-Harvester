@@ -590,6 +590,7 @@ class ProjectionQueryRequest(BaseModel):
     "/projections/{db_name}/register",
     summary="🚧 (WIP) Register a projection (materialized view)",
     tags=["Projections (WIP)"],
+    include_in_schema=False,
 )
 async def register_projection(
     db_name: str,
@@ -643,6 +644,7 @@ async def register_projection(
     "/projections/{db_name}/query",
     summary="🚧 (WIP) Query a projection (materialized view)",
     tags=["Projections (WIP)"],
+    include_in_schema=False,
 )
 async def query_projection(
     db_name: str,
@@ -692,6 +694,7 @@ async def query_projection(
     "/projections/{db_name}/list",
     summary="🚧 (WIP) List projections (materialized views)",
     tags=["Projections (WIP)"],
+    include_in_schema=False,
 )
 async def list_projections(
     db_name: str,

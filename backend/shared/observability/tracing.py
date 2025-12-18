@@ -104,7 +104,7 @@ class OpenTelemetryConfig:
     ENVIRONMENT = os.getenv("OTEL_ENVIRONMENT", settings.environment.value)
 
     # Exporter endpoints
-    OTLP_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317")
+    OTLP_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
     JAEGER_ENDPOINT = os.getenv("JAEGER_ENDPOINT", "localhost:14250")
 
     # Sampling
@@ -112,7 +112,11 @@ class OpenTelemetryConfig:
 
     # Export configuration
     EXPORT_CONSOLE = os.getenv("OTEL_EXPORT_CONSOLE", "false").lower() == "true"
-    EXPORT_OTLP = os.getenv("OTEL_EXPORT_OTLP", "true").lower() == "true"
+    _raw_export_otlp = os.getenv("OTEL_EXPORT_OTLP")
+    if _raw_export_otlp is None:
+        EXPORT_OTLP = bool(OTLP_ENDPOINT)
+    else:
+        EXPORT_OTLP = _raw_export_otlp.lower() == "true"
     EXPORT_JAEGER = os.getenv("OTEL_EXPORT_JAEGER", "false").lower() == "true"
 
     # Feature flags
@@ -180,6 +184,8 @@ class TracingService:
             if OpenTelemetryConfig.EXPORT_OTLP:
                 if OTLPSpanExporter is None:
                     logger.warning("OTLP exporter requested but opentelemetry-exporter-otlp is not installed")
+                elif not OpenTelemetryConfig.OTLP_ENDPOINT:
+                    logger.warning("OTLP exporter requested but OTEL_EXPORTER_OTLP_ENDPOINT is not set")
                 else:
                     try:
                         tracer_provider.add_span_processor(
@@ -399,4 +405,3 @@ def trace_external_call(name: Optional[str] = None):
     if HAS_OPENTELEMETRY and otel_trace is not None:
         return tracing.trace(name, kind=otel_trace.SpanKind.CLIENT)
     return tracing.trace(name, kind=None)
-

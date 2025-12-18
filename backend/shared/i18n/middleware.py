@@ -4,7 +4,7 @@ import json
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from shared.i18n.context import reset_language, set_language
 from shared.i18n.translator import localize_free_text
@@ -34,19 +34,41 @@ def install_i18n_middleware(app: FastAPI, *, max_body_bytes: int = 1_000_000) ->
         if "application/json" not in content_type:
             return response
 
-        # Avoid huge bodies or streaming.
-        body = b""
-        async for chunk in response.body_iterator:
-            body += chunk
-            if len(body) > max_body_bytes:
-                # Re-create original response with consumed body.
-                return Response(
-                    content=body,
+        content_length = response.headers.get("content-length")
+        if content_length is not None:
+            try:
+                if int(content_length) > max_body_bytes:
+                    return response
+            except ValueError:
+                pass
+
+        # Avoid huge bodies or streaming; if too large, pass through without rewrite.
+        body_parts = []
+        body_size = 0
+        iterator = response.body_iterator.__aiter__()
+        while True:
+            try:
+                chunk = await iterator.__anext__()
+            except StopAsyncIteration:
+                break
+            body_parts.append(chunk)
+            body_size += len(chunk)
+            if body_size > max_body_bytes:
+                async def _stream_body():
+                    for part in body_parts:
+                        yield part
+                    async for rest in iterator:
+                        yield rest
+
+                return StreamingResponse(
+                    _stream_body(),
                     status_code=response.status_code,
                     headers=dict(response.headers),
                     media_type="application/json",
                     background=response.background,
                 )
+
+        body = b"".join(body_parts)
 
         try:
             payload = json.loads(body.decode("utf-8"))
@@ -72,48 +94,103 @@ def install_i18n_middleware(app: FastAPI, *, max_body_bytes: int = 1_000_000) ->
         return new_response
 
 
-def _rewrite_payload(payload: Any, *, target_lang: str, status_code: int) -> Any:
+def _rewrite_payload(
+    payload: Any,
+    *,
+    target_lang: str,
+    status_code: int,
+    api_status: Optional[str] = None,
+    is_root: bool = True,
+) -> Any:
     if isinstance(payload, dict):
-        api_status = payload.get("status") if isinstance(payload.get("status"), str) else None
+        if is_root and api_status is None:
+            api_status = payload.get("status") if isinstance(payload.get("status"), str) else None
 
-        if isinstance(payload.get("message"), str):
-            # Only apply generic fallbacks when the response looks like our ApiResponse shape.
-            # For arbitrary payloads (e.g., root endpoints), we keep the original message unless
-            # we can translate it via known mappings/patterns.
-            payload["message"] = localize_free_text(
-                payload["message"],
-                target_lang=target_lang,
-                status_code=status_code if api_status else None,
-                api_status=api_status if api_status else None,
-            )
-
-        if isinstance(payload.get("detail"), str):
-            # FastAPI default error responses use {"detail": "..."}
-            payload["detail"] = localize_free_text(
-                payload["detail"],
-                target_lang=target_lang,
-                status_code=status_code,
-                api_status=api_status,
-            )
-
-        if isinstance(payload.get("errors"), list):
-            errors_out = []
-            for item in payload["errors"]:
-                errors_out.append(
-                    localize_free_text(
-                        item,
-                        target_lang=target_lang,
-                        status_code=status_code if api_status else None,
-                        api_status=api_status if api_status else None,
-                    )
-                    if isinstance(item, str)
-                    else item
+        for key, value in list(payload.items()):
+            if is_root and key == "message" and isinstance(value, str):
+                # Only apply generic fallbacks when the response looks like our ApiResponse shape.
+                payload[key] = localize_free_text(
+                    value,
+                    target_lang=target_lang,
+                    status_code=status_code if api_status else None,
+                    api_status=api_status if api_status else None,
                 )
-            payload["errors"] = errors_out
+                continue
+
+            if is_root and key == "detail" and isinstance(value, str):
+                # FastAPI default error responses use {"detail": "..."}
+                payload[key] = localize_free_text(
+                    value,
+                    target_lang=target_lang,
+                    status_code=status_code,
+                    api_status=api_status,
+                )
+                continue
+
+            if key == "description" and isinstance(value, str):
+                payload[key] = localize_free_text(
+                    value,
+                    target_lang=target_lang,
+                    status_code=None,
+                    api_status=None,
+                )
+                continue
+
+            if key == "error" and isinstance(value, str):
+                payload[key] = localize_free_text(
+                    value,
+                    target_lang=target_lang,
+                    status_code=None,
+                    api_status=None,
+                )
+                continue
+
+            if is_root and key == "errors" and isinstance(value, list):
+                errors_out = []
+                for item in value:
+                    if isinstance(item, str):
+                        errors_out.append(
+                            localize_free_text(
+                                item,
+                                target_lang=target_lang,
+                                status_code=status_code if api_status else None,
+                                api_status=api_status if api_status else None,
+                            )
+                        )
+                    else:
+                        errors_out.append(
+                            _rewrite_payload(
+                                item,
+                                target_lang=target_lang,
+                                status_code=status_code,
+                                api_status=api_status,
+                                is_root=False,
+                            )
+                        )
+                payload[key] = errors_out
+                continue
+
+            if isinstance(value, dict) or isinstance(value, list):
+                payload[key] = _rewrite_payload(
+                    value,
+                    target_lang=target_lang,
+                    status_code=status_code,
+                    api_status=api_status,
+                    is_root=False,
+                )
 
         return payload
 
     if isinstance(payload, list):
-        return payload
+        return [
+            _rewrite_payload(
+                item,
+                target_lang=target_lang,
+                status_code=status_code,
+                api_status=api_status,
+                is_root=False,
+            )
+            for item in payload
+        ]
 
     return payload

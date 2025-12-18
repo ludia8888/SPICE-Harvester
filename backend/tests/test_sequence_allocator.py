@@ -40,7 +40,13 @@ async def _make_allocator(*, dsn: str, schema: str) -> AggregateSequenceAllocato
         except Exception as e:
             last_error = e
             continue
-    pytest.skip(f"Postgres not available (candidates={_get_postgres_url_candidates()!r}): {last_error}")
+    msg = (
+        "Postgres not available for sequence allocator tests "
+        f"(candidates={_get_postgres_url_candidates()!r}): {last_error}"
+    )
+    if os.getenv("SKIP_POSTGRES_TESTS", "").lower() in ("true", "1", "yes", "on"):
+        pytest.skip(msg)
+    pytest.fail(msg)
 
 
 async def _truncate(alloc: AggregateSequenceAllocator, schema: str) -> None:
