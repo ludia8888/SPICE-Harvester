@@ -515,27 +515,27 @@ async def get_google_sheets_service() -> GoogleSheetsService:
 
 
 # Router registration (unchanged)
-app.include_router(database.router, prefix="/api/v1", tags=["database"])
-app.include_router(ontology.router, prefix="/api/v1", tags=["ontology"])
-app.include_router(query.router, prefix="/api/v1", tags=["query"])
-app.include_router(mapping.router, prefix="/api/v1", tags=["mapping"])
-app.include_router(health.router, prefix="/api/v1", tags=["health"])
-app.include_router(merge_conflict.router, prefix="/api/v1", tags=["merge-conflict"])
-app.include_router(instances.router, prefix="/api/v1", tags=["instances"])
-app.include_router(instance_async.router, prefix="/api/v1", tags=["async-instances"])
-app.include_router(command_status.router, prefix="/api/v1", tags=["command-status"])
-app.include_router(websocket.router, prefix="/api/v1", tags=["websocket"])
-app.include_router(tasks.router, prefix="/api/v1", tags=["background-tasks"])
-app.include_router(admin.router, prefix="/api/v1", tags=["admin"])
-app.include_router(data_connector.router, prefix="/api/v1", tags=["data-connector"])
-app.include_router(lineage.router, prefix="/api/v1", tags=["lineage"])
-app.include_router(audit.router, prefix="/api/v1", tags=["audit"])
-app.include_router(ai.router, prefix="/api/v1", tags=["ai"])
-app.include_router(graph.router, tags=["graph"])  # Graph router has its own prefix
+app.include_router(database.router, prefix="/api/v1")
+app.include_router(ontology.router, prefix="/api/v1")
+app.include_router(query.router, prefix="/api/v1")
+app.include_router(mapping.router, prefix="/api/v1")
+app.include_router(health.router, prefix="/api/v1")
+app.include_router(merge_conflict.router, prefix="/api/v1")
+app.include_router(instances.router, prefix="/api/v1")
+app.include_router(instance_async.router, prefix="/api/v1")
+app.include_router(command_status.router, prefix="/api/v1")
+app.include_router(websocket.router, prefix="/api/v1")
+app.include_router(tasks.router, prefix="/api/v1")
+app.include_router(admin.router, prefix="/api/v1")
+app.include_router(data_connector.router, prefix="/api/v1")
+app.include_router(lineage.router, prefix="/api/v1")
+app.include_router(audit.router, prefix="/api/v1")
+app.include_router(ai.router, prefix="/api/v1")
+app.include_router(graph.router)  # Graph router has its own /api/v1 prefix
 
 # Monitoring and observability endpoints (modernized architecture)
-app.include_router(monitoring.router, prefix="/api/v1/monitoring", tags=["monitoring"])
-app.include_router(config_monitoring.router, prefix="/api/v1/config", tags=["config-monitoring"])
+app.include_router(monitoring.router, prefix="/api/v1/monitoring")
+app.include_router(config_monitoring.router, prefix="/api/v1/config")
 
 
 if __name__ == "__main__":

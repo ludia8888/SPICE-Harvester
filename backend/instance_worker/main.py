@@ -401,6 +401,269 @@ class StrictPalantirInstanceWorker:
                 # Best-effort: stamping should not block S3 writes, but Terminus writes will retry anyway.
                 logger.debug(f"Failed to resolve ontology version (db={db_name}, branch={branch}): {e}")
         return build_ontology_version(branch=branch, commit=commit)
+
+    async def _apply_create_instance_side_effects(
+        self,
+        *,
+        command_id: str,
+        db_name: str,
+        class_id: str,
+        branch: str,
+        payload: Dict[str, Any],
+        instance_id: str,
+        command_log: Dict[str, Any],
+        ontology_version: Dict[str, str],
+        created_by: str,
+    ) -> Dict[str, Any]:
+        """
+        Apply the create-instance side-effects without touching command status.
+
+        Used by BULK_CREATE_INSTANCES to create many instances under a single command_id
+        while keeping command status semantics correct.
+        """
+        if not self.s3_client:
+            raise RuntimeError("S3 client not initialized")
+        if not self.terminus_service:
+            raise RuntimeError("Terminus service not initialized")
+
+        # 1) Save FULL data to S3 (instance command log bucket)
+        s3_path = f"{db_name}/{branch}/{class_id}/{instance_id}/{command_id}.json"
+        s3_data = {
+            "command": command_log,
+            "payload": payload,
+            "instance_id": instance_id,
+            "class_id": class_id,
+            "branch": branch,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        put_resp = self.s3_client.put_object(
+            Bucket=self.instance_bucket,
+            Key=s3_path,
+            Body=json.dumps(s3_data, indent=2),
+            ContentType="application/json",
+            Metadata={
+                "command_id": str(command_id),
+                "instance_id": instance_id,
+                "class_id": class_id,
+            },
+        )
+
+        if self.lineage_store:
+            try:
+                etag = put_resp.get("ETag") if isinstance(put_resp, dict) else None
+                version_id = put_resp.get("VersionId") if isinstance(put_resp, dict) else None
+                await self.lineage_store.record_link(
+                    from_node_id=self.lineage_store.node_event(str(command_id)),
+                    to_node_id=self.lineage_store.node_artifact("s3", self.instance_bucket, s3_path),
+                    edge_type="event_wrote_s3_object",
+                    occurred_at=datetime.now(timezone.utc),
+                    db_name=db_name,
+                    to_label=f"s3://{self.instance_bucket}/{s3_path}",
+                    edge_metadata={
+                        "bucket": self.instance_bucket,
+                        "key": s3_path,
+                        "purpose": "instance_command_log",
+                        "db_name": db_name,
+                        "etag": etag,
+                        "version_id": version_id,
+                        "ontology": ontology_version,
+                    },
+                )
+            except Exception as e:
+                logger.debug(f"Lineage record failed (non-fatal): {e}")
+
+        if self.audit_store:
+            try:
+                etag = put_resp.get("ETag") if isinstance(put_resp, dict) else None
+                version_id = put_resp.get("VersionId") if isinstance(put_resp, dict) else None
+                await self.audit_store.log(
+                    partition_key=f"db:{db_name}",
+                    actor="instance_worker",
+                    action="INSTANCE_S3_WRITE",
+                    status="success",
+                    resource_type="s3_object",
+                    resource_id=f"s3://{self.instance_bucket}/{s3_path}",
+                    event_id=str(command_id),
+                    command_id=str(command_id),
+                    metadata={
+                        "class_id": class_id,
+                        "instance_id": instance_id,
+                        "bucket": self.instance_bucket,
+                        "key": s3_path,
+                        "etag": etag,
+                        "version_id": version_id,
+                        "ontology": ontology_version,
+                    },
+                )
+            except Exception as e:
+                logger.debug(f"Audit record failed (non-fatal): {e}")
+
+        # 2) Extract ONLY relationships for graph
+        relationships = await self.extract_relationships(db_name, class_id, payload, branch=branch)
+
+        # 3) Store lightweight node in TerminusDB for graph traversal
+        primary_key_value = instance_id
+        terminus_id = f"{class_id}/{primary_key_value}"
+
+        graph_node = {
+            "@id": terminus_id,
+            "@type": class_id,
+        }
+
+        primary_key_field = f"{class_id.lower()}_id"
+        graph_node[primary_key_field] = payload.get(primary_key_field, primary_key_value)
+
+        for rel_field, rel_target in relationships.items():
+            graph_node[rel_field] = rel_target
+
+        for field in await self.extract_required_properties(db_name, class_id, branch=branch):
+            if field in graph_node:
+                continue
+            if field in payload:
+                graph_node[field] = payload[field]
+
+        try:
+            maybe_crash("instance_worker:before_terminus", logger=logger)
+            await self.terminus_service.create_instance(
+                db_name,
+                class_id,
+                graph_node,
+                branch=branch,
+            )
+            maybe_crash("instance_worker:after_terminus", logger=logger)
+
+            if self.lineage_store:
+                try:
+                    await self.lineage_store.record_link(
+                        from_node_id=self.lineage_store.node_event(str(command_id)),
+                        to_node_id=self.lineage_store.node_artifact("terminus", db_name, branch, terminus_id),
+                        edge_type="event_wrote_terminus_document",
+                        occurred_at=datetime.now(timezone.utc),
+                        db_name=db_name,
+                        to_label=f"terminus:{db_name}:{branch}:{terminus_id}",
+                        edge_metadata={
+                            "db_name": db_name,
+                            "branch": branch,
+                            "terminus_id": terminus_id,
+                            "class_id": class_id,
+                            "ontology": ontology_version,
+                        },
+                    )
+                except Exception as e:
+                    logger.debug(f"Lineage record failed (non-fatal): {e}")
+
+            if self.audit_store:
+                try:
+                    await self.audit_store.log(
+                        partition_key=f"db:{db_name}",
+                        actor="instance_worker",
+                        action="INSTANCE_TERMINUS_WRITE",
+                        status="success",
+                        resource_type="terminus_document",
+                        resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
+                        event_id=str(command_id),
+                        command_id=str(command_id),
+                        metadata={
+                            "class_id": class_id,
+                            "branch": branch,
+                            "instance_id": instance_id,
+                            "terminus_id": terminus_id,
+                            "ontology": ontology_version,
+                        },
+                    )
+                except Exception as e:
+                    logger.debug(f"Audit record failed (non-fatal): {e}")
+        except Exception as e:
+            existing = None
+            try:
+                existing = await self.terminus_service.document_service.get_document(
+                    db_name, terminus_id, graph_type="instance", branch=branch
+                )
+            except Exception:
+                existing = None
+
+            if existing:
+                logger.info(f"✅ TerminusDB node already exists (idempotent create): {terminus_id}")
+            else:
+                if self.audit_store:
+                    try:
+                        await self.audit_store.log(
+                            partition_key=f"db:{db_name}",
+                            actor="instance_worker",
+                            action="INSTANCE_TERMINUS_WRITE",
+                            status="failure",
+                            resource_type="terminus_document",
+                            resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
+                            event_id=str(command_id),
+                            command_id=str(command_id),
+                            metadata={
+                                "class_id": class_id,
+                                "branch": branch,
+                                "instance_id": instance_id,
+                                "terminus_id": terminus_id,
+                                "ontology": ontology_version,
+                            },
+                            error=str(e),
+                        )
+                    except Exception:
+                        pass
+                raise
+
+        # 4) Store/publish domain event (Event Sourcing: S3/MinIO -> EventPublisher -> Kafka)
+        event_payload = {
+            "db_name": db_name,
+            "branch": branch,
+            "class_id": class_id,
+            "instance_id": instance_id,
+            **payload,
+        }
+        aggregate_id = f"{db_name}:{branch}:{class_id}:{instance_id}"
+
+        domain_event_id = (
+            str(uuid5(NAMESPACE_URL, f"spice:{command_id}:INSTANCE_CREATED:{aggregate_id}"))
+            if command_id
+            else str(uuid4())
+        )
+
+        envelope = EventEnvelope(
+            event_id=domain_event_id,
+            event_type="INSTANCE_CREATED",
+            aggregate_type="Instance",
+            aggregate_id=aggregate_id,
+            occurred_at=datetime.now(timezone.utc),
+            actor=created_by or "system",
+            data=event_payload,
+            metadata={
+                "kind": "domain",
+                "kafka_topic": AppConfig.INSTANCE_EVENTS_TOPIC,
+                "service": "instance_worker",
+                "command_id": command_id,
+                "ontology": ontology_version,
+                "run_id": os.getenv("PIPELINE_RUN_ID") or os.getenv("RUN_ID") or os.getenv("EXECUTION_ID"),
+                "code_sha": os.getenv("CODE_SHA") or os.getenv("GIT_SHA") or os.getenv("COMMIT_SHA"),
+            },
+        )
+
+        if self.enable_event_sourcing and self.event_store:
+            await self.event_store.append_event(envelope)
+        else:
+            if not self.producer:
+                raise RuntimeError("Kafka producer not initialized")
+            self.producer.produce(
+                AppConfig.INSTANCE_EVENTS_TOPIC,
+                key=aggregate_id,
+                value=envelope.as_json(),
+            )
+            self.producer.flush()
+
+        return {
+            "instance_id": instance_id,
+            "terminus_id": terminus_id,
+            "s3_path": s3_path,
+            "aggregate_id": aggregate_id,
+            "domain_event_id": domain_event_id,
+        }
         
     async def process_create_instance(self, command: Dict[str, Any]):
         """Process CREATE_INSTANCE command - STRICT Palantir style"""
@@ -737,6 +1000,129 @@ class StrictPalantirInstanceWorker:
         except Exception as e:
             logger.error(f"❌ Failed to create instance: {e}")
             await self.set_command_status(command_id, 'failed', {'error': str(e)})
+            raise
+
+    async def process_bulk_create_instances(self, command: Dict[str, Any]) -> None:
+        """Process BULK_CREATE_INSTANCES command (idempotent per event_id; no sequence-guard)."""
+        db_name = command.get("db_name")
+        class_id = command.get("class_id")
+        command_id = command.get("command_id")
+        branch = validate_branch_name(command.get("branch") or "main")
+        payload = command.get("payload", {}) or {}
+
+        await self.set_command_status(command_id, "processing")
+
+        try:
+            if not db_name:
+                raise ValueError("db_name is required")
+            if not class_id:
+                raise ValueError("class_id is required")
+            if not isinstance(payload, dict):
+                raise ValueError("BULK_CREATE_INSTANCES payload must be an object")
+
+            raw_instances = payload.get("instances")
+            if not isinstance(raw_instances, list):
+                raise ValueError("BULK_CREATE_INSTANCES payload.instances must be a list")
+
+            if not raw_instances:
+                await self.set_command_status(
+                    command_id,
+                    "completed",
+                    {"created": 0, "total": 0, "note": "No instances provided"},
+                )
+                return
+
+            # Stamp semantic contract version (ontology ref/commit) once for the whole bulk op.
+            ontology_version = await self._resolve_ontology_version(db_name, branch)
+            command_meta = command.get("metadata")
+            if not isinstance(command_meta, dict):
+                command_meta = {}
+                command["metadata"] = command_meta
+
+            existing_ontology = normalize_ontology_version(command_meta.get("ontology"))
+            if existing_ontology:
+                merged = dict(existing_ontology)
+                if "ref" not in merged and ontology_version.get("ref"):
+                    merged["ref"] = ontology_version["ref"]
+                if "commit" not in merged and ontology_version.get("commit"):
+                    merged["commit"] = ontology_version["commit"]
+                command_meta["ontology"] = merged
+                ontology_version = merged
+            else:
+                command_meta["ontology"] = dict(ontology_version)
+
+            created_by = command.get("created_by") or "system"
+            expected_key = f"{class_id.lower()}_id"
+
+            total = len(raw_instances)
+            created_count = 0
+            sample_instance_ids: List[str] = []
+
+            for idx, inst in enumerate(raw_instances):
+                if not isinstance(inst, dict):
+                    raise ValueError(f"instances[{idx}] must be an object")
+
+                inst_payload = dict(inst)
+
+                # Prefer explicit primary-key fields. Fall back to deterministic per-row ID so retries don't duplicate.
+                candidate = inst_payload.get(expected_key)
+                if candidate:
+                    instance_id = str(candidate)
+                else:
+                    instance_id = None
+                    for key, value in inst_payload.items():
+                        if key.endswith("_id") and value:
+                            instance_id = str(value)
+                            break
+                    if not instance_id:
+                        suffix = uuid5(NAMESPACE_URL, f"bulk:{command_id}:{idx}").hex[:12]
+                        instance_id = f"{class_id.lower()}_{suffix}"
+                        inst_payload[expected_key] = instance_id
+
+                validate_instance_id(instance_id)
+                inst_payload.setdefault(expected_key, instance_id)
+
+                command_log = {
+                    "command_id": str(command_id),
+                    "command_type": "BULK_CREATE_INSTANCES",
+                    "db_name": db_name,
+                    "class_id": class_id,
+                    "branch": branch,
+                    "bulk_index": idx,
+                    "bulk_total": total,
+                    "created_by": created_by,
+                    "metadata": command_meta,
+                }
+
+                await self._apply_create_instance_side_effects(
+                    command_id=str(command_id),
+                    db_name=db_name,
+                    class_id=class_id,
+                    branch=branch,
+                    payload=inst_payload,
+                    instance_id=instance_id,
+                    command_log=command_log,
+                    ontology_version=ontology_version,
+                    created_by=created_by,
+                )
+
+                created_count += 1
+                if len(sample_instance_ids) < 5:
+                    sample_instance_ids.append(instance_id)
+
+            await self.set_command_status(
+                command_id,
+                "completed",
+                {
+                    "created": created_count,
+                    "total": total,
+                    "sample_instance_ids": sample_instance_ids,
+                },
+            )
+
+        except Exception as e:
+            logger.error(f"❌ Failed to bulk create instances: {e}")
+            await self.set_command_status(command_id, "failed", {"error": str(e)})
             raise
 
     async def process_update_instance(self, command: Dict[str, Any]) -> None:
@@ -1628,6 +2014,10 @@ class StrictPalantirInstanceWorker:
                 registry_event_id = command.get("event_id") or command.get("command_id")
                 registry_aggregate_id = command.get("aggregate_id")
                 registry_sequence = command.get("sequence_number")
+                # Bulk commands are not state-overwriting operations on a single aggregate.
+                # Disabling the sequence guard prevents "out-of-order => skipped_stale" data loss.
+                if command_type and str(command_type).startswith("BULK_"):
+                    registry_sequence = None
                 if self.processed_event_registry and registry_event_id:
                     claim = await self.processed_event_registry.claim(
                         handler="instance_worker",
@@ -1662,6 +2052,8 @@ class StrictPalantirInstanceWorker:
 
                 if command_type == "CREATE_INSTANCE":
                     await self.process_create_instance(command)
+                elif command_type == "BULK_CREATE_INSTANCES":
+                    await self.process_bulk_create_instances(command)
                 elif command_type == "UPDATE_INSTANCE":
                     await self.process_update_instance(command)
                 elif command_type == "DELETE_INSTANCE":

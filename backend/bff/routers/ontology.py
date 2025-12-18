@@ -1355,7 +1355,7 @@ async def suggest_mappings_from_google_sheets(
         if not target_schema:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="target_schema is required (OMS integration disabled)",
+                detail="target_schema is required for import (field types)",
             )
 
         from bff.services.funnel_client import FunnelClient
@@ -1504,7 +1504,7 @@ async def suggest_mappings_from_excel(
         if not target_schema_json:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="target_schema_json is required (OMS integration disabled)",
+                detail="target_schema_json is required for import (field types)",
             )
         try:
             target_schema_raw = json.loads(target_schema_json)
@@ -1724,7 +1724,7 @@ async def dry_run_import_from_google_sheets(
         if not request.target_schema:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="target_schema is required (OMS integration disabled)",
+                detail="target_schema is required for import (field types)",
             )
 
         dry_run_rows = max(1, min(int(request.dry_run_rows or 100), 5000))
@@ -1824,9 +1824,10 @@ async def dry_run_import_from_google_sheets(
 async def commit_import_from_google_sheets(
     db_name: str,
     request: ImportFromGoogleSheetsRequest,
+    oms_client: OMSClient = OMSClientDep,
 ):
     """
-    Google Sheets → (구조 분석 + 테이블 선택) → 매핑 적용 → 타입 변환 → instances 준비 (OMS 비활성)
+    Google Sheets → (구조 분석 + 테이블 선택) → 매핑 적용 → 타입 변환 → OMS bulk-create로 WRITE 파이프라인 시작
     """
     try:
         db_name = validate_db_name(db_name)
@@ -1834,7 +1835,7 @@ async def commit_import_from_google_sheets(
         if not request.target_schema:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="target_schema is required (OMS integration disabled)",
+                detail="target_schema is required for import (field types)",
             )
 
         from bff.services.funnel_client import FunnelClient
@@ -1936,9 +1937,42 @@ async def commit_import_from_google_sheets(
             returned_instances = instances[:max_return]
             has_more_instances = len(instances) > max_return
 
+        submitted_commands: List[Dict[str, Any]] = []
+        for batch in prepared_batches:
+            idx = int(batch["batch_index"])
+            start = idx * batch_size
+            end = start + batch_size
+            batch_instances = instances[start:end]
+
+            resp = await oms_client.post(
+                f"/api/v1/instances/{db_name}/async/{target_class_id}/bulk-create",
+                params={"branch": "main"},
+                json={
+                    "instances": batch_instances,
+                    "metadata": {
+                        "import": base_metadata,
+                        "import_batch": {"index": idx, "count": len(batch_instances)},
+                    },
+                },
+            )
+
+            command_id = (
+                resp.get("command_id")
+                if isinstance(resp, dict)
+                else None
+            )
+            submitted_commands.append(
+                {
+                    "batch_index": idx,
+                    "count": len(batch_instances),
+                    "command": resp,
+                    "status_url": f"/api/v1/commands/{command_id}/status" if command_id else None,
+                }
+            )
+
         return {
             "status": "success",
-            "message": "Import prepared (OMS disabled)",
+            "message": "Import accepted and submitted to OMS (async write pipeline started)",
             "source_info": base_metadata,
             "target_info": {"class_id": target_class_id},
             "stats": {
@@ -1946,6 +1980,7 @@ async def commit_import_from_google_sheets(
                 "prepared_instances": len(instances),
                 "skipped_error_rows": len(error_row_indices),
                 "batches": len(prepared_batches),
+                "submitted_commands": len(submitted_commands),
             },
             "warnings": build.get("warnings") or [],
             "errors": errors[:200],
@@ -1954,6 +1989,10 @@ async def commit_import_from_google_sheets(
                 "batches": prepared_batches,
                 "instances": returned_instances,
                 "has_more_instances": has_more_instances,
+            },
+            "write": {
+                "branch": "main",
+                "commands": submitted_commands,
             },
             "structure": structure,
         }
@@ -2037,7 +2076,7 @@ async def dry_run_import_from_excel(
         if not target_schema_json:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="target_schema_json is required (OMS integration disabled)",
+                detail="target_schema_json is required for import (field types)",
             )
         try:
             target_schema_raw = json.loads(target_schema_json)
@@ -2172,9 +2211,10 @@ async def commit_import_from_excel(
     return_instances: bool = Form(False),
     max_return_instances: int = Form(1000),
     options_json: Optional[str] = Form(None),
+    oms_client: OMSClient = OMSClientDep,
 ):
     """
-    Excel 업로드 → (구조 분석 + 테이블 선택) → 매핑 적용 → 타입 변환 → instances 준비 (OMS 비활성)
+    Excel 업로드 → (구조 분석 + 테이블 선택) → 매핑 적용 → 타입 변환 → OMS bulk-create로 WRITE 파이프라인 시작
     """
     import json
 
@@ -2211,7 +2251,7 @@ async def commit_import_from_excel(
         if not target_schema_json:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="target_schema_json is required (OMS integration disabled)",
+                detail="target_schema_json is required for import (field types)",
             )
         try:
             target_schema_raw = json.loads(target_schema_json)
@@ -2327,9 +2367,42 @@ async def commit_import_from_excel(
             returned_instances = instances[:max_return]
             has_more_instances = len(instances) > max_return
 
+        submitted_commands: List[Dict[str, Any]] = []
+        for batch in prepared_batches:
+            idx = int(batch["batch_index"])
+            start = idx * batch_size
+            end = start + batch_size
+            batch_instances = instances[start:end]
+
+            resp = await oms_client.post(
+                f"/api/v1/instances/{db_name}/async/{target_class_id}/bulk-create",
+                params={"branch": "main"},
+                json={
+                    "instances": batch_instances,
+                    "metadata": {
+                        "import": base_metadata,
+                        "import_batch": {"index": idx, "count": len(batch_instances)},
+                    },
+                },
+            )
+
+            command_id = (
+                resp.get("command_id")
+                if isinstance(resp, dict)
+                else None
+            )
+            submitted_commands.append(
+                {
+                    "batch_index": idx,
+                    "count": len(batch_instances),
+                    "command": resp,
+                    "status_url": f"/api/v1/commands/{command_id}/status" if command_id else None,
+                }
+            )
+
         return {
             "status": "success",
-            "message": "Import prepared (OMS disabled)",
+            "message": "Import accepted and submitted to OMS (async write pipeline started)",
             "source_info": base_metadata,
             "target_info": {"class_id": target_class_id},
             "stats": {
@@ -2337,6 +2410,7 @@ async def commit_import_from_excel(
                 "prepared_instances": len(instances),
                 "skipped_error_rows": len(error_row_indices),
                 "batches": len(prepared_batches),
+                "submitted_commands": len(submitted_commands),
             },
             "warnings": build.get("warnings") or [],
             "errors": errors[:200],
@@ -2345,6 +2419,10 @@ async def commit_import_from_excel(
                 "batches": prepared_batches,
                 "instances": returned_instances,
                 "has_more_instances": has_more_instances,
+            },
+            "write": {
+                "branch": "main",
+                "commands": submitted_commands,
             },
             "structure": structure,
         }

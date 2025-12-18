@@ -549,7 +549,7 @@ POST /database/{db_name}/suggest-mappings-from-excel
 **Notes:**
 - 두 엔드포인트 모두 응답에 `preview_data` + `structure` + `source_schema/target_schema` + `mappings`를 포함합니다.
 - `enable_semantic_hints=false`가 기본값이며, 도메인 중립 동작을 우선합니다.
-- 현재는 OMS 연동을 비활성화한 상태라, `target_schema`(또는 `target_schema_json`)를 클라이언트가 직접 전달해야 합니다.
+- 현재 import 단계에서 타입 변환/검증을 위해 `target_schema`(또는 `target_schema_json`)를 클라이언트가 직접 전달합니다. (향후 OMS 스키마 조회로 대체 가능)
 
 ### AI Import (Dry-run / Commit)
 
@@ -582,7 +582,7 @@ POST /database/{db_name}/import-from-google-sheets/dry-run
 }
 ```
 
-#### Commit Import From Google Sheets (Prepare-only, OMS disabled)
+#### Commit Import From Google Sheets (Submit to OMS async write)
 ```http
 POST /database/{db_name}/import-from-google-sheets/commit
 ```
@@ -605,6 +605,11 @@ POST /database/{db_name}/import-from-google-sheets/commit
 }
 ```
 
+**Notes:**
+- `commit`은 OMS의 `bulk-create`를 호출해 WRITE 파이프라인을 시작합니다. (비동기 처리)
+- 응답의 `write.commands[].status_url`로 `/api/v1/commands/{id}/status`를 폴링하여 완료/실패를 확인합니다.
+- `batch_size`에 따라 여러 개의 OMS command로 분할 제출될 수 있습니다.
+
 #### Dry-run Import From Excel Upload
 ```http
 POST /database/{db_name}/import-from-excel/dry-run
@@ -617,7 +622,7 @@ POST /database/{db_name}/import-from-excel/dry-run
 - `mappings_json`: JSON array string (e.g. `[{"source_field":"A","target_field":"name"}]`)
 - Optional: `sheet_name`, `table_id`, `table_top`, `table_left`, `table_bottom`, `table_right`, `dry_run_rows`, `max_import_rows`, `options_json`
 
-#### Commit Import From Excel Upload (Prepare-only, OMS disabled)
+#### Commit Import From Excel Upload (Submit to OMS async write)
 ```http
 POST /database/{db_name}/import-from-excel/commit
 ```
@@ -632,7 +637,9 @@ POST /database/{db_name}/import-from-excel/commit
 **Notes:**
 - Import는 Funnel의 구조 분석 결과(멀티테이블/전치/병합셀 등)를 기반으로 “선택된 테이블”을 정규화한 뒤 적용됩니다.
 - `allow_partial=false`(기본)인 경우, 변환/검증 에러가 있으면 커밋을 거부하고 에러를 반환합니다.
-- 현재는 OMS 연동을 비활성화한 상태라, `commit`은 실제 저장을 수행하지 않고 `prepared`(배치/옵션에 따라 생성된 instances)를 반환합니다.
+- `commit`은 OMS의 `bulk-create`를 호출해 WRITE 파이프라인을 시작합니다. (비동기 처리)
+- 응답의 `write.commands[].status_url`로 `/api/v1/commands/{id}/status`를 폴링하여 완료/실패를 확인합니다.
+- `batch_size`에 따라 여러 개의 OMS command로 분할 제출될 수 있습니다.
 
 ### Graph Query (Federated Multi-hop) ⭐ NEW
 

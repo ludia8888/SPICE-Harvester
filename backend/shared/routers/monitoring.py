@@ -28,7 +28,7 @@ from shared.services.lifecycle_manager import (
     ServiceLifecycleManager, ServiceState, ServiceMetrics
 )
 
-router = APIRouter()
+router = APIRouter(tags=["Monitoring"])
 
 
 # Dependency injection for monitoring endpoints

@@ -26,7 +26,7 @@ from shared.services.sheet_grid_parser import SheetGridParseOptions, SheetGridPa
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(tags=["Data Connectors"])
 
 
 # Import the dependency functions from main

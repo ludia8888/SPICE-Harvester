@@ -24,7 +24,7 @@ from shared.observability.config_monitor import (
     ConfigChangeType, ConfigSecurityAudit
 )
 
-router = APIRouter()
+router = APIRouter(tags=["Config Monitoring"])
 
 # Global configuration monitor instance
 _config_monitor: Optional[ConfigurationMonitor] = None
