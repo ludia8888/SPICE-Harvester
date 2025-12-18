@@ -43,7 +43,8 @@ class OntologyService(BaseTerminusService):
     async def create_ontology(
         self,
         db_name: str,
-        ontology: OntologyBase
+        ontology: OntologyBase,
+        branch: str = "main",
     ) -> OntologyResponse:
         """
         새 온톨로지(클래스) 생성
@@ -60,7 +61,7 @@ class OntologyService(BaseTerminusService):
             await self.db_service.ensure_db_exists(db_name)
             
             # 중복 확인
-            if await self.ontology_exists(db_name, ontology.id):
+            if await self.ontology_exists(db_name, ontology.id, branch=branch):
                 raise DuplicateOntologyError(f"온톨로지 '{ontology.id}'이(가) 이미 존재합니다")
             
             # 스키마 문서 생성 - 🔥 CRITICAL FIX: Correct TerminusDB format
@@ -89,10 +90,17 @@ class OntologyService(BaseTerminusService):
                     schema_doc[rel.predicate] = rel_schema  # Relationship uses 'predicate', not 'name'
             
             # 스키마 저장
-            endpoint = f"/api/document/{self.connection_info.account}/{db_name}?graph_type=schema&author=admin&message=Creating%20ontology%20{ontology.id}"
+            endpoint = (
+                f"/api/document/{self.connection_info.account}/{db_name}{self._branch_descriptor(branch)}"
+            )
+            params = {
+                "graph_type": "schema",
+                "author": self.connection_info.user or "admin",
+                "message": f"Creating ontology {ontology.id}",
+            }
             
             # Create schema document in TerminusDB
-            response = await self._make_request("POST", endpoint, schema_doc)
+            response = await self._make_request("POST", endpoint, schema_doc, params=params)
             
             logger.info(f"Ontology '{ontology.id}' created in database '{db_name}'")
             
@@ -117,7 +125,8 @@ class OntologyService(BaseTerminusService):
         self,
         db_name: str,
         ontology_id: str,
-        ontology: OntologyBase
+        ontology: OntologyBase,
+        branch: str = "main",
     ) -> OntologyResponse:
         """
         온톨로지 업데이트
@@ -132,14 +141,14 @@ class OntologyService(BaseTerminusService):
         """
         try:
             # 존재 확인
-            if not await self.ontology_exists(db_name, ontology_id):
+            if not await self.ontology_exists(db_name, ontology_id, branch=branch):
                 raise OntologyNotFoundError(f"온톨로지 '{ontology_id}'을(를) 찾을 수 없습니다")
             
             # 기존 스키마 삭제
-            await self.delete_ontology(db_name, ontology_id)
+            await self.delete_ontology(db_name, ontology_id, branch=branch)
             
             # 새 스키마 생성
-            return await self.create_ontology(db_name, ontology)
+            return await self.create_ontology(db_name, ontology, branch=branch)
             
         except (OntologyNotFoundError, DuplicateOntologyError):
             raise
@@ -150,7 +159,8 @@ class OntologyService(BaseTerminusService):
     async def delete_ontology(
         self,
         db_name: str,
-        ontology_id: str
+        ontology_id: str,
+        branch: str = "main",
     ) -> bool:
         """
         온톨로지 삭제
@@ -164,13 +174,21 @@ class OntologyService(BaseTerminusService):
         """
         try:
             # 존재 확인
-            if not await self.ontology_exists(db_name, ontology_id):
+            if not await self.ontology_exists(db_name, ontology_id, branch=branch):
                 raise OntologyNotFoundError(f"온톨로지 '{ontology_id}'을(를) 찾을 수 없습니다")
             
             # 스키마 문서 삭제
-            endpoint = f"/api/document/{self.connection_info.account}/{db_name}?graph_type=schema&id={ontology_id}"
+            endpoint = (
+                f"/api/document/{self.connection_info.account}/{db_name}{self._branch_descriptor(branch)}"
+            )
+            params = {
+                "graph_type": "schema",
+                "id": ontology_id,
+                "author": self.connection_info.user or "admin",
+                "message": f"Deleting ontology {ontology_id}",
+            }
             
-            await self._make_request("DELETE", endpoint)
+            await self._make_request("DELETE", endpoint, params=params)
             
             logger.info(f"Ontology '{ontology_id}' deleted from database '{db_name}'")
             return True
@@ -184,7 +202,8 @@ class OntologyService(BaseTerminusService):
     async def get_ontology(
         self,
         db_name: str,
-        ontology_id: str
+        ontology_id: str,
+        branch: str = "main",
     ) -> Optional[OntologyResponse]:
         """
         특정 온톨로지 조회
@@ -198,9 +217,12 @@ class OntologyService(BaseTerminusService):
         """
         try:
             # 스키마 문서 조회
-            endpoint = f"/api/document/{self.connection_info.account}/{db_name}?graph_type=schema&id={ontology_id}"
+            endpoint = (
+                f"/api/document/{self.connection_info.account}/{db_name}{self._branch_descriptor(branch)}"
+            )
+            params = {"graph_type": "schema", "id": ontology_id}
             
-            result = await self._make_request("GET", endpoint)
+            result = await self._make_request("GET", endpoint, params=params)
             
             if not result:
                 return None
@@ -221,6 +243,7 @@ class OntologyService(BaseTerminusService):
     async def list_ontologies(
         self,
         db_name: str,
+        branch: str = "main",
         limit: int = 100,
         offset: int = 0
     ) -> List[OntologyResponse]:
@@ -240,10 +263,13 @@ class OntologyService(BaseTerminusService):
             await self.db_service.ensure_db_exists(db_name)
             
             # Use document API to get all schema documents
-            endpoint = f"/api/document/{self.connection_info.account}/{db_name}?graph_type=schema"
+            endpoint = (
+                f"/api/document/{self.connection_info.account}/{db_name}{self._branch_descriptor(branch)}"
+            )
+            params = {"graph_type": "schema"}
             
             try:
-                result = await self._make_request("GET", endpoint)
+                result = await self._make_request("GET", endpoint, params=params)
             except Exception as e:
                 # If no schema documents exist, return empty list
                 if "404" in str(e):
@@ -277,7 +303,8 @@ class OntologyService(BaseTerminusService):
     async def ontology_exists(
         self,
         db_name: str,
-        ontology_id: str
+        ontology_id: str,
+        branch: str = "main",
     ) -> bool:
         """
         온톨로지 존재 여부 확인
@@ -290,7 +317,7 @@ class OntologyService(BaseTerminusService):
             존재 여부
         """
         try:
-            ontology = await self.get_ontology(db_name, ontology_id)
+            ontology = await self.get_ontology(db_name, ontology_id, branch=branch)
             return ontology is not None
         except Exception:
             return False

@@ -138,9 +138,10 @@ class InstanceCommand(BaseCommand):
     def __init__(self, **data):
         if "aggregate_type" not in data:
             data["aggregate_type"] = "Instance"
-        # aggregate_id 형식: {db_name}:{class_id}:{instance_id}
+        # aggregate_id 형식: {db_name}:{branch}:{class_id}:{instance_id}
         if "aggregate_id" not in data:
-            parts = [data.get("db_name", ""), data.get("class_id", "")]
+            branch = data.get("branch") or "main"
+            parts = [data.get("db_name", ""), str(branch), data.get("class_id", "")]
             if data.get("instance_id"):
                 parts.append(data["instance_id"])
             data["aggregate_id"] = ":".join(parts)

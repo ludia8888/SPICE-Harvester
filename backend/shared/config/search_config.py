@@ -3,6 +3,7 @@ Search Configuration
 Elasticsearch 인덱스 이름 규칙 중앙 관리
 """
 
+import hashlib
 import re
 from typing import Optional
 
@@ -55,7 +56,24 @@ def sanitize_index_name(name: str) -> str:
     return name
 
 
-def get_instances_index_name(db_name: str, version: Optional[str] = None) -> str:
+def _branch_overlay_token(branch: str) -> str:
+    """
+    Stable, collision-resistant token for ES branch overlay indices.
+
+    Why:
+    - Branch names may contain `/` (Git-like).
+    - `sanitize_index_name()` lowercases and normalizes characters, which can cause collisions.
+    - We therefore add a short hash of the original branch string.
+    """
+    raw = branch if isinstance(branch, str) else ""
+    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
+    slug = sanitize_index_name(raw)[:40] or "branch"
+    return f"br_{slug}_{digest}"
+
+
+def get_instances_index_name(
+    db_name: str, version: Optional[str] = None, *, branch: str = "main"
+) -> str:
     """
     인스턴스 데이터를 위한 Elasticsearch 인덱스 이름을 생성합니다.
     
@@ -71,9 +89,13 @@ def get_instances_index_name(db_name: str, version: Optional[str] = None) -> str
         'mydb_instances'
         >>> get_instances_index_name("My-DB", "v2")
         'my_db_instances_v2'
+        >>> get_instances_index_name("MyDB", branch="feature/foo")  # copy-on-write overlay
+        'mydb_instances__br_feature_foo_...'
     """
     base_name = sanitize_index_name(db_name)
     index_name = f"{base_name}_instances"
+    if branch and branch != "main":
+        index_name = f"{index_name}__{_branch_overlay_token(branch)}"
     
     if version:
         version = sanitize_index_name(version)
@@ -82,7 +104,9 @@ def get_instances_index_name(db_name: str, version: Optional[str] = None) -> str
     return index_name
 
 
-def get_ontologies_index_name(db_name: str, version: Optional[str] = None) -> str:
+def get_ontologies_index_name(
+    db_name: str, version: Optional[str] = None, *, branch: str = "main"
+) -> str:
     """
     온톨로지 데이터를 위한 Elasticsearch 인덱스 이름을 생성합니다.
     
@@ -98,9 +122,14 @@ def get_ontologies_index_name(db_name: str, version: Optional[str] = None) -> st
         'mydb_ontologies'
         >>> get_ontologies_index_name("My-DB", "v2")
         'my_db_ontologies_v2'
+        >>> get_ontologies_index_name("MyDB", branch="feature/foo")
+        'mydb_ontologies__br_feature_foo_...'
     """
     base_name = sanitize_index_name(db_name)
     index_name = f"{base_name}_ontologies"
+
+    if branch and branch != "main":
+        index_name = f"{index_name}__{_branch_overlay_token(branch)}"
     
     if version:
         version = sanitize_index_name(version)

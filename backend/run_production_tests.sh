@@ -3,8 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+PYTHON_BIN_ENV="${PYTHON_BIN:-}"
+PYTHON_BIN="${PYTHON_BIN_ENV:-python3}"
 
 MODE="full"
 WAIT_FOR_SERVICES="true"
@@ -25,7 +27,52 @@ trim_trailing_slash() {
 OMS_URL="$(trim_trailing_slash "${OMS_BASE_URL:-http://localhost:8000}")"
 BFF_URL="$(trim_trailing_slash "${BFF_BASE_URL:-http://localhost:8002}")"
 FUNNEL_URL="$(trim_trailing_slash "${FUNNEL_BASE_URL:-http://localhost:8003}")"
-MINIO_URL="$(trim_trailing_slash "${MINIO_ENDPOINT_URL:-http://localhost:9000}")"
+
+load_dotenv_defaults() {
+  local dotenv_path="$1"
+  [[ -f "$dotenv_path" ]] || return 0
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line#"${line%%[![:space:]]*}"}" # ltrim
+    line="${line%"${line##*[![:space:]]}"}" # rtrim
+
+    [[ -z "$line" ]] && continue
+    [[ "$line" == \#* ]] && continue
+
+    line="${line#export }"
+
+    if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+      local key="${BASH_REMATCH[1]}"
+      local value="${BASH_REMATCH[2]}"
+
+      if [[ "$value" =~ ^\"(.*)\"$ ]]; then
+        value="${BASH_REMATCH[1]}"
+      elif [[ "$value" =~ ^\'(.*)\'$ ]]; then
+        value="${BASH_REMATCH[1]}"
+      fi
+
+      if [[ -z "${!key:-}" ]]; then
+        export "$key=$value"
+      fi
+    fi
+  done <"$dotenv_path"
+}
+
+# Load repo root `.env` (port overrides, etc) but don't override explicit env vars.
+load_dotenv_defaults "$REPO_ROOT/.env"
+
+# Compose-aligned defaults (local host ports may be overridden by `.env`)
+POSTGRES_PORT_HOST="${POSTGRES_PORT_HOST:-5433}"
+MINIO_PORT_HOST="${MINIO_PORT_HOST:-9000}"
+ELASTICSEARCH_PORT_HOST="${ELASTICSEARCH_PORT_HOST:-9200}"
+KAFKA_PORT_HOST="${KAFKA_PORT_HOST:-9092}"
+
+export POSTGRES_URL="${POSTGRES_URL:-postgresql://spiceadmin:spicepass123@localhost:${POSTGRES_PORT_HOST}/spicedb}"
+export MINIO_ENDPOINT_URL="${MINIO_ENDPOINT_URL:-http://localhost:${MINIO_PORT_HOST}}"
+export ELASTICSEARCH_URL="${ELASTICSEARCH_URL:-http://localhost:${ELASTICSEARCH_PORT_HOST}}"
+export KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-localhost:${KAFKA_PORT_HOST}}"
+
+MINIO_URL="$(trim_trailing_slash "${MINIO_ENDPOINT_URL}")"
 
 usage() {
   cat <<'USAGE'
@@ -48,7 +95,9 @@ Options:
 Notes:
 - Tests live under `backend/tests/` (run from `backend/`).
 - Full suite expects local ports from docker compose:
-  OMS 8000, BFF 8002, Funnel 8003, MinIO 9000, Elasticsearch 9200, TerminusDB 6363, Kafka 9092, Postgres 5433/5432.
+  OMS 8000, BFF 8002, Funnel 8003, TerminusDB 6363.
+  Infra ports default to: Postgres 5433, MinIO 9000, Elasticsearch 9200, Kafka 9092.
+  If you use repo root `.env` port overrides (recommended), this script will auto-detect them.
 USAGE
 }
 
@@ -118,7 +167,19 @@ if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
 fi
 
 if ! "$PYTHON_BIN" -m pytest --version >/dev/null 2>&1; then
-  echo "❌ pytest is not available in this Python environment." >&2
+  if [[ -z "$PYTHON_BIN_ENV" ]]; then
+    for candidate in python3.13 python3.12 python3.11 python3.10 python3; do
+      if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -m pytest --version >/dev/null 2>&1; then
+        PYTHON_BIN="$candidate"
+        echo "ℹ️  Selected PYTHON_BIN=$PYTHON_BIN (pytest detected)"
+        break
+      fi
+    done
+  fi
+fi
+
+if ! "$PYTHON_BIN" -m pytest --version >/dev/null 2>&1; then
+  echo "❌ pytest is not available in this Python environment (PYTHON_BIN=$PYTHON_BIN)." >&2
   echo "   Install test deps (example):" >&2
   echo "   cd backend && pip install -e ./shared[test] && pip install -r ./tests/requirements.txt" >&2
   exit 1

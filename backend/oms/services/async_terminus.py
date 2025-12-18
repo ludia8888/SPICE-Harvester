@@ -279,6 +279,7 @@ class AsyncTerminusService:
         self, 
         db_name: str, 
         class_id: str, 
+        branch: str = "main",
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         filter_conditions: Optional[Dict[str, Any]] = None
@@ -290,26 +291,43 @@ class AsyncTerminusService:
             search = filter_conditions.get("search")
         
         return await self.instance_service.get_class_instances_optimized(
-            db_name, class_id, limit, offset, search
+            db_name=db_name,
+            class_id=class_id,
+            branch=branch,
+            limit=limit or 100,
+            offset=offset or 0,
+            search=search,
         )
 
     async def get_instance_optimized(
         self, 
         db_name: str, 
         instance_id: str, 
+        branch: str = "main",
         class_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """개별 인스턴스를 효율적으로 조회"""
-        return await self.instance_service.get_instance_optimized(db_name, instance_id, class_id)
+        return await self.instance_service.get_instance_optimized(
+            db_name=db_name,
+            instance_id=instance_id,
+            branch=branch,
+            class_id=class_id,
+        )
 
     async def count_class_instances(
         self, 
         db_name: str, 
         class_id: str, 
+        branch: str = "main",
         filter_conditions: Optional[Dict[str, Any]] = None
     ) -> int:
         """특정 클래스의 인스턴스 개수를 효율적으로 조회"""
-        return await self.instance_service.count_class_instances(db_name, class_id, filter_conditions)
+        return await self.instance_service.count_class_instances(
+            db_name=db_name,
+            class_id=class_id,
+            branch=branch,
+            filter_conditions=filter_conditions,
+        )
 
     # ==========================================
     # Ontology Operations - Facade Methods
@@ -319,17 +337,27 @@ class AsyncTerminusService:
         self, 
         db_name: str, 
         class_id: Optional[str] = None, 
-        raise_if_missing: bool = True
-    ) -> List[OntologyResponse]:
-        """온톨로지 조회"""
-        # OntologyService.get_ontology only takes 2 parameters
-        return await self.ontology_service.get_ontology(db_name, class_id)
+        raise_if_missing: bool = True,
+        *,
+        branch: str = "main",
+    ) -> Any:
+        """온톨로지 조회 (branch-aware).
 
-    async def create_ontology(self, db_name: str, ontology_data: OntologyBase) -> OntologyResponse:
+        Compatibility:
+        - If `class_id` is provided: returns a single OntologyResponse or None.
+        - If `class_id` is None: returns a list of OntologyResponse.
+        """
+        if not class_id:
+            return await self.ontology_service.list_ontologies(db_name, branch=branch, limit=1000, offset=0)
+        return await self.ontology_service.get_ontology(db_name, class_id, branch=branch)
+
+    async def create_ontology(
+        self, db_name: str, ontology_data: OntologyBase, *, branch: str = "main"
+    ) -> OntologyResponse:
         """온톨로지 생성"""
         # Create ontology using TerminusDB service
         try:
-            result = await self.ontology_service.create_ontology(db_name, ontology_data)
+            result = await self.ontology_service.create_ontology(db_name, ontology_data, branch=branch)
             logger.info(f"Successfully created ontology '{ontology_data.id}' in database '{db_name}'")
             return result
         except Exception as e:
@@ -340,6 +368,8 @@ class AsyncTerminusService:
         self,
         db_name: str,
         ontology_data: OntologyBase,
+        *,
+        branch: str = "main",
         auto_generate_inverse: bool = True,
         validate_relationships: bool = True,
         check_circular_references: bool = True
@@ -373,7 +403,7 @@ class AsyncTerminusService:
                         logger.warning(f"Circular reference detected: '{ontology_data.id}' -> '{rel.target}'")
             
             # Create the ontology using standard method
-            result = await self.ontology_service.create_ontology(db_name, ontology_data)
+            result = await self.ontology_service.create_ontology(db_name, ontology_data, branch=branch)
             logger.info(f"Successfully created ontology '{ontology_data.id}' with advanced features in database '{db_name}'")
             return result
         except Exception as e:
@@ -384,14 +414,16 @@ class AsyncTerminusService:
         self, 
         db_name: str, 
         class_id: str, 
-        ontology_data: OntologyBase
+        ontology_data: OntologyBase,
+        *,
+        branch: str = "main",
     ) -> OntologyResponse:
         """온톨로지 업데이트 - Atomic 버전"""
-        return await self.ontology_service.update_ontology(db_name, class_id, ontology_data)
+        return await self.ontology_service.update_ontology(db_name, class_id, ontology_data, branch=branch)
 
-    async def delete_ontology(self, db_name: str, class_id: str) -> bool:
+    async def delete_ontology(self, db_name: str, class_id: str, *, branch: str = "main") -> bool:
         """온톨로지 삭제"""
-        return await self.ontology_service.delete_ontology(db_name, class_id)
+        return await self.ontology_service.delete_ontology(db_name, class_id, branch=branch)
 
     async def list_ontology_classes(self, db_name: str) -> List[OntologyResponse]:
         """데이터베이스의 모든 온톨로지 목록 조회"""
@@ -523,29 +555,37 @@ class AsyncTerminusService:
         self, 
         db_name: str, 
         class_id: str, 
-        instance_data: Dict[str, Any]
+        instance_data: Dict[str, Any],
+        *,
+        branch: str = "main",
     ) -> Dict[str, Any]:
         """인스턴스 생성"""
-        return await self.document_service.create_instance(db_name, class_id, instance_data)
+        return await self.document_service.create_instance(db_name, class_id, instance_data, branch=branch)
 
     async def update_instance(
         self, 
         db_name: str, 
         class_id: str, 
         instance_id: str,
-        update_data: Dict[str, Any]
+        update_data: Dict[str, Any],
+        *,
+        branch: str = "main",
     ) -> Dict[str, Any]:
         """인스턴스 업데이트"""
-        return await self.document_service.update_instance(db_name, class_id, instance_id, update_data)
+        return await self.document_service.update_instance(
+            db_name, class_id, instance_id, update_data, branch=branch
+        )
 
     async def delete_instance(
         self, 
         db_name: str, 
         class_id: str, 
-        instance_id: str
+        instance_id: str,
+        *,
+        branch: str = "main",
     ) -> bool:
         """인스턴스 삭제"""
-        return await self.document_service.delete_instance(db_name, class_id, instance_id)
+        return await self.document_service.delete_instance(db_name, class_id, instance_id, branch=branch)
 
     # ==========================================
     # Relationship Management - Direct Methods

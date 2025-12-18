@@ -160,6 +160,31 @@ curl -fsS -X POST "http://localhost:8002/api/v1/graph-query/${DB}" \
 
 Expected: the response includes nodes/edges and each node exposes `data_status=FULL|PARTIAL|MISSING` so UI can distinguish “index lag” from “missing entity”.
 
+## 7.1) Branch-based what-if (no data copy)
+
+Branch virtualization lets you run “what if we change X?” simulations without copying data:
+- Graph/schema reads run on a TerminusDB branch (copy-on-write).
+- ES payload resolves with overlay: branch index → fallback to main index (best-effort).
+- Branch deletes are tombstoned to prevent fallback resurrection (tombstoned nodes return `data_status=MISSING` + `index_status.tombstoned=true`).
+- Deletion is terminal per aggregate (recreating the same ID on the same branch is blocked by OCC and returns 409).
+
+```bash
+# 1) Create a branch from main
+curl -fsS -X POST "http://localhost:8002/api/v1/databases/${DB}/branches" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"feature/whatif","from_branch":"main"}'
+
+# 2) Read via federation on the branch
+curl -fsS -X POST "http://localhost:8002/api/v1/graph-query/${DB}?branch=feature/whatif" \
+  -H 'Content-Type: application/json' \
+  -d '{"start_class":"Product","hops":[],"filters":{"product_id":"prod_001"},"include_documents":true}' | jq .
+
+# 3) Update on the branch (OCC): expected_seq comes from nodes[].index_status.event_sequence
+curl -fsS -X PUT "http://localhost:8002/api/v1/database/${DB}/instances/Product/prod_001/update?branch=feature/whatif&expected_seq=<expected_seq>" \
+  -H 'Content-Type: application/json' \
+  -d '{"data":{"name":"Shirt (WhatIf)"}}'
+```
+
 ## 8) Testing (no mocks)
 
 Production gate:

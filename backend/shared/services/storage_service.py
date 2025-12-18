@@ -386,13 +386,59 @@ class StorageService:
             try:
                 # Command 파일 읽기
                 command_data = await self.load_json(bucket, file_key)
-                command_type = command_data.get('command_type')
+
+                # Normalize shape:
+                # - Legacy shape: {command_type, payload, ...}
+                # - Current instance-worker snapshot shape: {command: {...}, payload: <full/merged>, ...}
+                command_record = command_data
+                if isinstance(command_data, dict) and isinstance(command_data.get("command"), dict):
+                    command_record = command_data["command"]
+
+                command_type = (
+                    (command_record.get("command_type") if isinstance(command_record, dict) else None)
+                    or (command_data.get("command_type") if isinstance(command_data, dict) else None)
+                )
+
+                command_id = (
+                    (command_record.get("command_id") if isinstance(command_record, dict) else None)
+                    or (command_data.get("command_id") if isinstance(command_data, dict) else None)
+                )
+                instance_id = (
+                    (command_record.get("instance_id") if isinstance(command_record, dict) else None)
+                    or (command_data.get("instance_id") if isinstance(command_data, dict) else None)
+                )
+                class_id = (
+                    (command_record.get("class_id") if isinstance(command_record, dict) else None)
+                    or (command_data.get("class_id") if isinstance(command_data, dict) else None)
+                )
+                db_name = (
+                    (command_record.get("db_name") if isinstance(command_record, dict) else None)
+                    or (command_data.get("db_name") if isinstance(command_data, dict) else None)
+                )
+                created_by = (
+                    (command_record.get("created_by") if isinstance(command_record, dict) else None)
+                    or (command_data.get("created_by") if isinstance(command_data, dict) else None)
+                )
+                timestamp = (
+                    (command_record.get("created_at") if isinstance(command_record, dict) else None)
+                    or (command_data.get("created_at") if isinstance(command_data, dict) else None)
+                    or (command_data.get("updated_at") if isinstance(command_data, dict) else None)
+                    or (command_data.get("deleted_at") if isinstance(command_data, dict) else None)
+                )
+
+                payload = None
+                if isinstance(command_data, dict):
+                    payload = command_data.get("payload")
+                if payload is None and isinstance(command_record, dict):
+                    payload = command_record.get("payload")
+                if payload is None:
+                    payload = {}
                 
                 # Command 이력 추가
                 command_history.append({
-                    'command_id': command_data.get('command_id'),
+                    'command_id': command_id,
                     'command_type': command_type,
-                    'timestamp': command_data.get('created_at'),
+                    'timestamp': timestamp,
                     'file': file_key
                 })
                 
@@ -400,13 +446,13 @@ class StorageService:
                 if command_type == CommandType.CREATE_INSTANCE.value:
                     # 인스턴스 생성
                     instance_state = {
-                        'instance_id': command_data.get('instance_id'),
-                        'class_id': command_data.get('class_id'),
-                        'db_name': command_data.get('db_name'),
-                        **command_data.get('payload', {}),
+                        'instance_id': instance_id,
+                        'class_id': class_id,
+                        'db_name': db_name,
+                        **(payload if isinstance(payload, dict) else {}),
                         '_metadata': {
-                            'created_at': command_data.get('created_at'),
-                            'created_by': command_data.get('created_by'),
+                            'created_at': timestamp,
+                            'created_by': created_by,
                             'version': 1,
                             'command_history': command_history
                         }
@@ -414,13 +460,13 @@ class StorageService:
                     
                 elif command_type == CommandType.UPDATE_INSTANCE.value and instance_state:
                     # 인스턴스 업데이트
-                    updates = command_data.get('payload', {})
+                    updates = payload if isinstance(payload, dict) else {}
                     # 메타데이터는 보존하면서 데이터 업데이트
                     metadata = instance_state.get('_metadata', {})
                     instance_state.update(updates)
                     instance_state['_metadata'] = metadata
-                    instance_state['_metadata']['updated_at'] = command_data.get('created_at')
-                    instance_state['_metadata']['updated_by'] = command_data.get('created_by')
+                    instance_state['_metadata']['updated_at'] = timestamp
+                    instance_state['_metadata']['updated_by'] = created_by
                     instance_state['_metadata']['version'] = metadata.get('version', 1) + 1
                     
                 elif command_type == CommandType.DELETE_INSTANCE.value:
@@ -428,23 +474,31 @@ class StorageService:
                     # Event Sourcing 원칙: 삭제도 하나의 상태 변화로 기록하여 감사 추적 가능
                     if instance_state:
                         instance_state['_metadata']['deleted'] = True
-                        instance_state['_metadata']['deleted_at'] = command_data.get('created_at')
-                        instance_state['_metadata']['deleted_by'] = command_data.get('created_by')
-                        instance_state['_metadata']['deletion_command_id'] = command_data.get('command_id')
-                        instance_state['_metadata']['deletion_reason'] = command_data.get('payload', {}).get('reason', 'No reason provided')
+                        instance_state['_metadata']['deleted_at'] = timestamp
+                        instance_state['_metadata']['deleted_by'] = created_by
+                        instance_state['_metadata']['deletion_command_id'] = command_id
+                        instance_state['_metadata']['deletion_reason'] = (
+                            payload.get('reason', 'No reason provided')
+                            if isinstance(payload, dict)
+                            else 'No reason provided'
+                        )
                     else:
                         # 생성 없이 삭제 Command만 있는 경우 (데이터 정합성 문제)
                         # 최소한의 삭제 정보라도 기록
                         instance_state = {
-                            'instance_id': command_data.get('instance_id'),
-                            'class_id': command_data.get('class_id'),
-                            'db_name': command_data.get('db_name'),
+                            'instance_id': instance_id,
+                            'class_id': class_id,
+                            'db_name': db_name,
                             '_metadata': {
                                 'deleted': True,
-                                'deleted_at': command_data.get('created_at'),
-                                'deleted_by': command_data.get('created_by'),
-                                'deletion_command_id': command_data.get('command_id'),
-                                'deletion_reason': command_data.get('payload', {}).get('reason', 'No reason provided'),
+                                'deleted_at': timestamp,
+                                'deleted_by': created_by,
+                                'deletion_command_id': command_id,
+                                'deletion_reason': (
+                                    payload.get('reason', 'No reason provided')
+                                    if isinstance(payload, dict)
+                                    else 'No reason provided'
+                                ),
                                 'orphan_deletion': True,  # 생성 Command 없이 삭제된 경우
                                 'version': 1
                             }

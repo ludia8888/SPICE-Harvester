@@ -30,6 +30,7 @@ from shared.config.app_config import AppConfig
 from shared.models.event_envelope import EventEnvelope
 from shared.services.aggregate_sequence_allocator import OptimisticConcurrencyError
 from shared.security.input_sanitizer import validate_db_name
+from shared.utils.ontology_version import build_ontology_version, normalize_ontology_version
 
 # OMS 서비스 import
 from oms.services.async_terminus import AsyncTerminusService
@@ -52,6 +53,7 @@ from shared.models.ontology import (
 from shared.security.input_sanitizer import (
     SecurityViolationError,
     sanitize_input,
+    validate_branch_name,
     validate_class_id,
     validate_db_name,
 )
@@ -64,6 +66,50 @@ from shared.middleware.rate_limiter import rate_limit, RateLimitPresets
 from shared.config.rate_limit_config import RateLimitConfig, EndpointCategory
 
 logger = logging.getLogger(__name__)
+
+
+def _coerce_commit_id(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, dict):
+        for key in ("commit", "commit_id", "identifier", "id", "@id", "head"):
+            candidate = value.get(key)
+            if candidate:
+                return str(candidate).strip() or None
+    return str(value).strip() or None
+
+
+async def _resolve_ontology_version(terminus: AsyncTerminusService, *, db_name: str, branch: str) -> Dict[str, str]:
+    """
+    Best-effort ontology semantic contract stamp (ref + commit).
+
+    Used for command-side traceability (stored in S3/MinIO command events).
+    """
+    commit: Optional[str] = None
+    try:
+        branches = await terminus.version_control_service.list_branches(db_name)
+        for item in branches or []:
+            if isinstance(item, dict) and item.get("name") == branch:
+                commit = _coerce_commit_id(item.get("head"))
+                break
+    except Exception as e:
+        logger.debug(f"Failed to resolve ontology version (db={db_name}, branch={branch}): {e}")
+    return build_ontology_version(branch=branch, commit=commit)
+
+
+def _merge_ontology_stamp(existing: Any, resolved: Dict[str, str]) -> Dict[str, str]:
+    existing_norm = normalize_ontology_version(existing)
+    if not existing_norm:
+        return dict(resolved)
+
+    merged = dict(existing_norm)
+    if "ref" not in merged and resolved.get("ref"):
+        merged["ref"] = resolved["ref"]
+    if "commit" not in merged and resolved.get("commit"):
+        merged["commit"] = resolved["commit"]
+    return merged
 
 
 async def _ensure_database_exists(db_name: str, terminus: AsyncTerminusService):
@@ -87,6 +133,7 @@ router = APIRouter(prefix="/database/{db_name}/ontology", tags=["Ontology Manage
 async def create_ontology(
     ontology_request: OntologyCreateRequest,  # Request body first (no default)
     db_name: str = Path(..., description="Database name"),  # URL path parameter
+    branch: str = Query("main", description="Target branch (default: main)"),
     terminus: AsyncTerminusService = TerminusServiceDep,
     converter: JSONToJSONLDConverter = JSONLDConverterDep,
     label_mapper=LabelMapperDep,
@@ -98,6 +145,7 @@ async def create_ontology(
     
     try:
         enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
+        branch = validate_branch_name(branch)
 
         # 🔥 FIXED: 데이터베이스 존재 확인 (dependency 제거로 인해 수동 처리)
         db_name = validate_db_name(db_name)
@@ -141,14 +189,17 @@ async def create_ontology(
                 description = str(description_data)
 
         if enable_event_sourcing:
+            ontology_version = await _resolve_ontology_version(terminus, db_name=db_name, branch=branch)
             # Event Sourcing: append command-request event to S3/MinIO and return 202.
             command = OntologyCommand(
                 command_type=CommandType.CREATE_ONTOLOGY_CLASS,
-                aggregate_id=f"{db_name}:{ontology_data.get('id')}",
+                aggregate_id=f"{db_name}:{branch}:{ontology_data.get('id')}",
                 db_name=db_name,
+                branch=branch,
                 expected_seq=0,
                 payload={
                     "db_name": db_name,
+                    "branch": branch,
                     "class_id": ontology_data.get("id"),
                     "label": label,
                     "description": description,
@@ -157,7 +208,7 @@ async def create_ontology(
                     "parent_class": ontology_data.get("parent_class"),
                     "abstract": ontology_data.get("abstract", False),
                 },
-                metadata={"source": "OMS", "user": "system"},
+                metadata={"source": "OMS", "user": "system", "ontology": ontology_version},
             )
 
             envelope = EventEnvelope.from_command(
@@ -188,6 +239,7 @@ async def create_ontology(
                             "command_type": command.command_type,
                             "aggregate_id": command.aggregate_id,
                             "db_name": db_name,
+                            "branch": branch,
                             "class_id": ontology_data.get("id"),
                             "created_at": command.created_at.isoformat(),
                             "created_by": command.created_by or "system",
@@ -209,6 +261,7 @@ async def create_ontology(
                         "command_id": str(command.command_id),
                         "ontology_id": ontology_data.get("id"),
                         "database": db_name,
+                        "branch": branch,
                         "status": "processing",
                         "mode": "event_sourcing",
                     },
@@ -461,6 +514,7 @@ async def update_ontology(
     ontology_data: OntologyUpdateRequest,
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
+    branch: str = Query("main", description="Target branch (default: main)"),
     expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
     terminus: AsyncTerminusService = TerminusServiceDep,
     converter: JSONToJSONLDConverter = JSONLDConverterDep,
@@ -470,12 +524,13 @@ async def update_ontology(
     """내부 ID 기반 온톨로지 업데이트"""
     try:
         enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
+        branch = validate_branch_name(branch)
 
         # 요청 데이터 정화
         sanitized_data = sanitize_input(ontology_data.model_dump(mode="json", exclude_unset=True))
 
         # 기존 데이터 조회
-        existing = await terminus.get_ontology(db_name, class_id)
+        existing = await terminus.get_ontology(db_name, class_id, branch=branch)
 
         if not existing:
             raise HTTPException(
@@ -484,18 +539,21 @@ async def update_ontology(
             )
 
         if enable_event_sourcing:
+            ontology_version = await _resolve_ontology_version(terminus, db_name=db_name, branch=branch)
             # Event Sourcing: publish UPDATE command (actual write is async in worker)
             command = OntologyCommand(
                 command_type=CommandType.UPDATE_ONTOLOGY_CLASS,
-                aggregate_id=f"{db_name}:{class_id}",
+                aggregate_id=f"{db_name}:{branch}:{class_id}",
                 db_name=db_name,
+                branch=branch,
                 expected_seq=expected_seq,
                 payload={
                     "db_name": db_name,
+                    "branch": branch,
                     "class_id": class_id,
                     "updates": sanitized_data,
                 },
-                metadata={"source": "OMS", "user": "system"},
+                metadata={"source": "OMS", "user": "system", "ontology": ontology_version},
             )
 
             envelope = EventEnvelope.from_command(
@@ -526,6 +584,7 @@ async def update_ontology(
                             "command_type": command.command_type,
                             "aggregate_id": command.aggregate_id,
                             "db_name": db_name,
+                            "branch": branch,
                             "class_id": class_id,
                             "created_at": command.created_at.isoformat(),
                             "created_by": command.created_by or "system",
@@ -542,6 +601,7 @@ async def update_ontology(
                         "command_id": str(command.command_id),
                         "ontology_id": class_id,
                         "database": db_name,
+                        "branch": branch,
                         "status": "processing",
                         "mode": "event_sourcing",
                     },
@@ -574,6 +634,7 @@ async def update_ontology(
 async def delete_ontology(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
+    branch: str = Query("main", description="Target branch (default: main)"),
     expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
     terminus: AsyncTerminusService = TerminusServiceDep,
     event_store=EventStoreDep,
@@ -582,23 +643,30 @@ async def delete_ontology(
     """내부 ID 기반 온톨로지 삭제"""
     try:
         enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
+        branch = validate_branch_name(branch)
 
-        # Ensure it exists (command-side validation)
-        existing = await terminus.get_ontology(db_name, class_id)
-        if not existing:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"온톨로지 '{class_id}'를 찾을 수 없습니다",
-            )
+        # Best-effort command-side validation:
+        # - Safe on main branch.
+        # - For non-main branches, the authoritative existence check is in the worker (branch-aware),
+        #   so we avoid false negatives due to stale caches or missing branch support.
+        if branch == "main":
+            existing = await terminus.get_ontology(db_name, class_id, branch=branch)
+            if not existing:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"온톨로지 '{class_id}'를 찾을 수 없습니다",
+                )
 
         if enable_event_sourcing:
+            ontology_version = await _resolve_ontology_version(terminus, db_name=db_name, branch=branch)
             command = OntologyCommand(
                 command_type=CommandType.DELETE_ONTOLOGY_CLASS,
-                aggregate_id=f"{db_name}:{class_id}",
+                aggregate_id=f"{db_name}:{branch}:{class_id}",
                 db_name=db_name,
+                branch=branch,
                 expected_seq=expected_seq,
-                payload={"db_name": db_name, "class_id": class_id},
-                metadata={"source": "OMS", "user": "system"},
+                payload={"db_name": db_name, "branch": branch, "class_id": class_id},
+                metadata={"source": "OMS", "user": "system", "ontology": ontology_version},
             )
 
             envelope = EventEnvelope.from_command(
@@ -629,6 +697,7 @@ async def delete_ontology(
                             "command_type": command.command_type,
                             "aggregate_id": command.aggregate_id,
                             "db_name": db_name,
+                            "branch": branch,
                             "class_id": class_id,
                             "created_at": command.created_at.isoformat(),
                             "created_by": command.created_by or "system",
@@ -645,6 +714,7 @@ async def delete_ontology(
                         "command_id": str(command.command_id),
                         "ontology_id": class_id,
                         "database": db_name,
+                        "branch": branch,
                         "status": "processing",
                         "mode": "event_sourcing",
                     },
@@ -652,7 +722,7 @@ async def delete_ontology(
             )
 
         # Direct delete mode
-        success = await terminus.delete_ontology(db_name, class_id)
+        success = await terminus.delete_ontology(db_name, class_id, branch=branch)
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

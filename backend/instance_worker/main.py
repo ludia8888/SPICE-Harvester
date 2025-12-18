@@ -36,11 +36,12 @@ from shared.services.command_status_service import (
 )
 from shared.config.settings import ApplicationSettings
 from shared.models.event_envelope import EventEnvelope
-from shared.security.input_sanitizer import validate_instance_id
+from shared.security.input_sanitizer import validate_branch_name, validate_instance_id
 from shared.services.processed_event_registry import ClaimDecision, ProcessedEventRegistry
 from shared.services.lineage_store import LineageStore
 from shared.services.audit_log_store import AuditLogStore
 from shared.utils.chaos import maybe_crash
+from shared.utils.ontology_version import build_ontology_version, normalize_ontology_version
 
 # ULTRA CRITICAL: Import TerminusDB service
 from oms.services.async_terminus import AsyncTerminusService
@@ -240,16 +241,19 @@ class StrictPalantirInstanceWorker:
         logger.warning(f"No primary key found for {class_id}, generated: {generated_id}")
         return generated_id
     
-    async def extract_relationships(self, db_name: str, class_id: str, payload: Dict[str, Any]) -> Dict[str, str]:
+    async def extract_relationships(
+        self, db_name: str, class_id: str, payload: Dict[str, Any], *, branch: str = "main"
+    ) -> Dict[str, str]:
         """
         Extract ONLY relationship fields from payload
         Returns: {field_name: target_id} for @id references only
         """
         relationships = {}
-        
+
         try:
+            branch = validate_branch_name(branch)
             # Get ontology to identify relationship fields
-            ontology = await self.terminus_service.get_ontology(db_name, class_id)
+            ontology = await self.terminus_service.get_ontology(db_name, class_id, branch=branch)
             
             if ontology:
                 # OntologyResponse (pydantic) shape
@@ -309,7 +313,9 @@ class StrictPalantirInstanceWorker:
                         
         return relationships
 
-    async def extract_required_properties(self, db_name: str, class_id: str) -> List[str]:
+    async def extract_required_properties(
+        self, db_name: str, class_id: str, *, branch: str = "main"
+    ) -> List[str]:
         """
         Extract required property names from the class schema.
 
@@ -317,18 +323,21 @@ class StrictPalantirInstanceWorker:
         enforces schema-required fields. Include required scalar fields so inserts
         do not fail schema checks.
         """
+        branch = validate_branch_name(branch)
         try:
-            ontology = await self.terminus_service.get_ontology(db_name, class_id)
+            ontology = await self.terminus_service.get_ontology(db_name, class_id, branch=branch)
         except Exception as e:
             # Without schema we cannot safely satisfy required-field constraints.
             # Treat as retryable by failing fast (outer loop will apply backoff/retry).
-            raise RuntimeError(f"Ontology fetch failed for required-field extraction ({db_name}:{class_id}): {e}") from e
+            raise RuntimeError(
+                f"Ontology fetch failed for required-field extraction ({db_name}:{branch}:{class_id}): {e}"
+            ) from e
 
         if not ontology:
             # Covers: temporary Terminus unavailability, schema not yet applied, or missing class.
             # Failing fast prevents us from writing a schema-invalid document that then becomes a
             # non-retryable 400 and wedges the command permanently.
-            raise RuntimeError(f"Ontology unavailable for required-field extraction ({db_name}:{class_id})")
+            raise RuntimeError(f"Ontology unavailable for required-field extraction ({db_name}:{branch}:{class_id})")
 
         required: List[str] = []
 
@@ -355,12 +364,50 @@ class StrictPalantirInstanceWorker:
                     required.append(str(prop["name"]))
 
         return required
+
+    @staticmethod
+    def _coerce_commit_id(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value.strip() or None
+        if isinstance(value, dict):
+            for key in ("commit", "commit_id", "identifier", "id", "@id", "head"):
+                candidate = value.get(key)
+                if candidate:
+                    return str(candidate).strip() or None
+        return str(value).strip() or None
+
+    async def _resolve_ontology_version(self, db_name: str, branch: str) -> Dict[str, str]:
+        """
+        Resolve the current ontology semantic contract version.
+
+        We stamp ref/commit into:
+        - command metadata (stored in S3 instance command logs)
+        - domain event metadata (so projections can inherit it)
+        - lineage/audit metadata (so ops can trace by semantic version)
+        """
+        commit: Optional[str] = None
+        if self.terminus_service:
+            try:
+                branches = await self.terminus_service.version_control_service.list_branches(db_name)
+                for item in branches or []:
+                    if not isinstance(item, dict):
+                        continue
+                    if item.get("name") == branch:
+                        commit = self._coerce_commit_id(item.get("head"))
+                        break
+            except Exception as e:
+                # Best-effort: stamping should not block S3 writes, but Terminus writes will retry anyway.
+                logger.debug(f"Failed to resolve ontology version (db={db_name}, branch={branch}): {e}")
+        return build_ontology_version(branch=branch, commit=commit)
         
     async def process_create_instance(self, command: Dict[str, Any]):
         """Process CREATE_INSTANCE command - STRICT Palantir style"""
         db_name = command.get('db_name')
         class_id = command.get('class_id')
         command_id = command.get('command_id')
+        branch = validate_branch_name(command.get("branch") or "main")
         payload = command.get('payload', {}) or {}
 
         # Set command status early (202 already returned to user).
@@ -382,7 +429,7 @@ class StrictPalantirInstanceWorker:
                         f"payload[{expected_key}]={payload.get(expected_key)}"
                     )
 
-                expected_aggregate_id = f"{db_name}:{class_id}:{instance_id}"
+                expected_aggregate_id = f"{db_name}:{branch}:{class_id}:{instance_id}"
                 if command.get("aggregate_id") and command.get("aggregate_id") != expected_aggregate_id:
                     raise ValueError(
                         f"aggregate_id mismatch: command.aggregate_id={command.get('aggregate_id')} "
@@ -397,15 +444,40 @@ class StrictPalantirInstanceWorker:
             command["instance_id"] = instance_id
             primary_key_value = instance_id
 
+            if not db_name:
+                raise ValueError("db_name is required")
+            if not class_id:
+                raise ValueError("class_id is required")
+
+            # Stamp semantic contract version (ontology ref/commit) for reproducibility.
+            ontology_version = await self._resolve_ontology_version(db_name, branch)
+            command_meta = command.get("metadata")
+            if not isinstance(command_meta, dict):
+                command_meta = {}
+                command["metadata"] = command_meta
+
+            existing_ontology = normalize_ontology_version(command_meta.get("ontology"))
+            if existing_ontology:
+                merged = dict(existing_ontology)
+                if "ref" not in merged and ontology_version.get("ref"):
+                    merged["ref"] = ontology_version["ref"]
+                if "commit" not in merged and ontology_version.get("commit"):
+                    merged["commit"] = ontology_version["commit"]
+                command_meta["ontology"] = merged
+                ontology_version = merged
+            else:
+                command_meta["ontology"] = dict(ontology_version)
+
             logger.info(f"🔷 STRICT Palantir: Creating {class_id}/{instance_id}")
 
             # 1. Save FULL data to S3 (Event Store)
-            s3_path = f"{db_name}/{class_id}/{instance_id}/{command_id}.json"
+            s3_path = f"{db_name}/{branch}/{class_id}/{instance_id}/{command_id}.json"
             s3_data = {
                 'command': command,
                 'payload': payload,
                 'instance_id': instance_id,
                 'class_id': class_id,
+                'branch': branch,
                 'created_at': datetime.now(timezone.utc).isoformat()
             }
             
@@ -441,6 +513,7 @@ class StrictPalantirInstanceWorker:
                             "db_name": db_name,
                             "etag": etag,
                             "version_id": version_id,
+                            "ontology": ontology_version,
                         },
                     )
                 except Exception as e:
@@ -466,13 +539,14 @@ class StrictPalantirInstanceWorker:
                             "key": s3_path,
                             "etag": etag,
                             "version_id": version_id,
+                            "ontology": ontology_version,
                         },
                     )
                 except Exception as e:
                     logger.debug(f"Audit record failed (non-fatal): {e}")
             
             # 2. Extract ONLY relationships for graph
-            relationships = await self.extract_relationships(db_name, class_id, payload)
+            relationships = await self.extract_relationships(db_name, class_id, payload, branch=branch)
             
             # 3. Create PURE lightweight node for TerminusDB (NO system fields!)
             graph_node = {
@@ -489,7 +563,7 @@ class StrictPalantirInstanceWorker:
                 graph_node[rel_field] = rel_target
 
             # Include required scalar properties to satisfy TerminusDB schema checks.
-            for field in await self.extract_required_properties(db_name, class_id):
+            for field in await self.extract_required_properties(db_name, class_id, branch=branch):
                 if field in graph_node:
                     continue
                 if field in payload:
@@ -512,6 +586,7 @@ class StrictPalantirInstanceWorker:
                     db_name,
                     class_id,
                     graph_node,  # Contains only @id, @type, relationships
+                    branch=branch,
                 )
                 maybe_crash("instance_worker:after_terminus", logger=logger)
                 logger.info("  ✅ Stored lightweight node in TerminusDB")
@@ -521,12 +596,18 @@ class StrictPalantirInstanceWorker:
                     try:
                         await self.lineage_store.record_link(
                             from_node_id=self.lineage_store.node_event(str(command_id)),
-                            to_node_id=self.lineage_store.node_artifact("terminus", db_name, terminus_id),
+                            to_node_id=self.lineage_store.node_artifact("terminus", db_name, branch, terminus_id),
                             edge_type="event_wrote_terminus_document",
                             occurred_at=datetime.now(timezone.utc),
                             db_name=db_name,
-                            to_label=f"terminus:{db_name}:{terminus_id}",
-                            edge_metadata={"db_name": db_name, "terminus_id": terminus_id, "class_id": class_id},
+                            to_label=f"terminus:{db_name}:{branch}:{terminus_id}",
+                            edge_metadata={
+                                "db_name": db_name,
+                                "branch": branch,
+                                "terminus_id": terminus_id,
+                                "class_id": class_id,
+                                "ontology": ontology_version,
+                            },
                         )
                     except Exception as e:
                         logger.debug(f"Lineage record failed (non-fatal): {e}")
@@ -539,10 +620,16 @@ class StrictPalantirInstanceWorker:
                             action="INSTANCE_TERMINUS_WRITE",
                             status="success",
                             resource_type="terminus_document",
-                            resource_id=f"terminus:{db_name}:{terminus_id}",
+                            resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
                             event_id=str(command_id),
                             command_id=str(command_id),
-                            metadata={"class_id": class_id, "instance_id": instance_id, "terminus_id": terminus_id},
+                            metadata={
+                                "class_id": class_id,
+                                "branch": branch,
+                                "instance_id": instance_id,
+                                "terminus_id": terminus_id,
+                                "ontology": ontology_version,
+                            },
                         )
                     except Exception as e:
                         logger.debug(f"Audit record failed (non-fatal): {e}")
@@ -550,7 +637,7 @@ class StrictPalantirInstanceWorker:
                 existing = None
                 try:
                     existing = await self.terminus_service.document_service.get_document(
-                        db_name, terminus_id, graph_type="instance"
+                        db_name, terminus_id, graph_type="instance", branch=branch
                     )
                 except Exception:
                     existing = None
@@ -569,10 +656,16 @@ class StrictPalantirInstanceWorker:
                                 action="INSTANCE_TERMINUS_WRITE",
                                 status="failure",
                                 resource_type="terminus_document",
-                                resource_id=f"terminus:{db_name}:{terminus_id}",
+                                resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
                                 event_id=str(command_id),
                                 command_id=str(command_id),
-                                metadata={"class_id": class_id, "instance_id": instance_id, "terminus_id": terminus_id},
+                                metadata={
+                                    "class_id": class_id,
+                                    "branch": branch,
+                                    "instance_id": instance_id,
+                                    "terminus_id": terminus_id,
+                                    "ontology": ontology_version,
+                                },
                                 error=str(e),
                             )
                         except Exception:
@@ -585,11 +678,12 @@ class StrictPalantirInstanceWorker:
             # NOTE: Elasticsearch indexing is handled by projection_worker (single writer) for schema consistency.
             event_payload = {
                 "db_name": db_name,
+                "branch": branch,
                 "class_id": class_id,
                 "instance_id": instance_id,
                 **payload,  # Include full payload in event
             }
-            aggregate_id = f"{db_name}:{class_id}:{instance_id}"
+            aggregate_id = f"{db_name}:{branch}:{class_id}:{instance_id}"
 
             domain_event_id = (
                 str(uuid5(NAMESPACE_URL, f"spice:{command_id}:INSTANCE_CREATED:{aggregate_id}"))
@@ -610,6 +704,7 @@ class StrictPalantirInstanceWorker:
                     "kafka_topic": AppConfig.INSTANCE_EVENTS_TOPIC,
                     "service": "instance_worker",
                     "command_id": command_id,
+                    "ontology": ontology_version,
                     "run_id": os.getenv("PIPELINE_RUN_ID") or os.getenv("RUN_ID") or os.getenv("EXECUTION_ID"),
                     "code_sha": os.getenv("CODE_SHA") or os.getenv("GIT_SHA") or os.getenv("COMMIT_SHA"),
                 },
@@ -649,6 +744,7 @@ class StrictPalantirInstanceWorker:
         db_name = command.get("db_name")
         class_id = command.get("class_id")
         command_id = command.get("command_id")
+        branch = validate_branch_name(command.get("branch") or "main")
         payload = command.get("payload", {}) or {}
 
         # Set command status early (202 already returned to user).
@@ -659,6 +755,25 @@ class StrictPalantirInstanceWorker:
         if not class_id:
             raise ValueError("class_id is required")
 
+        # Stamp semantic contract version (ontology ref/commit) for reproducibility.
+        ontology_version = await self._resolve_ontology_version(db_name, branch)
+        command_meta = command.get("metadata")
+        if not isinstance(command_meta, dict):
+            command_meta = {}
+            command["metadata"] = command_meta
+
+        existing_ontology = normalize_ontology_version(command_meta.get("ontology"))
+        if existing_ontology:
+            merged = dict(existing_ontology)
+            if "ref" not in merged and ontology_version.get("ref"):
+                merged["ref"] = ontology_version["ref"]
+            if "commit" not in merged and ontology_version.get("commit"):
+                merged["commit"] = ontology_version["commit"]
+            command_meta["ontology"] = merged
+            ontology_version = merged
+        else:
+            command_meta["ontology"] = dict(ontology_version)
+
         instance_id = command.get("instance_id")
         if not instance_id:
             raise ValueError("instance_id is required for UPDATE_INSTANCE")
@@ -668,7 +783,7 @@ class StrictPalantirInstanceWorker:
         if not isinstance(payload, dict):
             raise ValueError("UPDATE_INSTANCE payload must be an object")
 
-        expected_aggregate_id = f"{db_name}:{class_id}:{instance_id}"
+        expected_aggregate_id = f"{db_name}:{branch}:{class_id}:{instance_id}"
         if command.get("aggregate_id") and command.get("aggregate_id") != expected_aggregate_id:
             raise ValueError(
                 f"aggregate_id mismatch: command.aggregate_id={command.get('aggregate_id')} "
@@ -696,6 +811,7 @@ class StrictPalantirInstanceWorker:
         # will detect a mismatch and raise.
         previous_payload: Dict[str, Any] = {}
         last_domain_was_delete = False
+        has_existing_state = False
         event_store_error: Optional[Exception] = None
 
         # Version boundary: prefer expected_seq (OCC contract). Fallback to command sequence_number-1.
@@ -731,27 +847,91 @@ class StrictPalantirInstanceWorker:
                         previous_payload = {
                             k: v
                             for k, v in ev.data.items()
-                            if k not in {"db_name", "class_id", "instance_id"}
+                            if k not in {"db_name", "branch", "class_id", "instance_id"}
                         }
                         last_domain_was_delete = False
+                        has_existing_state = True
                     elif ev.event_type == "INSTANCE_DELETED":
                         previous_payload = {}
                         last_domain_was_delete = True
+                        has_existing_state = True
             except Exception as e:
                 event_store_error = e
                 logger.warning(
                     f"Failed to rebuild previous state from Event Store (aggregate_id={aggregate_id}): {e}"
                 )
 
+        # Branch virtualization: for the *first* write on a non-base branch, the branch stream has no prior domain
+        # state. For patch updates, we must rebuild the baseline payload from the base branch stream (typically `main`)
+        # at the caller-provided expected_seq boundary.
+        base_branch = (os.getenv("BRANCH_VIRTUALIZATION_BASE_BRANCH") or "main").strip() or "main"
+        try:
+            base_branch = validate_branch_name(base_branch)
+        except Exception:
+            base_branch = "main"
+
+        if (
+            (not has_existing_state)
+            and branch != base_branch
+            and self.enable_event_sourcing
+            and self.event_store
+        ):
+            if to_version is None:
+                raise ValueError("expected_seq is required for branch patch updates")
+
+            base_aggregate_id = f"{db_name}:{base_branch}:{class_id}:{instance_id}"
+            try:
+                base_events = await self.event_store.get_events(
+                    aggregate_type="Instance",
+                    aggregate_id=base_aggregate_id,
+                    to_version=to_version,
+                )
+            except Exception as e:
+                raise RuntimeError(
+                    f"Unable to rebuild baseline payload from base branch stream (base_aggregate_id={base_aggregate_id})"
+                ) from e
+
+            base_payload: Dict[str, Any] = {}
+            base_deleted = False
+            base_has_state = False
+            for ev in base_events:
+                kind = ev.metadata.get("kind") if isinstance(ev.metadata, dict) else None
+                if kind != "domain":
+                    continue
+                if ev.event_type in {"INSTANCE_CREATED", "INSTANCE_UPDATED"} and isinstance(ev.data, dict):
+                    base_payload = {
+                        k: v
+                        for k, v in ev.data.items()
+                        if k not in {"db_name", "branch", "class_id", "instance_id"}
+                    }
+                    base_deleted = False
+                    base_has_state = True
+                elif ev.event_type == "INSTANCE_DELETED":
+                    base_payload = {}
+                    base_deleted = True
+                    base_has_state = True
+
+            if base_deleted:
+                raise ValueError(f"Cannot update deleted instance (base_aggregate_id={base_aggregate_id})")
+            if base_has_state:
+                previous_payload = dict(base_payload)
+                has_existing_state = True
+
         if last_domain_was_delete:
             raise ValueError(f"Cannot update deleted instance (aggregate_id={aggregate_id})")
 
         # Fallback (best-effort): use latest S3 snapshot if Event Store lookup failed or found no domain state.
-        if (not previous_payload) and self.s3_client:
+        if (not has_existing_state) and self.s3_client:
             try:
-                prefix = f"{db_name}/{class_id}/{instance_id}/"
-                resp = self.s3_client.list_objects_v2(Bucket=self.instance_bucket, Prefix=prefix)
-                objs = list((resp or {}).get("Contents") or [])
+                prefixes = [f"{db_name}/{branch}/{class_id}/{instance_id}/"]
+                # Backward compatibility: older snapshots stored without branch segment for main.
+                if branch == "main":
+                    prefixes.append(f"{db_name}/{class_id}/{instance_id}/")
+
+                objs = []
+                for prefix in prefixes:
+                    resp = self.s3_client.list_objects_v2(Bucket=self.instance_bucket, Prefix=prefix)
+                    objs.extend(list((resp or {}).get("Contents") or []))
                 objs.sort(key=lambda o: o.get("LastModified") or datetime.fromtimestamp(0, tz=timezone.utc))
                 snapshot_key = (objs[-1].get("Key") if objs else None)
                 if snapshot_key:
@@ -766,6 +946,7 @@ class StrictPalantirInstanceWorker:
                         snap_payload = doc.get("payload")
                         if isinstance(snap_payload, dict):
                             previous_payload = dict(snap_payload)
+                            has_existing_state = True
             except Exception as e:
                 # Only fail hard if we also couldn't consult the Event Store; otherwise snapshot fallback is optional.
                 if event_store_error is not None:
@@ -774,15 +955,19 @@ class StrictPalantirInstanceWorker:
                     ) from e
                 logger.debug(f"Snapshot fallback failed (non-fatal): {e}")
 
+        if not has_existing_state:
+            raise ValueError(f"Cannot update missing instance (aggregate_id={aggregate_id})")
+
         merged_payload = {**previous_payload, **payload}
 
         # Save snapshot to S3 (optional durable blob store).
-        s3_path = f"{db_name}/{class_id}/{instance_id}/{command_id}.json"
+        s3_path = f"{db_name}/{branch}/{class_id}/{instance_id}/{command_id}.json"
         s3_data = {
             "command": command,
             "payload": merged_payload,
             "instance_id": instance_id,
             "class_id": class_id,
+            "branch": branch,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         try:
@@ -795,6 +980,7 @@ class StrictPalantirInstanceWorker:
                     "command_id": str(command_id) if command_id else "",
                     "instance_id": instance_id,
                     "class_id": class_id,
+                    "branch": branch,
                 },
             )
             if command_id and self.lineage_store:
@@ -815,6 +1001,7 @@ class StrictPalantirInstanceWorker:
                             "db_name": db_name,
                             "etag": etag,
                             "version_id": version_id,
+                            "ontology": ontology_version,
                         },
                     )
                 except Exception as e:
@@ -839,6 +1026,7 @@ class StrictPalantirInstanceWorker:
                             "key": s3_path,
                             "etag": etag,
                             "version_id": version_id,
+                            "ontology": ontology_version,
                         },
                     )
                 except Exception as e:
@@ -857,14 +1045,20 @@ class StrictPalantirInstanceWorker:
                         resource_id=f"s3://{self.instance_bucket}/{s3_path}",
                         event_id=str(command_id),
                         command_id=str(command_id),
-                        metadata={"class_id": class_id, "instance_id": instance_id, "bucket": self.instance_bucket, "key": s3_path},
+                        metadata={
+                            "class_id": class_id,
+                            "instance_id": instance_id,
+                            "bucket": self.instance_bucket,
+                            "key": s3_path,
+                            "ontology": ontology_version,
+                        },
                         error=str(e),
                     )
                 except Exception:
                     pass
 
         # Update lightweight node (relationships + required scalar fields)
-        relationships = await self.extract_relationships(db_name, class_id, merged_payload)
+        relationships = await self.extract_relationships(db_name, class_id, merged_payload, branch=branch)
         terminus_id = f"{class_id}/{instance_id}"
         graph_node: Dict[str, Any] = {
             "@id": terminus_id,
@@ -873,7 +1067,7 @@ class StrictPalantirInstanceWorker:
         }
         for rel_field, rel_target in relationships.items():
             graph_node[rel_field] = rel_target
-        for field in await self.extract_required_properties(db_name, class_id):
+        for field in await self.extract_required_properties(db_name, class_id, branch=branch):
             if field in graph_node:
                 continue
             if field in merged_payload:
@@ -881,19 +1075,25 @@ class StrictPalantirInstanceWorker:
 
         try:
             maybe_crash("instance_worker:before_terminus", logger=logger)
-            await self.terminus_service.update_instance(db_name, class_id, terminus_id, graph_node)
+            await self.terminus_service.update_instance(db_name, class_id, terminus_id, graph_node, branch=branch)
             maybe_crash("instance_worker:after_terminus", logger=logger)
             logger.info("  ✅ Updated lightweight node in TerminusDB")
             if command_id and self.lineage_store:
                 try:
                     await self.lineage_store.record_link(
                         from_node_id=self.lineage_store.node_event(str(command_id)),
-                        to_node_id=self.lineage_store.node_artifact("terminus", db_name, terminus_id),
+                        to_node_id=self.lineage_store.node_artifact("terminus", db_name, branch, terminus_id),
                         edge_type="event_wrote_terminus_document",
                         occurred_at=datetime.now(timezone.utc),
                         db_name=db_name,
-                        to_label=f"terminus:{db_name}:{terminus_id}",
-                        edge_metadata={"db_name": db_name, "terminus_id": terminus_id, "class_id": class_id},
+                        to_label=f"terminus:{db_name}:{branch}:{terminus_id}",
+                        edge_metadata={
+                            "db_name": db_name,
+                            "branch": branch,
+                            "terminus_id": terminus_id,
+                            "class_id": class_id,
+                            "ontology": ontology_version,
+                        },
                     )
                 except Exception as e:
                     logger.debug(f"Lineage record failed (non-fatal): {e}")
@@ -905,10 +1105,16 @@ class StrictPalantirInstanceWorker:
                         action="INSTANCE_TERMINUS_WRITE",
                         status="success",
                         resource_type="terminus_document",
-                        resource_id=f"terminus:{db_name}:{terminus_id}",
+                        resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
                         event_id=str(command_id),
                         command_id=str(command_id),
-                        metadata={"class_id": class_id, "instance_id": instance_id, "terminus_id": terminus_id},
+                        metadata={
+                            "class_id": class_id,
+                            "branch": branch,
+                            "instance_id": instance_id,
+                            "terminus_id": terminus_id,
+                            "ontology": ontology_version,
+                        },
                     )
                 except Exception as e:
                     logger.debug(f"Audit record failed (non-fatal): {e}")
@@ -922,10 +1128,16 @@ class StrictPalantirInstanceWorker:
                         action="INSTANCE_TERMINUS_WRITE",
                         status="failure",
                         resource_type="terminus_document",
-                        resource_id=f"terminus:{db_name}:{terminus_id}",
+                        resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
                         event_id=str(command_id),
                         command_id=str(command_id),
-                        metadata={"class_id": class_id, "instance_id": instance_id, "terminus_id": terminus_id},
+                        metadata={
+                            "class_id": class_id,
+                            "branch": branch,
+                            "instance_id": instance_id,
+                            "terminus_id": terminus_id,
+                            "ontology": ontology_version,
+                        },
                         error=str(e),
                     )
                 except Exception:
@@ -950,6 +1162,7 @@ class StrictPalantirInstanceWorker:
             actor=command.get("created_by") or "system",
             data={
                 "db_name": db_name,
+                "branch": branch,
                 "class_id": class_id,
                 "instance_id": instance_id,
                 **merged_payload,
@@ -959,6 +1172,7 @@ class StrictPalantirInstanceWorker:
                 "kafka_topic": AppConfig.INSTANCE_EVENTS_TOPIC,
                 "service": "instance_worker",
                 "command_id": command_id,
+                "ontology": ontology_version,
                 "run_id": os.getenv("PIPELINE_RUN_ID") or os.getenv("RUN_ID") or os.getenv("EXECUTION_ID"),
                 "code_sha": os.getenv("CODE_SHA") or os.getenv("GIT_SHA") or os.getenv("COMMIT_SHA"),
             },
@@ -987,6 +1201,7 @@ class StrictPalantirInstanceWorker:
         db_name = command.get("db_name")
         class_id = command.get("class_id")
         command_id = command.get("command_id")
+        branch = validate_branch_name(command.get("branch") or "main")
 
         await self.set_command_status(command_id, "processing")
 
@@ -995,13 +1210,32 @@ class StrictPalantirInstanceWorker:
         if not class_id:
             raise ValueError("class_id is required")
 
+        # Stamp semantic contract version (ontology ref/commit) for reproducibility.
+        ontology_version = await self._resolve_ontology_version(db_name, branch)
+        command_meta = command.get("metadata")
+        if not isinstance(command_meta, dict):
+            command_meta = {}
+            command["metadata"] = command_meta
+
+        existing_ontology = normalize_ontology_version(command_meta.get("ontology"))
+        if existing_ontology:
+            merged = dict(existing_ontology)
+            if "ref" not in merged and ontology_version.get("ref"):
+                merged["ref"] = ontology_version["ref"]
+            if "commit" not in merged and ontology_version.get("commit"):
+                merged["commit"] = ontology_version["commit"]
+            command_meta["ontology"] = merged
+            ontology_version = merged
+        else:
+            command_meta["ontology"] = dict(ontology_version)
+
         instance_id = command.get("instance_id")
         if not instance_id:
             raise ValueError("instance_id is required for DELETE_INSTANCE")
         instance_id = str(instance_id)
         validate_instance_id(instance_id)
 
-        expected_aggregate_id = f"{db_name}:{class_id}:{instance_id}"
+        expected_aggregate_id = f"{db_name}:{branch}:{class_id}:{instance_id}"
         if command.get("aggregate_id") and command.get("aggregate_id") != expected_aggregate_id:
             raise ValueError(
                 f"aggregate_id mismatch: command.aggregate_id={command.get('aggregate_id')} "
@@ -1014,7 +1248,7 @@ class StrictPalantirInstanceWorker:
         terminus_error: Optional[str] = None
         try:
             maybe_crash("instance_worker:before_terminus", logger=logger)
-            await self.terminus_service.delete_instance(db_name, class_id, terminus_id)
+            await self.terminus_service.delete_instance(db_name, class_id, terminus_id, branch=branch)
             maybe_crash("instance_worker:after_terminus", logger=logger)
             logger.info("  ✅ Deleted lightweight node from TerminusDB")
             terminus_deleted = True
@@ -1036,12 +1270,18 @@ class StrictPalantirInstanceWorker:
             try:
                 await self.lineage_store.record_link(
                     from_node_id=self.lineage_store.node_event(str(command_id)),
-                    to_node_id=self.lineage_store.node_artifact("terminus", db_name, terminus_id),
+                    to_node_id=self.lineage_store.node_artifact("terminus", db_name, branch, terminus_id),
                     edge_type="event_deleted_terminus_document",
                     occurred_at=datetime.now(timezone.utc),
                     db_name=db_name,
-                    to_label=f"terminus:{db_name}:{terminus_id}",
-                    edge_metadata={"db_name": db_name, "terminus_id": terminus_id, "class_id": class_id},
+                    to_label=f"terminus:{db_name}:{branch}:{terminus_id}",
+                    edge_metadata={
+                        "db_name": db_name,
+                        "branch": branch,
+                        "terminus_id": terminus_id,
+                        "class_id": class_id,
+                        "ontology": ontology_version,
+                    },
                 )
             except Exception as e:
                 logger.debug(f"Lineage record failed (non-fatal): {e}")
@@ -1054,14 +1294,16 @@ class StrictPalantirInstanceWorker:
                     action="INSTANCE_TERMINUS_DELETE",
                     status="success" if terminus_deleted else "failure",
                     resource_type="terminus_document",
-                    resource_id=f"terminus:{db_name}:{terminus_id}",
+                    resource_id=f"terminus:{db_name}:{branch}:{terminus_id}",
                     event_id=str(command_id),
                     command_id=str(command_id),
                     metadata={
                         "class_id": class_id,
+                        "branch": branch,
                         "instance_id": instance_id,
                         "terminus_id": terminus_id,
                         "already_missing": terminus_already_missing,
+                        "ontology": ontology_version,
                     },
                     error=None if terminus_deleted else (terminus_error or "delete_failed"),
                 )
@@ -1071,7 +1313,7 @@ class StrictPalantirInstanceWorker:
         # Elasticsearch deletion is handled by projection_worker (single writer) for schema consistency.
 
         # Tombstone snapshot (best-effort)
-        s3_path = f"{db_name}/{class_id}/{instance_id}/{command_id}.json"
+        s3_path = f"{db_name}/{branch}/{class_id}/{instance_id}/{command_id}.json"
         s3_written = False
         tombstone_resp: Optional[Dict[str, Any]] = None
         try:
@@ -1083,6 +1325,7 @@ class StrictPalantirInstanceWorker:
                         "command": command,
                         "instance_id": instance_id,
                         "class_id": class_id,
+                        "branch": branch,
                         "deleted_at": datetime.now(timezone.utc).isoformat(),
                     },
                     ensure_ascii=False,
@@ -1093,6 +1336,7 @@ class StrictPalantirInstanceWorker:
                     "command_id": str(command_id) if command_id else "",
                     "instance_id": instance_id,
                     "class_id": class_id,
+                    "branch": branch,
                     "tombstone": "true",
                 },
             )
@@ -1110,7 +1354,13 @@ class StrictPalantirInstanceWorker:
                         resource_id=f"s3://{self.instance_bucket}/{s3_path}",
                         event_id=str(command_id),
                         command_id=str(command_id),
-                        metadata={"class_id": class_id, "instance_id": instance_id, "bucket": self.instance_bucket, "key": s3_path},
+                        metadata={
+                            "class_id": class_id,
+                            "instance_id": instance_id,
+                            "bucket": self.instance_bucket,
+                            "key": s3_path,
+                            "ontology": ontology_version,
+                        },
                         error=str(e),
                     )
                 except Exception:
@@ -1134,6 +1384,7 @@ class StrictPalantirInstanceWorker:
                         "db_name": db_name,
                         "etag": etag,
                         "version_id": version_id,
+                        "ontology": ontology_version,
                     },
                 )
             except Exception as e:
@@ -1159,6 +1410,7 @@ class StrictPalantirInstanceWorker:
                         "key": s3_path,
                         "etag": etag,
                         "version_id": version_id,
+                        "ontology": ontology_version,
                     },
                 )
             except Exception as e:
@@ -1177,12 +1429,13 @@ class StrictPalantirInstanceWorker:
             aggregate_id=aggregate_id,
             occurred_at=datetime.now(timezone.utc),
             actor=command.get("created_by") or "system",
-            data={"db_name": db_name, "class_id": class_id, "instance_id": instance_id},
+            data={"db_name": db_name, "branch": branch, "class_id": class_id, "instance_id": instance_id},
             metadata={
                 "kind": "domain",
                 "kafka_topic": AppConfig.INSTANCE_EVENTS_TOPIC,
                 "service": "instance_worker",
                 "command_id": command_id,
+                "ontology": ontology_version,
                 "run_id": os.getenv("PIPELINE_RUN_ID") or os.getenv("RUN_ID") or os.getenv("EXECUTION_ID"),
                 "code_sha": os.getenv("CODE_SHA") or os.getenv("GIT_SHA") or os.getenv("COMMIT_SHA"),
             },

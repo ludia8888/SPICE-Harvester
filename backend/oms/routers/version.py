@@ -4,6 +4,7 @@
 """
 
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -11,6 +12,7 @@ from pydantic import BaseModel, ConfigDict
 
 from oms.dependencies import TerminusServiceDep
 from oms.services.async_terminus import AsyncTerminusService
+from shared.dependencies.providers import AuditLogStoreDep
 from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import (
     SecurityViolationError,
@@ -59,6 +61,23 @@ class RollbackRequest(BaseModel):
     target: str  # 커밋 ID 또는 상대 참조 (예: HEAD~1)
 
     model_config = ConfigDict(json_schema_extra={"example": {"target": "HEAD~1"}})
+
+
+_PROTECTED_BRANCHES = {"main", "master", "production", "prod"}
+
+
+def _rollback_enabled() -> bool:
+    """
+    Rollback is effectively a "force-push/reset" of the ontology graph.
+
+    Palantir/Foundry-style 운영 원칙:
+    - 온톨로지 스키마는 앞으로만 진화 (forward-only)
+    - 과거 판단은 과거 의미 체계로 재현 (Versioning + Recompute)
+
+    따라서 롤백은 기본적으로 비활성화하고(운영 차단),
+    필요 시 명시적으로 ENABLE_OMS_ROLLBACK=true로 켤 수 있게만 둡니다.
+    """
+    return os.getenv("ENABLE_OMS_ROLLBACK", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
 @router.post("/commit")
@@ -351,6 +370,11 @@ async def merge_branches(
 async def rollback(
     db_name: str,
     request: RollbackRequest,
+    audit_store: AuditLogStoreDep,
+    branch: Optional[str] = Query(
+        None,
+        description="Target branch to reset (default: current branch). Protected branches are blocked.",
+    ),
     terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     """
@@ -359,6 +383,12 @@ async def rollback(
     지정된 커밋으로 롤백합니다.
     """
     try:
+        if not _rollback_enabled():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Rollback endpoint is disabled by default (set ENABLE_OMS_ROLLBACK=true to enable in non-prod)",
+            )
+
         # 입력 데이터 보안 검증
         db_name = validate_db_name(db_name)
 
@@ -366,20 +396,96 @@ async def rollback(
         sanitized_data = sanitize_input(request.model_dump(mode="json"))
         target = sanitized_data["target"]
 
+        target_branch = branch
+        if target_branch:
+            target_branch = validate_branch_name(target_branch)
+        else:
+            target_branch = await terminus.get_current_branch(db_name)
+            target_branch = validate_branch_name(target_branch)
+
+        # Protected branch safety: never allow reset/force-push in production-like branches.
+        if target_branch in _PROTECTED_BRANCHES:
+            try:
+                await audit_store.log(
+                    partition_key=f"db:{db_name}",
+                    actor="oms",
+                    action="VERSION_ROLLBACK_BLOCKED",
+                    status="failure",
+                    resource_type="terminus_branch",
+                    resource_id=f"terminus:{db_name}:{target_branch}",
+                    metadata={
+                        "db_name": db_name,
+                        "branch": target_branch,
+                        "target": target,
+                        "protected": True,
+                        "reason": "protected_branch",
+                    },
+                )
+            except Exception:
+                # Blocking a dangerous operation should still work even if audit is degraded.
+                pass
+
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Rollback is blocked on protected branch '{target_branch}'",
+            )
+
         # 타겟 검증
         if len(target) > 100:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="롤백 타겟이 너무 깁니다"
             )
 
-        # 롤백 실행
-        await terminus.rollback(db_name, target)
+        # Audit is mandatory for rollback attempts (fail-closed when enabled).
+        try:
+            await audit_store.log(
+                partition_key=f"db:{db_name}",
+                actor="oms",
+                action="VERSION_ROLLBACK_REQUESTED",
+                status="success",
+                resource_type="terminus_branch",
+                resource_id=f"terminus:{db_name}:{target_branch}",
+                metadata={
+                    "db_name": db_name,
+                    "branch": target_branch,
+                    "target": target,
+                },
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Rollback requires audit logging, but audit store is unavailable: {e}",
+            ) from e
+
+        # 롤백 실행 (branch reset)
+        await terminus.version_control_service.reset_branch(
+            db_name, branch_name=target_branch, commit_id=target
+        )
+
+        try:
+            await audit_store.log(
+                partition_key=f"db:{db_name}",
+                actor="oms",
+                action="VERSION_ROLLBACK_APPLIED",
+                status="success",
+                resource_type="terminus_branch",
+                resource_id=f"terminus:{db_name}:{target_branch}",
+                metadata={
+                    "db_name": db_name,
+                    "branch": target_branch,
+                    "target": target,
+                },
+            )
+        except Exception:
+            # Best-effort; request log is already written.
+            pass
 
         return ApiResponse.success(
             message=f"'{target}'(으)로 롤백했습니다",
             data={
                 "target": target,
-                "current_branch": await terminus.get_current_branch(db_name)
+                "branch": target_branch,
+                "current_branch": await terminus.get_current_branch(db_name),
             }
         ).to_dict()
 
@@ -393,6 +499,20 @@ async def rollback(
         raise
     except Exception as e:
         logger.error(f"Failed to rollback: {e}")
+
+        try:
+            await audit_store.log(
+                partition_key=f"db:{db_name}",
+                actor="oms",
+                action="VERSION_ROLLBACK_FAILED",
+                status="failure",
+                resource_type="terminus_branch",
+                resource_id=f"terminus:{db_name}:{branch or 'current'}",
+                metadata={"db_name": db_name, "branch": branch, "target": getattr(request, "target", None)},
+                error=str(e),
+            )
+        except Exception:
+            pass
 
         if "not found" in str(e).lower():
             raise HTTPException(

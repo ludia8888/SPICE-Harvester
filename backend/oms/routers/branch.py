@@ -11,6 +11,8 @@ from pydantic import BaseModel, ConfigDict
 
 from oms.dependencies import TerminusServiceDep
 from oms.services.async_terminus import AsyncTerminusService
+from shared.config.search_config import get_instances_index_name, get_ontologies_index_name
+from shared.dependencies.providers import ElasticsearchServiceDep
 from shared.models.requests import ApiResponse, BranchCreateRequest, CheckoutRequest
 from shared.security.input_sanitizer import (
     SecurityViolationError,
@@ -72,6 +74,8 @@ async def create_branch(
     db_name: str,
     request: BranchCreateRequest,
     terminus: AsyncTerminusService = TerminusServiceDep,
+    *,
+    elasticsearch_service: ElasticsearchServiceDep,
 ):
     """
     새 브랜치 생성
@@ -102,6 +106,22 @@ async def create_branch(
 
         # 브랜치 생성
         await terminus.create_branch(db_name, branch_name, from_branch=from_branch)
+
+        # Best-effort safety: remove any stale ES overlay indices for this branch name.
+        # Rationale: if a previous branch with the same name was deleted while ES was down,
+        # the leftover overlay index could leak old documents into the new branch.
+        if branch_name != "main":
+            for index_name in (
+                get_instances_index_name(db_name, branch=branch_name),
+                get_ontologies_index_name(db_name, branch=branch_name),
+            ):
+                try:
+                    if await elasticsearch_service.index_exists(index_name):
+                        await elasticsearch_service.delete_index(index_name)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to clean Elasticsearch index '{index_name}' for new branch '{branch_name}' (continuing): {e}"
+                    )
 
         return ApiResponse.created(
             message=f"브랜치 '{branch_name}'이(가) 생성되었습니다",
@@ -138,6 +158,8 @@ async def delete_branch(
     branch_name: str,
     force: bool = Query(False, description="강제 삭제 여부"),
     terminus: AsyncTerminusService = TerminusServiceDep,
+    *,
+    elasticsearch_service: ElasticsearchServiceDep,
 ):
     """
     브랜치 삭제
@@ -167,6 +189,21 @@ async def delete_branch(
 
         # 브랜치 삭제
         await terminus.delete_branch(db_name, branch_name)
+
+        # Best-effort: clean up ES branch overlay indices to avoid cost drift.
+        # NOTE: Only applies to non-main branches (overlay indices). Main uses base indices.
+        if branch_name != "main":
+            for index_name in (
+                get_instances_index_name(db_name, branch=branch_name),
+                get_ontologies_index_name(db_name, branch=branch_name),
+            ):
+                try:
+                    if await elasticsearch_service.index_exists(index_name):
+                        await elasticsearch_service.delete_index(index_name)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to delete Elasticsearch index '{index_name}' for branch '{branch_name}' (continuing): {e}"
+                    )
 
         return ApiResponse.success(
             message=f"브랜치 '{branch_name}'이(가) 삭제되었습니다",

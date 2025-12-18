@@ -110,6 +110,7 @@ class BackgroundTaskManager:
         self,
         func: Callable,
         *args,
+        task_id: Optional[str] = None,
         task_name: Optional[str] = None,
         task_type: Optional[str] = None,
         priority: TaskPriority = TaskPriority.NORMAL,
@@ -143,7 +144,22 @@ class BackgroundTaskManager:
                 priority=TaskPriority.HIGH
             )
         """
-        task_id = str(uuid4())
+        requested_id = str(task_id).strip() if task_id else None
+        task_id = requested_id or str(uuid4())
+
+        # If caller requested a specific task_id, avoid clobbering an existing record.
+        if requested_id:
+            try:
+                existing = await self._get_task(task_id)
+                if existing:
+                    logger.warning(f"Task id {task_id} already exists; generating a new id")
+                    task_id = str(uuid4())
+            except Exception:
+                # If task lookup fails, fall back to generated id to avoid overwriting.
+                task_id = str(uuid4())
+
+        # Convenience: inject the effective task_id into the task function unless caller already set it.
+        kwargs.setdefault("task_id", task_id)
         
         # Create task record
         task_record = BackgroundTask(

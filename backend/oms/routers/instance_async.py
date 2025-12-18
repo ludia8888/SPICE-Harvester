@@ -30,9 +30,11 @@ from shared.services.command_status_service import CommandStatusService
 from shared.services.redis_service import RedisService
 from shared.models.event_envelope import EventEnvelope
 from shared.services.aggregate_sequence_allocator import OptimisticConcurrencyError
+from shared.utils.ontology_version import build_ontology_version, normalize_ontology_version
 from shared.security.input_sanitizer import (
     SecurityViolationError,
     sanitize_input,
+    validate_branch_name,
     validate_class_id,
     validate_db_name,
     validate_instance_id,
@@ -41,6 +43,51 @@ from shared.security.input_sanitizer import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/instances/{db_name}/async", tags=["Async Instance Management"])
+
+
+def _coerce_commit_id(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, dict):
+        for key in ("commit", "commit_id", "identifier", "id", "@id", "head"):
+            candidate = value.get(key)
+            if candidate:
+                return str(candidate).strip() or None
+    return str(value).strip() or None
+
+
+async def _resolve_ontology_version(terminus, *, db_name: str, branch: str) -> Dict[str, str]:
+    """
+    Best-effort ontology semantic contract stamp (ref + commit).
+
+    Command acceptance should not fail on temporary TerminusDB outages, so missing
+    commit is allowed; workers will still stamp domain events.
+    """
+    commit: Optional[str] = None
+    try:
+        branches = await terminus.version_control_service.list_branches(db_name)
+        for item in branches or []:
+            if isinstance(item, dict) and item.get("name") == branch:
+                commit = _coerce_commit_id(item.get("head"))
+                break
+    except Exception as e:
+        logger.debug(f"Failed to resolve ontology version (db={db_name}, branch={branch}): {e}")
+    return build_ontology_version(branch=branch, commit=commit)
+
+
+def _merge_ontology_stamp(existing: Any, resolved: Dict[str, str]) -> Dict[str, str]:
+    existing_norm = normalize_ontology_version(existing)
+    if not existing_norm:
+        return dict(resolved)
+
+    merged = dict(existing_norm)
+    if "ref" not in merged and resolved.get("ref"):
+        merged["ref"] = resolved["ref"]
+    if "commit" not in merged and resolved.get("commit"):
+        merged["commit"] = resolved["commit"]
+    return merged
 
 
 async def _append_command_event(command: InstanceCommand, *, event_store, topic: str, actor: Optional[str]) -> None:
@@ -99,7 +146,9 @@ class BulkInstanceCreateRequest(BaseModel):
 async def create_instance_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
+    branch: str = Query("main", description="Target branch (default: main)"),
     request: InstanceCreateRequest = ...,
+    terminus=TerminusServiceDep,
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
     event_store=EventStoreDep,
     user_id: Optional[str] = None,
@@ -113,9 +162,15 @@ async def create_instance_async(
     try:
         # 입력 검증
         sanitized_data = sanitize_input(request.data)
+        branch = validate_branch_name(branch)
 
         # CREATE_INSTANCE는 aggregate_id 정합성을 위해 instance_id를 포함해야 함
         instance_id = _derive_instance_id(class_id, sanitized_data)
+
+        ontology_version = _merge_ontology_stamp(
+            (request.metadata or {}).get("ontology"),
+            await _resolve_ontology_version(terminus, db_name=db_name, branch=branch),
+        )
         
         # Command 생성
         command = InstanceCommand(
@@ -123,12 +178,14 @@ async def create_instance_async(
             db_name=db_name,
             class_id=class_id,
             instance_id=instance_id,
+            branch=branch,
             expected_seq=0,
             payload=sanitized_data,
             metadata={
-                **request.metadata,
+                **(request.metadata or {}),
                 "user_id": user_id,
-                "created_at": datetime.now(timezone.utc).isoformat()
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "ontology": ontology_version,
             },
             created_by=user_id
         )
@@ -164,6 +221,7 @@ async def create_instance_async(
                         "db_name": db_name,
                         "class_id": class_id,
                         "instance_id": instance_id,
+                        "branch": branch,
                         "aggregate_id": command.aggregate_id,
                         "created_at": command.created_at.isoformat(),
                         "created_by": user_id,
@@ -184,7 +242,8 @@ async def create_instance_async(
                 "message": f"Instance creation command accepted for class '{class_id}'",
                 "instance_id": instance_id,
                 "class_id": class_id,
-                "db_name": db_name
+                "db_name": db_name,
+                "branch": branch,
             }
         )
         
@@ -207,8 +266,10 @@ async def update_instance_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
     instance_id: str = ...,
+    branch: str = Query("main", description="Target branch (default: main)"),
     expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
     request: InstanceUpdateRequest = ...,
+    terminus=TerminusServiceDep,
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
     event_store=EventStoreDep,
     user_id: Optional[str] = None,
@@ -220,6 +281,12 @@ async def update_instance_async(
         # 입력 검증
         validate_instance_id(instance_id)
         sanitized_data = sanitize_input(request.data)
+        branch = validate_branch_name(branch)
+
+        ontology_version = _merge_ontology_stamp(
+            (request.metadata or {}).get("ontology"),
+            await _resolve_ontology_version(terminus, db_name=db_name, branch=branch),
+        )
         
         # Command 생성
         command = InstanceCommand(
@@ -227,12 +294,14 @@ async def update_instance_async(
             db_name=db_name,
             class_id=class_id,
             instance_id=instance_id,
+            branch=branch,
             expected_seq=expected_seq,
             payload=sanitized_data,
             metadata={
-                **request.metadata,
+                **(request.metadata or {}),
                 "user_id": user_id,
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "ontology": ontology_version,
             },
             created_by=user_id
         )
@@ -268,6 +337,7 @@ async def update_instance_async(
                         "db_name": db_name,
                         "class_id": class_id,
                         "instance_id": instance_id,
+                        "branch": branch,
                         "aggregate_id": command.aggregate_id,
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                         "updated_by": user_id,
@@ -287,7 +357,8 @@ async def update_instance_async(
                 "message": f"Instance update command accepted for '{instance_id}'",
                 "instance_id": instance_id,
                 "class_id": class_id,
-                "db_name": db_name
+                "db_name": db_name,
+                "branch": branch,
             }
         )
         
@@ -310,7 +381,9 @@ async def delete_instance_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
     instance_id: str = ...,
+    branch: str = Query("main", description="Target branch (default: main)"),
     expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
+    terminus=TerminusServiceDep,
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
     event_store=EventStoreDep,
     user_id: Optional[str] = None,
@@ -321,6 +394,9 @@ async def delete_instance_async(
     try:
         # 입력 검증
         validate_instance_id(instance_id)
+        branch = validate_branch_name(branch)
+
+        ontology_version = await _resolve_ontology_version(terminus, db_name=db_name, branch=branch)
         
         # Command 생성
         command = InstanceCommand(
@@ -328,11 +404,13 @@ async def delete_instance_async(
             db_name=db_name,
             class_id=class_id,
             instance_id=instance_id,
+            branch=branch,
             expected_seq=expected_seq,
             payload={},  # 삭제는 payload 필요 없음
             metadata={
                 "user_id": user_id,
-                "deleted_at": datetime.now(timezone.utc).isoformat()
+                "deleted_at": datetime.now(timezone.utc).isoformat(),
+                "ontology": ontology_version,
             },
             created_by=user_id
         )
@@ -368,6 +446,7 @@ async def delete_instance_async(
                         "db_name": db_name,
                         "class_id": class_id,
                         "instance_id": instance_id,
+                        "branch": branch,
                         "aggregate_id": command.aggregate_id,
                         "deleted_at": datetime.now(timezone.utc).isoformat(),
                         "deleted_by": user_id,
@@ -387,7 +466,8 @@ async def delete_instance_async(
                 "message": f"Instance deletion command accepted for '{instance_id}'",
                 "instance_id": instance_id,
                 "class_id": class_id,
-                "db_name": db_name
+                "db_name": db_name,
+                "branch": branch,
             }
         )
         
@@ -409,8 +489,10 @@ async def delete_instance_async(
 async def bulk_create_instances_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
+    branch: str = Query("main", description="Target branch (default: main)"),
     request: BulkInstanceCreateRequest = ...,
     background_tasks: BackgroundTasks = BackgroundTasks(),
+    terminus=TerminusServiceDep,
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
     event_store=EventStoreDep,
     user_id: Optional[str] = None,
@@ -423,21 +505,29 @@ async def bulk_create_instances_async(
     """
     try:
         # 입력 검증
+        branch = validate_branch_name(branch)
         sanitized_instances = [sanitize_input(instance) for instance in request.instances]
+
+        ontology_version = _merge_ontology_stamp(
+            (request.metadata or {}).get("ontology"),
+            await _resolve_ontology_version(terminus, db_name=db_name, branch=branch),
+        )
         
         # Command 생성
         command = InstanceCommand(
             command_type=CommandType.BULK_CREATE_INSTANCES,
             db_name=db_name,
             class_id=class_id,
+            branch=branch,
             payload={
                 "instances": sanitized_instances,
                 "count": len(sanitized_instances)
             },
             metadata={
-                **request.metadata,
+                **(request.metadata or {}),
                 "user_id": user_id,
-                "created_at": datetime.now(timezone.utc).isoformat()
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "ontology": ontology_version,
             },
             created_by=user_id
         )
@@ -461,6 +551,7 @@ async def bulk_create_instances_async(
                         "command_type": command.command_type,
                         "db_name": db_name,
                         "class_id": class_id,
+                        "branch": branch,
                         "instance_count": len(sanitized_instances),
                         "aggregate_id": command.aggregate_id,
                         "created_at": command.created_at.isoformat(),
@@ -490,6 +581,7 @@ async def bulk_create_instances_async(
                 "message": f"Bulk instance creation command accepted for {len(sanitized_instances)} instances",
                 "class_id": class_id,
                 "db_name": db_name,
+                "branch": branch,
                 "instance_count": len(sanitized_instances),
                 "note": "Large batches are processed in background with progress tracking" if len(sanitized_instances) > 10 else None
             }
@@ -627,8 +719,10 @@ async def _track_bulk_create_progress(
 async def bulk_create_instances_with_tracking(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
+    branch: str = Query("main", description="Target branch (default: main)"),
     request: BulkInstanceCreateRequest = ...,
     background_tasks: BackgroundTasks = BackgroundTasks(),
+    terminus=TerminusServiceDep,
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
     event_store=EventStoreDep,
     user_id: Optional[str] = None,
@@ -643,7 +737,13 @@ async def bulk_create_instances_with_tracking(
     task_id = str(uuid4())
     
     # Validate input
+    branch = validate_branch_name(branch)
     sanitized_instances = [sanitize_input(instance) for instance in request.instances]
+
+    ontology_version = _merge_ontology_stamp(
+        (request.metadata or {}).get("ontology"),
+        await _resolve_ontology_version(terminus, db_name=db_name, branch=branch),
+    )
     
     # Add the actual bulk creation to background tasks
     background_tasks.add_task(
@@ -651,9 +751,11 @@ async def bulk_create_instances_with_tracking(
         task_id=task_id,
         db_name=db_name,
         class_id=class_id,
+        branch=branch,
         instances=sanitized_instances,
-        metadata=request.metadata,
+        metadata=request.metadata or {},
         user_id=user_id,
+        ontology_version=ontology_version,
         event_store=event_store,
         command_status_service=command_status_service
     )
@@ -672,9 +774,11 @@ async def _process_bulk_create_in_background(
     task_id: str,
     db_name: str,
     class_id: str,
+    branch: str,
     instances: List[Dict[str, Any]],
     metadata: Dict[str, Any],
     user_id: Optional[str],
+    ontology_version: Dict[str, str],
     event_store,
     command_status_service: CommandStatusService
 ) -> None:
@@ -687,16 +791,18 @@ async def _process_bulk_create_in_background(
             command_type=CommandType.BULK_CREATE_INSTANCES,
             db_name=db_name,
             class_id=class_id,
+            branch=branch,
             payload={
                 "instances": instances,
                 "count": len(instances),
                 "task_id": task_id
             },
             metadata={
-                **metadata,
+                **(metadata or {}),
                 "user_id": user_id,
                 "created_at": datetime.now(timezone.utc).isoformat(),
-                "background_task_id": task_id
+                "background_task_id": task_id,
+                "ontology": ontology_version,
             },
             created_by=user_id
         )

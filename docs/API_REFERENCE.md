@@ -80,6 +80,54 @@ Authorization: Basic base64(username:password)
 
 ## BFF API Endpoints
 
+### Admin Operations (Protected)
+
+⚠️ These endpoints are for operators/admins only.
+
+**Auth contract**
+- Admin endpoints are disabled unless `BFF_ADMIN_TOKEN` is configured on the BFF service.
+- Required header: `X-Admin-Token: <BFF_ADMIN_TOKEN>` (or `Authorization: Bearer <token>`)
+- Optional header: `X-Admin-Actor: <name/email>` (recorded into audit metadata)
+
+**Rate limit**
+- Strict by default: 10 requests / 60s per IP.
+
+#### Recompute Projection (Versioning + Recompute)
+Rebuild an Elasticsearch read model by replaying immutable domain events (preferred production recovery path).
+
+```http
+POST /admin/recompute-projection
+```
+
+**Request Body:**
+```json
+{
+  "db_name": "production",
+  "projection": "instances",
+  "branch": "main",
+  "from_ts": "2025-01-01T00:00:00Z",
+  "to_ts": "2025-01-02T00:00:00Z",
+  "promote": false,
+  "allow_delete_base_index": false,
+  "max_events": 100000
+}
+```
+
+**Response (202 Accepted):**
+```json
+{
+  "task_id": "b9c9b3d3-2b21-4e2a-9f9f-50b8f5d2d2a2",
+  "status": "accepted",
+  "message": "Projection recompute task started: instances",
+  "status_url": "/api/v1/tasks/b9c9b3d3-2b21-4e2a-9f9f-50b8f5d2d2a2"
+}
+```
+
+#### Get Recompute Result
+```http
+GET /admin/recompute-projection/{task_id}/result
+```
+
 ### Database Management
 
 #### List Databases
@@ -509,8 +557,19 @@ TerminusDB(그래프 관계) + Elasticsearch(문서 payload)를 결합한 멀티
 
 #### Multi-hop Graph Query
 ```http
-POST /graph-query/{db_name}
+POST /graph-query/{db_name}?branch=<branch>
 ```
+
+**Query Params:**
+- `branch`: Target branch (default: `main`)
+
+**Branch semantics (copy-on-write):**
+- TerminusDB query runs on the requested branch (graph/schema authority).
+- Elasticsearch payload is resolved with an overlay strategy:
+  1) branch index (if present)
+  2) fallback to main index (if missing)
+  - branch deletes are tombstoned to prevent “fallback resurrection”.
+  - tombstoned nodes return `data_status=MISSING` with `index_status.tombstoned=true` (intentional hide, not ES lag).
 
 **Request Body:**
 ```json
@@ -746,11 +805,16 @@ POST /branch/{db_name}/create
   "description": "Feature development branch"
 }
 ```
+**Notes:**
+- Best-effort cleanup: deletes any stale Elasticsearch overlay indices for the new branch name (prevents leaking old docs if a previous branch with the same name was deleted while ES was down).
 
 #### Delete Branch
 ```http
 DELETE /branch/{db_name}/branch/{branch_name}
 ```
+**Notes:**
+- Deletes the TerminusDB branch (graph/schema authority).
+- Best-effort cleanup: deletes Elasticsearch overlay indices for that branch (`instances` + `ontologies`) to avoid cost drift.
 
 #### Checkout Branch
 ```http
@@ -799,11 +863,15 @@ POST /database/{db_name}/branch
   "from_branch": "main"
 }
 ```
+**Notes:**
+- Best-effort cleanup: deletes any stale Elasticsearch overlay indices for the new branch name.
 
 #### Delete Branch
 ```http
 DELETE /database/{db_name}/branch/{branch_name}
 ```
+**Notes:**
+- Best-effort cleanup: deletes Elasticsearch overlay indices for that branch (copy-on-write payload layer).
 
 #### Checkout Branch
 ```http
@@ -955,14 +1023,19 @@ POST /database/{db_name}/merge
 
 #### Rollback to Previous Commit
 ```http
-POST /database/{db_name}/rollback
+POST /version/{db_name}/rollback?branch=<branch>
 ```
+
+⚠️ **Safety**:
+- Rollback is **disabled by default**. Enable explicitly in non-production only:
+  - `ENABLE_OMS_ROLLBACK=true`
+- Protected branches (e.g. `main`, `production`) are blocked by default.
+- Prefer “Versioning + Recompute” (rebuild read models by replay) for production recovery.
 
 **Request Body:**
 ```json
 {
-  "target": "HEAD~1",  // or specific commit ID
-  "author": "admin@example.com"
+  "target": "HEAD~1"
 }
 ```
 
@@ -1432,7 +1505,7 @@ Content-Type: application/json
 #### Create ontology class
 
 ```http
-POST /api/v1/database/{db_name}/ontology
+POST /api/v1/database/{db_name}/ontology?branch=<branch>
 Content-Type: application/json
 
 {
@@ -1447,7 +1520,7 @@ Content-Type: application/json
 #### Create instance (async)
 
 ```http
-POST /api/v1/instances/{db_name}/async/{class_id}/create
+POST /api/v1/instances/{db_name}/async/{class_id}/create?branch=<branch>
 Content-Type: application/json
 
 {
@@ -1461,14 +1534,17 @@ Content-Type: application/json
 
 Update/delete endpoints require an `expected_seq` query param. If the current aggregate sequence does not match, OMS returns **409 Conflict** and **does not append** the command.
 
+Tip: you can obtain the current `expected_seq` from federated reads:
+- `POST /graph-query/{db_name}` returns `nodes[].index_status.event_sequence` (best-effort, but works for UI-level OCC).
+
 Examples:
 
 ```http
-PUT /api/v1/database/{db_name}/ontology/{class_id}?expected_seq=42
-DELETE /api/v1/database/{db_name}/ontology/{class_id}?expected_seq=42
+PUT /api/v1/database/{db_name}/ontology/{class_id}?branch=<branch>&expected_seq=42
+DELETE /api/v1/database/{db_name}/ontology/{class_id}?branch=<branch>&expected_seq=42
 
-PUT /api/v1/instances/{db_name}/async/{class_id}/{instance_id}/update?expected_seq=42
-DELETE /api/v1/instances/{db_name}/async/{class_id}/{instance_id}/delete?expected_seq=42
+PUT /api/v1/instances/{db_name}/async/{class_id}/{instance_id}/update?branch=<branch>&expected_seq=42
+DELETE /api/v1/instances/{db_name}/async/{class_id}/{instance_id}/delete?branch=<branch>&expected_seq=42
 ```
 
 409 response example:

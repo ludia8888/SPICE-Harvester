@@ -23,6 +23,8 @@ from typing import Optional
 import aiohttp
 import pytest
 
+from oms.services.event_store import EventStore
+
 
 if os.getenv("RUN_LIVE_OMS_SMOKE", "").strip().lower() not in {"1", "true", "yes", "on"}:
     pytest.skip(
@@ -33,6 +35,22 @@ if os.getenv("RUN_LIVE_OMS_SMOKE", "").strip().lower() not in {"1", "true", "yes
 
 
 OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhost:8000").rstrip("/")
+
+
+async def _assert_command_event_has_ontology_stamp(*, event_id: str) -> None:
+    store = EventStore()
+    key = await store.get_event_object_key(event_id=str(event_id))
+    assert key, f"Missing by-event-id index for event_id={event_id}"
+
+    envelope = await store.read_event_by_key(key=key)
+    assert isinstance(envelope.data, dict)
+    cmd_meta = envelope.data.get("metadata")
+    assert isinstance(cmd_meta, dict), f"Missing command metadata in event_id={event_id}"
+
+    ontology = cmd_meta.get("ontology")
+    assert isinstance(ontology, dict), f"Missing ontology stamp in event_id={event_id}"
+    assert (ontology.get("ref") or "").strip(), f"Missing ontology.ref in event_id={event_id}"
+    assert (ontology.get("commit") or "").strip(), f"Missing ontology.commit in event_id={event_id}"
 
 
 async def _get_write_side_last_sequence(*, aggregate_type: str, aggregate_id: str) -> Optional[int]:
@@ -216,6 +234,10 @@ async def test_oms_end_to_end_smoke():
                 json=ontology,
             ) as resp:
                 assert resp.status == 202
+                payload = await resp.json()
+                ontology_command_id = (payload.get("data") or {}).get("command_id")
+                assert ontology_command_id
+                await _assert_command_event_has_ontology_stamp(event_id=str(ontology_command_id))
 
             await _wait_for_ontology_present(session, db_name=db_name, ontology_id=class_id)
 
@@ -225,6 +247,10 @@ async def test_oms_end_to_end_smoke():
                 json={"data": {"product_id": instance_id, "name": "OMS Smoke Product"}},
             ) as resp:
                 assert resp.status == 202
+                payload = await resp.json()
+                instance_command_id = payload.get("command_id")
+                assert instance_command_id
+                await _assert_command_event_has_ontology_stamp(event_id=str(instance_command_id))
 
             await _wait_for_instance_count(
                 session,

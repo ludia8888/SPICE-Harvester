@@ -36,6 +36,7 @@ class InstanceService(BaseTerminusService):
         self,
         db_name: str,
         class_id: str,
+        branch: str = "main",
         limit: int = 100,
         offset: int = 0,
         search: Optional[str] = None
@@ -59,7 +60,9 @@ class InstanceService(BaseTerminusService):
             await self.db_service.ensure_db_exists(db_name)
             
             # Document API를 사용하여 인스턴스 조회
-            endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
+            endpoint = (
+                f"/api/document/{self.connection_info.account}/{db_name}{self._branch_descriptor(branch)}"
+            )
             params = {
                 "type": class_id,
                 "graph_type": "instance",
@@ -147,6 +150,7 @@ class InstanceService(BaseTerminusService):
         self,
         db_name: str,
         instance_id: str,
+        branch: str = "main",
         class_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
@@ -187,7 +191,7 @@ class InstanceService(BaseTerminusService):
                 """
             
             # WOQL 실행 (TerminusDB는 SPARQL이 아닌 WOQL 사용)
-            endpoint = f"/api/woql/{self.connection_info.account}/{db_name}"
+            endpoint = f"/api/woql/{self.connection_info.account}/{db_name}{self._branch_descriptor(branch)}"
             result = await self._make_request("POST", endpoint, {"query": sparql_query})
             
             if not result:
@@ -231,6 +235,7 @@ class InstanceService(BaseTerminusService):
         self,
         db_name: str,
         class_id: str,
+        branch: str = "main",
         filter_conditions: Optional[Dict[str, Any]] = None,
     ) -> int:
         """
@@ -248,7 +253,9 @@ class InstanceService(BaseTerminusService):
 
             # NOTE: TerminusDB v12 supports filtering documents by `type` via the document API.
             # This avoids WOQL/SPARQL dialect differences and keeps the endpoint deterministic.
-            endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
+            endpoint = (
+                f"/api/document/{self.connection_info.account}/{db_name}{self._branch_descriptor(branch)}"
+            )
             limit = 1000
             offset = 0
             total = 0

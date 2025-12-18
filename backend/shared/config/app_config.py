@@ -68,8 +68,10 @@ class AppConfig:
         return "command:*:status"
     
     @staticmethod
-    def get_class_label_key(db_name: str, class_id: str) -> str:
-        """클래스 라벨 캐시 Redis 키 생성"""
+    def get_class_label_key(db_name: str, class_id: str, branch: str = "main") -> str:
+        """클래스 라벨 캐시 Redis 키 생성 (branch-aware)."""
+        if branch and branch != "main":
+            return f"class_label:{db_name}:{branch}:{class_id}"
         return f"class_label:{db_name}:{class_id}"
     
     @staticmethod

@@ -22,6 +22,7 @@ from shared.models.common import BaseResponse
 from shared.security.input_sanitizer import (
     SecurityViolationError,
     sanitize_input,
+    validate_branch_name,
     validate_db_name,
     validate_class_id,
     validate_instance_id,
@@ -96,6 +97,7 @@ async def create_instance_async(
     db_name: str,
     class_label: str,
     request: InstanceCreateRequest,
+    branch: str = Query("main", description="Target branch (default: main)"),
     oms_client: OMSClient = Depends(get_oms_client),
     label_mapper: LabelMapper = Depends(get_label_mapper),
     user_id: Optional[str] = None,
@@ -109,6 +111,7 @@ async def create_instance_async(
     try:
         # 입력 검증
         db_name = validate_db_name(db_name)
+        branch = validate_branch_name(branch)
         sanitized_data = sanitize_input(request.data)
         
         # Label을 ID로 변환
@@ -139,6 +142,7 @@ async def create_instance_async(
         
         response = await oms_client.post(
             f"/api/v1/instances/{db_name}/async/{class_id}/create",
+            params={"branch": branch},
             json=oms_request
         )
         
@@ -168,6 +172,7 @@ async def update_instance_async(
     instance_id: str,
     request: InstanceUpdateRequest,
     expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
+    branch: str = Query("main", description="Target branch (default: main)"),
     oms_client: OMSClient = Depends(get_oms_client),
     label_mapper: LabelMapper = Depends(get_label_mapper),
     user_id: Optional[str] = None,
@@ -179,6 +184,7 @@ async def update_instance_async(
         # 입력 검증
         db_name = validate_db_name(db_name)
         validate_instance_id(instance_id)
+        branch = validate_branch_name(branch)
         sanitized_data = sanitize_input(request.data)
         
         # Label을 ID로 변환
@@ -209,7 +215,7 @@ async def update_instance_async(
         
         response = await oms_client.put(
             f"/api/v1/instances/{db_name}/async/{class_id}/{instance_id}/update",
-            params={"expected_seq": expected_seq},
+            params={"expected_seq": expected_seq, "branch": branch},
             json=oms_request
         )
         
@@ -236,6 +242,7 @@ async def delete_instance_async(
     db_name: str,
     class_label: str,
     instance_id: str,
+    branch: str = Query("main", description="Target branch (default: main)"),
     expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
     oms_client: OMSClient = Depends(get_oms_client),
     label_mapper: LabelMapper = Depends(get_label_mapper),
@@ -248,6 +255,7 @@ async def delete_instance_async(
         # 입력 검증
         db_name = validate_db_name(db_name)
         validate_instance_id(instance_id)
+        branch = validate_branch_name(branch)
         
         # Label을 ID로 변환
         class_id = await label_mapper.get_class_id_by_label(db_name, class_label)
@@ -260,7 +268,7 @@ async def delete_instance_async(
         # OMS 비동기 API 호출
         response = await oms_client.delete(
             f"/api/v1/instances/{db_name}/async/{class_id}/{instance_id}/delete",
-            params={"expected_seq": expected_seq},
+            params={"expected_seq": expected_seq, "branch": branch},
         )
         
         return CommandResult(**response)
@@ -286,6 +294,7 @@ async def bulk_create_instances_async(
     db_name: str,
     class_label: str,
     request: BulkInstanceCreateRequest,
+    branch: str = Query("main", description="Target branch (default: main)"),
     oms_client: OMSClient = Depends(get_oms_client),
     label_mapper: LabelMapper = Depends(get_label_mapper),
     user_id: Optional[str] = None,
@@ -296,6 +305,7 @@ async def bulk_create_instances_async(
     try:
         # 입력 검증
         db_name = validate_db_name(db_name)
+        branch = validate_branch_name(branch)
         sanitized_instances = [sanitize_input(instance) for instance in request.instances]
         
         # Label을 ID로 변환
@@ -329,6 +339,7 @@ async def bulk_create_instances_async(
         
         response = await oms_client.post(
             f"/api/v1/instances/{db_name}/async/{class_id}/bulk-create",
+            params={"branch": branch},
             json=oms_request
         )
         

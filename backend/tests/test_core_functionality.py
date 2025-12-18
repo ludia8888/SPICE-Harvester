@@ -128,6 +128,41 @@ async def _wait_for_db_exists(
     raise AssertionError(f"Timed out waiting for db exists={expected} (last={last})")
 
 
+async def _wait_for_command_terminal_state(
+    session: aiohttp.ClientSession,
+    *,
+    command_id: str,
+    timeout_seconds: int = 90,
+    poll_interval_seconds: float = 1.0,
+) -> Dict[str, Any]:
+    """
+    Wait until an async (202 Accepted) command reaches a terminal state.
+
+    This avoids OCC races where the write-side stream continues to advance (e.g. command->domain)
+    after the user-visible side-effect becomes observable (like database existence).
+    """
+    deadline = time.monotonic() + timeout_seconds
+    last: Optional[Dict[str, Any]] = None
+
+    while time.monotonic() < deadline:
+        async with session.get(f"{OMS_URL}/api/v1/commands/{command_id}/status") as resp:
+            if resp.status != 200:
+                last = {"status": resp.status, "body": await resp.text()}
+                await asyncio.sleep(poll_interval_seconds)
+                continue
+            last = await resp.json()
+
+        status_value = str(last.get("status") or "").upper()
+        if status_value in {"COMPLETED", "FAILED", "CANCELLED"}:
+            if status_value != "COMPLETED":
+                raise AssertionError(f"Command {command_id} ended in {status_value}: {last}")
+            return last
+
+        await asyncio.sleep(poll_interval_seconds)
+
+    raise AssertionError(f"Timed out waiting for command terminal state (command_id={command_id}, last={last})")
+
+
 async def _wait_for_ontology_present(
     session: aiohttp.ClientSession,
     *,
@@ -159,6 +194,7 @@ class TestCoreOntologyManagement:
         """Test complete database lifecycle with Event Sourcing"""
         async with aiohttp.ClientSession() as session:
             db_name = f"test_db_{uuid.uuid4().hex[:8]}"
+            command_id: Optional[str] = None
             
             # Create database
             async with session.post(
@@ -168,17 +204,29 @@ class TestCoreOntologyManagement:
                 assert resp.status == 202  # Event Sourcing async
                 result = await resp.json()
                 assert result.get("status") == "accepted"
-                assert "command_id" in (result.get("data") or {})
+                command_id = (result.get("data") or {}).get("command_id")
+                assert command_id
+                assert str(command_id)
 
             await _wait_for_db_exists(session, db_name=db_name, expected=True)
+            await _wait_for_command_terminal_state(session, command_id=str(command_id))
                 
             # Delete database
-            expected_seq = await _get_write_side_last_sequence(aggregate_type="Database", aggregate_id=db_name)
-            async with session.delete(
-                f"{OMS_URL}/api/v1/database/{db_name}",
-                params={"expected_seq": expected_seq},
-            ) as resp:
-                assert resp.status == 202  # Event Sourcing async
+            # OCC can legitimately race with internal command->domain append; retry once on 409.
+            for attempt in range(2):
+                expected_seq = await _get_write_side_last_sequence(
+                    aggregate_type="Database", aggregate_id=db_name
+                )
+                async with session.delete(
+                    f"{OMS_URL}/api/v1/database/{db_name}",
+                    params={"expected_seq": expected_seq},
+                ) as resp:
+                    if resp.status == 202:
+                        break
+                    if resp.status == 409 and attempt == 0:
+                        continue
+                    body = await resp.text()
+                    raise AssertionError(f"Unexpected delete response: status={resp.status} body={body}")
 
             await _wait_for_db_exists(session, db_name=db_name, expected=False)
                 

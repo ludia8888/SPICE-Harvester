@@ -19,7 +19,9 @@ class QueryService(BaseTerminusService):
     WOQL 및 SPARQL 쿼리 실행 기능을 제공합니다.
     """
     
-    async def execute_query(self, db_name: str, query_dict: Dict[str, Any]) -> List[Dict[str, Any]]:
+    async def execute_query(
+        self, db_name: str, query_dict: Dict[str, Any], *, branch: str = "main"
+    ) -> List[Dict[str, Any]]:
         """
         WOQL 쿼리 실행
         
@@ -31,7 +33,7 @@ class QueryService(BaseTerminusService):
             쿼리 결과
         """
         # TerminusDB WOQL 쿼리 엔드포인트
-        endpoint = f"/api/woql/{self.connection_info.account}/{db_name}"
+        endpoint = f"/api/woql/{self.connection_info.account}/{db_name}{self._branch_descriptor(branch)}"
         
         # WOQL 쿼리를 올바른 형식으로 래핑
         woql_request = {

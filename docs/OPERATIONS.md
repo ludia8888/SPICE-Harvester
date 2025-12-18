@@ -491,7 +491,7 @@ SPICE HARVESTER utilizes TerminusDB's Git-like version control features for data
 #### Git-like Features
 **Progress**: 7/7 features working (100%)
 
-- ✅ Rollback (작동)
+- ✅ Rollback (기능은 있음, **기본값 비활성화**)
 - ✅ Branches (작동)
 - ✅ Commits (작동)
 - ✅ Push/Pull (작동)
@@ -517,10 +517,46 @@ curl -X POST http://localhost:8002/api/v1/branch/production/create \
   }'
 
 # Rollback to previous commit using Git-style references
-curl -X POST http://localhost:8002/api/v1/databases/production/rollback \
-  -H "X-API-Key: $API_KEY" \
+#
+# ⚠️ Rollback is DISABLED by default. Enable explicitly in non-prod only:
+#   ENABLE_OMS_ROLLBACK=true
+#
+# OMS endpoint:
+curl -X POST "http://localhost:8000/api/v1/version/production/rollback?branch=main" \
   -H "Content-Type: application/json" \
   -d '{"target": "HEAD~1"}'
+```
+
+#### Preferred Production Recovery: Versioning + Recompute (Projection rebuild)
+
+Rollback is risky in production because it rewrites branch history/state. The recommended recovery path is:
+1) Keep TerminusDB history (no rollback), and
+2) Rebuild read models (Elasticsearch) by replaying immutable domain events.
+
+**Safety contract**
+- The recompute API is an admin endpoint and is **disabled by default** unless `BFF_ADMIN_TOKEN` is configured.
+- Strict rate limit applies (10 requests / 60s per IP).
+- Every recompute request is recorded into the audit trail (including `requested_by` / IP when provided).
+
+**Example**
+```bash
+# Enable operator access (local only)
+export BFF_ADMIN_TOKEN="change-me"
+
+# Recompute instance projection on main branch
+curl -X POST "http://localhost:8002/api/v1/admin/recompute-projection" \
+  -H "X-Admin-Token: ${BFF_ADMIN_TOKEN}" \
+  -H "X-Admin-Actor: ops@spiceharvester.local" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "db_name": "production",
+    "projection": "instances",
+    "branch": "main",
+    "from_ts": "2025-01-01T00:00:00Z",
+    "to_ts": null,
+    "promote": false,
+    "allow_delete_base_index": false
+  }'
 ```
 
 #### Monitoring Version Control Status

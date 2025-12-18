@@ -71,6 +71,12 @@
       "branch": {
         "type": "keyword"
       },
+      "ontology_ref": {
+        "type": "keyword"
+      },
+      "ontology_commit": {
+        "type": "keyword"
+      },
       "version": {
         "type": "long"
       },

@@ -160,6 +160,31 @@ curl -fsS -X POST "http://localhost:8002/api/v1/graph-query/${DB}" \
 
 기대: 응답에는 nodes/edges가 포함되고, 각 노드는 `data_status=FULL|PARTIAL|MISSING`를 제공해 “인덱싱 지연”과 “실제 누락”을 UI에서 구분할 수 있습니다.
 
+## 7.1) 브랜치 기반 what-if (데이터 복사 없음)
+
+브랜치 가상화는 “만약 이 값을 바꾸면?” 같은 시뮬레이션을 **실제 데이터 복사 없이** 수행할 수 있게 합니다.
+- 그래프/스키마 조회는 TerminusDB 브랜치에서 수행됩니다(Copy-on-write).
+- ES payload는 오버레이로 해석됩니다: 브랜치 인덱스 → (없으면) main 인덱스 폴백(best-effort)
+- 브랜치에서 삭제된 엔티티는 tombstone으로 처리되어 “폴백으로 부활”하는 사고를 막습니다(`data_status=MISSING`, `index_status.tombstoned=true`)
+- 삭제는 aggregate 단위로 최종 상태이며, 동일 ID를 같은 브랜치에서 재생성하려 하면 OCC로 409가 반환됩니다
+
+```bash
+# 1) main에서 브랜치 생성
+curl -fsS -X POST "http://localhost:8002/api/v1/databases/${DB}/branches" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"feature/whatif","from_branch":"main"}'
+
+# 2) 브랜치에서 federated 조회
+curl -fsS -X POST "http://localhost:8002/api/v1/graph-query/${DB}?branch=feature/whatif" \
+  -H 'Content-Type: application/json' \
+  -d '{"start_class":"Product","hops":[],"filters":{"product_id":"prod_001"},"include_documents":true}' | jq .
+
+# 3) 브랜치에서 업데이트(OCC): expected_seq는 nodes[].index_status.event_sequence에서 가져옵니다
+curl -fsS -X PUT "http://localhost:8002/api/v1/database/${DB}/instances/Product/prod_001/update?branch=feature/whatif&expected_seq=<expected_seq>" \
+  -H 'Content-Type: application/json' \
+  -d '{"data":{"name":"Shirt (WhatIf)"}}'
+```
+
 ## 8) Testing (no mocks)
 
 프로덕션 게이트:

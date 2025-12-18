@@ -18,6 +18,7 @@ from shared.config.service_config import ServiceConfig
 from shared.config.search_config import (
     get_instances_index_name,
     get_ontologies_index_name,
+    sanitize_index_name,
     DEFAULT_INDEX_SETTINGS
 )
 from shared.config.app_config import AppConfig
@@ -35,6 +36,7 @@ from shared.services.processed_event_registry import ClaimDecision, ProcessedEve
 from shared.services.lineage_store import LineageStore
 from shared.services.audit_log_store import AuditLogStore
 from shared.utils.chaos import maybe_crash
+from shared.utils.ontology_version import split_ref_commit
 
 # Observability imports
 from shared.observability.tracing import get_tracing_service
@@ -132,11 +134,14 @@ class ProjectionWorker:
         trace_id = metadata.get("trace_id")
         correlation_id = metadata.get("correlation_id")
         service = metadata.get("service")
+        ontology_ref, ontology_commit = split_ref_commit(metadata.get("ontology"))
         return {
             "command_id": str(command_id) if command_id else None,
             "trace_id": str(trace_id) if trace_id else None,
             "correlation_id": str(correlation_id) if correlation_id else None,
             "origin_service": str(service) if service else None,
+            "ontology_ref": ontology_ref,
+            "ontology_commit": ontology_commit,
         }
 
     async def _record_es_side_effect(
@@ -163,6 +168,11 @@ class ProjectionWorker:
         occurred_at = datetime.now(timezone.utc)
         meta = self._extract_envelope_metadata(event_data)
         seq = self._parse_sequence(event_data.get("sequence_number"))
+        ontology_payload: Dict[str, str] = {}
+        if meta.get("ontology_ref"):
+            ontology_payload["ref"] = str(meta["ontology_ref"])
+        if meta.get("ontology_commit"):
+            ontology_payload["commit"] = str(meta["ontology_commit"])
 
         if self.audit_store:
             try:
@@ -178,9 +188,13 @@ class ProjectionWorker:
                     "skipped": bool(skip_reason),
                     "skip_reason": skip_reason,
                     "origin_service": meta.get("origin_service"),
+                    "ontology_ref": meta.get("ontology_ref"),
+                    "ontology_commit": meta.get("ontology_commit"),
                     "run_id": os.getenv("PIPELINE_RUN_ID") or os.getenv("RUN_ID") or os.getenv("EXECUTION_ID"),
                     "code_sha": os.getenv("CODE_SHA") or os.getenv("GIT_SHA") or os.getenv("COMMIT_SHA"),
                 }
+                if ontology_payload:
+                    audit_metadata["ontology"] = ontology_payload
                 if isinstance(extra_metadata, dict) and extra_metadata:
                     audit_metadata.update(extra_metadata)
                 await self.audit_store.log(
@@ -216,6 +230,9 @@ class ProjectionWorker:
                         "doc_id": doc_id,
                         "operation": operation,
                         "sequence_number": seq,
+                        "ontology_ref": meta.get("ontology_ref"),
+                        "ontology_commit": meta.get("ontology_commit"),
+                        "ontology": ontology_payload or None,
                     },
                 )
             except Exception as e:
@@ -329,13 +346,13 @@ class ProjectionWorker:
             logger.error(f"Failed to load mappings: {e}")
             raise
             
-    async def _ensure_index_exists(self, db_name: str, index_type: str = "instances"):
+    async def _ensure_index_exists(self, db_name: str, index_type: str = "instances", *, branch: str = "main"):
         """특정 데이터베이스의 인덱스가 존재하는지 확인하고 없으면 생성"""
         if index_type == "instances":
-            index_name = get_instances_index_name(db_name)
+            index_name = get_instances_index_name(db_name, branch=branch)
             mapping = self.instances_mapping
         else:
-            index_name = get_ontologies_index_name(db_name)
+            index_name = get_ontologies_index_name(db_name, branch=branch)
             mapping = self.ontologies_mapping
             
         # 이미 생성된 인덱스는 스킵
@@ -354,6 +371,18 @@ class ProjectionWorker:
                     settings=settings
                 )
                 logger.info(f"Created index: {index_name} for database: {db_name}")
+
+            # Ensure ontology stamp fields exist even for indices created before this feature.
+            try:
+                await self.elasticsearch_service.update_mapping(
+                    index_name,
+                    properties={
+                        "ontology_ref": {"type": "keyword"},
+                        "ontology_commit": {"type": "keyword"},
+                    },
+                )
+            except Exception as e:
+                logger.debug(f"Failed to update mapping for ontology stamps (index={index_name}): {e}")
                 
             self.created_indices.add(index_name)
             return index_name
@@ -567,12 +596,13 @@ class ProjectionWorker:
             db_name = event_data.get('db_name') or instance_data.get('db_name')
             if not db_name:
                 raise ValueError("db_name is required for instance creation")
+            branch = instance_data.get("branch") or "main"
                 
             # 인덱스 확인 및 생성
-            index_name = await self._ensure_index_exists(db_name, "instances")
+            index_name = await self._ensure_index_exists(db_name, "instances", branch=branch)
             
             # 클래스 라벨 조회 (Redis 캐시 활용)
-            class_label = await self._get_class_label(instance_data.get('class_id'), db_name)
+            class_label = await self._get_class_label(instance_data.get('class_id'), db_name, branch=branch)
             
             # Elasticsearch 문서 구성
             instance_id = instance_data.get('instance_id')
@@ -615,6 +645,11 @@ class ProjectionWorker:
                     )
                     return
 
+            event_meta = event_data.get("metadata") if isinstance(event_data, dict) else None
+            if not isinstance(event_meta, dict):
+                event_meta = {}
+            ontology_ref, ontology_commit = split_ref_commit(event_meta.get("ontology"))
+
             doc = {
                 'instance_id': instance_id,
                 'class_id': instance_data.get('class_id'),
@@ -626,7 +661,9 @@ class ProjectionWorker:
                 'event_timestamp': event_data.get('occurred_at') or event_data.get('timestamp'),
                 'version': int(incoming_seq) if incoming_seq is not None else 1,
                 'db_name': db_name,
-                'branch': instance_data.get('branch'),
+                'branch': branch,
+                'ontology_ref': ontology_ref,
+                'ontology_commit': ontology_commit,
                 'created_at': datetime.now(timezone.utc).isoformat(),
                 'updated_at': datetime.now(timezone.utc).isoformat()
             }
@@ -713,12 +750,13 @@ class ProjectionWorker:
             db_name = event_data.get('db_name') or instance_data.get('db_name')
             if not db_name:
                 raise ValueError("db_name is required for instance update")
+            branch = instance_data.get("branch") or "main"
                 
             # 인덱스 확인 및 생성
-            index_name = await self._ensure_index_exists(db_name, "instances")
+            index_name = await self._ensure_index_exists(db_name, "instances", branch=branch)
             
             # 클래스 라벨 조회
-            class_label = await self._get_class_label(instance_data.get('class_id'), db_name)
+            class_label = await self._get_class_label(instance_data.get('class_id'), db_name, branch=branch)
             
             # 기존 문서 조회
             instance_id = instance_data.get('instance_id')
@@ -773,6 +811,11 @@ class ProjectionWorker:
             created_at = None
             if existing_doc:
                 created_at = existing_doc.get("created_at")
+
+            event_meta = event_data.get("metadata") if isinstance(event_data, dict) else None
+            if not isinstance(event_meta, dict):
+                event_meta = {}
+            ontology_ref, ontology_commit = split_ref_commit(event_meta.get("ontology"))
             
             # 업데이트 문서 구성
             doc = {
@@ -786,7 +829,9 @@ class ProjectionWorker:
                 'event_timestamp': event_data.get('occurred_at') or event_data.get('timestamp'),
                 'version': version,
                 'db_name': db_name,
-                'branch': instance_data.get('branch'),
+                'branch': branch,
+                'ontology_ref': ontology_ref,
+                'ontology_commit': ontology_commit,
                 'created_at': created_at or datetime.now(timezone.utc).isoformat(),
                 'updated_at': datetime.now(timezone.utc).isoformat()
             }
@@ -880,14 +925,136 @@ class ProjectionWorker:
             db_name = event_data.get('db_name') or instance_data.get('db_name')
             if not db_name:
                 raise ValueError("db_name is required for instance deletion")
+            branch = instance_data.get("branch") or "main"
                 
             # 인덱스 이름 결정
-            index_name = get_instances_index_name(db_name)
+            index_name = await self._ensure_index_exists(db_name, "instances", branch=branch)
             instance_id = instance_data.get('instance_id')
             if not instance_id:
                 raise ValueError("instance_id is required for instance deletion")
 
             incoming_seq = self._parse_sequence(event_data.get("sequence_number"))
+
+            # Branch overlay semantics:
+            # - main branch: physical delete (existing behavior)
+            # - non-main branch: write a tombstone document so branch reads do not fall back to main
+            if branch != "main":
+                if incoming_seq is None:
+                    logger.warning(
+                        f"Refusing to tombstone instance without sequence_number "
+                        f"(branch={branch}, instance_id={instance_id})"
+                    )
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(instance_id),
+                        operation="index",
+                        status="success",
+                        record_lineage=False,
+                        skip_reason="missing_sequence_number",
+                    )
+                    return
+
+                existing_doc = await self.elasticsearch_service.get_document(index_name, instance_id)
+                if existing_doc and existing_doc.get("event_id") == event_id and existing_doc.get("deleted"):
+                    logger.info(
+                        f"Skipping duplicate instance tombstone event (event_id={event_id}, instance_id={instance_id})"
+                    )
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(instance_id),
+                        operation="index",
+                        status="success",
+                        record_lineage=False,
+                        skip_reason="duplicate",
+                        extra_metadata={"tombstone": True},
+                    )
+                    return
+
+                event_meta = event_data.get("metadata") if isinstance(event_data, dict) else None
+                if not isinstance(event_meta, dict):
+                    event_meta = {}
+                ontology_ref, ontology_commit = split_ref_commit(event_meta.get("ontology"))
+
+                tombstone_doc = {
+                    "instance_id": instance_id,
+                    "class_id": instance_data.get("class_id"),
+                    "db_name": db_name,
+                    "branch": branch,
+                    "ontology_ref": ontology_ref,
+                    "ontology_commit": ontology_commit,
+                    "deleted": True,
+                    "deleted_at": datetime.now(timezone.utc).isoformat(),
+                    "event_id": event_id,
+                    "event_sequence": incoming_seq,
+                    "event_timestamp": event_data.get("occurred_at") or event_data.get("timestamp"),
+                    "version": int(incoming_seq),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+
+                try:
+                    await self.elasticsearch_service.index_document(
+                        index_name,
+                        tombstone_doc,
+                        doc_id=instance_id,
+                        refresh=True,
+                        version=incoming_seq,
+                        version_type="external_gte",
+                    )
+                except Exception as e:
+                    if self._is_es_version_conflict(e):
+                        logger.info(
+                            f"Skipping stale instance tombstone event via ES version conflict "
+                            f"(seq={incoming_seq}, instance_id={instance_id})"
+                        )
+                        await self._record_es_side_effect(
+                            event_id=str(event_id),
+                            event_data=event_data,
+                            db_name=db_name,
+                            index_name=index_name,
+                            doc_id=str(instance_id),
+                            operation="index",
+                            status="success",
+                            record_lineage=False,
+                            skip_reason="stale_version_conflict",
+                            extra_metadata={"tombstone": True},
+                        )
+                        return
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(instance_id),
+                        operation="index",
+                        status="failure",
+                        record_lineage=False,
+                        error=str(e),
+                        extra_metadata={"tombstone": True},
+                    )
+                    raise
+
+                logger.info(
+                    f"Instance tombstoned in branch overlay (branch={branch}, instance_id={instance_id}, index={index_name})"
+                )
+                await self._record_es_side_effect(
+                    event_id=str(event_id),
+                    event_data=event_data,
+                    db_name=db_name,
+                    index_name=index_name,
+                    doc_id=str(instance_id),
+                    operation="index",
+                    status="success",
+                    record_lineage=True,
+                    extra_metadata={"tombstone": True},
+                )
+                return
+
             if incoming_seq is None:
                 existing_doc = await self.elasticsearch_service.get_document(index_name, instance_id)
                 if not existing_doc:
@@ -1006,9 +1173,10 @@ class ProjectionWorker:
             db_name = event_data.get('db_name') or ontology_data.get('db_name')
             if not db_name:
                 raise ValueError("db_name is required for ontology class creation")
+            branch = ontology_data.get("branch") or "main"
                 
             # 인덱스 확인 및 생성
-            index_name = await self._ensure_index_exists(db_name, "ontologies")
+            index_name = await self._ensure_index_exists(db_name, "ontologies", branch=branch)
             
             # Elasticsearch 문서 구성
             class_id = ontology_data.get('class_id') or ontology_data.get('id')
@@ -1051,6 +1219,11 @@ class ProjectionWorker:
                     )
                     return
 
+            event_meta = event_data.get("metadata") if isinstance(event_data, dict) else None
+            if not isinstance(event_meta, dict):
+                event_meta = {}
+            ontology_ref, ontology_commit = split_ref_commit(event_meta.get("ontology"))
+
             doc = {
                 'class_id': class_id,
                 'label': ontology_data.get('label'),
@@ -1060,7 +1233,9 @@ class ProjectionWorker:
                 'parent_classes': ontology_data.get('parent_classes', []),
                 'child_classes': ontology_data.get('child_classes', []),
                 'db_name': db_name,
-                'branch': ontology_data.get('branch'),
+                'branch': branch,
+                'ontology_ref': ontology_ref,
+                'ontology_commit': ontology_commit,
                 'version': int(incoming_seq) if incoming_seq is not None else 1,
                 'event_id': event_id,
                 'event_sequence': incoming_seq,
@@ -1132,7 +1307,8 @@ class ProjectionWorker:
             await self._cache_class_label(
                 class_id,
                 ontology_data.get('label'),
-                db_name
+                db_name,
+                branch=branch,
             )
             
             logger.info(f"Ontology class created in Elasticsearch: {class_id} in index: {index_name}")
@@ -1158,9 +1334,10 @@ class ProjectionWorker:
             db_name = event_data.get('db_name') or ontology_data.get('db_name')
             if not db_name:
                 raise ValueError("db_name is required for ontology class update")
+            branch = ontology_data.get("branch") or "main"
                 
             # 인덱스 확인 및 생성
-            index_name = await self._ensure_index_exists(db_name, "ontologies")
+            index_name = await self._ensure_index_exists(db_name, "ontologies", branch=branch)
 
             class_id = ontology_data.get('class_id') or ontology_data.get('id')
             
@@ -1211,6 +1388,11 @@ class ProjectionWorker:
             created_at = None
             if existing_doc:
                 created_at = existing_doc.get("created_at")
+
+            event_meta = event_data.get("metadata") if isinstance(event_data, dict) else None
+            if not isinstance(event_meta, dict):
+                event_meta = {}
+            ontology_ref, ontology_commit = split_ref_commit(event_meta.get("ontology"))
             
             # 업데이트 문서 구성
             doc = {
@@ -1222,7 +1404,9 @@ class ProjectionWorker:
                 'parent_classes': ontology_data.get('parent_classes', []),
                 'child_classes': ontology_data.get('child_classes', []),
                 'db_name': db_name,
-                'branch': ontology_data.get('branch'),
+                'branch': branch,
+                'ontology_ref': ontology_ref,
+                'ontology_commit': ontology_commit,
                 'version': version,
                 'event_id': event_id,
                 'event_sequence': incoming_seq,
@@ -1301,7 +1485,8 @@ class ProjectionWorker:
             await self._cache_class_label(
                 class_id,
                 ontology_data.get('label'),
-                db_name
+                db_name,
+                branch=branch,
             )
             
             logger.info(f"Ontology class updated in Elasticsearch: {class_id} in index: {index_name}")
@@ -1327,21 +1512,145 @@ class ProjectionWorker:
             db_name = event_data.get('db_name') or ontology_data.get('db_name')
             if not db_name:
                 raise ValueError("db_name is required for ontology class deletion")
+            branch = ontology_data.get("branch") or "main"
                 
             # 인덱스 이름 결정
-            index_name = get_ontologies_index_name(db_name)
+            index_name = await self._ensure_index_exists(db_name, "ontologies", branch=branch)
             class_id = ontology_data.get('class_id') or ontology_data.get('id')
             if not class_id:
                 raise ValueError("class_id is required for ontology class deletion")
 
             incoming_seq = self._parse_sequence(event_data.get("sequence_number"))
+
+            # Branch overlay semantics:
+            # - main branch: physical delete (existing behavior)
+            # - non-main branch: write a tombstone document so branch reads do not fall back to main
+            if branch != "main":
+                if incoming_seq is None:
+                    logger.warning(
+                        f"Refusing to tombstone ontology class without sequence_number "
+                        f"(branch={branch}, class_id={class_id})"
+                    )
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(class_id),
+                        operation="index",
+                        status="success",
+                        record_lineage=False,
+                        skip_reason="missing_sequence_number",
+                        extra_metadata={"tombstone": True},
+                    )
+                    return
+
+                existing_doc = await self.elasticsearch_service.get_document(index_name, class_id)
+                if existing_doc and existing_doc.get("event_id") == event_id and existing_doc.get("deleted"):
+                    logger.info(
+                        f"Skipping duplicate ontology tombstone event (event_id={event_id}, class_id={class_id})"
+                    )
+                    await self.redis_service.delete(AppConfig.get_class_label_key(db_name, class_id, branch))
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(class_id),
+                        operation="index",
+                        status="success",
+                        record_lineage=False,
+                        skip_reason="duplicate",
+                        extra_metadata={"tombstone": True},
+                    )
+                    return
+
+                event_meta = event_data.get("metadata") if isinstance(event_data, dict) else None
+                if not isinstance(event_meta, dict):
+                    event_meta = {}
+                ontology_ref, ontology_commit = split_ref_commit(event_meta.get("ontology"))
+
+                tombstone_doc = {
+                    "class_id": class_id,
+                    "db_name": db_name,
+                    "branch": branch,
+                    "ontology_ref": ontology_ref,
+                    "ontology_commit": ontology_commit,
+                    "deleted": True,
+                    "deleted_at": datetime.now(timezone.utc).isoformat(),
+                    "event_id": event_id,
+                    "event_sequence": incoming_seq,
+                    "event_timestamp": event_data.get("occurred_at") or event_data.get("timestamp"),
+                    "version": int(incoming_seq),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+
+                try:
+                    await self.elasticsearch_service.index_document(
+                        index_name,
+                        tombstone_doc,
+                        doc_id=class_id,
+                        refresh=True,
+                        version=incoming_seq,
+                        version_type="external_gte",
+                    )
+                except Exception as e:
+                    if self._is_es_version_conflict(e):
+                        logger.info(
+                            f"Skipping stale ontology tombstone event via ES version conflict "
+                            f"(seq={incoming_seq}, class_id={class_id})"
+                        )
+                        await self._record_es_side_effect(
+                            event_id=str(event_id),
+                            event_data=event_data,
+                            db_name=db_name,
+                            index_name=index_name,
+                            doc_id=str(class_id),
+                            operation="index",
+                            status="success",
+                            record_lineage=False,
+                            skip_reason="stale_version_conflict",
+                            extra_metadata={"tombstone": True},
+                        )
+                        return
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(class_id),
+                        operation="index",
+                        status="failure",
+                        record_lineage=False,
+                        error=str(e),
+                        extra_metadata={"tombstone": True},
+                    )
+                    raise
+
+                await self.redis_service.delete(AppConfig.get_class_label_key(db_name, class_id, branch))
+                logger.info(
+                    f"Ontology tombstoned in branch overlay (branch={branch}, class_id={class_id}, index={index_name})"
+                )
+                await self._record_es_side_effect(
+                    event_id=str(event_id),
+                    event_data=event_data,
+                    db_name=db_name,
+                    index_name=index_name,
+                    doc_id=str(class_id),
+                    operation="index",
+                    status="success",
+                    record_lineage=True,
+                    extra_metadata={"tombstone": True},
+                )
+                return
+
             if incoming_seq is None:
                 existing_doc = await self.elasticsearch_service.get_document(index_name, class_id)
                 if not existing_doc:
                     logger.info(
                         f"Ontology class already deleted (class_id={class_id}); treating delete as idempotent success"
                     )
-                    await self.redis_service.delete(AppConfig.get_class_label_key(db_name, class_id))
+                    await self.redis_service.delete(AppConfig.get_class_label_key(db_name, class_id, branch))
                     await self._record_es_side_effect(
                         event_id=str(event_id),
                         event_data=event_data,
@@ -1358,7 +1667,7 @@ class ProjectionWorker:
                     logger.info(
                         f"Skipping duplicate ontology delete event (event_id={event_id}, class_id={class_id})"
                     )
-                    await self.redis_service.delete(AppConfig.get_class_label_key(db_name, class_id))
+                    await self.redis_service.delete(AppConfig.get_class_label_key(db_name, class_id, branch))
                     await self._record_es_side_effect(
                         event_id=str(event_id),
                         event_data=event_data,
@@ -1429,7 +1738,7 @@ class ProjectionWorker:
                 raise
             
             # Redis 캐시 삭제 (DB별로 키 구분)
-            await self.redis_service.delete(AppConfig.get_class_label_key(db_name, class_id))
+            await self.redis_service.delete(AppConfig.get_class_label_key(db_name, class_id, branch))
             
             if success:
                 logger.info(f"Ontology class deleted from Elasticsearch: {class_id} from index: {index_name}")
@@ -1516,18 +1825,45 @@ class ProjectionWorker:
                 
             logger.info(f"Database deleted: {db_name}, cleaning up Elasticsearch indices")
             
-            # 관련 인덱스들 삭제
-            instances_index = get_instances_index_name(db_name)
-            ontologies_index = get_ontologies_index_name(db_name)
-            
-            # 인덱스 삭제 (존재하는 경우에만)
-            if await self.elasticsearch_service.index_exists(instances_index):
-                await self.elasticsearch_service.delete_index(instances_index)
-                logger.info(f"Deleted instances index: {instances_index}")
-                
-            if await self.elasticsearch_service.index_exists(ontologies_index):
-                await self.elasticsearch_service.delete_index(ontologies_index)
-                logger.info(f"Deleted ontologies index: {ontologies_index}")
+            # Related indices:
+            # - base indices (main)
+            # - branch overlay indices (`__br_*`)
+            # - versioned rebuild indices (`_*` suffix)
+            base = sanitize_index_name(db_name)
+            patterns = [f"{base}_instances*", f"{base}_ontologies*"]
+
+            indices_to_delete: List[str] = []
+            for pattern in patterns:
+                try:
+                    result = await self.elasticsearch_service.client.indices.get(
+                        index=pattern,
+                        allow_no_indices=True,
+                        ignore_unavailable=True,
+                    )
+                    if isinstance(result, dict):
+                        indices_to_delete.extend(list(result.keys()))
+                except Exception:
+                    continue
+
+            # Always include canonical base names (in case wildcards are restricted).
+            indices_to_delete.extend(
+                [
+                    get_instances_index_name(db_name),
+                    get_ontologies_index_name(db_name),
+                ]
+            )
+
+            # Dedup while preserving order
+            seen = set()
+            indices_to_delete = [i for i in indices_to_delete if not (i in seen or seen.add(i))]
+
+            for index_name in indices_to_delete:
+                try:
+                    if await self.elasticsearch_service.index_exists(index_name):
+                        await self.elasticsearch_service.delete_index(index_name)
+                        logger.info(f"Deleted index: {index_name}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete index {index_name} (continuing): {e}")
             
             # 메타데이터에서 데이터베이스 상태 업데이트 (완전 삭제 대신 비활성화)
             metadata_index = "spice_database_metadata"
@@ -1545,8 +1881,8 @@ class ProjectionWorker:
                 )
             
             # 생성된 인덱스 캐시에서 제거
-            self.created_indices.discard(instances_index)
-            self.created_indices.discard(ontologies_index)
+            for index_name in indices_to_delete:
+                self.created_indices.discard(index_name)
             
             logger.info(f"Database deletion processed: {db_name}, indices cleaned up and metadata updated")
             
@@ -1554,7 +1890,7 @@ class ProjectionWorker:
             logger.error(f"Failed to handle database deleted: {e}")
             raise
             
-    async def _get_class_label(self, class_id: str, db_name: str) -> Optional[str]:
+    async def _get_class_label(self, class_id: str, db_name: str, *, branch: str = "main") -> Optional[str]:
         """
         Redis에서 클래스 라벨 조회 (Cache Stampede 방지)
         
@@ -1565,7 +1901,7 @@ class ProjectionWorker:
             if not class_id or not db_name:
                 return None
                 
-            cache_key = AppConfig.get_class_label_key(db_name, class_id)
+            cache_key = AppConfig.get_class_label_key(db_name, class_id, branch)
             lock_key = f"lock:{cache_key}"
             
             # 캐시 stampede 방지를 위한 분산 락 메커니즘
@@ -1611,11 +1947,14 @@ class ProjectionWorker:
                         # Elasticsearch에서 조회
                         self.cache_metrics['cache_misses'] += 1
                         self.cache_metrics['elasticsearch_queries'] += 1
-                        index_name = get_ontologies_index_name(db_name)
-                        doc = await self.elasticsearch_service.get_document(
-                            index_name,
-                            class_id
-                        )
+                        index_name = get_ontologies_index_name(db_name, branch=branch)
+                        doc = await self.elasticsearch_service.get_document(index_name, class_id)
+
+                        # Branch virtualization: fall back to main ontology index when the overlay
+                        # does not override this class (copy-on-write).
+                        if (not doc) and branch != "main":
+                            base_index = get_ontologies_index_name(db_name, branch="main")
+                            doc = await self.elasticsearch_service.get_document(base_index, class_id)
                         
                         if doc:
                             label = doc.get('label')
@@ -1649,13 +1988,15 @@ class ProjectionWorker:
                     
             # 최대 대기 시간 초과 시 fallback (락 없이 직접 조회)
             logger.warning(f"Lock wait timeout for class_label {class_id} in {db_name}, falling back to direct query")
-            return await self._get_class_label_fallback(class_id, db_name)
+            return await self._get_class_label_fallback(class_id, db_name, branch=branch)
             
         except Exception as e:
             logger.error(f"Failed to get class label for {class_id} in {db_name}: {e}")
             return None
     
-    async def _get_class_label_fallback(self, class_id: str, db_name: str) -> Optional[str]:
+    async def _get_class_label_fallback(
+        self, class_id: str, db_name: str, *, branch: str = "main"
+    ) -> Optional[str]:
         """
         락 획득 실패 시 fallback 조회 (성능보다 안정성 우선)
         """
@@ -1663,17 +2004,17 @@ class ProjectionWorker:
             self.cache_metrics['fallback_queries'] += 1
             self.cache_metrics['elasticsearch_queries'] += 1
             
-            index_name = get_ontologies_index_name(db_name)
-            doc = await self.elasticsearch_service.get_document(
-                index_name,
-                class_id
-            )
+            index_name = get_ontologies_index_name(db_name, branch=branch)
+            doc = await self.elasticsearch_service.get_document(index_name, class_id)
+            if (not doc) and branch != "main":
+                base_index = get_ontologies_index_name(db_name, branch="main")
+                doc = await self.elasticsearch_service.get_document(base_index, class_id)
             
             if doc:
                 label = doc.get('label')
                 if label:
                     # 짧은 시간만 캐싱 (경합 상황이므로)
-                    cache_key = AppConfig.get_class_label_key(db_name, class_id)
+                    cache_key = AppConfig.get_class_label_key(db_name, class_id, branch)
                     await self.redis_service.client.setex(
                         cache_key,
                         60,  # 1분만 캐싱
@@ -1759,13 +2100,13 @@ class ProjectionWorker:
                 f"(indicates high lock contention)"
             )
             
-    async def _cache_class_label(self, class_id: str, label: str, db_name: str):
+    async def _cache_class_label(self, class_id: str, label: str, db_name: str, *, branch: str = "main"):
         """클래스 라벨을 Redis에 캐싱"""
         try:
             if not class_id or not label or not db_name:
                 return
                 
-            cache_key = AppConfig.get_class_label_key(db_name, class_id)
+            cache_key = AppConfig.get_class_label_key(db_name, class_id, branch)
             await self.redis_service.client.setex(
                 cache_key,
                 3600,  # 1시간 TTL

@@ -342,8 +342,8 @@ def rate_limit(
                     headers=headers
                 )
             
-            # Add headers to response
-            response = await func(request, *args, **kwargs)
+            # Call endpoint normally (do not inject Request twice).
+            response = await func(*args, **kwargs)
             if isinstance(response, JSONResponse):
                 for key, value in headers.items():
                     response.headers[key] = value

@@ -9,11 +9,11 @@ that combine TerminusDB's graph authority with Elasticsearch document payloads.
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 from pydantic import BaseModel
 
 from bff.dependencies import get_oms_client
-from shared.security.input_sanitizer import validate_db_name
+from shared.security.input_sanitizer import validate_branch_name, validate_db_name
 from shared.utils.language import get_accept_language
 from shared.services.graph_federation_service_woql import GraphFederationServiceWOQL
 from shared.config.settings import ApplicationSettings
@@ -144,6 +144,7 @@ async def execute_graph_query(
     request: Request,
     lineage_store: LineageStoreDep,
     graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service),
+    branch: str = Query("main", description="Target branch (default: main)"),
 ):
     """
     Execute multi-hop graph query with ES federation
@@ -169,6 +170,7 @@ async def execute_graph_query(
     try:
         # Validate database name
         db_name = validate_db_name(db_name)
+        branch = validate_branch_name(branch)
         
         # Convert hops to tuple format expected by service
         hops_tuples = [(hop.predicate, hop.target_class) for hop in query.hops]
@@ -178,6 +180,7 @@ async def execute_graph_query(
         # Execute multi-hop query
         result = await graph_service.multi_hop_query(
             db_name=db_name,
+            branch=branch,
             start_class=query.start_class,
             hops=hops_tuples,
             filters=query.filters,
@@ -207,7 +210,7 @@ async def execute_graph_query(
                 for node in raw_nodes:
                     terminus_id = str(node.get("terminus_id") or node.get("id") or "")
                     if terminus_id:
-                        art = LineageStore.node_artifact("terminus", db_name, terminus_id)
+                        art = LineageStore.node_artifact("terminus", db_name, branch, terminus_id)
                         terminus_artifact_by_node_id[terminus_id] = art
                         terminus_artifacts.append(art)
 
@@ -303,7 +306,7 @@ async def execute_graph_query(
                 # Relationships come from the source node's Terminus document; attribute to its last write event.
                 from_node = str(edge.get("from") or "")
                 if from_node:
-                    terminus_art = LineageStore.node_artifact("terminus", db_name, from_node)
+                    terminus_art = LineageStore.node_artifact("terminus", db_name, branch, from_node)
                     edge_prov = {"terminus": terminus_latest.get(terminus_art)}
             edges.append(
                 GraphEdge(
@@ -376,7 +379,8 @@ async def execute_simple_graph_query(
     db_name: str,
     query: SimpleGraphQueryRequest,
     request: Request,
-    graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service)
+    graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service),
+    branch: str = Query("main", description="Target branch (default: main)"),
 ):
     """
     Execute simple single-class graph query
@@ -396,12 +400,14 @@ async def execute_simple_graph_query(
     try:
         # Validate database name
         db_name = validate_db_name(db_name)
+        branch = validate_branch_name(branch)
         
         logger.info(f"📊 Simple graph query on {db_name}: {query.class_name}")
         
         # Execute simple query
         result = await graph_service.simple_graph_query(
             db_name=db_name,
+            branch=branch,
             class_name=query.class_name,
             filters=query.filters
         )
@@ -429,7 +435,8 @@ async def execute_multi_hop_query(
     db_name: str,
     query: Dict[str, Any],
     request: Request,
-    graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service)
+    graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service),
+    branch: str = Query("main", description="Target branch (default: main)"),
 ):
     """
     Execute multi-hop graph query with Federation
@@ -445,6 +452,7 @@ async def execute_multi_hop_query(
     try:
         # Validate database name
         db_name = validate_db_name(db_name)
+        branch = validate_branch_name(branch)
         
         start_class = query.get("start_class")
         hops = query.get("hops", [])
@@ -464,6 +472,7 @@ async def execute_multi_hop_query(
         # Execute multi-hop query
         result = await graph_service.multi_hop_query(
             db_name=db_name,
+            branch=branch,
             start_class=start_class,
             hops=hop_tuples,
             filters=filters,
@@ -497,7 +506,8 @@ async def find_relationship_paths(
     source_class: str,
     target_class: str,
     max_depth: int = 5,
-    graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service)
+    graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service),
+    branch: str = Query("main", description="Target branch (default: main)"),
 ):
     """
     Find all possible relationship paths between two classes
@@ -514,6 +524,7 @@ async def find_relationship_paths(
     try:
         # Validate database name
         db_name = validate_db_name(db_name)
+        branch = validate_branch_name(branch)
         
         logger.info(f"🔍 Finding paths from {source_class} to {target_class} in {db_name}")
         
@@ -547,9 +558,10 @@ async def find_relationship_paths(
         # Find paths using REAL WOQL schema queries
         paths = await graph_service.find_relationship_paths(
             db_name=db_name,
+            branch=branch,
             source_class=source_class,
             target_class=target_class,
-            max_depth=max_depth
+            max_depth=max_depth,
         )
         
         logger.info(f"✅ Found {len(paths)} paths via REAL WOQL schema discovery")

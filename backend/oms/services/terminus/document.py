@@ -42,6 +42,7 @@ class DocumentService(BaseTerminusService):
         db_name: str,
         document: Dict[str, Any],
         graph_type: str = "instance",
+        branch: str = "main",
         author: Optional[str] = None,
         message: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -67,11 +68,13 @@ class DocumentService(BaseTerminusService):
                 raise ValueError("문서에 ID가 필요합니다")
             
             # 중복 확인
-            if await self.document_exists(db_name, doc_id, graph_type):
+            if await self.document_exists(db_name, doc_id, graph_type, branch=branch):
                 raise DatabaseError(f"문서 '{doc_id}'이(가) 이미 존재합니다")
             
             # 문서 생성 엔드포인트
-            endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
+            endpoint = (
+                f"/api/document/{self.connection_info.account}/{db_name}{self._branch_descriptor(branch)}"
+            )
             params = {"graph_type": graph_type}
             
             # CLAUDE RULE FIX: Always add author parameter (required by TerminusDB API)
@@ -111,6 +114,7 @@ class DocumentService(BaseTerminusService):
         doc_id: str,
         document: Dict[str, Any],
         graph_type: str = "instance",
+        branch: str = "main",
         author: Optional[str] = None,
         message: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -130,14 +134,16 @@ class DocumentService(BaseTerminusService):
         """
         try:
             # 존재 확인
-            if not await self.document_exists(db_name, doc_id, graph_type):
+            if not await self.document_exists(db_name, doc_id, graph_type, branch=branch):
                 raise OntologyNotFoundError(f"문서 '{doc_id}'을(를) 찾을 수 없습니다")
             
             # ID 설정
             document["@id"] = doc_id
             
             # 문서 업데이트 엔드포인트
-            endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
+            endpoint = (
+                f"/api/document/{self.connection_info.account}/{db_name}{self._branch_descriptor(branch)}"
+            )
             params = {
                 "graph_type": graph_type,
                 "id": doc_id
@@ -172,6 +178,7 @@ class DocumentService(BaseTerminusService):
         db_name: str,
         doc_id: str,
         graph_type: str = "instance",
+        branch: str = "main",
         author: Optional[str] = None,
         message: Optional[str] = None
     ) -> bool:
@@ -190,11 +197,13 @@ class DocumentService(BaseTerminusService):
         """
         try:
             # 존재 확인
-            if not await self.document_exists(db_name, doc_id, graph_type):
+            if not await self.document_exists(db_name, doc_id, graph_type, branch=branch):
                 raise OntologyNotFoundError(f"문서 '{doc_id}'을(를) 찾을 수 없습니다")
             
             # 문서 삭제 엔드포인트
-            endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
+            endpoint = (
+                f"/api/document/{self.connection_info.account}/{db_name}{self._branch_descriptor(branch)}"
+            )
             params = {
                 "graph_type": graph_type,
                 "id": doc_id
@@ -223,7 +232,8 @@ class DocumentService(BaseTerminusService):
         self,
         db_name: str,
         doc_id: str,
-        graph_type: str = "instance"
+        graph_type: str = "instance",
+        branch: str = "main",
     ) -> Optional[Dict[str, Any]]:
         """
         특정 문서 조회
@@ -237,7 +247,9 @@ class DocumentService(BaseTerminusService):
             문서 데이터 또는 None
         """
         try:
-            endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
+            endpoint = (
+                f"/api/document/{self.connection_info.account}/{db_name}{self._branch_descriptor(branch)}"
+            )
             params = {
                 "graph_type": graph_type,
                 "id": doc_id
@@ -264,6 +276,7 @@ class DocumentService(BaseTerminusService):
         self,
         db_name: str,
         graph_type: str = "instance",
+        branch: str = "main",
         doc_type: Optional[str] = None,
         limit: int = 100,
         offset: int = 0
@@ -284,7 +297,9 @@ class DocumentService(BaseTerminusService):
         try:
             await self.db_service.ensure_db_exists(db_name)
             
-            endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
+            endpoint = (
+                f"/api/document/{self.connection_info.account}/{db_name}{self._branch_descriptor(branch)}"
+            )
             params = {
                 "graph_type": graph_type,
                 "limit": limit,
@@ -318,7 +333,8 @@ class DocumentService(BaseTerminusService):
         self,
         db_name: str,
         doc_id: str,
-        graph_type: str = "instance"
+        graph_type: str = "instance",
+        branch: str = "main",
     ) -> bool:
         """
         문서 존재 여부 확인
@@ -332,7 +348,7 @@ class DocumentService(BaseTerminusService):
             존재 여부
         """
         try:
-            doc = await self.get_document(db_name, doc_id, graph_type)
+            doc = await self.get_document(db_name, doc_id, graph_type, branch=branch)
             return doc is not None
         except Exception:
             return False
@@ -342,6 +358,7 @@ class DocumentService(BaseTerminusService):
         db_name: str,
         documents: List[Dict[str, Any]],
         graph_type: str = "instance",
+        branch: str = "main",
         author: Optional[str] = None,
         message: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -367,7 +384,9 @@ class DocumentService(BaseTerminusService):
                     raise ValueError("모든 문서에 ID가 필요합니다")
             
             # 벌크 생성 엔드포인트
-            endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
+            endpoint = (
+                f"/api/document/{self.connection_info.account}/{db_name}{self._branch_descriptor(branch)}"
+            )
             params = {"graph_type": graph_type}
             
             if author:
@@ -397,6 +416,7 @@ class DocumentService(BaseTerminusService):
         db_name: str,
         documents: List[Dict[str, Any]],
         graph_type: str = "instance",
+        branch: str = "main",
         author: Optional[str] = None,
         message: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -415,7 +435,9 @@ class DocumentService(BaseTerminusService):
         """
         try:
             # 벌크 업데이트 엔드포인트
-            endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
+            endpoint = (
+                f"/api/document/{self.connection_info.account}/{db_name}{self._branch_descriptor(branch)}"
+            )
             params = {"graph_type": graph_type}
             
             if author:
@@ -445,6 +467,7 @@ class DocumentService(BaseTerminusService):
         db_name: str,
         doc_ids: List[str],
         graph_type: str = "instance",
+        branch: str = "main",
         author: Optional[str] = None,
         message: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -468,7 +491,7 @@ class DocumentService(BaseTerminusService):
             for doc_id in doc_ids:
                 try:
                     await self.delete_document(
-                        db_name, doc_id, graph_type, author, message
+                        db_name, doc_id, graph_type, branch, author, message
                     )
                     deleted_count += 1
                 except OntologyNotFoundError:
@@ -492,6 +515,7 @@ class DocumentService(BaseTerminusService):
         db_name: str,
         search_query: str,
         graph_type: str = "instance",
+        branch: str = "main",
         doc_type: Optional[str] = None,
         limit: int = 100
     ) -> List[Dict[str, Any]]:
@@ -561,7 +585,8 @@ class DocumentService(BaseTerminusService):
         self,
         db_name: str,
         class_id: str,
-        instance_data: Dict[str, Any]
+        instance_data: Dict[str, Any],
+        branch: str = "main",
     ) -> Dict[str, Any]:
         """
         Create an instance document (alias for create_document)
@@ -586,6 +611,7 @@ class DocumentService(BaseTerminusService):
             db_name=db_name,
             document=instance_data,
             graph_type="instance",
+            branch=branch,
             author="system",
             message=f"Created instance of {class_id}"
         )
@@ -595,7 +621,8 @@ class DocumentService(BaseTerminusService):
         db_name: str,
         class_id: str,
         instance_id: str,
-        update_data: Dict[str, Any]
+        update_data: Dict[str, Any],
+        branch: str = "main",
     ) -> Dict[str, Any]:
         """
         Update an instance document (alias for update_document)
@@ -618,6 +645,7 @@ class DocumentService(BaseTerminusService):
             doc_id=instance_id,
             document=update_data,
             graph_type="instance",
+            branch=branch,
             author="system",
             message=f"Updated instance {instance_id}"
         )
@@ -626,7 +654,8 @@ class DocumentService(BaseTerminusService):
         self,
         db_name: str,
         class_id: str,
-        instance_id: str
+        instance_id: str,
+        branch: str = "main",
     ) -> bool:
         """
         Delete an instance document (alias for delete_document)
@@ -643,6 +672,7 @@ class DocumentService(BaseTerminusService):
             db_name=db_name,
             doc_id=instance_id,
             graph_type="instance",
+            branch=branch,
             author="system",
             message=f"Deleted instance {instance_id}"
         )

@@ -10,6 +10,7 @@ import httpx
 from functools import wraps
 
 from shared.models.config import ConnectionConfig
+from shared.utils.terminus_branch import encode_branch_name
 from oms.exceptions import ConnectionError as TerminusConnectionError
 
 logger = logging.getLogger(__name__)
@@ -117,6 +118,20 @@ class BaseTerminusService:
             )
             
         return self._client
+
+    def _branch_descriptor(self, branch: Optional[str]) -> str:
+        """
+        Build the TerminusDB descriptor path for a branch.
+
+        TerminusDB branch names cannot contain `/` in the descriptor segment, so we encode
+        Git-like names (e.g. "feature/foo") at the Terminus boundary only.
+
+        For main branch we keep the legacy/default path for compatibility.
+        """
+        if not branch or branch == "main":
+            return ""
+        encoded = encode_branch_name(branch)
+        return f"/local/branch/{encoded}"
     
     async def _authenticate(self) -> str:
         """TerminusDB 인증 토큰 획득"""

@@ -73,13 +73,14 @@ class OntologyEvent(BaseEvent):
     """온톨로지 관련 이벤트"""
     db_name: str = Field(..., description="데이터베이스 이름")
     class_id: str = Field(..., description="클래스 ID")
+    branch: str = Field(default="main", description="브랜치 이름")
     
     def __init__(self, **data):
         if "aggregate_type" not in data:
             data["aggregate_type"] = "OntologyClass"
         if "aggregate_id" not in data:
             # Ensure aggregate_id uniqueness across databases (SSoT stream key).
-            data["aggregate_id"] = f"{data.get('db_name', '')}:{data.get('class_id', '')}"
+            data["aggregate_id"] = f"{data.get('db_name', '')}:{data.get('branch', 'main')}:{data.get('class_id', '')}"
         super().__init__(**data)
 
 
@@ -142,6 +143,7 @@ class InstanceEvent(BaseEvent):
     db_name: str = Field(..., description="데이터베이스 이름")
     class_id: str = Field(..., description="클래스 ID")
     instance_id: str = Field(..., description="인스턴스 ID")
+    branch: str = Field(default="main", description="브랜치 이름")
     s3_path: Optional[str] = Field(None, description="S3 저장 경로")
     s3_checksum: Optional[str] = Field(None, description="S3 저장 파일의 SHA256 체크섬")
     
@@ -149,8 +151,11 @@ class InstanceEvent(BaseEvent):
         if "aggregate_type" not in data:
             data["aggregate_type"] = "Instance"
         if "aggregate_id" not in data:
-            # aggregate_id 형식: {db_name}:{class_id}:{instance_id}
-            data["aggregate_id"] = f"{data.get('db_name', '')}:{data.get('class_id', '')}:{data.get('instance_id', '')}"
+            # aggregate_id 형식: {db_name}:{branch}:{class_id}:{instance_id}
+            data["aggregate_id"] = (
+                f"{data.get('db_name', '')}:{data.get('branch', 'main')}:"
+                f"{data.get('class_id', '')}:{data.get('instance_id', '')}"
+            )
         super().__init__(**data)
 
 

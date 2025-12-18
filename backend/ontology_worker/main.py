@@ -37,6 +37,8 @@ from shared.services.command_status_service import CommandStatusService
 from shared.services.processed_event_registry import ClaimDecision, ProcessedEventRegistry
 from shared.services.lineage_store import LineageStore
 from shared.services.audit_log_store import AuditLogStore
+from shared.security.input_sanitizer import validate_branch_name
+from shared.utils.ontology_version import build_ontology_version
 
 # Observability imports
 from shared.observability.tracing import get_tracing_service, trace_endpoint
@@ -75,6 +77,38 @@ class OntologyWorker:
         self.tracing_service = None
         self.metrics_collector = None
         self.context_propagator = ContextPropagator()
+
+    @staticmethod
+    def _coerce_commit_id(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value.strip() or None
+        if isinstance(value, dict):
+            for key in ("commit", "commit_id", "identifier", "id", "@id", "head"):
+                candidate = value.get(key)
+                if candidate:
+                    return str(candidate).strip() or None
+        return str(value).strip() or None
+
+    async def _resolve_ontology_version(self, db_name: str, branch: str) -> Dict[str, str]:
+        """
+        Resolve the current ontology semantic contract version (ref + commit).
+
+        This stamp is attached to:
+        - Terminus side-effects (lineage/audit)
+        - Domain events (so projections inherit it)
+        """
+        commit: Optional[str] = None
+        if self.terminus_service:
+            branches = await self.terminus_service.version_control_service.list_branches(db_name)
+            for item in branches or []:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("name") == branch:
+                    commit = self._coerce_commit_id(item.get("head"))
+                    break
+        return build_ontology_version(branch=branch, commit=commit)
 
     async def _heartbeat_loop(self, *, handler: str, event_id: str) -> None:
         if not self.processed_event_registry:
@@ -244,6 +278,7 @@ class OntologyWorker:
         payload = command_data.get('payload', {}) or {}
         db_name = payload.get('db_name')  # Fixed: get db_name from payload
         command_id = command_data.get('command_id')
+        branch = validate_branch_name(payload.get("branch") or command_data.get("branch") or "main")
         
         sys.stdout.flush()
         sys.stdout.flush()
@@ -265,9 +300,13 @@ class OntologyWorker:
             
             # Idempotent create: if it already exists, treat as success.
             try:
-                await self.terminus_service.create_ontology(db_name, ontology_obj)  # Fixed: call create_ontology with OntologyBase
+                await self.terminus_service.create_ontology(
+                    db_name, ontology_obj, branch=branch
+                )  # Fixed: call create_ontology with OntologyBase
             except Exception as e:
-                existing = await self.terminus_service.get_ontology(db_name, payload.get('class_id'))
+                existing = await self.terminus_service.get_ontology(
+                    db_name, payload.get("class_id"), branch=branch
+                )
                 if existing:
                     logger.info(f"Ontology '{payload.get('class_id')}' already exists; treating create as idempotent success")
                 else:
@@ -279,10 +318,10 @@ class OntologyWorker:
                                 action="ONTOLOGY_TERMINUS_WRITE",
                                 status="failure",
                                 resource_type="terminus_schema",
-                                resource_id=f"terminus:{db_name}:ontology:{payload.get('class_id')}",
+                                resource_id=f"terminus:{db_name}:{branch}:ontology:{payload.get('class_id')}",
                                 event_id=str(command_id),
                                 command_id=str(command_id),
-                                metadata={"db_name": db_name, "class_id": payload.get("class_id"), "operation": "create"},
+                                metadata={"db_name": db_name, "branch": branch, "class_id": payload.get("class_id"), "operation": "create"},
                                 error=str(e),
                                 occurred_at=datetime.now(timezone.utc),
                             )
@@ -291,15 +330,22 @@ class OntologyWorker:
                     raise
 
             class_id = payload.get("class_id")
+            ontology_version = await self._resolve_ontology_version(db_name, branch)
             if command_id and class_id and self.lineage_store:
                 try:
                     await self.lineage_store.record_link(
                         from_node_id=self.lineage_store.node_event(str(command_id)),
-                        to_node_id=self.lineage_store.node_artifact("terminus", db_name, f"ontology:{class_id}"),
+                        to_node_id=self.lineage_store.node_artifact("terminus", db_name, branch, f"ontology:{class_id}"),
                         edge_type="event_wrote_terminus_document",
                         occurred_at=datetime.now(timezone.utc),
-                        to_label=f"terminus:{db_name}:ontology:{class_id}",
-                        edge_metadata={"db_name": db_name, "class_id": class_id, "artifact": "ontology_class"},
+                        to_label=f"terminus:{db_name}:{branch}:ontology:{class_id}",
+                        edge_metadata={
+                            "db_name": db_name,
+                            "branch": branch,
+                            "class_id": class_id,
+                            "artifact": "ontology_class",
+                            "ontology": ontology_version,
+                        },
                     )
                 except Exception:
                     pass
@@ -312,10 +358,16 @@ class OntologyWorker:
                         action="ONTOLOGY_TERMINUS_WRITE",
                         status="success",
                         resource_type="terminus_schema",
-                        resource_id=f"terminus:{db_name}:ontology:{class_id}",
+                        resource_id=f"terminus:{db_name}:{branch}:ontology:{class_id}",
                         event_id=str(command_id),
                         command_id=str(command_id),
-                        metadata={"db_name": db_name, "class_id": class_id, "operation": "create"},
+                        metadata={
+                            "db_name": db_name,
+                            "branch": branch,
+                            "class_id": class_id,
+                            "operation": "create",
+                            "ontology": ontology_version,
+                        },
                         occurred_at=datetime.now(timezone.utc),
                     )
                 except Exception:
@@ -326,10 +378,13 @@ class OntologyWorker:
             event = OntologyEvent(
                 event_type=EventType.ONTOLOGY_CLASS_CREATED,
                 db_name=db_name,
+                branch=branch,
                 class_id=payload.get('class_id'),
                 command_id=command_id,
+                metadata={"ontology": ontology_version},
                 data={
                     "db_name": db_name,
+                    "branch": branch,
                     "class_id": payload.get('class_id'),
                     "label": payload.get('label'),
                     "description": payload.get('description'),
@@ -364,6 +419,7 @@ class OntologyWorker:
         """온톨로지 업데이트 처리"""
         db_name = command_data.get('db_name')
         payload = command_data.get('payload', {}) or {}
+        branch = validate_branch_name(payload.get("branch") or command_data.get("branch") or "main")
         class_id = payload.get('class_id')
         updates = payload.get('updates', {})
         command_id = command_data.get('command_id')
@@ -372,7 +428,7 @@ class OntologyWorker:
         
         try:
             # 기존 데이터 조회
-            existing = await self.terminus_service.get_ontology(db_name, class_id)
+            existing = await self.terminus_service.get_ontology(db_name, class_id, branch=branch)
             if not existing:
                 raise Exception(f"Ontology class '{class_id}' not found")
 
@@ -388,10 +444,10 @@ class OntologyWorker:
             from shared.models.ontology import OntologyBase
             ontology_obj = OntologyBase(**merged_data)
             try:
-                await self.terminus_service.update_ontology(db_name, class_id, ontology_obj)
+                await self.terminus_service.update_ontology(db_name, class_id, ontology_obj, branch=branch)
             except Exception as e:
                 # Best-effort idempotency: if the current ontology already reflects the requested update, continue.
-                current = await self.terminus_service.get_ontology(db_name, class_id)
+                current = await self.terminus_service.get_ontology(db_name, class_id, branch=branch)
                 current_dict = current.model_dump() if hasattr(current, "model_dump") else (current or {})
                 already_applied = True
                 if isinstance(updates, dict):
@@ -410,10 +466,10 @@ class OntologyWorker:
                                 action="ONTOLOGY_TERMINUS_WRITE",
                                 status="failure",
                                 resource_type="terminus_schema",
-                                resource_id=f"terminus:{db_name}:ontology:{class_id}",
+                                resource_id=f"terminus:{db_name}:{branch}:ontology:{class_id}",
                                 event_id=str(command_id),
                                 command_id=str(command_id),
-                                metadata={"db_name": db_name, "class_id": class_id, "operation": "update"},
+                                metadata={"db_name": db_name, "branch": branch, "class_id": class_id, "operation": "update"},
                                 error=str(e),
                                 occurred_at=datetime.now(timezone.utc),
                             )
@@ -421,15 +477,22 @@ class OntologyWorker:
                             pass
                     raise
 
+            ontology_version = await self._resolve_ontology_version(db_name, branch)
             if command_id and class_id and self.lineage_store:
                 try:
                     await self.lineage_store.record_link(
                         from_node_id=self.lineage_store.node_event(str(command_id)),
-                        to_node_id=self.lineage_store.node_artifact("terminus", db_name, f"ontology:{class_id}"),
+                        to_node_id=self.lineage_store.node_artifact("terminus", db_name, branch, f"ontology:{class_id}"),
                         edge_type="event_wrote_terminus_document",
                         occurred_at=datetime.now(timezone.utc),
-                        to_label=f"terminus:{db_name}:ontology:{class_id}",
-                        edge_metadata={"db_name": db_name, "class_id": class_id, "artifact": "ontology_class"},
+                        to_label=f"terminus:{db_name}:{branch}:ontology:{class_id}",
+                        edge_metadata={
+                            "db_name": db_name,
+                            "branch": branch,
+                            "class_id": class_id,
+                            "artifact": "ontology_class",
+                            "ontology": ontology_version,
+                        },
                     )
                 except Exception:
                     pass
@@ -442,10 +505,16 @@ class OntologyWorker:
                         action="ONTOLOGY_TERMINUS_WRITE",
                         status="success",
                         resource_type="terminus_schema",
-                        resource_id=f"terminus:{db_name}:ontology:{class_id}",
+                        resource_id=f"terminus:{db_name}:{branch}:ontology:{class_id}",
                         event_id=str(command_id),
                         command_id=str(command_id),
-                        metadata={"db_name": db_name, "class_id": class_id, "operation": "update"},
+                        metadata={
+                            "db_name": db_name,
+                            "branch": branch,
+                            "class_id": class_id,
+                            "operation": "update",
+                            "ontology": ontology_version,
+                        },
                         occurred_at=datetime.now(timezone.utc),
                     )
                 except Exception:
@@ -455,10 +524,13 @@ class OntologyWorker:
             event = OntologyEvent(
                 event_type=EventType.ONTOLOGY_CLASS_UPDATED,
                 db_name=db_name,
+                branch=branch,
                 class_id=class_id,
                 command_id=command_id,
+                metadata={"ontology": ontology_version},
                 data={
                     "db_name": db_name,
+                    "branch": branch,
                     "class_id": class_id,
                     "updates": updates,
                     "merged_data": merged_data,
@@ -490,6 +562,7 @@ class OntologyWorker:
         """온톨로지 삭제 처리"""
         db_name = command_data.get('db_name')
         payload = command_data.get('payload', {}) or {}
+        branch = validate_branch_name(payload.get("branch") or command_data.get("branch") or "main")
         class_id = payload.get('class_id')
         command_id = command_data.get('command_id')
         
@@ -499,13 +572,13 @@ class OntologyWorker:
             # TerminusDB에서 삭제
             # Idempotent delete: "not found" is success (already deleted).
             try:
-                success = await self.terminus_service.delete_ontology(db_name, class_id)
+                success = await self.terminus_service.delete_ontology(db_name, class_id, branch=branch)
             except Exception:
                 success = False
 
             already_missing = False
             if not success:
-                existing = await self.terminus_service.get_ontology(db_name, class_id)
+                existing = await self.terminus_service.get_ontology(db_name, class_id, branch=branch)
                 if existing:
                     if command_id and self.audit_store:
                         try:
@@ -515,10 +588,10 @@ class OntologyWorker:
                                 action="ONTOLOGY_TERMINUS_DELETE",
                                 status="failure",
                                 resource_type="terminus_schema",
-                                resource_id=f"terminus:{db_name}:ontology:{class_id}",
+                                resource_id=f"terminus:{db_name}:{branch}:ontology:{class_id}",
                                 event_id=str(command_id),
                                 command_id=str(command_id),
-                                metadata={"db_name": db_name, "class_id": class_id, "operation": "delete"},
+                                metadata={"db_name": db_name, "branch": branch, "class_id": class_id, "operation": "delete"},
                                 error="delete_failed",
                                 occurred_at=datetime.now(timezone.utc),
                             )
@@ -528,15 +601,23 @@ class OntologyWorker:
                 logger.info(f"Ontology '{class_id}' already deleted; treating delete as idempotent success")
                 already_missing = True
 
+            ontology_version = await self._resolve_ontology_version(db_name, branch)
+
             if command_id and class_id and self.lineage_store:
                 try:
                     await self.lineage_store.record_link(
                         from_node_id=self.lineage_store.node_event(str(command_id)),
-                        to_node_id=self.lineage_store.node_artifact("terminus", db_name, f"ontology:{class_id}"),
+                        to_node_id=self.lineage_store.node_artifact("terminus", db_name, branch, f"ontology:{class_id}"),
                         edge_type="event_deleted_terminus_document",
                         occurred_at=datetime.now(timezone.utc),
-                        to_label=f"terminus:{db_name}:ontology:{class_id}",
-                        edge_metadata={"db_name": db_name, "class_id": class_id, "artifact": "ontology_class"},
+                        to_label=f"terminus:{db_name}:{branch}:ontology:{class_id}",
+                        edge_metadata={
+                            "db_name": db_name,
+                            "branch": branch,
+                            "class_id": class_id,
+                            "artifact": "ontology_class",
+                            "ontology": ontology_version,
+                        },
                     )
                 except Exception:
                     pass
@@ -549,14 +630,16 @@ class OntologyWorker:
                         action="ONTOLOGY_TERMINUS_DELETE",
                         status="success",
                         resource_type="terminus_schema",
-                        resource_id=f"terminus:{db_name}:ontology:{class_id}",
+                        resource_id=f"terminus:{db_name}:{branch}:ontology:{class_id}",
                         event_id=str(command_id),
                         command_id=str(command_id),
                         metadata={
                             "db_name": db_name,
+                            "branch": branch,
                             "class_id": class_id,
                             "operation": "delete",
                             "already_missing": already_missing,
+                            "ontology": ontology_version,
                         },
                         occurred_at=datetime.now(timezone.utc),
                     )
@@ -567,10 +650,13 @@ class OntologyWorker:
             event = OntologyEvent(
                 event_type=EventType.ONTOLOGY_CLASS_DELETED,
                 db_name=db_name,
+                branch=branch,
                 class_id=class_id,
                 command_id=command_id,
+                metadata={"ontology": ontology_version},
                 data={
                     "db_name": db_name,
+                    "branch": branch,
                     "class_id": class_id
                 },
                 occurred_by=command_data.get('created_by', 'system')
@@ -699,6 +785,8 @@ class OntologyWorker:
         # Preserve useful context for downstream projections
         if hasattr(event, "db_name") and getattr(event, "db_name"):
             data.setdefault("db_name", getattr(event, "db_name"))
+        if hasattr(event, "branch") and getattr(event, "branch"):
+            data.setdefault("branch", getattr(event, "branch"))
         if hasattr(event, "class_id") and getattr(event, "class_id"):
             data.setdefault("class_id", getattr(event, "class_id"))
         if getattr(event, "command_id", None):

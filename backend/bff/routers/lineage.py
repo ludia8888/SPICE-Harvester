@@ -19,6 +19,15 @@ from shared.security.input_sanitizer import validate_db_name
 
 router = APIRouter(prefix="/lineage", tags=["Lineage"])
 
+# TODO(향후 개발): 셀/필드 단위 provenance(end-to-end)
+# 현재 Lineage API는 "event/aggregate/artifact" 수준의 그래프(포인터) 추적에 초점을 둡니다.
+# 실무에서 "이 값이 엑셀의 몇 행/몇 열에서 왔는지"까지 증명하려면, 그래프를 셀 단위로 키우지 말고:
+# - S3에 per-document provenance blob 저장 (예: provenance/<db>/<index>/<doc_id>/<event_id>.json.gz)
+# - ES 문서에는 provenance_ref(S3 key/etag 등)만 저장
+# - Lineage에는 포인터 엣지만 기록: event -> artifact:s3:provenance_blob -> artifact:es:<index>/<doc_id>
+# - 구조 분석(crop/pivot/merged fill) 이후에도 cell 좌표가 유지되도록 import 파이프라인에서 좌표 매핑을 carry
+# 이렇게 하면 그래프 폭발 없이 "원천까지" 추적 + 감사(Audit) 근거 제시가 가능합니다.
+
 
 def _parse_artifact_node_id(node_id: str) -> Tuple[Optional[str], str]:
     """

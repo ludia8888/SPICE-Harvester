@@ -19,6 +19,7 @@ import asyncpg
 from shared.config.service_config import ServiceConfig
 from shared.models.event_envelope import EventEnvelope
 from shared.models.lineage import LineageDirection, LineageEdge, LineageGraph, LineageNode
+from shared.utils.ontology_version import extract_ontology_version
 
 
 class LineageStore:
@@ -937,6 +938,7 @@ class LineageStore:
         producer_service = envelope.metadata.get("service") if isinstance(envelope.metadata, dict) else None
         producer_run_id = envelope.metadata.get("run_id") if isinstance(envelope.metadata, dict) else None
         producer_code_sha = envelope.metadata.get("code_sha") if isinstance(envelope.metadata, dict) else None
+        ontology = extract_ontology_version(envelope_metadata=envelope.metadata, envelope_data=envelope.data)
 
         await self.record_link(
             from_node_id=agg_node,
@@ -956,6 +958,7 @@ class LineageStore:
                 "producer_run_id": str(producer_run_id) if producer_run_id else None,
                 "producer_code_sha": str(producer_code_sha) if producer_code_sha else None,
                 "schema_version": envelope.schema_version,
+                "ontology": ontology,
             },
         )
 
@@ -976,6 +979,7 @@ class LineageStore:
                     "producer_run_id": str(producer_run_id) if producer_run_id else None,
                     "producer_code_sha": str(producer_code_sha) if producer_code_sha else None,
                     "schema_version": envelope.schema_version,
+                    "ontology": ontology,
                 },
             )
 
@@ -999,6 +1003,7 @@ class LineageStore:
                         "producer_run_id": str(producer_run_id) if producer_run_id else None,
                         "producer_code_sha": str(producer_code_sha) if producer_code_sha else None,
                         "schema_version": envelope.schema_version,
+                        "ontology": ontology,
                     },
                 )
 

@@ -7,15 +7,13 @@ import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
-import base64
+from shared.utils.terminus_branch import decode_branch_name, encode_branch_name
 
 from .base import BaseTerminusService
 from .database import DatabaseService
 from oms.exceptions import DatabaseError
 
 logger = logging.getLogger(__name__)
-
-_BRANCH_B64_PREFIX = "spiceb64_"
 
 
 class VersionControlService(BaseTerminusService):
@@ -45,31 +43,8 @@ class VersionControlService(BaseTerminusService):
         finally:
             await super().disconnect()
 
-    @staticmethod
-    def _encode_branch_name(branch_name: str) -> str:
-        """
-        TerminusDB branch names do not support slashes in resource descriptors.
-
-        We accept Git-like names (e.g. "feature/xyz") at the API layer and store an
-        internal, Terminus-safe representation instead.
-        """
-        if "/" not in branch_name:
-            return branch_name
-        encoded = base64.urlsafe_b64encode(branch_name.encode("utf-8")).decode("ascii").rstrip("=")
-        return f"{_BRANCH_B64_PREFIX}{encoded}"
-
-    @staticmethod
-    def _decode_branch_name(branch_name: str) -> str:
-        if not isinstance(branch_name, str):
-            return branch_name
-        if not branch_name.startswith(_BRANCH_B64_PREFIX):
-            return branch_name
-        token = branch_name[len(_BRANCH_B64_PREFIX):]
-        padded = token + ("=" * (-len(token) % 4))
-        try:
-            return base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
-        except Exception:
-            return branch_name
+    _encode_branch_name = staticmethod(encode_branch_name)
+    _decode_branch_name = staticmethod(decode_branch_name)
 
     @staticmethod
     def _is_origin_branch_missing_error(exc: Exception) -> bool:
@@ -371,7 +346,7 @@ class VersionControlService(BaseTerminusService):
         """
         try:
             encoded_branch = self._encode_branch_name(branch_name)
-            endpoint = f"/api/woql/{self.connection_info.account}/{db_name}/branch/{encoded_branch}"
+            endpoint = f"/api/woql/{self.connection_info.account}/{db_name}/local/branch/{encoded_branch}"
             
             # 빈 WOQL 쿼리로 커밋 생성
             data = {
