@@ -136,7 +136,7 @@ async def preview_google_sheet_for_funnel(
 
 
 @router.post(
-    "/connectors/google-sheets/register",
+    "/data-connectors/google-sheets/register",
     response_model=Dict[str, Any],
     summary="Register Google Sheet for data monitoring",
     description="Register a Google Sheet URL for data change monitoring and automatic import"
@@ -214,14 +214,7 @@ async def register_google_sheet(
     "/data-connectors/google-sheets/{sheet_id}/preview",
     response_model=Dict[str, Any],
     summary="Preview registered Google Sheet data",
-    description="Get a preview of data from a registered Google Sheet (canonical path).",
-)
-@router.get(
-    "/connectors/google-sheets/{sheet_id}/preview",
-    response_model=Dict[str, Any],
-    summary="Preview Google Sheet data (legacy path)",
-    description="Legacy path kept for backward compatibility. Prefer /data-connectors/...",
-    deprecated=True,
+    description="Get a preview of data from a registered Google Sheet.",
 )
 @rate_limit(**RateLimitPresets.RELAXED)
 @trace_endpoint("preview_google_sheet")
@@ -276,14 +269,7 @@ async def preview_google_sheet(
     "/data-connectors/google-sheets/registered",
     response_model=Dict[str, Any],
     summary="List registered Google Sheets",
-    description="Get list of all registered Google Sheets for monitoring (canonical path).",
-)
-@router.get(
-    "/connectors/google-sheets/registered",
-    response_model=Dict[str, Any],
-    summary="List registered Google Sheets (legacy path)",
-    description="Legacy path kept for backward compatibility. Prefer /data-connectors/...",
-    deprecated=True,
+    description="Get list of all registered Google Sheets for monitoring.",
 )
 @rate_limit(**RateLimitPresets.RELAXED)
 @trace_endpoint("list_registered_sheets")
@@ -327,14 +313,7 @@ async def list_registered_sheets(
     "/data-connectors/google-sheets/{sheet_id}",
     response_model=Dict[str, str],
     summary="Unregister Google Sheet",
-    description="Remove a Google Sheet from monitoring (canonical path).",
-)
-@router.delete(
-    "/connectors/google-sheets/{sheet_id}",
-    response_model=Dict[str, str],
-    summary="Unregister Google Sheet (legacy path)",
-    description="Legacy path kept for backward compatibility. Prefer /data-connectors/...",
-    deprecated=True,
+    description="Remove a Google Sheet from monitoring.",
 )
 @rate_limit(**RateLimitPresets.STANDARD)
 @trace_endpoint("unregister_google_sheet")

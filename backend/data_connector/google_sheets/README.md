@@ -12,30 +12,20 @@ Google Sheets를 SPICE HARVESTER 온톨로지 시스템과 연동하는 커넥�
 
 ## 📋 API 엔드포인트
 
-### 1. 헬스 체크
+> 기준: **BFF** 서비스(`http://localhost:8002`)에 노출된 Google Sheets 커넥터 API입니다.
+
+### 1) 시트 미리보기 (URL 기반; Funnel/프론트 공용)
+
 ```bash
-GET /api/v1/connectors/google/health
+POST /api/v1/data-connectors/google-sheets/preview
 ```
 
-응답 예시:
+요청 예시:
 ```json
 {
-  "status": "healthy",
-  "service": "google_sheets_connector",
-  "api_key_configured": false,
-  "message": "Google Sheets connector is operational"
-}
-```
-
-### 2. 시트 미리보기
-```bash
-POST /api/v1/connectors/google/preview
-```
-
-요청:
-```json
-{
-  "sheet_url": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit"
+  "sheet_url": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=0",
+  "worksheet_name": "Sheet1",
+  "api_key": null
 }
 ```
 
@@ -76,9 +66,10 @@ POST /api/v1/data-connectors/google-sheets/grid
 }
 ```
 
-### 3. 시트 등록 (폴링)
+### 2) 시트 등록 (폴링/모니터링)
+
 ```bash
-POST /api/v1/connectors/google/register
+POST /api/v1/data-connectors/google-sheets/register
 ```
 
 요청:
@@ -90,25 +81,24 @@ POST /api/v1/connectors/google/register
 }
 ```
 
-응답:
-```json
-{
-  "status": "registered",
-  "sheet_id": "YOUR_SHEET_ID",
-  "worksheet_name": "Sheet1",
-  "polling_interval": 300,
-  "registered_at": "2025-07-18T12:00:00Z"
-}
+응답은 `ApiResponse` 래퍼(`success/message/data`) 형태로 반환됩니다.
+
+### 3) 등록된 시트 목록
+
+```bash
+GET /api/v1/data-connectors/google-sheets/registered
 ```
 
-### 4. 등록된 시트 목록
+### 4) 등록된 시트 미리보기 (sheet_id 기반)
+
 ```bash
-GET /api/v1/connectors/google/registered
+GET /api/v1/data-connectors/google-sheets/{sheet_id}/preview
 ```
 
-### 5. 시트 등록 해제
+### 5) 시트 등록 해제
+
 ```bash
-DELETE /api/v1/connectors/google/register/{sheet_id}
+DELETE /api/v1/data-connectors/google-sheets/{sheet_id}
 ```
 
 ## 🔧 설정
@@ -138,7 +128,7 @@ import asyncio
 async def preview_google_sheet():
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            "http://localhost:8002/api/v1/connectors/google/preview",
+            "http://localhost:8002/api/v1/data-connectors/google-sheets/preview",
             json={
                 "sheet_url": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit"
             }
@@ -156,14 +146,14 @@ asyncio.run(preview_google_sheet())
 ### cURL 예시
 ```bash
 # 시트 미리보기
-curl -X POST http://localhost:8002/api/v1/connectors/google/preview \
+curl -X POST http://localhost:8002/api/v1/data-connectors/google-sheets/preview \
   -H "Content-Type: application/json" \
   -d '{
     "sheet_url": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit"
   }'
 
 # 시트 등록
-curl -X POST http://localhost:8002/api/v1/connectors/google/register \
+curl -X POST http://localhost:8002/api/v1/data-connectors/google-sheets/register \
   -H "Content-Type: application/json" \
   -d '{
     "sheet_url": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit",
@@ -179,7 +169,7 @@ curl -X POST http://localhost:8002/api/v1/connectors/google/register \
    - 공개 공유 설정
 
 2. **데이터 미리보기**
-   - `/preview` API로 데이터 구조 확인
+   - `POST /api/v1/data-connectors/google-sheets/preview`로 데이터 구조 확인
    - 컬럼과 데이터 타입 파악
 
 3. **ObjectType 생성**
@@ -187,14 +177,14 @@ curl -X POST http://localhost:8002/api/v1/connectors/google/register \
    - 각 컬럼을 속성으로 매핑
 
 4. **주기적 동기화**
-   - `/register` API로 시트 등록
+   - `POST /api/v1/data-connectors/google-sheets/register`로 시트 등록
    - 설정된 간격으로 자동 업데이트
 
 ## 🚧 제한사항
 
 - 현재는 공개 시트만 지원 (OAuth2는 개발 중)
-- 최대 5개의 샘플 행만 미리보기에 표시
-- 폴링 간격은 60초~3600초 사이
+- 미리보기는 기본 `limit=10` (필요 시 쿼리 파라미터로 조정)
+- `polling_interval`은 seconds 단위이며 너무 짧으면 외부 API/비용 이슈가 생길 수 있음
 
 ## 🔮 향후 계획
 
@@ -206,16 +196,14 @@ curl -X POST http://localhost:8002/api/v1/connectors/google/register \
 
 ## 🧪 테스트
 
-### 유틸리티 테스트
-```bash
-cd backend
-python tests/connectors/test_google_sheets_simple.py
-```
+Google Sheets는 외부 서비스 의존성이 있어, 로컬에서는 아래처럼 엔드포인트 스모크로 확인하는 방식이 가장 안전합니다.
 
-### API 통합 테스트
 ```bash
-cd backend
-python test_google_sheets_quick.py
+curl -fsS http://localhost:8002/api/v1/health | jq .
+
+curl -fsS -X POST http://localhost:8002/api/v1/data-connectors/google-sheets/preview \\
+  -H 'Content-Type: application/json' \\
+  -d '{\"sheet_url\":\"https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit\"}' | jq .
 ```
 
 ## 📝 문제 해결

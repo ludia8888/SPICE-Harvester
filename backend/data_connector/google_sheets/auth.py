@@ -48,7 +48,7 @@ class GoogleOAuth2Client:
         self.client_id = client_id or os.getenv("GOOGLE_CLIENT_ID")
         self.client_secret = client_secret or os.getenv("GOOGLE_CLIENT_SECRET")
         self.redirect_uri = redirect_uri or os.getenv(
-            "GOOGLE_REDIRECT_URI", "http://localhost:8002/api/v1/connectors/google/oauth/callback"
+            "GOOGLE_REDIRECT_URI", "http://localhost:8002/api/v1/data-connectors/google-sheets/oauth/callback"
         )
 
         # Token storage (실제로는 DB나 Redis 사용)
