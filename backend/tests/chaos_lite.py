@@ -62,6 +62,10 @@ ENDPOINTS = Endpoints(
     es=(os.getenv("ELASTICSEARCH_URL") or f"http://localhost:{ES_PORT}").rstrip("/"),
 )
 
+# Instance aggregate_id format (shared.models.commands.InstanceCommand):
+#   "{db_name}:{branch}:{class_id}:{instance_id}"
+DEFAULT_BRANCH = "main"
+
 
 def _run(cmd: list[str], *, cwd: Path, env: Optional[Dict[str, str]] = None) -> str:
     proc = subprocess.run(
@@ -469,8 +473,8 @@ def _assert_converged(
     retry_expected: bool = False,
 ) -> None:
     # 1) S3/MinIO event store indexes exist for command + domain events
-    cust_agg = f"{db_name}:Customer:{customer_id}"
-    prod_agg = f"{db_name}:Product:{product_id}"
+    cust_agg = f"{db_name}:{DEFAULT_BRANCH}:Customer:{customer_id}"
+    prod_agg = f"{db_name}:{DEFAULT_BRANCH}:Product:{product_id}"
     cust_domain = _domain_event_id(customer_command_id, event_type="INSTANCE_CREATED", aggregate_id=cust_agg)
     prod_domain = _domain_event_id(product_command_id, event_type="INSTANCE_CREATED", aggregate_id=prod_agg)
 
@@ -690,7 +694,7 @@ def scenario_out_of_order_delivery() -> None:
         product_command_id=ids["product_command_id"],
     )
 
-    prod_agg = f"{db}:Product:{product_id}"
+    prod_agg = f"{db}:{DEFAULT_BRANCH}:Product:{product_id}"
 
     # 2) Stop message-relay so OMS can append commands to S3 without automatically publishing to Kafka.
     print("Stopping message-relay (publisher)...", flush=True)
