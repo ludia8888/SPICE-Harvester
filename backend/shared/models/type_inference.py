@@ -2,10 +2,10 @@
 Funnel Service Models
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from shared.models.common import DataType
 
@@ -22,16 +22,9 @@ class TypeInferenceResult(BaseModel):
 class ColumnAnalysisResult(BaseModel):
     """Analysis result for a single column"""
 
-    column_name: str
-    inferred_type: TypeInferenceResult
-    sample_values: List[Any] = Field(
-        default_factory=list, description="Sample values used for analysis"
-    )
-    null_count: int = Field(default=0, description="Number of null/empty values")
-    unique_count: int = Field(default=0, description="Number of unique values")
-
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra={
             "example": {
                 "column_name": "order_date",
                 "inferred_type": {
@@ -40,11 +33,30 @@ class ColumnAnalysisResult(BaseModel):
                     "reason": "47/50 values (94%) match date pattern YYYY-MM-DD",
                     "metadata": {"detected_format": "YYYY-MM-DD"},
                 },
+                "total_count": 50,
+                "non_empty_count": 47,
                 "sample_values": ["2023-01-15", "2023-02-20", "2023-03-10"],
                 "null_count": 3,
                 "unique_count": 47,
+                "null_ratio": 0.06,
+                "unique_ratio": 1.0,
             }
-        }
+        },
+    )
+
+    column_name: str
+    inferred_type: TypeInferenceResult
+    total_count: int = Field(default=0, ge=0, description="Total analyzed values (incl. null/empty)")
+    non_empty_count: int = Field(default=0, ge=0, description="Non-empty analyzed values")
+    sample_values: List[Any] = Field(
+        default_factory=list, description="Sample values used for analysis"
+    )
+    null_count: int = Field(default=0, description="Number of null/empty values")
+    unique_count: int = Field(default=0, description="Number of unique values")
+    null_ratio: float = Field(default=0.0, ge=0.0, le=1.0, description="Null/total ratio")
+    unique_ratio: float = Field(
+        default=0.0, ge=0.0, le=1.0, description="Unique/non-empty ratio"
+    )
 
 
 class DatasetAnalysisRequest(BaseModel):
@@ -61,7 +73,7 @@ class DatasetAnalysisResponse(BaseModel):
 
     columns: List[ColumnAnalysisResult]
     analysis_metadata: Dict[str, Any] = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class SchemaGenerationRequest(BaseModel):

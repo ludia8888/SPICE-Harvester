@@ -25,6 +25,7 @@ services:
     depends_on:
       - terminusdb
       - postgres
+      - minio
       
   bff:
     extends:
@@ -43,6 +44,7 @@ services:
     depends_on:
       - postgres
       - kafka
+      - minio
       
   ontology-worker:
     extends:
@@ -52,6 +54,7 @@ services:
       - terminusdb
       - kafka
       - message-relay
+      - postgres
       
   instance-worker:
     extends:
@@ -61,6 +64,8 @@ services:
       - terminusdb
       - kafka
       - message-relay
+      - postgres
+      - minio
       
   projection-worker:
     extends:
@@ -71,6 +76,7 @@ services:
       - redis
       - kafka
       - message-relay
+      - postgres
       
   # Database services
   postgres:
@@ -87,6 +93,11 @@ services:
     extends:
       file: docker-compose.databases.yml
       service: elasticsearch
+
+  minio:
+    extends:
+      file: docker-compose.databases.yml
+      service: minio
       
   # Kafka services
   zookeeper:
@@ -110,10 +121,12 @@ volumes:
   postgres-data:
   redis-data:
   elasticsearch-data:
+  minio-data:
   zookeeper-data:
   zookeeper-logs:
   kafka-data:
 
 networks:
   spice_network:
+    name: spice_network
     driver: bridge

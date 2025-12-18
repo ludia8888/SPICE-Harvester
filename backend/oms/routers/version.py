@@ -77,7 +77,7 @@ async def create_commit(
         db_name = validate_db_name(db_name)
 
         # 요청 데이터 정화
-        sanitized_data = sanitize_input(request.dict())
+        sanitized_data = sanitize_input(request.model_dump(mode="json"))
 
         # 커밋 메시지 검증
         if not sanitized_data.get("message"):
@@ -212,17 +212,31 @@ async def get_diff(
         # 차이점 조회
         diff = await terminus.diff(db_name, from_ref, to_ref)
 
+        summary = {"added": 0, "modified": 0, "deleted": 0}
+        if isinstance(diff, list):
+            for change in diff:
+                if not isinstance(change, dict):
+                    continue
+                change_type = change.get("type")
+                if change_type in summary:
+                    summary[change_type] += 1
+        elif isinstance(diff, dict):
+            changes = diff.get("changes")
+            if isinstance(changes, list):
+                for change in changes:
+                    if not isinstance(change, dict):
+                        continue
+                    change_type = change.get("type")
+                    if change_type in summary:
+                        summary[change_type] += 1
+
         return ApiResponse.success(
             message="차이점을 조회했습니다",
             data={
                 "from": from_ref,
                 "to": to_ref,
                 "changes": diff,
-                "summary": {
-                    "added": len([c for c in diff if c.get("type") == "added"]),
-                    "modified": len([c for c in diff if c.get("type") == "modified"]),
-                    "deleted": len([c for c in diff if c.get("type") == "deleted"])
-                }
+                "summary": summary,
             }
         ).to_dict()
 
@@ -263,7 +277,7 @@ async def merge_branches(
         db_name = validate_db_name(db_name)
 
         # 요청 데이터 정화
-        sanitized_data = sanitize_input(request.dict())
+        sanitized_data = sanitize_input(request.model_dump(mode="json"))
 
         # 브랜치 이름 검증
         source_branch = validate_branch_name(sanitized_data["source_branch"])
@@ -349,7 +363,7 @@ async def rollback(
         db_name = validate_db_name(db_name)
 
         # 요청 데이터 정화
-        sanitized_data = sanitize_input(request.dict())
+        sanitized_data = sanitize_input(request.model_dump(mode="json"))
         target = sanitized_data["target"]
 
         # 타겟 검증

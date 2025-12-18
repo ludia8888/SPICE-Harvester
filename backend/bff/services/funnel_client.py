@@ -25,7 +25,7 @@ class FunnelClient:
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
             timeout=30.0,
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            headers={"Accept": "application/json"},
             verify=ssl_config.get("verify", True),
         )
 
@@ -177,6 +177,8 @@ class FunnelClient:
         worksheet_name: str = None,
         class_name: str = None,
         api_key: str = None,
+        table_id: Optional[str] = None,
+        table_bbox: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Google Sheets에서 직접 스키마 생성
@@ -191,7 +193,46 @@ class FunnelClient:
             스키마 제안 결과
         """
         try:
-            # 1. Google Sheets 미리보기 및 타입 추론
+            # Preferred path: structure analysis (handles multi-table, transposed, key-value forms)
+            try:
+                structure = await self.analyze_google_sheets_structure(
+                    sheet_url=sheet_url,
+                    worksheet_name=worksheet_name,
+                    api_key=api_key,
+                    include_complex_types=True,
+                )
+                table = self._select_requested_table(
+                    structure,
+                    table_id=table_id,
+                    table_bbox=table_bbox,
+                )
+                preview_result = self._structure_table_to_preview(
+                    structure=structure,
+                    table=table,
+                    sheet_url=sheet_url,
+                    worksheet_name=worksheet_name,
+                )
+
+                analysis_result = {
+                    "columns": preview_result.get("inferred_schema") or [],
+                    "analysis_metadata": {
+                        "source": "google_sheets",
+                        "sheet_url": sheet_url,
+                        "worksheet_name": worksheet_name,
+                        "table_id": table.get("id"),
+                        "table_mode": table.get("mode"),
+                        "table_bbox": table.get("bbox"),
+                        "total_rows": preview_result.get("total_rows", 0),
+                    },
+                }
+                schema_suggestion = await self.suggest_schema(analysis_result, class_name)
+                return {"preview": preview_result, "schema_suggestion": schema_suggestion, "structure": structure}
+            except Exception as e:
+                if table_id or table_bbox:
+                    raise
+                logger.warning(f"Structure analysis path failed; falling back to simple preview: {e}")
+
+            # Fallback path: legacy preview (assumes header-row table)
             preview_result = await self.preview_google_sheets(
                 sheet_url=sheet_url,
                 worksheet_name=worksheet_name,
@@ -200,27 +241,429 @@ class FunnelClient:
                 include_complex_types=True,
             )
 
-            # 2. 추론된 스키마를 기반으로 제안 생성
-            if preview_result.get("inferred_schema"):
-                analysis_result = {
-                    "columns": preview_result["inferred_schema"],
-                    "analysis_metadata": {
-                        "source": "google_sheets",
-                        "sheet_url": sheet_url,
-                        "worksheet_name": worksheet_name,
-                        "total_rows": preview_result.get("total_rows", 0),
-                    },
-                }
-
-                schema_suggestion = await self.suggest_schema(analysis_result, class_name)
-
-                return {"preview": preview_result, "schema_suggestion": schema_suggestion}
-            else:
+            if not preview_result.get("inferred_schema"):
                 raise ValueError("타입 추론에 실패했습니다.")
+
+            analysis_result = {
+                "columns": preview_result["inferred_schema"],
+                "analysis_metadata": {
+                    "source": "google_sheets",
+                    "sheet_url": sheet_url,
+                    "worksheet_name": worksheet_name,
+                    "total_rows": preview_result.get("total_rows", 0),
+                },
+            }
+            schema_suggestion = await self.suggest_schema(analysis_result, class_name)
+            return {"preview": preview_result, "schema_suggestion": schema_suggestion}
 
         except Exception as e:
             logger.error(f"Google Sheets 스키마 생성 실패: {e}")
             raise
+
+    async def google_sheets_to_structure_preview(
+        self,
+        *,
+        sheet_url: str,
+        worksheet_name: Optional[str] = None,
+        api_key: Optional[str] = None,
+        table_id: Optional[str] = None,
+        table_bbox: Optional[Dict[str, Any]] = None,
+        include_complex_types: bool = True,
+        max_tables: int = 5,
+        max_rows: Optional[int] = None,
+        max_cols: Optional[int] = None,
+        trim_trailing_empty: bool = True,
+        options: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Google Sheets URL → (grid/merged_cells) → structure analysis → selected table preview.
+
+        Notes:
+        - This method does NOT call `/suggest-schema`; it only returns preview + structure for downstream steps
+          (e.g., mapping suggestions, UI preview).
+        """
+        structure = await self.analyze_google_sheets_structure(
+            sheet_url=sheet_url,
+            worksheet_name=worksheet_name,
+            api_key=api_key,
+            include_complex_types=include_complex_types,
+            max_tables=max_tables,
+            max_rows=max_rows,
+            max_cols=max_cols,
+            trim_trailing_empty=trim_trailing_empty,
+            options=options,
+        )
+        table = self._select_requested_table(structure, table_id=table_id, table_bbox=table_bbox)
+        preview = self._structure_table_to_preview(
+            structure=structure,
+            table=table,
+            sheet_url=sheet_url,
+            worksheet_name=worksheet_name,
+        )
+        return {"preview": preview, "structure": structure, "table": table}
+
+    async def analyze_google_sheets_structure(
+        self,
+        *,
+        sheet_url: str,
+        worksheet_name: Optional[str] = None,
+        api_key: Optional[str] = None,
+        include_complex_types: bool = True,
+        max_tables: int = 5,
+        max_rows: Optional[int] = None,
+        max_cols: Optional[int] = None,
+        trim_trailing_empty: bool = True,
+        options: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Analyze sheet structure via Funnel (Google Sheets URL → grid/merged_cells → structure analysis).
+        """
+        payload: Dict[str, Any] = {
+            "sheet_url": sheet_url,
+            "worksheet_name": worksheet_name,
+            "api_key": api_key,
+            "include_complex_types": include_complex_types,
+            "max_tables": max_tables,
+            "max_rows": max_rows,
+            "max_cols": max_cols,
+            "trim_trailing_empty": trim_trailing_empty,
+            "options": options or {},
+        }
+        # Drop nulls to keep request minimal
+        payload = {k: v for k, v in payload.items() if v is not None}
+
+        response = await self.client.post("/api/v1/funnel/structure/analyze/google-sheets", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    async def excel_to_structure_preview(
+        self,
+        *,
+        xlsx_bytes: bytes,
+        filename: str,
+        sheet_name: Optional[str] = None,
+        table_id: Optional[str] = None,
+        table_bbox: Optional[Dict[str, Any]] = None,
+        include_complex_types: bool = True,
+        max_tables: int = 5,
+        max_rows: Optional[int] = None,
+        max_cols: Optional[int] = None,
+        options: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Excel bytes → (grid/merged_cells) → structure analysis → selected table preview.
+
+        Notes:
+        - This method does NOT call `/suggest-schema`; it only returns preview + structure for downstream steps
+          (e.g., mapping suggestions, UI preview).
+        """
+        structure = await self.analyze_excel_structure(
+            xlsx_bytes=xlsx_bytes,
+            filename=filename,
+            sheet_name=sheet_name,
+            include_complex_types=include_complex_types,
+            max_tables=max_tables,
+            max_rows=max_rows,
+            max_cols=max_cols,
+            options=options,
+        )
+
+        table = self._select_requested_table(structure, table_id=table_id, table_bbox=table_bbox)
+        preview = self._structure_table_to_excel_preview(
+            structure=structure,
+            table=table,
+            file_name=filename,
+            sheet_name=sheet_name,
+        )
+        return {"preview": preview, "structure": structure, "table": table}
+
+    async def analyze_excel_structure(
+        self,
+        *,
+        xlsx_bytes: bytes,
+        filename: str,
+        sheet_name: Optional[str] = None,
+        include_complex_types: bool = True,
+        max_tables: int = 5,
+        max_rows: Optional[int] = None,
+        max_cols: Optional[int] = None,
+        options: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Analyze sheet structure via Funnel (Excel bytes → grid/merged_cells → structure analysis).
+        """
+        import json
+
+        params: Dict[str, Any] = {
+            "sheet_name": sheet_name,
+            "include_complex_types": include_complex_types,
+            "max_tables": max_tables,
+            "max_rows": max_rows,
+            "max_cols": max_cols,
+        }
+        if options is not None:
+            params["options_json"] = json.dumps(options, ensure_ascii=False)
+        params = {k: v for k, v in params.items() if v is not None}
+
+        files = {
+            "file": (
+                filename,
+                xlsx_bytes,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        }
+
+        response = await self.client.post("/api/v1/funnel/structure/analyze/excel", params=params, files=files)
+        response.raise_for_status()
+        return response.json()
+
+    @staticmethod
+    def _select_primary_table(structure: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Choose a single "primary" table for schema suggestion.
+
+        Heuristic (domain-neutral):
+        - Prefer record-like tables (mode=table/transposed) over property forms.
+        - Then prefer higher confidence.
+        - Tie-break by area, column count, sample rows.
+        """
+        tables = structure.get("tables") or []
+        if not tables:
+            raise ValueError("No tables detected in sheet")
+
+        def area(t: Dict[str, Any]) -> int:
+            bbox = t.get("bbox") or {}
+            try:
+                return int(bbox.get("bottom", 0) - bbox.get("top", 0) + 1) * int(
+                    bbox.get("right", 0) - bbox.get("left", 0) + 1
+                )
+            except Exception:
+                return 0
+
+        def rank(t: Dict[str, Any]) -> tuple:
+            mode = t.get("mode")
+            is_record_table = mode in {"table", "transposed"}
+            conf = float(t.get("confidence") or 0.0)
+            headers = t.get("headers") or []
+            rows = t.get("sample_rows") or []
+            return (is_record_table, conf, area(t), len(headers), len(rows))
+
+        return max(tables, key=rank)
+
+    @classmethod
+    def _select_requested_table(
+        cls,
+        structure: Dict[str, Any],
+        *,
+        table_id: Optional[str],
+        table_bbox: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """
+        Select a table from structure analysis output.
+
+        When neither table_id nor table_bbox are provided, falls back to the primary-table heuristic.
+        """
+        if not table_id and not table_bbox:
+            return cls._select_primary_table(structure)
+
+        tables = structure.get("tables") or []
+        if not tables:
+            raise ValueError("No tables detected in sheet")
+
+        if table_id:
+            by_id = next((t for t in tables if str(t.get("id")) == str(table_id)), None)
+            if by_id is None:
+                available = [t.get("id") for t in tables]
+                raise ValueError(f"Unknown table_id '{table_id}'. Available: {available}")
+
+            if table_bbox:
+                want = cls._normalize_bbox_dict(table_bbox)
+                got = cls._normalize_bbox_dict(by_id.get("bbox") or {})
+                if want and got and want != got:
+                    raise ValueError(
+                        f"table_id '{table_id}' bbox mismatch: expected {want}, got {got}"
+                    )
+            return by_id
+
+        want = cls._normalize_bbox_dict(table_bbox or {})
+        if not want:
+            return cls._select_primary_table(structure)
+
+        by_bbox = next(
+            (t for t in tables if cls._normalize_bbox_dict(t.get("bbox") or {}) == want),
+            None,
+        )
+        if by_bbox is None:
+            available = [cls._normalize_bbox_dict(t.get("bbox") or {}) for t in tables]
+            raise ValueError(f"Unknown table_bbox {want}. Available: {available}")
+        return by_bbox
+
+    @staticmethod
+    def _normalize_bbox_dict(bbox: Dict[str, Any]) -> Optional[Dict[str, int]]:
+        try:
+            keys = ("top", "left", "bottom", "right")
+            if not all(k in bbox for k in keys):
+                return None
+            return {k: int(bbox[k]) for k in keys}
+        except Exception:
+            return None
+
+    @staticmethod
+    def _structure_table_to_preview(
+        *,
+        structure: Dict[str, Any],
+        table: Dict[str, Any],
+        sheet_url: str,
+        worksheet_name: Optional[str],
+    ) -> Dict[str, Any]:
+        meta = structure.get("metadata") or {}
+        sheet_id = meta.get("sheet_id")
+        sheet_title = meta.get("sheet_title")
+        worksheet_title = meta.get("worksheet_title") or worksheet_name
+
+        headers = table.get("headers") or []
+        rows = table.get("sample_rows") or []
+
+        bbox = table.get("bbox") or {}
+        mode = table.get("mode")
+        header_rows = int(table.get("header_rows") or 0)
+        header_cols = int(table.get("header_cols") or 0)
+
+        total_rows_est = 0
+        try:
+            height = int(bbox.get("bottom") - bbox.get("top") + 1)
+            width = int(bbox.get("right") - bbox.get("left") + 1)
+            if mode == "table":
+                total_rows_est = max(0, height - max(1, header_rows))
+            elif mode == "transposed":
+                total_rows_est = max(0, width - max(1, header_cols))
+            elif mode == "property":
+                total_rows_est = len(table.get("key_values") or [])
+        except Exception:
+            total_rows_est = 0
+
+        return {
+            "source_metadata": {
+                "type": "google_sheets",
+                "sheet_id": sheet_id,
+                "sheet_title": sheet_title,
+                "worksheet_title": worksheet_title,
+                "sheet_url": sheet_url,
+                "table_id": table.get("id"),
+                "table_mode": mode,
+                "table_bbox": bbox,
+            },
+            "columns": headers,
+            "sample_data": rows,
+            "inferred_schema": table.get("inferred_schema"),
+            "total_rows": total_rows_est,
+            "preview_rows": len(rows),
+        }
+
+    @staticmethod
+    def _structure_table_to_excel_preview(
+        *,
+        structure: Dict[str, Any],
+        table: Dict[str, Any],
+        file_name: str,
+        sheet_name: Optional[str],
+    ) -> Dict[str, Any]:
+        meta = structure.get("metadata") or {}
+        headers = table.get("headers") or []
+        rows = table.get("sample_rows") or []
+
+        bbox = table.get("bbox") or {}
+        mode = table.get("mode")
+        header_rows = int(table.get("header_rows") or 0)
+        header_cols = int(table.get("header_cols") or 0)
+
+        total_rows_est = 0
+        try:
+            height = int(bbox.get("bottom") - bbox.get("top") + 1)
+            width = int(bbox.get("right") - bbox.get("left") + 1)
+            if mode == "table":
+                total_rows_est = max(0, height - max(1, header_rows))
+            elif mode == "transposed":
+                total_rows_est = max(0, width - max(1, header_cols))
+            elif mode == "property":
+                total_rows_est = len(table.get("key_values") or [])
+        except Exception:
+            total_rows_est = 0
+
+        return {
+            "source_metadata": {
+                "type": "excel",
+                "file_name": file_name,
+                "sheet_name": sheet_name or meta.get("sheet_name"),
+                "table_id": table.get("id"),
+                "table_mode": mode,
+                "table_bbox": bbox,
+            },
+            "columns": headers,
+            "sample_data": rows,
+            "inferred_schema": table.get("inferred_schema"),
+            "total_rows": total_rows_est,
+            "preview_rows": len(rows),
+        }
+
+    async def excel_to_schema(
+        self,
+        *,
+        xlsx_bytes: bytes,
+        filename: str,
+        sheet_name: Optional[str] = None,
+        class_name: Optional[str] = None,
+        table_id: Optional[str] = None,
+        table_bbox: Optional[Dict[str, Any]] = None,
+        include_complex_types: bool = True,
+        max_tables: int = 5,
+        max_rows: Optional[int] = None,
+        max_cols: Optional[int] = None,
+        options: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Excel 업로드에서 직접 스키마 생성 (구조 분석 기반).
+
+        Notes:
+        - 멀티 테이블/전치/폼 문서도 처리 가능하도록 구조 분석 결과에서 "대표 테이블"을 선택합니다.
+        """
+        structure = await self.analyze_excel_structure(
+            xlsx_bytes=xlsx_bytes,
+            filename=filename,
+            sheet_name=sheet_name,
+            include_complex_types=include_complex_types,
+            max_tables=max_tables,
+            max_rows=max_rows,
+            max_cols=max_cols,
+            options=options,
+        )
+
+        table = self._select_requested_table(
+            structure,
+            table_id=table_id,
+            table_bbox=table_bbox,
+        )
+        preview_result = self._structure_table_to_excel_preview(
+            structure=structure,
+            table=table,
+            file_name=filename,
+            sheet_name=sheet_name,
+        )
+
+        analysis_result = {
+            "columns": preview_result.get("inferred_schema") or [],
+            "analysis_metadata": {
+                "source": "excel",
+                "file_name": filename,
+                "sheet_name": sheet_name,
+                "table_id": table.get("id"),
+                "table_mode": table.get("mode"),
+                "table_bbox": table.get("bbox"),
+                "total_rows": preview_result.get("total_rows", 0),
+            },
+        }
+        schema_suggestion = await self.suggest_schema(analysis_result, class_name)
+        return {"preview": preview_result, "schema_suggestion": schema_suggestion, "structure": structure}
 
     async def __aenter__(self):
         return self

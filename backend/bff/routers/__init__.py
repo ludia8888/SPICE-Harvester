@@ -16,6 +16,8 @@ from . import websocket
 from . import tasks
 from . import admin
 from . import graph
+from . import lineage
+from . import audit
 
 __all__ = [
     "database",
@@ -29,5 +31,7 @@ __all__ = [
     "websocket",
     "tasks",
     "admin",
-    "graph"
+    "graph",
+    "lineage",
+    "audit",
 ]

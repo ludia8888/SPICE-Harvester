@@ -32,6 +32,13 @@ class OntologyService(BaseTerminusService):
         super().__init__(*args, **kwargs)
         # DatabaseService 인스턴스 (데이터베이스 존재 확인용)
         self.db_service = DatabaseService(*args, **kwargs)
+
+    async def disconnect(self) -> None:
+        # Close nested db_service first to avoid leaking its httpx client in short-lived contexts/tests.
+        try:
+            await self.db_service.disconnect()
+        finally:
+            await super().disconnect()
     
     async def create_ontology(
         self,
@@ -90,8 +97,8 @@ class OntologyService(BaseTerminusService):
             logger.info(f"Ontology '{ontology.id}' created in database '{db_name}'")
             
             # 응답 생성
-            # ontology.dict() already contains created_at and updated_at from OntologyBase
-            ontology_dict = ontology.dict()
+            # ontology.model_dump() already contains created_at and updated_at from OntologyBase
+            ontology_dict = ontology.model_dump()
             # Only set timestamps if they don't exist
             if 'created_at' not in ontology_dict or ontology_dict['created_at'] is None:
                 ontology_dict['created_at'] = datetime.now(timezone.utc)
@@ -403,7 +410,30 @@ class OntologyService(BaseTerminusService):
             if key.startswith("@"):
                 continue
             
-            if isinstance(value, dict):
+            if isinstance(value, str):
+                # Required scalar properties are stored as a bare type string (e.g. "xsd:string")
+                if value.startswith("xsd:") or value.startswith("sys:"):
+                    ontology.properties.append(
+                        Property(
+                            name=key,
+                            type=value,
+                            label=key,
+                            description="",
+                            required=True,
+                        )
+                    )
+                else:
+                    # Required relationship can be stored as a bare class reference string.
+                    ontology.relationships.append(
+                        Relationship(
+                            predicate=key,
+                            target=value,
+                            label=key,
+                            description="",
+                            cardinality="1:1",
+                        )
+                    )
+            elif isinstance(value, dict):
                 # 관계인지 속성인지 판단
                 if "@class" in value:
                     class_type = value.get("@class", "")

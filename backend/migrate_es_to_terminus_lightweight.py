@@ -13,7 +13,7 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List
 
 # Add backend to path
@@ -124,13 +124,13 @@ class ESToTerminusMigrator:
                 return False
             
             # Build lightweight node
-            lightweight_node = {
-                "@id": instance_id,
-                "@type": class_id,
-                "instance_id": instance_id,
-                "es_doc_id": doc.get("_es_id", instance_id),
-                "created_at": datetime.utcnow().isoformat()
-            }
+                lightweight_node = {
+                    "@id": instance_id,
+                    "@type": class_id,
+                    "instance_id": instance_id,
+                    "es_doc_id": doc.get("_es_id", instance_id),
+                    "created_at": datetime.now(timezone.utc).isoformat()
+                }
             
             # Add S3 URI if available
             if doc.get("s3_path"):

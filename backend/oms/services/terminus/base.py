@@ -69,7 +69,8 @@ class BaseTerminusService:
             # 환경변수에서 연결 정보 로드
             import os
             self.connection_info = ConnectionConfig(
-                server_url=os.getenv("TERMINUS_SERVER_URL", "http://localhost:6364"),
+                # Default to 6363 (TerminusDB default in this project); override via TERMINUS_SERVER_URL as needed.
+                server_url=os.getenv("TERMINUS_SERVER_URL", "http://localhost:6363"),
                 account=os.getenv("TERMINUS_ACCOUNT", "admin"),
                 user=os.getenv("TERMINUS_USER", "admin"),
                 key=os.getenv("TERMINUS_KEY", "admin"),
@@ -159,9 +160,11 @@ class BaseTerminusService:
         client = await self._get_client()
         
         # 헤더 설정
-        request_headers = {
-            "Content-Type": "application/json",
-        }
+        request_headers: Dict[str, str] = {}
+        # TerminusDB v12 can hang on DELETE requests that include `Content-Type: application/json`
+        # while sending no body. Only set Content-Type when we actually send JSON payloads.
+        if data is not None and method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
+            request_headers["Content-Type"] = "application/json"
         
         # Only add auth if credentials are configured
         logger.debug(f"Auth check: user={self.connection_info.user}, has_key={bool(self.connection_info.key)}, not_anonymous={self.connection_info.user != 'anonymous'}")
@@ -223,6 +226,12 @@ class BaseTerminusService:
             if content_type.startswith("application/json"):
                 # Handle JSONL (JSON Lines) format - multiple JSON objects separated by newlines
                 response_text = response.text
+                if not response_text or not response_text.strip():
+                    # TerminusDB streaming endpoints often return an empty body (200 OK) when there are no results.
+                    # Example: `/api/document/...` with `stream=true`.
+                    if "stream=true" in content_type:
+                        return []
+                    return {}
                 logger.debug(f"Response content-type: {content_type}")
                 logger.debug(f"Response text preview: {response_text[:200]}...")
                 

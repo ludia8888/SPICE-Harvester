@@ -11,7 +11,12 @@ Welcome to the SPICE HARVESTER project documentation. This directory contains al
 - **[API Reference](API_REFERENCE.md)** - Complete API documentation for all services
 - **[Developer Guide](DEVELOPER_GUIDE.md)** - Development setup, guidelines, and best practices
 - **[Operations Manual](OPERATIONS.md)** - Deployment, maintenance, and operational procedures
+- **[DevOps Risk & Cost Report](DEVOPS_MSA_RISK_COST_REPORT.md)** - Senior DevOps 관점 운영 리스크/코스트 분석 및 우선순위 개선안
+- **[LLM Integration Blueprint](LLM_INTEGRATION.md)** - LLM을 Funnel/OMS/Graph/Lineage에 안전하게 결합하는 설계(도메인 중립)
 - **[Security Documentation](SECURITY.md)** - Security architecture, guidelines, and compliance
+- **[Data Lineage](DATA_LINEAGE.md)** - Provenance/lineage 그래프 설계 및 운영(백필/지표 포함)
+- **[Audit Logs](AUDIT_LOGS.md)** - 감사 로그 스키마/보장(guarantees) 및 운영 가이드
+- **[Idempotency Contract](IDEMPOTENCY_CONTRACT.md)** - 재시도/중복 처리(At-least-once) 안전성 계약
 - **[UI/UX Guidelines](UIUX.md)** - User interface and experience design standards
 - **[Design System](DesignSystem.md)** - Design system documentation and guidelines
 
@@ -33,7 +38,8 @@ Welcome to the SPICE HARVESTER project documentation. This directory contains al
 #### For DevOps Engineers
 1. Follow the [Operations Manual](OPERATIONS.md) for deployment
 2. Review [Security Documentation](SECURITY.md) for security configuration
-3. Check monitoring and maintenance procedures
+3. Read the [DevOps Risk & Cost Report](DEVOPS_MSA_RISK_COST_REPORT.md) for 운영 리스크/코스트 우선순위
+4. Check monitoring and maintenance procedures (incl. [Data Lineage](DATA_LINEAGE.md), [Audit Logs](AUDIT_LOGS.md))
 
 #### For QA Engineers
 1. Review the test structure in [Developer Guide](DEVELOPER_GUIDE.md#testing-guidelines)
@@ -50,7 +56,12 @@ docs/
 ├── API_REFERENCE.md        # Complete API documentation
 ├── DEVELOPER_GUIDE.md      # Developer onboarding and guidelines
 ├── OPERATIONS.md          # Operations and deployment manual
+├── DEVOPS_MSA_RISK_COST_REPORT.md  # 🆕 DevOps 운영 리스크/코스트 보고서
+├── LLM_INTEGRATION.md      # 🆕 LLM 결합 설계(도메인 중립/엔터프라이즈 안전)
 ├── SECURITY.md            # Security documentation
+├── DATA_LINEAGE.md        # Data lineage / provenance 운영 가이드
+├── AUDIT_LOGS.md          # Audit logs 스키마/보장 및 운영
+├── IDEMPOTENCY_CONTRACT.md  # Idempotency(멱등성) 계약/가이드
 ├── UIUX.md               # UI/UX guidelines
 ├── DesignSystem.md       # 🔄 Design system (renamed from DesignSysyem.md)
 └── architecture/         # Architecture diagrams and details
@@ -79,7 +90,7 @@ backend/docs/              # Backend-specific documentation
 ### Enterprise Microservices Architecture
 - **BFF (Backend for Frontend)** - Port 8002: User-friendly API gateway with Service Factory pattern
 - **OMS (Ontology Management Service)** - Port 8000: Core ontology operations with 18+ validators
-- **Funnel (Type Inference Service)** - Port 8004: AI-powered data analysis with 1,048 lines of algorithms
+- **Funnel (Type Inference Service)** - Port 8003: AI-powered data analysis with 1,048 lines of algorithms
 - **Shared Components** - Service Factory, validators, and utilities
 
 ### Technical Capabilities
@@ -92,7 +103,7 @@ backend/docs/              # Backend-specific documentation
 - **Multi-language Support** - Comprehensive internationalization
 - **Performance Optimization** - 95%+ success rate, <5s response time
 - **Security Features** - Input sanitization, authentication, audit logging
-- **TerminusDB v11.x Integration** - Full schema type support
+- **TerminusDB Integration** - Full schema type support
 
 ### Frontend Technology Stack
 - **React 18 + TypeScript 5** - Modern UI framework with strict typing
@@ -113,8 +124,8 @@ backend/docs/              # Backend-specific documentation
 - **Port Assignments**:
   - BFF: 8002 (Frontend API gateway)
   - OMS: 8000 (Core ontology service)
-  - Funnel: 8004 (Type inference service)
-  - TerminusDB: 6364 (Graph database)
+  - Funnel: 8003 (Type inference service)
+  - TerminusDB: 6363 (Graph database)
 
 ## Documentation Standards
 
@@ -192,6 +203,6 @@ For documentation issues or questions:
 - Submit a pull request with improvements
 
 ---
-*Last updated: 2025-07-26*
+*Last updated: 2025-12-17*
 *Documentation reorganization: Complete*
 *Version: 3.0 (Major reorganization)*

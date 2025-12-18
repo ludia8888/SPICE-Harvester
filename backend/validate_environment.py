@@ -101,7 +101,7 @@ class EnvironmentValidator:
                 self.check_result(var, True, actual or "Empty (OK)")
     
     async def check_postgresql(self):
-        """Check PostgreSQL connection and outbox table"""
+        """Check PostgreSQL connection and processed-event registry tables"""
         self.print_header("POSTGRESQL CONNECTION CHECK")
         
         try:
@@ -115,33 +115,46 @@ class EnvironmentValidator:
             
             self.check_result("PostgreSQL Connection", True, f"Connected to {os.getenv('POSTGRES_HOST')}:{os.getenv('POSTGRES_PORT')}")
             
-            # Check spice_outbox schema
+            # Check spice_event_registry schema
             schema_exists = await conn.fetchval("""
                 SELECT EXISTS(
                     SELECT 1 FROM information_schema.schemata 
-                    WHERE schema_name = 'spice_outbox'
+                    WHERE schema_name = 'spice_event_registry'
                 )
             """)
-            self.check_result("spice_outbox Schema", schema_exists)
+            self.check_result("spice_event_registry Schema", schema_exists)
             
-            # Check outbox table
+            # Check registry tables
             if schema_exists:
-                table_exists = await conn.fetchval("""
+                processed_events_exists = await conn.fetchval("""
                     SELECT EXISTS(
                         SELECT 1 FROM information_schema.tables 
-                        WHERE table_schema = 'spice_outbox' 
-                        AND table_name = 'outbox'
+                        WHERE table_schema = 'spice_event_registry' 
+                        AND table_name = 'processed_events'
                     )
                 """)
-                self.check_result("outbox Table", table_exists)
+                self.check_result("processed_events Table", processed_events_exists)
                 
-                if table_exists:
-                    count = await conn.fetchval("SELECT COUNT(*) FROM spice_outbox.outbox")
-                    unprocessed = await conn.fetchval("""
-                        SELECT COUNT(*) FROM spice_outbox.outbox 
-                        WHERE processed_at IS NULL
+                aggregate_versions_exists = await conn.fetchval("""
+                    SELECT EXISTS(
+                        SELECT 1 FROM information_schema.tables 
+                        WHERE table_schema = 'spice_event_registry' 
+                        AND table_name = 'aggregate_versions'
+                    )
+                """)
+                self.check_result("aggregate_versions Table", aggregate_versions_exists)
+
+                if processed_events_exists:
+                    count = await conn.fetchval("SELECT COUNT(*) FROM spice_event_registry.processed_events")
+                    in_progress = await conn.fetchval("""
+                        SELECT COUNT(*) FROM spice_event_registry.processed_events 
+                        WHERE status = 'processing'
                     """)
-                    self.check_result("Outbox Records", True, f"{count} total, {unprocessed} unprocessed")
+                    self.check_result(
+                        "Processed Events Records",
+                        True,
+                        f"{count} total, {in_progress} processing",
+                    )
             
             await conn.close()
             
@@ -296,8 +309,8 @@ class EnvironmentValidator:
     def check_docker_config(self):
         """Check Docker configuration"""
         self.print_header("DOCKER CONFIGURATION CHECK")
-        
-        docker_compose_path = "/Users/isihyeon/Desktop/SPICE HARVESTER/backend/docker-compose.yml"
+
+        docker_compose_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docker-compose.yml")
         
         if os.path.exists(docker_compose_path):
             with open(docker_compose_path, 'r') as f:

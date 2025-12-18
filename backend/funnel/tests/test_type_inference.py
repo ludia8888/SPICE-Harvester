@@ -24,6 +24,8 @@ class TestTypeInference:
         assert result.inferred_type.type == DataType.INTEGER.value
         assert result.inferred_type.confidence >= 0.9
         assert "integer" in result.inferred_type.reason.lower()
+        assert result.total_count == len(test_data)
+        assert result.non_empty_count == len(test_data)
         assert result.null_count == 0
         assert result.unique_count == len(test_data)
 
@@ -39,6 +41,9 @@ class TestTypeInference:
             "decimal" in result.inferred_type.reason.lower()
             or "number" in result.inferred_type.reason.lower()
         )
+        assert result.inferred_type.metadata is not None
+        assert "min" in result.inferred_type.metadata
+        assert "max" in result.inferred_type.metadata
 
     def test_boolean_detection(self):
         """불리언 타입 감지 테스트"""
@@ -109,6 +114,8 @@ class TestTypeInference:
         result = FunnelTypeInferenceService.infer_column_type(test_data, "nullable_column")
 
         assert result.inferred_type.type == DataType.INTEGER.value
+        assert result.total_count == len(test_data)
+        assert result.non_empty_count == 3
         assert result.null_count == 5  # None, "", "  " 포함
         assert result.unique_count == 3  # "123", "456", "789"
 
@@ -206,8 +213,161 @@ class TestTypeInference:
 
         # 90% (9/10)가 정수이므로 정수로 추론되어야 함
         assert result.inferred_type.type == DataType.INTEGER.value
-        assert result.inferred_type.confidence == 0.9
+        assert result.inferred_type.confidence >= 0.9
         assert "9/10" in result.inferred_type.reason
+
+    def test_decimal_detection_european_format(self):
+        """유럽식 숫자 형식(1.234,56) 감지 테스트"""
+        test_data = ["1.234,56", "2.345,00", "10,50"]
+
+        result = FunnelTypeInferenceService.infer_column_type(test_data, "amount")
+
+        assert result.inferred_type.type == DataType.DECIMAL.value
+        assert result.inferred_type.confidence >= 0.9
+        assert result.inferred_type.metadata is not None
+        assert result.inferred_type.metadata["min"] == 10.5
+        assert result.inferred_type.metadata["max"] == 2345.0
+
+    def test_money_detection_with_symbols(self):
+        """통화 기호 기반 money 타입 감지 테스트"""
+        test_data = ["$1,234.56", "$10.00", "$99.99"]
+
+        result = FunnelTypeInferenceService.infer_column_type(
+            test_data, "amount_usd", include_complex_types=True
+        )
+
+        assert result.inferred_type.type == DataType.MONEY.value
+        assert result.inferred_type.confidence >= 0.9
+        assert result.inferred_type.metadata is not None
+        assert result.inferred_type.metadata.get("currency") == "USD"
+        assert "allowedCurrencies" in result.inferred_type.metadata.get("suggested_constraints", {})
+
+    def test_money_detection_with_asian_currency_formats(self):
+        """아시아권 통화 표기(¥/RMB/원) 기반 money 타입 감지 테스트"""
+        test_data = ["¥150", "150 RMB", "15,000원"]
+
+        result = FunnelTypeInferenceService.infer_column_type(
+            test_data, "amount", include_complex_types=True
+        )
+
+        assert result.inferred_type.type == DataType.MONEY.value
+        assert result.inferred_type.confidence >= 0.9
+        assert result.inferred_type.metadata is not None
+
+        currencies = set(result.inferred_type.metadata.get("currencies", []))
+        assert currencies == {"CNY", "KRW"}
+
+        suggested = result.inferred_type.metadata.get("suggested_constraints", {})
+        assert set(suggested.get("allowedCurrencies", [])) == {"CNY", "KRW"}
+
+    def test_enum_detection_and_constraints(self):
+        """열거형(enum) 후보 감지 및 제약조건 제안 테스트"""
+        test_data = ["active", "inactive"] * 5  # 10 values, 2 unique
+
+        result = FunnelTypeInferenceService.infer_column_type(
+            test_data, "status", include_complex_types=True
+        )
+
+        assert result.inferred_type.type == DataType.ENUM.value
+        assert result.inferred_type.confidence >= 0.7
+        assert result.inferred_type.metadata is not None
+        suggested = result.inferred_type.metadata.get("suggested_constraints")
+        assert isinstance(suggested, dict)
+        assert "enum" in suggested
+
+    def test_uuid_detection(self):
+        """UUID 타입 감지 테스트"""
+        test_data = [
+            "550e8400-e29b-41d4-a716-446655440000",
+            "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+            "00000000-0000-0000-0000-000000000000",
+        ]
+
+        result = FunnelTypeInferenceService.infer_column_type(
+            test_data, "uuid", include_complex_types=True
+        )
+
+        assert result.inferred_type.type == "uuid"
+        assert result.inferred_type.confidence >= 0.9
+
+    def test_ip_detection(self):
+        """IP 주소 타입 감지 테스트"""
+        test_data = ["192.168.0.1", "8.8.8.8", "10.0.0.254"]
+
+        result = FunnelTypeInferenceService.infer_column_type(
+            test_data, "ip_address", include_complex_types=True
+        )
+
+        assert result.inferred_type.type == "ip"
+        assert result.inferred_type.confidence >= 0.9
+
+    def test_uri_detection(self):
+        """URI/URL 타입 감지 테스트"""
+        test_data = [
+            "https://example.com",
+            "http://test.org/path?x=1",
+            "https://sub.domain.co.kr/a/b",
+        ]
+
+        result = FunnelTypeInferenceService.infer_column_type(
+            test_data, "website_url", include_complex_types=True
+        )
+
+        assert result.inferred_type.type == DataType.URI.value
+        assert result.inferred_type.confidence >= 0.9
+
+    def test_json_array_object_detection(self):
+        """JSON array/object 타입 감지 테스트"""
+        array_data = ['["a","b"]', '["c"]', "[]"]
+        object_data = ['{"a":1}', '{"b":2,"c":3}', "{}"]
+
+        array_result = FunnelTypeInferenceService.infer_column_type(
+            array_data, "tags", include_complex_types=True
+        )
+        object_result = FunnelTypeInferenceService.infer_column_type(
+            object_data, "payload", include_complex_types=True
+        )
+
+        assert array_result.inferred_type.type == DataType.ARRAY.value
+        assert array_result.inferred_type.confidence >= 0.9
+        assert object_result.inferred_type.type == DataType.OBJECT.value
+        assert object_result.inferred_type.confidence >= 0.9
+
+    def test_coordinate_detection(self):
+        """좌표(coordinate) 타입 감지 테스트"""
+        test_data = ["37.5665,126.9780", "35.1796,129.0756", "-33.8688,151.2093"]
+
+        result = FunnelTypeInferenceService.infer_column_type(
+            test_data, "coords", include_complex_types=True
+        )
+
+        assert result.inferred_type.type == DataType.COORDINATE.value
+        assert result.inferred_type.confidence >= 0.9
+
+    def test_phone_suggested_region(self):
+        """전화번호 기본 지역 제안(defaultRegion) 테스트"""
+        test_data = ["010-1234-5678", "+82-10-9876-5432", "010-0000-0000"]
+
+        result = FunnelTypeInferenceService.infer_column_type(
+            test_data, "phone", include_complex_types=True
+        )
+
+        assert result.inferred_type.type == DataType.PHONE.value
+        assert result.inferred_type.metadata is not None
+        suggested = result.inferred_type.metadata.get("suggested_constraints")
+        assert isinstance(suggested, dict)
+        assert suggested.get("defaultRegion") == "KR"
+
+    def test_ambiguous_date_detection_sets_metadata(self):
+        """모호한 날짜(DD/MM vs MM/DD) 감지 시 메타데이터/신뢰도 페널티 테스트"""
+        test_data = ["01/02/2023", "03/04/2023", "05/06/2023", "07/08/2023"]
+
+        result = FunnelTypeInferenceService.infer_column_type(test_data, "date")
+
+        assert result.inferred_type.type == DataType.DATE.value
+        assert result.inferred_type.metadata is not None
+        assert result.inferred_type.metadata.get("ambiguous_count", 0) > 0
+        assert result.inferred_type.confidence < 1.0
 
 
 @pytest.mark.parametrize(

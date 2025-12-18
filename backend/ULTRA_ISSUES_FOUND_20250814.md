@@ -2,6 +2,9 @@
 **날짜**: 2025-08-14
 **요청**: "아주 작고 사소한 문제도 모두 발견하고 수정"
 
+> NOTE (2025-12-17): 이 문서는 steady-state(Event Sourcing 단일 경로) 이전의 작업 로그입니다.  
+> 현재는 `ENABLE_S3_EVENT_STORE`/dual-write 플래그와 레거시 Kafka wrapper 포맷이 제거되었고, Kafka payload는 `EventEnvelope` JSON 단일 포맷입니다.
+
 ## 📊 최종 결과
 - **발견된 문제**: 8개
 - **수정된 문제**: 8개
@@ -10,17 +13,12 @@
 
 ## 🔍 발견된 문제들 (시간순)
 
-### 1. ❌ S3 Event Store가 비활성화되어 있었음
+### 1. ❌ S3 Event Store가 비활성화되어 있었음 (HISTORICAL)
 **증상**: Instance Worker가 S3에서 이벤트를 읽지 못함
-```bash
-# 문제
-ENABLE_S3_EVENT_STORE=없음 (기본값 "false")
-```
-**해결**: 
-```bash
-export ENABLE_S3_EVENT_STORE=true
-```
-**상태**: ✅ FIXED
+
+> 현재(steady state)는 `ENABLE_S3_EVENT_STORE` 플래그가 제거되었고, Event Store는 항상 S3/MinIO 입니다.
+
+**상태**: ✅ FIXED (historical)
 
 ### 2. ❌ spice_3pl_synthetic 데이터베이스에 Product 스키마 없음
 **증상**: TerminusDB 400 에러 - "ascribed_type_does_not_exist"
@@ -36,6 +34,9 @@ POST /api/v1/database/spice_3pl_synthetic/ontology/create-advanced
 
 ### 3. ❌ Instance Worker가 Kafka 메시지를 잘못 파싱함
 **증상**: command_type, db_name, class_id가 모두 None
+
+> NOTE: 현재 Kafka 메시지 스키마는 `EventEnvelope` JSON 단일 포맷이며, 아래 “wrapper/payload 파싱” 이슈 자체가 제거되었습니다.
+
 ```python
 # 문제
 return message['payload']  # payload만 반환
@@ -112,31 +113,31 @@ logger.info(f"📦 Extracted command keys: {list(command.keys())}")
 
 ### Event Sourcing Infrastructure
 - ✅ S3/MinIO에 이벤트 저장 (spice-event-store 버킷)
-- ✅ Instance 데이터 S3 저장 (instance-events 버킷)
+- ✅ Command/Domain 이벤트 모두 `spice-event-store`에 append-only 저장 (단일 SSoT)
 - ✅ Kafka 메시지 플로우 정상
-- ✅ PostgreSQL Outbox 패턴 작동 (59 events)
+- ✅ PostgreSQL processed_events registry + seq allocator 작동
 - ✅ Elasticsearch 인덱싱 정상
 
 ### Services
 - ✅ OMS: HEALTHY (Port 8000)
 - ✅ BFF: HEALTHY (Port 8002)
 - ✅ Funnel: HEALTHY (Port 8003)
-- ✅ Instance Worker: S3 Event Store ENABLED
+- ✅ Instance Worker: consuming `EventEnvelope` from Kafka
 - ✅ Ontology Worker: Running
 - ✅ Projection Worker: Running
 
 ### Infrastructure
-- ✅ PostgreSQL: Port 5432, spiceadmin/spicepass123
-- ✅ Redis: Port 6379, password: spice123!
-- ✅ Elasticsearch: Port 9200, elastic/spice123!
-- ✅ MinIO: Port 9000, admin/spice123!
-- ✅ TerminusDB: Port 6363, admin/spice123!
+- ✅ PostgreSQL: Host Port 5433 (container 5432), spiceadmin/spicepass123
+- ✅ Redis: Port 6379, password: spicepass123
+- ✅ Elasticsearch: Port 9200 (security disabled by default)
+- ✅ MinIO: Port 9000, minioadmin/minioadmin123
+- ✅ TerminusDB: Port 6363, admin/admin
 - ✅ Kafka: Port 9092, 정상 작동
 
 ## 🎯 핵심 교훈
 
 1. **환경변수 하나도 무시하면 안 됨**
-   - ENABLE_S3_EVENT_STORE 미설정 → S3 Event Store 비활성화
+   - (현재) S3/MinIO Event Store는 항상 활성입니다. 대신 `MINIO_ENDPOINT_URL`/크레덴셜/`EVENT_STORE_BUCKET`을 명시적으로 설정 권장.
    - DOCKER_CONTAINER 잘못 설정 → 네트워크 문제
 
 2. **스키마 존재 확인 필수**

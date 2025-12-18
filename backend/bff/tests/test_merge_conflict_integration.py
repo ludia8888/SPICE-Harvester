@@ -3,8 +3,6 @@ Integration Tests for Foundry-style Merge Conflict Resolution
 실제 OMS와 TerminusDB 연동 테스트
 """
 
-import asyncio
-import json
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock, patch
 
@@ -284,7 +282,7 @@ class TestMergeConflictIntegration:
     @pytest.mark.asyncio
     async def test_conflict_converter_integration(self):
         """충돌 변환기 통합 테스트"""
-        from utils.conflict_converter import ConflictConverter
+        from bff.utils.conflict_converter import ConflictConverter
 
         converter = ConflictConverter()
 
@@ -315,7 +313,7 @@ class TestMergeConflictIntegration:
     @pytest.mark.asyncio
     async def test_path_mapping_system(self):
         """JSON-LD 경로 매핑 시스템 테스트"""
-        from utils.conflict_converter import ConflictConverter
+        from bff.utils.conflict_converter import ConflictConverter
 
         converter = ConflictConverter()
 
@@ -387,7 +385,7 @@ class TestMergeConflictIntegration:
     @pytest.mark.asyncio
     async def test_bff_dependencies_integration(self):
         """BFF Dependencies 통합 테스트"""
-        from dependencies import TerminusService
+        from bff.dependencies import TerminusService
 
         # Mock OMS Client
         mock_oms = AsyncMock(spec=OMSClient)
@@ -408,19 +406,18 @@ class TestMergeConflictIntegration:
 
         mock_oms.client.post.return_value = simulation_response
 
-        with patch("dependencies.get_oms_client", return_value=mock_oms):
-            terminus_service = TerminusService()
+        terminus_service = TerminusService(mock_oms)
 
-            # 시뮬레이션 테스트
-            result = await terminus_service.simulate_merge("test-db", "feature", "main")
+        # 시뮬레이션 테스트
+        result = await terminus_service.simulate_merge("test-db", "feature", "main")
 
-            assert result["status"] == "success"
-            assert "merge_preview" in result["data"]
+        assert result["status"] == "success"
+        assert "merge_preview" in result["data"]
 
-            # Mock calls 검증
-            mock_oms.client.post.assert_called_once()
-            call_args = mock_oms.client.post.call_args
-            assert "/database/test-db/merge/simulate" in call_args[0][0]
+        # Mock calls 검증
+        mock_oms.client.post.assert_called_once()
+        call_args = mock_oms.client.post.call_args
+        assert "/database/test-db/merge/simulate" in call_args[0][0]
 
     def test_api_documentation_completeness(self, client):
         """API 문서화 완성도 테스트"""

@@ -43,7 +43,8 @@ export CORS_ENABLED=true
 **2단계: 서비스 시작**
 ```bash
 # 모든 서비스 시작
-python start_services.py
+python backend/start_services.py --env development
+# 또는: cd backend && python start_services.py --env development
 
 # 또는 개별 시작
 python -m bff.main &
@@ -56,7 +57,7 @@ python -m funnel.main &
 # 각 서비스의 CORS 설정 확인
 curl http://localhost:8002/debug/cors | jq  # BFF
 curl http://localhost:8000/debug/cors | jq  # OMS
-curl http://localhost:8004/debug/cors | jq  # Funnel
+curl http://localhost:8003/debug/cors | jq  # Funnel
 ```
 
 **4단계: 자동 테스트 실행**
@@ -165,7 +166,7 @@ CORS_ORIGINS=["https://app.spice-harvester.com", "https://www.spice-harvester.co
 - **CORS 설정**: 중간 수준의 보안 설정
 
 ### Funnel (Type Inference Service)
-- **포트**: 8004
+- **포트**: 8003
 - **주요 용도**: 타입 추론 전용 서비스
 - **CORS 설정**: 필요에 따라 제한적 설정
 
@@ -185,7 +186,7 @@ curl http://localhost:8002/debug/cors
 curl http://localhost:8000/debug/cors
 
 # Funnel 서비스
-curl http://localhost:8004/debug/cors
+curl http://localhost:8003/debug/cors
 ```
 
 ### 2. 자동 테스트 스크립트
@@ -227,7 +228,7 @@ curl -X GET \\
    ```bash
    curl http://localhost:8002/health
    curl http://localhost:8000/health
-   curl http://localhost:8004/health
+   curl http://localhost:8003/health
    ```
 
 2. **CORS 설정 확인**
@@ -333,7 +334,7 @@ const corsConfig = {
 
 ```bash
 # 모든 서비스 시작
-./start_services.py
+python backend/start_services.py --env development
 
 # CORS 테스트 실행
 python test_cors_configuration.py
@@ -344,7 +345,7 @@ curl http://localhost:8002/debug/cors | jq
 # 서비스 상태 확인
 curl http://localhost:8002/health
 curl http://localhost:8000/health
-curl http://localhost:8004/health
+curl http://localhost:8003/health
 ```
 
 ---

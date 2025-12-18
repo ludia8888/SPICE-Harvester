@@ -6,7 +6,7 @@ These models support comprehensive task tracking and eliminate
 fire-and-forget anti-patterns.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
@@ -29,11 +29,6 @@ class TaskProgress(BaseModel):
     percentage: float = Field(..., description="Progress percentage (0-100)")
     message: Optional[str] = Field(None, description="Progress status message")
     updated_at: datetime = Field(..., description="Last progress update time")
-    
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
 
 
 class TaskResult(BaseModel):
@@ -45,11 +40,6 @@ class TaskResult(BaseModel):
     error_traceback: Optional[str] = Field(None, description="Full error traceback")
     message: Optional[str] = Field(None, description="Human-readable result message")
     warnings: List[str] = Field(default_factory=list, description="Non-fatal warnings")
-    
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
 
 
 class BackgroundTask(BaseModel):
@@ -88,11 +78,6 @@ class BackgroundTask(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional task metadata")
     parent_task_id: Optional[str] = Field(None, description="Parent task ID for nested tasks")
     child_task_ids: List[str] = Field(default_factory=list, description="Child task IDs")
-    
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
         
     @property
     def duration(self) -> Optional[float]:
@@ -148,11 +133,6 @@ class TaskFilter(BaseModel):
     created_after: Optional[datetime] = Field(None, description="Filter by creation time")
     created_before: Optional[datetime] = Field(None, description="Filter by creation time")
     parent_task_id: Optional[str] = Field(None, description="Filter by parent task")
-    
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
 
 
 class TaskUpdateNotification(BaseModel):
@@ -168,9 +148,4 @@ class TaskUpdateNotification(BaseModel):
     retry_count: Optional[int] = Field(None, description="Retry count")
     max_retries: Optional[int] = Field(None, description="Maximum retries")
     next_retry_at: Optional[str] = Field(None, description="Next retry time")
-    timestamp: datetime = Field(default_factory=lambda: datetime.utcnow(), description="Notification timestamp")
-    
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Notification timestamp")

@@ -37,36 +37,34 @@
 
 3. **시스템 배포**
    ```bash
-   # HTTP로 시작
-   docker-compose up -d
-   
-   # 또는 HTTPS로 시작
-   docker-compose -f docker-compose-https.yml up -d
-   
-   # 또는 개발 환경에서
-   python start_services.py
+   # Full local stack (recommended)
+   docker compose -f docker-compose.full.yml up -d
+   # or: cd backend && ./deploy.sh up
+
+   # Local dev (no docker, services only)
+   python backend/start_services.py --env development
    ```
 
 ### 배포 명령어
 
 ```bash
 # 모든 서비스 빌드 및 시작
-docker-compose up --build
+docker compose -f docker-compose.full.yml up --build
 
 # 백그라운드에서 실행
-docker-compose up -d
+docker compose -f docker-compose.full.yml up -d
 
 # 모든 서비스 중지
-docker-compose down
+docker compose -f docker-compose.full.yml down
 
 # 로그 보기
-docker-compose logs -f [service-name]
+docker compose -f docker-compose.full.yml logs -f [service-name]
 
 # 테스트 실행
 pytest tests/
 
 # 모든 것 정리 (데이터 포함)
-docker-compose down -v
+docker compose -f docker-compose.full.yml down -v
 ```
 
 ### 포트 설정 (환경변수)

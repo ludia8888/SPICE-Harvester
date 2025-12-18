@@ -15,14 +15,14 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
       ZOOKEEPER_LOG4J_ROOT_LOGLEVEL: WARN
     ports:
-      - "2181:2181"
+      - "${ZOOKEEPER_PORT_HOST:-2181}:2181"
     volumes:
       - zookeeper-data:/var/lib/zookeeper/data
       - zookeeper-logs:/var/lib/zookeeper/log
     networks:
       - spice_network
     healthcheck:
-      test: ["CMD", "zkServer.sh", "status"]
+      test: ["CMD-SHELL", "cub zk-ready localhost:2181 10"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -39,7 +39,7 @@ services:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:${KAFKA_PORT_HOST:-9092}
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
@@ -50,8 +50,8 @@ services:
       KAFKA_LOG4J_ROOT_LOGLEVEL: WARN
       KAFKA_LOG4J_LOGGERS: "kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO"
     ports:
-      - "9092:9092"
-      - "29092:29092"
+      - "${KAFKA_PORT_HOST:-9092}:9092"
+      - "${KAFKA_PORT_INTERNAL_HOST:-29092}:29092"
     volumes:
       - kafka-data:/var/lib/kafka/data
     networks:
@@ -75,7 +75,7 @@ services:
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
       KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
     ports:
-      - "8080:8080"
+      - "${KAFKA_UI_PORT_HOST:-8080}:8080"
     networks:
       - spice_network
 
@@ -89,4 +89,5 @@ volumes:
 
 networks:
   spice_network:
-    external: true
+    name: spice_network
+    driver: bridge

@@ -3,7 +3,7 @@ Configuration models for SPICE HARVESTER
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 
@@ -97,13 +97,13 @@ class AsyncConnectionInfo:
     def __post_init__(self) -> None:
         """Post-initialization setup"""
         if self.connected_at is None:
-            self.connected_at = datetime.now()
+            self.connected_at = datetime.now(timezone.utc)
         if self.last_used is None:
-            self.last_used = datetime.now()
+            self.last_used = datetime.now(timezone.utc)
 
     def mark_used(self) -> None:
         """Mark connection as used"""
-        self.last_used = datetime.now()
+        self.last_used = datetime.now(timezone.utc)
 
     def can_create_connection(self) -> bool:
         """Check if new connection can be created"""

@@ -25,7 +25,7 @@ All endpoints require TerminusDB authentication configured through environment v
 - `TERMINUS_USER`: TerminusDB username (default: admin)
 - `TERMINUS_KEY`: TerminusDB password (default: admin)
 - `TERMINUS_ACCOUNT`: TerminusDB account (default: admin)
-- `TERMINUS_SERVER_URL`: TerminusDB server URL (default: http://localhost:6364)
+- `TERMINUS_SERVER_URL`: TerminusDB server URL (default: http://localhost:6363)
 
 ## Git-like Version Control Endpoints (NEW)
 
@@ -445,12 +445,20 @@ Analyzes a dataset and infers types for all columns using production AI algorith
       "column_name": "email",
       "inferred_type": {
         "type": "email",
-        "confidence": 1.00,
-        "reason": "Column name suggests email, 2/2 samples valid"
+        "confidence": 0.97,
+        "reason": "2/2 samples validate as email",
+        "metadata": {
+          "matched": 2,
+          "total": 2
+        }
       },
+      "total_count": 2,
+      "non_empty_count": 2,
       "sample_values": ["john@example.com", "jane@test.org"],
       "null_count": 0,
-      "unique_count": 2
+      "unique_count": 2,
+      "null_ratio": 0.0,
+      "unique_ratio": 1.0
     }
   ],
   "analysis_metadata": {
@@ -463,8 +471,9 @@ Analyzes a dataset and infers types for all columns using production AI algorith
 ```
 
 **🔥 Real Implementation Features**:
-- ✅ **100% Confidence Rates**: All inferences achieve perfect accuracy
-- ✅ **6+ Complex Types**: Email, Date, Boolean, Decimal, Phone, URL detection
+- ✅ **Explainable Confidence**: 타입/신뢰도/근거(reason) + 메타데이터 제공
+- ✅ **Rich Profiling Stats**: total/non-empty/null/unique count + ratio 제공
+- ✅ **10+ Complex Types**: Email, Phone, URL, Money, UUID, IP, Enum, JSON array/object, Coordinate 등
 - ✅ **Multilingual Support**: Korean column hints (이메일, 전화번호, 주소)
 - ✅ **No Mock Data**: All responses contain real analysis results
 
@@ -516,7 +525,7 @@ When running with Docker Compose, the OMS service is accessible at:
 Environment variables are configured in `docker-compose.yml`:
 ```yaml
 environment:
-  - TERMINUS_SERVER_URL=${TERMINUS_SERVER_URL:-http://terminusdb:6364}
+  - TERMINUS_SERVER_URL=${TERMINUS_SERVER_URL:-http://terminusdb:6363}
   - TERMINUS_USER=${TERMINUS_USER:-admin}
   - TERMINUS_ACCOUNT=${TERMINUS_ACCOUNT:-admin}
   - TERMINUS_KEY=${TERMINUS_KEY:-admin}

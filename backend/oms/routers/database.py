@@ -1,25 +1,25 @@
 """
 데이터베이스 관리 라우터
 데이터베이스 생성, 삭제, 목록 조회 등을 담당
-Event Sourcing을 위한 Outbox 패턴 구현
+Event Sourcing: S3/MinIO Event Store(SSoT)에 Command 이벤트를 저장
 """
 
 import logging
-from typing import Any, Dict, List
+import os
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Query
 from fastapi.responses import JSONResponse
 
-from oms.dependencies import TerminusServiceDep, OutboxServiceDep, get_outbox_service, EventStoreDep
+from oms.dependencies import TerminusServiceDep, EventStoreDep, CommandStatusServiceDep
 from oms.services.async_terminus import AsyncTerminusService
-from oms.services.migration_helper import migration_helper
-from oms.database.outbox import OutboxService
-from oms.database.postgres import db as postgres_db
 from shared.models.requests import ApiResponse
-from shared.models.commands import DatabaseCommand, CommandType
+from shared.models.commands import DatabaseCommand, CommandType, CommandStatus
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
 from shared.config.app_config import AppConfig
+from shared.models.event_envelope import EventEnvelope
+from shared.services.aggregate_sequence_allocator import OptimisticConcurrencyError
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,8 @@ async def list_databases(terminus_service: AsyncTerminusService = TerminusServic
 async def create_database(
     request: dict, 
     terminus_service: AsyncTerminusService = TerminusServiceDep,
-    outbox_service: OutboxService = OutboxServiceDep
+    event_store=EventStoreDep,
+    command_status_service=CommandStatusServiceDep,
 ):
     """
     새 데이터베이스 생성
@@ -79,49 +80,64 @@ async def create_database(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="설명이 너무 깁니다 (500자 이하)"
             )
 
-        # Event Sourcing 모드: 명령만 발행 (비동기 처리)
-        if outbox_service:
-            logger.info(f"Event Sourcing mode enabled for database creation: {db_name}")
+        enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
+
+        if enable_event_sourcing:
+            command = DatabaseCommand(
+                command_type=CommandType.CREATE_DATABASE,
+                aggregate_id=db_name,
+                expected_seq=0,
+                payload={"database_name": db_name, "description": description},
+                metadata={"source": "OMS", "user": "system"},
+            )
+
+            envelope = EventEnvelope.from_command(
+                command,
+                actor="system",
+                kafka_topic=AppConfig.DATABASE_COMMANDS_TOPIC,
+                metadata={"service": "oms", "mode": "event_sourcing"},
+            )
             try:
-                async with postgres_db.transaction() as conn:
-                    command = DatabaseCommand(
-                        command_type=CommandType.CREATE_DATABASE,
-                        aggregate_id=db_name,
-                        payload={
-                            "database_name": db_name,
-                            "description": description
+                await event_store.append_event(envelope)
+            except OptimisticConcurrencyError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "error": "optimistic_concurrency_conflict",
+                        "aggregate_id": e.aggregate_id,
+                        "expected_seq": e.expected_last_sequence,
+                        "actual_seq": e.actual_last_sequence,
+                    },
+                )
+
+            if command_status_service:
+                try:
+                    await command_status_service.set_command_status(
+                        command_id=str(command.command_id),
+                        status=CommandStatus.PENDING,
+                        metadata={
+                            "command_type": command.command_type,
+                            "aggregate_id": command.aggregate_id,
+                            "db_name": db_name,
+                            "created_at": command.created_at.isoformat(),
+                            "created_by": command.created_by or "system",
                         },
-                        metadata={"source": "OMS", "user": "system"}
                     )
-                    # 🔥 MIGRATION: Use migration helper for gradual S3 adoption
-                    migration_result = await migration_helper.handle_command_with_migration(
-                        connection=conn,
-                        command=command,
-                        outbox_service=outbox_service,
-                        topic=AppConfig.DATABASE_COMMANDS_TOPIC,
-                        actor="system"
-                    )
-                    logger.info(f"🔥 Published CREATE_DATABASE command for {db_name} - Migration: {migration_result['migration_mode']}")
-                    
-                    # Event Sourcing 모드에서는 명령 ID와 상태 반환 (202 Accepted)
-                    return JSONResponse(
-                        status_code=status.HTTP_202_ACCEPTED,
-                        content=ApiResponse.accepted(
-                            message=f"데이터베이스 '{db_name}' 생성 명령이 접수되었습니다",
-                            data={
-                                "command_id": str(command.command_id),
-                                "database_name": db_name,
-                                "status": "processing",
-                                "mode": "event_sourcing"
-                            }
-                        ).to_dict()
-                    )
-            except Exception as e:
-                logger.error(f"Failed to publish CREATE_DATABASE command: {e}")
-                # Event Sourcing 실패 시 직접 생성으로 폴백
-                logger.warning("Falling back to direct creation due to Event Sourcing failure")
-        else:
-            logger.warning(f"🔥 OutboxService is None - using direct creation mode")
+                except Exception as e:
+                    logger.warning(f"Failed to persist command status (continuing without Redis): {e}")
+
+            return JSONResponse(
+                status_code=status.HTTP_202_ACCEPTED,
+                content=ApiResponse.accepted(
+                    message=f"데이터베이스 '{db_name}' 생성 명령이 접수되었습니다",
+                    data={
+                        "command_id": str(command.command_id),
+                        "database_name": db_name,
+                        "status": "processing",
+                        "mode": "event_sourcing",
+                    },
+                ).to_dict(),
+            )
         
         # 직접 생성 모드 (Event Sourcing 비활성화 또는 실패 시)
         result = await terminus_service.create_database(db_name, description=description)
@@ -178,9 +194,11 @@ async def create_database(
 
 @router.delete("/{db_name}")
 async def delete_database(
-    db_name: str, 
+    db_name: str,
+    expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
     terminus_service: AsyncTerminusService = TerminusServiceDep,
-    outbox_service: OutboxService = OutboxServiceDep
+    event_store=EventStoreDep,
+    command_status_service=CommandStatusServiceDep,
 ):
     """
     데이터베이스 삭제
@@ -200,46 +218,66 @@ async def delete_database(
                 detail=f"시스템 데이터베이스 '{db_name}'은(는) 삭제할 수 없습니다",
             )
 
+        enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
+
         # Event Sourcing 모드: 명령만 발행 (비동기 처리)
         # 존재 확인은 worker에서 처리하도록 함
-        if outbox_service:
+        if enable_event_sourcing:
+            command = DatabaseCommand(
+                command_type=CommandType.DELETE_DATABASE,
+                aggregate_id=db_name,
+                expected_seq=expected_seq,
+                payload={"database_name": db_name},
+                metadata={"source": "OMS", "user": "system"},
+            )
+
+            envelope = EventEnvelope.from_command(
+                command,
+                actor="system",
+                kafka_topic=AppConfig.DATABASE_COMMANDS_TOPIC,
+                metadata={"service": "oms", "mode": "event_sourcing"},
+            )
             try:
-                async with postgres_db.transaction() as conn:
-                    command = DatabaseCommand(
-                        command_type=CommandType.DELETE_DATABASE,
-                        aggregate_id=db_name,
-                        payload={
-                            "database_name": db_name
+                await event_store.append_event(envelope)
+            except OptimisticConcurrencyError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "error": "optimistic_concurrency_conflict",
+                        "aggregate_id": e.aggregate_id,
+                        "expected_seq": e.expected_last_sequence,
+                        "actual_seq": e.actual_last_sequence,
+                    },
+                )
+
+            if command_status_service:
+                try:
+                    await command_status_service.set_command_status(
+                        command_id=str(command.command_id),
+                        status=CommandStatus.PENDING,
+                        metadata={
+                            "command_type": command.command_type,
+                            "aggregate_id": command.aggregate_id,
+                            "db_name": db_name,
+                            "created_at": command.created_at.isoformat(),
+                            "created_by": command.created_by or "system",
                         },
-                        metadata={"source": "OMS", "user": "system"}
                     )
-                    # 🔥 MIGRATION: Use migration helper for gradual S3 adoption
-                    migration_result = await migration_helper.handle_command_with_migration(
-                        connection=conn,
-                        command=command,
-                        outbox_service=outbox_service,
-                        topic=AppConfig.DATABASE_COMMANDS_TOPIC,
-                        actor="system"
-                    )
-                    logger.info(f"🔥 Published DELETE_DATABASE command for {db_name} - Migration: {migration_result['migration_mode']}")
-                    
-                    # Event Sourcing 모드에서는 명령 ID와 상태 반환 (202 Accepted)
-                    return JSONResponse(
-                        status_code=status.HTTP_202_ACCEPTED,
-                        content=ApiResponse.accepted(
-                            message=f"데이터베이스 '{db_name}' 삭제 명령이 접수되었습니다",
-                            data={
-                                "command_id": str(command.command_id),
-                                "database_name": db_name,
-                                "status": "processing",
-                                "mode": "event_sourcing"
-                            }
-                        ).to_dict()
-                    )
-            except Exception as e:
-                logger.error(f"Failed to publish DELETE_DATABASE command: {e}")
-                # Event Sourcing 실패 시 직접 삭제로 폴백
-                logger.warning("Falling back to direct deletion due to Event Sourcing failure")
+                except Exception as e:
+                    logger.warning(f"Failed to persist command status (continuing without Redis): {e}")
+
+            return JSONResponse(
+                status_code=status.HTTP_202_ACCEPTED,
+                content=ApiResponse.accepted(
+                    message=f"데이터베이스 '{db_name}' 삭제 명령이 접수되었습니다",
+                    data={
+                        "command_id": str(command.command_id),
+                        "database_name": db_name,
+                        "status": "processing",
+                        "mode": "event_sourcing",
+                    },
+                ).to_dict(),
+            )
 
         # 직접 삭제 모드 (Event Sourcing 비활성화 또는 실패 시)
         # 이 모드에서만 존재 확인 필요

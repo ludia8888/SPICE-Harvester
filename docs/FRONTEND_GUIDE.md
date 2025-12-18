@@ -39,8 +39,8 @@
 #### Enterprise-Grade Services
 - **OMS (Ontology Management Service)**: Port 8000 - ✅ **Fully Implemented** (7/7 git features, 18+ validators)
 - **BFF (Backend for Frontend)**: Port 8002 - ✅ **Enterprise Implementation** (Service Factory pattern)
-- **Funnel (Type Inference Service)**: Port 8004 - ✅ **Advanced AI Algorithms** (1,048 lines of sophisticated code)
-- **TerminusDB**: Port 6364 - ✅ **v11.x Full Integration** (git-like features 100% support)
+- **Funnel (Type Inference Service)**: Port 8003 - ✅ **Advanced AI Algorithms** (1,048 lines of sophisticated code)
+- **TerminusDB**: Port 6363 - ✅ **Full Integration** (git-like features 100% support)
 
 #### Key Achievements (2025-07-26 Update)
 1. **API Response Standardization** ✅ **Complete**
@@ -75,7 +75,7 @@
 ### Base URLs (Actual Ports)
 - **BFF (Recommended)**: `http://localhost:8002` - ✅ **Complete Implementation** (Service Factory)
 - **OMS (Internal)**: `http://localhost:8000` - ✅ **Complete Implementation** (18+ validators)
-- **Funnel (Type Inference)**: `http://localhost:8004` - ✅ **Complete Implementation** (1,048 lines AI algorithms)
+- **Funnel (Type Inference)**: `http://localhost:8003` - ✅ **Complete Implementation** (1,048 lines AI algorithms)
 
 ### API Client Implementation
 

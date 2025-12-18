@@ -3,10 +3,11 @@ OMS 온톨로지 라우터 - 내부 ID 기반 온톨로지 관리
 """
 
 import logging
-from datetime import datetime
+import os
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status, Path
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Path, Query
 from fastapi.responses import JSONResponse
 
 # Modernized dependency injection imports
@@ -14,22 +15,20 @@ from oms.dependencies import (
     get_jsonld_converter, 
     get_label_mapper, 
     get_terminus_service,
-    get_outbox_service,
     TerminusServiceDep,
     JSONLDConverterDep,
     LabelMapperDep,
-    OutboxServiceDep,
     EventStoreDep,  # Added for S3/MinIO Event Store
+    CommandStatusServiceDep,
     ValidatedDatabaseName,
     ValidatedClassId,
     ensure_database_exists
 )
-from oms.services.migration_helper import migration_helper
-from oms.database.postgres import db as postgres_db
-from oms.database.outbox import MessageType, OutboxService
-from shared.models.commands import CommandType, OntologyCommand
+from shared.models.commands import CommandType, OntologyCommand, CommandStatus
 from shared.models.events import EventType
 from shared.config.app_config import AppConfig
+from shared.models.event_envelope import EventEnvelope
+from shared.services.aggregate_sequence_allocator import OptimisticConcurrencyError
 from shared.security.input_sanitizer import validate_db_name
 
 # OMS 서비스 import
@@ -91,12 +90,15 @@ async def create_ontology(
     terminus: AsyncTerminusService = TerminusServiceDep,
     converter: JSONToJSONLDConverter = JSONLDConverterDep,
     label_mapper=LabelMapperDep,
-    outbox_service: Optional[OutboxService] = OutboxServiceDep,
+    event_store=EventStoreDep,
+    command_status_service=CommandStatusServiceDep,
 ) -> OntologyResponse:
     """내부 ID 기반 온톨로지 생성"""
     # 🔥 ULTRA DEBUG! OMS received data
     
     try:
+        enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
+
         # 🔥 FIXED: 데이터베이스 존재 확인 (dependency 제거로 인해 수동 처리)
         db_name = validate_db_name(db_name)
         if not await terminus.database_exists(db_name):
@@ -138,55 +140,82 @@ async def create_ontology(
             else:
                 description = str(description_data)
 
-        # Event Sourcing 모드: 명령만 발행 (비동기 처리)
-        if outbox_service:
+        if enable_event_sourcing:
+            # Event Sourcing: append command-request event to S3/MinIO and return 202.
+            command = OntologyCommand(
+                command_type=CommandType.CREATE_ONTOLOGY_CLASS,
+                aggregate_id=f"{db_name}:{ontology_data.get('id')}",
+                db_name=db_name,
+                expected_seq=0,
+                payload={
+                    "db_name": db_name,
+                    "class_id": ontology_data.get("id"),
+                    "label": label,
+                    "description": description,
+                    "properties": ontology_data.get("properties", []),
+                    "relationships": ontology_data.get("relationships", []),
+                    "parent_class": ontology_data.get("parent_class"),
+                    "abstract": ontology_data.get("abstract", False),
+                },
+                metadata={"source": "OMS", "user": "system"},
+            )
+
+            envelope = EventEnvelope.from_command(
+                command,
+                actor="system",
+                kafka_topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC,
+                metadata={"service": "oms", "mode": "event_sourcing"},
+            )
             try:
-                async with postgres_db.transaction() as conn:
-                    command = OntologyCommand(
-                        command_type=CommandType.CREATE_ONTOLOGY_CLASS,
-                        aggregate_id=f"{db_name}:{ontology_data.get('id')}",
-                        db_name=db_name,
-                        payload={
+                await event_store.append_event(envelope)
+            except OptimisticConcurrencyError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "error": "optimistic_concurrency_conflict",
+                        "aggregate_id": e.aggregate_id,
+                        "expected_seq": e.expected_last_sequence,
+                        "actual_seq": e.actual_last_sequence,
+                    },
+                )
+
+            if command_status_service:
+                try:
+                    await command_status_service.set_command_status(
+                        command_id=str(command.command_id),
+                        status=CommandStatus.PENDING,
+                        metadata={
+                            "command_type": command.command_type,
+                            "aggregate_id": command.aggregate_id,
                             "db_name": db_name,
                             "class_id": ontology_data.get("id"),
-                            "label": label,
-                            "description": description,
-                            "properties": ontology_data.get("properties", []),
-                            "relationships": ontology_data.get("relationships", []),
-                            "parent_class": ontology_data.get("parent_class"),
-                            "abstract": ontology_data.get("abstract", False),
+                            "created_at": command.created_at.isoformat(),
+                            "created_by": command.created_by or "system",
                         },
-                        metadata={"source": "OMS", "user": "system"}
                     )
-                    # 🔥 MIGRATION: Use migration helper for gradual S3 adoption
-                    migration_result = await migration_helper.handle_command_with_migration(
-                        connection=conn,
-                        command=command,
-                        outbox_service=outbox_service,
-                        topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC,
-                        actor="system"
-                    )
-                    logger.info(f"🔥 Published CREATE_ONTOLOGY_CLASS command for {db_name}:{ontology_data.get('id')} - Migration: {migration_result['migration_mode']}")
-                    
-                    # Event Sourcing 모드에서는 명령 ID와 상태 반환 (202 Accepted)
-                    return JSONResponse(
-                        status_code=status.HTTP_202_ACCEPTED,
-                        content=ApiResponse.accepted(
-                            message=f"온톨로지 '{ontology_data.get('id')}' 생성 명령이 접수되었습니다",
-                            data={
-                                "command_id": str(command.command_id),
-                                "ontology_id": ontology_data.get("id"),
-                                "database": db_name,
-                                "status": "processing",
-                                "mode": "event_sourcing"
-                            }
-                        ).to_dict()
-                    )
-            except Exception as e:
-                logger.error(f"Failed to publish CREATE_ONTOLOGY_CLASS command: {e}")
-                logger.warning("Falling back to direct creation due to Event Sourcing failure")
+                except Exception as e:
+                    logger.warning(f"Failed to persist command status (continuing without Redis): {e}")
 
-        # 직접 생성 모드 (Event Sourcing 비활성화 또는 실패 시)
+            logger.info(
+                f"🔥 Stored CREATE_ONTOLOGY_CLASS command in Event Store: {envelope.event_id} "
+                f"(seq={envelope.sequence_number})"
+            )
+
+            return JSONResponse(
+                status_code=status.HTTP_202_ACCEPTED,
+                content=ApiResponse.accepted(
+                    message=f"온톨로지 '{ontology_data.get('id')}' 생성 명령이 접수되었습니다",
+                    data={
+                        "command_id": str(command.command_id),
+                        "ontology_id": ontology_data.get("id"),
+                        "database": db_name,
+                        "status": "processing",
+                        "mode": "event_sourcing",
+                    },
+                ).to_dict(),
+            )
+
+        # 직접 생성 모드 (Event Sourcing 비활성화 시)
         # TerminusDB에 직접 저장 (create_ontology 사용)
         from shared.models.ontology import OntologyBase
         ontology_obj = OntologyBase(**ontology_data)
@@ -229,7 +258,7 @@ async def create_ontology(
             abstract=ontology_data.get("abstract", False),
             metadata={
                 "terminus_response": result,  # 원본 TerminusDB 응답 보존
-                "creation_timestamp": datetime.utcnow().isoformat(),
+                "creation_timestamp": datetime.now(timezone.utc).isoformat(),
                 "mode": "direct"
             },
         )
@@ -432,14 +461,18 @@ async def update_ontology(
     ontology_data: OntologyUpdateRequest,
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
+    expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
     terminus: AsyncTerminusService = TerminusServiceDep,
     converter: JSONToJSONLDConverter = JSONLDConverterDep,
-    outbox_service: Optional[OutboxService] = OutboxServiceDep,
+    event_store=EventStoreDep,
+    command_status_service=CommandStatusServiceDep,
 ):
     """내부 ID 기반 온톨로지 업데이트"""
     try:
+        enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
+
         # 요청 데이터 정화
-        sanitized_data = sanitize_input(ontology_data.dict(exclude_unset=True))
+        sanitized_data = sanitize_input(ontology_data.model_dump(mode="json", exclude_unset=True))
 
         # 기존 데이터 조회
         existing = await terminus.get_ontology(db_name, class_id)
@@ -450,54 +483,76 @@ async def update_ontology(
                 detail=f"온톨로지 '{class_id}'를 찾을 수 없습니다",
             )
 
-        # 업데이트 데이터 병합
-        merged_data = {**converter.extract_from_jsonld(existing), **sanitized_data}
-        merged_data["id"] = class_id  # ID는 변경 불가
+        if enable_event_sourcing:
+            # Event Sourcing: publish UPDATE command (actual write is async in worker)
+            command = OntologyCommand(
+                command_type=CommandType.UPDATE_ONTOLOGY_CLASS,
+                aggregate_id=f"{db_name}:{class_id}",
+                db_name=db_name,
+                expected_seq=expected_seq,
+                payload={
+                    "db_name": db_name,
+                    "class_id": class_id,
+                    "updates": sanitized_data,
+                },
+                metadata={"source": "OMS", "user": "system"},
+            )
 
-        # JSON-LD로 변환
-        jsonld_data = converter.convert_with_labels(merged_data)
-
-        # TerminusDB 업데이트
-        result = await terminus.update_ontology(db_name, class_id, jsonld_data)
-
-        # 🔥 MIGRATION: Use migration helper for Event Sourcing with S3/MinIO
-        if outbox_service and postgres_db.pool:
+            envelope = EventEnvelope.from_command(
+                command,
+                actor="system",
+                kafka_topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC,
+                metadata={"service": "oms", "mode": "event_sourcing"},
+            )
             try:
-                async with postgres_db.transaction() as conn:
-                    # Create update command
-                    from shared.models.commands import OntologyCommand
-                    import uuid
-                    
-                    command = OntologyCommand(
-                        command_id=str(uuid.uuid4()),
-                        command_type=CommandType.UPDATE_ONTOLOGY_CLASS,
-                        aggregate_type="OntologyClass",
-                        aggregate_id=class_id,
-                        payload={
+                await event_store.append_event(envelope)
+            except OptimisticConcurrencyError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "error": "optimistic_concurrency_conflict",
+                        "aggregate_id": e.aggregate_id,
+                        "expected_seq": e.expected_last_sequence,
+                        "actual_seq": e.actual_last_sequence,
+                    },
+                )
+
+            if command_status_service:
+                try:
+                    await command_status_service.set_command_status(
+                        command_id=str(command.command_id),
+                        status=CommandStatus.PENDING,
+                        metadata={
+                            "command_type": command.command_type,
+                            "aggregate_id": command.aggregate_id,
                             "db_name": db_name,
                             "class_id": class_id,
-                            "updates": sanitized_data,
-                            "merged_data": merged_data,
+                            "created_at": command.created_at.isoformat(),
+                            "created_by": command.created_by or "system",
                         },
-                        metadata={
-                            "user": "system",  # TODO: 실제 사용자 정보 추가
-                            "source": "oms_api",
-                        }
                     )
-                    
-                    # Use migration helper for dual-write pattern
-                    migration_result = await migration_helper.handle_command_with_migration(
-                        connection=conn,
-                        command=command,
-                        outbox_service=outbox_service,
-                        topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC,
-                        actor="system"
-                    )
-                    logger.info(f"🔥 Published UPDATE_ONTOLOGY_CLASS command for {class_id} - Migration: {migration_result['migration_mode']}")
-            except Exception as e:
-                # 이벤트 발행 실패는 업데이트 작업을 실패시키지 않음
-                logger.error(f"Failed to publish outbox event: {e}")
+                except Exception as e:
+                    logger.warning(f"Failed to persist command status (continuing without Redis): {e}")
 
+            return JSONResponse(
+                status_code=status.HTTP_202_ACCEPTED,
+                content=ApiResponse.accepted(
+                    message=f"온톨로지 '{class_id}' 업데이트 명령이 접수되었습니다",
+                    data={
+                        "command_id": str(command.command_id),
+                        "ontology_id": class_id,
+                        "database": db_name,
+                        "status": "processing",
+                        "mode": "event_sourcing",
+                    },
+                ).to_dict(),
+            )
+
+        # Direct update mode
+        merged_data = {**converter.extract_from_jsonld(existing), **sanitized_data}
+        merged_data["id"] = class_id  # ID는 변경 불가
+        jsonld_data = converter.convert_with_labels(merged_data)
+        result = await terminus.update_ontology(db_name, class_id, jsonld_data)
         return OntologyResponse(
             status="success", message=f"온톨로지 '{class_id}'가 업데이트되었습니다", data=result
         )
@@ -519,57 +574,90 @@ async def update_ontology(
 async def delete_ontology(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
+    expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
     terminus: AsyncTerminusService = TerminusServiceDep,
-    outbox_service: Optional[OutboxService] = OutboxServiceDep,
+    event_store=EventStoreDep,
+    command_status_service=CommandStatusServiceDep,
 ):
     """내부 ID 기반 온톨로지 삭제"""
     try:
+        enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
 
-        # TerminusDB에서 삭제
-        success = await terminus.delete_ontology(db_name, class_id)
-
-        if not success:
+        # Ensure it exists (command-side validation)
+        existing = await terminus.get_ontology(db_name, class_id)
+        if not existing:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"온톨로지 '{class_id}'를 찾을 수 없습니다",
             )
 
-        # 🔥 MIGRATION: Use migration helper for Event Sourcing with S3/MinIO
-        if outbox_service and postgres_db.pool:
+        if enable_event_sourcing:
+            command = OntologyCommand(
+                command_type=CommandType.DELETE_ONTOLOGY_CLASS,
+                aggregate_id=f"{db_name}:{class_id}",
+                db_name=db_name,
+                expected_seq=expected_seq,
+                payload={"db_name": db_name, "class_id": class_id},
+                metadata={"source": "OMS", "user": "system"},
+            )
+
+            envelope = EventEnvelope.from_command(
+                command,
+                actor="system",
+                kafka_topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC,
+                metadata={"service": "oms", "mode": "event_sourcing"},
+            )
             try:
-                async with postgres_db.transaction() as conn:
-                    # Create delete command
-                    from shared.models.commands import OntologyCommand
-                    import uuid
-                    
-                    command = OntologyCommand(
-                        command_id=str(uuid.uuid4()),
-                        command_type=CommandType.DELETE_ONTOLOGY_CLASS,
-                        aggregate_type="OntologyClass",
-                        aggregate_id=class_id,
-                        payload={
+                await event_store.append_event(envelope)
+            except OptimisticConcurrencyError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "error": "optimistic_concurrency_conflict",
+                        "aggregate_id": e.aggregate_id,
+                        "expected_seq": e.expected_last_sequence,
+                        "actual_seq": e.actual_last_sequence,
+                    },
+                )
+
+            if command_status_service:
+                try:
+                    await command_status_service.set_command_status(
+                        command_id=str(command.command_id),
+                        status=CommandStatus.PENDING,
+                        metadata={
+                            "command_type": command.command_type,
+                            "aggregate_id": command.aggregate_id,
                             "db_name": db_name,
                             "class_id": class_id,
+                            "created_at": command.created_at.isoformat(),
+                            "created_by": command.created_by or "system",
                         },
-                        metadata={
-                            "user": "system",  # TODO: 실제 사용자 정보 추가
-                            "source": "oms_api",
-                        }
                     )
-                    
-                    # Use migration helper for dual-write pattern
-                    migration_result = await migration_helper.handle_command_with_migration(
-                        connection=conn,
-                        command=command,
-                        outbox_service=outbox_service,
-                        topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC,
-                        actor="system"
-                    )
-                    logger.info(f"🔥 Published DELETE_ONTOLOGY_CLASS command for {class_id} - Migration: {migration_result['migration_mode']}")
-            except Exception as e:
-                # 이벤트 발행 실패는 삭제 작업을 실패시키지 않음
-                logger.error(f"Failed to publish outbox event: {e}")
+                except Exception as e:
+                    logger.warning(f"Failed to persist command status (continuing without Redis): {e}")
 
+            return JSONResponse(
+                status_code=status.HTTP_202_ACCEPTED,
+                content=ApiResponse.accepted(
+                    message=f"온톨로지 '{class_id}' 삭제 명령이 접수되었습니다",
+                    data={
+                        "command_id": str(command.command_id),
+                        "ontology_id": class_id,
+                        "database": db_name,
+                        "status": "processing",
+                        "mode": "event_sourcing",
+                    },
+                ).to_dict(),
+            )
+
+        # Direct delete mode
+        success = await terminus.delete_ontology(db_name, class_id)
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"온톨로지 '{class_id}'를 찾을 수 없습니다",
+            )
         return BaseResponse(status="success", message=f"온톨로지 '{class_id}'가 삭제되었습니다")
 
     except SecurityViolationError as e:
@@ -594,7 +682,7 @@ async def query_ontologies(
     """내부 ID 기반 온톨로지 쿼리"""
     try:
         # 쿼리 데이터 정화
-        sanitized_query = sanitize_input(query.dict())
+        sanitized_query = sanitize_input(query.model_dump(mode="json"))
 
         # 클래스 ID 검증 (있는 경우)
         if sanitized_query.get("class_id"):
@@ -648,12 +736,12 @@ async def query_ontologies(
         # 쿼리 실행
         result = await terminus.execute_query(db_name, query_dict)
 
-        return QueryResponse(
-            status="success",
-            message="쿼리가 성공적으로 실행되었습니다",
-            data=result.get("results", []),
-            count=result.get("total", 0),
-        )
+        return {
+            "status": "success",
+            "message": "쿼리가 성공적으로 실행되었습니다",
+            "data": result.get("results", []),
+            "count": result.get("total", 0),
+        }
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in query_ontologies: {e}")
@@ -754,7 +842,7 @@ async def create_ontology_with_advanced_relationships(
             abstract=ontology_data.get("abstract", False),
             metadata={
                 "terminus_response": result,
-                "creation_timestamp": datetime.utcnow().isoformat(),
+                "creation_timestamp": datetime.now(timezone.utc).isoformat(),
                 "advanced_features": {
                     "auto_generate_inverse": auto_generate_inverse,
                     "validate_relationships": validate_relationships,

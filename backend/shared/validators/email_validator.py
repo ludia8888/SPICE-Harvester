@@ -50,7 +50,8 @@ class EmailValidator(BaseValidator):
             # Disable DNS check for validation
             validated = validate_email_lib(value, check_deliverability=False)
             result_data = {
-                "email": validated.email,
+                # validated.email is deprecated; use validated.normalized instead
+                "email": getattr(validated, "normalized", None) or validated.email,
                 "local": validated.local_part,
                 "domain": validated.domain,
             }

@@ -38,4 +38,4 @@ EXPOSE 8003
 ENV PYTHONPATH=/app
 
 # Run the application
-CMD ["python", "-m", "funnel.main"]
+CMD ["python", "-m", "uvicorn", "funnel.main:app", "--host", "0.0.0.0", "--port", "8003", "--log-level", "info"]

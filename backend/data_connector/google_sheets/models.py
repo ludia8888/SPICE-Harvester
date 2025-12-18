@@ -63,8 +63,8 @@ class GoogleSheetPreviewResponse(BaseModel):
     worksheet_name: str = Field(default="", description="워크시트 이름")
     metadata: Optional[SheetMetadata] = Field(None, description="시트 메타데이터")
     columns: List[str] = Field(default_factory=list, description="컬럼 목록")
-    sample_rows: List[Dict[str, Any]] = Field(default_factory=list, description="샘플 행 데이터")
-    preview_data: List[List[str]] = Field(default_factory=list, description="미리보기 데이터")
+    sample_rows: List[List[Any]] = Field(default_factory=list, description="샘플 행 데이터")
+    preview_data: List[List[Any]] = Field(default_factory=list, description="미리보기 데이터")
     total_rows: int = Field(0, description="전체 행 수")
     total_columns: int = Field(0, description="전체 컬럼 수")
 

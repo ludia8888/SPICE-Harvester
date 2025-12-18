@@ -53,8 +53,8 @@
 
 #### Database Requirements
 - TerminusDB v11.x
-- PostgreSQL 13+ (for future metadata store)
-- Redis 6+ (for caching, optional)
+- PostgreSQL 13+ (**required**: `processed_events`/`aggregate_versions` idempotency+ordering registry, write-side seq allocator)
+- Redis 6+ (optional but recommended: command status, caching; write-side should continue without Redis)
 
 ## Installation and Setup
 
@@ -172,7 +172,7 @@ ALLOWED_HOSTS=api.example.com,localhost
 CORS_ORIGINS=https://app.example.com
 
 # Database
-TERMINUS_SERVER_URL=http://localhost:6364
+TERMINUS_SERVER_URL=http://localhost:6363
 TERMINUS_USER=admin
 TERMINUS_ACCOUNT=admin
 TERMINUS_KEY=your-terminus-key
@@ -180,7 +180,7 @@ TERMINUS_KEY=your-terminus-key
 # Service URLs
 OMS_BASE_URL=http://localhost:8000
 BFF_BASE_URL=http://localhost:8002
-FUNNEL_BASE_URL=http://localhost:8004
+FUNNEL_BASE_URL=http://localhost:8003
 
 # Performance
 WORKER_PROCESSES=4
@@ -235,7 +235,7 @@ authentication:
 #### Development Mode
 ```bash
 # Start all services
-python start_services.py --env development
+python backend/start_services.py --env development
 
 # Start individual services
 python -m bff.main
@@ -251,7 +251,8 @@ sudo systemctl start spice-harvester-oms
 sudo systemctl start spice-harvester-funnel
 
 # Using Docker Compose
-docker-compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.full.yml up -d
+# or: cd backend && ./deploy.sh up
 ```
 
 ## Database Administration
@@ -262,31 +263,31 @@ docker-compose -f docker-compose.prod.yml up -d
 
 ```bash
 # Check database status
-curl -u admin:password http://localhost:6364/api/db/admin
+curl -u admin:${TERMINUS_KEY:-admin} http://localhost:6363/api/db/admin
 
 # List all databases
-curl -u admin:password http://localhost:6364/api/db/admin/_meta
+curl -u admin:${TERMINUS_KEY:-admin} http://localhost:6363/api/db/admin/_meta
 
 # Create new database
-curl -u admin:password -X POST http://localhost:6364/api/db/admin/mydb \
+curl -u admin:${TERMINUS_KEY:-admin} -X POST http://localhost:6363/api/db/admin/mydb \
   -H "Content-Type: application/json" \
   -d '{"label": "My Database", "comment": "Production database"}'
 
 # Delete database (CAUTION!)
-curl -u admin:password -X DELETE http://localhost:6364/api/db/admin/mydb
+curl -u admin:${TERMINUS_KEY:-admin} -X DELETE http://localhost:6363/api/db/admin/mydb
 ```
 
 #### Performance Monitoring
 
 ```bash
 # Check database size
-docker exec terminusdb du -sh /app/terminusdb/storage
+docker exec spice_terminusdb du -sh /app/terminusdb/storage
 
 # Monitor active connections
-docker exec terminusdb netstat -an | grep 6364
+docker exec spice_terminusdb netstat -an | grep 6363
 
 # View database logs
-docker logs terminusdb --tail 100 -f
+docker logs spice_terminusdb --tail 100 -f
 ```
 
 ### Data Management
@@ -298,7 +299,7 @@ docker logs terminusdb --tail 100 -f
 python scripts/export_schema.py --database mydb --output schema.json
 
 # Export full database
-docker exec terminusdb terminusdb db dump admin/mydb > backup.dump
+docker exec spice_terminusdb terminusdb db dump admin/mydb > backup.dump
 
 # Export specific ontologies
 python scripts/export_ontology.py --database mydb --class Product
@@ -308,7 +309,7 @@ python scripts/export_ontology.py --database mydb --class Product
 
 ```bash
 # Import database dump
-docker exec -i terminusdb terminusdb db restore admin/mydb < backup.dump
+docker exec -i spice_terminusdb terminusdb db restore admin/mydb < backup.dump
 
 # Import schema only
 python scripts/import_schema.py --database mydb --file schema.json
@@ -329,10 +330,10 @@ curl http://localhost:8002/health
 curl http://localhost:8000/health
 
 # Funnel health check
-curl http://localhost:8004/health
+curl http://localhost:8003/health
 
 # TerminusDB health check
-curl -u admin:password http://localhost:6364/api/status
+curl -u admin:${TERMINUS_KEY:-admin} http://localhost:6363/api/status
 ```
 
 ### Monitoring Script
@@ -348,7 +349,7 @@ from datetime import datetime
 SERVICES = {
     "BFF": "http://localhost:8002/health",
     "OMS": "http://localhost:8000/health",
-    "Funnel": "http://localhost:8004/health",
+    "Funnel": "http://localhost:8003/health",
 }
 
 async def check_service_health(name, url):
@@ -532,10 +533,10 @@ from shared.models.config import ConnectionConfig
 
 async def check_version_status(db_name):
     config = ConnectionConfig(
-        server_url="http://localhost:6364",
+        server_url="http://localhost:6363",
         user="admin",
         account="admin",
-        key="admin123"
+        key="admin"
     )
     
     service = AsyncTerminusService(config)
@@ -644,8 +645,8 @@ sudo sysctl -p
 # Check port availability
 sudo lsof -i :8000
 sudo lsof -i :8002
-sudo lsof -i :8004
-sudo lsof -i :6364
+sudo lsof -i :8003
+sudo lsof -i :6363
 
 # Check logs
 tail -n 100 logs/oms.log
@@ -798,7 +799,7 @@ case $SERVICE in
     echo "Recovering Funnel service..."
     sudo systemctl restart spice-harvester-funnel
     sleep 5
-    curl -f http://localhost:8004/health || exit 1
+    curl -f http://localhost:8003/health || exit 1
     ;;
   *)
     echo "Unknown service: $SERVICE"
@@ -1000,10 +1001,10 @@ python scripts/post_update_checks.py
 |---------|------|----------|---------|
 | OMS | 8000 | HTTP | Internal API |
 | BFF | 8002 | HTTP | Public API |
-| Funnel | 8004 | HTTP | Type inference |
-| TerminusDB | 6364 | HTTP | Database |
+| Funnel | 8003 | HTTP | Type inference |
+| TerminusDB | 6363 | HTTP | Database |
 | Redis | 6379 | TCP | Cache (optional) |
-| PostgreSQL | 5432 | TCP | Metadata (future) |
+| PostgreSQL | 5433 | TCP | Idempotency/ordering/seq allocator |
 
 ### B. Log File Locations
 

@@ -8,13 +8,17 @@ import asyncio
 import json
 import logging
 from typing import Dict, Set, Optional, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import WebSocket, WebSocketDisconnect
 from dataclasses import dataclass, field
 
 from shared.services.redis_service import RedisService
 
 logger = logging.getLogger(__name__)
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 @dataclass
@@ -24,8 +28,8 @@ class WebSocketConnection:
     client_id: str
     user_id: Optional[str] = None
     subscribed_commands: Set[str] = field(default_factory=set)
-    connected_at: datetime = field(default_factory=datetime.utcnow)
-    last_ping: datetime = field(default_factory=datetime.utcnow)
+    connected_at: datetime = field(default_factory=utc_now)
+    last_ping: datetime = field(default_factory=utc_now)
 
 
 class WebSocketConnectionManager:
@@ -153,7 +157,7 @@ class WebSocketConnectionManager:
         message = {
             "type": "command_update",
             "command_id": command_id,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utc_now().isoformat(),
             "data": update_data
         }
         
@@ -190,10 +194,30 @@ class WebSocketConnectionManager:
                 sent_count += 1
                 
         return sent_count
+
+    async def broadcast_to_all(self, message: Dict[str, Any]) -> int:
+        """Broadcast a message to all connected clients."""
+        if not self.active_connections:
+            return 0
+
+        sent_count = 0
+        failed_clients: List[str] = []
+
+        for client_id in list(self.active_connections.keys()):
+            success = await self.send_to_client(client_id, message)
+            if success:
+                sent_count += 1
+            else:
+                failed_clients.append(client_id)
+
+        for client_id in failed_clients:
+            await self.disconnect(client_id)
+
+        return sent_count
         
     async def ping_all_clients(self) -> None:
         """모든 클라이언트에 ping 전송 (연결 상태 확인)"""
-        current_time = datetime.utcnow()
+        current_time = utc_now()
         
         ping_message = {
             "type": "ping",
@@ -326,11 +350,20 @@ class WebSocketNotificationService:
                 if message["type"] == "pmessage":
                     try:
                         # 채널에서 command_id 추출
-                        channel = message["channel"].decode()
+                        raw_channel = message.get("channel")
+                        if isinstance(raw_channel, bytes):
+                            channel = raw_channel.decode()
+                        else:
+                            channel = str(raw_channel or "")
                         command_id = channel.split(":")[-1]
                         
                         # 메시지 데이터 파싱
-                        update_data = json.loads(message["data"])
+                        raw_data = message.get("data")
+                        if isinstance(raw_data, bytes):
+                            payload = raw_data.decode()
+                        else:
+                            payload = raw_data
+                        update_data = json.loads(payload) if payload else {}
                         
                         # WebSocket 클라이언트들에게 브로드캐스트
                         await self.connection_manager.broadcast_command_update(
@@ -363,7 +396,7 @@ class WebSocketNotificationService:
         await self.connection_manager.broadcast_to_all({
             "type": "task_update",
             "data": update_data,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         })
 
 

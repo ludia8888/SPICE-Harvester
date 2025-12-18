@@ -1,5 +1,8 @@
 # SPICE HARVESTER - 시스템 아키텍처
 
+> NOTE (2025-12): 현재 실사용 경로는 **S3/MinIO Event Store(SSoT) + EventPublisher(S3 tail → Kafka)** 이며, PostgreSQL은 **`processed_events`/`aggregate_versions`(멱등/순서 레지스트리) + write-side seq allocator** 용도로만 사용합니다.  
+> 멱등/순서 계약은 `docs/IDEMPOTENCY_CONTRACT.md`를 기준으로 합니다.
+
 ## 목차
 
 1.  [시스템 개요](#1-시스템-개요)
@@ -61,12 +64,12 @@ graph TD
 
     subgraph "쓰기 경로 (Write Path)"
         C(OMS - Ontology Management Service)
-        D[PostgreSQL - Outbox]
-        E[Message Relay]
+        I[S3 / MinIO - Event Store (SSoT)]
+        E[EventPublisher (S3 tail → Kafka)]
         F[Kafka - Event Bus]
         G[Instance Worker]
         H[Ontology Worker]
-        I[S3 / MinIO - Event Store]
+        P[PostgreSQL - processed_events/aggregate_versions + seq allocator]
         J[TerminusDB - Write Model]
     end
 
@@ -83,21 +86,25 @@ graph TD
     B -->|Ontology Command| C
     B -->|Instance Command| C
 
-    C -->|Store Command| D
-    D -->|Poll & Publish| E
-    E -->|Push to Topic| F
+    C -->|Append Command Event| I
+    I -->|Tail Index| E
+    E -->|Publish to Topic| F
 
     F -- Instance Commands --> G
     F -- Ontology Commands --> H
 
-    G -->|1. Save Command Log (SSoT)| I
-    G -->|2. Update Write Model| J
-    G -->|3. Publish Event| F
+    G <-->|Claim/Mark (Idempotency+Ordering)| P
+    H <-->|Claim/Mark (Idempotency+Ordering)| P
+    K <-->|Claim/Mark (Idempotency+Ordering)| P
 
+    G -->|Update Write Model| J
     H -->|Update Write Model| J
-    H -->|Publish Event| F
+
+    G -->|Append Domain Event| I
+    H -->|Append Domain Event| I
 
     F -- Instance/Ontology Events --> K
+
     K -->|Project to| L
     K -->|Cache Data| N
 
@@ -125,14 +132,14 @@ graph TD
 -   **BFF (Backend for Frontend)**: 클라이언트(UI, 외부 API)를 위한 API 게이트웨이입니다. 복잡한 백엔드 로직을 추상화하고, 사용자 친화적인 API를 제공하며, 요청을 내부 서비스로 라우팅하고, 읽기 모델(Elasticsearch, TerminusDB)을 직접 조회하여 응답을 구성합니다.
 
 ### 쓰기 모델 (Write Model)
--   **OMS (Ontology Management Service)**: 모든 변경 요청(Command)의 진입점입니다. 커맨드를 검증하고 `Outbox` 테이블에 저장하여 처리의 안정성을 보장하는 핵심 서비스입니다.
--   **Message Relay**: `Outbox` 패턴의 핵심 컴포넌트로, PostgreSQL의 Outbox 테이블을 주기적으로 폴링하여 저장된 커맨드를 Kafka로 안정적으로 발행(Publish)합니다.
+-   **OMS (Ontology Management Service)**: 모든 변경 요청(Command)의 진입점입니다. 커맨드를 검증한 뒤 **S3/MinIO Event Store(SSoT)**에 `EventEnvelope(kind=command)`로 **append** 합니다(즉시 202 반환).
+-   **EventPublisher (message_relay)**: **S3/MinIO Event Store의 by-date 인덱스를 tail** 하여 커맨드/이벤트를 Kafka로 발행합니다. Publisher/Kafka는 at-least-once이며, 멱등은 소비자 계약입니다.
 -   **Kafka**: 모든 커맨드와 이벤트가 흐르는 중앙 이벤트 버스입니다. 서비스 간의 비동기 통신을 담당합니다.
 -   **Instance Worker**: `Instance` 관련 커맨드를 처리하는 실제 작업자입니다.
-    1.  커맨드 자체를 **S3(Event Store)에 영구 저장**합니다 (SSoT).
-    2.  TerminusDB에 최신 상태를 **업데이트**합니다 (Write-Model Cache).
-    3.  처리 완료 후 `INSTANCE_CREATED`와 같은 도메인 이벤트를 Kafka로 발행합니다.
--   **Ontology Worker**: `Ontology` 관련 커맨드를 처리합니다. TerminusDB의 스키마를 직접 변경하고, 도메인 이벤트를 Kafka로 발행합니다.
+    1.  `processed_events` 레지스트리(PostgreSQL)로 **claim(lease+heartbeat)** 하여 중복/재처리에도 **side-effect 1회**만 발생하도록 보장합니다.
+    2.  TerminusDB/Elasticsearch 등 write/read 모델을 업데이트합니다.
+    3.  처리 완료 후 `EventEnvelope(kind=domain)`을 Event Store에 append하고, EventPublisher가 Kafka로 전달합니다.
+-   **Ontology Worker**: `Ontology` 관련 커맨드를 처리합니다. 동일하게 `processed_events` 레지스트리로 멱등/순서를 보장하고 TerminusDB 스키마를 변경한 뒤 도메인 이벤트를 append합니다.
 
 ### 읽기 모델 (Read Model)
 -   **Projection Worker**: Kafka의 도메인 이벤트를 구독하여, 검색에 최적화된 읽기 모델을 **Elasticsearch에 구축(Projection)**합니다.
@@ -150,30 +157,31 @@ graph TD
 sequenceDiagram
     participant Client
     participant BFF/OMS
-    participant PostgreSQL
-    participant MessageRelay
+    participant S3 as Event Store
+    participant EventPublisher
     participant Kafka
     participant InstanceWorker
-    participant S3 as Event Store
+    participant Postgres as processed_events
     participant TerminusDB
     participant ProjectionWorker
     participant Elasticsearch
 
     Client->>BFF/OMS: POST /instances (Create)
-    BFF/OMS->>PostgreSQL: Store Command in Outbox
+    BFF/OMS->>S3: Append Command Event (SSoT)
     BFF/OMS-->>Client: 202 Accepted (Command ID)
 
-    loop Poll & Publish
-        MessageRelay->>PostgreSQL: Get Command from Outbox
-        MessageRelay->>Kafka: Publish Command
+    loop Tail & Publish
+        EventPublisher->>S3: Tail by-date index
+        EventPublisher->>Kafka: Publish Command
     end
 
     InstanceWorker->>Kafka: Consume Command
-    InstanceWorker->>S3: 1. Save Command Log (SSoT)
+    InstanceWorker->>Postgres: Claim(event_id) / Seq guard
     InstanceWorker->>TerminusDB: 2. Update latest state
-    InstanceWorker->>Kafka: 3. Publish INSTANCE_CREATED Event
+    InstanceWorker->>S3: 3. Append INSTANCE_CREATED Event
 
     ProjectionWorker->>Kafka: Consume Event
+    ProjectionWorker->>Postgres: Claim(event_id) / Seq guard
     ProjectionWorker->>Elasticsearch: Index new document
 ```
 
@@ -185,10 +193,10 @@ sequenceDiagram
 
 | 저장소 | 주 역할 | 데이터 종류 | 데이터 모델 | SSoT 여부 |
 | :--- | :--- | :--- | :--- | :--- |
-| **S3 / MinIO** | **이벤트 저장소 (Event Store)** | 인스턴스 커맨드 로그 | Append-only JSON 파일 | **Yes (Instance)** |
+| **S3 / MinIO** | **이벤트 저장소 (Event Store)** | 커맨드/도메인 이벤트 로그 | Append-only JSON 파일 | **Yes (Instance)** |
 | **TerminusDB** | 쓰기/읽기 모델 | 온톨로지 스키마, 인스턴스 최신 상태 | Graph / Document | **Yes (Ontology)** |
 | **Elasticsearch** | **읽기 모델 (Read Model)** | 검색 및 목록용 데이터 | Denormalized JSON | No |
-| **PostgreSQL** | **메시지 큐 (Outbox)** | 처리 대기중인 커맨드 | Relational | No |
+| **PostgreSQL** | **멱등 레지스트리** | `processed_events`, `aggregate_versions` | Relational | No |
 | **Kafka** | **이벤트 버스 (Event Bus)** | 커맨드 및 도메인 이벤트 | Event Stream | No |
 | **Redis** | **캐시 / 상태 저장소** | 커맨드 처리 상태, 메타데이터 | Key-Value | No |
 
@@ -204,7 +212,8 @@ sequenceDiagram
 ### 데이터 계층
 - **그래프 DB**: TerminusDB
 - **이벤트 저장소**: S3 (MinIO)
-- **메시지 큐**: PostgreSQL (Outbox), Kafka
+- **멱등/순서/시퀀스**: PostgreSQL (`processed_events`, `aggregate_versions`, write-side seq allocator)
+- **이벤트 버스**: Kafka
 - **검색 엔진**: Elasticsearch
 - **캐시**: Redis
 
@@ -212,7 +221,7 @@ sequenceDiagram
 - **마이크로서비스 아키텍처 (MSA)**
 - **CQRS (Command Query Responsibility Segregation)**
 - **이벤트 소싱 (Event Sourcing)**
-- **아웃박스 패턴 (Outbox Pattern)**
+- **At-least-once + 멱등 처리 계약**
 - **프로젝션 (Projection)**
 
 (이하 내용은 기존 문서와 거의 동일하여 생략)

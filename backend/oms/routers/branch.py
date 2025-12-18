@@ -83,7 +83,7 @@ async def create_branch(
         db_name = validate_db_name(db_name)
 
         # 요청 데이터 정화
-        sanitized_data = sanitize_input(request.dict())
+        sanitized_data = sanitize_input(request.model_dump(mode="json"))
 
         # 브랜치 이름 유효성 검증
         branch_name = sanitized_data.get("branch_name")
@@ -132,7 +132,7 @@ async def create_branch(
         )
 
 
-@router.delete("/branch/{branch_name}")
+@router.delete("/branch/{branch_name:path}")
 async def delete_branch(
     db_name: str,
     branch_name: str,
@@ -211,7 +211,7 @@ async def checkout(
         db_name = validate_db_name(db_name)
 
         # 요청 데이터 정화
-        sanitized_data = sanitize_input(request.dict())
+        sanitized_data = sanitize_input(request.model_dump(mode="json"))
 
         target = sanitized_data["target"]
         target_type = sanitized_data.get("target_type", "branch")
@@ -271,7 +271,7 @@ async def checkout(
         )
 
 
-@router.get("/branch/{branch_name}/info")
+@router.get("/branch/{branch_name:path}/info")
 async def get_branch_info(
     db_name: str, branch_name: str, terminus: AsyncTerminusService = TerminusServiceDep
 ):
@@ -351,7 +351,7 @@ async def commit_changes(
         db_name = validate_db_name(db_name)
         
         # 요청 데이터 정화
-        sanitized_data = sanitize_input(request.dict())
+        sanitized_data = sanitize_input(request.model_dump(mode="json"))
         
         message = sanitized_data.get("message", "Automated commit")
         author = sanitized_data.get("author", "system")

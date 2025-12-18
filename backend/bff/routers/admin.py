@@ -10,7 +10,7 @@ and BackgroundTaskManager for all long-running operations.
 
 import logging
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -110,7 +110,7 @@ async def replay_instance_state(
             "db_name": request.db_name,
             "class_id": request.class_id,
             "instance_id": request.instance_id,
-            "requested_at": datetime.utcnow().isoformat()
+            "requested_at": datetime.now(timezone.utc).isoformat()
         }
     )
     
@@ -218,7 +218,7 @@ async def _replay_instance_state_task(
                 "is_deleted": False,
                 "deletion_info": None,
                 "command_count": 0,
-                "replayed_at": datetime.utcnow().isoformat(),
+                "replayed_at": datetime.now(timezone.utc).isoformat(),
                 "message": "No commands found for instance"
             }
         else:
@@ -237,7 +237,7 @@ async def _replay_instance_state_task(
                 "is_deleted": is_deleted,
                 "deletion_info": deletion_info,
                 "command_count": len(command_files),
-                "replayed_at": datetime.utcnow().isoformat()
+                "replayed_at": datetime.now(timezone.utc).isoformat()
             }
         
         # Store result in Redis if requested
@@ -358,7 +358,7 @@ async def get_system_health(
     
     return {
         "status": health_status,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "issues": issues,
         "components": {
             "redis": "healthy" if redis_healthy else "unhealthy",

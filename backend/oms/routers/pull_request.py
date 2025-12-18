@@ -11,7 +11,7 @@ import logging
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from oms.dependencies import TerminusServiceDep
 from oms.services.pull_request_service import PullRequestService, PullRequestStatus
@@ -34,16 +34,17 @@ class PRCreateRequest(BaseModel):
     description: Optional[str] = Field(None, max_length=5000, description="PR description")
     author: str = Field(default="system", description="PR author")
     
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "source_branch": "feature/new-ontology",
                 "target_branch": "main",
                 "title": "Add Product ontology",
                 "description": "This PR adds a new Product ontology with price and description fields",
-                "author": "developer"
+                "author": "developer",
             }
         }
+    )
 
 
 class PRMergeRequest(BaseModel):
@@ -51,13 +52,14 @@ class PRMergeRequest(BaseModel):
     merge_message: Optional[str] = Field(None, max_length=1000, description="Custom merge message")
     author: str = Field(default="system", description="Person performing the merge")
     
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "merge_message": "Merge PR: Add Product ontology",
-                "author": "maintainer"
+                "author": "maintainer",
             }
         }
+    )
 
 
 class PRCloseRequest(BaseModel):
@@ -97,7 +99,7 @@ async def create_pull_request(
         request.target_branch = validate_branch_name(request.target_branch)
         
         # Sanitize text fields
-        sanitized_data = sanitize_input(request.dict())
+        sanitized_data = sanitize_input(request.model_dump(mode="json"))
         
         # Create PR
         result = await pr_service.create_pull_request(
@@ -245,7 +247,7 @@ async def merge_pull_request(
     try:
         # Validate inputs
         db_name = validate_db_name(db_name)
-        sanitized_data = sanitize_input(request.dict())
+        sanitized_data = sanitize_input(request.model_dump(mode="json"))
         
         # Merge PR
         result = await pr_service.merge_pull_request(
@@ -294,7 +296,7 @@ async def close_pull_request(
     try:
         # Validate inputs
         db_name = validate_db_name(db_name)
-        sanitized_data = sanitize_input(request.dict())
+        sanitized_data = sanitize_input(request.model_dump(mode="json"))
         
         # Close PR
         result = await pr_service.close_pull_request(

@@ -74,36 +74,43 @@ async def main():
                 database='spicedb'
             )
             
-            # Check outbox schema
+            # Check processed-event registry schema
             schema_exists = await conn.fetchval("""
                 SELECT EXISTS(
                     SELECT 1 FROM information_schema.schemata 
-                    WHERE schema_name = 'spice_outbox'
+                    WHERE schema_name = 'spice_event_registry'
                 )
             """)
             
             if schema_exists:
-                # Check outbox table
-                table_exists = await conn.fetchval("""
+                processed_events_exists = await conn.fetchval("""
                     SELECT EXISTS(
                         SELECT 1 FROM information_schema.tables 
-                        WHERE table_schema = 'spice_outbox' 
-                        AND table_name = 'outbox'
+                        WHERE table_schema = 'spice_event_registry' 
+                        AND table_name = 'processed_events'
                     )
                 """)
                 
-                if table_exists:
-                    count = await conn.fetchval("SELECT COUNT(*) FROM spice_outbox.outbox")
+                aggregate_versions_exists = await conn.fetchval("""
+                    SELECT EXISTS(
+                        SELECT 1 FROM information_schema.tables 
+                        WHERE table_schema = 'spice_event_registry' 
+                        AND table_name = 'aggregate_versions'
+                    )
+                """)
+
+                if processed_events_exists and aggregate_versions_exists:
+                    count = await conn.fetchval("SELECT COUNT(*) FROM spice_event_registry.processed_events")
                     print(f"   ✅ PostgreSQL: Connected (Port 5432)")
-                    print(f"      • Outbox schema: EXISTS")
-                    print(f"      • Outbox table: {count} records")
+                    print(f"      • Registry schema: EXISTS")
+                    print(f"      • processed_events: {count} records")
                 else:
-                    print(f"   ⚠️  PostgreSQL: Outbox table missing")
-                    issues_found.append("PostgreSQL outbox table missing")
+                    print(f"   ⚠️  PostgreSQL: Registry tables missing")
+                    issues_found.append("PostgreSQL registry tables missing")
                     all_checks_passed = False
             else:
-                print(f"   ⚠️  PostgreSQL: Outbox schema missing")
-                issues_found.append("PostgreSQL outbox schema missing")
+                print(f"   ⚠️  PostgreSQL: Registry schema missing")
+                issues_found.append("PostgreSQL registry schema missing")
                 all_checks_passed = False
                 
             await conn.close()
@@ -158,19 +165,20 @@ async def main():
                 verify=False
             )
             
-            # Check events bucket
+            # Check event-store bucket
+            bucket = os.getenv("EVENT_STORE_BUCKET", "spice-event-store")
             try:
-                s3_client.head_bucket(Bucket='events')
+                s3_client.head_bucket(Bucket=bucket)
                 # Count objects
-                response = s3_client.list_objects_v2(Bucket='events')
+                response = s3_client.list_objects_v2(Bucket=bucket)
                 object_count = response.get('KeyCount', 0)
                 print(f"   ✅ MinIO/S3: Connected")
-                print(f"      • Events bucket: EXISTS")
+                print(f"      • Event store bucket: EXISTS ({bucket})")
                 print(f"      • Event objects: {object_count}")
             except ClientError as e:
                 if e.response['Error']['Code'] == '404':
-                    print(f"   ⚠️  MinIO/S3: Events bucket missing")
-                    issues_found.append("MinIO events bucket missing")
+                    print(f"   ⚠️  MinIO/S3: Event store bucket missing ({bucket})")
+                    issues_found.append("MinIO event store bucket missing")
                     all_checks_passed = False
                 else:
                     raise

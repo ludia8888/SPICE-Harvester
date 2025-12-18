@@ -7,6 +7,7 @@ that combine TerminusDB's graph authority with Elasticsearch document payloads.
 """
 
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
@@ -16,6 +17,9 @@ from shared.security.input_sanitizer import validate_db_name
 from shared.utils.language import get_accept_language
 from shared.services.graph_federation_service_woql import GraphFederationServiceWOQL
 from shared.config.settings import ApplicationSettings
+from shared.config.service_config import ServiceConfig
+from shared.dependencies.providers import LineageStoreDep
+from shared.services.lineage_store import LineageStore
 import os
 
 logger = logging.getLogger(__name__)
@@ -35,7 +39,16 @@ class GraphQueryRequest(BaseModel):
     start_class: str  # Starting class (e.g., "Product")
     hops: List[GraphHop]  # List of hops to traverse
     filters: Optional[Dict[str, Any]] = None  # Optional filters on start class
-    limit: int = 100  # Max results
+    limit: int = 100  # Max bindings (page size)
+    offset: int = 0  # Binding offset for pagination
+    max_nodes: int = 500
+    max_edges: int = 2000
+    include_paths: bool = False
+    max_paths: int = 100
+    no_cycles: bool = False
+    include_provenance: bool = False
+    include_documents: bool = True
+    include_audit: bool = False
 
 
 class GraphNode(BaseModel):
@@ -43,7 +56,13 @@ class GraphNode(BaseModel):
     id: str
     type: str
     es_doc_id: str
+    db_name: str
+    es_ref: Dict[str, str]
+    data_status: str  # FULL|PARTIAL|MISSING
+    display: Optional[Dict[str, Any]] = None  # Stable UI fields from Terminus graph
     data: Optional[Dict[str, Any]] = None  # Document payload from ES
+    index_status: Optional[Dict[str, Any]] = None
+    provenance: Optional[Dict[str, Any]] = None
 
 
 class GraphEdge(BaseModel):
@@ -51,6 +70,7 @@ class GraphEdge(BaseModel):
     from_node: str
     to_node: str
     predicate: str
+    provenance: Optional[Dict[str, Any]] = None
 
 
 class GraphQueryResponse(BaseModel):
@@ -59,6 +79,10 @@ class GraphQueryResponse(BaseModel):
     edges: List[GraphEdge]
     query: Dict[str, Any]
     count: int
+    warnings: List[str] = []
+    page: Optional[Dict[str, Any]] = None
+    paths: Optional[List[Dict[str, Any]]] = None
+    index_summary: Optional[Dict[str, Any]] = None
 
 
 class SimpleGraphQueryRequest(BaseModel):
@@ -82,25 +106,23 @@ async def get_graph_federation_service() -> GraphFederationServiceWOQL:
     
     if _graph_service is None:
         # Initialize TerminusDB service
-        # Use Docker service names when running in container
-        is_docker = os.getenv("DOCKER_CONTAINER", "false").lower() == "true"
-        terminus_url = "http://terminusdb:6363" if is_docker else os.getenv("TERMINUS_SERVER_URL", "http://localhost:6363")
+        terminus_url = ServiceConfig.get_terminus_url()
         
         connection_info = ConnectionConfig(
             server_url=terminus_url,
             user=os.getenv("TERMINUS_USER", "admin"),
             account=os.getenv("TERMINUS_ACCOUNT", "admin"),
-            key=os.getenv("TERMINUS_KEY", "spice123!")  # Fixed: correct password
+            key=os.getenv("TERMINUS_KEY", "admin"),
         )
         
         terminus_service = AsyncTerminusService(connection_info)
         await terminus_service.connect()
         
         # Initialize REAL WOQL GraphFederationService
-        es_host = "elasticsearch" if is_docker else os.getenv("ELASTICSEARCH_HOST", "localhost")
-        es_port = int(os.getenv("ELASTICSEARCH_PORT", "9200"))
-        es_username = os.getenv("ELASTICSEARCH_USERNAME", "elastic")
-        es_password = os.getenv("ELASTICSEARCH_PASSWORD", "spice123!")
+        es_host = ServiceConfig.get_elasticsearch_host()
+        es_port = ServiceConfig.get_elasticsearch_port()
+        es_username = (os.getenv("ELASTICSEARCH_USERNAME") or "").strip()
+        es_password = os.getenv("ELASTICSEARCH_PASSWORD") or ""
         
         _graph_service = GraphFederationServiceWOQL(
             terminus_service=terminus_service,
@@ -120,7 +142,8 @@ async def execute_graph_query(
     db_name: str,
     query: GraphQueryRequest,
     request: Request,
-    graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service)
+    lineage_store: LineageStoreDep,
+    graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service),
 ):
     """
     Execute multi-hop graph query with ES federation
@@ -158,39 +181,176 @@ async def execute_graph_query(
             start_class=query.start_class,
             hops=hops_tuples,
             filters=query.filters,
-            limit=query.limit
+            limit=query.limit,
+            offset=query.offset,
+            max_nodes=query.max_nodes,
+            max_edges=query.max_edges,
+            include_paths=query.include_paths,
+            max_paths=query.max_paths,
+            no_cycles=query.no_cycles,
+            include_documents=query.include_documents,
+            include_audit=query.include_audit,
         )
         
-        # Convert result to response model
-        nodes = [
-            GraphNode(
-                id=node["id"],
-                type=node["type"],
-                es_doc_id=node.get("es_doc_id", ""),
-                data=node.get("data")
+        raw_nodes = list(result.get("nodes", []) or [])
+
+        terminus_latest: Dict[str, Dict[str, Any]] = {}
+        es_latest: Dict[str, Dict[str, Any]] = {}
+        terminus_artifact_by_node_id: Dict[str, str] = {}
+        es_artifact_by_node_id: Dict[str, str] = {}
+
+        if query.include_provenance and raw_nodes:
+            try:
+                # Best-effort provenance: last event -> Terminus doc / ES doc
+                terminus_artifacts: List[str] = []
+                es_artifacts: List[str] = []
+                for node in raw_nodes:
+                    terminus_id = str(node.get("terminus_id") or node.get("id") or "")
+                    if terminus_id:
+                        art = LineageStore.node_artifact("terminus", db_name, terminus_id)
+                        terminus_artifact_by_node_id[terminus_id] = art
+                        terminus_artifacts.append(art)
+
+                    es_ref = node.get("es_ref") or {}
+                    index_name = str(es_ref.get("index") or "")
+                    doc_id = str(es_ref.get("id") or "")
+                    if index_name and doc_id:
+                        art = LineageStore.node_artifact("es", index_name, doc_id)
+                        es_artifact_by_node_id[f"{index_name}/{doc_id}"] = art
+                        es_artifacts.append(art)
+
+                terminus_latest = await lineage_store.get_latest_edges_to(
+                    to_node_ids=list({*terminus_artifacts}),
+                    edge_type="event_wrote_terminus_document",
+                    db_name=db_name,
+                )
+                es_latest = await lineage_store.get_latest_edges_to(
+                    to_node_ids=list({*es_artifacts}),
+                    edge_type="event_materialized_es_document",
+                    db_name=db_name,
+                )
+            except Exception as e:
+                logger.debug(f"Provenance lookup failed (non-fatal): {e}")
+
+        # Convert result to response model (include data_status + display for UX stability)
+        nodes: List[GraphNode] = []
+        for node in raw_nodes:
+            terminus_id = str(node.get("terminus_id") or node.get("id") or "")
+            es_doc_id = node.get("es_doc_id") or terminus_id or node.get("id")
+            es_ref = node.get("es_ref") or {
+                "index": f"{db_name}_instances",
+                "id": str(es_doc_id),
+            }
+            node_index_status = dict(node.get("index_status") or {})
+
+            provenance: Optional[Dict[str, Any]] = None
+            if query.include_provenance and terminus_id:
+                terminus_art = terminus_artifact_by_node_id.get(terminus_id) or LineageStore.node_artifact(
+                    "terminus", db_name, terminus_id
+                )
+                es_key = f"{es_ref.get('index')}/{es_ref.get('id')}"
+                es_art = es_artifact_by_node_id.get(es_key) or (
+                    LineageStore.node_artifact("es", str(es_ref.get("index")), str(es_ref.get("id")))
+                    if es_ref.get("index") and es_ref.get("id")
+                    else None
+                )
+
+                terminus_prov = terminus_latest.get(terminus_art)
+                es_prov = es_latest.get(es_art) if es_art else None
+                provenance = {"terminus": terminus_prov, "es": es_prov}
+
+                try:
+                    t_at = (
+                        datetime.fromisoformat(str(terminus_prov.get("occurred_at")))
+                        if terminus_prov and terminus_prov.get("occurred_at")
+                        else None
+                    )
+                    e_at = (
+                        datetime.fromisoformat(str(es_prov.get("occurred_at")))
+                        if es_prov and es_prov.get("occurred_at")
+                        else None
+                    )
+                    if t_at and t_at.tzinfo is None:
+                        t_at = t_at.replace(tzinfo=timezone.utc)
+                    if e_at and e_at.tzinfo is None:
+                        e_at = e_at.replace(tzinfo=timezone.utc)
+                    if t_at and e_at:
+                        node_index_status["graph_last_updated_at"] = t_at.isoformat()
+                        node_index_status["projection_last_indexed_at"] = e_at.isoformat()
+                        node_index_status["projection_lag_seconds"] = max(0.0, (t_at - e_at).total_seconds())
+                except Exception:
+                    pass
+
+            nodes.append(
+                GraphNode(
+                    id=node["id"],
+                    type=node["type"],
+                    es_doc_id=str(es_doc_id),
+                    db_name=str(node.get("db_name") or db_name),
+                    es_ref=es_ref,
+                    data_status=str(node.get("data_status") or ("FULL" if node.get("data") else "PARTIAL")),
+                    display=node.get("display"),
+                    data=node.get("data") if query.include_documents else None,
+                    index_status=node_index_status or None,
+                    provenance=provenance,
+                )
             )
-            for node in result.get("nodes", [])
-        ]
         
-        edges = [
-            GraphEdge(
-                from_node=edge["from"],
-                to_node=edge["to"],
-                predicate=edge["predicate"]
+        edges: List[GraphEdge] = []
+        for edge in result.get("edges", []) or []:
+            edge_prov: Optional[Dict[str, Any]] = None
+            if query.include_provenance:
+                # Relationships come from the source node's Terminus document; attribute to its last write event.
+                from_node = str(edge.get("from") or "")
+                if from_node:
+                    terminus_art = LineageStore.node_artifact("terminus", db_name, from_node)
+                    edge_prov = {"terminus": terminus_latest.get(terminus_art)}
+            edges.append(
+                GraphEdge(
+                    from_node=edge["from"],
+                    to_node=edge["to"],
+                    predicate=edge["predicate"],
+                    provenance=edge_prov,
+                )
             )
-            for edge in result.get("edges", [])
+
+        # Index summary (best-effort observability)
+        full_docs = sum(1 for n in nodes if n.data_status == "FULL")
+        index_ages = [
+            float(n.index_status.get("index_age_seconds"))
+            for n in nodes
+            if isinstance(n.index_status, dict) and n.index_status.get("index_age_seconds") is not None
         ]
+        index_summary = {
+            "documents_found": full_docs,
+            "documents_missing": max(0, len(nodes) - full_docs),
+            "max_index_age_seconds": max(index_ages) if index_ages else None,
+            "avg_index_age_seconds": (sum(index_ages) / len(index_ages)) if index_ages else None,
+        }
         
         response = GraphQueryResponse(
             nodes=nodes,
             edges=edges,
+            paths=result.get("paths") if query.include_paths else None,
+            index_summary=index_summary,
             query={
                 "start_class": query.start_class,
                 "hops": [{"predicate": h[0], "target_class": h[1]} for h in hops_tuples],
                 "filters": query.filters,
-                "limit": query.limit
+                "limit": query.limit,
+                "offset": query.offset,
+                "max_nodes": query.max_nodes,
+                "max_edges": query.max_edges,
+                "include_paths": query.include_paths,
+                "max_paths": query.max_paths,
+                "no_cycles": query.no_cycles,
+                "include_provenance": query.include_provenance,
+                "include_documents": query.include_documents,
+                "include_audit": query.include_audit,
             },
-            count=len(nodes)
+            count=len(nodes),
+            warnings=list(result.get("warnings") or []),
+            page=result.get("page"),
         )
         
         logger.info(f"✅ Graph query complete: {len(nodes)} nodes, {len(edges)} edges")
@@ -363,9 +523,9 @@ async def find_relationship_paths(
         from shared.models.config import ConnectionConfig
         
         # Get TerminusDB connection details from environment
-        terminus_url = os.environ.get("TERMINUS_SERVER_URL", "http://localhost:6363")
-        es_host = os.environ.get("ELASTICSEARCH_HOST", "localhost")
-        es_port = int(os.environ.get("ELASTICSEARCH_PORT", "9201"))
+        terminus_url = ServiceConfig.get_terminus_url()
+        es_host = ServiceConfig.get_elasticsearch_host()
+        es_port = ServiceConfig.get_elasticsearch_port()
         
         # Initialize services for schema query
         connection_info = ConnectionConfig(

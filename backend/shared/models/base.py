@@ -4,7 +4,7 @@ Implements Optimistic Locking through version field management
 """
 
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class VersionedModelMixin(BaseModel):
@@ -16,7 +16,9 @@ class VersionedModelMixin(BaseModel):
     - OCP: Can be extended without modification
     - LSP: Can substitute any BaseModel
     """
-    
+
+    model_config = ConfigDict(validate_assignment=True, use_enum_values=True)
+
     version: int = Field(
         default=1,
         ge=1,
@@ -51,11 +53,6 @@ class VersionedModelMixin(BaseModel):
             Current version number
         """
         return self.version
-    
-    class Config:
-        """Pydantic configuration"""
-        validate_assignment = True
-        use_enum_values = True
 
 
 class OptimisticLockError(Exception):

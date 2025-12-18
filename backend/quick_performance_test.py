@@ -5,8 +5,6 @@ Quick test to verify Event Sourcing is 100% working after field name fix
 
 import asyncio
 import aiohttp
-import asyncpg
-import json
 from datetime import datetime
 
 async def test_event_sourcing_complete():
@@ -80,73 +78,12 @@ async def test_event_sourcing_complete():
             elif resp.status != 201:
                 print(f"   Error: {result}")
             
-        # 3. Check PostgreSQL outbox
-        print(f"\n3️⃣ Checking PostgreSQL outbox table...")
-        conn = await asyncpg.connect(
-            host='localhost',
-            port=5432,
-            user='spiceadmin',
-            password='spicepass123',
-            database='spicedb'
-        )
-        
-        try:
-            # Check for CREATE_DATABASE command
-            db_commands = await conn.fetch("""
-                SELECT id, message_type, payload, processed_at, retry_count
-                FROM spice_outbox.outbox
-                WHERE message_type = 'COMMAND'
-                AND payload->>'command_type' = 'CREATE_DATABASE'
-                AND payload->'payload'->>'database_name' = $1
-                ORDER BY created_at DESC
-                LIMIT 1
-            """, test_db)
-            
-            if db_commands:
-                cmd = db_commands[0]
-                print(f"   ✅ Found CREATE_DATABASE command:")
-                print(f"      Processed: {cmd['processed_at'] is not None}")
-                print(f"      Retry count: {cmd['retry_count']}")
-            else:
-                print(f"   ⚠️  No CREATE_DATABASE command found for {test_db}")
-                
-            # Check for CREATE_ONTOLOGY_CLASS command
-            onto_commands = await conn.fetch("""
-                SELECT id, message_type, payload, processed_at, retry_count
-                FROM spice_outbox.outbox
-                WHERE message_type = 'COMMAND'
-                AND payload->>'command_type' = 'CREATE_ONTOLOGY_CLASS'
-                AND payload->'payload'->>'db_name' = $1
-                AND payload->'payload'->>'class_id' = $2
-                ORDER BY created_at DESC
-                LIMIT 1
-            """, test_db, test_class)
-            
-            if onto_commands:
-                cmd = onto_commands[0]
-                print(f"   ✅ Found CREATE_ONTOLOGY_CLASS command:")
-                print(f"      Processed: {cmd['processed_at'] is not None}")
-                print(f"      Retry count: {cmd['retry_count']}")
-                
-                # Verify payload structure
-                full_payload = json.loads(cmd['payload'])
-                nested_payload = full_payload.get('payload', {})
-                if 'class_id' in nested_payload:
-                    print(f"      ✅ Payload contains 'class_id': {nested_payload['class_id']}")
-                else:
-                    print(f"      ❌ Payload missing 'class_id'! Keys: {list(nested_payload.keys())}")
-            else:
-                print(f"   ⚠️  No CREATE_ONTOLOGY_CLASS command found for {test_db}:{test_class}")
-                    
-        finally:
-            await conn.close()
-            
-        # 4. Wait a moment for processing
-        print(f"\n4️⃣ Waiting 7 seconds for Event Sourcing to process...")
+        # 3. Wait a moment for async processing
+        print(f"\n3️⃣ Waiting 7 seconds for Event Sourcing to process...")
         await asyncio.sleep(7)
         
-        # 5. Verify in TerminusDB
-        print(f"\n5️⃣ Verifying in TerminusDB...")
+        # 4. Verify in TerminusDB
+        print(f"\n4️⃣ Verifying in TerminusDB...")
         
         # Check if database exists
         async with session.get(
@@ -169,8 +106,8 @@ async def test_event_sourcing_complete():
             else:
                 print(f"   ⚠️  Ontology class not yet in TerminusDB")
                 
-        # 6. Cleanup
-        print(f"\n6️⃣ Cleaning up test database...")
+        # 5. Cleanup
+        print(f"\n5️⃣ Cleaning up test database...")
         async with session.delete(
             f"http://localhost:8000/api/v1/database/{test_db}"
         ) as resp:

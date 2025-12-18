@@ -2,6 +2,8 @@
 
 > Auto-generated on 2025-07-18 10:41:34  
 > Updated on 2025-08-05 - Command/Event Sourcing & Redis Integration
+>
+> NOTE (2025-12): Legacy Postgres 기반 delivery-buffer는 제거되었습니다. 현재 실사용 경로는 **S3/MinIO Event Store(SSoT) + EventPublisher(S3 tail → Kafka)** 이며, PostgreSQL은 **`processed_events`(멱등 레지스트리) + write-side seq allocator** 용도로만 사용합니다. (`docs/IDEMPOTENCY_CONTRACT.md`)
 
 ## Overview
 
@@ -10,11 +12,12 @@ This document contains architecture diagrams for the SPICE HARVESTER project. Th
 - **Command/Event Sourcing Pattern**: Complete separation of Commands (intent) from Events (results)
 - **Redis-based Status Tracking**: Real-time command status monitoring with history
 - **Synchronous API Wrapper**: Convenience APIs with configurable timeouts
-- **Enhanced Outbox Pattern**: Support for both Commands and Events
+- **S3/MinIO Event Store (SSoT)**: Immutable append-only envelopes + durable checkpoints
+- **EventPublisher (S3 tail → Kafka)**: At-least-once publishing with best-effort dedup
 - **Kafka Message Broker**: Reliable message delivery with retry logic
 - **Multi-Worker Architecture**: Ontology, Instance, and Projection workers for distributed processing
 - **CQRS with Elasticsearch**: Search-optimized projections with real-time indexing
-- **S3 Storage Integration**: Instance event storage with MinIO for audit and recovery
+- **Consumer Idempotency**: Postgres `processed_events` registry + per-aggregate `sequence_number` ordering
 - **Fault Tolerance**: DLQ pattern with retry logic and circuit breaker patterns
 
 ## Class Diagrams
@@ -146,12 +149,13 @@ classDiagram
         +handle_delete_ontology() None
     }
     
-    class MessageRelayService {
-        +PostgreSQL outbox_db
+    class EventPublisher {
+        +S3Client s3_client
         +KafkaProducer producer
-        +poll_outbox() None
-        +publish_messages() None
-        +handle_retry() None
+        +load_checkpoint() Dict
+        +save_checkpoint() None
+        +tail_by_date_index() List
+        +publish_events() None
     }
     
     %% Command/Event Models
@@ -240,8 +244,6 @@ classDiagram
     OntologyWorker --> AsyncTerminusService : uses
     OntologyWorker --> BaseCommand : processes
     OntologyWorker --> BaseEvent : publishes
-    MessageRelayService --> BaseCommand : relays
-    MessageRelayService --> BaseEvent : relays
     Production --> Relationship : has many
     Ontology --> Production : defines
     RelationshipManager --> Relationship : manages
@@ -259,7 +261,7 @@ classDiagram
 
 ```mermaid
 graph TB
-    %% Data Flow Architecture with Outbox Pattern
+    %% Data Flow Architecture (Event Store Publisher)
     
     subgraph "Client Layer"
         Web[Web Application]
@@ -277,12 +279,13 @@ graph TB
         OMS[Ontology Management]
         Query[Query Service]
         Validator[Validation Service]
-        Relay[Message Relay Service]
+        Publisher[Event Publisher]
     end
     
     subgraph "Data Layer"
         Terminus[TerminusDB]
-        Postgres[(PostgreSQL<br/>Outbox Table)]
+        EventStore[S3/MinIO<br/>Event Store (SSoT)]
+        Registry[(PostgreSQL<br/>processed_events)]
         Cache[Redis Cache]
         Search[Search Index]
     end
@@ -307,12 +310,12 @@ graph TB
     Query --> Validator
     
     OMS --> Terminus
-    OMS --> Postgres
+    OMS --> EventStore
     Query --> Terminus
     Query --> Cache
     
-    Postgres --> Relay
-    Relay --> Kafka
+    EventStore --> Publisher
+    Publisher --> Kafka
     Kafka --> Consumers
     
     Terminus --> Search
@@ -322,15 +325,15 @@ graph TB
 
 ```mermaid
 sequenceDiagram
-    %% Service Interaction Flow with Outbox Pattern
+    %% Service Interaction Flow (Event Store + Kafka)
     
     participant Client
     participant BFF as Backend for Frontend
     participant OMS as Ontology Management Service
     participant Redis
     participant DB as TerminusDB
-    participant PG as PostgreSQL
-    participant Relay as Message Relay
+    participant S3 as S3/MinIO Event Store
+    participant Publisher as EventPublisher
     participant Kafka
     participant Worker as Ontology Worker
     participant Consumer as Event Consumer
@@ -344,8 +347,8 @@ sequenceDiagram
     
     rect rgb(240, 240, 240)
         Note over OMS,Redis: Command Creation
-        OMS->>PG: Store Command (Atomic)
-        PG-->>OMS: Command Stored
+        OMS->>S3: Append Command/Event (immutable)
+        S3-->>OMS: Append OK
         OMS->>Redis: Create Command Status
         Redis-->>OMS: Status Stored
     end
@@ -355,20 +358,19 @@ sequenceDiagram
     
     %% Asynchronous Processing Flow
     rect rgb(230, 250, 230)
-        Note over Relay,Worker: Command Processing
-        Relay->>PG: Poll Commands
-        PG-->>Relay: Command List
-        Relay->>Kafka: Publish Commands
-        Kafka-->>Relay: Ack
+        Note over Publisher,Worker: Event Processing
+        Publisher->>S3: Tail index + checkpoint
+        S3-->>Publisher: New envelopes
+        Publisher->>Kafka: Publish envelopes (at-least-once)
+        Kafka-->>Publisher: Ack
         
-        Worker->>Kafka: Subscribe to Commands
-        Kafka-->>Worker: New Command
+        Worker->>Kafka: Subscribe to Envelopes
+        Kafka-->>Worker: New Envelope
         Worker->>Redis: Update Status (PROCESSING)
         Worker->>DB: Execute Operation
         DB-->>Worker: Result
-        Worker->>PG: Store Event
         Worker->>Redis: Update Status (COMPLETED)
-        Worker->>Kafka: Publish Event
+        Worker->>S3: Append Domain Event (immutable)
         
         Consumer->>Kafka: Subscribe to Events
         Kafka-->>Consumer: New Event
@@ -379,7 +381,7 @@ sequenceDiagram
     rect rgb(250, 230, 230)
         Note over Client,Redis: Sync API Option
         Client->>OMS: HTTP Request (Sync Create)
-        OMS->>PG: Store Command
+        OMS->>S3: Append Command/Event
         OMS->>Redis: Create Status
         
         loop Poll until complete
@@ -397,35 +399,32 @@ sequenceDiagram
     OMS-->>Client: Detailed Status
 ```
 
-## Outbox Pattern with Command/Event Sourcing
+## EventPublisher + Idempotent Consumers
 
 ### Overview
 
-The enhanced Outbox Pattern with Command/Event Sourcing solves the distributed transaction problem by separating intent (Commands) from results (Events). This ensures perfect atomicity and reliability in a microservices architecture.
+SPICE HARVESTER uses **S3/MinIO Event Store(SSoT)** as the durable append-only log. An **EventPublisher** tails the event store and publishes envelopes to Kafka with **at-least-once delivery**. All consumers (workers/projections) are required to be **idempotent by `event_id`** and to enforce **per-aggregate ordering via `sequence_number`**.
 
 ### Architecture Evolution
 
 #### Problem with Original Approach
 ```
-OMS → TerminusDB (Transaction A) → PostgreSQL Outbox (Transaction B)
+OMS → TerminusDB (Transaction A) → (any external write) (Transaction B)
 ```
-Two independent transactions cannot guarantee atomicity!
+Two independent transactions cannot guarantee atomicity.
 
-#### Solution: Command/Event Sourcing
+#### Solution: Event Store + Publisher + Idempotent Consumers
 ```
-OMS → PostgreSQL (Command) → Kafka → Worker → TerminusDB
-                                          ↓
-                                    PostgreSQL (Event) → Kafka → Consumers
+OMS/Workers → S3/MinIO (append-only envelopes) → EventPublisher → Kafka → Consumers
 ```
 
 ### Components
 
-1. **PostgreSQL Outbox Table**: Stores both Commands and Events
-2. **OMS Service**: Only stores Commands (single transaction)
-3. **Message Relay Service**: Publishes messages to Kafka
-4. **Ontology Worker**: Processes Commands and executes TerminusDB operations
-5. **Kafka**: Message broker for both Commands and Events
-6. **Event Consumers**: Services that react to Events
+1. **S3/MinIO Event Store (SSoT)**: Stores command + domain envelopes and publisher checkpoints (append-only)
+2. **OMS Service**: Appends command/request envelopes and tracks command status (Redis)
+3. **EventPublisher**: S3 tail → Kafka (durable checkpoint, best-effort dedup, at-least-once)
+4. **Workers / Projections**: Idempotent consumers; side effects guarded by `processed_events` + `sequence_number`
+5. **Kafka**: Transport (at-least-once)
 
 ### Message Types
 
@@ -452,10 +451,12 @@ OMS → PostgreSQL (Command) → Kafka → Worker → TerminusDB
 ### Configuration
 
 Key environment variables:
-- `POSTGRES_*`: PostgreSQL connection settings
+- `POSTGRES_*`: PostgreSQL connection settings (processed-event registry / seq-guard)
 - `KAFKA_BOOTSTRAP_SERVERS`: Kafka broker addresses
-- `MESSAGE_RELAY_BATCH_SIZE`: Messages per batch (default: 100)
-- `MESSAGE_RELAY_POLL_INTERVAL`: Polling interval in seconds (default: 5)
+- `EVENT_STORE_BUCKET`: S3/MinIO event store bucket (default: `spice-event-store`)
+- `EVENT_PUBLISHER_BATCH_SIZE`: Index entries per batch (default: 200)
+- `EVENT_PUBLISHER_POLL_INTERVAL`: Polling interval in seconds (default: 3)
+- `EVENT_PUBLISHER_CHECKPOINT_KEY`: S3 checkpoint key (default: `checkpoints/event_publisher.json`)
 
 ### API Usage
 
@@ -527,4 +528,3 @@ GET /api/v1/ontology/mydb/sync/command/550e8400.../wait?timeout=30
 POST /api/v1/ontology/mydb/create
 # Direct TerminusDB operation (use with caution - no status tracking)
 ```
-

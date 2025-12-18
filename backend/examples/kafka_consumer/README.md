@@ -1,6 +1,6 @@
 # Kafka Consumer Example
 
-이 예제는 Outbox Pattern을 통해 발행된 온톨로지 이벤트를 구독하고 처리하는 방법을 보여줍니다.
+이 예제는 **S3/MinIO Event Store(SSoT) → EventPublisher(S3 tail → Kafka)** 경로로 발행된 온톨로지 이벤트를 구독하고 처리하는 방법을 보여줍니다.
 
 ## 실행 방법
 
@@ -53,4 +53,4 @@ class MyCustomConsumer(OntologyEventConsumer):
 2. **모니터링**: 메트릭 수집 및 알림
 3. **스케일링**: 여러 컨슈머 인스턴스 실행
 4. **재시도**: 실패한 메시지 재처리 로직
-5. **멱등성**: 중복 메시지 처리 방지
+5. **멱등성**: `event_id` 기준 1회만 side-effect 발생 (Worker/Projection은 `processed_events` 레지스트리 권장)

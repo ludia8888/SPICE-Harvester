@@ -4,7 +4,7 @@
     "system": "SPICE HARVESTER",
     "version": "1.0.0",
     "components_analyzed": [
-      "Event Sourcing (Kafka + Outbox)",
+      "Event Sourcing (Kafka + processed_events registry)",
       "MVCC (PostgreSQL)",
       "TerminusDB Integration",
       "MCP Integration",
@@ -14,7 +14,7 @@
       {
         "area": "Event Sourcing",
         "score": 85,
-        "details": "Well-implemented Outbox pattern with Kafka integration"
+        "details": "At-least-once publishing + consumer idempotency via processed_events registry"
       },
       {
         "area": "MVCC",

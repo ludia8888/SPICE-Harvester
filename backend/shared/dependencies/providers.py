@@ -19,6 +19,8 @@ from fastapi import Depends
 from shared.services.storage_service import StorageService, create_storage_service
 from shared.services.redis_service import RedisService, create_redis_service
 from shared.services.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
+from shared.services.lineage_store import LineageStore, create_lineage_store
+from shared.services.audit_log_store import AuditLogStore, create_audit_log_store
 
 # Import container and settings
 from shared.dependencies.container import get_container, ServiceContainer
@@ -96,12 +98,31 @@ async def get_elasticsearch_service(
     
     return await container.get(ElasticsearchService)
 
+async def get_lineage_store(
+    container: ServiceContainer = Depends(get_container),
+) -> LineageStore:
+    """FastAPI dependency to get LineageStore instance."""
+    if not container.has(LineageStore):
+        container.register_singleton(LineageStore, create_lineage_store)
+    return await container.get(LineageStore)
+
+
+async def get_audit_log_store(
+    container: ServiceContainer = Depends(get_container),
+) -> AuditLogStore:
+    """FastAPI dependency to get AuditLogStore instance."""
+    if not container.has(AuditLogStore):
+        container.register_singleton(AuditLogStore, create_audit_log_store)
+    return await container.get(AuditLogStore)
+
 
 # Type annotations for cleaner dependency injection - storage is now always available
 StorageServiceDep = Annotated[StorageService, Depends(get_storage_service)]
 
 RedisServiceDep = Annotated[RedisService, Depends(get_redis_service)]
 ElasticsearchServiceDep = Annotated[ElasticsearchService, Depends(get_elasticsearch_service)]
+LineageStoreDep = Annotated[LineageStore, Depends(get_lineage_store)]
+AuditLogStoreDep = Annotated[AuditLogStore, Depends(get_audit_log_store)]
 SettingsDep = Annotated[ApplicationSettings, Depends(get_settings_dependency)]
 
 
@@ -119,6 +140,8 @@ def register_core_services(container: ServiceContainer) -> None:
     container.register_singleton(StorageService, create_storage_service)
     container.register_singleton(RedisService, create_redis_service)
     container.register_singleton(ElasticsearchService, create_elasticsearch_service)
+    container.register_singleton(LineageStore, create_lineage_store)
+    container.register_singleton(AuditLogStore, create_audit_log_store)
     
     # Log registration
     import logging

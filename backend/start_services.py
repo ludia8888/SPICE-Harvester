@@ -8,9 +8,11 @@ import subprocess
 import time
 import os
 import signal
+import argparse
 import requests
 import sys
 import urllib3
+from pathlib import Path
 
 # Disable SSL warnings for development
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -86,12 +88,25 @@ def stop_services(processes):
 
 def main():
     processes = {}
+
+    parser = argparse.ArgumentParser(description="Start SPICE HARVESTER services locally (OMS/BFF/Funnel).")
+    parser.add_argument(
+        "--env",
+        choices=["development", "production"],
+        default=os.getenv("SPICE_ENV", "development"),
+        help="Environment preset (default: development)",
+    )
+    args = parser.parse_args()
+
+    # Ensure local-mode defaults unless explicitly overridden.
+    if args.env == "development":
+        os.environ.setdefault("DOCKER_CONTAINER", "false")
     
     # Service paths
-    base_path = "/Users/isihyeon/Desktop/SPICE HARVESTER/backend"
-    oms_path = os.path.join(base_path, "oms")
-    bff_path = os.path.join(base_path, "bff")
-    funnel_path = os.path.join(base_path, "funnel")
+    base_path = Path(__file__).resolve().parent
+    oms_path = str(base_path / "oms")
+    bff_path = str(base_path / "bff")
+    funnel_path = str(base_path / "funnel")
     
     # Verify all main.py files exist
     services_config = [
@@ -120,7 +135,7 @@ def main():
         oms_process = start_service(
             "OMS",
             oms_path,
-            "python -m uvicorn main:app --host 0.0.0.0 --port 8000",
+            f"{sys.executable} -m uvicorn main:app --host 0.0.0.0 --port 8000",
             8000
         )
         
@@ -133,7 +148,7 @@ def main():
         funnel_process = start_service(
             "Funnel",
             funnel_path,
-            "python -m uvicorn main:app --host 0.0.0.0 --port 8003",
+            f"{sys.executable} -m uvicorn main:app --host 0.0.0.0 --port 8003",
             8003
         )
         
@@ -147,7 +162,7 @@ def main():
         bff_process = start_service(
             "BFF", 
             bff_path,
-            "python -m uvicorn main:app --host 0.0.0.0 --port 8002",
+            f"{sys.executable} -m uvicorn main:app --host 0.0.0.0 --port 8002",
             8002
         )
         

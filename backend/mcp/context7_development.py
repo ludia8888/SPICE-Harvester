@@ -6,7 +6,7 @@ Utilities for using Context7 during development
 import asyncio
 import logging
 from typing import Any, Dict, List, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 from backend.mcp.mcp_client import get_context7_client, Context7Client
 
@@ -63,7 +63,7 @@ class Context7Developer:
             # Compile analysis
             analysis = {
                 "feature": feature_name,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "similar_patterns": similar_patterns,
                 "architecture_insights": architecture_insights,
                 "potential_issues": potential_issues,
@@ -80,7 +80,7 @@ class Context7Developer:
                 metadata={
                     "type": "analysis",
                     "feature": feature_name,
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat()
                 }
             )
             
@@ -132,7 +132,7 @@ class Context7Developer:
             
             validation = {
                 "feature": feature_name,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "validation_results": validation_results,
                 "suggestions": suggestions,
                 "code_smells": code_smells,
@@ -183,7 +183,7 @@ class Context7Developer:
 {self._format_technical_details(technical_details)}
 
 ## Implementation Date
-{datetime.utcnow().isoformat()}
+{datetime.now(timezone.utc).isoformat()}
 
 ## Lessons Learned
 {self._format_lessons(lessons_learned)}
@@ -196,7 +196,7 @@ class Context7Developer:
                 metadata={
                     "type": "implementation",
                     "feature": feature_name,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "technical_details": technical_details
                 }
             )

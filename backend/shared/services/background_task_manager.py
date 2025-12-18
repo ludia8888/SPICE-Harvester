@@ -469,14 +469,14 @@ class BackgroundTaskManager:
     async def _save_task(self, task: BackgroundTask) -> None:
         """Save task to Redis."""
         key = f"background_task:{task.task_id}"
-        await self.redis.set_json(key, task.dict(), ex=self.task_ttl)
+        await self.redis.set_json(key, task.model_dump(mode="json"), ex=self.task_ttl)
         
         # Also save result separately with longer TTL if completed
         if task.status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]:
             result_key = f"task_result:{task.task_id}"
             await self.redis.set_json(
                 result_key,
-                task.result.dict() if task.result else {},
+                task.result.model_dump(mode="json") if task.result else {},
                 ex=self.result_ttl
             )
             
@@ -602,7 +602,7 @@ class BackgroundTaskManager:
             await self.websocket.notify_task_update({
                 "event": "task_progress",
                 "task_id": task.task_id,
-                "progress": task.progress.dict()
+                "progress": task.progress.model_dump(mode="json")
             })
             
     async def _notify_task_completed(self, task: BackgroundTask) -> None:
@@ -611,7 +611,7 @@ class BackgroundTaskManager:
             await self.websocket.notify_task_update({
                 "event": "task_completed",
                 "task_id": task.task_id,
-                "result": task.result.dict() if task.result else None
+                "result": task.result.model_dump(mode="json") if task.result else None
             })
             
     async def _notify_task_failed(self, task: BackgroundTask) -> None:

@@ -44,6 +44,42 @@ class OMSClient:
         """클라이언트 연결 종료"""
         await self.client.aclose()
 
+    # -----------------------------
+    # Generic HTTP helpers
+    # -----------------------------
+
+    async def get(self, path: str, **kwargs) -> Dict[str, Any]:
+        """Low-level GET helper (returns JSON dict)."""
+        response = await self.client.get(path, **kwargs)
+        response.raise_for_status()
+        if not response.text:
+            return {}
+        return response.json()
+
+    async def post(self, path: str, **kwargs) -> Dict[str, Any]:
+        """Low-level POST helper (returns JSON dict)."""
+        response = await self.client.post(path, **kwargs)
+        response.raise_for_status()
+        if not response.text:
+            return {}
+        return response.json()
+
+    async def put(self, path: str, **kwargs) -> Dict[str, Any]:
+        """Low-level PUT helper (returns JSON dict)."""
+        response = await self.client.put(path, **kwargs)
+        response.raise_for_status()
+        if not response.text:
+            return {}
+        return response.json()
+
+    async def delete(self, path: str, **kwargs) -> Dict[str, Any]:
+        """Low-level DELETE helper (returns JSON dict when available)."""
+        response = await self.client.delete(path, **kwargs)
+        response.raise_for_status()
+        if not response.text:
+            return {}
+        return response.json()
+
     async def check_health(self) -> bool:
         """OMS 서비스 상태 확인"""
         try:
@@ -89,10 +125,13 @@ class OMSClient:
             logger.error(f"🔍 OMS Client: Error details: {e.__dict__ if hasattr(e, '__dict__') else str(e)}")
             raise
 
-    async def delete_database(self, db_name: str) -> Dict[str, Any]:
+    async def delete_database(self, db_name: str, *, expected_seq: int) -> Dict[str, Any]:
         """데이터베이스 삭제"""
         try:
-            response = await self.client.delete(f"/api/v1/database/{db_name}")
+            response = await self.client.delete(
+                f"/api/v1/database/{db_name}",
+                params={"expected_seq": int(expected_seq)},
+            )
             response.raise_for_status()
             return response.json()
         except Exception as e:
@@ -188,12 +227,14 @@ class OMSClient:
             raise
 
     async def update_ontology(
-        self, db_name: str, class_id: str, update_data: Dict[str, Any]
+        self, db_name: str, class_id: str, update_data: Dict[str, Any], *, expected_seq: int
     ) -> Dict[str, Any]:
         """온톨로지 업데이트"""
         try:
             response = await self.client.put(
-                f"/api/v1/database/{db_name}/ontology/{class_id}", json=update_data
+                f"/api/v1/database/{db_name}/ontology/{class_id}",
+                params={"expected_seq": int(expected_seq)},
+                json=update_data,
             )
             response.raise_for_status()
             return response.json()
@@ -201,10 +242,13 @@ class OMSClient:
             logger.error(f"온톨로지 업데이트 실패: {e}")
             raise
 
-    async def delete_ontology(self, db_name: str, class_id: str) -> Dict[str, Any]:
+    async def delete_ontology(self, db_name: str, class_id: str, *, expected_seq: int) -> Dict[str, Any]:
         """온톨로지 삭제"""
         try:
-            response = await self.client.delete(f"/api/v1/database/{db_name}/ontology/{class_id}")
+            response = await self.client.delete(
+                f"/api/v1/database/{db_name}/ontology/{class_id}",
+                params={"expected_seq": int(expected_seq)},
+            )
             response.raise_for_status()
             # 실제 삭제 응답 반환
             if response.text:

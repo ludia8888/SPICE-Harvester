@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "spice-shared"
@@ -39,7 +39,7 @@ dependencies = [
     # 🗄️ Database & Caching - GHOST DEPENDENCY RESOLVED
     "redis[hiredis]==5.0.1",   # ✅ RedisService - 모든 워커에서 사용
     "elasticsearch==8.11.0",   # ✅ ElasticsearchService - 검색 및 인덱싱
-    "aiohttp==3.9.1",         # ✅ Elasticsearch async client dependency
+    "aiohttp==3.9.5",         # ✅ Elasticsearch async client dependency (also required by aioboto3/aiobotocore)
     "asyncpg==0.29.0",        # ✅ PostgreSQL 비동기 드라이버 - 모든 워커
     "aiosqlite==0.19.0",      # SQLite 비동기 드라이버 - 개발/테스트
     
@@ -50,8 +50,9 @@ dependencies = [
     "terminusdb-client==10.2.0", # ✅ 온톨로지/인스턴스 워커의 그래프 DB 연결
     
     # ☁️ Storage - GHOST DEPENDENCY RESOLVED
-    "boto3==1.34.14",         # ✅ S3 스토리지 서비스
-    "botocore==1.34.14",      # boto3 코어 의존성
+    "boto3==1.38.27",         # ✅ S3 스토리지 서비스 (aligned with aioboto3/aiobotocore)
+    "botocore==1.38.27",      # boto3 코어 의존성 (aligned with aioboto3/aiobotocore)
+    "aioboto3==15.0.0",       # ✅ async S3/MinIO client (Event Store, Publisher)
     
     # 🔐 Authentication & Security
     "python-jose[cryptography]==3.3.0", # JWT 토큰 처리
@@ -127,7 +128,22 @@ Repository = "https://github.com/spiceharvester/backend"
 Issues = "https://github.com/spiceharvester/backend/issues"
 
 [tool.setuptools]
-packages = ["shared"]
+package-dir = { "shared" = "." }
+packages = [
+    "shared",
+    "shared.config",
+    "shared.dependencies",
+    "shared.interfaces",
+    "shared.middleware",
+    "shared.models",
+    "shared.observability",
+    "shared.routers",
+    "shared.security",
+    "shared.serializers",
+    "shared.services",
+    "shared.utils",
+    "shared.validators",
+]
 
 [tool.setuptools.package-data]
 shared = ["py.typed"]

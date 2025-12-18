@@ -1,177 +1,79 @@
-# 🔥 THINK ULTRA! S3/MinIO Event Store Migration Progress
+# S3/MinIO Event Store Migration (Historical) — Completed
 
-## ✅ Phase 1: Foundation (COMPLETED)
+> Updated: 2025-12-17  
+> Status: **COMPLETE** — legacy dual-write flags and Kafka wrapper formats were removed.
 
-### What Was Done:
-1. **MinIO Configuration Added** ✅
-   - Added `get_minio_endpoint()`, `get_minio_access_key()`, `get_minio_secret_key()` to `service_config.py`
-   - MinIO container already running in Docker
+This file used to track the cutover from a legacy PostgreSQL-centric “event store” concept to the current production architecture.  
+It is kept for context, but **the system no longer supports the dual-write migration modes described in older versions of this document**.
 
-2. **Event Store Integration** ✅
-   - Created `event_store.py` with full S3/MinIO Event Store implementation
-   - Integrated into `main.py` startup sequence
-   - Added to `dependencies.py` as `EventStoreDep`
+## ✅ Current Production Architecture (Steady State)
 
-3. **Migration Helper Created** ✅
-   - `migration_helper.py` implements dual-write pattern
-   - Feature flags: `ENABLE_S3_EVENT_STORE` and `ENABLE_DUAL_WRITE`
-   - Safe, gradual migration with zero downtime
+1. **S3/MinIO Event Store (SSoT)**
+   - Immutable append-only `EventEnvelope` JSON (commands + domain events)
+   - Indexes + durable publisher checkpoint stored in the same bucket
 
-4. **Testing Verified** ✅
-   - Successfully connected to MinIO
-   - Events stored and retrieved from S3
-   - Dual-write mode confirmed working
+2. **EventPublisher (message_relay)**
+   - Tails `indexes/by-date/...` and publishes to Kafka
+   - Delivery semantics: **at-least-once**
+   - Best-effort dedup (process-local + checkpoint snapshot)
+   - Batched produce/flush + metrics logging
 
-### Test Results:
-```
-✅ Event stored in S3/MinIO: 10d1749b-50e8-48de-8115-aa7a70687aba
-✅ Retrieved 1 event(s) from S3/MinIO
-✅ Migration Mode: dual_write (safe transition)
-```
+3. **Consumers (Workers / Projection)**
+   - **Kafka payload schema is unified**: `EventEnvelope` JSON only
+   - Idempotency + ordering is enforced via Postgres registry:
+     - `processed_events` (handler,event_id) with lease/heartbeat
+     - `aggregate_versions` monotonic seq guard per handler
 
-## ✅ Phase 2: Router Migration (COMPLETED)
+4. **Postgres role**
+   - **Not** an event store
+   - Used for:
+     - `processed_events` registry (durable idempotency)
+     - write-side atomic `sequence_number` allocation (true concurrency safety)
 
-### Completed:
-- **instance_async.py** ✅
-  - All 5 endpoints migrated to use migration helper
-  - Dual-write pattern implemented
-  - Backward compatible
+Reference contracts:
+- Idempotency/ordering: `docs/IDEMPOTENCY_CONTRACT.md`
+- Architecture overview: `docs/architecture/README.md`
 
-- **ontology.py** ✅
-  - CREATE_ONTOLOGY_CLASS command migrated
-  - UPDATE_ONTOLOGY_CLASS command migrated
-  - DELETE_ONTOLOGY_CLASS command migrated
-  - All using migration helper with dual-write
+## ✅ What Changed vs. Legacy Migration Plan
 
-- **database.py** ✅
-  - CREATE_DATABASE command migrated
-  - DELETE_DATABASE command migrated
-  - All using migration helper with dual-write
+- Removed feature flags:
+  - `ENABLE_S3_EVENT_STORE` (removed)
+  - `ENABLE_DUAL_WRITE` (removed)
+- Removed legacy Kafka wrapper formats:
+  - `{"message_type": "...", "payload": ...}` wrapper
+  - `s3_reference` indirection payloads
+  - `metadata.storage_mode` migration hints
+- Removed `migration_helper.py` dual-write path (no longer exists)
+- Strengthened correctness:
+  - **Atomic write-side `sequence_number` reservation in Postgres** before S3 append
+  - **`expected_seq` Optimistic Concurrency** for command append (OMS returns **409** on conflict)
 
-## ✅ Phase 3: Worker Updates (COMPLETED)
+## ✅ Operational Checklist (Must-Pass)
 
-### Completed:
-- **Message Relay** ✅
-  - Enhanced to include S3/MinIO references in Kafka messages
-  - Builds S3 key path matching event_store.py structure
-  - Adds storage_mode metadata (legacy/postgres_only/dual_write)
-  - Backward compatible with legacy consumers
+1. Publisher duplicate publish / checkpoint rollback → consumer side-effects happen once.
+2. Worker crash across `claim`/side-effect/`mark_done` boundaries → lease TTL enables recovery.
+3. Out-of-order events by `sequence_number` → stale events ignored.
+4. Concurrent delivery (2 consumers) → only one claim succeeds.
+5. OCC:
+   - UPDATE/DELETE without correct `expected_seq` → OMS returns **409** (no command appended).
 
-- **Instance Worker** ✅
-  - Added async S3 reading capability with aioboto3
-  - Supports both new format (S3 reference) and legacy format (embedded payload)
-  - Automatically falls back to embedded payload if S3 read fails
-  - Logs storage mode for monitoring migration progress
+## ✅ Current Env Vars (Relevant)
 
-- **Projection Worker** ✅
-  - Added async S3 reading capability with aioboto3
-  - Extracts payload from S3 when reference available
-  - Falls back to embedded payload for backward compatibility
-  - Tracks S3 read metrics for monitoring
+Event sourcing:
+- `ENABLE_EVENT_SOURCING=true` (production default)
+- `EVENT_STORE_BUCKET=spice-event-store`
 
-## ✅ Phase 4: Test Cleanup (COMPLETED)
+Idempotency registry:
+- `ENABLE_PROCESSED_EVENT_REGISTRY=true`
+- `PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS=900`
+- `PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS=30`
 
-### Completed:
-- **Test Consolidation Plan** ✅
-  - Created comprehensive plan to reduce 83 files to ~20
-  - Identified test structure and consolidation strategy
+Write-side sequencing:
+- `EVENT_STORE_SEQUENCE_ALLOCATOR_MODE=postgres` (default)
+- `EVENT_STORE_SEQUENCE_SCHEMA=spice_event_registry`
+- `EVENT_STORE_SEQUENCE_HANDLER_PREFIX=write_side`
 
-- **Core Test Files Created** ✅
-  - `test_event_store.py`: Complete S3/MinIO Event Store unit tests
-  - `test_migration_helper.py`: Migration pattern and dual-write tests
-  - `test_e2e_event_sourcing_s3.py`: End-to-end Event Sourcing with S3
-  - `test_worker_s3_integration.py`: All workers' S3 integration tests
-  - `test_validators_consolidated.py`: Consolidated 11 validator tests into 1
-
-### Completed:
-- ✅ Merged validator tests (11 files → 1 consolidated file)
-- ✅ Created comprehensive E2E tests for S3 Event Sourcing
-- ✅ Created worker S3 integration tests
-- ✅ Identified and documented all test duplicates
-
-## ✅ Phase 5: Legacy Removal & Monitoring (COMPLETED)
-
-### Completed:
-- ✅ Verified no legacy PostgreSQL event storage code exists
-- ✅ PostgreSQL correctly used only for Outbox pattern
-- ✅ Created S3 Event Store monitoring dashboard
-- ✅ Created Grafana dashboard configuration
-- ✅ Created production migration runbook
-
-## 🚀 Current State
-
-### Architecture Status:
-```
-✅ S3/MinIO: Event Store (SSoT) - WORKING
-✅ PostgreSQL: Delivery guarantee only - CLARIFIED
-✅ Dual-write: Both S3 and PostgreSQL - ACTIVE
-✅ Feature flags: Control migration - IMPLEMENTED
-```
-
-### Migration Modes:
-1. **Legacy Mode** (`ENABLE_S3_EVENT_STORE=false`)
-   - Uses PostgreSQL as Event Store (wrong but compatible)
-
-2. **Dual-Write Mode** (`ENABLE_S3_EVENT_STORE=true`, `ENABLE_DUAL_WRITE=true`) ← CURRENT
-   - Writes to both S3 and PostgreSQL
-   - Safe rollback possible
-   - Zero downtime
-
-3. **S3-Only Mode** (`ENABLE_S3_EVENT_STORE=true`, `ENABLE_DUAL_WRITE=false`)
-   - Final state: S3 as sole Event Store
-   - PostgreSQL for delivery only
-
-## 🎯 Key Achievements
-
-1. **Corrected Architecture Understanding** ✅
-   - PostgreSQL is NOT an Event Store
-   - S3/MinIO is the Single Source of Truth
-   - Outbox pattern is for delivery guarantee only
-
-2. **Zero-Downtime Migration Path** ✅
-   - Dual-write pattern allows gradual migration
-   - Feature flags enable safe rollback
-   - No service interruption
-
-3. **Production-Ready Implementation** ✅
-   - Proper error handling
-   - Logging and monitoring hooks
-   - Backward compatibility maintained
-
-## 📊 Progress Summary
-
-| Phase | Status | Completion |
-|-------|--------|------------|
-| Phase 1: Foundation | ✅ Complete | 100% |
-| Phase 2: Router Migration | ✅ Complete | 100% |
-| Phase 3: Worker Updates | ✅ Complete | 100% |
-| Phase 4: Test Cleanup | ✅ Complete | 100% |
-| Phase 5: Legacy Removal & Monitoring | ✅ Complete | 100% |
-
-**Overall Progress: 100% Complete** 🎉
-
-## ✅ Migration Complete!
-
-### What Was Accomplished:
-1. ✅ S3/MinIO established as the Single Source of Truth
-2. ✅ All routers and workers migrated to dual-write pattern
-3. ✅ Test consolidation completed
-4. ✅ Monitoring dashboards created
-5. ✅ Production migration runbook created
-
-### Ready for Production:
-- System running in dual-write mode
-- Complete rollback capability
-- Comprehensive monitoring in place
-- Production runbook available
-
-## 💡 Important Notes
-
-- **MinIO is running**: Container `spice_minio` on port 9000/9001
-- **Dual-write is safe**: Both storages are being written to
-- **Rollback is possible**: Just change feature flags
-- **No data loss**: Events are in both S3 and PostgreSQL during migration
-
----
-
-**The migration is progressing well with a solid foundation in place!**
+Publisher batching/metrics:
+- `EVENT_PUBLISHER_KAFKA_FLUSH_BATCH_SIZE` (default: `EVENT_PUBLISHER_BATCH_SIZE`)
+- `EVENT_PUBLISHER_KAFKA_FLUSH_TIMEOUT_SECONDS=10`
+- `EVENT_PUBLISHER_METRICS_LOG_INTERVAL_SECONDS=30`

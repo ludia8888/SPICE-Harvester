@@ -10,12 +10,13 @@ internal data source or processing path.
 """
 
 import pytest
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock
 from fastapi.testclient import TestClient
 from fastapi import status
 from typing import Dict, Any, List
 
 from bff.main import app
+from bff.dependencies import get_elasticsearch_service, get_oms_client
 from elasticsearch.exceptions import ConnectionError as ESConnectionError
 
 class TestInformationLeakagePrevention:
@@ -53,17 +54,17 @@ class TestInformationLeakagePrevention:
             }
         }
         
-        with patch('bff.dependencies.get_elasticsearch_service') as mock_es_dep, \
-             patch('bff.dependencies.get_oms_client') as mock_oms_dep:
-            
-            mock_es = AsyncMock()
-            mock_es.search.return_value = mock_es_result
-            mock_es_dep.return_value = mock_es
-            
-            mock_oms = AsyncMock()
-            mock_oms_dep.return_value = mock_oms
-            
-            response = client.get("/database/test_db/class/TestClass/instance/test_instance")
+        mock_es = AsyncMock()
+        mock_es.search.return_value = mock_es_result
+
+        mock_oms = AsyncMock()
+
+        app.dependency_overrides[get_elasticsearch_service] = lambda: mock_es
+        app.dependency_overrides[get_oms_client] = lambda: mock_oms
+        try:
+            response = client.get("/api/v1/database/test_db/class/TestClass/instance/test_instance")
+        finally:
+            app.dependency_overrides.clear()
         
         assert response.status_code == status.HTTP_200_OK
         response_data = response.json()
@@ -92,20 +93,20 @@ class TestInformationLeakagePrevention:
             }
         }
         
-        with patch('bff.dependencies.get_elasticsearch_service') as mock_es_dep, \
-             patch('bff.dependencies.get_oms_client') as mock_oms_dep:
-            
-            # ES fails
-            mock_es = AsyncMock()
-            mock_es.search.side_effect = ESConnectionError("Connection failed")
-            mock_es_dep.return_value = mock_es
-            
-            # OMS succeeds
-            mock_oms = AsyncMock()
-            mock_oms.get_instance.return_value = mock_oms_result
-            mock_oms_dep.return_value = mock_oms
-            
-            response = client.get("/database/test_db/class/TestClass/instance/test_instance")
+        # ES fails
+        mock_es = AsyncMock()
+        mock_es.search.side_effect = ESConnectionError("Connection failed")
+
+        # OMS succeeds
+        mock_oms = AsyncMock()
+        mock_oms.get_instance.return_value = mock_oms_result
+
+        app.dependency_overrides[get_elasticsearch_service] = lambda: mock_es
+        app.dependency_overrides[get_oms_client] = lambda: mock_oms
+        try:
+            response = client.get("/api/v1/database/test_db/class/TestClass/instance/test_instance")
+        finally:
+            app.dependency_overrides.clear()
         
         assert response.status_code == status.HTTP_200_OK
         response_data = response.json()
@@ -135,17 +136,17 @@ class TestInformationLeakagePrevention:
             }
         }
         
-        with patch('bff.dependencies.get_elasticsearch_service') as mock_es_dep, \
-             patch('bff.dependencies.get_oms_client') as mock_oms_dep:
-            
-            mock_es = AsyncMock()
-            mock_es.search.return_value = mock_es_result
-            mock_es_dep.return_value = mock_es
-            
-            mock_oms = AsyncMock()
-            mock_oms_dep.return_value = mock_oms
-            
-            response = client.get("/database/test_db/class/TestClass/instances")
+        mock_es = AsyncMock()
+        mock_es.search.return_value = mock_es_result
+
+        mock_oms = AsyncMock()
+
+        app.dependency_overrides[get_elasticsearch_service] = lambda: mock_es
+        app.dependency_overrides[get_oms_client] = lambda: mock_oms
+        try:
+            response = client.get("/api/v1/database/test_db/class/TestClass/instances")
+        finally:
+            app.dependency_overrides.clear()
         
         assert response.status_code == status.HTTP_200_OK
         response_data = response.json()
@@ -170,20 +171,20 @@ class TestInformationLeakagePrevention:
             "instances": [{"instance_id": "inst1", "class_id": "TestClass"}]
         }
         
-        with patch('bff.dependencies.get_elasticsearch_service') as mock_es_dep, \
-             patch('bff.dependencies.get_oms_client') as mock_oms_dep:
-            
-            # ES fails
-            mock_es = AsyncMock()
-            mock_es.search.side_effect = ESConnectionError("Connection failed")
-            mock_es_dep.return_value = mock_es
-            
-            # OMS succeeds
-            mock_oms = AsyncMock()
-            mock_oms.get_class_instances.return_value = mock_oms_result
-            mock_oms_dep.return_value = mock_oms
-            
-            response = client.get("/database/test_db/class/TestClass/instances")
+        # ES fails
+        mock_es = AsyncMock()
+        mock_es.search.side_effect = ESConnectionError("Connection failed")
+
+        # OMS succeeds
+        mock_oms = AsyncMock()
+        mock_oms.get_class_instances.return_value = mock_oms_result
+
+        app.dependency_overrides[get_elasticsearch_service] = lambda: mock_es
+        app.dependency_overrides[get_oms_client] = lambda: mock_oms
+        try:
+            response = client.get("/api/v1/database/test_db/class/TestClass/instances")
+        finally:
+            app.dependency_overrides.clear()
         
         assert response.status_code == status.HTTP_200_OK
         response_data = response.json()
@@ -203,19 +204,19 @@ class TestInformationLeakagePrevention:
     async def test_error_responses_no_internal_info_leak(self, client):
         """Test: Error responses should not leak internal architecture details"""
         
-        with patch('bff.dependencies.get_elasticsearch_service') as mock_es_dep, \
-             patch('bff.dependencies.get_oms_client') as mock_oms_dep:
-            
-            # Both ES and OMS fail
-            mock_es = AsyncMock()
-            mock_es.search.side_effect = ESConnectionError("Connection failed")
-            mock_es_dep.return_value = mock_es
-            
-            mock_oms = AsyncMock()
-            mock_oms.get_instance.side_effect = Exception("OMS connection failed")
-            mock_oms_dep.return_value = mock_oms
-            
-            response = client.get("/database/test_db/class/TestClass/instance/nonexistent")
+        # Both ES and OMS fail
+        mock_es = AsyncMock()
+        mock_es.search.side_effect = ESConnectionError("Connection failed")
+
+        mock_oms = AsyncMock()
+        mock_oms.get_instance.side_effect = Exception("OMS connection failed")
+
+        app.dependency_overrides[get_elasticsearch_service] = lambda: mock_es
+        app.dependency_overrides[get_oms_client] = lambda: mock_oms
+        try:
+            response = client.get("/api/v1/database/test_db/class/TestClass/instance/nonexistent")
+        finally:
+            app.dependency_overrides.clear()
         
         # Should return proper HTTP error without internal details
         assert response.status_code == status.HTTP_404_NOT_FOUND

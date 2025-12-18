@@ -143,18 +143,6 @@
       ]
     },
     {
-      "@id": "Outbox",
-      "properties": [
-        "command_id",
-        "command_type",
-        "topic",
-        "key",
-        "payload",
-        "created_at",
-        "cause_event_id"
-      ]
-    },
-    {
       "@id": "Client",
       "properties": [
         "client_id",

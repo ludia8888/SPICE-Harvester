@@ -5,7 +5,7 @@ Google Sheets Connector - Utility Functions
 import hashlib
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
@@ -158,7 +158,11 @@ def format_datetime_iso(dt: datetime) -> str:
     Returns:
         ISO 8601 형식 문자열
     """
-    return dt.isoformat() + "Z"
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.isoformat().replace("+00:00", "Z")
 
 
 def parse_range_notation(range_str: str) -> Tuple[str, Optional[str]]:

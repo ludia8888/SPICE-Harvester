@@ -5,7 +5,7 @@ Google Sheets Connector - Service Layer
 import asyncio
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 class GoogleSheetsService:
     """Google Sheets API 서비스"""
 
-    def __init__(self, producer: Producer, api_key: Optional[str] = None):
+    def __init__(self, producer: Optional[Producer] = None, api_key: Optional[str] = None):
         """
         초기화
 
@@ -63,12 +63,80 @@ class GoogleSheetsService:
             )
         return self._client
 
-    async def preview_sheet(self, sheet_url: str) -> GoogleSheetPreviewResponse:
+    async def fetch_sheet_values(
+        self,
+        sheet_url: str,
+        *,
+        worksheet_name: Optional[str] = None,
+        api_key: Optional[str] = None,
+    ) -> tuple[str, SheetMetadata, str, Optional[int], List[List[Any]]]:
+        """
+        Fetch raw values + metadata for a Google Sheet URL.
+
+        Returns:
+            (sheet_id, metadata, worksheet_title, worksheet_sheet_id, values)
+        """
+        # Extract sheet ID
+        sheet_id = extract_sheet_id(sheet_url)
+        gid = extract_gid(sheet_url)
+
+        # Get sheet metadata first
+        metadata = await self._get_sheet_metadata(sheet_id, api_key=api_key)
+
+        # Determine worksheet name (+ numeric sheetId when possible)
+        worksheet_title = worksheet_name or "Sheet1"
+        worksheet_sheet_id: Optional[int] = None
+
+        if worksheet_name:
+            for sheet in metadata.sheets or []:
+                if str(sheet.get("properties", {}).get("title", "")) == worksheet_name:
+                    worksheet_title = worksheet_name
+                    try:
+                        worksheet_sheet_id = int(sheet.get("properties", {}).get("sheetId"))
+                    except (TypeError, ValueError):
+                        worksheet_sheet_id = None
+                    break
+        elif gid and metadata.sheets:
+            for sheet in metadata.sheets:
+                if str(sheet.get("properties", {}).get("sheetId", "")) == gid:
+                    worksheet_title = sheet["properties"]["title"]
+                    try:
+                        worksheet_sheet_id = int(sheet.get("properties", {}).get("sheetId"))
+                    except (TypeError, ValueError):
+                        worksheet_sheet_id = None
+                    break
+        elif metadata.sheets:
+            worksheet_title = metadata.sheets[0]["properties"]["title"]
+            try:
+                worksheet_sheet_id = int(metadata.sheets[0].get("properties", {}).get("sheetId"))
+            except (TypeError, ValueError):
+                worksheet_sheet_id = None
+
+        # 특수 문자가 있는 워크시트 이름은 작은따옴표로 감싸야 함
+        if any(ch in worksheet_title for ch in (" ", "/", "(", ")")):
+            worksheet_range = f"'{worksheet_title}'"
+        else:
+            worksheet_range = worksheet_title
+
+        values = await self._get_sheet_data(sheet_id, worksheet_range, api_key=api_key)
+        return sheet_id, metadata, worksheet_title, worksheet_sheet_id, values
+
+    async def preview_sheet(
+        self,
+        sheet_url: str,
+        *,
+        worksheet_name: Optional[str] = None,
+        limit: int = 10,
+        api_key: Optional[str] = None,
+    ) -> GoogleSheetPreviewResponse:
         """
         Google Sheet 미리보기
 
         Args:
             sheet_url: Google Sheets URL
+            worksheet_name: 워크시트 이름(선택)
+            limit: 샘플 행 수
+            api_key: 요청 단위 API 키(선택)
 
         Returns:
             미리보기 응답
@@ -77,55 +145,28 @@ class GoogleSheetsService:
             ValueError: 유효하지 않은 URL
             httpx.HTTPError: API 호출 실패
         """
-        # Extract sheet ID
-        sheet_id = extract_sheet_id(sheet_url)
-        gid = extract_gid(sheet_url)
-
-        # Get sheet metadata first
-        metadata = await self._get_sheet_metadata(sheet_id)
-
-        # Determine worksheet name
-        worksheet_name = "Sheet1"
-        if gid and metadata.sheets:
-            # Find worksheet by gid
-            for sheet in metadata.sheets:
-                if str(sheet.get("properties", {}).get("sheetId", "")) == gid:
-                    worksheet_name = sheet["properties"]["title"]
-                    break
-        elif metadata.sheets:
-            # Use first sheet if no gid specified
-            worksheet_name = metadata.sheets[0]["properties"]["title"]
-
-        # 특수 문자가 있는 워크시트 이름은 작은따옴표로 감싸야 함
-        if (
-            " " in worksheet_name
-            or "/" in worksheet_name
-            or "(" in worksheet_name
-            or ")" in worksheet_name
-        ):
-            worksheet_range = f"'{worksheet_name}'"
-        else:
-            worksheet_range = worksheet_name
-
-        # Get sheet data
-        data = await self._get_sheet_data(sheet_id, worksheet_range)
+        sheet_id, metadata, worksheet_title, _, data = await self.fetch_sheet_values(
+            sheet_url,
+            worksheet_name=worksheet_name,
+            api_key=api_key,
+        )
 
         # Normalize data
         columns, rows = normalize_sheet_data(data)
 
-        # Get sample rows (max 5)
-        sample_rows = rows[:5] if rows else []
+        # Get sample rows
+        sample_rows = rows[: max(1, int(limit))] if rows else []
 
         return GoogleSheetPreviewResponse(
             sheet_id=sheet_id,
             sheet_url=sheet_url,
             sheet_title=metadata.title,
-            worksheet_title=sanitize_worksheet_name(worksheet_name),
-            worksheet_name=worksheet_name,
+            worksheet_title=sanitize_worksheet_name(worksheet_title),
+            worksheet_name=worksheet_title,
             metadata=metadata,
             columns=columns,
             sample_rows=sample_rows,
-            preview_data=data[:5] if data else [],  # First 5 rows as preview
+            preview_data=data[: max(1, int(limit))] if data else [],
             total_rows=len(rows),
             total_columns=len(columns),
         )
@@ -162,7 +203,7 @@ class GoogleSheetsService:
             sheet_url=str(sheet_url),
             worksheet_name=sanitize_worksheet_name(worksheet_name),
             polling_interval=polling_interval,
-            registered_at=format_datetime_iso(datetime.utcnow()),
+            registered_at=format_datetime_iso(datetime.now(timezone.utc)),
         )
 
         # Store in memory (실제로는 DB 저장)
@@ -178,7 +219,7 @@ class GoogleSheetsService:
             registered_sheet=registered_sheet,
         )
 
-    async def _get_sheet_metadata(self, sheet_id: str) -> SheetMetadata:
+    async def _get_sheet_metadata(self, sheet_id: str, *, api_key: Optional[str] = None) -> SheetMetadata:
         """
         Google Sheet 메타데이터 조회
 
@@ -192,8 +233,9 @@ class GoogleSheetsService:
         url = build_sheets_metadata_url(sheet_id)
 
         params = {}
-        if self.api_key:
-            params["key"] = self.api_key
+        key = api_key or self.api_key
+        if key:
+            params["key"] = key
 
         try:
             response = await client.get(url, params=params)
@@ -216,7 +258,9 @@ class GoogleSheetsService:
                 )
             raise
 
-    async def _get_sheet_data(self, sheet_id: str, range_name: str = "Sheet1") -> List[List[Any]]:
+    async def _get_sheet_data(
+        self, sheet_id: str, range_name: str = "Sheet1", *, api_key: Optional[str] = None
+    ) -> List[List[Any]]:
         """
         Google Sheet 데이터 조회
 
@@ -235,8 +279,9 @@ class GoogleSheetsService:
             "valueRenderOption": "FORMATTED_VALUE",
             "dateTimeRenderOption": "FORMATTED_STRING",
         }
-        if self.api_key:
-            params["key"] = self.api_key
+        key = api_key or self.api_key
+        if key:
+            params["key"] = key
 
         try:
             response = await client.get(url, params=params)
@@ -292,7 +337,7 @@ class GoogleSheetsService:
                         worksheet_name=registered_sheet.worksheet_name,
                         changed_rows=len(rows),
                         changed_columns=columns,
-                        timestamp=format_datetime_iso(datetime.utcnow()),
+                        timestamp=format_datetime_iso(datetime.now(timezone.utc)),
                     )
 
                     # Send notification to Kafka
@@ -300,7 +345,7 @@ class GoogleSheetsService:
 
                 # Update polling info
                 registered_sheet.last_hash = current_hash
-                registered_sheet.last_polled = format_datetime_iso(datetime.utcnow())
+                registered_sheet.last_polled = format_datetime_iso(datetime.now(timezone.utc))
 
             except Exception as e:
                 logger.error(f"Polling error for sheet {sheet_id}: {e}")
@@ -315,8 +360,11 @@ class GoogleSheetsService:
             update: 변경 정보
         """
         try:
+            if not self.producer:
+                logger.warning("Kafka producer not configured; skipping update notification")
+                return
             topic = "google-sheets-updates"
-            value = update.json()
+            value = update.model_dump_json()
             key = update.sheet_id.encode("utf-8")
 
             self.producer.produce(topic=topic, value=value, key=key)

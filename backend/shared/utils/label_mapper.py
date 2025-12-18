@@ -9,7 +9,7 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -220,7 +220,14 @@ class LabelMapper:
                             (db_name, class_id, label, label_lang, description, updated_at)
                             VALUES (?, ?, ?, ?, ?, ?)
                         """,
-                            (db_name, class_id, label_text, lang, desc_text, datetime.utcnow()),
+                            (
+                                db_name,
+                                class_id,
+                                label_text,
+                                lang,
+                                desc_text,
+                                datetime.now(timezone.utc).replace(tzinfo=None),
+                            ),
                         )
 
                     await conn.commit()
@@ -571,7 +578,14 @@ class LabelMapper:
                     (db_name, class_id, property_id, label, label_lang, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                    (db_name, class_id, property_id, label_text, lang, datetime.utcnow()),
+                    (
+                        db_name,
+                        class_id,
+                        property_id,
+                        label_text,
+                        lang,
+                        datetime.now(timezone.utc).replace(tzinfo=None),
+                    ),
                 )
 
             await conn.commit()
@@ -597,7 +611,13 @@ class LabelMapper:
                     (db_name, predicate, label, label_lang, updated_at)
                     VALUES (?, ?, ?, ?, ?)
                 """,
-                    (db_name, predicate, label_text, lang, datetime.utcnow()),
+                    (
+                        db_name,
+                        predicate,
+                        label_text,
+                        lang,
+                        datetime.now(timezone.utc).replace(tzinfo=None),
+                    ),
                 )
 
             await conn.commit()
@@ -884,10 +904,11 @@ class LabelMapper:
             # MultiLingualText의 dict 형태
             return {k: str(v).strip() for k, v in label.items() if v and str(v).strip()}
 
-        if hasattr(label, "dict"):
+        if hasattr(label, "model_dump") or hasattr(label, "dict"):
             # Pydantic 모델
             try:
-                return {k: str(v).strip() for k, v in label.dict().items() if v and str(v).strip()}
+                data = label.model_dump() if hasattr(label, "model_dump") else label.dict()
+                return {k: str(v).strip() for k, v in data.items() if v and str(v).strip()}
             except Exception as e:
                 logger.warning(f"Failed to extract labels from Pydantic model: {e}")
                 return {}
@@ -977,7 +998,7 @@ class LabelMapper:
                 "classes": [],
                 "properties": [],
                 "relationships": [],
-                "exported_at": datetime.utcnow().isoformat(),
+                "exported_at": datetime.now(timezone.utc).isoformat(),
                 "error": "Invalid database name",
             }
 
@@ -1016,7 +1037,7 @@ class LabelMapper:
                     "classes": classes,
                     "properties": properties,
                     "relationships": relationships,
-                    "exported_at": datetime.utcnow().isoformat(),
+                    "exported_at": datetime.now(timezone.utc).isoformat(),
                 }
 
         except Exception as e:
@@ -1026,7 +1047,7 @@ class LabelMapper:
                 "classes": [],
                 "properties": [],
                 "relationships": [],
-                "exported_at": datetime.utcnow().isoformat(),
+                "exported_at": datetime.now(timezone.utc).isoformat(),
                 "error": str(e),
             }
 

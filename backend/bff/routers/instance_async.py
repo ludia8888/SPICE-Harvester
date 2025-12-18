@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
 
 from bff.dependencies import (
@@ -138,7 +138,7 @@ async def create_instance_async(
         }
         
         response = await oms_client.post(
-            f"/instances/{db_name}/async/{class_id}/create",
+            f"/api/v1/instances/{db_name}/async/{class_id}/create",
             json=oms_request
         )
         
@@ -167,6 +167,7 @@ async def update_instance_async(
     class_label: str,
     instance_id: str,
     request: InstanceUpdateRequest,
+    expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
     oms_client: OMSClient = Depends(get_oms_client),
     label_mapper: LabelMapper = Depends(get_label_mapper),
     user_id: Optional[str] = None,
@@ -207,7 +208,8 @@ async def update_instance_async(
         }
         
         response = await oms_client.put(
-            f"/instances/{db_name}/async/{class_id}/{instance_id}/update",
+            f"/api/v1/instances/{db_name}/async/{class_id}/{instance_id}/update",
+            params={"expected_seq": expected_seq},
             json=oms_request
         )
         
@@ -234,6 +236,7 @@ async def delete_instance_async(
     db_name: str,
     class_label: str,
     instance_id: str,
+    expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
     oms_client: OMSClient = Depends(get_oms_client),
     label_mapper: LabelMapper = Depends(get_label_mapper),
     user_id: Optional[str] = None,
@@ -256,7 +259,8 @@ async def delete_instance_async(
         
         # OMS 비동기 API 호출
         response = await oms_client.delete(
-            f"/instances/{db_name}/async/{class_id}/{instance_id}/delete"
+            f"/api/v1/instances/{db_name}/async/{class_id}/{instance_id}/delete",
+            params={"expected_seq": expected_seq},
         )
         
         return CommandResult(**response)
@@ -324,7 +328,7 @@ async def bulk_create_instances_async(
         }
         
         response = await oms_client.post(
-            f"/instances/{db_name}/async/{class_id}/bulk-create",
+            f"/api/v1/instances/{db_name}/async/{class_id}/bulk-create",
             json=oms_request
         )
         
@@ -361,7 +365,7 @@ async def get_instance_command_status(
         
         # OMS API 호출
         response = await oms_client.get(
-            f"/instances/{db_name}/async/command/{command_id}/status"
+            f"/api/v1/instances/{db_name}/async/command/{command_id}/status"
         )
         
         return CommandResult(**response)

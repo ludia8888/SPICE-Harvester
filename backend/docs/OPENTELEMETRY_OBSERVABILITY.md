@@ -39,7 +39,7 @@ Based on Context7 analysis recommendations, we've implemented comprehensive obse
 - **OMS Service** (Port 8000)
   - Database operation tracing
   - Command/Event metrics
-  - Outbox pattern monitoring
+  - Event store append + publisher checkpoint monitoring
 
 - **Funnel Service** (Port 8003)
   - Type inference tracing

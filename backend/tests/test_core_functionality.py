@@ -12,25 +12,147 @@ import aiohttp
 import json
 import uuid
 import os
+import time
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 # Real service endpoints
-OMS_URL = "http://localhost:8000"
-BFF_URL = "http://localhost:8002"
-FUNNEL_URL = "http://localhost:8003"
+OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhost:8000").rstrip("/")
+BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
+FUNNEL_URL = (os.getenv("FUNNEL_BASE_URL") or os.getenv("FUNNEL_URL") or "http://localhost:8003").rstrip("/")
 
 # Test configuration
-TERMINUS_URL = "http://localhost:6363"
-REDIS_URL = "redis://localhost:6379"
-POSTGRES_URL = "postgresql://spiceadmin:spicepass123@localhost:5432/spicedb"
-MINIO_URL = "http://localhost:9000"
-ELASTICSEARCH_URL = "http://localhost:9200"
-KAFKA_BOOTSTRAP = "localhost:9092"
+TERMINUS_URL = (os.getenv("TERMINUS_SERVER_URL") or "http://localhost:6363").rstrip("/")
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+def _get_postgres_url_candidates() -> list[str]:
+    """Return Postgres DSN candidates (env override first, then common local ports)."""
+    env_url = (os.getenv("POSTGRES_URL") or "").strip()
+    if env_url:
+        return [env_url]
+    return [
+        # docker-compose host port default
+        "postgresql://spiceadmin:spicepass123@localhost:5433/spicedb",
+        # common local Postgres port
+        "postgresql://spiceadmin:spicepass123@localhost:5432/spicedb",
+    ]
+MINIO_URL = os.getenv("MINIO_ENDPOINT_URL", "http://localhost:9000")
+ELASTICSEARCH_URL = os.getenv(
+    "ELASTICSEARCH_URL",
+    f"http://{os.getenv('ELASTICSEARCH_HOST', 'localhost')}:{os.getenv('ELASTICSEARCH_PORT', '9200')}",
+)
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+
+
+async def _get_write_side_last_sequence(*, aggregate_type: str, aggregate_id: str) -> int:
+    """
+    Fetch the current write-side sequence for an aggregate from Postgres.
+
+    This is the same value OMS uses for OCC (`expected_seq`) at command append time.
+    """
+    import asyncpg
+    import re
+    from urllib.parse import urlparse
+
+    schema = os.getenv("EVENT_STORE_SEQUENCE_SCHEMA", "spice_event_registry")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", schema):
+        raise ValueError(f"Invalid EVENT_STORE_SEQUENCE_SCHEMA: {schema!r}")
+
+    prefix = (os.getenv("EVENT_STORE_SEQUENCE_HANDLER_PREFIX", "write_side") or "write_side").strip()
+    handler = f"{prefix}:{aggregate_type}"
+
+    conn = None
+    last_error: Optional[Exception] = None
+    explicit_postgres_url = (os.getenv("POSTGRES_URL") or "").strip()
+
+    for dsn in _get_postgres_url_candidates():
+        parsed = urlparse(dsn)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 5432
+        user = parsed.username or "spiceadmin"
+        password = parsed.password or "spicepass123"
+        database = (parsed.path or "/spicedb").lstrip("/") or "spicedb"
+        try:
+            conn = await asyncpg.connect(
+                host=host,
+                port=port,
+                user=user,
+                password=password,
+                database=database,
+            )
+            break
+        except Exception as e:
+            last_error = e
+            continue
+
+    if conn is None:
+        if not explicit_postgres_url:
+            pytest.skip(
+                "Postgres DSN not provided for OCC/sequence checks. "
+                "Set POSTGRES_URL to run tests that require expected_seq."
+            )
+        raise AssertionError("Could not connect to Postgres using POSTGRES_URL.") from last_error
+
+    try:
+        value = await conn.fetchval(
+            f"""
+            SELECT last_sequence
+            FROM {schema}.aggregate_versions
+            WHERE handler = $1 AND aggregate_id = $2
+            """,
+            handler,
+            aggregate_id,
+        )
+        return int(value or 0)
+    finally:
+        await conn.close()
+
+
+async def _wait_for_db_exists(
+    session: aiohttp.ClientSession,
+    *,
+    db_name: str,
+    expected: bool,
+    timeout_seconds: int = 30,
+    poll_interval_seconds: float = 1.0,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    last = None
+    while time.monotonic() < deadline:
+        async with session.get(f"{OMS_URL}/api/v1/database/exists/{db_name}") as resp:
+            assert resp.status == 200
+            last = await resp.json()
+            if (last.get("data") or {}).get("exists") is expected:
+                return
+        await asyncio.sleep(poll_interval_seconds)
+
+    raise AssertionError(f"Timed out waiting for db exists={expected} (last={last})")
+
+
+async def _wait_for_ontology_present(
+    session: aiohttp.ClientSession,
+    *,
+    db_name: str,
+    ontology_id: str,
+    timeout_seconds: int = 30,
+    poll_interval_seconds: float = 1.0,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    last = None
+    while time.monotonic() < deadline:
+        async with session.get(f"{OMS_URL}/api/v1/database/{db_name}/ontology") as resp:
+            assert resp.status == 200
+            last = await resp.json()
+            ontologies = (last.get("data") or {}).get("ontologies") or []
+            if any(o.get("id") == ontology_id for o in ontologies):
+                return
+        await asyncio.sleep(poll_interval_seconds)
+
+    raise AssertionError(f"Timed out waiting for ontology '{ontology_id}' (last={last})")
 
 
 class TestCoreOntologyManagement:
     """Test suite for Ontology Management Service"""
+    pytestmark = pytest.mark.integration
     
     @pytest.mark.asyncio
     async def test_database_lifecycle(self):
@@ -45,35 +167,20 @@ class TestCoreOntologyManagement:
             ) as resp:
                 assert resp.status == 202  # Event Sourcing async
                 result = await resp.json()
-                assert "command_id" in result
-                
-            # Wait for processing
-            await asyncio.sleep(5)
-            
-            # Verify creation
-            async with session.get(
-                f"{OMS_URL}/api/v1/database/exists/{db_name}"
-            ) as resp:
-                assert resp.status == 200
-                result = await resp.json()
-                assert result["data"]["exists"] is True
+                assert result.get("status") == "accepted"
+                assert "command_id" in (result.get("data") or {})
+
+            await _wait_for_db_exists(session, db_name=db_name, expected=True)
                 
             # Delete database
+            expected_seq = await _get_write_side_last_sequence(aggregate_type="Database", aggregate_id=db_name)
             async with session.delete(
-                f"{OMS_URL}/api/v1/database/{db_name}"
+                f"{OMS_URL}/api/v1/database/{db_name}",
+                params={"expected_seq": expected_seq},
             ) as resp:
                 assert resp.status == 202  # Event Sourcing async
-                
-            # Wait for deletion
-            await asyncio.sleep(5)
-            
-            # Verify deletion
-            async with session.get(
-                f"{OMS_URL}/api/v1/database/exists/{db_name}"
-            ) as resp:
-                assert resp.status == 200
-                result = await resp.json()
-                assert result["data"]["exists"] is False
+
+            await _wait_for_db_exists(session, db_name=db_name, expected=False)
                 
     @pytest.mark.asyncio
     async def test_ontology_creation(self):
@@ -87,8 +194,27 @@ class TestCoreOntologyManagement:
                 json={"name": db_name, "description": "Ontology test"}
             ) as resp:
                 assert resp.status == 202
-                
-            await asyncio.sleep(5)
+
+            await _wait_for_db_exists(session, db_name=db_name, expected=True)
+
+            # Relationship targets must exist in schema (create Customer first)
+            customer_ontology = {
+                "id": "Customer",
+                "label": "Customer",
+                "description": "Customer for relationship target",
+                "properties": [
+                    {"name": "customer_id", "type": "string", "label": "Customer ID", "required": True},
+                    {"name": "name", "type": "string", "label": "Name", "required": True},
+                ],
+                "relationships": [],
+            }
+            async with session.post(
+                f"{OMS_URL}/api/v1/database/{db_name}/ontology",
+                json=customer_ontology,
+            ) as resp:
+                assert resp.status == 202
+
+            await _wait_for_ontology_present(session, db_name=db_name, ontology_id="Customer")
             
             # Create ontology
             ontology_data = {
@@ -112,27 +238,20 @@ class TestCoreOntologyManagement:
             }
             
             async with session.post(
-                f"{OMS_URL}/api/v1/database/{db_name}/ontology/create",
+                f"{OMS_URL}/api/v1/database/{db_name}/ontology",
                 json=ontology_data
             ) as resp:
                 assert resp.status == 202
                 result = await resp.json()
-                assert "command_id" in result
-                
-            await asyncio.sleep(5)
-            
-            # Verify ontology
-            async with session.get(
-                f"{OMS_URL}/api/v1/database/{db_name}/ontology"
-            ) as resp:
-                assert resp.status == 200
-                result = await resp.json()
-                ontologies = result["data"]
-                assert any(o["id"] == "TestProduct" for o in ontologies)
+                assert result.get("status") == "accepted"
+                assert "command_id" in (result.get("data") or {})
+
+            await _wait_for_ontology_present(session, db_name=db_name, ontology_id="TestProduct")
 
 
 class TestBFFGraphFederation:
     """Test suite for BFF Graph Federation capabilities"""
+    pytestmark = pytest.mark.integration
     
     @pytest.mark.asyncio
     async def test_schema_suggestion(self):
@@ -141,26 +260,33 @@ class TestBFFGraphFederation:
             sample_data = [
                 {"name": "iPhone 15", "price": 999.99, "in_stock": True},
                 {"name": "Samsung S24", "price": 899.99, "in_stock": False},
-                {"name": "Pixel 8", "price": 699.99, "in_stock": True}
+                {"name": "Pixel 8", "price": 699.99, "in_stock": True},
             ]
+            columns = ["name", "price", "in_stock"]
+            data = [[row.get(col) for col in columns] for row in sample_data]
             
             async with session.post(
-                f"{BFF_URL}/api/v1/suggest-schema",
-                json={"sample_data": sample_data}
+                f"{BFF_URL}/api/v1/database/test_db/suggest-schema-from-data",
+                json={
+                    "data": data,
+                    "columns": columns,
+                    "class_name": "Product",
+                    "include_complex_types": True,
+                },
             ) as resp:
                 assert resp.status == 200
                 result = await resp.json()
                 
                 # Verify schema suggestion
-                assert "ontology" in result["data"]
-                ontology = result["data"]["ontology"]
+                assert result.get("status") == "success"
+                ontology = result.get("suggested_schema") or {}
                 assert "properties" in ontology
                 
                 # Check inferred types
-                properties = {p["name"]: p["type"] for p in ontology["properties"]}
-                assert properties.get("name") == "string"
-                assert properties.get("price") in ["decimal", "number"]
-                assert properties.get("in_stock") == "boolean"
+                properties = {p.get("name"): p.get("type") for p in ontology.get("properties") or []}
+                assert properties.get("name") in {"xsd:string", "STRING", "string"}
+                assert properties.get("price") in {"xsd:decimal", "DECIMAL", "decimal", "xsd:integer", "INTEGER"}
+                assert properties.get("in_stock") in {"xsd:boolean", "BOOLEAN", "boolean"}
                 
     @pytest.mark.asyncio
     async def test_graph_query_federation(self):
@@ -178,60 +304,108 @@ class TestBFFGraphFederation:
 
 class TestEventSourcingInfrastructure:
     """Test Event Sourcing and CQRS infrastructure"""
+    pytestmark = pytest.mark.integration
     
     @pytest.mark.asyncio
+    @pytest.mark.filterwarnings(
+        "ignore:datetime\\.datetime\\.utcnow\\(\\) is deprecated.*:DeprecationWarning:botocore\\..*"
+    )
     async def test_s3_event_storage(self):
         """Verify S3/MinIO event storage is working"""
         import boto3
         from botocore.exceptions import ClientError
+        bucket_name = os.getenv("EVENT_STORE_BUCKET", "spice-event-store")
+        explicit_minio_access_key = (os.getenv("MINIO_ACCESS_KEY") or "").strip()
+        explicit_minio_secret_key = (os.getenv("MINIO_SECRET_KEY") or "").strip()
         
         client = boto3.client(
             's3',
             endpoint_url=MINIO_URL,
-            aws_access_key_id='minioadmin',
-            aws_secret_access_key='minioadmin123',
+            aws_access_key_id=explicit_minio_access_key or "minioadmin",
+            aws_secret_access_key=explicit_minio_secret_key or "minioadmin123",
             use_ssl=False,
             verify=False
         )
         
-        # Check if events bucket exists
+        # Check if events bucket exists (and create if missing, like EventStore.connect)
         try:
-            client.head_bucket(Bucket='events')
-            bucket_exists = True
-        except ClientError:
-            bucket_exists = False
-            
-        assert bucket_exists, "Events bucket should exist in MinIO"
+            client.head_bucket(Bucket=bucket_name)
+        except ClientError as e:
+            code = (e.response or {}).get("Error", {}).get("Code")
+            if not (explicit_minio_access_key and explicit_minio_secret_key):
+                pytest.skip(
+                    "MinIO credentials not provided for direct check. "
+                    "Set MINIO_ACCESS_KEY/MINIO_SECRET_KEY to run this test."
+                )
+            if code in {"404", "NoSuchBucket", "NotFound"}:
+                client.create_bucket(Bucket=bucket_name)
+                client.head_bucket(Bucket=bucket_name)
+            else:
+                raise AssertionError(
+                    f"MinIO/S3 head_bucket failed for '{bucket_name}' (code={code!r}). "
+                    "Check MINIO_ENDPOINT_URL/MINIO_ACCESS_KEY/MINIO_SECRET_KEY."
+                ) from e
         
     @pytest.mark.asyncio
-    async def test_postgresql_outbox(self):
-        """Verify PostgreSQL outbox pattern is working"""
+    async def test_postgresql_processed_event_registry(self):
+        """Verify Postgres processed_events registry is available (idempotency contract)"""
         import asyncpg
-        
-        conn = await asyncpg.connect(
-            host='localhost',
-            port=5432,
-            user='spiceadmin',
-            password='spicepass123',
-            database='spicedb'
-        )
+        from urllib.parse import urlparse
+
+        explicit_postgres_url = (os.getenv("POSTGRES_URL") or "").strip()
+        conn = None
+        last_error: Optional[Exception] = None
+        for dsn in _get_postgres_url_candidates():
+            parsed = urlparse(dsn)
+            host = parsed.hostname or "localhost"
+            port = parsed.port or 5432
+            user = parsed.username or "spiceadmin"
+            password = parsed.password or "spicepass123"
+            database = (parsed.path or "/spicedb").lstrip("/") or "spicedb"
+            try:
+                conn = await asyncpg.connect(
+                    host=host,
+                    port=port,
+                    user=user,
+                    password=password,
+                    database=database,
+                )
+                break
+            except Exception as e:
+                last_error = e
+                continue
+
+        if conn is None:
+            if not explicit_postgres_url:
+                pytest.skip(
+                    "Postgres DSN not provided for direct registry check. "
+                    "Set POSTGRES_URL to run this test."
+                )
+            raise AssertionError("Could not connect to Postgres using POSTGRES_URL.") from last_error
         
         try:
-            # Check outbox table exists
-            exists = await conn.fetchval("""
+            # processed_events table exists
+            processed_exists = await conn.fetchval(
+                """
                 SELECT EXISTS(
-                    SELECT 1 FROM information_schema.tables 
-                    WHERE table_schema = 'spice_outbox' 
-                    AND table_name = 'outbox'
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_schema = 'spice_event_registry'
+                      AND table_name = 'processed_events'
                 )
-            """)
-            assert exists, "Outbox table should exist"
-            
-            # Check for recent events
-            count = await conn.fetchval(
-                "SELECT COUNT(*) FROM spice_outbox.outbox"
+                """
             )
-            assert count >= 0, "Should be able to query outbox"
+            assert processed_exists, "processed_events registry table should exist"
+
+            versions_exists = await conn.fetchval(
+                """
+                SELECT EXISTS(
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_schema = 'spice_event_registry'
+                      AND table_name = 'aggregate_versions'
+                )
+                """
+            )
+            assert versions_exists, "aggregate_versions registry table should exist"
             
         finally:
             await conn.close()
@@ -239,34 +413,30 @@ class TestEventSourcingInfrastructure:
     @pytest.mark.asyncio
     async def test_kafka_message_flow(self):
         """Verify Kafka message flow is operational"""
-        from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
-        
-        producer = AIOKafkaProducer(
-            bootstrap_servers=KAFKA_BOOTSTRAP
-        )
-        await producer.start()
-        
-        try:
-            # Send test message
-            test_message = json.dumps({
-                "test": "message",
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            })
-            
-            await producer.send_and_wait(
-                "test_topic",
-                test_message.encode('utf-8')
-            )
-            
-            # Message sent successfully
-            assert True
-            
-        finally:
-            await producer.stop()
+        from confluent_kafka import Producer
+
+        producer = Producer({"bootstrap.servers": KAFKA_BOOTSTRAP})
+
+        # Send test message
+        test_message = json.dumps(
+            {"test": "message", "timestamp": datetime.now(timezone.utc).isoformat()}
+        ).encode("utf-8")
+
+        delivery_err = None
+
+        def on_delivery(err, _msg):
+            nonlocal delivery_err
+            delivery_err = err
+
+        producer.produce("test_topic", value=test_message, callback=on_delivery)
+        remaining = producer.flush(timeout=10)
+        assert remaining == 0, f"Kafka flush timed out (remaining={remaining})"
+        assert delivery_err is None, f"Kafka delivery failed: {delivery_err}"
 
 
 class TestComplexTypes:
     """Test complex type validation and handling"""
+    pytestmark = pytest.mark.unit
     
     def test_email_validation(self):
         """Test email type validation"""
@@ -290,10 +460,10 @@ class TestComplexTypes:
         
         # Valid phone
         valid, msg, normalized = ComplexTypeValidator.validate(
-            "+1-555-123-4567", "phone"
+            "+1 650-253-0000", "phone"
         )
         assert valid is True
-        assert normalized == "+15551234567"
+        assert (normalized or {}).get("e164") == "+16502530000"
         
     def test_json_validation(self):
         """Test JSON type validation"""
@@ -314,6 +484,7 @@ class TestComplexTypes:
 
 class TestHealthEndpoints:
     """Test all service health endpoints"""
+    pytestmark = pytest.mark.integration
     
     @pytest.mark.asyncio
     async def test_oms_health(self):
@@ -322,7 +493,8 @@ class TestHealthEndpoints:
             async with session.get(f"{OMS_URL}/health") as resp:
                 assert resp.status == 200
                 result = await resp.json()
-                assert result["status"] == "healthy"
+                assert result.get("status") == "success"
+                assert (result.get("data") or {}).get("status") == "healthy"
                 
     @pytest.mark.asyncio
     async def test_bff_health(self):
@@ -331,7 +503,8 @@ class TestHealthEndpoints:
             async with session.get(f"{BFF_URL}/health") as resp:
                 assert resp.status == 200
                 result = await resp.json()
-                assert result["status"] == "healthy"
+                assert result.get("status") == "success"
+                assert (result.get("data") or {}).get("status") == "healthy"
                 
     @pytest.mark.asyncio
     async def test_funnel_health(self):
@@ -340,7 +513,8 @@ class TestHealthEndpoints:
             async with session.get(f"{FUNNEL_URL}/health") as resp:
                 assert resp.status == 200
                 result = await resp.json()
-                assert result["status"] == "healthy"
+                assert result.get("status") == "success"
+                assert (result.get("data") or {}).get("status") == "healthy"
 
 
 if __name__ == "__main__":

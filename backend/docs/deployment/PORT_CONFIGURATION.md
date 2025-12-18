@@ -6,8 +6,8 @@ All service ports are now centrally configured through environment variables, el
 ## Default Port Assignments
 - **OMS (Ontology Management Service)**: 8000
 - **BFF (Backend for Frontend)**: 8002
-- **Funnel (Type Inference Service)**: 8004 (now active!)
-- **TerminusDB**: 6364
+- **Funnel (Type Inference Service)**: 8003
+- **TerminusDB**: 6363
 
 ## Configuration Methods
 
@@ -16,10 +16,10 @@ Set these in your `.env` file or shell environment:
 ```bash
 OMS_PORT=8000
 BFF_PORT=8002
-FUNNEL_PORT=8004
+FUNNEL_PORT=8003
 OMS_BASE_URL=http://localhost:8000  # Optional
 BFF_BASE_URL=http://localhost:8002  # Optional
-FUNNEL_BASE_URL=http://localhost:8004  # Optional
+FUNNEL_BASE_URL=http://localhost:8003  # Optional
 ```
 
 ### 2. Using ServiceConfig
@@ -30,12 +30,12 @@ from shared.config.service_config import ServiceConfig
 # Get ports
 oms_port = ServiceConfig.get_oms_port()  # Returns 8000 or $OMS_PORT
 bff_port = ServiceConfig.get_bff_port()  # Returns 8002 or $BFF_PORT
-funnel_port = ServiceConfig.get_funnel_port()  # Returns 8004 or $FUNNEL_PORT
+funnel_port = ServiceConfig.get_funnel_port()  # Returns 8003 or $FUNNEL_PORT
 
 # Get URLs
 oms_url = ServiceConfig.get_oms_url()  # Returns http://localhost:8000 or $OMS_BASE_URL
 bff_url = ServiceConfig.get_bff_url()  # Returns http://localhost:8002 or $BFF_BASE_URL
-funnel_url = ServiceConfig.get_funnel_url()  # Returns http://localhost:8004 or $FUNNEL_BASE_URL
+funnel_url = ServiceConfig.get_funnel_url()  # Returns http://localhost:8003 or $FUNNEL_BASE_URL
 ```
 
 ## Changes Made
@@ -67,7 +67,7 @@ funnel_url = ServiceConfig.get_funnel_url()  # Returns http://localhost:8004 or 
 cd oms
 python main.py
 
-# Terminal 2 - Start Funnel (port 8004)
+# Terminal 2 - Start Funnel (port 8003)
 cd funnel
 python main.py
 
@@ -91,12 +91,12 @@ OMS_BASE_URL=http://localhost:8001 python main.py
 Start all services with one command:
 ```bash
 cd backend
-python start_services.py
+python start_services.py --env development
 ```
 
 This will automatically start:
 - OMS on port 8000
-- Funnel on port 8004  
+- Funnel on port 8003
 - BFF on port 8002
 
 And provide helpful API endpoints for schema suggestion!

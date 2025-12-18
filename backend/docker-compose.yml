@@ -3,21 +3,21 @@ version: '3.8'
 services:
   # PostgreSQL - 표준화된 인증 정보
   postgres:
-    image: postgres:15
+    image: postgres:16-alpine
     container_name: spice_postgres
     environment:
-      - POSTGRES_USER=admin
-      - POSTGRES_PASSWORD=spice123!
-      - POSTGRES_DB=spicedb
+      - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
+      - POSTGRES_DB=${POSTGRES_DB:-spicedb}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT_HOST:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/init:/docker-entrypoint-initdb.d
     networks:
       - spice_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin -d spicedb"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-spiceadmin} -d ${POSTGRES_DB:-spicedb}"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -26,39 +26,44 @@ services:
   redis:
     image: redis:7-alpine
     container_name: spice_redis
-    command: redis-server --requirepass spice123!
+    command: redis-server --requirepass ${REDIS_PASSWORD:-spicepass123}
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT_HOST:-6379}:6379"
     volumes:
       - redis_data:/data
     networks:
       - spice_network
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "spice123!", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD:-spicepass123} ping || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
 
   # Elasticsearch - 표준화된 인증 정보
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.0
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
     container_name: spice_elasticsearch
     environment:
       - discovery.type=single-node
-      - xpack.security.enabled=true
-      - xpack.security.authc.api_key.enabled=true
-      - ELASTIC_PASSWORD=spice123!
-      - bootstrap.memory_lock=false
+      - xpack.security.enabled=false
+      - xpack.security.enrollment.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+      - bootstrap.memory_lock=true
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
       - http.host=0.0.0.0
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
     ports:
-      - "9200:9200"
+      - "${ELASTICSEARCH_PORT_HOST:-9200}:9200"
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
     networks:
       - spice_network
     healthcheck:
-      test: ["CMD-SHELL", "curl -u elastic:spice123! -f http://localhost:9200/_cluster/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -76,7 +81,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
     ports:
-      - "9092:9092"
+      - "${KAFKA_PORT_HOST:-9092}:9092"
     depends_on:
       - zookeeper
     networks:
@@ -95,7 +100,7 @@ services:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     ports:
-      - "2181:2181"
+      - "${ZOOKEEPER_PORT_HOST:-2181}:2181"
     networks:
       - spice_network
     healthcheck:
@@ -109,18 +114,19 @@ services:
     image: minio/minio:latest
     container_name: spice_minio
     environment:
-      - MINIO_ROOT_USER=admin
-      - MINIO_ROOT_PASSWORD=spice123!
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:-minioadmin123}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${MINIO_PORT_HOST:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT_HOST:-9001}:9001"
     volumes:
       - minio_data:/data
     networks:
       - spice_network
     command: server /data --console-address ":9001"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      # MinIO image doesn't ship with curl; use bash TCP check.
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/9000'"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -130,7 +136,7 @@ services:
     image: terminusdb/terminusdb-server:latest
     container_name: spice_terminusdb
     environment:
-      - TERMINUSDB_ADMIN_PASS=spice123!
+      - TERMINUSDB_ADMIN_PASS=${TERMINUS_KEY:-admin}
       - TERMINUSDB_SERVER_NAME=SpiceTerminusDB
       - TERMINUSDB_AUTOLOGIN=false
     ports:
@@ -140,7 +146,8 @@ services:
     networks:
       - spice_network
     healthcheck:
-      test: ["CMD-SHELL", "test -f /app/terminusdb/storage/SYSTEM/system.db || exit 1"]
+      # terminusdb-server image doesn't ship with curl; use bash TCP check.
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/6363'"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -156,25 +163,30 @@ services:
       - TERMINUS_SERVER_URL=http://terminusdb:6363
       - TERMINUS_USER=admin
       - TERMINUS_ACCOUNT=admin
-      - TERMINUS_KEY=spice123!
+      - TERMINUS_KEY=${TERMINUS_KEY:-admin}
       # PostgreSQL
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
-      - POSTGRES_USER=admin
-      - POSTGRES_PASSWORD=spice123!
-      - POSTGRES_DB=spicedb
+      - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
+      - POSTGRES_DB=${POSTGRES_DB:-spicedb}
       # Kafka
       - KAFKA_HOST=kafka
       - KAFKA_PORT=29092
       # Redis
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - REDIS_PASSWORD=spice123!
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-spicepass123}
       # Elasticsearch
       - ELASTICSEARCH_HOST=elasticsearch
       - ELASTICSEARCH_PORT=9200
-      - ELASTICSEARCH_USERNAME=elastic
-      - ELASTICSEARCH_PASSWORD=spice123!
+      - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_USERNAME:-}
+      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-}
+      # Event Store (S3/MinIO)
+      - MINIO_ENDPOINT_URL=http://minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
+      - EVENT_STORE_BUCKET=${EVENT_STORE_BUCKET:-spice-event-store}
       # Service
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
@@ -202,6 +214,21 @@ services:
     environment:
       - OMS_BASE_URL=http://oms:8000
       - FUNNEL_BASE_URL=http://funnel:8003
+      # Infra (needed for WebSocket notifications / search / rate limiting)
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
+      - POSTGRES_DB=${POSTGRES_DB:-spicedb}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-spicepass123}
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+      - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_USERNAME:-}
+      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-}
+      - KAFKA_HOST=kafka
+      - KAFKA_PORT=29092
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
     ports:
@@ -224,6 +251,10 @@ services:
       dockerfile: ./funnel/Dockerfile
     container_name: spice_funnel
     environment:
+      # Infra (rate limiting)
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-spicepass123}
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
     ports:
@@ -243,19 +274,17 @@ services:
       dockerfile: ./message_relay/Dockerfile
     container_name: spice_message_relay
     environment:
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_USER=admin
-      - POSTGRES_PASSWORD=spice123!
-      - POSTGRES_DB=spicedb
       - KAFKA_HOST=kafka
       - KAFKA_PORT=29092
-      - MESSAGE_RELAY_BATCH_SIZE=100
-      - MESSAGE_RELAY_POLL_INTERVAL=5
+      - MINIO_ENDPOINT_URL=http://minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
+      - EVENT_STORE_BUCKET=${EVENT_STORE_BUCKET:-spice-event-store}
+      - EVENT_PUBLISHER_BATCH_SIZE=${EVENT_PUBLISHER_BATCH_SIZE:-200}
+      - EVENT_PUBLISHER_POLL_INTERVAL=${EVENT_PUBLISHER_POLL_INTERVAL:-3}
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
     depends_on:
-      - postgres
       - kafka
     networks:
       - spice_network
@@ -273,10 +302,15 @@ services:
       - TERMINUS_SERVER_URL=http://terminusdb:6363
       - TERMINUS_USER=admin
       - TERMINUS_ACCOUNT=admin
-      - TERMINUS_KEY=spice123!
+      - TERMINUS_KEY=${TERMINUS_KEY:-admin}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
+      - POSTGRES_DB=${POSTGRES_DB:-spicedb}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - REDIS_PASSWORD=spice123!
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-spicepass123}
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
     depends_on:
@@ -299,18 +333,32 @@ services:
       - TERMINUS_SERVER_URL=http://terminusdb:6363
       - TERMINUS_USER=admin
       - TERMINUS_ACCOUNT=admin
-      - TERMINUS_KEY=spice123!
+      - TERMINUS_KEY=${TERMINUS_KEY:-admin}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
+      - POSTGRES_DB=${POSTGRES_DB:-spicedb}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - REDIS_PASSWORD=spice123!
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-spicepass123}
       - ELASTICSEARCH_HOST=elasticsearch
       - ELASTICSEARCH_PORT=9200
-      - ELASTICSEARCH_USERNAME=elastic
-      - ELASTICSEARCH_PASSWORD=spice123!
+      - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_USERNAME:-}
+      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-}
       - MINIO_ENDPOINT_URL=http://minio:9000
-      - MINIO_ACCESS_KEY=admin
-      - MINIO_SECRET_KEY=spice123!
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
       - INSTANCE_BUCKET=instance-events
+      - EVENT_STORE_BUCKET=${EVENT_STORE_BUCKET:-spice-event-store}
+      # Correctness/chaos tuning (defaults are production-safe)
+      - PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS=${PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS:-900}
+      - PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS=${PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS:-30}
+      - INSTANCE_WORKER_MAX_RETRY_ATTEMPTS=${INSTANCE_WORKER_MAX_RETRY_ATTEMPTS:-5}
+      - ENABLE_CHAOS_INJECTION=${ENABLE_CHAOS_INJECTION:-false}
+      - CHAOS_CRASH_POINT=${CHAOS_CRASH_POINT:-}
+      - CHAOS_CRASH_ONCE=${CHAOS_CRASH_ONCE:-true}
+      - CHAOS_CRASH_EXIT_CODE=${CHAOS_CRASH_EXIT_CODE:-42}
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
     depends_on:
@@ -333,11 +381,24 @@ services:
       - KAFKA_PORT=29092
       - ELASTICSEARCH_HOST=elasticsearch
       - ELASTICSEARCH_PORT=9200
-      - ELASTICSEARCH_USERNAME=elastic
-      - ELASTICSEARCH_PASSWORD=spice123!
+      - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_USERNAME:-}
+      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
+      - POSTGRES_DB=${POSTGRES_DB:-spicedb}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - REDIS_PASSWORD=spice123!
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-spicepass123}
+      # Correctness/chaos tuning (defaults are production-safe)
+      - PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS=${PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS:-900}
+      - PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS=${PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS:-30}
+      - PROJECTION_WORKER_MAX_RETRIES=${PROJECTION_WORKER_MAX_RETRIES:-5}
+      - ENABLE_CHAOS_INJECTION=${ENABLE_CHAOS_INJECTION:-false}
+      - CHAOS_CRASH_POINT=${CHAOS_CRASH_POINT:-}
+      - CHAOS_CRASH_ONCE=${CHAOS_CRASH_ONCE:-true}
+      - CHAOS_CRASH_EXIT_CODE=${CHAOS_CRASH_EXIT_CODE:-42}
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
     depends_on:
@@ -357,4 +418,5 @@ volumes:
 
 networks:
   spice_network:
+    name: spice_network
     driver: bridge

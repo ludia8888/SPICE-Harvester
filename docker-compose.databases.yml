@@ -1,7 +1,7 @@
 version: '3.8'
 
 # 데이터베이스 서비스들만 독립 실행
-# 포함: PostgreSQL (Outbox), Redis (Command Status), Cassandra, Elasticsearch, MinIO (S3)
+# 포함: PostgreSQL (processed_events 멱등 레지스트리), Redis (Command Status), Cassandra, Elasticsearch, MinIO (S3)
 # 실행: docker-compose -f docker-compose.databases.yml up -d
 
 services:
@@ -42,7 +42,7 @@ services:
       - POSTGRES_DB=spicedb
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8
     ports:
-      - "5433:5432"  # Using 5433 to avoid conflict with existing postgres
+      - "${POSTGRES_PORT_HOST:-5433}:5432"  # Host port override to avoid conflicts
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./backend/database/init:/docker-entrypoint-initdb.d
@@ -64,7 +64,7 @@ services:
     environment:
       - REDIS_REPLICATION_MODE=master
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT_HOST:-6379}:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -97,8 +97,8 @@ services:
         soft: -1
         hard: -1
     ports:
-      - "9200:9200"  # REST API
-      - "9300:9300"  # Transport
+      - "${ELASTICSEARCH_PORT_HOST:-9200}:9200"  # REST API
+      - "${ELASTICSEARCH_TRANSPORT_PORT_HOST:-9300}:9300"  # Transport
     volumes:
       - elasticsearch-data:/usr/share/elasticsearch/data
     healthcheck:
@@ -124,7 +124,7 @@ services:
       - ELASTICSEARCH_PASSWORD=kibana
       - xpack.security.enabled=false
     ports:
-      - "5601:5601"
+      - "${KIBANA_PORT_HOST:-5601}:5601"
     depends_on:
       - elasticsearch
     healthcheck:
@@ -149,12 +149,13 @@ services:
       - MINIO_REGION_NAME=us-east-1
       - MINIO_REGION=us-east-1
     ports:
-      - "9000:9000"  # S3 API
-      - "9001:9001"  # MinIO Console
+      - "${MINIO_PORT_HOST:-9000}:9000"  # S3 API
+      - "${MINIO_CONSOLE_PORT_HOST:-9001}:9001"  # MinIO Console
     volumes:
       - minio-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      # MinIO image doesn't ship with curl; use bash TCP check.
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/9000'"]
       interval: 30s
       timeout: 20s
       retries: 3
@@ -177,4 +178,5 @@ volumes:
 
 networks:
   spice_network:
-    external: true
+    name: spice_network
+    driver: bridge

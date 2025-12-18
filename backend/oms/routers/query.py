@@ -9,7 +9,7 @@ Palantir-style architecture: Query from Elasticsearch with TerminusDB graph fede
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query as QueryParam
 from pydantic import BaseModel
 
@@ -37,16 +37,26 @@ class WOQLQuery(BaseModel):
     query: str  # WOQL/SPARQL query string
 
 
-async def get_elasticsearch() -> AsyncElasticsearch:
+async def get_elasticsearch() -> AsyncIterator[AsyncElasticsearch]:
     """Get Elasticsearch client"""
     settings = ApplicationSettings()
-    client = AsyncElasticsearch(
-        hosts=[f"http://localhost:9200"],
-        basic_auth=("elastic", "spice123!"),
-        verify_certs=False,
-        ssl_show_warn=False
-    )
-    return client
+    es_url = f"http://{settings.elasticsearch_host}:{settings.elasticsearch_port}"
+    es_username = (settings.elasticsearch_username or "").strip()
+    es_password = settings.elasticsearch_password or ""
+
+    es_kwargs = {
+        "hosts": [es_url],
+        "verify_certs": False,
+        "ssl_show_warn": False,
+    }
+    if es_username:
+        es_kwargs["basic_auth"] = (es_username, es_password)
+
+    client = AsyncElasticsearch(**es_kwargs)
+    try:
+        yield client
+    finally:
+        await client.close()
 
 
 @router.post("/query/{db_name}")

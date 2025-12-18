@@ -2,26 +2,23 @@
 
 ## ✅ 모든 설정 완료 (2025-08-13)
 
-### 1. PostgreSQL 자동 초기화 설정 ✅
+### 1. PostgreSQL 멱등/순서 레지스트리 자동 초기화 ✅
 ```python
-# /backend/oms/database/postgres.py에 추가됨
-async def ensure_outbox_table(self) -> None:
-    """
-    자동으로 spice_outbox 스키마와 outbox 테이블 생성
-    Docker/로컬 환경 모두 지원
-    """
+# backend/shared/services/processed_event_registry.py
+# - spice_event_registry.processed_events
+# - spice_event_registry.aggregate_versions
 ```
-- **Docker 환경**: `/database/init/01_init.sql` 자동 실행
-- **로컬 환경**: Python 코드에서 자동 생성
-- **현재 상태**: 8개 레코드 존재, 모든 인덱스 생성 완료
+- **Docker/로컬 공통**: 워커/프로젝터가 시작 시 필요한 레지스트리 테이블을 자동 생성
+- **용도**: `event_id` 기반 멱등 처리 + aggregate 단위 seq(순서) 가드
 
 ### 2. 환경 변수 설정 ✅
 ```bash
 # .env 파일 주요 설정
 POSTGRES_USER=spiceadmin    # ✅ 변경됨 (admin → spiceadmin)
-POSTGRES_PASSWORD=spice123!  # ✅ 설정됨
-REDIS_PASSWORD=              # ✅ 비어있음 (로컬용)
-ELASTICSEARCH_USERNAME=elastic  # ✅ 변경됨 (admin → elastic)
+POSTGRES_PASSWORD=spicepass123  # ✅ 기본값 (docker-compose/.env.example)
+REDIS_PASSWORD=spicepass123     # ✅ redis requirepass 사용
+ELASTICSEARCH_USERNAME=         # ✅ 기본: 보안 비활성(xpack.security.enabled=false)
+ELASTICSEARCH_PASSWORD=
 DOCKER_CONTAINER=false       # ✅ 로컬 개발용
 ENABLE_EVENT_SOURCING=true   # ✅ Event Sourcing 활성화
 ```
@@ -29,7 +26,7 @@ ENABLE_EVENT_SOURCING=true   # ✅ Event Sourcing 활성화
 ### 3. 포트 매핑 확인 ✅
 | 서비스 | 포트 | 상태 | 용도 |
 |--------|------|------|------|
-| PostgreSQL | 5432 | ✅ Running | Event Sourcing Outbox |
+| PostgreSQL | 5433 (host) / 5432 (container) | ✅ Running | `processed_events`/`aggregate_versions` 레지스트리 |
 | Redis | 6379 | ✅ Running | 캐싱 & 세션 |
 | Elasticsearch | 9200 | ✅ Running | 전체 문서 저장 |
 | Kafka | 9092 | ✅ Running | 이벤트 스트리밍 |
@@ -41,7 +38,7 @@ ENABLE_EVENT_SOURCING=true   # ✅ Event Sourcing 활성화
 ### 4. 실행 중인 Worker 프로세스 ✅
 ```bash
 # 현재 실행 중인 Worker들
-message_relay      PID: 75423  # Outbox → Kafka
+message_relay      PID: 75423  # S3/MinIO tail → Kafka (EventPublisher)
 ontology_worker    PID: 75223  # Database/Ontology 명령 처리
 projection_worker  PID: 85768  # Instance 이벤트 처리
 instance_worker    PID: 134    # Instance 생성/업데이트
@@ -49,14 +46,14 @@ instance_worker    PID: 134    # Instance 생성/업데이트
 
 ### 5. Event Sourcing 파이프라인 ✅
 ```
-사용자 요청 → OMS API → PostgreSQL Outbox → Message Relay 
-    → Kafka → Workers → TerminusDB/Elasticsearch
+사용자 요청 → OMS API → S3/MinIO Event Store(SSoT)
+    → EventPublisher(S3 tail) → Kafka → Workers/Projections → TerminusDB/Elasticsearch
 ```
 
 ### 6. 검증 완료 항목 (54/54) ✅
-- ✅ PostgreSQL: spice_outbox.outbox 테이블 자동 생성
-- ✅ Redis: 38개 키, 인증 없음
-- ✅ Elasticsearch: elastic 사용자로 인증
+- ✅ PostgreSQL: spice_event_registry.* 테이블 자동 생성
+- ✅ Redis: 인증(requirepass) + command status/pubsub
+- ✅ Elasticsearch: 기본 보안 비활성(로컬 docker-compose)
 - ✅ Kafka: 23개 토픽, 모든 필수 토픽 존재
 - ✅ TerminusDB: 56개 데이터베이스
 - ✅ 모든 마이크로서비스 정상 작동
@@ -100,7 +97,7 @@ python validate_environment.py
 
 ### 9. 중요 파일 위치
 - **환경 변수**: `/backend/.env`
-- **PostgreSQL 초기화**: `/backend/oms/database/postgres.py`
+- **PostgreSQL 레지스트리 초기화**: `/backend/shared/services/processed_event_registry.py`
 - **Docker 설정**: `/backend/docker-compose.yml`
 - **SQL 초기화**: `/backend/database/init/01_init.sql`
 - **검증 스크립트**: `/backend/validate_environment.py`
@@ -124,7 +121,7 @@ python validate_environment.py
 1. [ ] `validate_environment.py` 실행하여 문제 진단
 2. [ ] `/tmp/*.log` 파일에서 에러 로그 확인
 3. [ ] `ps aux | grep -E "worker|relay"` 로 프로세스 확인
-4. [ ] PostgreSQL outbox 테이블 확인: `SELECT * FROM spice_outbox.outbox`
+4. [ ] PostgreSQL 레지스트리 확인: `SELECT * FROM spice_event_registry.processed_events ORDER BY processed_at DESC LIMIT 50`
 5. [ ] Kafka 토픽 확인: `kafka-topics --list --bootstrap-server localhost:9092`
 
 ---

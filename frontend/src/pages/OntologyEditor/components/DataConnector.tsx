@@ -565,26 +565,25 @@ export const DataConnector: React.FC<DataConnectorProps> = ({
   // TODO: Replace with actual data import implementation
   // ARCHITECTURE NOTES for future developers:
   // ========================================
-  // 1. OUTBOX PATTERN: Don't insert directly to TerminusDB
-  //    - Insert import job to PostgreSQL outbox table
+  // 1. EVENT SOURCING: Don't insert directly to TerminusDB
+  //    - Append an import-request envelope to the Event Store (S3/MinIO)
   //    - Include: job_id, ontology_class, csv_data, mapping_config, status
-  // 
+  //
   // 2. EVENT STREAMING: Use Kafka for async processing
-  //    - Publish 'data.import.requested' event
+  //    - EventPublisher tails S3 and publishes to topic: 'data-import-requests'
   //    - Payload: { jobId, classId, csvData, mappings }
   //
   // 3. CQRS PATTERN: Separate read/write models
   //    - WRITE: Kafka Consumer processes import job
-  //    - READ: ElasticSearch for search queries, Cassandra for bulk data
+  //    - READ: Elasticsearch for search queries, Cassandra for bulk data
   //
   // 4. EVENT FLOW:
-  //    CSV Upload -> Outbox Table -> Kafka Event -> Import Service -> TerminusDB + ElasticSearch + Cassandra
+  //    CSV Upload -> S3 Event Store -> EventPublisher -> Kafka -> Import Service -> TerminusDB + Elasticsearch + Cassandra
   //
   // 5. IMPLEMENTATION CHECKLIST:
-  //    [ ] PostgreSQL outbox table (import_jobs)
   //    [ ] Kafka topic (data-import-requests)
   //    [ ] Import service (Kafka consumer)
-  //    [ ] ElasticSearch indexing
+  //    [ ] Elasticsearch indexing
   //    [ ] Cassandra bulk storage
   //    [ ] Progress tracking via WebSocket/SSE
   const importCsvData = async () => {
@@ -604,7 +603,7 @@ export const DataConnector: React.FC<DataConnectorProps> = ({
       setProcessingStep(`Creating import job for ${profiledData.rows.length} records...`);
       setProgress(10);
       
-      // TODO: Replace with actual outbox pattern implementation
+      // TODO: Replace with actual Event Sourcing pipeline
       // const importJobId = await createImportJob({
       //   database: dbName,
       //   sourceFile: csvFiles[0]?.name,

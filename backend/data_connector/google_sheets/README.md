@@ -39,6 +39,27 @@ POST /api/v1/connectors/google/preview
 }
 ```
 
+### (Internal) Funnel 연동: grid + merged_cells 추출
+
+구조 분석(멀티테이블/전치/병합셀/키-값)을 위해 “표준 grid + 병합셀 좌표”가 필요할 때 사용합니다.
+
+```bash
+POST /api/v1/data-connectors/google-sheets/grid
+```
+
+요청 예시:
+```json
+{
+  "sheet_url": "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=0",
+  "worksheet_name": "Sheet1",
+  "max_rows": 5000,
+  "max_cols": 200,
+  "trim_trailing_empty": true
+}
+```
+
+응답은 `grid`(2차원)와 `merged_cells`(0-based inclusive range)를 포함합니다.
+
 응답:
 ```json
 {

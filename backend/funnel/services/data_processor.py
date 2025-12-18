@@ -3,15 +3,12 @@
 Data Connector와 OMS/BFF 사이의 데이터 처리 레이어
 """
 
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import httpx
 
-from data_connector.google_sheets.models import (
-    GoogleSheetPreviewRequest,
-    GoogleSheetPreviewResponse,
-)
+from shared.models.google_sheets import GoogleSheetPreviewRequest, GoogleSheetPreviewResponse
 
 from funnel.services.type_inference import FunnelTypeInferenceService
 from shared.config.service_config import ServiceConfig
@@ -67,7 +64,7 @@ class FunnelDataProcessor:
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{ServiceConfig.get_bff_url()}/api/v1/data-connectors/google-sheets/preview",
-                json=preview_request.dict(),
+                json=preview_request.model_dump(),
             )
 
             if response.status_code != 200:
@@ -127,7 +124,7 @@ class FunnelDataProcessor:
         }
 
         return DatasetAnalysisResponse(
-            columns=analysis_results, analysis_metadata=metadata, timestamp=datetime.now(datetime.UTC)
+            columns=analysis_results, analysis_metadata=metadata, timestamp=datetime.now(timezone.utc)
         )
 
     def generate_schema_suggestion(
@@ -159,45 +156,58 @@ class FunnelDataProcessor:
                 "description": {
                     "ko": f"{result.inferred_type.reason} (신뢰도: {result.inferred_type.confidence:.0%})"
                 },
-                "required": result.null_count == 0,  # null이 없으면 필수 필드로 제안
+                # 데이터가 없는 경우(required 판단 불가)는 False로 둠
+                "required": result.total_count > 0 and result.null_count == 0,
                 "metadata": {
                     "inferred_confidence": result.inferred_type.confidence,
-                    "unique_ratio": (
-                        result.unique_count / len(result.sample_values)
-                        if result.sample_values
-                        else 0
-                    ),
-                    "null_ratio": (
-                        result.null_count / (result.null_count + len(result.sample_values))
-                        if result.sample_values
-                        else 0
-                    ),
+                    "total_count": result.total_count,
+                    "non_empty_count": result.non_empty_count,
+                    "unique_count": result.unique_count,
+                    "null_count": result.null_count,
+                    "unique_ratio": result.unique_ratio,
+                    "null_ratio": result.null_ratio,
                 },
             }
 
             # 타입별 추가 제약조건
-            if data_type == "xsd:string" and result.unique_count == len(result.sample_values):
+            if (
+                data_type == "xsd:string"
+                and result.non_empty_count > 0
+                and result.unique_count == result.non_empty_count
+            ):
                 property_def["constraints"] = {"unique": True}
             elif data_type in ["xsd:integer", "xsd:decimal"]:
-                if result.sample_values:
+                # Prefer engine-provided numeric stats when available
+                meta = result.inferred_type.metadata or {}
+                min_val = meta.get("min")
+                max_val = meta.get("max")
+
+                if min_val is None or max_val is None:
+                    # Fallback to sample values (limited) when metadata is missing
                     numeric_values = []
                     for val in result.sample_values:
                         try:
                             numeric_values.append(float(val))
                         except (ValueError, TypeError):
-                            # Skip non-numeric values for constraint calculation
                             continue
                     if numeric_values:
-                        property_def["constraints"] = {
-                            "min": min(numeric_values),
-                            "max": max(numeric_values),
-                        }
+                        min_val = min(numeric_values)
+                        max_val = max(numeric_values)
+
+                if min_val is not None and max_val is not None:
+                    property_def["constraints"] = {"min": min_val, "max": max_val}
+
+            # 복합 타입(예: enum/phone 등)의 추론 메타데이터에서 제약조건 제안이 있으면 반영
+            suggested = (result.inferred_type.metadata or {}).get("suggested_constraints")
+            if isinstance(suggested, dict) and suggested:
+                property_def.setdefault("constraints", {})
+                property_def["constraints"].update(suggested)
 
             properties.append(property_def)
 
         # 클래스 이름 생성
         if not class_name:
-            class_name = "GeneratedClass" + datetime.now(datetime.UTC).strftime("%Y%m%d%H%M%S")
+            class_name = "GeneratedClass" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
 
         return {
             "id": self._generate_class_id(class_name),
@@ -208,7 +218,7 @@ class FunnelDataProcessor:
             "properties": properties,
             "metadata": {
                 "generated_by": "funnel",
-                "generation_date": datetime.now(datetime.UTC).isoformat(),
+                "generation_date": datetime.now(timezone.utc).isoformat(),
                 "confidence_scores": {
                     result.column_name: result.inferred_type.confidence
                     for result in analysis_results

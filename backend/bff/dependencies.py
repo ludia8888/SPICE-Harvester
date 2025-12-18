@@ -18,6 +18,7 @@ Key improvements:
 
 from typing import Any, Dict, List, Optional
 import json
+import inspect
 
 import httpx
 from fastapi import HTTPException, status, Depends
@@ -25,6 +26,8 @@ from fastapi import HTTPException, status, Depends
 # Modern dependency injection imports
 from shared.dependencies import get_container, ServiceContainer
 from shared.dependencies.providers import (
+    get_elasticsearch_service,
+    get_storage_service,
     StorageServiceDep,
     RedisServiceDep,
     ElasticsearchServiceDep,
@@ -147,6 +150,18 @@ class TerminusService:
         self.oms_client = oms_client
         self.connected = False
 
+    @staticmethod
+    async def _await_if_needed(value: Any) -> Any:
+        if inspect.isawaitable(value):
+            return await value
+        return value
+
+    async def _raise_for_status(self, response: Any) -> None:
+        await self._await_if_needed(response.raise_for_status())
+
+    async def _response_json(self, response: Any) -> Any:
+        return await self._await_if_needed(response.json())
+
     async def list_databases(self):
         """데이터베이스 목록 조회"""
         response = await self.oms_client.list_databases()
@@ -163,9 +178,9 @@ class TerminusService:
         response = await self.oms_client.create_database(db_name, description)
         return response
 
-    async def delete_database(self, db_name: str):
+    async def delete_database(self, db_name: str, *, expected_seq: int):
         """데이터베이스 삭제"""
-        response = await self.oms_client.delete_database(db_name)
+        response = await self.oms_client.delete_database(db_name, expected_seq=int(expected_seq))
         return response
 
     async def get_database_info(self, db_name: str):
@@ -207,14 +222,16 @@ class TerminusService:
             # Re-raise other exceptions
             raise
 
-    async def update_class(self, db_name: str, class_id: str, class_data: dict):
+    async def update_class(self, db_name: str, class_id: str, class_data: dict, *, expected_seq: int):
         """클래스 업데이트"""
-        response = await self.oms_client.update_ontology(db_name, class_id, class_data)
+        response = await self.oms_client.update_ontology(
+            db_name, class_id, class_data, expected_seq=int(expected_seq)
+        )
         return response
 
-    async def delete_class(self, db_name: str, class_id: str):
+    async def delete_class(self, db_name: str, class_id: str, *, expected_seq: int):
         """클래스 삭제"""
-        response = await self.oms_client.delete_ontology(db_name, class_id)
+        response = await self.oms_client.delete_ontology(db_name, class_id, expected_seq=int(expected_seq))
         return response
 
     async def query_database(self, db_name: str, query: str):
@@ -328,8 +345,8 @@ class TerminusService:
             response = await self.oms_client.client.post(
                 f"/api/v1/version/{db_name}/rollback", json=rollback_data
             )
-            response.raise_for_status()
-            return response.json()
+            await self._raise_for_status(response)
+            return await self._response_json(response)
         except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
             raise RuntimeError(f"롤백 실패 ({db_name}): {e}")
 
@@ -339,8 +356,8 @@ class TerminusService:
             response = await self.oms_client.client.get(
                 f"/api/v1/branch/{db_name}/branch/{branch_name}/info"
             )
-            response.raise_for_status()
-            return response.json()
+            await self._raise_for_status(response)
+            return await self._response_json(response)
         except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
             raise RuntimeError(f"브랜치 정보 조회 실패 ({db_name}/{branch_name}): {e}")
 
@@ -358,8 +375,8 @@ class TerminusService:
             response = await self.oms_client.client.post(
                 f"/api/v1/database/{db_name}/merge/simulate", json=merge_data
             )
-            response.raise_for_status()
-            return response.json()
+            await self._raise_for_status(response)
+            return await self._response_json(response)
         except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
             raise RuntimeError(f"병합 시뮬레이션 실패 ({db_name}): {e}")
 
@@ -389,8 +406,8 @@ class TerminusService:
             response = await self.oms_client.client.post(
                 f"/api/v1/database/{db_name}/merge/resolve", json=resolve_data
             )
-            response.raise_for_status()
-            return response.json()
+            await self._raise_for_status(response)
+            return await self._response_json(response)
         except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
             raise RuntimeError(f"충돌 해결 실패 ({db_name}): {e}")
 
@@ -439,8 +456,6 @@ TerminusServiceDep = Depends(get_terminus_service)
 get_oms_client = BFFDependencyProvider.get_oms_client
 get_label_mapper = BFFDependencyProvider.get_label_mapper
 get_jsonld_converter = BFFDependencyProvider.get_jsonld_converter
-get_elasticsearch_service = ElasticsearchServiceDep
-get_storage_service = StorageServiceDep
 
 
 # Health check function for the modernized dependencies

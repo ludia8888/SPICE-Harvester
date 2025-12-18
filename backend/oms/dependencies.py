@@ -16,6 +16,7 @@ Key improvements:
 6. ✅ Easy testing and mocking
 """
 
+import os
 from typing import Annotated
 from fastapi import HTTPException, status, Path, Depends
 
@@ -35,7 +36,6 @@ from shared.services.command_status_service import CommandStatusService
 
 # OMS specific imports
 from oms.services.async_terminus import AsyncTerminusService
-from oms.database.outbox import OutboxService
 from oms.services.event_store import EventStore, event_store
 from shared.models.config import ConnectionConfig
 
@@ -130,59 +130,11 @@ class OMSDependencyProvider:
             )
     
     @staticmethod
-    async def get_outbox_service(
-        container: ServiceContainer = Depends(get_container)
-    ) -> OutboxService:
-        """
-        Get outbox service from container
-        
-        This replaces the global outbox_service variable and get_outbox_service() function.
-        Note: Returns None if outbox service is not available (optional service).
-        """
-        # Register OutboxService factory if not already registered
-        if not container.has(OutboxService):
-            def create_outbox_service(settings: ApplicationSettings) -> OutboxService:
-                # OutboxService creation will depend on PostgreSQL connection
-                # This will be handled during container initialization
-                from oms.database.postgres import db as postgres_db
-                return OutboxService(postgres_db)
-            
-            container.register_singleton(OutboxService, create_outbox_service)
-        
-        try:
-            return await container.get(OutboxService)
-        except Exception as e:
-            # Outbox service is optional - return None if not available
-            # 하지만 오류 원인을 로깅하여 디버깅 지원
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"❌ OutboxService 초기화 실패: {type(e).__name__}: {e}")
-            
-            # 더 상세한 디버깅 정보 출력
-            from oms.database.postgres import db as postgres_db
-            logger.error(f"🔍 PostgreSQL URL: {postgres_db.connection_url}")
-            logger.error(f"🔍 Pool 상태: {postgres_db.pool is not None if hasattr(postgres_db, 'pool') else 'Unknown'}")
-            
-            # 환경 변수 확인
-            import os
-            logger.error(f"🔍 POSTGRES_HOST: {os.getenv('POSTGRES_HOST', 'not set')}")
-            logger.error(f"🔍 DOCKER_CONTAINER: {os.getenv('DOCKER_CONTAINER', 'not set')}")
-            logger.error(f"🔍 /.dockerenv exists: {os.path.exists('/.dockerenv')}")
-            
-            logger.error(f"🔍 PostgreSQL 연결 또는 스키마 문제 가능성 - Event Sourcing 비활성화됨")
-            import traceback
-            logger.debug(f"Full traceback: {traceback.format_exc()}")
-            return None
-    
-    @staticmethod
     async def get_event_store(
         container: ServiceContainer = Depends(get_container)
     ) -> EventStore:
         """
-        Get S3/MinIO Event Store - The REAL Single Source of Truth.
-        PostgreSQL Outbox is NOT an event store, just delivery guarantee!
-        
-        This is the authoritative event storage, not PostgreSQL!
+        Get S3/MinIO Event Store - The Single Source of Truth.
         """
         # Event store is a global singleton
         return event_store
@@ -217,10 +169,14 @@ class OMSDependencyProvider:
             if redis_service is None:
                 try:
                     from shared.services.redis_service import RedisService as RedisServiceClass
-                    redis_service = RedisServiceClass()
-                    if not await redis_service.connect():
-                        logger.warning("Redis connection failed")
-                        redis_service = None
+                    from shared.config.service_config import ServiceConfig
+
+                    redis_service = RedisServiceClass(
+                        host=ServiceConfig.get_redis_host(),
+                        port=ServiceConfig.get_redis_port(),
+                        password=os.getenv("REDIS_PASSWORD", "spicepass123"),
+                    )
+                    await redis_service.connect()
                 except Exception as e:
                     logger.warning(f"Direct Redis connection failed: {e}")
                     redis_service = None
@@ -249,7 +205,6 @@ class OMSDependencyProvider:
 TerminusServiceDep = Depends(OMSDependencyProvider.get_terminus_service)
 JSONLDConverterDep = Depends(OMSDependencyProvider.get_jsonld_converter)
 LabelMapperDep = Depends(OMSDependencyProvider.get_label_mapper)
-OutboxServiceDep = Depends(OMSDependencyProvider.get_outbox_service)
 EventStoreDep = Depends(OMSDependencyProvider.get_event_store)
 CommandStatusServiceDep = Depends(OMSDependencyProvider.get_command_status_service)
 
@@ -296,17 +251,20 @@ async def ensure_database_exists(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"데이터베이스 확인 실패: {str(e)}"
+        # TerminusDB outage should not prevent command acceptance in an event-sourced system.
+        # We still validate the db_name format, but defer existence verification to the workers.
+        import logging
+
+        logging.getLogger(__name__).warning(
+            f"TerminusDB unavailable while verifying database '{db_name}' (continuing): {e}"
         )
+        return db_name
 
 
 # Convenience dependency annotations for backward compatibility
 get_terminus_service = OMSDependencyProvider.get_terminus_service
 get_jsonld_converter = OMSDependencyProvider.get_jsonld_converter
 get_label_mapper = OMSDependencyProvider.get_label_mapper
-get_outbox_service = OMSDependencyProvider.get_outbox_service
 get_redis_service = RedisServiceDep
 get_command_status_service = OMSDependencyProvider.get_command_status_service
 get_elasticsearch_service = ElasticsearchServiceDep
@@ -352,13 +310,6 @@ async def check_oms_dependencies_health(
                     health_status[service_name] = "not_registered"
             except Exception as e:
                 health_status[service_name] = f"error: {str(e)}"
-        
-        # Check optional services
-        try:
-            outbox_service = await OMSDependencyProvider.get_outbox_service(container)
-            health_status["outbox_service"] = "available" if outbox_service else "not_available"
-        except Exception as e:
-            health_status["outbox_service"] = f"error: {str(e)}"
         
         return {
             "status": "ok",

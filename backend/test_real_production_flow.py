@@ -9,15 +9,13 @@ import aiohttp
 import json
 import os
 import time
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from uuid import uuid4
 import subprocess
 
 # REAL production configuration
 os.environ.update({
     "DOCKER_CONTAINER": "false",
-    "ENABLE_S3_EVENT_STORE": "true",
-    "ENABLE_DUAL_WRITE": "true",
     "MINIO_ENDPOINT_URL": "http://localhost:9000",
     "MINIO_ACCESS_KEY": "admin",
     "MINIO_SECRET_KEY": "spice123!",
@@ -64,9 +62,9 @@ class ProductionFlowTest:
                 password="spicepass123",
                 database="spicedb"
             )
-            count = await conn.fetchval("SELECT COUNT(*) FROM spice_outbox.outbox")
+            count = await conn.fetchval("SELECT COUNT(*) FROM spice_event_registry.processed_events")
             await conn.close()
-            checks.append(("PostgreSQL", True, f"{count} outbox entries"))
+            checks.append(("PostgreSQL", True, f"{count} processed_events"))
         except Exception as e:
             checks.append(("PostgreSQL", False, str(e)))
             self.errors.append(f"PostgreSQL: {e}")
@@ -281,7 +279,7 @@ class ProductionFlowTest:
             # List all events
             response = await s3.list_objects_v2(
                 Bucket='spice-event-store',
-                Prefix=f'events/{datetime.now(UTC).year:04d}/{datetime.now(UTC).month:02d}/{datetime.now(UTC).day:02d}/'
+                Prefix=f"events/{datetime.now(timezone.utc).year:04d}/{datetime.now(timezone.utc).month:02d}/{datetime.now(timezone.utc).day:02d}/"
             )
             
             today_events = response.get('Contents', [])
@@ -300,10 +298,10 @@ class ProductionFlowTest:
                 self.errors.append("No test events found in S3")
                 self.results["s3_events"] = False
     
-    async def verify_postgresql_outbox(self):
-        """Verify outbox entries"""
+    async def verify_postgresql_registry(self):
+        """Verify processed-event registry entries"""
         print("\n" + "="*80)
-        print("6️⃣ VERIFYING POSTGRESQL OUTBOX")
+        print("6️⃣ VERIFYING POSTGRESQL REGISTRY")
         print("="*80)
         
         import asyncpg
@@ -315,27 +313,26 @@ class ProductionFlowTest:
             database="spicedb"
         )
         
-        # Check for our test entries
         query = """
-            SELECT id, message_type, aggregate_type, aggregate_id, processed_at
-            FROM spice_outbox.outbox
-            WHERE payload::text LIKE $1
-            ORDER BY created_at DESC
-            LIMIT 5
+            SELECT handler, event_id, aggregate_id, sequence_number, status, processed_at, last_error
+            FROM spice_event_registry.processed_events
+            WHERE aggregate_id LIKE $1
+            ORDER BY started_at DESC
+            LIMIT 10
         """
-        
-        rows = await conn.fetch(query, f'%{self.test_id}%')
-        print(f"  Outbox entries with our test ID: {len(rows)}")
-        
+
+        rows = await conn.fetch(query, f"%{self.test_id}%")
+        print(f"  Registry entries with our test ID: {len(rows)}")
+
         if rows:
-            print("  ✅ Outbox entries found:")
+            print("  ✅ Registry entries found:")
             for row in rows:
-                processed = "✅ Processed" if row['processed_at'] else "⏳ Pending"
-                print(f"    - {row['message_type']}: {row['aggregate_type']} - {processed}")
-            self.results["outbox_entries"] = True
+                processed = "✅ Done" if row["status"] == "done" else f"⚠️ {row['status']}"
+                print(f"    - {row['handler']}: {row['aggregate_id']} - {processed}")
+            self.results["registry_entries"] = True
         else:
-            self.errors.append("No outbox entries found")
-            self.results["outbox_entries"] = False
+            self.errors.append("No registry entries found")
+            self.results["registry_entries"] = False
         
         await conn.close()
     
@@ -376,7 +373,7 @@ class ProductionFlowTest:
         print("🔥 THINK ULTRA! REAL PRODUCTION FLOW TEST")
         print("="*100)
         print(f"Test ID: {self.test_id}")
-        print(f"Started: {datetime.now(UTC).isoformat()}")
+        print(f"Started: {datetime.now(timezone.utc).isoformat()}")
         
         try:
             # 1. Verify infrastructure
@@ -408,8 +405,8 @@ class ProductionFlowTest:
             # 5. Verify S3 events
             await self.verify_s3_events()
             
-            # 6. Verify PostgreSQL outbox
-            await self.verify_postgresql_outbox()
+            # 6. Verify PostgreSQL processed-event registry
+            await self.verify_postgresql_registry()
             
             # 7. Verify Kafka messages
             await self.verify_kafka_messages()

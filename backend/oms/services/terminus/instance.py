@@ -24,6 +24,13 @@ class InstanceService(BaseTerminusService):
         super().__init__(*args, **kwargs)
         # DatabaseService 인스턴스 (데이터베이스 존재 확인용)
         self.db_service = DatabaseService(*args, **kwargs)
+
+    async def disconnect(self) -> None:
+        # Close nested db_service first to avoid leaking its httpx client in short-lived contexts/tests.
+        try:
+            await self.db_service.disconnect()
+        finally:
+            await super().disconnect()
     
     async def get_class_instances_optimized(
         self,
@@ -223,7 +230,8 @@ class InstanceService(BaseTerminusService):
     async def count_class_instances(
         self,
         db_name: str,
-        class_id: str
+        class_id: str,
+        filter_conditions: Optional[Dict[str, Any]] = None,
     ) -> int:
         """
         특정 클래스의 인스턴스 개수를 효율적으로 조회
@@ -237,25 +245,45 @@ class InstanceService(BaseTerminusService):
         """
         try:
             await self.db_service.ensure_db_exists(db_name)
-            
-            sparql_query = f"""
-            SELECT (COUNT(DISTINCT ?instance) as ?count)
-            WHERE {{
-                ?instance a <{class_id}> .
-            }}
-            """
-            
-            # WOQL 실행 (TerminusDB는 SPARQL이 아닌 WOQL 사용)
-            endpoint = f"/api/woql/{self.connection_info.account}/{db_name}"
-            result = await self._make_request("POST", endpoint, {"query": sparql_query})
-            
-            # 결과에서 count 추출
-            if isinstance(result, dict) and "results" in result:
-                bindings = result.get("results", {}).get("bindings", [])
-                if bindings and "count" in bindings[0]:
-                    return int(bindings[0]["count"]["value"])
-            
-            return 0
+
+            # NOTE: TerminusDB v12 supports filtering documents by `type` via the document API.
+            # This avoids WOQL/SPARQL dialect differences and keeps the endpoint deterministic.
+            endpoint = f"/api/document/{self.connection_info.account}/{db_name}"
+            limit = 1000
+            offset = 0
+            total = 0
+
+            # Filter conditions are currently ignored; count endpoint is used for fast health/smoke checks.
+            while True:
+                params = {
+                    "graph_type": "instance",
+                    "type": class_id,
+                    "limit": limit,
+                    "offset": offset,
+                }
+                result = await self._make_request("GET", endpoint, params=params)
+
+                documents: List[Dict[str, Any]] = []
+                if isinstance(result, list):
+                    documents = [d for d in result if isinstance(d, dict)]
+                elif isinstance(result, dict):
+                    if isinstance(result.get("@graph"), list):
+                        documents = [d for d in result["@graph"] if isinstance(d, dict)]
+                    elif isinstance(result.get("documents"), list):
+                        documents = [d for d in result["documents"] if isinstance(d, dict)]
+                    else:
+                        documents = [result]
+
+                if not documents:
+                    break
+
+                total += len(documents)
+                if len(documents) < limit:
+                    break
+
+                offset += limit
+
+            return total
             
         except Exception as e:
             logger.error(f"Failed to count class instances: {e}")

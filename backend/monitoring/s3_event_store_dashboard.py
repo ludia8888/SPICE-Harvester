@@ -7,17 +7,18 @@ Real-time monitoring of S3 Event Store metrics:
 - Storage usage and growth
 - Performance metrics
 - Error tracking
-- Migration progress tracking
+- Publisher checkpoint freshness
 """
 
 import asyncio
 import json
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from collections import defaultdict
 import aioboto3
 from prometheus_client import Counter, Histogram, Gauge, generate_latest
 import logging
+import os
 
 from oms.services.event_store import event_store
 from shared.config.service_config import ServiceConfig
@@ -62,15 +63,28 @@ events_per_aggregate = Gauge(
     ['aggregate_type']
 )
 
-migration_mode = Gauge(
-    'event_store_migration_mode',
-    'Current migration mode (0=legacy, 1=dual_write, 2=s3_only)'
-)
-
 error_rate = Counter(
     'event_store_errors_total',
     'Total number of Event Store errors',
     ['operation', 'error_type']
+)
+
+publisher_checkpoint_age_seconds = Gauge(
+    "event_publisher_checkpoint_age_seconds",
+    "Seconds since the EventPublisher checkpoint was last updated",
+    ["bucket", "checkpoint_key"],
+)
+
+publisher_checkpoint_lag_seconds = Gauge(
+    "event_publisher_checkpoint_lag_seconds",
+    "Seconds between now and the EventPublisher checkpoint last_timestamp_ms (best-effort lag)",
+    ["bucket", "checkpoint_key"],
+)
+
+publisher_checkpoint_last_timestamp_ms = Gauge(
+    "event_publisher_checkpoint_last_timestamp_ms",
+    "EventPublisher checkpoint last_timestamp_ms (epoch ms)",
+    ["bucket", "checkpoint_key"],
 )
 
 
@@ -80,9 +94,10 @@ class S3EventStoreDashboard:
     def __init__(self):
         self.session = aioboto3.Session()
         self.endpoint_url = ServiceConfig.get_minio_endpoint()
-        self.bucket_name = "spice-event-store"
+        self.bucket_name = os.getenv("EVENT_STORE_BUCKET", "spice-event-store")
+        self.checkpoint_key = os.getenv("EVENT_PUBLISHER_CHECKPOINT_KEY", "checkpoints/event_publisher.json")
         self.metrics_cache = defaultdict(dict)
-        self.last_update = datetime.now(datetime.UTC)
+        self.last_update = datetime.now(timezone.utc)
         
     async def connect(self):
         """Initialize connection to S3/MinIO"""
@@ -160,35 +175,67 @@ class S3EventStoreDashboard:
             }
         }
     
-    async def collect_migration_metrics(self) -> Dict[str, Any]:
-        """Collect migration progress metrics"""
-        
-        from oms.services.migration_helper import migration_helper
-        
-        mode = migration_helper._get_migration_mode()
-        mode_value = {"legacy": 0, "dual_write": 1, "s3_only": 2}.get(mode, -1)
-        migration_mode.set(mode_value)
-        
-        # Count events by storage mode
-        postgres_only_count = 0
-        dual_write_count = 0
-        s3_only_count = 0
-        
-        # This would normally query actual data
-        # For now, showing structure
-        
+    async def collect_publisher_checkpoint_metrics(self) -> Dict[str, Any]:
+        """Collect EventPublisher checkpoint metrics from S3/MinIO."""
+
+        async with self.session.client(
+            "s3",
+            endpoint_url=self.endpoint_url,
+            aws_access_key_id=ServiceConfig.get_minio_access_key(),
+            aws_secret_access_key=ServiceConfig.get_minio_secret_key(),
+        ) as s3_client:
+            try:
+                obj = await s3_client.get_object(Bucket=self.bucket_name, Key=self.checkpoint_key)
+                raw = await obj["Body"].read()
+                checkpoint = json.loads(raw.decode("utf-8"))
+            except Exception as e:
+                error_rate.labels(operation="publisher_checkpoint", error_type=type(e).__name__).inc()
+                publisher_checkpoint_age_seconds.labels(
+                    bucket=self.bucket_name, checkpoint_key=self.checkpoint_key
+                ).set(-1)
+                publisher_checkpoint_lag_seconds.labels(
+                    bucket=self.bucket_name, checkpoint_key=self.checkpoint_key
+                ).set(-1)
+                publisher_checkpoint_last_timestamp_ms.labels(
+                    bucket=self.bucket_name, checkpoint_key=self.checkpoint_key
+                ).set(0)
+                return {"exists": False, "error": str(e)}
+
+        now = datetime.now(timezone.utc)
+        updated_at_iso = checkpoint.get("updated_at")
+        last_ts_ms = checkpoint.get("last_timestamp_ms")
+
+        age_s: Optional[float] = None
+        if isinstance(updated_at_iso, str) and updated_at_iso:
+            try:
+                dt = datetime.fromisoformat(updated_at_iso.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                age_s = max(0.0, (now - dt.astimezone(timezone.utc)).total_seconds())
+            except Exception:
+                age_s = None
+
+        lag_s: Optional[float] = None
+        if isinstance(last_ts_ms, (int, float)) and float(last_ts_ms) > 0:
+            lag_s = max(0.0, now.timestamp() - (float(last_ts_ms) / 1000.0))
+
+        publisher_checkpoint_age_seconds.labels(bucket=self.bucket_name, checkpoint_key=self.checkpoint_key).set(
+            age_s if age_s is not None else -1
+        )
+        publisher_checkpoint_lag_seconds.labels(bucket=self.bucket_name, checkpoint_key=self.checkpoint_key).set(
+            lag_s if lag_s is not None else -1
+        )
+        publisher_checkpoint_last_timestamp_ms.labels(
+            bucket=self.bucket_name, checkpoint_key=self.checkpoint_key
+        ).set(float(last_ts_ms) if isinstance(last_ts_ms, (int, float)) else 0)
+
         return {
-            "current_mode": mode,
-            "events_distribution": {
-                "postgres_only": postgres_only_count,
-                "dual_write": dual_write_count,
-                "s3_only": s3_only_count
-            },
-            "migration_progress": {
-                "phase": "dual_write",
-                "percentage_complete": 65,
-                "estimated_completion": "2024-12-01"
-            }
+            "exists": True,
+            "checkpoint_key": self.checkpoint_key,
+            "updated_at": updated_at_iso,
+            "age_seconds": age_s,
+            "last_timestamp_ms": last_ts_ms,
+            "lag_seconds": lag_s,
         }
     
     async def collect_health_metrics(self) -> Dict[str, Any]:
@@ -218,7 +265,7 @@ class S3EventStoreDashboard:
                 health_status["bucket_accessible"] = True
                 
                 # Test write permission
-                test_key = f"health_check/{datetime.now(datetime.UTC).isoformat()}.json"
+                test_key = f"health_check/{datetime.now(timezone.utc).isoformat()}.json"
                 await s3_client.put_object(
                     Bucket=self.bucket_name,
                     Key=test_key,
@@ -243,14 +290,14 @@ class S3EventStoreDashboard:
         """Generate complete dashboard data"""
         
         dashboard = {
-            "timestamp": datetime.now(datetime.UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "event_store": {
                 "endpoint": self.endpoint_url,
                 "bucket": self.bucket_name
             },
             "storage": await self.collect_storage_metrics(),
             "performance": await self.collect_performance_metrics(),
-            "migration": await self.collect_migration_metrics(),
+            "publisher": await self.collect_publisher_checkpoint_metrics(),
             "health": await self.collect_health_metrics()
         }
         
@@ -264,7 +311,7 @@ class S3EventStoreDashboard:
                 "health_score": sum(dashboard["health"].values()) / len(dashboard["health"]) * 100
             }
         
-        self.last_update = datetime.now(datetime.UTC)
+        self.last_update = datetime.now(timezone.utc)
         return dashboard
     
     async def start_monitoring(self, interval_seconds: int = 60):
@@ -280,7 +327,8 @@ class S3EventStoreDashboard:
                 logger.info(f"S3 Event Store Dashboard Update:")
                 logger.info(f"  Total Events: {dashboard_data['summary']['total_events']}")
                 logger.info(f"  Storage Used: {dashboard_data['summary']['storage_used_mb']} MB")
-                logger.info(f"  Migration Mode: {dashboard_data['migration']['current_mode']}")
+                if (dashboard_data.get("publisher") or {}).get("exists"):
+                    logger.info(f"  Publisher Checkpoint Age: {dashboard_data['publisher'].get('age_seconds')}s")
                 logger.info(f"  Health Score: {dashboard_data['summary']['health_score']}%")
                 
                 # Could send to external monitoring system here
@@ -321,10 +369,12 @@ async def main():
     print(f"  Storage Used: {storage.get('total_size_mb', 0)} MB")
     print(f"  Average Event Size: {storage.get('average_event_size', 0)} bytes")
     
-    print("\n🔄 MIGRATION STATUS:")
-    migration = data.get("migration", {})
-    print(f"  Current Mode: {migration.get('current_mode', 'unknown')}")
-    print(f"  Progress: {migration.get('migration_progress', {}).get('percentage_complete', 0)}%")
+    print("\n🧭 PUBLISHER CHECKPOINT:")
+    publisher = data.get("publisher", {})
+    print(f"  Exists: {publisher.get('exists', False)}")
+    print(f"  Key: {publisher.get('checkpoint_key', '')}")
+    print(f"  Age Seconds: {publisher.get('age_seconds', None)}")
+    print(f"  Lag Seconds: {publisher.get('lag_seconds', None)}")
     
     print("\n❤️ HEALTH STATUS:")
     health = data.get("health", {})

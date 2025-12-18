@@ -72,7 +72,7 @@ async def get_internal_task_status(
         "created_at": task.created_at.isoformat(),
         "is_complete": task.is_complete,
         "is_successful": task.is_successful,
-        "progress": task.progress.dict() if task.progress else None
+        "progress": task.progress.model_dump(mode="json") if task.progress else None
     }
 
 

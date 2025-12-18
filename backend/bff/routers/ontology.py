@@ -8,8 +8,9 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel
+import httpx
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from pydantic import BaseModel, Field
 
 from shared.models.ontology import (
     OntologyBase,
@@ -19,6 +20,7 @@ from shared.models.ontology import (
     Property,
     Relationship,
 )
+from shared.models.structure_analysis import BoundingBox
 
 # Add shared path for common utilities
 from shared.utils.language import get_accept_language
@@ -44,6 +46,8 @@ class SchemaFromGoogleSheetsRequest(BaseModel):
     worksheet_name: Optional[str] = None
     class_name: Optional[str] = None
     api_key: Optional[str] = None
+    table_id: Optional[str] = None
+    table_bbox: Optional[BoundingBox] = None
 
 
 class MappingSuggestionRequest(BaseModel):
@@ -55,7 +59,66 @@ class MappingSuggestionRequest(BaseModel):
     target_sample_data: Optional[List[Dict[str, Any]]] = None  # Target sample values for distribution matching
 
 
-from fastapi import HTTPException
+class MappingFromGoogleSheetsRequest(BaseModel):
+    """Request model for mapping suggestions from Google Sheets → existing ontology class"""
+
+    sheet_url: str
+    worksheet_name: Optional[str] = None
+    api_key: Optional[str] = None
+
+    target_class_id: str
+    # OMS integration is optional; when disabled, clients should supply the target schema directly.
+    target_schema: List[Dict[str, Any]] = Field(default_factory=list)
+
+    table_id: Optional[str] = None
+    table_bbox: Optional[BoundingBox] = None
+
+    include_relationships: bool = False
+    enable_semantic_hints: bool = False
+
+
+class ImportFieldMapping(BaseModel):
+    """Field mapping for import (source column → target property)"""
+
+    source_field: str
+    target_field: str
+
+
+class ImportTargetField(BaseModel):
+    """Target field definition for import (name + type)."""
+
+    name: str
+    type: str = "xsd:string"
+
+
+class ImportFromGoogleSheetsRequest(BaseModel):
+    """Request model for dry-run/commit import from Google Sheets"""
+
+    sheet_url: str
+    worksheet_name: Optional[str] = None
+    api_key: Optional[str] = None
+
+    target_class_id: str
+    target_schema: List[ImportTargetField] = Field(default_factory=list)
+    mappings: List[ImportFieldMapping] = Field(default_factory=list)
+
+    table_id: Optional[str] = None
+    table_bbox: Optional[BoundingBox] = None
+
+    # Extraction controls
+    max_tables: int = 5
+    max_rows: Optional[int] = None
+    max_cols: Optional[int] = None
+    trim_trailing_empty: bool = True
+
+    # Import behavior
+    allow_partial: bool = False
+    dry_run_rows: int = 100
+    max_import_rows: Optional[int] = None
+    batch_size: int = 500
+    return_instances: bool = False
+    max_return_instances: int = 1000
+    options: Dict[str, Any] = Field(default_factory=dict)
 
 # Modernized dependency injection imports  
 from bff.dependencies import (
@@ -107,7 +170,7 @@ async def create_ontology(
         db_name = validate_db_name(db_name)
         
         # 입력 데이터 처리 (Pydantic model에서 dict로 변환)
-        ontology_dict = ontology.dict(exclude_unset=True)  # Convert Pydantic model to dict
+        ontology_dict = ontology.model_dump(exclude_unset=True)  # Convert Pydantic model to dict
         ontology_dict = sanitize_input(ontology_dict)
 
         # ID 생성 또는 검증
@@ -457,6 +520,7 @@ async def update_ontology(
     class_label: str,
     ontology: OntologyUpdateInput,
     request: Request,
+    expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
     mapper: LabelMapper = LabelMapperDep,
     terminus: TerminusService = TerminusServiceDep,
 ):
@@ -477,11 +541,11 @@ async def update_ontology(
             class_id = class_label
 
         # 업데이트 데이터 준비
-        update_data = ontology.dict(exclude_unset=True)
+        update_data = ontology.model_dump(exclude_unset=True)
         update_data["id"] = class_id
 
         # 온톨로지 업데이트
-        await terminus.update_class(db_name, class_id, update_data)
+        await terminus.update_class(db_name, class_id, update_data, expected_seq=expected_seq)
 
         # 레이블 매핑 업데이트
         await mapper.update_mappings(db_name, update_data)
@@ -515,6 +579,7 @@ async def delete_ontology(
     db_name: str,
     class_label: str,
     request: Request,
+    expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
     mapper: LabelMapper = LabelMapperDep,
     terminus: TerminusService = TerminusServiceDep,
 ):
@@ -536,7 +601,7 @@ async def delete_ontology(
             class_id = class_label
 
         # 온톨로지 삭제
-        await terminus.delete_class(db_name, class_id)
+        await terminus.delete_class(db_name, class_id, expected_seq=expected_seq)
 
         # 레이블 매핑 삭제
         await mapper.remove_class(db_name, class_id)
@@ -651,7 +716,7 @@ async def create_ontology_with_relationship_validation(
         # BFF Adapter를 통해 모든 로직 위임 (중복 제거)
         return await adapter.create_advanced_ontology(
             db_name=db_name,
-            ontology_data=ontology.dict(exclude_unset=True),
+            ontology_data=ontology.model_dump(exclude_unset=True),
             language="ko"
         )
 
@@ -680,7 +745,7 @@ async def validate_ontology_relationships_bff(
         # BFF Adapter를 통해 모든 로직 위임 (중복 제거)
         return await adapter.validate_relationships(
             db_name=db_name,
-            validation_data=ontology.dict(exclude_unset=True),
+            validation_data=ontology.model_dump(exclude_unset=True),
             language="ko"
         )
 
@@ -709,7 +774,7 @@ async def check_circular_references_bff(
         # 새 온톨로지 데이터 준비
         detection_data = {}
         if ontology:
-            detection_data = ontology.dict(exclude_unset=True)
+            detection_data = ontology.model_dump(exclude_unset=True)
 
         # BFF Adapter를 통해 모든 로직 위임 (중복 제거)
         return await adapter.detect_circular_references(
@@ -1101,6 +1166,1210 @@ async def suggest_mappings(
         )
 
 
+def _normalize_mapping_type(type_value: Any) -> str:
+    if not type_value:
+        return "xsd:string"
+    t = str(type_value).strip()
+    if not t:
+        return "xsd:string"
+    if t.startswith("xsd:"):
+        return t
+
+    t_lower = t.lower()
+
+    # Funnel complex types → base XSD types (domain-neutral)
+    if t_lower == "money":
+        return "xsd:decimal"
+    if t_lower in {"integer", "int"}:
+        return "xsd:integer"
+    if t_lower in {"decimal", "number", "float", "double"}:
+        return "xsd:decimal"
+    if t_lower in {"boolean", "bool"}:
+        return "xsd:boolean"
+    if t_lower in {"datetime", "timestamp"}:
+        return "xsd:dateTime"
+    if t_lower == "date":
+        # Note: "date" may be a complex type representing date/time in upstream.
+        return "xsd:dateTime"
+    return "xsd:string"
+
+
+def _build_source_schema_from_preview(preview: Dict[str, Any]) -> List[Dict[str, Any]]:
+    inferred = preview.get("inferred_schema") or []
+    out: List[Dict[str, Any]] = []
+
+    for col in inferred:
+        if not isinstance(col, dict):
+            continue
+        col_name = col.get("column_name") or col.get("name")
+        if not col_name:
+            continue
+        inferred_type = col.get("inferred_type") or {}
+        type_id = None
+        conf = None
+        if isinstance(inferred_type, dict):
+            type_id = inferred_type.get("type")
+            conf = inferred_type.get("confidence")
+        if not type_id:
+            type_id = col.get("type")
+
+        field: Dict[str, Any] = {
+            "name": str(col_name),
+            "type": _normalize_mapping_type(type_id),
+        }
+        if conf is not None:
+            field["confidence"] = conf
+        if type_id is not None:
+            field["original_type"] = type_id
+        out.append(field)
+
+    # Fallback: no inferred_schema → columns only
+    if not out:
+        for name in preview.get("columns") or []:
+            out.append({"name": str(name), "type": "xsd:string"})
+
+    return out
+
+
+def _build_sample_data_from_preview(preview: Dict[str, Any]) -> List[Dict[str, Any]]:
+    columns = [str(c) for c in (preview.get("columns") or [])]
+    rows = preview.get("sample_data") or []
+    sample: List[Dict[str, Any]] = []
+
+    for row in rows:
+        if not isinstance(row, list):
+            continue
+        sample.append({columns[i]: row[i] if i < len(row) else None for i in range(len(columns))})
+
+    return sample
+
+
+def _build_target_schema_from_ontology(
+    ontology: Dict[str, Any],
+    *,
+    include_relationships: bool,
+) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+
+    raw_props = ontology.get("properties") or []
+    for prop in raw_props:
+        if isinstance(prop, dict):
+            name = prop.get("name") or prop.get("id")
+            if not name:
+                continue
+            out.append(
+                {
+                    "name": str(name),
+                    "type": _normalize_mapping_type(prop.get("type")),
+                    "label": prop.get("label"),
+                }
+            )
+        elif isinstance(prop, str):
+            out.append({"name": prop, "type": "xsd:string"})
+
+    if include_relationships:
+        raw_rels = ontology.get("relationships") or []
+        for rel in raw_rels:
+            if not isinstance(rel, dict):
+                continue
+            predicate = rel.get("predicate") or rel.get("name")
+            if not predicate:
+                continue
+            out.append(
+                {
+                    "name": str(predicate),
+                    "type": "link",
+                    "label": rel.get("label"),
+                    "target": rel.get("target"),
+                }
+            )
+
+    # Keep stable order but remove duplicates by name
+    seen = set()
+    deduped: List[Dict[str, Any]] = []
+    for f in out:
+        name = f.get("name")
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        deduped.append(f)
+    return deduped
+
+
+def _normalize_target_schema_for_mapping(
+    target_schema: List[Dict[str, Any]],
+    *,
+    include_relationships: bool,
+) -> List[Dict[str, Any]]:
+    """
+    Normalize a client-provided target schema to the shape expected by MappingSuggestionService.
+
+    This keeps behavior domain-neutral and does not require OMS.
+    """
+    out: List[Dict[str, Any]] = []
+    for f in target_schema or []:
+        if not isinstance(f, dict):
+            continue
+        name = f.get("name") or f.get("id") or f.get("predicate")
+        if not name:
+            continue
+        t = f.get("type") or "xsd:string"
+        norm = {**f, "name": str(name), "type": _normalize_mapping_type(t)}
+        out.append(norm)
+
+    if not include_relationships:
+        out = [f for f in out if str(f.get("type") or "") != "link"]
+
+    # Keep stable order but remove duplicates by name
+    seen = set()
+    deduped: List[Dict[str, Any]] = []
+    for f in out:
+        name = f.get("name")
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        deduped.append(f)
+    return deduped
+
+
+@router.post("/suggest-mappings-from-google-sheets")
+async def suggest_mappings_from_google_sheets(
+    db_name: str,
+    request: MappingFromGoogleSheetsRequest,
+):
+    """
+    🔥 Google Sheets → 온톨로지 클래스 매핑 자동 제안
+
+    - Funnel의 구조 분석(멀티테이블/전치/폼)을 먼저 수행한 뒤,
+    - 선택된 테이블의 source_schema를 만들고,
+    - 타겟 온톨로지 클래스 schema를 불러와,
+    - 매핑 후보를 반환합니다.
+    """
+    try:
+        db_name = validate_db_name(db_name)
+        target_class_id = validate_class_id(request.target_class_id)
+        target_schema = _normalize_target_schema_for_mapping(
+            request.target_schema,
+            include_relationships=bool(request.include_relationships),
+        )
+        if not target_schema:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="target_schema is required (OMS integration disabled)",
+            )
+
+        from bff.services.funnel_client import FunnelClient
+        from bff.services.mapping_suggestion_service import MappingSuggestionService
+
+        async with FunnelClient() as funnel_client:
+            result = await funnel_client.google_sheets_to_structure_preview(
+                sheet_url=request.sheet_url,
+                worksheet_name=request.worksheet_name,
+                api_key=request.api_key,
+                table_id=request.table_id,
+                table_bbox=request.table_bbox.model_dump() if request.table_bbox is not None else None,
+                include_complex_types=True,
+            )
+
+        preview = result.get("preview") or {}
+        structure = result.get("structure")
+
+        source_schema = _build_source_schema_from_preview(preview)
+        sample_data = _build_sample_data_from_preview(preview)
+
+        config = None
+        try:
+            import os
+
+            config_path = os.path.join(os.path.dirname(__file__), "..", "config", "mapping_config.json")
+            if os.path.exists(config_path):
+                with open(config_path, "r") as f:
+                    config = json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load mapping config: {e}, using defaults")
+
+        # Domain-neutral by default; semantic hints are opt-in per request.
+        if request.enable_semantic_hints:
+            config = {**(config or {}), "features": {**((config or {}).get("features") or {}), "semantic_match": True}}
+        else:
+            config = {**(config or {}), "features": {**((config or {}).get("features") or {}), "semantic_match": False}}
+
+        suggestion_service = MappingSuggestionService(config=config)
+        suggestion = suggestion_service.suggest_mappings(
+            source_schema=source_schema,
+            target_schema=target_schema,
+            sample_data=sample_data,
+            target_sample_data=None,
+        )
+
+        return {
+            "status": "success",
+            "message": f"Found {len(suggestion.mappings)} mapping suggestions with {suggestion.overall_confidence:.2f} overall confidence",
+            "source_info": {
+                "sheet_url": request.sheet_url,
+                "worksheet_name": request.worksheet_name,
+                "table_id": (result.get("table") or {}).get("id"),
+                "table_mode": (result.get("table") or {}).get("mode"),
+                "table_bbox": (result.get("table") or {}).get("bbox"),
+            },
+            "target_info": {"class_id": target_class_id},
+            "source_schema": source_schema,
+            "target_schema": target_schema,
+            "mappings": [
+                {
+                    "source_field": m.source_field,
+                    "target_field": m.target_field,
+                    "confidence": m.confidence,
+                    "match_type": m.match_type,
+                    "reasons": m.reasons,
+                }
+                for m in suggestion.mappings
+            ],
+            "unmapped_source_fields": suggestion.unmapped_source_fields,
+            "unmapped_target_fields": suggestion.unmapped_target_fields,
+            "overall_confidence": suggestion.overall_confidence,
+            "statistics": {
+                "total_source_fields": len(source_schema),
+                "total_target_fields": len(target_schema),
+                "mapped_fields": len(suggestion.mappings),
+                "high_confidence_mappings": len([m for m in suggestion.mappings if m.confidence >= 0.8]),
+                "medium_confidence_mappings": len([m for m in suggestion.mappings if 0.6 <= m.confidence < 0.8]),
+            },
+            "preview_data": preview,
+            "structure": structure,
+        }
+
+    except httpx.HTTPStatusError as e:
+        detail = e.response.text
+        try:
+            detail_json = e.response.json()
+            if isinstance(detail_json, dict):
+                detail = detail_json.get("detail") or detail_json
+        except Exception:
+            pass
+        raise HTTPException(status_code=e.response.status_code, detail=detail)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Google Sheets mapping suggestion failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Google Sheets 매핑 제안 실패: {str(e)}",
+        )
+
+
+@router.post("/suggest-mappings-from-excel")
+async def suggest_mappings_from_excel(
+    db_name: str,
+    target_class_id: str = Query(..., description="Target ontology class id"),
+    file: UploadFile = File(...),
+    target_schema_json: Optional[str] = Form(None, description="JSON array of target schema fields"),
+    sheet_name: Optional[str] = None,
+    table_id: Optional[str] = None,
+    table_top: Optional[int] = None,
+    table_left: Optional[int] = None,
+    table_bottom: Optional[int] = None,
+    table_right: Optional[int] = None,
+    include_relationships: bool = False,
+    enable_semantic_hints: bool = False,
+    max_tables: int = 5,
+    max_rows: Optional[int] = None,
+    max_cols: Optional[int] = None,
+):
+    """
+    🔥 Excel 업로드 → 온톨로지 클래스 매핑 자동 제안
+
+    - Funnel의 구조 분석(멀티테이블/전치/폼)을 먼저 수행한 뒤,
+    - 선택된 테이블의 source_schema를 만들고,
+    - 타겟 온톨로지 클래스 schema를 불러와,
+    - 매핑 후보를 반환합니다.
+    """
+    try:
+        db_name = validate_db_name(db_name)
+        target_class_id = validate_class_id(target_class_id)
+
+        filename = file.filename or "upload.xlsx"
+        if not filename.lower().endswith((".xlsx", ".xlsm")):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only .xlsx/.xlsm files are supported",
+            )
+
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+
+        if not target_schema_json:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="target_schema_json is required (OMS integration disabled)",
+            )
+        try:
+            target_schema_raw = json.loads(target_schema_json)
+            if not isinstance(target_schema_raw, list):
+                raise ValueError("target_schema_json must be a JSON array")
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid target_schema_json: {e}")
+
+        table_bbox: Optional[Dict[str, int]] = None
+        bbox_parts = [table_top, table_left, table_bottom, table_right]
+        if any(v is not None for v in bbox_parts):
+            if any(v is None for v in bbox_parts):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="table_top/table_left/table_bottom/table_right must be provided together",
+                )
+            table_bbox = {
+                "top": int(table_top),
+                "left": int(table_left),
+                "bottom": int(table_bottom),
+                "right": int(table_right),
+            }
+
+        from bff.services.funnel_client import FunnelClient
+        from bff.services.mapping_suggestion_service import MappingSuggestionService
+
+        async with FunnelClient() as funnel_client:
+            result = await funnel_client.excel_to_structure_preview(
+                xlsx_bytes=content,
+                filename=filename,
+                sheet_name=sheet_name,
+                table_id=table_id,
+                table_bbox=table_bbox,
+                include_complex_types=True,
+                max_tables=max_tables,
+                max_rows=max_rows,
+                max_cols=max_cols,
+            )
+
+        preview = result.get("preview") or {}
+        structure = result.get("structure")
+
+        source_schema = _build_source_schema_from_preview(preview)
+        sample_data = _build_sample_data_from_preview(preview)
+        target_schema = _normalize_target_schema_for_mapping(
+            target_schema_raw,
+            include_relationships=bool(include_relationships),
+        )
+        if not target_schema:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="target_schema_json produced an empty schema",
+            )
+
+        config = None
+        try:
+            import os
+
+            config_path = os.path.join(os.path.dirname(__file__), "..", "config", "mapping_config.json")
+            if os.path.exists(config_path):
+                with open(config_path, "r") as f:
+                    config = json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load mapping config: {e}, using defaults")
+
+        # Domain-neutral by default; semantic hints are opt-in per request.
+        if enable_semantic_hints:
+            config = {**(config or {}), "features": {**((config or {}).get("features") or {}), "semantic_match": True}}
+        else:
+            config = {**(config or {}), "features": {**((config or {}).get("features") or {}), "semantic_match": False}}
+
+        suggestion_service = MappingSuggestionService(config=config)
+        suggestion = suggestion_service.suggest_mappings(
+            source_schema=source_schema,
+            target_schema=target_schema,
+            sample_data=sample_data,
+            target_sample_data=None,
+        )
+
+        return {
+            "status": "success",
+            "message": f"Found {len(suggestion.mappings)} mapping suggestions with {suggestion.overall_confidence:.2f} overall confidence",
+            "source_info": {
+                "file_name": filename,
+                "sheet_name": sheet_name,
+                "table_id": (result.get("table") or {}).get("id"),
+                "table_mode": (result.get("table") or {}).get("mode"),
+                "table_bbox": (result.get("table") or {}).get("bbox"),
+            },
+            "target_info": {"class_id": target_class_id},
+            "source_schema": source_schema,
+            "target_schema": target_schema,
+            "mappings": [
+                {
+                    "source_field": m.source_field,
+                    "target_field": m.target_field,
+                    "confidence": m.confidence,
+                    "match_type": m.match_type,
+                    "reasons": m.reasons,
+                }
+                for m in suggestion.mappings
+            ],
+            "unmapped_source_fields": suggestion.unmapped_source_fields,
+            "unmapped_target_fields": suggestion.unmapped_target_fields,
+            "overall_confidence": suggestion.overall_confidence,
+            "statistics": {
+                "total_source_fields": len(source_schema),
+                "total_target_fields": len(target_schema),
+                "mapped_fields": len(suggestion.mappings),
+                "high_confidence_mappings": len([m for m in suggestion.mappings if m.confidence >= 0.8]),
+                "medium_confidence_mappings": len([m for m in suggestion.mappings if 0.6 <= m.confidence < 0.8]),
+            },
+            "preview_data": preview,
+            "structure": structure,
+        }
+
+    except httpx.HTTPStatusError as e:
+        detail = e.response.text
+        try:
+            detail_json = e.response.json()
+            if isinstance(detail_json, dict):
+                detail = detail_json.get("detail") or detail_json
+        except Exception:
+            pass
+        raise HTTPException(status_code=e.response.status_code, detail=detail)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Excel mapping suggestion failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Excel 매핑 제안 실패: {str(e)}",
+        )
+
+
+def _extract_target_field_types(ontology: Dict[str, Any]) -> Dict[str, str]:
+    types: Dict[str, str] = {}
+
+    for prop in ontology.get("properties") or []:
+        if not isinstance(prop, dict):
+            continue
+        name = prop.get("name") or prop.get("id")
+        if not name:
+            continue
+        types[str(name)] = str(prop.get("type") or "xsd:string")
+
+    for rel in ontology.get("relationships") or []:
+        if not isinstance(rel, dict):
+            continue
+        predicate = rel.get("predicate") or rel.get("name")
+        if not predicate:
+            continue
+        types[str(predicate)] = "link"
+
+    return types
+
+
+def _normalize_import_target_type(type_value: Any) -> str:
+    """
+    Normalize user-provided target field type for import.
+
+    This is intentionally conservative and domain-neutral.
+    """
+    if not type_value:
+        return "xsd:string"
+    t = str(type_value).strip()
+    if not t:
+        return "xsd:string"
+    if t.startswith("xsd:") or t == "link":
+        return t
+
+    t_lower = t.lower()
+    if t_lower in {"string", "text"}:
+        return "xsd:string"
+    if t_lower in {"int", "integer", "long"}:
+        return "xsd:integer"
+    if t_lower in {"decimal", "number", "float", "double"}:
+        return "xsd:decimal"
+    if t_lower in {"bool", "boolean"}:
+        return "xsd:boolean"
+    if t_lower in {"date"}:
+        return "xsd:date"
+    if t_lower in {"datetime", "timestamp"}:
+        return "xsd:dateTime"
+    if t_lower in {"money", "currency"}:
+        # Stored as numeric in instances; currency metadata is not imported yet.
+        return "xsd:decimal"
+
+    return "xsd:string"
+
+
+def _extract_target_field_types_from_import_schema(
+    target_schema: List[ImportTargetField],
+) -> Dict[str, str]:
+    types: Dict[str, str] = {}
+    for f in target_schema:
+        name = (f.name or "").strip()
+        if not name:
+            continue
+        types[name] = _normalize_import_target_type(f.type)
+    return types
+
+
+@router.post("/import-from-google-sheets/dry-run")
+async def dry_run_import_from_google_sheets(
+    db_name: str,
+    request: ImportFromGoogleSheetsRequest,
+):
+    """
+    Google Sheets → (구조 분석 + 테이블 선택) → 매핑 적용 → 타입 변환/검증 (dry-run)
+    """
+    try:
+        db_name = validate_db_name(db_name)
+        target_class_id = validate_class_id(request.target_class_id)
+        if not request.target_schema:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="target_schema is required (OMS integration disabled)",
+            )
+
+        dry_run_rows = max(1, min(int(request.dry_run_rows or 100), 5000))
+        sample_row_limit = dry_run_rows
+        if request.max_import_rows is not None:
+            sample_row_limit = min(sample_row_limit, int(request.max_import_rows))
+
+        from bff.services.funnel_client import FunnelClient
+        from bff.services.sheet_import_service import FieldMapping, SheetImportService
+
+        options = {**(request.options or {}), "sample_row_limit": sample_row_limit}
+        async with FunnelClient() as funnel_client:
+            result = await funnel_client.google_sheets_to_structure_preview(
+                sheet_url=request.sheet_url,
+                worksheet_name=request.worksheet_name,
+                api_key=request.api_key,
+                table_id=request.table_id,
+                table_bbox=request.table_bbox.model_dump() if request.table_bbox is not None else None,
+                include_complex_types=True,
+                max_tables=int(request.max_tables or 5),
+                max_rows=request.max_rows,
+                max_cols=request.max_cols,
+                trim_trailing_empty=bool(request.trim_trailing_empty),
+                options=options,
+            )
+
+        table = result.get("table") or {}
+        if table.get("mode") == "property":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Property-form tables are not supported for record import yet",
+            )
+
+        preview = result.get("preview") or {}
+        structure = result.get("structure")
+        target_field_types = _extract_target_field_types_from_import_schema(request.target_schema)
+        mappings = [
+            FieldMapping(source_field=m.source_field, target_field=m.target_field)
+            for m in (request.mappings or [])
+        ]
+
+        build = SheetImportService.build_instances(
+            columns=preview.get("columns") or [],
+            rows=preview.get("sample_data") or [],
+            mappings=mappings,
+            target_field_types=target_field_types,
+        )
+
+        instances = build.get("instances") or []
+        errors = build.get("errors") or []
+
+        return {
+            "status": "success",
+            "message": "Dry-run import completed",
+            "source_info": {
+                "sheet_url": request.sheet_url,
+                "worksheet_name": request.worksheet_name,
+                "table_id": table.get("id"),
+                "table_mode": table.get("mode"),
+                "table_bbox": table.get("bbox"),
+            },
+            "target_info": {"class_id": target_class_id},
+            "mapping_summary": {
+                "mappings": [m.model_dump() for m in request.mappings],
+                "mapping_count": len(request.mappings),
+            },
+            "stats": build.get("stats") or {},
+            "warnings": build.get("warnings") or [],
+            "errors": errors[:200],
+            "sample_instances": instances[:5],
+            "preview_data": preview,
+            "structure": structure,
+        }
+
+    except httpx.HTTPStatusError as e:
+        detail = e.response.text
+        try:
+            detail_json = e.response.json()
+            if isinstance(detail_json, dict):
+                detail = detail_json.get("detail") or detail_json
+        except Exception:
+            pass
+        raise HTTPException(status_code=e.response.status_code, detail=detail)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Google Sheets dry-run import failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Google Sheets dry-run import 실패: {str(e)}",
+        )
+
+
+@router.post("/import-from-google-sheets/commit")
+async def commit_import_from_google_sheets(
+    db_name: str,
+    request: ImportFromGoogleSheetsRequest,
+):
+    """
+    Google Sheets → (구조 분석 + 테이블 선택) → 매핑 적용 → 타입 변환 → instances 준비 (OMS 비활성)
+    """
+    try:
+        db_name = validate_db_name(db_name)
+        target_class_id = validate_class_id(request.target_class_id)
+        if not request.target_schema:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="target_schema is required (OMS integration disabled)",
+            )
+
+        from bff.services.funnel_client import FunnelClient
+        from bff.services.sheet_import_service import FieldMapping, SheetImportService
+
+        sample_row_limit: int | None
+        if request.max_import_rows is None:
+            sample_row_limit = -1  # full
+        else:
+            sample_row_limit = max(0, int(request.max_import_rows))
+
+        options = {**(request.options or {}), "sample_row_limit": sample_row_limit}
+        async with FunnelClient() as funnel_client:
+            result = await funnel_client.google_sheets_to_structure_preview(
+                sheet_url=request.sheet_url,
+                worksheet_name=request.worksheet_name,
+                api_key=request.api_key,
+                table_id=request.table_id,
+                table_bbox=request.table_bbox.model_dump() if request.table_bbox is not None else None,
+                include_complex_types=True,
+                max_tables=int(request.max_tables or 5),
+                max_rows=request.max_rows,
+                max_cols=request.max_cols,
+                trim_trailing_empty=bool(request.trim_trailing_empty),
+                options=options,
+            )
+
+        table = result.get("table") or {}
+        if table.get("mode") == "property":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Property-form tables are not supported for record import yet",
+            )
+
+        preview = result.get("preview") or {}
+        structure = result.get("structure")
+        target_field_types = _extract_target_field_types_from_import_schema(request.target_schema)
+        mappings = [
+            FieldMapping(source_field=m.source_field, target_field=m.target_field)
+            for m in (request.mappings or [])
+        ]
+
+        build = SheetImportService.build_instances(
+            columns=preview.get("columns") or [],
+            rows=preview.get("sample_data") or [],
+            mappings=mappings,
+            target_field_types=target_field_types,
+        )
+
+        errors = build.get("errors") or []
+        if errors and not request.allow_partial:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "Import validation failed. Fix errors or set allow_partial=true to skip bad rows.",
+                    "stats": build.get("stats") or {},
+                    "errors": errors[:200],
+                },
+            )
+
+        instances = build.get("instances") or []
+        instance_row_indices = build.get("instance_row_indices") or []
+        error_row_indices = set(build.get("error_row_indices") or [])
+
+        if error_row_indices:
+            filtered_instances = []
+            for inst, row_idx in zip(instances, instance_row_indices):
+                if row_idx in error_row_indices:
+                    continue
+                filtered_instances.append(inst)
+            instances = filtered_instances
+
+        if not instances:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No valid instances to import",
+            )
+
+        batch_size = max(1, min(int(request.batch_size or 500), 5000))
+        prepared_batches = [
+            {"batch_index": i // batch_size, "count": len(instances[i : i + batch_size])}
+            for i in range(0, len(instances), batch_size)
+        ]
+
+        base_metadata = {
+            "source": "google_sheets",
+            "sheet_url": request.sheet_url,
+            "worksheet_name": request.worksheet_name,
+            "table_id": table.get("id"),
+            "table_mode": table.get("mode"),
+            "table_bbox": table.get("bbox"),
+            "mappings": [m.model_dump() for m in request.mappings],
+        }
+
+        returned_instances: List[Dict[str, Any]] = []
+        has_more_instances = False
+        if request.return_instances:
+            max_return = max(0, min(int(request.max_return_instances or 1000), 50000))
+            returned_instances = instances[:max_return]
+            has_more_instances = len(instances) > max_return
+
+        return {
+            "status": "success",
+            "message": "Import prepared (OMS disabled)",
+            "source_info": base_metadata,
+            "target_info": {"class_id": target_class_id},
+            "stats": {
+                **(build.get("stats") or {}),
+                "prepared_instances": len(instances),
+                "skipped_error_rows": len(error_row_indices),
+                "batches": len(prepared_batches),
+            },
+            "warnings": build.get("warnings") or [],
+            "errors": errors[:200],
+            "prepared": {
+                "batch_size": batch_size,
+                "batches": prepared_batches,
+                "instances": returned_instances,
+                "has_more_instances": has_more_instances,
+            },
+            "structure": structure,
+        }
+
+    except httpx.HTTPStatusError as e:
+        detail = e.response.text
+        try:
+            detail_json = e.response.json()
+            if isinstance(detail_json, dict):
+                detail = detail_json.get("detail") or detail_json
+        except Exception:
+            pass
+        raise HTTPException(status_code=e.response.status_code, detail=detail)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Google Sheets import commit failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Google Sheets import 실패: {str(e)}",
+        )
+
+
+@router.post("/import-from-excel/dry-run")
+async def dry_run_import_from_excel(
+    db_name: str,
+    file: UploadFile = File(...),
+    target_class_id: str = Form(...),
+    target_schema_json: Optional[str] = Form(None),
+    mappings_json: str = Form(...),
+    sheet_name: Optional[str] = Form(None),
+    table_id: Optional[str] = Form(None),
+    table_top: Optional[int] = Form(None),
+    table_left: Optional[int] = Form(None),
+    table_bottom: Optional[int] = Form(None),
+    table_right: Optional[int] = Form(None),
+    max_tables: int = Form(5),
+    max_rows: Optional[int] = Form(None),
+    max_cols: Optional[int] = Form(None),
+    dry_run_rows: int = Form(100),
+    max_import_rows: Optional[int] = Form(None),
+    options_json: Optional[str] = Form(None),
+):
+    """
+    Excel 업로드 → (구조 분석 + 테이블 선택) → 매핑 적용 → 타입 변환/검증 (dry-run)
+    """
+    import json
+
+    try:
+        db_name = validate_db_name(db_name)
+        target_class_id = validate_class_id(target_class_id)
+
+        filename = file.filename or "upload.xlsx"
+        if not filename.lower().endswith((".xlsx", ".xlsm")):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only .xlsx/.xlsm files are supported",
+            )
+
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+
+        try:
+            mappings_raw = json.loads(mappings_json)
+            if not isinstance(mappings_raw, list):
+                raise ValueError("mappings_json must be a JSON array")
+            mappings = [ImportFieldMapping(**m) for m in mappings_raw]
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid mappings_json: {e}")
+
+        try:
+            options = json.loads(options_json) if options_json else {}
+            if not isinstance(options, dict):
+                raise ValueError("options_json must be an object")
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid options_json: {e}")
+
+        if not target_schema_json:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="target_schema_json is required (OMS integration disabled)",
+            )
+        try:
+            target_schema_raw = json.loads(target_schema_json)
+            if not isinstance(target_schema_raw, list):
+                raise ValueError("target_schema_json must be a JSON array")
+            target_schema = [ImportTargetField(**f) for f in target_schema_raw]
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid target_schema_json: {e}")
+
+        target_field_types = _extract_target_field_types_from_import_schema(target_schema)
+
+        dry_run_rows = max(1, min(int(dry_run_rows or 100), 5000))
+        sample_row_limit = dry_run_rows
+        if max_import_rows is not None:
+            sample_row_limit = min(sample_row_limit, int(max_import_rows))
+
+        from bff.services.funnel_client import FunnelClient
+        from bff.services.sheet_import_service import FieldMapping, SheetImportService
+
+        table_bbox: Optional[Dict[str, int]] = None
+        bbox_parts = [table_top, table_left, table_bottom, table_right]
+        if any(v is not None for v in bbox_parts):
+            if any(v is None for v in bbox_parts):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="table_top/table_left/table_bottom/table_right must be provided together",
+                )
+            table_bbox = {
+                "top": int(table_top),
+                "left": int(table_left),
+                "bottom": int(table_bottom),
+                "right": int(table_right),
+            }
+
+        options = {**options, "sample_row_limit": sample_row_limit}
+        async with FunnelClient() as funnel_client:
+            result = await funnel_client.excel_to_structure_preview(
+                xlsx_bytes=content,
+                filename=filename,
+                sheet_name=sheet_name,
+                table_id=table_id,
+                table_bbox=table_bbox,
+                include_complex_types=True,
+                max_tables=int(max_tables or 5),
+                max_rows=max_rows,
+                max_cols=max_cols,
+                options=options,
+            )
+
+        table = result.get("table") or {}
+        if table.get("mode") == "property":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Property-form tables are not supported for record import yet",
+            )
+
+        preview = result.get("preview") or {}
+        structure = result.get("structure")
+        build = SheetImportService.build_instances(
+            columns=preview.get("columns") or [],
+            rows=preview.get("sample_data") or [],
+            mappings=[FieldMapping(source_field=m.source_field, target_field=m.target_field) for m in mappings],
+            target_field_types=target_field_types,
+        )
+
+        instances = build.get("instances") or []
+        errors = build.get("errors") or []
+
+        return {
+            "status": "success",
+            "message": "Dry-run import completed",
+            "source_info": {
+                "file_name": filename,
+                "sheet_name": sheet_name,
+                "table_id": table.get("id"),
+                "table_mode": table.get("mode"),
+                "table_bbox": table.get("bbox"),
+            },
+            "target_info": {"class_id": target_class_id},
+            "mapping_summary": {
+                "mappings": [m.model_dump() for m in mappings],
+                "mapping_count": len(mappings),
+            },
+            "stats": build.get("stats") or {},
+            "warnings": build.get("warnings") or [],
+            "errors": errors[:200],
+            "sample_instances": instances[:5],
+            "preview_data": preview,
+            "structure": structure,
+        }
+
+    except httpx.HTTPStatusError as e:
+        detail = e.response.text
+        try:
+            detail_json = e.response.json()
+            if isinstance(detail_json, dict):
+                detail = detail_json.get("detail") or detail_json
+        except Exception:
+            pass
+        raise HTTPException(status_code=e.response.status_code, detail=detail)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Excel dry-run import failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Excel dry-run import 실패: {str(e)}",
+        )
+
+
+@router.post("/import-from-excel/commit")
+async def commit_import_from_excel(
+    db_name: str,
+    file: UploadFile = File(...),
+    target_class_id: str = Form(...),
+    target_schema_json: Optional[str] = Form(None),
+    mappings_json: str = Form(...),
+    sheet_name: Optional[str] = Form(None),
+    table_id: Optional[str] = Form(None),
+    table_top: Optional[int] = Form(None),
+    table_left: Optional[int] = Form(None),
+    table_bottom: Optional[int] = Form(None),
+    table_right: Optional[int] = Form(None),
+    max_tables: int = Form(5),
+    max_rows: Optional[int] = Form(None),
+    max_cols: Optional[int] = Form(None),
+    allow_partial: bool = Form(False),
+    max_import_rows: Optional[int] = Form(None),
+    batch_size: int = Form(500),
+    return_instances: bool = Form(False),
+    max_return_instances: int = Form(1000),
+    options_json: Optional[str] = Form(None),
+):
+    """
+    Excel 업로드 → (구조 분석 + 테이블 선택) → 매핑 적용 → 타입 변환 → instances 준비 (OMS 비활성)
+    """
+    import json
+
+    try:
+        db_name = validate_db_name(db_name)
+        target_class_id = validate_class_id(target_class_id)
+
+        filename = file.filename or "upload.xlsx"
+        if not filename.lower().endswith((".xlsx", ".xlsm")):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only .xlsx/.xlsm files are supported",
+            )
+
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+
+        try:
+            mappings_raw = json.loads(mappings_json)
+            if not isinstance(mappings_raw, list):
+                raise ValueError("mappings_json must be a JSON array")
+            mappings = [ImportFieldMapping(**m) for m in mappings_raw]
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid mappings_json: {e}")
+
+        try:
+            options = json.loads(options_json) if options_json else {}
+            if not isinstance(options, dict):
+                raise ValueError("options_json must be an object")
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid options_json: {e}")
+
+        if not target_schema_json:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="target_schema_json is required (OMS integration disabled)",
+            )
+        try:
+            target_schema_raw = json.loads(target_schema_json)
+            if not isinstance(target_schema_raw, list):
+                raise ValueError("target_schema_json must be a JSON array")
+            target_schema = [ImportTargetField(**f) for f in target_schema_raw]
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid target_schema_json: {e}")
+
+        target_field_types = _extract_target_field_types_from_import_schema(target_schema)
+
+        sample_row_limit: int | None
+        if max_import_rows is None:
+            sample_row_limit = -1  # full
+        else:
+            sample_row_limit = max(0, int(max_import_rows))
+
+        from bff.services.funnel_client import FunnelClient
+        from bff.services.sheet_import_service import FieldMapping, SheetImportService
+
+        table_bbox: Optional[Dict[str, int]] = None
+        bbox_parts = [table_top, table_left, table_bottom, table_right]
+        if any(v is not None for v in bbox_parts):
+            if any(v is None for v in bbox_parts):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="table_top/table_left/table_bottom/table_right must be provided together",
+                )
+            table_bbox = {
+                "top": int(table_top),
+                "left": int(table_left),
+                "bottom": int(table_bottom),
+                "right": int(table_right),
+            }
+
+        options = {**options, "sample_row_limit": sample_row_limit}
+        async with FunnelClient() as funnel_client:
+            result = await funnel_client.excel_to_structure_preview(
+                xlsx_bytes=content,
+                filename=filename,
+                sheet_name=sheet_name,
+                table_id=table_id,
+                table_bbox=table_bbox,
+                include_complex_types=True,
+                max_tables=int(max_tables or 5),
+                max_rows=max_rows,
+                max_cols=max_cols,
+                options=options,
+            )
+
+        table = result.get("table") or {}
+        if table.get("mode") == "property":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Property-form tables are not supported for record import yet",
+            )
+
+        preview = result.get("preview") or {}
+        structure = result.get("structure")
+        build = SheetImportService.build_instances(
+            columns=preview.get("columns") or [],
+            rows=preview.get("sample_data") or [],
+            mappings=[FieldMapping(source_field=m.source_field, target_field=m.target_field) for m in mappings],
+            target_field_types=target_field_types,
+        )
+
+        errors = build.get("errors") or []
+        if errors and not allow_partial:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "Import validation failed. Fix errors or set allow_partial=true to skip bad rows.",
+                    "stats": build.get("stats") or {},
+                    "errors": errors[:200],
+                },
+            )
+
+        instances = build.get("instances") or []
+        instance_row_indices = build.get("instance_row_indices") or []
+        error_row_indices = set(build.get("error_row_indices") or [])
+
+        if error_row_indices:
+            filtered_instances = []
+            for inst, row_idx in zip(instances, instance_row_indices):
+                if row_idx in error_row_indices:
+                    continue
+                filtered_instances.append(inst)
+            instances = filtered_instances
+
+        if not instances:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No valid instances to import")
+
+        batch_size = max(1, min(int(batch_size or 500), 5000))
+        prepared_batches = [
+            {"batch_index": i // batch_size, "count": len(instances[i : i + batch_size])}
+            for i in range(0, len(instances), batch_size)
+        ]
+
+        base_metadata = {
+            "source": "excel",
+            "file_name": filename,
+            "sheet_name": sheet_name,
+            "table_id": table.get("id"),
+            "table_mode": table.get("mode"),
+            "table_bbox": table.get("bbox"),
+            "mappings": [m.model_dump() for m in mappings],
+        }
+
+        returned_instances: List[Dict[str, Any]] = []
+        has_more_instances = False
+        if return_instances:
+            max_return = max(0, min(int(max_return_instances or 1000), 50000))
+            returned_instances = instances[:max_return]
+            has_more_instances = len(instances) > max_return
+
+        return {
+            "status": "success",
+            "message": "Import prepared (OMS disabled)",
+            "source_info": base_metadata,
+            "target_info": {"class_id": target_class_id},
+            "stats": {
+                **(build.get("stats") or {}),
+                "prepared_instances": len(instances),
+                "skipped_error_rows": len(error_row_indices),
+                "batches": len(prepared_batches),
+            },
+            "warnings": build.get("warnings") or [],
+            "errors": errors[:200],
+            "prepared": {
+                "batch_size": batch_size,
+                "batches": prepared_batches,
+                "instances": returned_instances,
+                "has_more_instances": has_more_instances,
+            },
+            "structure": structure,
+        }
+
+    except httpx.HTTPStatusError as e:
+        detail = e.response.text
+        try:
+            detail_json = e.response.json()
+            if isinstance(detail_json, dict):
+                detail = detail_json.get("detail") or detail_json
+        except Exception:
+            pass
+        raise HTTPException(status_code=e.response.status_code, detail=detail)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Excel import commit failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Excel import 실패: {str(e)}",
+        )
+
+
 @router.post("/suggest-schema-from-google-sheets")
 async def suggest_schema_from_google_sheets(
     db_name: str,
@@ -1124,10 +2393,13 @@ async def suggest_schema_from_google_sheets(
                 worksheet_name=request.worksheet_name,
                 class_name=request.class_name,
                 api_key=request.api_key,
+                table_id=request.table_id,
+                table_bbox=request.table_bbox.model_dump() if request.table_bbox is not None else None,
             )
 
             preview = result.get("preview", {})
             schema_suggestion = result.get("schema_suggestion", {})
+            structure = result.get("structure")
 
             # 미리보기 정보 요약
             total_rows = preview.get("total_rows", 0)
@@ -1146,13 +2418,138 @@ async def suggest_schema_from_google_sheets(
                     "columns": columns,
                 },
                 "preview_data": preview,
+                "structure": structure,
             }
 
+    except httpx.HTTPStatusError as e:
+        detail = e.response.text
+        try:
+            detail_json = e.response.json()
+            if isinstance(detail_json, dict):
+                detail = detail_json.get("detail") or detail_json
+        except Exception:
+            pass
+        raise HTTPException(status_code=e.response.status_code, detail=detail)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Google Sheets schema suggestion failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Google Sheets 스키마 제안 실패: {str(e)}",
+        )
+
+
+@router.post("/suggest-schema-from-excel")
+async def suggest_schema_from_excel(
+    db_name: str,
+    file: UploadFile = File(...),
+    sheet_name: Optional[str] = None,
+    class_name: Optional[str] = None,
+    table_id: Optional[str] = None,
+    table_top: Optional[int] = None,
+    table_left: Optional[int] = None,
+    table_bottom: Optional[int] = None,
+    table_right: Optional[int] = None,
+    include_complex_types: bool = True,
+    max_tables: int = 5,
+    max_rows: Optional[int] = None,
+    max_cols: Optional[int] = None,
+):
+    """
+    🔥 Excel 업로드에서 스키마 자동 제안
+
+    Excel(.xlsx/.xlsm) 파일을 업로드 받아 분석하고 OMS 온톨로지 스키마를 자동으로 생성합니다.
+    """
+    try:
+        db_name = validate_db_name(db_name)
+
+        filename = file.filename or "upload.xlsx"
+        if not filename.lower().endswith((".xlsx", ".xlsm")):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only .xlsx/.xlsm files are supported",
+            )
+
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+
+        from bff.services.funnel_client import FunnelClient
+
+        table_bbox: Optional[Dict[str, int]] = None
+        bbox_parts = [table_top, table_left, table_bottom, table_right]
+        if any(v is not None for v in bbox_parts):
+            if any(v is None for v in bbox_parts):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="table_top/table_left/table_bottom/table_right must be provided together",
+                )
+            table_bbox = {
+                "top": int(table_top),
+                "left": int(table_left),
+                "bottom": int(table_bottom),
+                "right": int(table_right),
+            }
+
+        async with FunnelClient() as funnel_client:
+            result = await funnel_client.excel_to_schema(
+                xlsx_bytes=content,
+                filename=filename,
+                sheet_name=sheet_name,
+                class_name=class_name,
+                table_id=table_id,
+                table_bbox=table_bbox,
+                include_complex_types=include_complex_types,
+                max_tables=max_tables,
+                max_rows=max_rows,
+                max_cols=max_cols,
+            )
+
+        preview = result.get("preview", {})
+        schema_suggestion = result.get("schema_suggestion", {})
+        structure = result.get("structure")
+
+        total_rows = preview.get("total_rows", 0)
+        preview_rows = preview.get("preview_rows", 0)
+        columns = preview.get("columns", [])
+
+        return {
+            "status": "success",
+            "message": f"Excel 스키마 제안이 완료되었습니다. (추정) {total_rows}행 중 {preview_rows}행 샘플 분석됨",
+            "suggested_schema": schema_suggestion,
+            "source_info": {
+                "file_name": filename,
+                "sheet_name": sheet_name,
+                "total_rows": total_rows,
+                "preview_rows": preview_rows,
+                "columns": columns,
+            },
+            "preview_data": preview,
+            "structure": structure,
+        }
+
+    except httpx.HTTPStatusError as e:
+        # Propagate Funnel's status codes (e.g., 501 when openpyxl is missing)
+        detail = e.response.text
+        try:
+            detail_json = e.response.json()
+            if isinstance(detail_json, dict):
+                detail = detail_json.get("detail") or detail_json
+        except Exception:
+            pass
+        raise HTTPException(status_code=e.response.status_code, detail=detail)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Excel schema suggestion failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Excel 스키마 제안 실패: {str(e)}",
         )
 
 
@@ -1237,15 +2634,14 @@ async def save_mapping_metadata(
 # ==========================================
 # CSV DATA IMPORT ENDPOINTS
 # ==========================================
-# TODO: Replace with actual Outbox Pattern + CQRS implementation
+# TODO: Replace with actual Event Sourcing + CQRS implementation
 # ARCHITECTURE NOTES for future developers:
 # ========================================
 # 
-# 1. OUTBOX PATTERN IMPLEMENTATION:
-#    - Create PostgreSQL table: import_jobs
-#    - Schema: job_id, database_name, class_id, csv_data, mappings, status, created_at
-#    - Insert import job atomically with other operations
-#    - Use database transactions to ensure consistency
+# 1. EVENT STORE REQUEST ENVELOPE:
+#    - Append import request to S3/MinIO Event Store (SSoT)
+#    - Envelope contains: job_id, database_name, class_id, csv_data, mappings, status, created_at
+#    - Durable checkpointed publishing is handled by EventPublisher
 #
 # 2. EVENT STREAMING with KAFKA:
 #    - Topic: "data-import-requests"
@@ -1260,7 +2656,7 @@ async def save_mapping_metadata(
 #    - Read Models: ElasticSearch (search), Cassandra (bulk data)
 #
 # 4. SERVICES ARCHITECTURE:
-#    BFF -> Outbox Table -> Kafka -> Import Service -> TerminusDB + ElasticSearch + Cassandra
+#    BFF -> Event Store (S3/MinIO) -> EventPublisher -> Kafka -> Import Service -> TerminusDB + ElasticSearch + Cassandra
 #
 # 5. PROGRESS TRACKING:
 #    - WebSocket/SSE endpoint for real-time progress
@@ -1289,7 +2685,7 @@ async def import_csv_data(
     """
     CSV 데이터를 온톨로지 인스턴스로 임포트
     
-    TODO: 실제 구현에서는 Outbox Pattern + Event Streaming 사용
+    TODO: 실제 구현에서는 Event Sourcing + Kafka Event Streaming 사용
     현재는 UX 플로우 완성을 위한 Placeholder 구현
     """
     try:
@@ -1304,35 +2700,20 @@ async def import_csv_data(
         
         logger.info(f"Starting CSV import for database {db_name}: {import_request.total_records} records from {import_request.source_file}")
         
-        # TODO: Replace with Outbox Pattern
+        # TODO: Replace with the Event Sourcing pipeline
         # =====================================
-        # STEP 1: Insert to outbox table (PostgreSQL)
-        # import_job = await create_import_job({
-        #     "database_name": db_name,
-        #     "source_file": import_request.source_file,
-        #     "total_records": import_request.total_records,
-        #     "csv_data": import_request.csv_data,
-        #     "mappings": import_request.mappings,
-        #     "status": "pending",
-        #     "created_at": datetime.utcnow()
-        # })
+        # STEP 1: Append import request to the Event Store (S3/MinIO)
+        # import_request_envelope = EventEnvelope.from_command(...)
+        # await event_store.append_event(import_request_envelope)
         # 
-        # STEP 2: Publish to Kafka
-        # await kafka_producer.send("data-import-requests", {
-        #     "job_id": import_job.id,
-        #     "database": db_name,
-        #     "class_id": import_request.mappings.get("target_class"),
-        #     "csv_data": import_request.csv_data,
-        #     "mappings": import_request.mappings,
-        #     "timestamp": datetime.utcnow().isoformat()
-        # })
+        # STEP 2: EventPublisher tails S3 and publishes to Kafka topic (data-import-requests)
         # 
         # STEP 3: Return job ID for progress tracking
         # return {
         #     "status": "accepted",
-        #     "job_id": import_job.id,
+        #     "job_id": import_request_envelope.event_id,
         #     "message": "Import job queued successfully",
-        #     "progress_url": f"/api/v1/import-progress/{import_job.id}"
+        #     "progress_url": f"/api/v1/import-progress/{import_request_envelope.event_id}"
         # }
         
         # PLACEHOLDER IMPLEMENTATION: Simulate async processing

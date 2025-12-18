@@ -13,7 +13,7 @@ Key features:
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -47,11 +47,6 @@ class TaskStatusResponse(BaseModel):
     duration: Optional[float] = Field(None, description="Duration in seconds")
     progress: Optional[Dict[str, Any]] = Field(None, description="Progress information")
     result: Optional[Dict[str, Any]] = Field(None, description="Task result")
-    
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
 
 
 class TaskListResponse(BaseModel):
@@ -63,12 +58,7 @@ class TaskListResponse(BaseModel):
 class TaskMetricsResponse(BaseModel):
     """Task metrics response model."""
     metrics: TaskMetrics = Field(..., description="Task execution metrics")
-    timestamp: datetime = Field(default_factory=lambda: datetime.utcnow(), description="Metrics timestamp")
-    
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Metrics timestamp")
 
 
 # Dependency injection
@@ -123,18 +113,18 @@ async def get_task_status(
             detail=f"Task {task_id} not found"
         )
     
-    return TaskStatusResponse(
-        task_id=task.task_id,
-        task_name=task.task_name,
-        task_type=task.task_type,
-        status=task.status,
-        created_at=task.created_at,
-        started_at=task.started_at,
-        completed_at=task.completed_at,
-        duration=task.duration,
-        progress=task.progress.dict() if task.progress else None,
-        result=task.result.dict() if task.result else None
-    )
+        return TaskStatusResponse(
+            task_id=task.task_id,
+            task_name=task.task_name,
+            task_type=task.task_type,
+            status=task.status,
+            created_at=task.created_at,
+            started_at=task.started_at,
+            completed_at=task.completed_at,
+            duration=task.duration,
+        progress=task.progress.model_dump(mode="json") if task.progress else None,
+        result=task.result.model_dump(mode="json") if task.result else None
+        )
 
 
 @router.get("/", response_model=TaskListResponse)
@@ -157,7 +147,7 @@ async def list_tasks(
     )
     
     task_responses = [
-        TaskStatusResponse(
+            TaskStatusResponse(
             task_id=task.task_id,
             task_name=task.task_name,
             task_type=task.task_type,
@@ -166,9 +156,9 @@ async def list_tasks(
             started_at=task.started_at,
             completed_at=task.completed_at,
             duration=task.duration,
-            progress=task.progress.dict() if task.progress else None,
-            result=task.result.dict() if task.result else None
-        )
+            progress=task.progress.model_dump(mode="json") if task.progress else None,
+            result=task.result.model_dump(mode="json") if task.result else None
+            )
         for task in tasks
     ]
     
@@ -225,7 +215,7 @@ async def get_task_metrics(
     
     return TaskMetricsResponse(
         metrics=metrics,
-        timestamp=datetime.utcnow()
+        timestamp=datetime.now(timezone.utc)
     )
 
 

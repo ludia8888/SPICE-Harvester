@@ -3,9 +3,11 @@ BFF Merge Conflict Router
 Foundry-style 병합 충돌 해결 API
 """
 
+import inspect
 import logging
 from typing import Any, Dict, List, Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 
 # BFF dependencies import
@@ -29,6 +31,20 @@ from bff.utils.conflict_converter import ConflictConverter
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/database/{db_name}/merge", tags=["Merge Conflict Resolution"])
+
+
+async def _await_if_needed(value: Any) -> Any:
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+async def _raise_for_status(response: Any) -> None:
+    await _await_if_needed(response.raise_for_status())
+
+
+async def _response_json(response: Any) -> Any:
+    return await _await_if_needed(response.json())
 
 
 @router.post("/simulate", response_model=ApiResponse)
@@ -61,16 +77,32 @@ async def simulate_merge(
             source_info = await oms_client.client.get(
                 f"/api/v1/branch/{db_name}/branch/{source_branch}/info"
             )
-            source_info.raise_for_status()
+            await _raise_for_status(source_info)
 
             target_info = await oms_client.client.get(
                 f"/api/v1/branch/{db_name}/branch/{target_branch}/info"
             )
-            target_info.raise_for_status()
+            await _raise_for_status(target_info)
 
-        except Exception as e:
+        except httpx.HTTPStatusError as e:
+            if getattr(e, "response", None) is not None and e.response.status_code == 404:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="브랜치를 찾을 수 없습니다",
+                )
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail=f"브랜치를 찾을 수 없습니다: {e}"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="브랜치 조회 실패",
+            )
+        except httpx.HTTPError:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="브랜치 조회 실패",
+            )
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="브랜치 조회 실패",
             )
 
         # 2. TerminusDB diff API를 사용하여 변경사항 분석
@@ -79,8 +111,8 @@ async def simulate_merge(
                 f"/api/v1/version/{db_name}/diff",
                 params={"from_ref": target_branch, "to_ref": source_branch},
             )
-            diff_response.raise_for_status()
-            diff_data = diff_response.json()  # httpx response.json() is sync, not async!
+            await _raise_for_status(diff_response)
+            diff_data = await _response_json(diff_response)
 
         except Exception as e:
             raise HTTPException(
@@ -93,8 +125,8 @@ async def simulate_merge(
                 f"/api/v1/version/{db_name}/diff",
                 params={"from_ref": source_branch, "to_ref": target_branch},
             )
-            reverse_diff_response.raise_for_status()
-            reverse_diff_data = reverse_diff_response.json()  # httpx response.json() is sync!
+            await _raise_for_status(reverse_diff_response)
+            reverse_diff_data = await _response_json(reverse_diff_response)
 
         except Exception as e:
             logger.warning(f"역방향 diff 분석 실패: {e}")
@@ -109,7 +141,7 @@ async def simulate_merge(
                 params={"branch1": source_branch, "branch2": target_branch},
             )
             if ancestor_response.status_code == 200:
-                ancestor_data = ancestor_response.json()  # httpx response.json() is sync!
+                ancestor_data = await _response_json(ancestor_response)
                 common_ancestor = ancestor_data.get("data", {}).get("common_ancestor")
                 logger.info(f"Found common ancestor: {common_ancestor}")
         except Exception as e:
@@ -229,8 +261,8 @@ async def resolve_merge_conflicts(
             merge_response = await oms_client.client.post(
                 f"/api/v1/version/{db_name}/merge", json=merge_data
             )
-            merge_response.raise_for_status()
-            merge_result = merge_response.json()  # httpx response.json() is sync!
+            await _raise_for_status(merge_response)
+            merge_result = await _response_json(merge_response)
 
         except Exception as e:
             raise HTTPException(

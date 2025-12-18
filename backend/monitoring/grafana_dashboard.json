@@ -104,49 +104,35 @@
       "title": "Event Store Operations Rate",
       "type": "timeseries"
     },
-    {
-      "datasource": "Prometheus",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [
-            {
-              "options": {
-                "0": {
-                  "text": "Legacy (PostgreSQL)"
-                },
-                "1": {
-                  "text": "Dual-Write (S3 + PostgreSQL)"
-                },
-                "2": {
-                  "text": "S3-Only"
-                }
-              },
-              "type": "value"
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 1
-              },
-              {
-                "color": "green",
-                "value": 2
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
+	    {
+	      "datasource": "Prometheus",
+	      "fieldConfig": {
+	        "defaults": {
+	          "color": {
+	            "mode": "thresholds"
+	          },
+	          "mappings": [],
+	          "thresholds": {
+	            "mode": "absolute",
+	            "steps": [
+	              {
+	                "color": "green",
+	                "value": null
+	              },
+	              {
+	                "color": "yellow",
+	                "value": 60
+	              },
+	              {
+	                "color": "red",
+	                "value": 300
+	              }
+	            ]
+	          },
+	          "unit": "s"
+	        },
+	        "overrides": []
+	      },
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -167,16 +153,16 @@
         "showThresholdMarkers": true,
         "text": {}
       },
-      "pluginVersion": "8.0.0",
-      "targets": [
-        {
-          "expr": "event_store_migration_mode",
-          "refId": "A"
-        }
-      ],
-      "title": "Migration Mode",
-      "type": "gauge"
-    },
+	      "pluginVersion": "8.0.0",
+	      "targets": [
+	        {
+	          "expr": "max(event_publisher_checkpoint_age_seconds)",
+	          "refId": "A"
+	        }
+	      ],
+	      "title": "Publisher Checkpoint Age",
+	      "type": "gauge"
+	    },
     {
       "datasource": "Prometheus",
       "fieldConfig": {

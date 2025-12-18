@@ -6,7 +6,7 @@ Manages command lifecycle states and provides status tracking functionality.
 
 import logging
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from uuid import UUID
 
@@ -65,11 +65,11 @@ class CommandStatusService:
             "aggregate_id": aggregate_id,
             "payload": payload,
             "user_id": user_id,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
             "history": [
                 {
                     "status": CommandStatus.PENDING,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "message": "Command created"
                 }
             ]
@@ -114,7 +114,7 @@ class CommandStatusService:
         # Add to history
         history_entry = {
             "status": status,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "message": message or f"Status changed to {status}"
         }
         
@@ -398,13 +398,18 @@ class CommandStatusService:
         details = await self.get_command_details(command_id)
         if not details:
             return None
-            
+
+        # IMPORTANT: keep this payload-light (do not include the original command payload),
+        # but include failure/progress details so async 202 flows are observable.
         return {
-            "status": details["status"],
+            "status": details.get("status"),
             "command_type": details.get("command_type"),
             "aggregate_id": details.get("aggregate_id"),
             "created_at": details.get("created_at"),
-            "updated_at": details.get("updated_at")
+            "updated_at": details.get("updated_at"),
+            "progress": details.get("progress"),
+            "error": details.get("error"),
+            "history": details.get("history"),
         }
     
     async def get_command_result(self, command_id: str) -> Optional[Dict[str, Any]]:

@@ -85,7 +85,9 @@ async def add_system_fields_to_ontology(
         ontology = ontologies[0] if isinstance(ontologies, list) else ontologies
         
         # Convert to dict if needed
-        if hasattr(ontology, 'dict'):
+        if hasattr(ontology, "model_dump"):
+            ontology_dict = ontology.model_dump()
+        elif hasattr(ontology, "dict"):
             ontology_dict = ontology.dict()
         else:
             ontology_dict = ontology

@@ -4,7 +4,7 @@ Google Sheets models for SPICE HARVESTER
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
 
 class GoogleSheetPreviewRequest(BaseModel):
@@ -14,6 +14,9 @@ class GoogleSheetPreviewRequest(BaseModel):
         ...,
         description="Google Sheets URL",
         examples=["https://docs.google.com/spreadsheets/d/1abc123XYZ/edit#gid=0"],
+    )
+    worksheet_name: Optional[str] = Field(
+        default=None, description="Optional worksheet title; falls back to gid/first sheet"
     )
     api_key: Optional[str] = Field(None, description="Google API key for authentication")
 
@@ -86,18 +89,19 @@ class GoogleSheetPreviewResponse(BaseModel):
 class GoogleSheetError(BaseModel):
     """Google Sheet error response model"""
 
-    error_code: str = Field(..., description="Error code")
-    message: str = Field(..., description="Error message")
-    detail: Optional[str] = Field(None, description="Detailed error information")
-
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "error_code": "SHEET_NOT_ACCESSIBLE",
                 "message": "Cannot access the Google Sheet. Please ensure it's shared publicly.",
                 "detail": "403 Forbidden: The caller does not have permission",
             }
         }
+    )
+
+    error_code: str = Field(..., description="Error code")
+    message: str = Field(..., description="Error message")
+    detail: Optional[str] = Field(None, description="Detailed error information")
 
 
 class GoogleSheetRegisterRequest(BaseModel):

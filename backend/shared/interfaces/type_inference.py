@@ -19,47 +19,55 @@ class TypeInferenceInterface(ABC):
     """
 
     @abstractmethod
-    def infer_column_type(
+    async def infer_column_type(
         self,
         column_data: List[Any],
         column_name: Optional[str] = None,
+        include_complex_types: bool = False,
+        context_columns: Optional[Dict[str, List[Any]]] = None,
         metadata: Optional[Dict[str, Any]] = None,
-    ) -> TypeInferenceResult:
+    ) -> ColumnAnalysisResult:
         """
-        Infer the data type of a single column.
+        Analyze a single column and infer its type.
 
         Args:
-            column_data: List of values from the column
-            column_name: Optional column name for context
-            metadata: Optional metadata for inference hints
+            column_data: Column values (sample or full column)
+            column_name: Optional column name for context/hints
+            include_complex_types: Whether to include complex type detection
+            context_columns: Optional surrounding columns for contextual hints
+            metadata: Optional extra hints/config for inference
 
         Returns:
-            TypeInferenceResult with inferred type, confidence, and reasoning
+            ColumnAnalysisResult containing inferred type and profiling stats
         """
-        pass
+        raise NotImplementedError
 
     @abstractmethod
-    def analyze_dataset(
+    async def analyze_dataset(
         self,
-        data: List[Dict[str, Any]],
-        headers: Optional[List[str]] = None,
+        data: List[List[Any]],
+        columns: List[str],
+        sample_size: int = 1000,
+        include_complex_types: bool = False,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> List[ColumnAnalysisResult]:
         """
         Analyze an entire dataset and infer types for all columns.
 
         Args:
-            data: List of dictionaries representing rows
-            headers: Optional list of column headers
-            metadata: Optional metadata for analysis hints
+            data: Dataset rows (2D table)
+            columns: Column names aligned with row positions
+            sample_size: Max rows to analyze
+            include_complex_types: Whether to include complex type detection
+            metadata: Optional extra hints/config for analysis
 
         Returns:
             List of ColumnAnalysisResult for each column
         """
-        pass
+        raise NotImplementedError
 
     @abstractmethod
-    def infer_single_value_type(
+    async def infer_single_value_type(
         self, value: Any, context: Optional[Dict[str, Any]] = None
     ) -> TypeInferenceResult:
         """
@@ -72,7 +80,7 @@ class TypeInferenceInterface(ABC):
         Returns:
             TypeInferenceResult with inferred type and confidence
         """
-        pass
+        raise NotImplementedError
 
 
 class RealTypeInferenceService(TypeInferenceInterface):
@@ -87,66 +95,69 @@ class RealTypeInferenceService(TypeInferenceInterface):
         """Initialize with real pattern-based type detection service."""
         # Import here to avoid circular dependencies
         from funnel.services.type_inference import PatternBasedTypeDetector
+
         self.funnel_service = PatternBasedTypeDetector
 
-    def infer_column_type(
+    async def infer_column_type(
         self,
         column_data: List[Any],
         column_name: Optional[str] = None,
+        include_complex_types: bool = False,
+        context_columns: Optional[Dict[str, List[Any]]] = None,
         metadata: Optional[Dict[str, Any]] = None,
-    ) -> TypeInferenceResult:
+    ) -> ColumnAnalysisResult:
         """🔥 REAL implementation using Funnel service algorithms."""
-        # Use actual Funnel service implementation
-        include_complex_types = metadata.get("include_complex_types", False) if metadata else False
-        
-        analysis_result = self.funnel_service.infer_column_type(
+        import asyncio
+
+        # Allow metadata to override flags while keeping explicit args as defaults
+        if metadata:
+            include_complex_types = metadata.get("include_complex_types", include_complex_types)
+
+        return await asyncio.to_thread(
+            self.funnel_service.infer_column_type,
             column_data=column_data,
             column_name=column_name,
-            include_complex_types=include_complex_types
+            include_complex_types=include_complex_types,
+            context_columns=context_columns,
         )
-        
-        # Extract the TypeInferenceResult from ColumnAnalysisResult
-        return analysis_result.inferred_type
 
-    def analyze_dataset(
+    async def analyze_dataset(
         self,
-        data: List[Dict[str, Any]],
-        headers: Optional[List[str]] = None,
+        data: List[List[Any]],
+        columns: List[str],
+        sample_size: int = 1000,
+        include_complex_types: bool = False,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> List[ColumnAnalysisResult]:
         """🔥 REAL implementation using Funnel service algorithms."""
-        if not headers:
-            # Extract headers from first row if not provided
-            headers = list(data[0].keys()) if data else []
-        
-        # Convert dict data to list of lists format expected by Funnel
-        table_data = []
-        for row in data:
-            table_row = [row.get(header) for header in headers]
-            table_data.append(table_row)
-        
-        # Use actual Funnel service
-        include_complex_types = metadata.get("include_complex_types", False) if metadata else False
-        sample_size = metadata.get("sample_size", 1000) if metadata else 1000
-        
-        return self.funnel_service.analyze_dataset(
-            data=table_data,
-            columns=headers,
+        import asyncio
+
+        if metadata:
+            include_complex_types = metadata.get("include_complex_types", include_complex_types)
+            sample_size = metadata.get("sample_size", sample_size)
+
+        return await asyncio.to_thread(
+            self.funnel_service.analyze_dataset,
+            data=data,
+            columns=columns,
             sample_size=sample_size,
-            include_complex_types=include_complex_types
+            include_complex_types=include_complex_types,
         )
 
-    def infer_single_value_type(
+    async def infer_single_value_type(
         self, value: Any, context: Optional[Dict[str, Any]] = None
     ) -> TypeInferenceResult:
         """🔥 REAL implementation using Funnel service algorithms."""
-        # Create a single-item column for analysis
-        analysis_result = self.infer_column_type(
+        column_name = context.get("column_name") if context else None
+        include_complex_types = context.get("include_complex_types", False) if context else False
+
+        analysis = await self.infer_column_type(
             column_data=[value],
-            column_name=context.get("column_name") if context else None,
-            metadata=context
+            column_name=column_name,
+            include_complex_types=include_complex_types,
+            metadata=context,
         )
-        return analysis_result
+        return analysis.inferred_type
 
 
 def get_production_type_inference_service() -> TypeInferenceInterface:
@@ -161,23 +172,34 @@ def get_production_type_inference_service() -> TypeInferenceInterface:
     return RealTypeInferenceService()
 
 
+def get_mock_type_inference_service() -> TypeInferenceInterface:
+    """
+    Legacy helper kept for backward compatibility.
+
+    This project no longer ships a mock implementation for type inference.
+    The returned service is the real production implementation.
+    """
+    return get_production_type_inference_service()
+
+
 if __name__ == "__main__":
-    # Test the mock implementation
-    mock_service = get_mock_type_inference_service()
+    import asyncio
+
+    # Quick smoke test for the real implementation
+    service = get_production_type_inference_service()
 
     # Test single value inference
-    result = mock_service.infer_single_value_type("test_value")
-    print(f"Single value result: {result}")
+    result = asyncio.run(service.infer_single_value_type("test_value"))
+    print(f"Single value result: {result.model_dump() if hasattr(result, 'model_dump') else result}")
 
     # Test dataset analysis
-    test_data = [
-        {"name": "John", "age": "25", "city": "New York"},
-        {"name": "Jane", "age": "30", "city": "San Francisco"},
+    test_rows = [
+        ["John", "25", "New York"],
+        ["Jane", "30", "San Francisco"],
     ]
+    cols = ["name", "age", "city"]
 
-    results = mock_service.analyze_dataset(test_data, headers=["name", "age", "city"])
+    results = asyncio.run(service.analyze_dataset(test_rows, cols))
     print(f"Dataset analysis results: {len(results)} columns analyzed")
-    for result in results:
-        print(
-            f"  {result.column_name}: {result.inferred_type.type} (confidence: {result.inferred_type.confidence})"
-        )
+    for col in results:
+        print(f"  {col.column_name}: {col.inferred_type.type} (confidence: {col.inferred_type.confidence})")

@@ -3,7 +3,7 @@ Ontology models for SPICE HARVESTER
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
@@ -80,7 +80,16 @@ class OntologyBase(VersionedModelMixin):
     def set_timestamps(cls, values) -> Any:
         """Set timestamps if not provided"""
         if isinstance(values, dict):
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
+
+            created_at = values.get("created_at")
+            if isinstance(created_at, datetime) and created_at.tzinfo is None:
+                values["created_at"] = created_at.replace(tzinfo=timezone.utc)
+
+            updated_at = values.get("updated_at")
+            if isinstance(updated_at, datetime) and updated_at.tzinfo is None:
+                values["updated_at"] = updated_at.replace(tzinfo=timezone.utc)
+
             if "created_at" not in values or values["created_at"] is None:
                 values["created_at"] = now
             if "updated_at" not in values or values["updated_at"] is None:

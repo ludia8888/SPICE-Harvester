@@ -5,7 +5,7 @@ Database Service for TerminusDB
 
 import logging
 from typing import Any, Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .base import BaseTerminusService, async_terminus_retry
 from oms.exceptions import (
@@ -31,15 +31,14 @@ class DatabaseService(BaseTerminusService):
     
     async def database_exists(self, db_name: str) -> bool:
         """데이터베이스 존재 여부 확인"""
-        if db_name in self._db_cache:
-            return True
-            
         try:
             endpoint = f"/api/db/{self.connection_info.account}/{db_name}"
             await self._make_request("GET", endpoint)
             self._db_cache.add(db_name)
             return True
         except Exception:
+            # Cache is best-effort; the database may have been deleted by another worker/process.
+            self._db_cache.discard(db_name)
             return False
     
     async def ensure_db_exists(self, db_name: str, description: Optional[str] = None) -> None:
@@ -95,7 +94,7 @@ class DatabaseService(BaseTerminusService):
             
             logger.info(f"Database '{db_name}' created successfully")
             
-            return {"name": db_name, "created_at": datetime.utcnow().isoformat()}
+            return {"name": db_name, "created_at": datetime.now(timezone.utc).isoformat()}
             
         except Exception as e:
             logger.error(f"Failed to create database: {e}")

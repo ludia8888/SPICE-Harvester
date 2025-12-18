@@ -67,12 +67,6 @@ class BaseEvent(BaseModel):
     # Production-ready fields for ES+CQRS invariants
     sequence_number: Optional[int] = Field(None, description="Per-aggregate sequence number for ordering")
     schema_version: Optional[str] = Field(None, description="Schema version for migration support")
-    
-    class Config:
-        json_encoders = {
-            UUID: str,
-            datetime: lambda v: v.isoformat()
-        }
 
 
 class OntologyEvent(BaseEvent):
@@ -84,7 +78,8 @@ class OntologyEvent(BaseEvent):
         if "aggregate_type" not in data:
             data["aggregate_type"] = "OntologyClass"
         if "aggregate_id" not in data:
-            data["aggregate_id"] = data.get("class_id", "")
+            # Ensure aggregate_id uniqueness across databases (SSoT stream key).
+            data["aggregate_id"] = f"{data.get('db_name', '')}:{data.get('class_id', '')}"
         super().__init__(**data)
 
 
@@ -98,7 +93,7 @@ class PropertyEvent(BaseEvent):
         if "aggregate_type" not in data:
             data["aggregate_type"] = "Property"
         if "aggregate_id" not in data:
-            data["aggregate_id"] = f"{data.get('class_id', '')}.{data.get('property_name', '')}"
+            data["aggregate_id"] = f"{data.get('db_name', '')}:{data.get('class_id', '')}.{data.get('property_name', '')}"
         super().__init__(**data)
 
 
@@ -113,7 +108,7 @@ class RelationshipEvent(BaseEvent):
         if "aggregate_type" not in data:
             data["aggregate_type"] = "Relationship"
         if "aggregate_id" not in data:
-            data["aggregate_id"] = data.get("relationship_id", "")
+            data["aggregate_id"] = f"{data.get('db_name', '')}:{data.get('relationship_id', '')}"
         super().__init__(**data)
 
 

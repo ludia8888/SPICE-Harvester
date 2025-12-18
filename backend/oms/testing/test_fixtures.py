@@ -5,7 +5,7 @@ Test utilities specifically for OMS service testing with the modernized
 dependency injection system.
 
 Key features:
-1. ✅ OMS-specific mock services (AsyncTerminusService, OutboxService)
+1. ✅ OMS-specific mock services (AsyncTerminusService)
 2. ✅ Mock OMS service container
 3. ✅ Test utilities for PostgreSQL and TerminusDB operations
 4. ✅ Integration test helpers
@@ -25,7 +25,6 @@ from shared.testing.config_fixtures import (
 
 # OMS specific imports
 from oms.services.async_terminus import AsyncTerminusService
-from oms.database.outbox import OutboxService
 from oms.dependencies import OMSDependencyProvider
 from shared.models.config import ConnectionConfig
 from shared.services.command_status_service import CommandStatusService
@@ -160,27 +159,6 @@ def create_mock_async_terminus_service() -> Mock:
     return mock_terminus
 
 
-def create_mock_outbox_service() -> Mock:
-    """Create mock OutboxService for testing"""
-    mock_outbox = AsyncMock(spec=OutboxService)
-    
-    # Mock event publishing
-    mock_outbox.publish_event = AsyncMock(return_value=True)
-    mock_outbox.publish_ontology_created = AsyncMock(return_value=True)
-    mock_outbox.publish_ontology_updated = AsyncMock(return_value=True)
-    mock_outbox.publish_ontology_deleted = AsyncMock(return_value=True)
-    
-    # Mock event retrieval
-    mock_outbox.get_pending_events = AsyncMock(return_value=[])
-    mock_outbox.mark_event_processed = AsyncMock(return_value=True)
-    mock_outbox.get_event_by_id = AsyncMock(return_value=None)
-    
-    # Mock health check
-    mock_outbox.health_check = AsyncMock(return_value=True)
-    
-    return mock_outbox
-
-
 def create_mock_postgres_db() -> Mock:
     """Create mock PostgreSQL database connection for testing"""
     mock_db = AsyncMock()
@@ -211,7 +189,6 @@ class MockOMSServiceContainer:
         self._oms_services['terminus_service'] = create_mock_async_terminus_service()
         self._oms_services['jsonld_converter'] = create_mock_jsonld_converter()
         self._oms_services['label_mapper'] = create_mock_label_mapper()
-        self._oms_services['outbox_service'] = create_mock_outbox_service()
         self._oms_services['redis_service'] = create_mock_redis_service()
         self._oms_services['command_status_service'] = AsyncMock(spec=CommandStatusService)
         self._oms_services['elasticsearch_service'] = create_mock_elasticsearch_service()
@@ -244,10 +221,6 @@ class MockOMSServiceContainer:
             raise RuntimeError("Label mapper not initialized")
         return self._oms_services['label_mapper']
     
-    def get_outbox_service(self) -> Optional[Mock]:
-        """Get mock outbox service"""
-        return self._oms_services.get('outbox_service')
-    
     def get_redis_service(self) -> Optional[Mock]:
         """Get mock Redis service"""
         return self._oms_services.get('redis_service')
@@ -278,12 +251,6 @@ async def mock_oms_container(test_settings: TestApplicationSettings) -> AsyncGen
 def mock_async_terminus_service():
     """Pytest fixture for mock AsyncTerminusService"""
     return create_mock_async_terminus_service()
-
-
-@pytest.fixture
-def mock_outbox_service():
-    """Pytest fixture for mock OutboxService"""
-    return create_mock_outbox_service()
 
 
 @pytest.fixture
@@ -343,18 +310,9 @@ class OMSTestClient:
     async def test_ontology_operations(self, db_name: str, ontology_data: Dict[str, Any]) -> Dict[str, Any]:
         """Test ontology operations"""
         terminus_service = self.container.get_terminus_service()
-        outbox_service = self.container.get_outbox_service()
         
         # Test ontology creation
         create_result = await terminus_service.create_ontology(db_name, ontology_data)
-        
-        # Test event publishing
-        if outbox_service:
-            await outbox_service.publish_ontology_created(
-                db_name, 
-                create_result.get("data", {}).get("id", "test_id"),
-                ontology_data
-            )
         
         # Test ontology retrieval
         ontology_id = create_result.get("data", {}).get("id", "test_id")
@@ -515,21 +473,4 @@ async def test_with_oms_fixtures(oms_test_client, mock_async_terminus_service):
     assert result["create_result"]["data"]["id"] == "new_onto"
 
 # Test specific service interactions
-@pytest.mark.asyncio
-async def test_outbox_integration(mock_oms_container):
-    terminus_service = mock_oms_container.get_terminus_service()
-    outbox_service = mock_oms_container.get_outbox_service()
-    
-    # Test ontology creation with event publishing
-    ontology_data = setup_test_ontology_data()
-    create_result = await terminus_service.create_ontology("test_db", ontology_data)
-    
-    await outbox_service.publish_ontology_created(
-        "test_db", 
-        create_result["data"]["id"], 
-        ontology_data
-    )
-    
-    # Verify event was published
-    outbox_service.publish_ontology_created.assert_called_once()
 """

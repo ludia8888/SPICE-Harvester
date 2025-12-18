@@ -8,7 +8,7 @@ import asyncio
 import logging
 import time
 from typing import Optional, Dict, Any, Callable
-from datetime import datetime
+from datetime import datetime, timezone
 
 from shared.models.sync_wrapper import SyncOptions, SyncResult, TimeoutError
 from shared.models.commands import CommandStatus
@@ -141,7 +141,7 @@ class SyncWrapperService:
             # 진행률 기록
             if progress_history is not None:
                 progress_entry = {
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "elapsed_time": time.time() - start_time,
                     "status": current_status,
                     "progress": details.get("progress", 0)

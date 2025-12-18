@@ -213,7 +213,11 @@ class ElasticsearchService:
         index: str,
         document: Dict[str, Any],
         doc_id: Optional[str] = None,
-        refresh: Union[bool, str] = False
+        refresh: Union[bool, str] = False,
+        *,
+        version: Optional[int] = None,
+        version_type: Optional[str] = None,
+        op_type: Optional[str] = None,
     ) -> str:
         """
         Index a single document.
@@ -228,12 +232,20 @@ class ElasticsearchService:
             Document ID
         """
         try:
-            response = await self.client.index(
-                index=index,
-                body=document,
-                id=doc_id,
-                refresh=refresh
-            )
+            kwargs: Dict[str, Any] = {
+                "index": index,
+                "body": document,
+                "id": doc_id,
+                "refresh": refresh,
+            }
+            if version is not None:
+                kwargs["version"] = int(version)
+            if version_type is not None:
+                kwargs["version_type"] = version_type
+            if op_type is not None:
+                kwargs["op_type"] = op_type
+
+            response = await self.client.index(**kwargs)
             return response["_id"]
         except ElasticsearchException as e:
             logger.error(f"Failed to index document: {e}")
@@ -324,7 +336,10 @@ class ElasticsearchService:
         self,
         index: str,
         doc_id: str,
-        refresh: Union[bool, str] = False
+        refresh: Union[bool, str] = False,
+        *,
+        version: Optional[int] = None,
+        version_type: Optional[str] = None,
     ) -> bool:
         """
         Delete a document.
@@ -338,11 +353,13 @@ class ElasticsearchService:
             Success status
         """
         try:
-            await self.client.delete(
-                index=index,
-                id=doc_id,
-                refresh=refresh
-            )
+            kwargs: Dict[str, Any] = {"index": index, "id": doc_id, "refresh": refresh}
+            if version is not None:
+                kwargs["version"] = int(version)
+            if version_type is not None:
+                kwargs["version_type"] = version_type
+
+            await self.client.delete(**kwargs)
             return True
         except NotFoundError:
             return False

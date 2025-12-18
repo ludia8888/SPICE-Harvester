@@ -1,8 +1,8 @@
 # SPICE HARVESTER API Reference
 
-> **Last Updated**: 2025-08-05  
-> **API Version**: v1.0  
-> **Status**: Production Ready (95% Complete) - Command/Event Sourcing & Redis Integration
+> **Last Updated**: 2025-12-17  
+> **API Version**: v1  
+> **Status**: Event Sourcing steady state (docs are partially curated; OpenAPI is the source of truth)
 
 ## Table of Contents
 
@@ -11,8 +11,7 @@
 3. [BFF API Endpoints](#bff-api-endpoints)
 4. [OMS API Endpoints](#oms-api-endpoints)
    - [Legacy Direct API](#legacy-direct-api)
-   - [Asynchronous API](#asynchronous-api) ⭐ NEW
-   - [Synchronous API Wrapper](#synchronous-api-wrapper) ⭐ NEW
+   - [Asynchronous API](#asynchronous-api)
 5. [Funnel API Endpoints](#funnel-api-endpoints)
 6. [Git-like Features](#git-like-features)
 7. [Command Status Tracking](#command-status-tracking) ⭐ NEW
@@ -29,12 +28,10 @@ SPICE HARVESTER provides RESTful APIs across three main services with advanced C
 - **OMS (Ontology Management Service)**: Internal API with ID-based operations + Command/Event Sourcing
 - **Funnel (Type Inference Service)**: Data analysis and type inference API
 
-### New Features (2025-08-05)
-- **Asynchronous API**: Command-based operations with status tracking
-- **Synchronous API Wrapper**: Convenience endpoints with configurable timeouts
-- **Redis Status Tracking**: Real-time command monitoring with history
-- **WebSocket Real-time Updates**: Live command status broadcasting with Redis Pub/Sub
-- **Enhanced Error Handling**: 408 Request Timeout with helpful hints
+### Recent Additions (steady state)
+- **Asynchronous writes**: Command/Event append-only to S3/MinIO Event Store (SSoT)
+- **Command status API**: async processing observability via `GET /api/v1/commands/{command_id}/status`
+- **Optimistic concurrency (OCC)**: `expected_seq` required on update/delete (409 on mismatch)
 
 ### Base URLs
 
@@ -42,7 +39,7 @@ SPICE HARVESTER provides RESTful APIs across three main services with advanced C
 |---------|-------------|------------|
 | BFF | `http://localhost:8002/api/v1` | `https://api.spiceharvester.com/v1` |
 | OMS | `http://localhost:8000/api/v1` | Internal only |
-| Funnel | `http://localhost:8004/api/v1` | Internal only |
+| Funnel | `http://localhost:8003/api/v1` | Internal only |
 
 ### Content Types
 
@@ -332,6 +329,270 @@ POST /database/{db_name}/mappings/validate
 - Duplicate label detection
 - Conflict detection with existing mappings
 - Detailed validation error reporting
+
+### AI Schema Suggestion (Data Import)
+
+#### Suggest Schema From Data (Rows + Columns)
+```http
+POST /database/{db_name}/suggest-schema-from-data
+```
+
+**Request Body:**
+```json
+{
+  "data": [["1", "Shirt", "15,000원"]],
+  "columns": ["id", "name", "price"],
+  "class_name": "MyImportedData",
+  "include_complex_types": true
+}
+```
+
+#### Suggest Schema From Google Sheets
+```http
+POST /database/{db_name}/suggest-schema-from-google-sheets
+```
+
+**Request Body:**
+```json
+{
+  "sheet_url": "https://docs.google.com/spreadsheets/d/xxxx/edit#gid=0",
+  "worksheet_name": "Sheet1",
+  "class_name": "MyImportedData",
+  "api_key": null,
+  "table_id": "table_1",
+  "table_bbox": {"top": 4, "left": 0, "bottom": 120, "right": 8}
+}
+```
+
+#### Suggest Schema From Excel Upload (.xlsx/.xlsm)
+```http
+POST /database/{db_name}/suggest-schema-from-excel
+```
+
+**Multipart Form Data:**
+- `file`: Excel file
+- Query params (optional): `sheet_name`, `class_name`, `max_tables`, `max_rows`, `max_cols`, `include_complex_types`, `table_id`, `table_top`, `table_left`, `table_bottom`, `table_right`
+
+**Notes:**
+- 구조 분석 기반으로 멀티테이블/전치/폼 문서도 처리합니다.
+- 응답에는 `preview_data`와 함께 `structure`(tables/key_values)가 포함되어, 프론트에서 테이블 선택 UI를 붙일 수 있습니다.
+
+### AI Mapping Suggestion (Data Import)
+
+#### Suggest Mappings From Google Sheets → Target Schema
+```http
+POST /database/{db_name}/suggest-mappings-from-google-sheets
+```
+
+**Request Body:**
+```json
+{
+  "sheet_url": "https://docs.google.com/spreadsheets/d/xxxx/edit#gid=0",
+  "worksheet_name": "Sheet1",
+  "api_key": null,
+  "target_class_id": "OrderItem",
+  "target_schema": [
+    {"name": "name", "type": "xsd:string"},
+    {"name": "qty", "type": "xsd:integer"},
+    {"name": "unit_price", "type": "xsd:decimal"}
+  ],
+  "table_id": "table_1",
+  "table_bbox": {"top": 4, "left": 0, "bottom": 120, "right": 8},
+  "include_relationships": false,
+  "enable_semantic_hints": false
+}
+```
+
+#### Suggest Mappings From Excel Upload → Target Schema
+```http
+POST /database/{db_name}/suggest-mappings-from-excel
+```
+
+**Multipart Form Data:**
+- `file`: Excel file
+- `target_schema_json`: JSON array string (e.g. `[{"name":"qty","type":"xsd:integer"}]`)
+- Query params:
+  - required: `target_class_id`
+  - optional: `sheet_name`, `table_id`, `table_top`, `table_left`, `table_bottom`, `table_right`, `include_relationships`, `enable_semantic_hints`, `max_tables`, `max_rows`, `max_cols`
+
+**Notes:**
+- 두 엔드포인트 모두 응답에 `preview_data` + `structure` + `source_schema/target_schema` + `mappings`를 포함합니다.
+- `enable_semantic_hints=false`가 기본값이며, 도메인 중립 동작을 우선합니다.
+- 현재는 OMS 연동을 비활성화한 상태라, `target_schema`(또는 `target_schema_json`)를 클라이언트가 직접 전달해야 합니다.
+
+### AI Import (Dry-run / Commit)
+
+#### Dry-run Import From Google Sheets
+```http
+POST /database/{db_name}/import-from-google-sheets/dry-run
+```
+
+**Request Body:**
+```json
+{
+  "sheet_url": "https://docs.google.com/spreadsheets/d/xxxx/edit#gid=0",
+  "worksheet_name": "Sheet1",
+  "api_key": null,
+  "target_class_id": "OrderItem",
+  "target_schema": [
+    {"name": "name", "type": "xsd:string"},
+    {"name": "qty", "type": "xsd:integer"},
+    {"name": "unit_price", "type": "xsd:decimal"}
+  ],
+  "table_id": "table_1",
+  "table_bbox": {"top": 4, "left": 0, "bottom": 120, "right": 8},
+  "mappings": [
+    {"source_field": "상품명", "target_field": "name"},
+    {"source_field": "수량", "target_field": "qty"},
+    {"source_field": "단가", "target_field": "unit_price"}
+  ],
+  "dry_run_rows": 100,
+  "options": {}
+}
+```
+
+#### Commit Import From Google Sheets (Prepare-only, OMS disabled)
+```http
+POST /database/{db_name}/import-from-google-sheets/commit
+```
+
+**Request Body (same shape as dry-run + commit options):**
+```json
+{
+  "sheet_url": "https://docs.google.com/spreadsheets/d/xxxx/edit#gid=0",
+  "worksheet_name": "Sheet1",
+  "api_key": null,
+  "target_class_id": "OrderItem",
+  "target_schema": [{"name": "name", "type": "xsd:string"}],
+  "mappings": [{"source_field": "상품명", "target_field": "name"}],
+  "allow_partial": false,
+  "max_import_rows": null,
+  "batch_size": 500,
+  "return_instances": false,
+  "max_return_instances": 1000,
+  "options": {}
+}
+```
+
+#### Dry-run Import From Excel Upload
+```http
+POST /database/{db_name}/import-from-excel/dry-run
+```
+
+**Multipart Form Data:**
+- `file`: Excel file
+- `target_class_id`: string
+- `target_schema_json`: JSON array string (e.g. `[{"name":"name","type":"xsd:string"}]`)
+- `mappings_json`: JSON array string (e.g. `[{"source_field":"A","target_field":"name"}]`)
+- Optional: `sheet_name`, `table_id`, `table_top`, `table_left`, `table_bottom`, `table_right`, `dry_run_rows`, `max_import_rows`, `options_json`
+
+#### Commit Import From Excel Upload (Prepare-only, OMS disabled)
+```http
+POST /database/{db_name}/import-from-excel/commit
+```
+
+**Multipart Form Data:**
+- `file`: Excel file
+- `target_class_id`: string
+- `target_schema_json`: JSON array string
+- `mappings_json`: JSON array string
+- Optional: `sheet_name`, `table_id`, `table_top`, `table_left`, `table_bottom`, `table_right`, `allow_partial`, `max_import_rows`, `batch_size`, `return_instances`, `max_return_instances`, `options_json`
+
+**Notes:**
+- Import는 Funnel의 구조 분석 결과(멀티테이블/전치/병합셀 등)를 기반으로 “선택된 테이블”을 정규화한 뒤 적용됩니다.
+- `allow_partial=false`(기본)인 경우, 변환/검증 에러가 있으면 커밋을 거부하고 에러를 반환합니다.
+- 현재는 OMS 연동을 비활성화한 상태라, `commit`은 실제 저장을 수행하지 않고 `prepared`(배치/옵션에 따라 생성된 instances)를 반환합니다.
+
+### Graph Query (Federated Multi-hop) ⭐ NEW
+
+TerminusDB(그래프 관계) + Elasticsearch(문서 payload)를 결합한 멀티홉 조회 API입니다.
+
+#### Multi-hop Graph Query
+```http
+POST /graph-query/{db_name}
+```
+
+**Request Body:**
+```json
+{
+  "start_class": "Product",
+  "hops": [
+    {"predicate": "owned_by", "target_class": "Customer"}
+  ],
+  "filters": {"product_id": "PROD-1"},
+  "limit": 100,
+  "offset": 0,
+  "max_nodes": 500,
+  "max_edges": 2000,
+  "include_documents": true,
+  "include_paths": false,
+  "max_paths": 100,
+  "no_cycles": false,
+  "include_provenance": false
+}
+```
+
+**Response (핵심 필드):**
+- `nodes[].display`: ES가 없어도 UI가 안정적으로 렌더링할 수 있는 최소 표시 필드(그래프에서 조회)
+- `nodes[].data_status`: `FULL|PARTIAL|MISSING`
+  - `FULL`: ES payload 포함
+  - `PARTIAL`: 요청에서 payload를 제외(`include_documents=false`)
+  - `MISSING`: payload 요청했지만 ES 문서가 없음
+- `nodes[].es_ref`: `{index,id}` (BFF/FE가 batch resolve 가능)
+- `paths`: `include_paths=true`일 때만 포함 (비용이 크므로 기본 false)
+- `index_summary`: 응답 내 ES payload 커버리지/age 요약 (best-effort)
+
+**Example Response (ES 누락 시 UX 안정성):**
+```json
+{
+  "nodes": [
+    {
+      "id": "Customer/CUST-1",
+      "type": "Customer",
+      "data_status": "MISSING",
+      "display": {"primary_key": "CUST-1", "name": "Alice", "summary": "Alice"},
+      "data": null
+    }
+  ],
+  "edges": [
+    {"from_node": "Product/PROD-1", "to_node": "Customer/CUST-1", "predicate": "owned_by"}
+  ]
+}
+```
+
+**Safety Guards (운영 안전장치):**
+- `GRAPH_QUERY_MAX_HOPS` / `GRAPH_QUERY_MAX_LIMIT` / `GRAPH_QUERY_MAX_PATHS` 환경변수로 상한을 강제합니다.
+- `max_nodes`/`max_edges`/`no_cycles`로 폭발/순환을 제어합니다.
+- 관계 의미(도메인/레인지) 검증은 기본 ON(`GRAPH_QUERY_ENFORCE_SEMANTICS=true`)입니다.
+
+### Lineage (Provenance) ⭐ NEW
+
+#### Get Lineage Graph
+```http
+GET /lineage/graph?root=<event_id_or_node_id>&direction=both&max_depth=5
+```
+
+#### Get Lineage Impact (Downstream Artifacts)
+```http
+GET /lineage/impact?root=<event_id_or_node_id>&direction=downstream&max_depth=10
+```
+
+#### Get Lineage Metrics (Lag / Missing Ratio)
+```http
+GET /lineage/metrics?db_name=<db_name>&window_minutes=60
+```
+
+### Audit Logs ⭐ NEW
+
+#### List Audit Logs
+```http
+GET /audit/logs?partition_key=db:<db_name>&limit=100
+```
+
+#### Get Audit Chain Head
+```http
+GET /audit/chain-head?partition_key=db:<db_name>
+```
 
 ## OMS API Endpoints
 
@@ -802,6 +1063,57 @@ POST /preview/google-sheets
 }
 ```
 
+### Structure Analysis (Spreadsheet)
+
+Funnel은 “엑셀/구글시트 같은 격자 데이터”를 `grid + merged_cells`로 표준화한 뒤,
+멀티 테이블/전치 표/키-값 폼을 자동으로 분해해 줍니다.
+
+#### Analyze Raw Sheet Grid
+```http
+POST /api/v1/funnel/structure/analyze
+```
+
+**Request Body:**
+```json
+{
+  "grid": [["상품", "수량", "가격"], ["셔츠", "2", "15,000원"]],
+  "merged_cells": [{"top": 1, "left": 0, "bottom": 2, "right": 0}],
+  "include_complex_types": true,
+  "max_tables": 5,
+  "options": {}
+}
+```
+
+#### Analyze Excel Upload (.xlsx/.xlsm)
+```http
+POST /api/v1/funnel/structure/analyze/excel
+```
+
+**Multipart Form Data:**
+- `file`: Excel file
+- `sheet_name` (optional)
+- `max_rows`/`max_cols` (optional)
+- `options_json` (optional, JSON string)
+
+#### Analyze Google Sheets URL (End-to-End)
+```http
+POST /api/v1/funnel/structure/analyze/google-sheets
+```
+
+**Request Body:**
+```json
+{
+  "sheet_url": "https://docs.google.com/spreadsheets/d/xxxx/edit#gid=0",
+  "worksheet_name": "Sheet1",
+  "api_key": null,
+  "max_rows": 5000,
+  "max_cols": 200,
+  "include_complex_types": true,
+  "max_tables": 5,
+  "options": {}
+}
+```
+
 #### Suggest Schema
 ```http
 POST /suggest-schema
@@ -935,7 +1247,7 @@ interface Relationship {
 **Note:** Error details are included in the HTTP response body with appropriate status codes:
 - 400 Bad Request - Validation errors
 - 404 Not Found - Resource not found
-- 409 Conflict - Duplicate resources
+- 409 Conflict - Duplicate resources or optimistic concurrency conflicts (`expected_seq` mismatch)
 - 500 Internal Server Error - Server errors
 
 ### Common Error Codes
@@ -945,6 +1257,7 @@ interface Relationship {
 | `VALIDATION_ERROR` | 400 | Input validation failed |
 | `NOT_FOUND` | 404 | Resource not found |
 | `DUPLICATE_ERROR` | 409 | Resource already exists |
+| `OPTIMISTIC_CONCURRENCY_CONFLICT` | 409 | `expected_seq` mismatch (write rejected; no command appended) |
 | `UNAUTHORIZED` | 401 | Authentication required |
 | `FORBIDDEN` | 403 | Insufficient permissions |
 | `INTERNAL_ERROR` | 500 | Server error |
@@ -976,6 +1289,19 @@ interface Relationship {
   "success": false,
   "message": "온톨로지 'Product'이(가) 이미 존재합니다",
   "data": null
+}
+```
+
+#### Conflict Error (409) — Optimistic Concurrency (OCC)
+
+```json
+{
+  "detail": {
+    "error": "optimistic_concurrency_conflict",
+    "aggregate_id": "db:class:instance",
+    "expected_seq": 41,
+    "actual_seq": 42
+  }
 }
 ```
 
@@ -1082,123 +1408,86 @@ Official SDKs available for:
 - JavaScript: `npm install @spice-harvester/sdk`
 - Go: `go get github.com/spice-harvester/go-sdk`
 
-## Asynchronous API ⭐ NEW
+## Asynchronous API
 
-The async API follows Command/Event Sourcing pattern for reliable operations.
+Write operations are command-based and append-only to the Event Store.
 
-### Submit Commands
+- Write endpoints return **202 Accepted** with a `command_id`.
+- Read endpoints return **200 OK** with the current read-side view.
 
-All async endpoints return immediately with a command ID:
+### Submit commands (examples)
+
+#### Create database
 
 ```http
-POST /api/v1/ontology/{db_name}/async/create
+POST /api/v1/database/create
 Content-Type: application/json
 
 {
-  "id": "Person",
-  "label": "Person",
-  "properties": [...]
+  "name": "mydb",
+  "description": "Database description"
 }
 ```
 
-Response:
-```json
-{
-  "command_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "PENDING",
-  "result": {
-    "message": "Ontology creation command accepted for 'Person'",
-    "class_id": "Person",
-    "db_name": "mydb"
-  }
-}
-```
-
-### Check Command Status
+#### Create ontology class
 
 ```http
-GET /api/v1/ontology/{db_name}/async/command/{command_id}/status
-```
-
-Response (Completed):
-```json
-{
-  "command_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "COMPLETED",
-  "result": {
-    "message": "Command is COMPLETED",
-    "command_type": "CREATE_ONTOLOGY_CLASS",
-    "progress": 100,
-    "history": [
-      {
-        "status": "PENDING",
-        "timestamp": "2025-08-05T10:30:00Z",
-        "message": "Command created"
-      },
-      {
-        "status": "PROCESSING", 
-        "timestamp": "2025-08-05T10:30:01Z",
-        "message": "Processing started by worker-12345"
-      },
-      {
-        "status": "COMPLETED",
-        "timestamp": "2025-08-05T10:30:05Z", 
-        "message": "Command completed successfully"
-      }
-    ],
-    "result": {...}
-  }
-}
-```
-
-## Synchronous API Wrapper ⭐ NEW
-
-Convenience API that submits commands and waits for completion.
-
-### Create with Timeout
-
-```http
-POST /api/v1/ontology/{db_name}/sync/create?timeout=30&poll_interval=0.5
+POST /api/v1/database/{db_name}/ontology
 Content-Type: application/json
 
 {
-  "id": "Person",
-  "label": "Person"
+  "id": "Product",
+  "label": "Product",
+  "description": "E-commerce product",
+  "properties": [...],
+  "relationships": [...]
 }
 ```
 
-Response (Success):
-```json
+#### Create instance (async)
+
+```http
+POST /api/v1/instances/{db_name}/async/{class_id}/create
+Content-Type: application/json
+
 {
-  "status": "success",
-  "message": "Successfully created ontology class 'Person'",
   "data": {
-    "command_id": "550e8400-e29b-41d4-a716-446655440000",
-    "class_id": "Person",
-    "execution_time": 2.5,
-    "result": {...}
+    "...": "..."
   }
 }
 ```
 
-Response (Timeout):
-```http
-HTTP/1.1 408 Request Timeout
-Content-Type: application/json
+### Update/Delete require `expected_seq` (OCC)
 
+Update/delete endpoints require an `expected_seq` query param. If the current aggregate sequence does not match, OMS returns **409 Conflict** and **does not append** the command.
+
+Examples:
+
+```http
+PUT /api/v1/database/{db_name}/ontology/{class_id}?expected_seq=42
+DELETE /api/v1/database/{db_name}/ontology/{class_id}?expected_seq=42
+
+PUT /api/v1/instances/{db_name}/async/{class_id}/{instance_id}/update?expected_seq=42
+DELETE /api/v1/instances/{db_name}/async/{class_id}/{instance_id}/delete?expected_seq=42
+```
+
+409 response example:
+
+```json
 {
   "detail": {
-    "message": "Operation timed out after 30 seconds",
-    "command_id": "550e8400-e29b-41d4-a716-446655440000",
-    "hint": "You can check the status using GET /api/v1/ontology/mydb/async/command/550e8400.../status"
+    "error": "optimistic_concurrency_conflict",
+    "aggregate_id": "db:class:instance",
+    "expected_seq": 41,
+    "actual_seq": 42
   }
 }
 ```
 
-### Wait for Existing Command
+### Check command status
 
 ```http
-GET /api/v1/ontology/{db_name}/sync/command/{command_id}/wait?timeout=30
+GET /api/v1/commands/{command_id}/status
 ```
 
 ## Command Status Tracking ⭐ NEW
@@ -1225,9 +1514,8 @@ Each status change is tracked with:
 
 ### TTL and Cleanup
 
-- Commands are automatically cleaned up after 24 hours
-- Configurable via `REDIS_COMMAND_TTL` environment variable
-- Manual cleanup endpoint: `DELETE /api/v1/commands/{command_id}`
+- Commands are automatically cleaned up after 24 hours (Redis TTL; currently fixed in code).
+- There is no manual cleanup endpoint; use Redis key expiration/eviction or operational tooling.
 
 ## WebSocket Real-time Updates ⭐ NEW
 

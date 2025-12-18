@@ -4,9 +4,8 @@ Automatically detects data types from sample data with confidence scoring
 """
 
 import re
-import math
 import statistics
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, List, Optional, Dict, Tuple
@@ -16,6 +15,7 @@ import logging
 from shared.models.common import DataType
 from shared.models.type_inference import ColumnAnalysisResult, TypeInferenceResult
 from shared.validators.complex_type_validator import ComplexTypeValidator
+from shared.validators.money_validator import MoneyValidator
 
 logger = logging.getLogger(__name__)
 
@@ -114,13 +114,17 @@ class PatternBasedTypeDetector:
             ColumnAnalysisResult with pattern-based analysis
         """
         # 통계 정보 수집
+        total_count = len(column_data)
         non_empty_values = [v for v in column_data if v is not None and str(v).strip() != ""]
         null_count = len(column_data) - len(non_empty_values)
+        non_empty_count = len(non_empty_values)
         unique_values = set(str(v) for v in non_empty_values)
         unique_count = len(unique_values)
+        unique_ratio = unique_count / non_empty_count if non_empty_count > 0 else 0.0
+        null_ratio = null_count / total_count if total_count > 0 else 0.0
 
-        # 샘플 값 추출 (최대 5개)
-        sample_values = list(non_empty_values[:5])
+        # 샘플 값 추출 (최대 10개)
+        sample_values = list(non_empty_values[:10])
 
         if not non_empty_values:
             result = TypeInferenceResult(
@@ -131,9 +135,13 @@ class PatternBasedTypeDetector:
             return ColumnAnalysisResult(
                 column_name=column_name or "unknown",
                 inferred_type=result,
+                total_count=total_count,
+                non_empty_count=0,
                 sample_values=[],
                 null_count=null_count,
                 unique_count=0,
+                null_ratio=null_ratio,
+                unique_ratio=0.0,
             )
 
         # 🔥 Pattern-Based Type Detection
@@ -148,9 +156,13 @@ class PatternBasedTypeDetector:
         return ColumnAnalysisResult(
             column_name=column_name or "unknown",
             inferred_type=inference_result,
+            total_count=total_count,
+            non_empty_count=non_empty_count,
             sample_values=sample_values,
             null_count=null_count,
             unique_count=unique_count,
+            null_ratio=null_ratio,
+            unique_ratio=unique_ratio,
         )
 
     @classmethod
@@ -172,76 +184,369 @@ class PatternBasedTypeDetector:
         # 🔥 Adaptive Thresholds based on sample size and data quality
         adaptive_thresholds = cls._calculate_adaptive_thresholds(str_values, sample_size)
         
-        # 🔥 Contextual Analysis - analyze surrounding columns
-        context_hints = cls._analyze_context(column_name, context_columns) if context_columns else {}
-        
-        # Enhanced column name hints with multilingual support
-        name_hint_result = cls._check_column_name_hints_enhanced(column_name) if column_name else None
-        
-        # 🔥 Pattern-Based Type Detection with Adaptive Thresholds
-        # 1. Boolean check (most specific)
-        bool_result = cls._check_boolean_enhanced(str_values, adaptive_thresholds)
-        if bool_result.confidence >= adaptive_thresholds['boolean']:
-            return bool_result
+        name_hints = cls._get_column_name_hint_scores(column_name)
 
-        # 2. Integer check with statistical analysis
-        int_result = cls._check_integer_enhanced(str_values, adaptive_thresholds)
-        if int_result.confidence >= adaptive_thresholds['integer']:
-            return int_result
+        # 후보 타입들을 모두 평가한 뒤 점수 기반으로 선택 (순서 편향 제거)
+        candidates: List[TypeInferenceResult] = [
+            cls._check_boolean_enhanced(str_values, adaptive_thresholds),
+            cls._check_integer_enhanced(str_values, adaptive_thresholds),
+            cls._check_decimal_enhanced(str_values, adaptive_thresholds),
+            cls._check_datetime_enhanced(str_values, adaptive_thresholds),
+            cls._check_date_enhanced(str_values, adaptive_thresholds),
+        ]
 
-        # 3. Decimal check with distribution analysis
-        decimal_result = cls._check_decimal_enhanced(str_values, adaptive_thresholds)
-        if decimal_result.confidence >= adaptive_thresholds['decimal']:
-            return decimal_result
-
-        # 4. Date check with fuzzy matching
-        date_result = cls._check_date_enhanced(str_values, adaptive_thresholds)
-        if date_result.confidence >= adaptive_thresholds['date']:
-            return date_result
-
-        # 5. DateTime check with advanced parsing
-        datetime_result = cls._check_datetime_enhanced(str_values, adaptive_thresholds)
-        if datetime_result.confidence >= adaptive_thresholds['datetime']:
-            return datetime_result
-
-        # 🔥 Pattern-Based Complex Type Detection
         if include_complex_types:
-            # Enhanced phone number detection
-            phone_result = cls._check_phone_enhanced(str_values, adaptive_thresholds, column_name)
-            if phone_result.confidence >= 0.7:
-                return phone_result
-                
-            # Use column name hints with existing validator
-            if name_hint_result and name_hint_result.confidence >= 0.7:
-                # Validate using ComplexTypeValidator
-                sample_value = str_values[0] if str_values else ""
-                valid, error, normalized = ComplexTypeValidator.validate(
-                    sample_value, name_hint_result.type, {}
+            candidates.extend(
+                cls._check_complex_types_enhanced(
+                    str_values,
+                    adaptive_thresholds,
+                    column_name=column_name,
+                    name_hints=name_hints,
                 )
+            )
+            candidates.append(cls._check_enum_enhanced(str_values, adaptive_thresholds, name_hints))
 
-                if valid:
-                    # Check more samples for confidence
-                    valid_count = 0
-                    for val in str_values[: min(50, len(str_values))]:
-                        is_valid, _, _ = ComplexTypeValidator.validate(
-                            val, name_hint_result.type, {}
-                        )
-                        if is_valid:
-                            valid_count += 1
-
-                    confidence = valid_count / min(50, len(str_values))
-                    if confidence >= 0.7:
-                        return TypeInferenceResult(
-                            type=name_hint_result.type,
-                            confidence=confidence,
-                            reason=f"Column name suggests {name_hint_result.type}, {valid_count}/{min(50, len(str_values))} samples valid",
-                        )
+        best = cls._select_best_candidate(candidates, adaptive_thresholds, name_hints)
+        if best is not None:
+            return best
 
         # Default to string
         return TypeInferenceResult(
             type=DataType.STRING.value,
             confidence=1.0,
             reason="No specific pattern detected, using string type",
+        )
+
+    @classmethod
+    def _get_column_name_hint_scores(cls, column_name: Optional[str]) -> Dict[str, float]:
+        """Return type -> hint strength (0.0~1.0) based on column name."""
+        if not column_name:
+            return {}
+
+        name_lower = column_name.lower()
+        hints: Dict[str, float] = {}
+
+        hint_specs: List[Tuple[str, float, List[str]]] = [
+            (DataType.EMAIL.value, 0.9, ["email", "e-mail", "mail", "이메일", "メール", "邮箱", "邮件"]),
+            (DataType.PHONE.value, 0.85, ["phone", "tel", "mobile", "cell", "전화", "휴대폰", "電話", "手机"]),
+            (DataType.URI.value, 0.85, ["url", "uri", "link", "website", "site", "링크", "사이트", "网址", "链接"]),
+            (DataType.MONEY.value, 0.8, ["price", "cost", "amount", "fee", "salary", "가격", "금액", "価格"]),
+            (DataType.ADDRESS.value, 0.75, ["address", "addr", "주소", "住所", "地址", "dirección", "endereço", "адрес"]),
+            (DataType.DATE.value, 0.75, ["date", "day", "날짜", "일자", "日期", "日付"]),
+            (DataType.DATETIME.value, 0.75, ["datetime", "timestamp", "time", "시간", "일시", "日時", "时间戳"]),
+            (DataType.BOOLEAN.value, 0.7, ["is_", "has_", "flag", "active", "enabled", "여부", "유무"]),
+            (DataType.ENUM.value, 0.7, ["status", "state", "type", "category", "kind", "role", "등급", "분류"]),
+            ("uuid", 0.85, ["uuid", "guid"]),
+            ("ip", 0.85, ["ip", "ip_address", "ipv4", "ipv6"]),
+            (DataType.ARRAY.value, 0.7, ["array", "list", "items", "tags"]),
+            (DataType.OBJECT.value, 0.7, ["json", "payload", "metadata", "attributes", "object"]),
+            (DataType.COORDINATE.value, 0.75, ["coordinate", "coords", "latlng", "좌표", "위도", "경도"]),
+        ]
+
+        for type_id, score, keywords in hint_specs:
+            if any(keyword in name_lower for keyword in keywords):
+                hints[type_id] = max(hints.get(type_id, 0.0), score)
+
+        return hints
+
+    @classmethod
+    def _min_confidence_for_type(
+        cls, type_id: str, thresholds: Dict[str, float], name_hints: Dict[str, float]
+    ) -> float:
+        """Minimum acceptance confidence for a type (name hints can lower it)."""
+        if type_id == DataType.BOOLEAN.value:
+            base = thresholds["boolean"]
+        elif type_id == DataType.INTEGER.value:
+            base = thresholds["integer"]
+        elif type_id == DataType.DECIMAL.value:
+            base = thresholds["decimal"]
+        elif type_id == DataType.DATE.value:
+            base = thresholds["date"]
+        elif type_id == DataType.DATETIME.value:
+            base = thresholds["datetime"]
+        elif type_id == DataType.ENUM.value:
+            base = thresholds["enum"]
+        else:
+            base = thresholds["complex"]
+
+        # Column name strongly suggests this type -> allow lower evidence threshold
+        if type_id in name_hints:
+            base = min(base, 0.70)
+
+        return base
+
+    @classmethod
+    def _type_priority(cls, type_id: str) -> int:
+        """Tie-break priority (lower is preferred)."""
+        priorities = {
+            DataType.EMAIL.value: 0,
+            DataType.URI.value: 1,
+            "uuid": 2,
+            "ip": 3,
+            DataType.PHONE.value: 4,
+            DataType.MONEY.value: 5,
+            DataType.ARRAY.value: 6,
+            DataType.OBJECT.value: 7,
+            DataType.COORDINATE.value: 8,
+            DataType.BOOLEAN.value: 10,
+            DataType.INTEGER.value: 11,
+            DataType.DECIMAL.value: 12,
+            DataType.DATETIME.value: 13,
+            DataType.DATE.value: 14,
+            DataType.ENUM.value: 20,
+        }
+        return priorities.get(type_id, 100)
+
+    @classmethod
+    def _select_best_candidate(
+        cls,
+        candidates: List[TypeInferenceResult],
+        thresholds: Dict[str, float],
+        name_hints: Dict[str, float],
+    ) -> Optional[TypeInferenceResult]:
+        # If the column name strongly implies a specialized type, prefer it when it validates reasonably.
+        strong_types = {
+            DataType.EMAIL.value,
+            DataType.PHONE.value,
+            DataType.URI.value,
+            DataType.MONEY.value,
+            DataType.ADDRESS.value,
+            DataType.COORDINATE.value,
+            "uuid",
+            "ip",
+        }
+        strong_hints = sorted(
+            (t for t, s in name_hints.items() if s >= 0.85 and t in strong_types),
+            key=lambda t: name_hints.get(t, 0.0),
+            reverse=True,
+        )
+        for hinted_type in strong_hints:
+            hinted_candidates = [c for c in candidates if c.type == hinted_type]
+            if not hinted_candidates:
+                continue
+            best_hinted = max(hinted_candidates, key=lambda c: c.confidence)
+            if best_hinted.confidence >= cls._min_confidence_for_type(
+                best_hinted.type, thresholds, name_hints
+            ):
+                return best_hinted
+
+        eligible: List[Tuple[float, int, TypeInferenceResult]] = []
+        for cand in candidates:
+            min_conf = cls._min_confidence_for_type(cand.type, thresholds, name_hints)
+            if cand.confidence < min_conf:
+                continue
+
+            # Small tie-break boost if column name hints the same type
+            hint_boost = 0.02 if cand.type in name_hints else 0.0
+            rank_score = min(1.0, cand.confidence + hint_boost)
+            eligible.append((rank_score, -cls._type_priority(cand.type), cand))
+
+        if not eligible:
+            return None
+
+        eligible.sort(reverse=True, key=lambda t: (t[0], t[1]))
+        return eligible[0][2]
+
+    @classmethod
+    def _check_complex_types_enhanced(
+        cls,
+        values: List[str],
+        thresholds: Dict[str, float],
+        column_name: Optional[str],
+        name_hints: Dict[str, float],
+    ) -> List[TypeInferenceResult]:
+        """Evaluate complex/specialized types via validators and heuristics."""
+        candidates: List[TypeInferenceResult] = []
+
+        # Phone (heuristic) – also provides region hint metadata
+        candidates.append(cls._check_phone_enhanced(values, thresholds, column_name))
+
+        # Validator-based candidates (high precision)
+        candidates.append(cls._check_validator_type(values, DataType.EMAIL.value))
+        candidates.append(cls._check_validator_type(values, DataType.URI.value))
+        candidates.append(cls._check_validator_type(values, DataType.MONEY.value))
+        candidates.append(cls._check_validator_type(values, "uuid"))
+        candidates.append(cls._check_validator_type(values, "ip"))
+        candidates.append(cls._check_validator_type(values, DataType.ARRAY.value))
+        candidates.append(cls._check_validator_type(values, DataType.OBJECT.value))
+        candidates.append(cls._check_validator_type(values, DataType.COORDINATE.value))
+
+        # Column-name-hinted validation for types that are easy to overfit
+        for hinted_type in [
+            DataType.EMAIL.value,
+            DataType.PHONE.value,
+            DataType.URI.value,
+            DataType.MONEY.value,
+            DataType.ADDRESS.value,
+            "uuid",
+            "ip",
+        ]:
+            if hinted_type not in name_hints:
+                continue
+            candidates.append(
+                cls._check_validator_type(
+                    values,
+                    hinted_type,
+                    sample_limit=min(50, len(values)),
+                    hint_reason=f"Column name suggests {hinted_type}",
+                )
+            )
+
+        return candidates
+
+    @classmethod
+    def _check_validator_type(
+        cls,
+        values: List[str],
+        type_id: str,
+        sample_limit: int = 50,
+        hint_reason: Optional[str] = None,
+        constraints: Optional[Dict[str, Any]] = None,
+    ) -> TypeInferenceResult:
+        """Check values against ComplexTypeValidator for a given type."""
+        if not values:
+            return TypeInferenceResult(type=type_id, confidence=0.0, reason="No values to validate")
+
+        sample = values[: min(sample_limit, len(values))]
+        effective_constraints: Dict[str, Any] = dict(constraints or {})
+        if type_id == DataType.MONEY.value:
+            derived = cls._derive_money_constraints_from_samples(sample)
+            if derived.get("allowedCurrencies") and "allowedCurrencies" not in effective_constraints:
+                effective_constraints["allowedCurrencies"] = derived["allowedCurrencies"]
+
+        valid_count = 0
+        money_currencies: Counter[str] = Counter()
+        money_amounts: List[float] = []
+        ambiguous_yen_samples = 0
+        ambiguous_yen_resolved: Counter[str] = Counter()
+        for v in sample:
+            if type_id == DataType.MONEY.value and isinstance(v, str):
+                if any(sym in v for sym in MoneyValidator.AMBIGUOUS_SYMBOLS):
+                    ambiguous_yen_samples += 1
+
+            is_valid, _, normalized = ComplexTypeValidator.validate(v, type_id, effective_constraints)
+            if is_valid:
+                valid_count += 1
+                if type_id == DataType.MONEY.value and isinstance(normalized, dict):
+                    currency = normalized.get("currency")
+                    amount = normalized.get("amount")
+                    if isinstance(currency, str):
+                        money_currencies[currency] += 1
+                        if isinstance(v, str) and any(sym in v for sym in MoneyValidator.AMBIGUOUS_SYMBOLS):
+                            ambiguous_yen_resolved[currency] += 1
+                    try:
+                        if amount is not None:
+                            money_amounts.append(float(amount))
+                    except (TypeError, ValueError):
+                        pass
+
+        confidence = valid_count / len(sample) if sample else 0.0
+        reason_prefix = f"{hint_reason}. " if hint_reason else ""
+        metadata: Dict[str, Any] = {"matched": valid_count, "total": len(sample)}
+
+        if type_id == DataType.MONEY.value and valid_count > 0 and money_currencies:
+            currencies = [c for c, _ in money_currencies.most_common()]
+            default_currency = money_currencies.most_common(1)[0][0]
+            metadata.update(
+                {
+                    "currencies": currencies,
+                    "currency": default_currency,
+                    "min": min(money_amounts) if money_amounts else None,
+                    "max": max(money_amounts) if money_amounts else None,
+                    "suggested_constraints": {
+                        "allowedCurrencies": currencies,
+                        "defaultCurrency": default_currency,
+                    },
+                }
+            )
+            if ambiguous_yen_samples > 0:
+                yen_context = set(effective_constraints.get("allowedCurrencies", [])) & {"CNY", "JPY"}
+                metadata.update(
+                    {
+                        "ambiguous_symbol_samples": ambiguous_yen_samples,
+                        "ambiguous_symbol_resolved": {
+                            c: n for c, n in ambiguous_yen_resolved.most_common()
+                        },
+                        "ambiguous_symbol_candidates": ["CNY", "JPY"] if len(yen_context) != 1 else [],
+                    }
+                )
+
+        return TypeInferenceResult(
+            type=type_id,
+            confidence=confidence,
+            reason=f"{reason_prefix}{valid_count}/{len(sample)} samples validate as {type_id}",
+            metadata=metadata,
+        )
+
+    @classmethod
+    def _derive_money_constraints_from_samples(cls, values: List[str]) -> Dict[str, Any]:
+        """
+        Derive money constraints (allowedCurrencies) from explicit tokens in samples.
+
+        Purpose: disambiguate symbols like ¥/￥ without hard-coding a region-specific default.
+        """
+        allowed: set[str] = set()
+        for raw in values:
+            s = str(raw).strip()
+            if not s:
+                continue
+
+            # Unit words / localized aliases
+            for word, code in MoneyValidator.CURRENCY_WORD_ALIASES.items():
+                if word in s:
+                    allowed.add(code)
+
+            # Unambiguous currency symbols
+            for sym, code in MoneyValidator.CURRENCY_SYMBOLS.items():
+                if sym in s:
+                    allowed.add(code)
+
+            # Currency codes (ISO-ish), including aliases like RMB/CNH
+            for code in re.findall(r"\b[A-Za-z]{3}\b", s):
+                norm = MoneyValidator.CURRENCY_CODE_ALIASES.get(code.upper(), code.upper())
+                if norm in MoneyValidator.COMMON_CURRENCIES:
+                    allowed.add(norm)
+
+        return {"allowedCurrencies": sorted(allowed)} if allowed else {}
+
+    @classmethod
+    def _check_enum_enhanced(
+        cls, values: List[str], thresholds: Dict[str, float], name_hints: Dict[str, float]
+    ) -> TypeInferenceResult:
+        """Detect enum-like categorical strings and propose constraints."""
+        if not values:
+            return TypeInferenceResult(type=DataType.ENUM.value, confidence=0.0, reason="No values")
+
+        counts = Counter(values)
+        unique_count = len(counts)
+        total = len(values)
+        unique_ratio = unique_count / total if total > 0 else 0.0
+
+        # Heuristic: small unique set and repeated values => enum candidate
+        max_unique_allowed = min(50, max(2, int(total * 0.2)))
+        is_enum_like = unique_count <= max_unique_allowed and unique_ratio <= 0.2
+
+        confidence = max(0.0, min(1.0, 1.0 - unique_ratio))
+        allowed_values = [v for v, _ in counts.most_common(min(unique_count, 50))]
+
+        if not is_enum_like:
+            return TypeInferenceResult(
+                type=DataType.ENUM.value,
+                confidence=confidence,
+                reason=f"Enum heuristic not met (unique_ratio={unique_ratio:.2f}, unique_count={unique_count})",
+                metadata={"unique_count": unique_count, "total": total},
+            )
+
+        return TypeInferenceResult(
+            type=DataType.ENUM.value,
+            confidence=confidence,
+            reason=f"Enum-like distribution: {unique_count} unique / {total} samples (unique_ratio={unique_ratio:.2f})",
+            metadata={
+                "allowed_values": allowed_values,
+                "suggested_constraints": {"enum": allowed_values},
+                "unique_count": unique_count,
+                "total": total,
+            },
         )
 
     @classmethod
@@ -512,41 +817,35 @@ class PatternBasedTypeDetector:
 
     @classmethod
     def _calculate_adaptive_thresholds(cls, values: List[str], sample_size: int) -> Dict[str, float]:
-        """🔥 Adaptive Thresholds: Adjust confidence thresholds based on data quality"""
+        """🔥 Adaptive Thresholds: tune acceptance based on sample size.
+
+        Notes:
+        - 작은 샘플은 우연/오탐 위험이 크므로 더 보수적으로(임계값 ↑)
+        - 큰 샘플은 소량의 노이즈를 허용(임계값 ↓)
+        """
         base_thresholds = {
-            'boolean': 0.9,
-            'integer': 0.9, 
-            'decimal': 0.9,
-            'date': 0.8,
-            'datetime': 0.8
+            "boolean": 0.95,
+            "integer": 0.90,
+            "decimal": 0.90,
+            "date": 0.90,
+            "datetime": 0.90,
+            # complex / enum are handled in selection stage, but keep defaults here
+            "complex": 0.90,
+            "enum": 0.95,
         }
-        
-        # Calculate data quality metrics
-        unique_count = len(set(values))
-        total_count = len(values)
-        uniqueness_ratio = unique_count / total_count if total_count > 0 else 0
-        
-        # Adjust thresholds based on sample size and uniqueness
-        if sample_size < 10:
-            # Small samples: be more lenient
-            adjustment = 0.1
-        elif sample_size > 1000:
-            # Large samples: be more strict
-            adjustment = -0.05
+
+        if sample_size <= 10:
+            delta = 0.05
+        elif sample_size >= 1000:
+            delta = -0.05
         else:
-            adjustment = 0
-            
-        # High uniqueness suggests more complex data
-        if uniqueness_ratio > 0.8:
-            adjustment -= 0.05
-        elif uniqueness_ratio < 0.3:
-            adjustment += 0.05
-            
-        # Apply adjustments with bounds
-        for key in base_thresholds:
-            base_thresholds[key] = max(0.6, min(0.95, base_thresholds[key] + adjustment))
-            
-        return base_thresholds
+            delta = 0.0
+
+        thresholds: Dict[str, float] = {}
+        for key, base in base_thresholds.items():
+            thresholds[key] = max(0.70, min(0.99, base + delta))
+
+        return thresholds
     
     @classmethod
     def _analyze_context(cls, column_name: str, context_columns: Dict[str, List[Any]]) -> Dict[str, Any]:
@@ -630,20 +929,18 @@ class PatternBasedTypeDetector:
         """🔥 Enhanced Boolean Detection with Fuzzy Matching"""
         total = len(values)
         matched = 0
-        fuzzy_matched = 0
         
         for value in values:
             value_lower = value.lower().strip()
+            # Trim common punctuation without allowing substring matches (avoid "true story" -> boolean)
+            token = re.sub(r"^[\\W_]+|[\\W_]+$", "", value_lower)
             
             # Exact match
-            if value_lower in cls.BOOLEAN_VALUES:
+            if token in cls.BOOLEAN_VALUES:
                 matched += 1
-            # Fuzzy matching for partial patterns
-            elif any(bool_val in value_lower for bool_val in cls.BOOLEAN_VALUES.keys() if len(bool_val) > 2):
-                fuzzy_matched += 1
                 
         exact_confidence = matched / total if total > 0 else 0
-        fuzzy_confidence = (matched + fuzzy_matched * 0.7) / total if total > 0 else 0
+        fuzzy_confidence = exact_confidence
         
         # Use higher confidence with explanation
         if exact_confidence >= thresholds['boolean']:
@@ -651,12 +948,6 @@ class PatternBasedTypeDetector:
                 type=DataType.BOOLEAN.value,
                 confidence=exact_confidence,
                 reason=f"Enhanced boolean detection: {matched}/{total} exact matches ({exact_confidence*100:.1f}%)",
-            )
-        elif fuzzy_confidence >= thresholds['boolean'] * 0.8:  # Lower threshold for fuzzy
-            return TypeInferenceResult(
-                type=DataType.BOOLEAN.value,
-                confidence=fuzzy_confidence,
-                reason=f"Enhanced fuzzy boolean detection: {matched} exact + {fuzzy_matched} fuzzy matches ({fuzzy_confidence*100:.1f}%)",
             )
         
         return TypeInferenceResult(
@@ -673,14 +964,36 @@ class PatternBasedTypeDetector:
         int_values = []
         
         for value in values:
-            cleaned = value.replace(",", "").replace(" ", "")
+            raw = value.strip()
+            if not raw:
+                continue
+
+            # Allow proper thousands separators (comma/space/underscore) and leading zeros
+            is_valid_int = False
+            normalized = raw
+
+            if re.fullmatch(r"[+-]?\d+", raw):
+                is_valid_int = True
+                normalized = raw
+            elif "," in raw and re.fullmatch(r"[+-]?\d{1,3}(,\d{3})+", raw):
+                is_valid_int = True
+                normalized = raw.replace(",", "")
+            elif "_" in raw and re.fullmatch(r"[+-]?\d{1,3}(_\d{3})+", raw):
+                is_valid_int = True
+                normalized = raw.replace("_", "")
+            elif " " in raw and re.fullmatch(r"[+-]?\d{1,3}( \d{3})+", raw):
+                is_valid_int = True
+                normalized = raw.replace(" ", "")
+
+            if not is_valid_int:
+                continue
+
             try:
-                int_val = int(cleaned)
-                if cleaned == str(int_val) or (cleaned.startswith("+") and cleaned[1:] == str(int_val)):
-                    matched += 1
-                    int_values.append(int_val)
+                int_val = int(normalized)
+                matched += 1
+                int_values.append(int_val)
             except ValueError:
-                pass
+                continue
                 
         confidence = matched / total if total > 0 else 0
         
@@ -697,11 +1010,27 @@ class PatternBasedTypeDetector:
                 confidence = min(1.0, confidence * 1.05)
                 
         if confidence >= thresholds['integer']:
-            stats_info = f", range: {max(int_values) - min(int_values)}, avg_digits: {statistics.mean([len(str(abs(v))) for v in int_values]):.1f}" if int_values else ""
+            stats_info = (
+                f", range: {max(int_values) - min(int_values)}, "
+                f"avg_digits: {statistics.mean([len(str(abs(v))) for v in int_values]):.1f}"
+                if int_values
+                else ""
+            )
+            metadata = None
+            if int_values:
+                metadata = {
+                    "min": min(int_values),
+                    "max": max(int_values),
+                    "mean": statistics.mean(int_values),
+                    "std": statistics.stdev(int_values) if len(int_values) > 1 else 0.0,
+                    "matched": matched,
+                    "total": total,
+                }
             return TypeInferenceResult(
                 type=DataType.INTEGER.value,
                 confidence=confidence,
                 reason=f"Enhanced integer analysis: {matched}/{total} values ({confidence*100:.1f}%){stats_info}",
+                metadata=metadata,
             )
         
         return TypeInferenceResult(
@@ -719,19 +1048,67 @@ class PatternBasedTypeDetector:
         decimal_values = []
         
         for value in values:
-            cleaned = value.replace(" ", "")
-            
-            # Handle different decimal separators
-            if "," in cleaned and "." not in cleaned:
-                cleaned = cleaned.replace(",", ".")
-            elif "," in cleaned and "." in cleaned:
-                cleaned = cleaned.replace(",", "")
-                
+            raw = value.strip().replace(" ", "")
+            if not raw:
+                continue
+
+            # Allow parentheses for negatives: (123.45)
+            sign = ""
+            if raw.startswith("(") and raw.endswith(")"):
+                sign = "-"
+                raw = raw[1:-1].strip()
+
+            # Extract sign
+            if raw.startswith(("+", "-")):
+                sign = raw[0]
+                raw = raw[1:]
+
+            normalized = raw
+            has_fraction = False
+
+            if "," in raw and "." in raw:
+                # Decide decimal separator by the last occurrence
+                if raw.rfind(",") > raw.rfind("."):
+                    # 1.234,56 -> 1234.56
+                    normalized = raw.replace(".", "").replace(",", ".")
+                    has_fraction = True
+                else:
+                    # 1,234.56 -> 1234.56
+                    normalized = raw.replace(",", "")
+                    has_fraction = True
+            elif "," in raw:
+                parts = raw.split(",")
+                if len(parts) == 2 and 1 <= len(parts[1]) <= 6 and len(parts[1]) != 3:
+                    # 12,34 -> 12.34 (comma as decimal)
+                    normalized = raw.replace(",", ".")
+                    has_fraction = True
+                elif len(parts) >= 2 and all(len(p) == 3 for p in parts[1:]):
+                    # 1,234,567 -> 1234567 (comma as thousands)
+                    normalized = raw.replace(",", "")
+                    has_fraction = False
+                else:
+                    # Ambiguous: try decimal first
+                    if len(parts) == 2 and 1 <= len(parts[1]) <= 6:
+                        normalized = raw.replace(",", ".")
+                        has_fraction = True
+                    else:
+                        continue
+            elif "." in raw:
+                dot_count = raw.count(".")
+                if dot_count > 1:
+                    # 1.234.567 -> 1234567 (dot as thousands)
+                    normalized = raw.replace(".", "")
+                    has_fraction = False
+                else:
+                    # Single dot: treat as decimal separator
+                    normalized = raw
+                    has_fraction = True
+
             try:
-                decimal_val = float(Decimal(cleaned))
+                decimal_val = float(Decimal(f"{sign}{normalized}"))
                 matched += 1
                 decimal_values.append(decimal_val)
-                if "." in cleaned:
+                if has_fraction:
                     has_decimals += 1
             except (ValueError, InvalidOperation):
                 pass
@@ -748,8 +1125,6 @@ class PatternBasedTypeDetector:
                 # Adjust confidence based on distribution characteristics
                 if coefficient_of_variation < 0.5:  # Low variability suggests structured data
                     confidence = min(1.0, confidence * 1.1)
-                elif coefficient_of_variation > 2.0:  # High variability might indicate mixed types
-                    confidence = confidence * 0.9
                     
             except statistics.StatisticsError:
                 pass
@@ -761,11 +1136,23 @@ class PatternBasedTypeDetector:
             # Reduce confidence if no actual decimals but claiming decimal type
             if has_decimals == 0:
                 confidence *= 0.8
+            metadata = None
+            if decimal_values:
+                metadata = {
+                    "min": min(decimal_values),
+                    "max": max(decimal_values),
+                    "mean": statistics.mean(decimal_values),
+                    "std": statistics.stdev(decimal_values) if len(decimal_values) > 1 else 0.0,
+                    "matched": matched,
+                    "total": total,
+                    "has_decimals": has_decimals,
+                }
                 
             return TypeInferenceResult(
                 type=DataType.DECIMAL.value,
                 confidence=confidence,
                 reason=f"Enhanced decimal analysis: {matched}/{total} values ({confidence*100:.1f}%){decimal_info}{stats_info}",
+                metadata=metadata,
             )
             
         return TypeInferenceResult(
@@ -776,64 +1163,150 @@ class PatternBasedTypeDetector:
     
     @classmethod
     def _check_date_enhanced(cls, values: List[str], thresholds: Dict[str, float]) -> TypeInferenceResult:
-        """🔥 Enhanced Date Detection with Fuzzy Matching"""
+        """🔥 Enhanced Date Detection with strict parsing and ambiguity handling."""
         total = len(values)
         matched = 0
-        fuzzy_matched = 0
-        pattern_counts = Counter()
-        
+        ambiguous = 0
+        pattern_counts: Counter[str] = Counter()
+
+        def _try_parse(value: str, fmt: str) -> bool:
+            try:
+                datetime.strptime(value, fmt)
+                return True
+            except ValueError:
+                return False
+
         for value in values:
-            exact_match = False
-            
-            # Exact pattern matching
-            for pattern_regex, format_str, pattern_name in cls.DATE_PATTERNS:
-                if re.match(pattern_regex, value):
-                    if format_str:
-                        try:
-                            datetime.strptime(value, format_str)
-                            matched += 1
-                            pattern_counts[pattern_name] += 1
-                            exact_match = True
-                            break
-                        except ValueError:
-                            continue
-                    else:
+            v = value.strip()
+            if not v:
+                continue
+
+            # ISO-ish: YYYY-MM-DD / YYYY/M/D
+            if re.fullmatch(r"\d{4}-\d{1,2}-\d{1,2}", v) and _try_parse(v, "%Y-%m-%d"):
+                matched += 1
+                pattern_counts["YYYY-MM-DD"] += 1
+                continue
+            if re.fullmatch(r"\d{4}/\d{1,2}/\d{1,2}", v) and _try_parse(v, "%Y/%m/%d"):
+                matched += 1
+                pattern_counts["YYYY/MM/DD"] += 1
+                continue
+
+            # Ambiguous: 01/02/2024 or 01-02-2024
+            m = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{4})", v)
+            if m:
+                a, b, _year = m.groups()
+                month_first = _try_parse(v, "%m/%d/%Y")
+                day_first = _try_parse(v, "%d/%m/%Y")
+                if month_first and not day_first:
+                    matched += 1
+                    pattern_counts["MM/DD/YYYY"] += 1
+                    continue
+                if day_first and not month_first:
+                    matched += 1
+                    pattern_counts["DD/MM/YYYY"] += 1
+                    continue
+                if month_first and day_first:
+                    a_i, b_i = int(a), int(b)
+                    if a_i > 12:
                         matched += 1
-                        pattern_counts[pattern_name] += 1
-                        exact_match = True
-                        break
-            
-            # Fuzzy matching for partial date patterns
-            if not exact_match:
-                if re.search(r'\d{4}', value) and re.search(r'\d{1,2}', value):  # Year + month/day pattern
-                    fuzzy_matched += 1
-                elif any(month in value.lower() for month in ['jan', 'feb', 'mar', 'apr', 'may', 'jun',
-                                                               'jul', 'aug', 'sep', 'oct', 'nov', 'dec']):
-                    fuzzy_matched += 1
-                    
-        exact_confidence = matched / total if total > 0 else 0
-        fuzzy_confidence = (matched + fuzzy_matched * 0.6) / total if total > 0 else 0
-        
-        if exact_confidence >= thresholds['date'] and pattern_counts:
-            most_common_pattern = pattern_counts.most_common(1)[0][0]
+                        pattern_counts["DD/MM/YYYY"] += 1
+                        continue
+                    if b_i > 12:
+                        matched += 1
+                        pattern_counts["MM/DD/YYYY"] += 1
+                        continue
+                    # Truly ambiguous (both <= 12)
+                    ambiguous += 1
+                    matched += 1
+                    pattern_counts["MM/DD/YYYY"] += 1
+                    continue
+
+            m = re.fullmatch(r"(\d{1,2})-(\d{1,2})-(\d{4})", v)
+            if m:
+                a, b, _year = m.groups()
+                month_first = _try_parse(v, "%m-%d-%Y")
+                day_first = _try_parse(v, "%d-%m-%Y")
+                if month_first and not day_first:
+                    matched += 1
+                    pattern_counts["MM-DD-YYYY"] += 1
+                    continue
+                if day_first and not month_first:
+                    matched += 1
+                    pattern_counts["DD-MM-YYYY"] += 1
+                    continue
+                if month_first and day_first:
+                    a_i, b_i = int(a), int(b)
+                    if a_i > 12:
+                        matched += 1
+                        pattern_counts["DD-MM-YYYY"] += 1
+                        continue
+                    if b_i > 12:
+                        matched += 1
+                        pattern_counts["MM-DD-YYYY"] += 1
+                        continue
+                    ambiguous += 1
+                    matched += 1
+                    pattern_counts["MM-DD-YYYY"] += 1
+                    continue
+
+            # Dot format: DD.MM.YYYY
+            if re.fullmatch(r"\d{1,2}\.\d{1,2}\.\d{4}", v) and _try_parse(v, "%d.%m.%Y"):
+                matched += 1
+                pattern_counts["DD.MM.YYYY"] += 1
+                continue
+
+            # Korean: YYYY년 M월 D일
+            m = re.fullmatch(r"(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일", v)
+            if m:
+                y, mo, d = map(int, m.groups())
+                try:
+                    datetime(y, mo, d)
+                    matched += 1
+                    pattern_counts["YYYY년 MM월 DD일"] += 1
+                    continue
+                except ValueError:
+                    pass
+
+            # Japanese/Chinese: YYYY年M月D日
+            m = re.fullmatch(r"(\d{4})[年]\s*(\d{1,2})[月]\s*(\d{1,2})[日]", v)
+            if m:
+                y, mo, d = map(int, m.groups())
+                try:
+                    datetime(y, mo, d)
+                    matched += 1
+                    pattern_counts["YYYY年MM月DD日"] += 1
+                    continue
+                except ValueError:
+                    pass
+
+            # Reiwa era (keep as date-like, but not convertible here)
+            if re.fullmatch(r"令和\d+年\s*\d{1,2}月\s*\d{1,2}日", v):
+                matched += 1
+                pattern_counts["令和年月日"] += 1
+                continue
+
+        confidence = matched / total if total > 0 else 0.0
+        if confidence >= thresholds["date"] and pattern_counts:
+            most_common = pattern_counts.most_common(1)[0][0]
+            final_confidence = confidence
+            if ambiguous > 0:
+                final_confidence = max(0.0, confidence - 0.05)
             return TypeInferenceResult(
                 type=DataType.DATE.value,
-                confidence=exact_confidence,
-                reason=f"Enhanced date detection: {matched}/{total} exact matches ({exact_confidence*100:.1f}%), primary pattern: {most_common_pattern}",
-                metadata={"detected_format": most_common_pattern, "fuzzy_matches": fuzzy_matched}
+                confidence=final_confidence,
+                reason=f"Enhanced date detection: {matched}/{total} matches ({final_confidence*100:.1f}%), primary pattern: {most_common}",
+                metadata={
+                    "detected_format": most_common,
+                    "ambiguous_count": ambiguous,
+                    "matched": matched,
+                    "total": total,
+                },
             )
-        elif fuzzy_confidence >= thresholds['date'] * 0.7:  # Lower threshold for fuzzy
-            return TypeInferenceResult(
-                type=DataType.DATE.value,
-                confidence=fuzzy_confidence,
-                reason=f"Enhanced fuzzy date detection: {matched} exact + {fuzzy_matched} fuzzy matches ({fuzzy_confidence*100:.1f}%)",
-                metadata={"fuzzy_matches": fuzzy_matched}
-            )
-            
+
         return TypeInferenceResult(
             type=DataType.DATE.value,
-            confidence=fuzzy_confidence,
-            reason=f"Enhanced date analysis: insufficient matches ({fuzzy_confidence*100:.1f}%)",
+            confidence=confidence,
+            reason=f"Enhanced date analysis: insufficient matches ({confidence*100:.1f}%)",
         )
     
     @classmethod
@@ -979,28 +1452,52 @@ class PatternBasedTypeDetector:
         total = len(values)
         matched = 0
         fuzzy_matched = 0
+        kr_like = 0
+        us_like = 0
         
-        # Enhanced phone patterns
-        phone_patterns = [
-            r'^\+?1?[-\s]?\(?\d{3}\)?[-\s]?\d{3}[-\s]?\d{4}$',  # US format
-            r'^\+?\d{1,4}[-\s]?\(?\d{1,4}\)?[-\s]?\d{3,4}[-\s]?\d{4}$',  # International
-            r'^\d{3}-\d{4}-\d{4}$',  # Korean format
-            r'^\d{3}[-\s]\d{4}[-\s]\d{4}$',  # Korean alt
-            r'^\d{10,15}$',  # Simple numeric
-            r'^\+\d{10,15}$',  # International prefix
+        # Enhanced phone patterns (ordered from most specific to most generic)
+        kr_patterns = [
+            r"^\d{3}-\d{4}-\d{4}$",  # Korean format
+            r"^\d{3}[-\s]\d{4}[-\s]\d{4}$",  # Korean alt
         ]
+        us_pattern = r"^\+?1?[-\s]?\(?\d{3}\)?[-\s]?\d{3}[-\s]?\d{4}$"
+        plus_digits_pattern = r"^\+\d{10,15}$"
+        digits_only_pattern = r"^\d{10,15}$"
+        intl_pattern = r"^\+?\d{1,4}[-\s]?\(?\d{1,4}\)?[-\s]?\d{3,4}[-\s]?\d{4}$"
         
         for value in values:
             # Clean the value
             cleaned = value.strip()
             
-            # Exact pattern matching
+            # Exact pattern matching (prefer specific patterns first)
             exact_match = False
-            for pattern in phone_patterns:
-                if re.match(pattern, cleaned):
-                    matched += 1
-                    exact_match = True
-                    break
+            if any(re.match(p, cleaned) for p in kr_patterns):
+                matched += 1
+                exact_match = True
+                kr_like += 1
+            elif re.match(us_pattern, cleaned):
+                matched += 1
+                exact_match = True
+                us_like += 1
+            elif re.match(plus_digits_pattern, cleaned):
+                matched += 1
+                exact_match = True
+                if cleaned.startswith("+82"):
+                    kr_like += 1
+                elif cleaned.startswith("+1"):
+                    us_like += 1
+            elif re.match(digits_only_pattern, cleaned):
+                matched += 1
+                exact_match = True
+                if cleaned.startswith("010"):
+                    kr_like += 1
+            elif re.match(intl_pattern, cleaned):
+                matched += 1
+                exact_match = True
+                if cleaned.startswith("82") or cleaned.startswith("+82"):
+                    kr_like += 1
+                elif cleaned.startswith("1") or cleaned.startswith("+1"):
+                    us_like += 1
                     
             # Fuzzy matching if no exact match
             if not exact_match:
@@ -1013,9 +1510,19 @@ class PatternBasedTypeDetector:
                     # Check if it starts with country code patterns
                     elif cleaned.startswith(('+', '00')) or (len(digits_only) >= 10):
                         fuzzy_matched += 1
+                if cleaned.startswith("+82") or cleaned.startswith("82") or cleaned.startswith("010"):
+                    kr_like += 1
+                if cleaned.startswith("+1") or cleaned.startswith("1"):
+                    us_like += 1
                         
         exact_confidence = matched / total if total > 0 else 0
         fuzzy_confidence = (matched + fuzzy_matched * 0.8) / total if total > 0 else 0
+
+        suggested_constraints = None
+        if kr_like > 0 and kr_like >= us_like:
+            suggested_constraints = {"defaultRegion": "KR"}
+        elif us_like > 0 and us_like > kr_like:
+            suggested_constraints = {"defaultRegion": "US"}
         
         # Boost confidence if column name suggests phone
         column_boost = 0
@@ -1025,12 +1532,18 @@ class PatternBasedTypeDetector:
                 column_boost = 0.1
                 
         final_confidence = min(1.0, fuzzy_confidence + column_boost)
+        metadata = {
+            "matched": matched,
+            "total": total,
+            "suggested_constraints": suggested_constraints,
+        }
         
         if exact_confidence >= 0.8:
             return TypeInferenceResult(
                 type=DataType.PHONE.value,
                 confidence=exact_confidence,
                 reason=f"Enhanced phone detection: {matched}/{total} exact pattern matches ({exact_confidence*100:.1f}%)",
+                metadata=metadata,
             )
         elif final_confidence >= 0.7:
             boost_info = f" + column hint boost" if column_boost > 0 else ""
@@ -1038,12 +1551,14 @@ class PatternBasedTypeDetector:
                 type=DataType.PHONE.value,
                 confidence=final_confidence,
                 reason=f"Enhanced fuzzy phone detection: {matched} exact + {fuzzy_matched} fuzzy matches ({final_confidence*100:.1f}%){boost_info}",
+                metadata=metadata,
             )
             
         return TypeInferenceResult(
             type=DataType.PHONE.value,
             confidence=final_confidence,
             reason=f"Enhanced phone analysis: insufficient matches ({final_confidence*100:.1f}%)",
+            metadata=metadata,
         )
 
 

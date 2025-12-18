@@ -69,12 +69,11 @@ class BaseCommand(BaseModel):
     created_by: Optional[str] = Field(None, description="생성자")
     version: int = Field(1, description="명령 버전")
     checksum: Optional[str] = Field(None, description="페이로드 체크섬 (SHA256)")
-    
-    class Config:
-        json_encoders = {
-            UUID: str,
-            datetime: lambda v: v.isoformat()
-        }
+    expected_seq: Optional[int] = Field(
+        None,
+        description="Optimistic concurrency guard: expected current aggregate sequence",
+        ge=0,
+    )
 
 
 class OntologyCommand(BaseCommand):
@@ -156,9 +155,3 @@ class CommandResult(BaseModel):
     error: Optional[str] = Field(None, description="에러 메시지")
     completed_at: Optional[datetime] = Field(None, description="완료 시각")
     retry_count: int = Field(0, description="재시도 횟수")
-    
-    class Config:
-        json_encoders = {
-            UUID: str,
-            datetime: lambda v: v.isoformat()
-        }

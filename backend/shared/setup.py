@@ -29,7 +29,7 @@ setup(
         # 🗄️ Database & Caching
         "redis[hiredis]==5.0.1",
         "elasticsearch==8.11.0",
-        "aiohttp==3.9.1",  # Required for Elasticsearch async client
+        "aiohttp==3.9.5",  # Required for Elasticsearch async client (also required by aioboto3/aiobotocore)
         "asyncpg==0.29.0",
         "aiosqlite==0.19.0",
         
@@ -40,8 +40,9 @@ setup(
         "terminusdb-client==10.2.0",
         
         # ☁️ Storage
-        "boto3==1.34.14",
-        "botocore==1.34.14",
+        "boto3==1.38.27",
+        "botocore==1.38.27",
+        "aioboto3==15.0.0",
         
         # 🔐 Authentication & Security
         "python-jose[cryptography]==3.3.0",

@@ -5,7 +5,7 @@
 특징:
 - 역직구(한국 -> 해외) B2C 물류 흐름을 가정한 합성 데이터
 - 의도적으로 생성된 데이터 이상치(재고 불일치, mis-pick, 중복 트래킹, 통관 지연 등)
-- Event/Outbox 포함(원인-결과 연결: cause_event_id)
+- Event 포함(원인-결과 연결: cause_event_id)
 
 ## 파일 목록
 - warehouses.csv, locations.csv
@@ -16,7 +16,7 @@
 - tracking.csv
 - returns.csv, exceptions.csv
 - inventory_snapshots.csv
-- events.csv, outbox.csv
+- events.csv
 - ontology.jsonld
 
 ## 주요 테스트 시나리오
@@ -32,8 +32,8 @@
 4) **중복 트래킹 번호**
    - `tracking.tracking_number` 중복 값 존재 → 중복 처리 로직 검증
 
-5) **Outbox 패턴 검증**
-   - `events`의 event_id ↔ `outbox.cause_event_id` 인과 연결
+5) **Event 인과 관계 검증**
+   - `events.cause_event_id` 기반으로 원인-결과 연결이 유효한지 확인
 
 ## 스키마(요약)
 각 CSV 헤더가 컬럼이며, 상세 속성은 `ontology.jsonld` 참고.
@@ -51,5 +51,4 @@
 - Orders: 3000
 - Order items: 6016
 - Inbounds: 2639
-- Events: 2500 / Outbox: 2500
-
+- Events: 2500

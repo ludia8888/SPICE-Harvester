@@ -6,13 +6,19 @@ Handles database creation, deletion, and listing
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 
 # Modernized dependency injection imports
 from bff.dependencies import get_oms_client, OMSClientDep
 from bff.services.oms_client import OMSClient
 from shared.models.requests import ApiResponse, DatabaseCreateRequest
-from shared.security.input_sanitizer import sanitize_input, validate_db_name, SecurityViolationError
+from shared.security.input_sanitizer import (
+    SecurityViolationError,
+    sanitize_input,
+    validate_branch_name,
+    validate_db_name,
+)
 
 # Add shared path for common utilities
 from shared.utils.language import get_accept_language
@@ -104,17 +110,16 @@ async def create_database(request: DatabaseCreateRequest, oms: OMSClient = OMSCl
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.delete("/{db_name:path}")
-async def delete_database(db_name: str, oms: OMSClient = OMSClientDep):
+@router.delete("/{db_name}")
+async def delete_database(
+    db_name: str,
+    expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
+    oms: OMSClient = OMSClientDep,
+):
     """데이터베이스 삭제"""
     try:
         # 입력 데이터 보안 검증
-        # 슬래시가 포함된 잘못된 데이터베이스 이름도 삭제할 수 있도록 임시 허용
-        if "/" not in db_name:
-            validated_db_name = validate_db_name(db_name)
-        else:
-            logger.warning(f"Deleting database with invalid name containing slashes: {db_name}")
-            validated_db_name = db_name
+        validated_db_name = validate_db_name(db_name)
 
         # 시스템 데이터베이스 보호
         protected_dbs = ["_system", "_meta"]
@@ -125,7 +130,7 @@ async def delete_database(db_name: str, oms: OMSClient = OMSClientDep):
             )
 
         # OMS를 통해 데이터베이스 삭제
-        await oms.delete_database(validated_db_name)
+        await oms.delete_database(validated_db_name, expected_seq=expected_seq)
 
         # 자동 커밋: 데이터베이스 삭제 기록
         # 참고: 데이터베이스가 삭제되었으므로 메타데이터나 로그 시스템에 기록
@@ -166,6 +171,65 @@ async def delete_database(db_name: str, oms: OMSClient = OMSClientDep):
             )
 
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/{db_name}/branches/{branch_name:path}")
+async def get_branch_info(db_name: str, branch_name: str, oms: OMSClient = OMSClientDep) -> Dict[str, Any]:
+    """브랜치 정보 조회 (프론트엔드용 BFF 래핑)"""
+    try:
+        db_name = validate_db_name(db_name)
+        branch_name = validate_branch_name(branch_name)
+
+        return await oms.get(f"/api/v1/branch/{db_name}/branch/{branch_name}/info")
+    except SecurityViolationError as e:
+        logger.warning(f"Security validation failed for branch info ({db_name}/{branch_name}): {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except httpx.HTTPStatusError as e:
+        resp = getattr(e, "response", None)
+        if resp is not None and resp.status_code == 404:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="브랜치를 찾을 수 없습니다") from e
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="OMS 브랜치 조회 실패") from e
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="OMS 브랜치 조회 실패") from e
+    except Exception as e:
+        logger.error(f"Failed to get branch info ({db_name}/{branch_name}): {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+
+
+@router.delete("/{db_name}/branches/{branch_name:path}")
+async def delete_branch(
+    db_name: str,
+    branch_name: str,
+    force: bool = False,
+    oms: OMSClient = OMSClientDep,
+) -> Dict[str, Any]:
+    """브랜치 삭제 (프론트엔드용 BFF 래핑)"""
+    try:
+        db_name = validate_db_name(db_name)
+        branch_name = validate_branch_name(branch_name)
+
+        return await oms.delete(
+            f"/api/v1/branch/{db_name}/branch/{branch_name}",
+            params={"force": force},
+        )
+    except SecurityViolationError as e:
+        logger.warning(f"Security validation failed for branch delete ({db_name}/{branch_name}): {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except httpx.HTTPStatusError as e:
+        resp = getattr(e, "response", None)
+        if resp is not None:
+            if resp.status_code == 404:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="브랜치를 찾을 수 없습니다") from e
+            if resp.status_code == 403:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="보호된 브랜치는 삭제할 수 없습니다") from e
+            if resp.status_code == 400:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="현재 브랜치는 삭제할 수 없습니다") from e
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="OMS 브랜치 삭제 실패") from e
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="OMS 브랜치 삭제 실패") from e
+    except Exception as e:
+        logger.error(f"Failed to delete branch ({db_name}/{branch_name}): {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
 
 @router.get("/{db_name}")
@@ -361,11 +425,16 @@ async def create_branch(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="브랜치 이름이 필요합니다"
             )
+        branch_name = validate_branch_name(branch_name)
+
+        from_branch = branch_data.get("from_branch", "main")
+        if from_branch:
+            from_branch = validate_branch_name(from_branch)
 
         # 🔥 ROOT CAUSE FIX: OMS가 기대하는 필드명으로 변환
         oms_branch_data = {
             "branch_name": branch_name,  # 'name' -> 'branch_name'
-            "from_branch": branch_data.get("from_branch", "main")
+            "from_branch": from_branch,
         }
 
         # OMS를 통해 브랜치 생성

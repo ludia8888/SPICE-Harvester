@@ -1,230 +1,143 @@
-# 🔥 SPICE HARVESTER ENVIRONMENT VARIABLES
+# 🔥 SPICE HARVESTER ENVIRONMENT VARIABLES (Steady State)
 
-## Complete Production Environment Configuration
+> This document is a human-friendly index.  
+> Canonical defaults live in `.env.example`, and runtime contracts are documented in `docs/IDEMPOTENCY_CONTRACT.md`.
 
-All environment variables used across the entire SPICE HARVESTER system.
+## 1) Service base URLs (local/dev)
 
-## Core Services
-
-### OMS (Ontology Management Service)
 ```bash
-# Service Configuration
-SERVICE_NAME=oms
-SERVICE_PORT=8000
-SERVICE_HOST=0.0.0.0
-
-# Docker/Local Mode
-DOCKER_CONTAINER=false  # CRITICAL: Set to false for local development
-
-# API Keys
-API_KEY=your-secure-api-key-here
+OMS_BASE_URL=http://localhost:8000
+BFF_BASE_URL=http://localhost:8002
+FUNNEL_BASE_URL=http://localhost:8003
+USE_HTTPS=false
+VERIFY_SSL=false
 ```
 
-### BFF (Backend for Frontend)
+## 2) Core infra
+
+### PostgreSQL (idempotency registry + seq allocator)
+
 ```bash
-SERVICE_NAME=bff
-SERVICE_PORT=8002
-SERVICE_HOST=0.0.0.0
+# Preferred: single DSN
+POSTGRES_URL=postgresql://spiceadmin:spicepass123@localhost:5433/spicedb
 
-# Service Discovery
-OMS_URL=http://localhost:8000
-FUNNEL_URL=http://localhost:8003
-```
-
-### Funnel Service
-```bash
-SERVICE_NAME=funnel
-SERVICE_PORT=8003
-SERVICE_HOST=0.0.0.0
-```
-
-## Database Configuration
-
-### PostgreSQL (Primary Database)
-```bash
-# Connection Details
+# Or host/port components (used when POSTGRES_URL is not set)
 POSTGRES_HOST=localhost
-POSTGRES_PORT=5432  # NOT 5433! This was a critical bug
-POSTGRES_DB=spicedb
+POSTGRES_PORT=5433
 POSTGRES_USER=spiceadmin
 POSTGRES_PASSWORD=spicepass123
-
-# Legacy variables (deprecated)
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=spicedb
-DB_USER=spiceadmin
-DB_PASSWORD=spicepass123
+POSTGRES_DB=spicedb
 ```
 
-### Redis (Cache & Command Status)
+### Redis (command status + caching)
+
 ```bash
 REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_PASSWORD=spicepass123
-REDIS_DB=0
 ```
 
-### TerminusDB (Graph Database)
+### TerminusDB (graph: ontology/schema + lightweight instance nodes)
+
 ```bash
 TERMINUS_SERVER_URL=http://localhost:6363
 TERMINUS_USER=admin
-TERMINUS_KEY=spice123!  # NOT 'admin'! This was a critical bug
 TERMINUS_ACCOUNT=admin
+TERMINUS_KEY=admin
 ```
 
-### Elasticsearch (Search & Analytics)
+### Elasticsearch (read model / search)
+
 ```bash
+ELASTICSEARCH_URL=http://localhost:9200
+# Or host/port components (used when ELASTICSEARCH_URL is not set)
 ELASTICSEARCH_HOST=localhost
-ELASTICSEARCH_PORT=9201
-ELASTICSEARCH_USER=elastic
-ELASTICSEARCH_PASSWORD=spice123!
-ELASTICSEARCH_URL=http://elastic:spice123!@localhost:9201
+ELASTICSEARCH_PORT=9200
+ELASTICSEARCH_USERNAME=
+ELASTICSEARCH_PASSWORD=
 ```
 
-## Event Sourcing Infrastructure
+### Kafka
 
-### MinIO/S3 (Event Store)
 ```bash
-# MinIO Configuration
+KAFKA_BOOTSTRAP_SERVERS=localhost:9092
+
+# Topics (canonical names via shared AppConfig)
+INSTANCE_COMMANDS_TOPIC=instance_commands
+ONTOLOGY_COMMANDS_TOPIC=ontology_commands
+DATABASE_COMMANDS_TOPIC=database_commands
+INSTANCE_EVENTS_TOPIC=instance_events
+ONTOLOGY_EVENTS_TOPIC=ontology_events
+PROJECTION_DLQ_TOPIC=projection_failures_dlq
+```
+
+### MinIO / S3 (Event Store)
+
+```bash
 MINIO_ENDPOINT_URL=http://localhost:9000
 MINIO_ACCESS_KEY=minioadmin
 MINIO_SECRET_KEY=minioadmin123
-MINIO_USE_SSL=false
 
-# S3 Configuration (AWS)
-S3_ENDPOINT_URL=https://s3.amazonaws.com
-S3_ACCESS_KEY=your-access-key
-S3_SECRET_KEY=your-secret-key
-S3_REGION=us-east-1
-S3_USE_SSL=true
-
-# Event Store Configuration
-ENABLE_S3_EVENT_STORE=true
-ENABLE_DUAL_WRITE=true
-S3_EVENT_BUCKET=events
+EVENT_STORE_BUCKET=spice-event-store
+INSTANCE_BUCKET=instance-events
 ```
 
-### Kafka (Message Broker)
-```bash
-KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-KAFKA_GROUP_ID=spice-harvester-group
-KAFKA_AUTO_OFFSET_RESET=earliest
+## 3) Event Sourcing correctness layer
 
-# Topics
-ONTOLOGY_COMMANDS_TOPIC=ontology_commands
-DATABASE_COMMANDS_TOPIC=database_commands
-INSTANCE_COMMANDS_TOPIC=instance_commands
-GRAPH_EVENTS_TOPIC=graph_events
-SYSTEM_EVENTS_TOPIC=system_events
+### Event Store sequencing + idempotency
+
+```bash
+# Write-side atomic allocator (default: postgres)
+EVENT_STORE_SEQUENCE_ALLOCATOR_MODE=postgres  # postgres|legacy|off
+EVENT_STORE_SEQUENCE_SCHEMA=spice_event_registry
+EVENT_STORE_SEQUENCE_HANDLER_PREFIX=write_side
+
+# Same event_id, different payload -> contract violation handling
+EVENT_STORE_IDEMPOTENCY_MISMATCH_MODE=error  # error|warn
 ```
 
-## Worker Services
+### Durable processed-event registry (Worker / Projection)
 
-### Ontology Worker
 ```bash
-WORKER_NAME=ontology-worker
-WORKER_CONCURRENCY=10
-WORKER_BATCH_SIZE=100
+ENABLE_PROCESSED_EVENT_REGISTRY=true
+PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS=900
+PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS=30
+PROCESSED_EVENT_OWNER=  # optional
 ```
 
-### Instance Worker
+### Publisher (S3 tail → Kafka)
+
 ```bash
-WORKER_NAME=instance-worker
-WORKER_CONCURRENCY=20
-WORKER_BATCH_SIZE=50
+EVENT_PUBLISHER_CHECKPOINT_KEY=checkpoints/event_publisher.json
+EVENT_PUBLISHER_POLL_INTERVAL=3
+EVENT_PUBLISHER_BATCH_SIZE=200
+EVENT_PUBLISHER_LOOKBACK_SECONDS=600
+EVENT_PUBLISHER_LOOKBACK_MAX_KEYS=50
+EVENT_PUBLISHER_DEDUP_MAX_EVENTS=10000
+EVENT_PUBLISHER_DEDUP_CHECKPOINT_MAX_EVENTS=2000
+EVENT_PUBLISHER_KAFKA_FLUSH_BATCH_SIZE=200
+EVENT_PUBLISHER_KAFKA_FLUSH_TIMEOUT_SECONDS=10
+EVENT_PUBLISHER_METRICS_LOG_INTERVAL_SECONDS=30
 ```
 
-### Projection Worker
+## 4) Workers (consumer groups + retry policy)
+
 ```bash
-WORKER_NAME=projection-worker
-WORKER_CONCURRENCY=5
-PROJECTION_BATCH_SIZE=100
+INSTANCE_WORKER_GROUP=instance-worker-group
+ONTOLOGY_WORKER_GROUP=ontology-worker-group
+PROJECTION_WORKER_GROUP=projection-worker-group
+
+INSTANCE_WORKER_MAX_RETRY_ATTEMPTS=5
+ONTOLOGY_WORKER_MAX_RETRY_ATTEMPTS=5
+PROJECTION_WORKER_MAX_RETRIES=5
 ```
 
-## Observability
-
-### Logging
-```bash
-LOG_LEVEL=INFO  # DEBUG, INFO, WARNING, ERROR, CRITICAL
-LOG_FORMAT=json  # json or text
-LOG_FILE=/tmp/spice_harvester.log
-LOG_MAX_SIZE=100MB
-LOG_BACKUP_COUNT=10
-```
-
-### Monitoring
-```bash
-ENABLE_METRICS=true
-METRICS_PORT=9090
-PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
-```
-
-### Tracing (OpenTelemetry)
-```bash
-ENABLE_TRACING=false  # Set to true for production
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
-OTEL_SERVICE_NAME=spice-harvester
-OTEL_TRACES_EXPORTER=otlp
-```
-
-## Security
-
-### Authentication
-```bash
-JWT_SECRET_KEY=your-super-secret-jwt-key
-JWT_ALGORITHM=HS256
-JWT_EXPIRATION_MINUTES=60
-```
-
-### CORS
-```bash
-CORS_ORIGINS=["http://localhost:3000", "http://localhost:8080"]
-CORS_ALLOW_CREDENTIALS=true
-CORS_ALLOW_METHODS=["GET", "POST", "PUT", "DELETE"]
-CORS_ALLOW_HEADERS=["*"]
-```
-
-## Feature Flags
+## 5) Feature flags (steady state)
 
 ```bash
-# Event Sourcing Features
 ENABLE_EVENT_SOURCING=true
 ENABLE_CQRS=true
-ENABLE_OUTBOX_PATTERN=true
-
-# Storage Features
-ENABLE_S3_EVENT_STORE=true
-ENABLE_DUAL_WRITE=true
-
-# Advanced Features
-ENABLE_GRAPH_FEDERATION=true
-ENABLE_ML_SCHEMA_INFERENCE=true
-ENABLE_COMPLEX_TYPES=true
-ENABLE_RBAC=false  # Not yet implemented
 ```
-
-## Development/Testing
-
-```bash
-# Environment
-ENVIRONMENT=development  # development, staging, production
-DEBUG=true
-
-# Testing
-TEST_MODE=false
-TEST_DATABASE_URL=postgresql://test:test@localhost:5432/test_db
-PYTEST_WORKERS=auto
-```
-
-## Docker Compose Specific
-
-```bash
-# Network
-DOCKER_NETWORK=spice-network
-
-# Volumes
-DATA_VOLUME=/data
 LOG_VOLUME=/logs
 
 # Resource Limits
@@ -234,21 +147,16 @@ CPU_LIMIT=2
 
 ## Critical Environment Variables That Were Bug Sources
 
-1. **POSTGRES_PORT=5432** (NOT 5433!)
-   - Documentation had wrong port
-   - Caused connection failures
-
-2. **TERMINUS_KEY=spice123!** (NOT 'admin'!)
-   - Wrong password in multiple places
-   - Caused authentication failures
-
-3. **DOCKER_CONTAINER=false** (for local development)
+1. **DOCKER_CONTAINER=false** (for local development)
    - Must be false when running locally
    - Affects hostname resolution
 
-4. **ELASTICSEARCH_PASSWORD=spice123!**
-   - Missing in many service configs
-   - Caused 401 Unauthorized errors
+2. **POSTGRES_PORT=5433 (host) vs 5432 (docker)**
+   - Host port defaults to 5433 to avoid conflicts; containers use 5432.
+   - Use `POSTGRES_URL` to avoid ambiguity.
+
+3. **ELASTICSEARCH_PORT=9200** (NOT 9201)
+   - Elasticsearch runs on 9200 in docker-compose.
 
 ## Example .env File
 
@@ -262,7 +170,7 @@ DOCKER_CONTAINER=false
 
 # PostgreSQL
 POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
+POSTGRES_PORT=5433
 POSTGRES_DB=spicedb
 POSTGRES_USER=spiceadmin
 POSTGRES_PASSWORD=spicepass123
@@ -275,13 +183,13 @@ REDIS_PASSWORD=spicepass123
 # TerminusDB
 TERMINUS_SERVER_URL=http://localhost:6363
 TERMINUS_USER=admin
-TERMINUS_KEY=spice123!
+TERMINUS_KEY=admin
 
 # Elasticsearch
 ELASTICSEARCH_HOST=localhost
-ELASTICSEARCH_PORT=9201
-ELASTICSEARCH_USER=elastic
-ELASTICSEARCH_PASSWORD=spice123!
+ELASTICSEARCH_PORT=9200
+ELASTICSEARCH_USERNAME=
+ELASTICSEARCH_PASSWORD=
 
 # MinIO
 MINIO_ENDPOINT_URL=http://localhost:9000
@@ -292,8 +200,7 @@ MINIO_SECRET_KEY=minioadmin123
 KAFKA_BOOTSTRAP_SERVERS=localhost:9092
 
 # Event Sourcing
-ENABLE_S3_EVENT_STORE=true
-ENABLE_DUAL_WRITE=true
+EVENT_STORE_BUCKET=spice-event-store
 ```
 
 ## Verification Commands

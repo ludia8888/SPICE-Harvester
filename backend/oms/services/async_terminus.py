@@ -168,6 +168,10 @@ class AsyncTerminusService:
 
         # Relationship cache for performance
         self._ontology_cache: Dict[str, List[OntologyResponse]] = {}
+
+        # Stateless HTTP API에서 "current branch"는 서버에 존재하지 않지만,
+        # 일부 라우터가 UX 목적으로 사용하므로 서비스 레벨에서 best-effort로 추적.
+        self._current_branch_by_db: Dict[str, str] = {}
         
         # 동시 요청 제한으로 TerminusDB 부하 조절
         self._request_semaphore = asyncio.Semaphore(50)  # 최대 50개 동시 요청
@@ -400,15 +404,37 @@ class AsyncTerminusService:
     
     async def create_branch(self, db_name: str, branch_name: str, from_branch: str = "main") -> bool:
         """브랜치 생성"""
-        return await self.version_control_service.create_branch(db_name, branch_name, from_branch)
+        await self.version_control_service.create_branch(db_name, branch_name, from_branch)
+        return True
 
     async def list_branches(self, db_name: str) -> List[str]:
         """브랜치 목록 조회"""
-        return await self.version_control_service.list_branches(db_name)
+        branches = await self.version_control_service.list_branches(db_name)
+        if branches and isinstance(branches[0], dict):
+            return [b.get("name") for b in branches if isinstance(b, dict) and b.get("name")]
+        return [str(b) for b in branches] if isinstance(branches, list) else []
+
+    async def get_current_branch(self, db_name: str) -> str:
+        """현재 브랜치 (best-effort, 기본값: main)"""
+        return self._current_branch_by_db.get(db_name, "main")
+
+    async def delete_branch(self, db_name: str, branch_name: str) -> bool:
+        """브랜치 삭제"""
+        return await self.version_control_service.delete_branch(db_name, branch_name)
 
     async def checkout_branch(self, db_name: str, branch_name: str) -> bool:
         """브랜치 체크아웃"""
-        return await self.version_control_service.checkout_branch(db_name, branch_name)
+        ok = await self.version_control_service.checkout_branch(db_name, branch_name)
+        if ok:
+            self._current_branch_by_db[db_name] = branch_name
+        return ok
+
+    async def checkout(self, db_name: str, target: str, target_type: str = "branch") -> bool:
+        """Router 호환 checkout (branch/commit)."""
+        if target_type == "branch":
+            return await self.checkout_branch(db_name, target)
+        # commit checkout is stateless; accept for compatibility
+        return True
 
     async def merge_branches(
         self, 
@@ -419,8 +445,12 @@ class AsyncTerminusService:
         author: Optional[str] = None
     ) -> Dict[str, Any]:
         """브랜치 병합"""
-        return await self.version_control_service.merge_branches(
-            db_name, source_branch, target_branch, message, author
+        return await self.version_control_service.merge(
+            db_name,
+            source_branch=source_branch,
+            target_branch=target_branch,
+            author=author,
+            message=message,
         )
 
     async def commit(
@@ -437,19 +467,53 @@ class AsyncTerminusService:
         self, 
         db_name: str, 
         branch: str = "main", 
-        limit: int = 10
+        limit: int = 10,
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         """커밋 히스토리 조회"""
-        return await self.version_control_service.get_commit_history(db_name, branch, limit)
+        return await self.version_control_service.get_commit_history(db_name, branch, limit, offset)
+
+    async def diff(self, db_name: str, from_ref: str, to_ref: str) -> Any:
+        """차이점 조회"""
+        return await self.version_control_service.diff(db_name, from_ref, to_ref)
+
+    async def merge(
+        self,
+        db_name: str,
+        *,
+        source_branch: str,
+        target_branch: str,
+        strategy: str = "auto",
+    ) -> Dict[str, Any]:
+        """Router 호환 merge API."""
+        return await self.version_control_service.merge(
+            db_name,
+            source_branch=source_branch,
+            target_branch=target_branch,
+            strategy=strategy,
+        )
 
     async def rebase(
         self, 
         db_name: str, 
-        source_branch: str, 
-        target_branch: str
+        *,
+        onto: str,
+        branch: str,
+        message: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """브랜치 리베이스"""
-        return await self.version_control_service.rebase(db_name, source_branch, target_branch)
+        """Router 호환 rebase API (branch -> onto)."""
+        return await self.version_control_service.rebase(db_name, branch=branch, onto=onto, message=message)
+
+    async def rollback(self, db_name: str, target: str) -> Dict[str, Any]:
+        """Router 호환 rollback API (reset current branch to target)."""
+        branch = await self.get_current_branch(db_name)
+        return await self.version_control_service.reset_branch(db_name, branch_name=branch, commit_id=target)
+
+    async def find_common_ancestor(
+        self, db_name: str, branch1: str, branch2: str
+    ) -> Optional[str]:
+        """공통 조상 찾기 (현재는 best-effort 미구현)."""
+        return None
 
     # ==========================================
     # Document Operations - Facade Methods

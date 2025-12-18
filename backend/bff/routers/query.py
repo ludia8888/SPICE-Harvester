@@ -56,25 +56,22 @@ async def execute_query(
         # 입력 데이터 보안 검증
         db_name = validate_db_name(db_name)
         # 쿼리 입력을 딕셔너리로 변환
-        query_dict = query.dict(exclude_unset=True)
+        query_dict = query.model_dump(exclude_unset=True)
 
         # 레이블 기반 쿼리를 내부 ID 기반으로 변환
         internal_query = await mapper.convert_query_to_internal(db_name, query_dict, lang)
 
-        # 쿼리 실행
-        result = terminus.execute_query(db_name, internal_query)
+        # 쿼리 실행 (OMS를 통해)
+        result = await terminus.query_database(db_name, internal_query)
 
-        # 배치 결과를 레이블 기반으로 변환 (N+1 쿼리 문제 해결)
-        labeled_results = await mapper.convert_to_display_batch(
-            db_name, result.get("results", []), lang
-        )
+        raw_results = result.get("data", []) if isinstance(result, dict) else []
+        labeled_results = await mapper.convert_to_display_batch(db_name, raw_results, lang)
 
-        # 응답 생성
-        return QueryResponse(
-            results=labeled_results,
-            total=result.get("total", len(labeled_results)),
-            query=query_dict,
-        )
+        return {
+            "results": labeled_results,
+            "total": (result.get("count") if isinstance(result, dict) else None) or len(labeled_results),
+            "query": query_dict,
+        }
 
     except ValueError as e:
         # 레이블을 찾을 수 없는 경우
@@ -113,8 +110,8 @@ async def execute_raw_query(
         # 쿼리 파라미터 정화
         sanitized_query = sanitize_input(query)
 
-        # 쿼리 실행
-        result = terminus.execute_query(validated_db_name, sanitized_query)
+        # 쿼리 실행 (OMS를 통해)
+        result = await terminus.query_database(validated_db_name, sanitized_query)
 
         return result
 

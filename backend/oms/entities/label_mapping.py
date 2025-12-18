@@ -33,8 +33,8 @@ class LabelMapping:
     class_id: Optional[str] = None  # property 타입일 때 소속 클래스 ID
 
     # 메타데이터
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    updated_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     # TerminusDB 특정 필드
     terminus_type: str = "LabelMapping"  # TerminusDB 타입

@@ -208,13 +208,24 @@ class ConflictConverter:
         # 사람이 읽기 쉬운 형태로 변환
         human_readable = self._convert_to_human_readable(namespace, property_name)
 
+        namespace_mapping = self.namespace_mappings.get(namespace, namespace)
+        prefixed_key: Optional[str] = None
+        if namespace and namespace.startswith("http") and isinstance(namespace_mapping, str) and namespace_mapping.endswith(":"):
+            prefixed_key = f"{namespace_mapping}{property_name}"
+        elif namespace and namespace.endswith(":"):
+            prefixed_key = f"{namespace}{property_name}"
+
+        korean_name = (
+            self.korean_property_mappings.get(prefixed_key, property_name)
+            if prefixed_key
+            else property_name
+        )
+
         # 컨텍스트 정보 수집
         context = {
             "original_path": path,
-            "namespace_mapping": self.namespace_mappings.get(namespace, namespace),
-            "korean_name": self.korean_property_mappings.get(
-                f"{namespace}{property_name}", property_name
-            ),
+            "namespace_mapping": namespace_mapping,
+            "korean_name": korean_name,
         }
 
         return JsonLdPath(
@@ -264,7 +275,12 @@ class ConflictConverter:
             return PathType.ANNOTATION
         elif property_name.startswith("xsd:") or "datatype" in property_name.lower():
             return PathType.DATA_TYPE
-        elif full_path.startswith("http://schema.org/"):
+        elif (
+            full_path.startswith("http://schema.org/")
+            or property_name.startswith("http://schema.org/")
+            or "schema.org/" in property_name
+            or full_path.startswith("schema:")
+        ):
             return PathType.SCHEMA_REFERENCE
         else:
             return PathType.UNKNOWN
@@ -272,10 +288,16 @@ class ConflictConverter:
     def _convert_to_human_readable(self, namespace: Optional[str], property_name: str) -> str:
         """사람이 읽기 쉬운 형태로 변환"""
 
-        # 한국어 매핑이 있는 경우
-        full_key = f"{namespace or ''}{property_name}"
-        if full_key in self.korean_property_mappings:
-            return self.korean_property_mappings[full_key]
+        # Full IRI namespace -> prefer Korean mapping via prefix form (e.g. rdfs:label -> 이름).
+        if namespace and namespace.startswith("http") and namespace in self.namespace_mappings:
+            prefixed_key = f"{self.namespace_mappings[namespace]}{property_name}"
+            if prefixed_key in self.korean_property_mappings:
+                return self.korean_property_mappings[prefixed_key]
+            return prefixed_key
+
+        # Prefix namespace (e.g. rdfs:) -> keep compact form (don't translate to Korean)
+        if namespace and namespace.endswith(":"):
+            return f"{namespace}{property_name}"
 
         # 네임스페이스 축약
         if namespace and namespace in self.namespace_mappings:
@@ -433,6 +455,8 @@ class ConflictConverter:
 
         value = change.get("new_value", change.get("value"))
 
+        if isinstance(value, bool):
+            return value, "boolean"
         if isinstance(value, dict):
             return value, "object"
         elif isinstance(value, list):
@@ -441,8 +465,6 @@ class ConflictConverter:
             return value, "string"
         elif isinstance(value, (int, float)):
             return value, "number"
-        elif isinstance(value, bool):
-            return value, "boolean"
         else:
             return str(value), "unknown"
 
@@ -538,6 +560,6 @@ class ConflictConverter:
 
     def _get_current_timestamp(self) -> str:
         """현재 타임스탬프 반환"""
-        from datetime import datetime
+        from datetime import datetime, timezone
 
-        return datetime.utcnow().isoformat()
+        return datetime.now(timezone.utc).isoformat()

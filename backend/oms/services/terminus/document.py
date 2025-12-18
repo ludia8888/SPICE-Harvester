@@ -5,7 +5,7 @@ Document Service for TerminusDB
 
 import logging
 from typing import Any, Dict, List, Optional, Union
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 
 from .base import BaseTerminusService
@@ -29,6 +29,13 @@ class DocumentService(BaseTerminusService):
         super().__init__(*args, **kwargs)
         # DatabaseService 인스턴스 (데이터베이스 존재 확인용)
         self.db_service = DatabaseService(*args, **kwargs)
+
+    async def disconnect(self) -> None:
+        # Close nested db_service first to avoid leaking its httpx client in short-lived contexts/tests.
+        try:
+            await self.db_service.disconnect()
+        finally:
+            await super().disconnect()
     
     async def create_document(
         self,
@@ -90,7 +97,7 @@ class DocumentService(BaseTerminusService):
             
             return {
                 "id": doc_id,
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
                 "graph_type": graph_type
             }
             
@@ -150,7 +157,7 @@ class DocumentService(BaseTerminusService):
             
             return {
                 "id": doc_id,
-                "updated_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
                 "graph_type": graph_type
             }
             
@@ -377,7 +384,7 @@ class DocumentService(BaseTerminusService):
             
             return {
                 "created_count": len(documents),
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
                 "graph_type": graph_type
             }
             
@@ -425,7 +432,7 @@ class DocumentService(BaseTerminusService):
             
             return {
                 "updated_count": len(documents),
-                "updated_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
                 "graph_type": graph_type
             }
             
@@ -472,7 +479,7 @@ class DocumentService(BaseTerminusService):
             
             return {
                 "deleted_count": deleted_count,
-                "deleted_at": datetime.utcnow().isoformat(),
+                "deleted_at": datetime.now(timezone.utc).isoformat(),
                 "graph_type": graph_type
             }
             
@@ -608,6 +615,7 @@ class DocumentService(BaseTerminusService):
         
         return await self.update_document(
             db_name=db_name,
+            doc_id=instance_id,
             document=update_data,
             graph_type="instance",
             author="system",

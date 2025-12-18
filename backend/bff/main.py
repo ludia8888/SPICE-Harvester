@@ -93,7 +93,7 @@ from bff.services.oms_client import OMSClient
 from data_connector.google_sheets.service import GoogleSheetsService
 from bff.routers import (
     database, health, mapping, merge_conflict, ontology, query, 
-    instances, instance_async, websocket, tasks, admin, data_connector, graph
+    instances, instance_async, websocket, tasks, admin, data_connector, graph, lineage, audit
 )
 
 # Monitoring and observability routers
@@ -258,9 +258,13 @@ class BFFServiceContainer:
         try:
             logger.info("Initializing Kafka producer...")
             
-            # Kafka configuration from settings
+            # Kafka configuration from ServiceConfig (works in Docker + local dev)
+            from shared.config.service_config import ServiceConfig
+            bootstrap_servers = ServiceConfig.get_kafka_bootstrap_servers()
+
+            # Kafka configuration
             kafka_config = {
-                'bootstrap.servers': self.settings.kafka.bootstrap_servers,
+                'bootstrap.servers': bootstrap_servers,
                 'client.id': 'bff-service',
                 'acks': 'all',
                 'retries': 3,
@@ -285,14 +289,13 @@ class BFFServiceContainer:
         try:
             logger.info("Initializing Google Sheets service...")
             
-            # Get Kafka producer
+            # Kafka producer is optional for preview/grid extraction; required only for change notifications.
             producer = self._bff_services.get('kafka_producer')
             if not producer:
-                logger.warning("Kafka producer not available for Google Sheets service")
-                return
+                logger.warning("Kafka producer not available; Google Sheets service will run without notifications")
             
             # Get Google API key from settings
-            google_api_key = getattr(self.settings, 'google_api_key', None)
+            google_api_key = (self.settings.google_sheets.google_sheets_api_key or "").strip() or None
             
             # Create Google Sheets service
             google_sheets_service = GoogleSheetsService(
@@ -763,6 +766,8 @@ app.include_router(websocket.router, prefix="/api/v1", tags=["websocket"])
 app.include_router(tasks.router, prefix="/api/v1", tags=["background-tasks"])
 app.include_router(admin.router, prefix="/api/v1", tags=["admin"])
 app.include_router(data_connector.router, prefix="/api/v1", tags=["data-connector"])
+app.include_router(lineage.router, prefix="/api/v1", tags=["lineage"])
+app.include_router(audit.router, prefix="/api/v1", tags=["audit"])
 app.include_router(graph.router, tags=["graph"])  # Graph router has its own prefix
 
 # Monitoring and observability endpoints (modernized architecture)

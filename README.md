@@ -22,7 +22,7 @@ SPICE HARVESTER는 **이벤트 소싱(Event Sourcing) + CQRS** 아키텍처를 �
 ### 💎 하이브리드 데이터 아키텍처
 **데이터의 특성에 따라 최적의 관리 전략을 적용합니다.**
 
-- **🔄 이벤트 소싱 (Event Sourcing)**: 인스턴스 데이터의 모든 변경 이력을 S3에 불변 로그로 저장
+- **🔄 이벤트 소싱 (Event Sourcing)**: 인스턴스 데이터의 모든 변경 이력을 S3/MinIO Event Store(SSoT)에 불변 로그로 저장
 - **📊 상태 저장 (State-Store)**: 온톨로지 스키마를 TerminusDB에 최신 상태로 관리
 - **🎯 CQRS**: 쓰기(Command)와 읽기(Query) 책임을 완전 분리하여 성능 극대화
 
@@ -51,10 +51,15 @@ SPICE HARVESTER는 **이벤트 소싱(Event Sourcing) + CQRS** 아키텍처를 �
 - **자동 스키마 생성**: 외부 데이터 소스 분석 후 온톨로지 스키마 제안
 
 #### ✅ **고성능 메시징 시스템**
-- **Kafka EOS v2**: 정확히 한 번(Exactly-Once) 메시지 처리 보장
+- **Kafka at-least-once + 멱등 소비**: `event_id`/`sequence_number` 기반으로 중복 전달·재시작·리플레이에도 결과 동일
 - **DLQ (Dead Letter Queue)**: 실패한 메시지 자동 복구 및 재시도
 - **파티션 키 라우팅**: 집계별 순서 보장으로 데이터 일관성 확보
 - **워터마크 모니터링**: 실시간 지연 시간 추적 및 알림
+
+#### ✅ **멀티홉 그래프 쿼리 (TerminusDB + Elasticsearch Federation)**
+- **관계(그래프)는 TerminusDB**, **payload(문서)는 Elasticsearch**에서 가져와 합쳐서 응답합니다.
+- ES가 지연/누락되어도 `data_status=FULL|PARTIAL|MISSING` + `display` 필드로 UI가 “빈 화면(data=null)”에 갇히지 않습니다.
+- `max_depth/max_nodes/max_edges` 가드로 멀티홉 폭발/순환을 안전하게 제어합니다.
 
 ---
 
@@ -76,12 +81,12 @@ graph TD
 
     subgraph "✍️ 명령 처리 경로 (Write Path)"
         C(OMS - Ontology Management Service<br/>Port 8000)
-        D[PostgreSQL - Outbox Pattern]
-        E[Message Relay Worker]
+        I[S3/MinIO - Event Store<br/>📝 Command/Domain Event Log (SSoT)]
+        E[EventPublisher (S3 tail → Kafka)]
         F[Kafka - Event Bus]
         G[Instance Worker]
         H[Ontology Worker]
-        I[S3/MinIO - Event Store<br/>📝 인스턴스 커맨드 로그 (SSoT)]
+        P[(PostgreSQL - processed_events/aggregate_versions<br/>🔒 Idempotency + Ordering + Seq Allocator)]
         J[TerminusDB - Graph DB<br/>📊 온톨로지 스키마 (SSoT)]
     end
 
@@ -93,30 +98,32 @@ graph TD
     end
 
     subgraph "🤖 AI 서비스"
-        O(Funnel - Type Inference Service<br/>Port 8004)
+        O(Funnel - Type Inference Service<br/>Port 8003)
     end
 
     %% 데이터 흐름
     A -->|REST API| B
     B -->|Command| C
-    C -->|Save Command| D
-    D -->|Poll & Publish| E
+    C -->|Append Command Event| I
+    I -->|Tail & Publish| E
     E -->|Event Stream| F
 
     F -.->|Instance Commands| G
     F -.->|Ontology Commands| H
     F -.->|AI Requests| O
 
-    G -->|1. Save Log| I
-    G -->|2. Update Cache| J
-    G -->|3. Publish Event| F
+    G -->|Append Domain Event| I
+    G -->|Write-side Effects| J
+    G -->|Idempotency Guard| P
 
     H -->|Update Schema| J
-    H -->|Publish Event| F
+    H -->|Append Domain Event| I
+    H -->|Idempotency Guard| P
 
     F -.->|Domain Events| K
     K -->|Project Data| L
     K -->|Cache Results| N
+    K -->|Idempotency Guard| P
 
     B -->|Search Query| L
     B -->|Direct Query| M
@@ -149,13 +156,13 @@ graph TD
 | 테스트 항목 | 상태 | 성능 지표 | 비고 |
 |------------|------|-----------|------|
 | **파티션 키 라우팅** | ✅ **통과** | 100 이벤트/파티션 | 집계별 순서 보장 100% |
-| **Kafka EOS v2** | ✅ **통과** | 트랜잭션 보장 검증 | 중복 처리 0% 달성 |
+| **Idempotency Contract** | ✅ **통과** | `event_id` + `sequence_number` | 중복 전달에도 결과 동일 |
 | **워터마크 모니터링** | ✅ **통과** | 지연 감지 정확도 100% | 903/903 메시지 정확 추적 |
 | **DLQ 핸들러** | ✅ **수정 완료** | 5/5 메시지 복구 | ThreadPoolExecutor로 블로킹 해결 |
 | **통합 부하 테스트** | ✅ **통과** | 500 이벤트/초 | 20 이벤트 10초 내 처리 |
 
 ### 🛡️ **엔터프라이즈 안정성**
-- **무손실 보장**: Kafka EOS v2 + Outbox Pattern
+- **무손실 보장**: S3/MinIO Event Store(SSoT) + Publisher(at-least-once) + Consumers(idempotent via `processed_events`)
 - **자동 복구**: DLQ 핸들러의 지수 백오프 재시도
 - **실시간 모니터링**: 지연 시간 추적 및 알림
 - **데이터 일관성**: CQRS를 통한 읽기/쓰기 분리
@@ -185,22 +192,25 @@ git clone https://github.com/your-org/spice-harvester.git
 cd spice-harvester
 
 # 2. 환경 설정
-cp backend/.env.example backend/.env
+cp .env.example .env
 # .env 파일에서 필요한 설정을 수정하세요
 
-# 3. 전체 인프라 실행 (Docker Compose)
-docker-compose -f docker-compose.full.yml up -d
+# 3. 전체 스택 실행 (Docker Compose)
+docker compose -f docker-compose.full.yml up -d
 
-# 4. Python 환경 설정
+# (대안) backend/docker-compose.yml 기반 헬스체크 포함 스크립트
+# cd backend && ./deploy.sh up
+
+# 4. (옵션) 로컬에서 Python으로 서비스 실행(개발용)
 cd backend
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
+source venv/bin/activate  # Windows: venv\\Scripts\\activate
+pip install -e ./shared[dev,test]
 
-# 5. 서비스 시작
-PYTHONPATH=/path/to/spice-harvester/backend python -m oms.main &
-PYTHONPATH=/path/to/spice-harvester/backend python -m bff.main &
-PYTHONPATH=/path/to/spice-harvester/backend python -m funnel.main &
+# 5. 서비스 시작(로컬 실행 시)
+python -m oms.main &
+python -m bff.main &
+python -m funnel.main &
 ```
 
 ### ✅ 동작 확인
@@ -209,7 +219,7 @@ PYTHONPATH=/path/to/spice-harvester/backend python -m funnel.main &
 # 서비스 상태 확인
 curl http://localhost:8002/health  # BFF (API Gateway)
 curl http://localhost:8000/health  # OMS (Ontology Management)
-curl http://localhost:8004/health  # Funnel (AI Type Inference)
+curl http://localhost:8003/health  # Funnel (AI Type Inference)
 
 # 데이터베이스 생성 테스트
 curl -X POST http://localhost:8002/api/v1/database \
@@ -223,41 +233,27 @@ curl -X POST http://localhost:8002/api/v1/database \
 
 - **8002**: BFF (Frontend API Gateway) - **메인 진입점**
 - **8000**: OMS (Ontology Management Service)
-- **8004**: Funnel (AI Type Inference Service)
-- **6364**: TerminusDB (Graph Database)
+- **8003**: Funnel (AI Type Inference Service)
+- **6363**: TerminusDB (Graph Database)
 - **9200**: Elasticsearch (Search Engine)
 - **9092**: Kafka (Message Broker)
-- **5432**: PostgreSQL (Outbox Pattern)
+- **5433**: PostgreSQL (`processed_events`/`aggregate_versions` + write-side seq allocator)
 - **6379**: Redis (Cache)
 
 ---
 
 ## 📚 문서 가이드
 
-SPICE HARVESTER의 모든 기능과 사용법을 자세히 설명하는 10개의 핵심 가이드입니다.
+프로젝트 문서는 `docs/`에 정리되어 있습니다.
 
-### 🏗️ **시스템 설계 및 아키텍처**
-- **[아키텍처.md](./아키텍처.md)** - CQRS + Event Sourcing 상세 설계 원칙 및 구현
-
-### 👨‍💻 **개발자 가이드**
-- **[프론트엔드개발자가이드.md](./프론트엔드개발자가이드.md)** - React, UI/UX, 접근성, 테스팅 완벽 가이드
-- **[백엔드개발자가이드.md](./백엔드개발자가이드.md)** - FastAPI, 마이크로서비스, 데이터베이스 개발 가이드
-
-### 🚀 **운영 및 배포**
-- **[배포운영가이드.md](./배포운영가이드.md)** - Docker, 인프라, 모니터링, 보안 완벽 가이드
-
-### 📖 **API 및 데이터**
-- **[API레퍼런스.md](./API레퍼런스.md)** - 전체 REST API 명세 및 실제 사용 예제
-- **[데이터타입가이드.md](./데이터타입가이드.md)** - 18+ 복합 타입, 유효성 검사, AI 추론 가이드
-
-### ⚡ **성능 및 최적화**
-- **[성능최적화가이드.md](./성능최적화가이드.md)** - Kafka EOS, DLQ, 파티션 키 최적화 실전 가이드
-
-### 🔬 **테스팅**
-- **[테스팅가이드.md](./테스팅가이드.md)** - 단위/통합/E2E 테스트 전략 및 실제 코드
-
-### 🔄 **버전 관리**
-- **[버전관리가이드.md](./버전관리가이드.md)** - Git 기능, 브랜치 전략, 롤백 가이드
+- **문서 인덱스**: [docs/README.md](./docs/README.md)
+- **아키텍처(SSoT/Publisher/Consumers)**: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
+- **멱등/순서/OCC 계약**: [docs/IDEMPOTENCY_CONTRACT.md](./docs/IDEMPOTENCY_CONTRACT.md)
+- **개발자 가이드**: [docs/DEVELOPER_GUIDE.md](./docs/DEVELOPER_GUIDE.md)
+- **프론트엔드 가이드**: [docs/FRONTEND_GUIDE.md](./docs/FRONTEND_GUIDE.md)
+- **API 레퍼런스**: [docs/API_REFERENCE.md](./docs/API_REFERENCE.md)
+- **운영/런북**: [docs/OPERATIONS.md](./docs/OPERATIONS.md), [backend/PRODUCTION_MIGRATION_RUNBOOK.md](./backend/PRODUCTION_MIGRATION_RUNBOOK.md)
+- **검증 체크리스트**: [backend/FINAL_VERIFICATION_REPORT.md](./backend/FINAL_VERIFICATION_REPORT.md)
 
 ---
 
@@ -269,18 +265,18 @@ SPICE HARVESTER의 모든 기능과 사용법을 자세히 설명하는 10개의
 - **마이크로서비스**: 서비스 팩토리 패턴
 
 ### 💾 **데이터 레이어**
-- **그래프 DB**: TerminusDB v11.x (온톨로지 SSoT)
+- **그래프 DB**: TerminusDB (온톨로지 SSoT)
 - **이벤트 스토어**: S3/MinIO (인스턴스 로그 SSoT) 
-- **검색 엔진**: Elasticsearch 7.x (읽기 모델)
+- **검색 엔진**: Elasticsearch 8.x (읽기 모델)
 - **메시지 브로커**: Apache Kafka (이벤트 버스)
-- **관계형 DB**: PostgreSQL (Outbox 패턴)
+- **관계형 DB**: PostgreSQL (`processed_events`/`aggregate_versions` + write-side seq allocator)
 - **캐시**: Redis (상태 추적 및 캐시)
 
 ### 🏗️ **아키텍처 패턴**
 - **마이크로서비스 아키텍처 (MSA)**
 - **CQRS (Command Query Responsibility Segregation)**
 - **이벤트 소싱 (Event Sourcing)**
-- **아웃박스 패턴 (Outbox Pattern)**
+- **멱등 처리 (Idempotency via `processed_events`)**
 - **프로젝션 (Projection)**
 - **어댑터 패턴 (Adapter Pattern)**
 
@@ -307,13 +303,13 @@ SPICE HARVESTER의 모든 기능과 사용법을 자세히 설명하는 10개의
 - ✅ **7/7 Git 기능 완벽 동작** (브랜치, 커밋, 비교, 병합, 롤백, 히스토리, PR)
 - ✅ **18+ 복합 데이터 타입 완벽 지원**
 - ✅ **AI 타입 추론 고급 알고리즘** (1,048라인)
-- ✅ **Kafka EOS v2 정확히 한 번 처리**
+- ✅ **`event_id` 기반 멱등 처리 계약(Processed Events Registry)**
 - ✅ **DLQ 자동 복구 시스템**
 
 #### 🚀 **서비스 구현**
 - ✅ **OMS (포트 8000)**: 온톨로지 관리 완전 구현
 - ✅ **BFF (포트 8002)**: API 게이트웨이 엔터프라이즈 구현  
-- ✅ **Funnel (포트 8004)**: AI 타입 추론 고급 알고리즘 완성
+- ✅ **Funnel (포트 8003)**: AI 타입 추론 고급 알고리즘 완성
 - ✅ **Workers**: Instance/Ontology/Projection 워커 완전 구현
 
 #### ⚡ **성능 검증**
@@ -381,6 +377,6 @@ SPICE HARVESTER는 **"데이터의 모든 것을 추적하고 관리한다"**는
 
 **⭐ 이 프로젝트가 도움이 되셨다면 Star를 눌러주세요!**
 
-*최종 업데이트: 2024-08-12*  
+*최종 업데이트: 2025-12-17*  
 *버전: 2.0.0 (Event Sourcing + CQRS 완전 구현)*  
 *문서 언어: 한국어 (완전 현지화)*

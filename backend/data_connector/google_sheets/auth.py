@@ -4,7 +4,7 @@ Google Sheets Connector - Authentication Module (for future OAuth2 support)
 
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 import httpx
@@ -105,7 +105,7 @@ class GoogleOAuth2Client:
             # Calculate expiry time
             expires_in = token_data.get("expires_in", 3600)
             token_data["expires_at"] = (
-                datetime.utcnow() + timedelta(seconds=expires_in)
+                datetime.now(timezone.utc) + timedelta(seconds=expires_in)
             ).isoformat()
 
             return token_data
@@ -136,7 +136,7 @@ class GoogleOAuth2Client:
             # Calculate new expiry time
             expires_in = token_data.get("expires_in", 3600)
             token_data["expires_at"] = (
-                datetime.utcnow() + timedelta(seconds=expires_in)
+                datetime.now(timezone.utc) + timedelta(seconds=expires_in)
             ).isoformat()
 
             # Refresh token은 새로 발급되지 않을 수 있음
@@ -200,7 +200,9 @@ class GoogleOAuth2Client:
 
         # Check if token is expired
         expires_at = datetime.fromisoformat(token_data["expires_at"])
-        if expires_at <= datetime.utcnow():
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at <= datetime.now(timezone.utc):
             # Token expired, try to refresh
             refresh_token = token_data.get("refresh_token")
             if not refresh_token:

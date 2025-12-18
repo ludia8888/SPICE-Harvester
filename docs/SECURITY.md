@@ -100,9 +100,9 @@ SPICE HARVESTER implements a defense-in-depth security strategy with multiple la
 
 ```python
 # shared/security/api_key_auth.py
-import hashlib
-import secrets
-from datetime import datetime, timedelta
+	import hashlib
+	import secrets
+	from datetime import datetime, timedelta, timezone
 
 class ApiKeyManager:
     """Secure API key management"""
@@ -115,13 +115,13 @@ class ApiKeyManager:
         # Hash for storage
         key_hash = hashlib.sha256(api_key.encode()).hexdigest()
         
-        # Store with metadata
-        self.store_api_key(user_id, key_hash, {
-            "created_at": datetime.utcnow(),
-            "expires_at": datetime.utcnow() + timedelta(days=365),
-            "permissions": ["read", "write"],
-            "rate_limit": 1000
-        })
+	        # Store with metadata
+	        self.store_api_key(user_id, key_hash, {
+	            "created_at": datetime.now(timezone.utc),
+	            "expires_at": datetime.now(timezone.utc) + timedelta(days=365),
+	            "permissions": ["read", "write"],
+	            "rate_limit": 1000
+	        })
         
         return api_key, key_hash
     
@@ -135,8 +135,8 @@ class ApiKeyManager:
         if not metadata:
             raise AuthenticationError("Invalid API key")
         
-        if metadata["expires_at"] < datetime.utcnow():
-            raise AuthenticationError("API key expired")
+	        if metadata["expires_at"] < datetime.now(timezone.utc):
+	            raise AuthenticationError("API key expired")
         
         return metadata
 ```
@@ -145,8 +145,8 @@ class ApiKeyManager:
 
 ```python
 # shared/security/jwt_auth.py
-import jwt
-from datetime import datetime, timedelta
+	import jwt
+	from datetime import datetime, timedelta, timezone
 
 class JWTManager:
     """JWT token management"""
@@ -155,15 +155,15 @@ class JWTManager:
         self.secret_key = secret_key
         self.algorithm = algorithm
     
-    def generate_token(self, user_id: str, permissions: list) -> str:
-        """Generate JWT token"""
-        payload = {
-            "user_id": user_id,
-            "permissions": permissions,
-            "exp": datetime.utcnow() + timedelta(hours=24),
-            "iat": datetime.utcnow(),
-            "iss": "spice-harvester"
-        }
+	    def generate_token(self, user_id: str, permissions: list) -> str:
+	        """Generate JWT token"""
+	        payload = {
+	            "user_id": user_id,
+	            "permissions": permissions,
+	            "exp": datetime.now(timezone.utc) + timedelta(hours=24),
+	            "iat": datetime.now(timezone.utc),
+	            "iss": "spice-harvester"
+	        }
         
         return jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
     
@@ -802,8 +802,8 @@ sudo ufw allow 443/tcp
 # Allow internal services (only from internal network)
 sudo ufw allow from 10.0.0.0/8 to any port 8000  # OMS
 sudo ufw allow from 10.0.0.0/8 to any port 8002  # BFF
-sudo ufw allow from 10.0.0.0/8 to any port 8004  # Funnel
-sudo ufw allow from 10.0.0.0/8 to any port 6364  # TerminusDB
+sudo ufw allow from 10.0.0.0/8 to any port 8003  # Funnel
+sudo ufw allow from 10.0.0.0/8 to any port 6363  # TerminusDB
 
 # Rate limiting for API endpoints
 sudo ufw limit 443/tcp
@@ -826,7 +826,7 @@ sudo ufw status verbose
 ```python
 # shared/middleware/ddos_protection.py
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Tuple
 import asyncio
 
@@ -860,13 +860,13 @@ class DDoSProtection:
         # Check if IP is blocked
         if client_ip in self.blocked_ips:
             block_until = self.blocked_ips[client_ip]
-            if datetime.utcnow() < block_until:
+            if datetime.now(timezone.utc) < block_until:
                 return False, f"IP blocked until {block_until}"
             else:
                 del self.blocked_ips[client_ip]
         
         # Track request
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         self.request_counts[client_ip].append(now)
         
         # Remove old requests
@@ -892,7 +892,7 @@ class DDoSProtection:
         while True:
             await asyncio.sleep(300)  # Run every 5 minutes
             
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             cutoff = now - timedelta(seconds=self.window_seconds * 2)
             
             # Clean request counts
@@ -1082,7 +1082,7 @@ class DependencyChecker:
 # shared/security/security_logger.py
 import logging
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 class SecurityLogger:
@@ -1110,7 +1110,7 @@ class SecurityLogger:
         """Log authentication attempt"""
         event = {
             "event_type": "authentication",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "success": success,
             "user_id": user_id,
             "client_ip": client_ip,
@@ -1133,7 +1133,7 @@ class SecurityLogger:
         """Log authorization failure"""
         event = {
             "event_type": "authorization_failure",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "user_id": user_id,
             "resource": resource,
             "action": action,
@@ -1151,7 +1151,7 @@ class SecurityLogger:
         """Log security violation"""
         event = {
             "event_type": "security_violation",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "violation_type": violation_type,
             "client_ip": client_ip,
             "details": details
@@ -1170,7 +1170,7 @@ class SecurityLogger:
         """Log data access for audit trail"""
         event = {
             "event_type": "data_access",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "user_id": user_id,
             "resource_type": resource_type,
             "resource_id": resource_id,
@@ -1188,7 +1188,7 @@ class SecurityLogger:
 import asyncio
 import re
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 class SecurityMonitor:
     """Real-time security monitoring"""
@@ -1241,13 +1241,13 @@ class SecurityMonitor:
         # Track failed attempts
         if not event["success"]:
             self.event_counts["failed_auth"][client_ip].append(
-                datetime.utcnow()
+                datetime.now(timezone.utc)
             )
             
             # Check threshold
             recent_failures = [
                 t for t in self.event_counts["failed_auth"][client_ip]
-                if t > datetime.utcnow() - timedelta(minutes=5)
+                if t > datetime.now(timezone.utc) - timedelta(minutes=5)
             ]
             
             if len(recent_failures) >= self.alert_thresholds["failed_auth"]:
@@ -1266,7 +1266,7 @@ class SecurityMonitor:
         """Send security alert"""
         alert = {
             "type": alert_type,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "message": message,
             "details": details,
             "severity": self.get_severity(alert_type)
@@ -1381,6 +1381,7 @@ esac
 
 ```python
 # scripts/post_incident_analysis.py
+from datetime import datetime, timezone
 class PostIncidentAnalyzer:
     """Post-incident analysis and reporting"""
     
@@ -1396,7 +1397,7 @@ class PostIncidentAnalyzer:
         
         report = {
             "incident_id": incident_id,
-            "report_date": datetime.utcnow().isoformat(),
+            "report_date": datetime.now(timezone.utc).isoformat(),
             "incident_type": incident_type,
             "severity": self.assess_severity(impact),
             "timeline": timeline,
@@ -1496,6 +1497,7 @@ All APIs now use standardized ApiResponse format for consistent security:
 
 ```python
 # shared/compliance/security_standards.py
+from datetime import datetime, timezone
 class SecurityStandards:
     """Security standards compliance checks"""
     
@@ -1517,7 +1519,7 @@ class SecurityStandards:
     def generate_compliance_report(self) -> Dict[str, Any]:
         """Generate compliance report"""
         return {
-            "report_date": datetime.utcnow().isoformat(),
+            "report_date": datetime.now(timezone.utc).isoformat(),
             "standards": {
                 "owasp_top_10": self.check_owasp_compliance(),
                 "pci_dss": self.check_pci_compliance(),

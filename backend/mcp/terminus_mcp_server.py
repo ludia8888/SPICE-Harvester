@@ -162,14 +162,28 @@ class TerminusDBMCPServer:
                         arguments["db_name"],
                         ontology
                     )
-                    return {"success": True, "ontology": result.dict()}
+                    if hasattr(result, "model_dump"):
+                        ontology_payload = result.model_dump(mode="json")
+                    elif hasattr(result, "dict"):
+                        ontology_payload = result.dict()
+                    else:
+                        ontology_payload = result
+                    return {"success": True, "ontology": ontology_payload}
                     
                 elif name == "get_ontology":
                     result = await self.terminus_service.get_ontology(
                         arguments["db_name"],
                         arguments.get("class_id")
                     )
-                    return {"ontologies": [o.dict() for o in result]}
+                    ontologies_payload = []
+                    for ontology in result:
+                        if hasattr(ontology, "model_dump"):
+                            ontologies_payload.append(ontology.model_dump(mode="json"))
+                        elif hasattr(ontology, "dict"):
+                            ontologies_payload.append(ontology.dict())
+                        else:
+                            ontologies_payload.append(ontology)
+                    return {"ontologies": ontologies_payload}
                     
                 elif name == "list_branches":
                     branches = await self.terminus_service.list_branches(
@@ -240,10 +254,19 @@ class TerminusDBMCPServer:
                     ontologies = await self.terminus_service.get_ontology(db_name)
                     branches = await self.terminus_service.list_branches(db_name)
                     
+                    ontologies_payload = []
+                    for ontology in ontologies:
+                        if hasattr(ontology, "model_dump"):
+                            ontologies_payload.append(ontology.model_dump(mode="json"))
+                        elif hasattr(ontology, "dict"):
+                            ontologies_payload.append(ontology.dict())
+                        else:
+                            ontologies_payload.append(ontology)
+
                     return json.dumps({
                         "database": db_name,
                         "branches": branches,
-                        "ontologies": [o.dict() for o in ontologies],
+                        "ontologies": ontologies_payload,
                         "ontology_count": len(ontologies)
                     }, indent=2)
                     

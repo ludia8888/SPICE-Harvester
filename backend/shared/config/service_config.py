@@ -27,6 +27,7 @@ class ServiceConfig:
     DEFAULT_OMS_PORT = 8000
     DEFAULT_BFF_PORT = 8002
     DEFAULT_FUNNEL_PORT = 8003
+    DEFAULT_ELASTICSEARCH_PORT = 9200
 
     @staticmethod
     def get_oms_port() -> int:
@@ -119,11 +120,11 @@ class ServiceConfig:
     def get_terminus_url() -> str:
         """Get TerminusDB URL from environment or default."""
         if url := os.getenv("TERMINUS_SERVER_URL"):
-            return url
+            return url.rstrip("/")
         protocol = ServiceConfig.get_protocol()
-        # FIXED: TerminusDB는 6363 포트에서 실행 중
-        # FIXED: Use 127.0.0.1 instead of localhost to avoid IPv6 issues
-        return f"{protocol}://127.0.0.1:6363"
+        # Use Docker service names when running in container
+        host = "terminusdb" if ServiceConfig.is_docker_environment() else "127.0.0.1"
+        return f"{protocol}://{host}:6363"
     
     @staticmethod
     def get_postgres_url() -> str:
@@ -132,8 +133,8 @@ class ServiceConfig:
             return url
         
         # FIXED: Use 127.0.0.1 instead of localhost to avoid IPv6 issues
-        host = os.getenv("POSTGRES_HOST", "spice_postgres" if ServiceConfig.is_docker_environment() else "127.0.0.1")
-        port = os.getenv("POSTGRES_PORT", "5432")
+        host = os.getenv("POSTGRES_HOST", "postgres" if ServiceConfig.is_docker_environment() else "127.0.0.1")
+        port = os.getenv("POSTGRES_PORT") or ("5432" if ServiceConfig.is_docker_environment() else "5433")
         user = os.getenv("POSTGRES_USER", "spiceadmin")
         password = os.getenv("POSTGRES_PASSWORD", "spicepass123")
         database = os.getenv("POSTGRES_DB", "spicedb")
@@ -148,7 +149,10 @@ class ServiceConfig:
         
         # FIXED: Use 127.0.0.1 instead of localhost to avoid IPv6 issues
         host = os.getenv("KAFKA_HOST", "kafka" if ServiceConfig.is_docker_environment() else "127.0.0.1")
-        port = os.getenv("KAFKA_PORT", "9092")
+        port = os.getenv(
+            "KAFKA_PORT",
+            "29092" if ServiceConfig.is_docker_environment() else "9092",
+        )
         return f"{host}:{port}"
     
     @staticmethod
@@ -169,7 +173,35 @@ class ServiceConfig:
             return url
         host = ServiceConfig.get_redis_host()
         port = ServiceConfig.get_redis_port()
-        return f"redis://{host}:{port}"
+        password = os.getenv("REDIS_PASSWORD")
+        if password is None and ServiceConfig.is_docker_environment():
+            password = "spicepass123"
+        password = (password or "").strip()
+        if not password:
+            return f"redis://{host}:{port}"
+        return f"redis://:{password}@{host}:{port}"
+
+    @staticmethod
+    def get_elasticsearch_host() -> str:
+        """Get Elasticsearch host from environment or default."""
+        return os.getenv(
+            "ELASTICSEARCH_HOST",
+            "elasticsearch" if ServiceConfig.is_docker_environment() else "127.0.0.1",
+        )
+
+    @staticmethod
+    def get_elasticsearch_port() -> int:
+        """Get Elasticsearch port from environment or default."""
+        return int(os.getenv("ELASTICSEARCH_PORT", str(ServiceConfig.DEFAULT_ELASTICSEARCH_PORT)))
+
+    @staticmethod
+    def get_elasticsearch_url() -> str:
+        """Get Elasticsearch base URL from environment or construct from host/port."""
+        if base_url := os.getenv("ELASTICSEARCH_URL"):
+            return base_url.rstrip("/")
+        host = ServiceConfig.get_elasticsearch_host()
+        port = ServiceConfig.get_elasticsearch_port()
+        return f"http://{host}:{port}"
 
     @staticmethod
     def is_docker_environment() -> bool:
@@ -189,18 +221,18 @@ class ServiceConfig:
         """Get MinIO/S3 endpoint URL."""
         if url := os.getenv("MINIO_ENDPOINT_URL"):
             return url
-        host = "minio" if ServiceConfig.is_docker_environment() else "localhost"
+        host = "minio" if ServiceConfig.is_docker_environment() else "127.0.0.1"
         return f"http://{host}:9000"
     
     @staticmethod
     def get_minio_access_key() -> str:
         """Get MinIO/S3 access key."""
-        return os.getenv("MINIO_ACCESS_KEY", "admin")
+        return os.getenv("MINIO_ACCESS_KEY", "minioadmin")
     
     @staticmethod
     def get_minio_secret_key() -> str:
         """Get MinIO/S3 secret key."""
-        return os.getenv("MINIO_SECRET_KEY", "spice123!")
+        return os.getenv("MINIO_SECRET_KEY", "minioadmin123")
 
     @staticmethod
     def get_service_url(service_name: str) -> str:

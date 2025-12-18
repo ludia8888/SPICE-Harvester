@@ -18,21 +18,7 @@
     "id", "code", "name", "no", "number", "key", "value", "data", "info",
     "item", "type", "status", "flag", "is", "has", "get", "set"
   ],
-  "domain_specific_mappings": {
-    "finance": {
-      "amount": ["price", "cost", "total", "sum", "payment"],
-      "transaction": ["payment", "transfer", "order", "purchase"],
-      "account": ["customer", "client", "user", "member"]
-    },
-    "healthcare": {
-      "patient": ["person", "individual", "subject", "client"],
-      "diagnosis": ["condition", "disease", "disorder", "finding"],
-      "medication": ["drug", "medicine", "treatment", "prescription"]
-    },
-    "ecommerce": {
-      "product": ["item", "goods", "merchandise", "article"],
-      "order": ["purchase", "transaction", "sale", "booking"],
-      "customer": ["buyer", "client", "user", "shopper"]
-    }
+  "features": {
+    "semantic_match": false
   }
 }

@@ -43,7 +43,7 @@ class MappingSuggestionService:
     Features:
     - 이름 기반 매칭 (exact, fuzzy, phonetic)
     - 타입 기반 매칭
-    - 의미론적 매칭 (도메인 지식 활용)
+    - 의미론적 매칭 (옵션: 일반적인 별칭/동의어)
     - 값 패턴 기반 매칭
     - 값 분포 유사도 매칭
     - 토큰 기반 이름 유사도
@@ -70,7 +70,19 @@ class MappingSuggestionService:
             },
             'stop_words': {
                 'id', 'code', 'name', 'no', 'number', 'key', 'value', 'data', 'info'
-            }
+            },
+            # Domain-neutral defaults: semantic matching is opt-in.
+            'features': {
+                'semantic_match': False,
+            },
+            # Optional alias groups for semantic matching (kept intentionally generic).
+            'semantic_aliases': {
+                'name': ['name', 'full_name', 'fullname', 'display_name', '이름', '성명'],
+                'email': ['email', 'email_address', 'e-mail', 'mail', '이메일'],
+                'phone': ['phone', 'phone_number', 'tel', 'telephone', 'mobile', '연락처', '전화번호', '휴대폰'],
+                'date': ['date', 'datetime', 'timestamp', 'created_at', 'updated_at', '날짜', '일시'],
+                'id': ['id', 'identifier', 'code', 'key', '아이디', '식별자'],
+            },
         }
         
         self.config = default_config
@@ -84,45 +96,16 @@ class MappingSuggestionService:
         
         self.thresholds = self.config['thresholds']
         self.weights = self.config['weights']
-        self.stop_words = self.config['stop_words']
+
+        stop_words = self.config.get('stop_words') or set()
+        self.stop_words = stop_words if isinstance(stop_words, set) else set(stop_words)
+
+        self.features = self.config.get('features') or {}
+        self.semantic_match_enabled = bool(self.features.get('semantic_match', False))
+        self.semantic_aliases = self.config.get('semantic_aliases') or {}
         
-        # Common field name mappings across different naming conventions
-        self.common_mappings = {
-            # Person related
-            'firstname': ['first_name', 'fname', 'given_name', '이름', 'name'],
-            'lastname': ['last_name', 'lname', 'surname', 'family_name', '성'],
-            'fullname': ['full_name', 'name', 'display_name', '성명', '이름'],
-            'email': ['email_address', 'mail', 'e-mail', '이메일'],
-            'phone': ['phone_number', 'telephone', 'tel', 'mobile', '전화번호', '연락처'],
-            
-            # Address related
-            'address': ['street_address', 'addr', 'location', '주소'],
-            'city': ['town', 'locality', '도시', '시'],
-            'state': ['province', 'region', '주', '도'],
-            'country': ['nation', 'country_code', '국가'],
-            'zipcode': ['zip', 'postal_code', 'postcode', '우편번호'],
-            
-            # Date/Time related
-            'createdat': ['created_at', 'creation_date', 'date_created', '생성일', '생성일시'],
-            'updatedat': ['updated_at', 'modified_at', 'last_modified', '수정일', '수정일시'],
-            'date': ['datetime', 'timestamp', '날짜', '일시'],
-            
-            # Business related
-            'company': ['organization', 'org', 'corp', 'business', '회사', '기업'],
-            'department': ['dept', 'division', 'team', '부서', '팀'],
-            'position': ['title', 'job_title', 'role', '직책', '직위'],
-            
-            # Product related
-            'product': ['item', 'goods', 'merchandise', '상품', '제품'],
-            'price': ['cost', 'amount', 'value', '가격', '금액'],
-            'quantity': ['qty', 'count', 'number', '수량', '개수'],
-            'description': ['desc', 'details', 'info', '설명', '내용'],
-            
-            # ID related
-            'id': ['identifier', 'key', 'code', '아이디', '식별자'],
-            'userid': ['user_id', 'username', 'uid', '사용자ID'],
-            'customerid': ['customer_id', 'client_id', '고객ID'],
-        }
+        # NOTE: Previously this class shipped with a hard-coded, business-oriented synonym list.
+        # For domain-neutral behavior, semantic matching is now opt-in and driven by `semantic_aliases`.
         
         # Type compatibility matrix
         self.type_compatibility = {
@@ -179,9 +162,10 @@ class MappingSuggestionService:
                     candidates.append(fuzzy_match)
                 
                 # 4. 의미론적 매칭 (도메인 지식)
-                semantic_match = self._check_semantic_match(source_field, target_field)
-                if semantic_match:
-                    candidates.append(semantic_match)
+                if self.semantic_match_enabled:
+                    semantic_match = self._check_semantic_match(source_field, target_field)
+                    if semantic_match:
+                        candidates.append(semantic_match)
                 
                 # 5. 타입 기반 매칭
                 type_match = self._check_type_match(source_field, target_field)
@@ -244,33 +228,95 @@ class MappingSuggestionService:
             unmapped_target_fields=unmapped_targets,
             overall_confidence=overall_confidence
         )
-    
+
+    @staticmethod
+    def _field_name_candidates(field: Dict[str, Any]) -> List[str]:
+        """
+        Return candidate strings for name matching.
+
+        Supports optional metadata keys:
+        - label: human-readable label
+        - aliases: list of alternative names
+        """
+        candidates: List[str] = []
+
+        # Primary name is required by the service contract.
+        name = field.get("name")
+        if name is not None:
+            name_str = str(name).strip()
+            if name_str:
+                candidates.append(name_str)
+
+        label = field.get("label")
+        if label is not None:
+            label_str = str(label).strip()
+            if label_str:
+                candidates.append(label_str)
+
+        aliases = field.get("aliases")
+        if isinstance(aliases, list):
+            for a in aliases:
+                if a is None:
+                    continue
+                a_str = str(a).strip()
+                if a_str:
+                    candidates.append(a_str)
+
+        seen = set()
+        out: List[str] = []
+        for c in candidates:
+            if c in seen:
+                continue
+            seen.add(c)
+            out.append(c)
+
+        return out
+
     def _check_exact_match(
         self, source_field: Dict[str, Any], target_field: Dict[str, Any]
     ) -> Optional[MappingCandidate]:
         """정확한 이름 매칭 검사"""
-        source_name = self._normalize_field_name(source_field['name'])
-        target_name = self._normalize_field_name(target_field['name'])
-        
-        if source_name == target_name:
-            return MappingCandidate(
-                source_field=source_field['name'],
-                target_field=target_field['name'],
-                confidence=self.weights['exact_match'],
-                match_type='exact',
-                reasons=['Exact name match']
-            )
+        source_variants = self._field_name_candidates(source_field)
+        target_variants = self._field_name_candidates(target_field)
+
+        for s in source_variants:
+            s_norm = self._normalize_field_name(s)
+            for t in target_variants:
+                t_norm = self._normalize_field_name(t)
+                if s_norm != t_norm:
+                    continue
+
+                reasons = ['Exact name match']
+                if s != source_field.get("name") or t != target_field.get("name"):
+                    reasons.append(f'Matched "{s}" ↔ "{t}"')
+
+                return MappingCandidate(
+                    source_field=source_field['name'],
+                    target_field=target_field['name'],
+                    confidence=self.weights['exact_match'],
+                    match_type='exact',
+                    reasons=reasons,
+                )
         return None
     
     def _check_token_match(
         self, source_field: Dict[str, Any], target_field: Dict[str, Any]
     ) -> Optional[MappingCandidate]:
         """토큰 기반 이름 매칭 검사"""
-        source_name = source_field['name']
-        target_name = target_field['name']
-        
-        # Calculate token similarity
-        token_sim = self._token_similarity(source_name, target_name)
+        source_variants = self._field_name_candidates(source_field)
+        target_variants = self._field_name_candidates(target_field)
+
+        best_score = 0.0
+        best_pair = (source_field.get("name", ""), target_field.get("name", ""))
+        for s in source_variants:
+            for t in target_variants:
+                score = self._token_similarity(s, t)
+                if score > best_score:
+                    best_score = score
+                    best_pair = (s, t)
+
+        source_name, target_name = best_pair
+        token_sim = best_score
         
         if token_sim > 0.5:  # Minimum threshold for token match
             confidence = token_sim * self.weights['token_similarity']
@@ -287,6 +333,9 @@ class MappingSuggestionService:
                 reasons.append(f'High token similarity ({token_sim:.2f})')
             else:
                 reasons.append(f'Moderate token similarity ({token_sim:.2f})')
+
+            if source_name != source_field.get("name") or target_name != target_field.get("name"):
+                reasons.append(f'Matched "{source_name}" ↔ "{target_name}"')
             
             return MappingCandidate(
                 source_field=source_field['name'],
@@ -301,29 +350,43 @@ class MappingSuggestionService:
         self, source_field: Dict[str, Any], target_field: Dict[str, Any]
     ) -> Optional[MappingCandidate]:
         """퍼지 이름 매칭 검사"""
-        source_name = self._normalize_field_name(source_field['name'])
-        target_name = self._normalize_field_name(target_field['name'])
+        source_variants = self._field_name_candidates(source_field)
+        target_variants = self._field_name_candidates(target_field)
+
+        best_similarity = 0.0
+        best_levenshtein = 0.0
+        best_score = 0.0
+        best_pair = (source_field.get("name", ""), target_field.get("name", ""))
+
+        for s in source_variants:
+            s_norm = self._normalize_field_name(s)
+            for t in target_variants:
+                t_norm = self._normalize_field_name(t)
+
+                similarity = SequenceMatcher(None, s_norm, t_norm).ratio()
+                levenshtein_sim = self._levenshtein_similarity(s_norm, t_norm)
+                combined_score = (similarity * 0.7 + levenshtein_sim * 0.3)
+
+                if combined_score > best_score:
+                    best_score = combined_score
+                    best_similarity = similarity
+                    best_levenshtein = levenshtein_sim
+                    best_pair = (s, t)
         
-        # String similarity
-        similarity = SequenceMatcher(None, source_name, target_name).ratio()
-        
-        # Levenshtein distance-based similarity (for typos)
-        levenshtein_sim = self._levenshtein_similarity(source_name, target_name)
-        
-        # Combined score
-        combined_score = (similarity * 0.7 + levenshtein_sim * 0.3)
-        
-        if combined_score > self.thresholds['fuzzy_match']:
+        if best_score > self.thresholds['fuzzy_match']:
             reasons = []
-            if similarity > 0.8:
-                reasons.append(f'High string similarity ({similarity:.2f})')
-            if levenshtein_sim > 0.8:
-                reasons.append(f'Similar spelling (edit distance: {levenshtein_sim:.2f})')
+            if best_similarity > 0.8:
+                reasons.append(f'High string similarity ({best_similarity:.2f})')
+            if best_levenshtein > 0.8:
+                reasons.append(f'Similar spelling (edit distance: {best_levenshtein:.2f})')
+
+            if best_pair[0] != source_field.get("name") or best_pair[1] != target_field.get("name"):
+                reasons.append(f'Matched "{best_pair[0]}" ↔ "{best_pair[1]}"')
             
             return MappingCandidate(
                 source_field=source_field['name'],
                 target_field=target_field['name'],
-                confidence=combined_score * self.weights['fuzzy_match'],
+                confidence=best_score * self.weights['fuzzy_match'],
                 match_type='fuzzy',
                 reasons=reasons
             )
@@ -332,32 +395,40 @@ class MappingSuggestionService:
     def _check_semantic_match(
         self, source_field: Dict[str, Any], target_field: Dict[str, Any]
     ) -> Optional[MappingCandidate]:
-        """의미론적 매칭 검사 (도메인 지식 활용)"""
-        source_norm = self._normalize_field_name(source_field['name'])
-        target_norm = self._normalize_field_name(target_field['name'])
-        
-        # Check common mappings
-        for key, variations in self.common_mappings.items():
-            normalized_variations = [self._normalize_field_name(v) for v in variations]
-            
-            if source_norm in normalized_variations and target_norm in normalized_variations:
+        """의미론적 매칭 검사 (옵션: 별칭/동의어 그룹 기반)"""
+        source_norms = {
+            self._normalize_field_name(v) for v in self._field_name_candidates(source_field)
+        }
+        target_norms = {
+            self._normalize_field_name(v) for v in self._field_name_candidates(target_field)
+        }
+
+        # Check alias groups
+        for key, variations in (self.semantic_aliases or {}).items():
+            normalized_variations = {self._normalize_field_name(key)}
+            for v in variations:
+                normalized_variations.add(self._normalize_field_name(v))
+
+            if source_norms & normalized_variations and target_norms & normalized_variations:
                 return MappingCandidate(
                     source_field=source_field['name'],
                     target_field=target_field['name'],
                     confidence=self.weights['semantic_match'],
                     match_type='semantic',
-                    reasons=[f'Both fields are variations of "{key}"']
+                    reasons=[f'Both fields match alias group "{key}"'],
                 )
         
         # Check if one is abbreviation of the other
-        if self._is_abbreviation(source_norm, target_norm):
-            return MappingCandidate(
-                source_field=source_field['name'],
-                target_field=target_field['name'],
-                confidence=0.75 * self.weights['semantic_match'],
-                match_type='semantic',
-                reasons=['Abbreviation match']
-            )
+        for s in source_norms:
+            for t in target_norms:
+                if self._is_abbreviation(s, t):
+                    return MappingCandidate(
+                        source_field=source_field['name'],
+                        target_field=target_field['name'],
+                        confidence=0.75 * self.weights['semantic_match'],
+                        match_type='semantic',
+                        reasons=['Abbreviation match'],
+                    )
         
         return None
     
@@ -379,21 +450,35 @@ class MappingSuggestionService:
             return None
         
         # Type-based matching is weak, so only suggest if names are somewhat similar
-        source_name = self._normalize_field_name(source_field['name'])
-        target_name = self._normalize_field_name(target_field['name'])
-        name_similarity = SequenceMatcher(None, source_name, target_name).ratio()
+        source_variants = self._field_name_candidates(source_field)
+        target_variants = self._field_name_candidates(target_field)
+
+        best_similarity = 0.0
+        best_pair = (source_field.get("name", ""), target_field.get("name", ""))
+        for s in source_variants:
+            s_norm = self._normalize_field_name(s)
+            for t in target_variants:
+                t_norm = self._normalize_field_name(t)
+                sim = SequenceMatcher(None, s_norm, t_norm).ratio()
+                if sim > best_similarity:
+                    best_similarity = sim
+                    best_pair = (s, t)
+        name_similarity = best_similarity
         
         if name_similarity > self.thresholds['name_similarity']:
             confidence = (0.5 + (name_similarity * 0.3)) * self.weights['type_match']
+            reasons = [
+                f'Compatible types ({source_type} → {target_type})',
+                f'Partial name similarity ({name_similarity:.2f})',
+            ]
+            if best_pair[0] != source_field.get("name") or best_pair[1] != target_field.get("name"):
+                reasons.append(f'Matched "{best_pair[0]}" ↔ "{best_pair[1]}"')
             return MappingCandidate(
                 source_field=source_field['name'],
                 target_field=target_field['name'],
                 confidence=confidence,
                 match_type='type_based',
-                reasons=[
-                    f'Compatible types ({source_type} → {target_type})',
-                    f'Partial name similarity ({name_similarity:.2f})'
-                ]
+                reasons=reasons,
             )
         
         return None
@@ -405,7 +490,7 @@ class MappingSuggestionService:
     ) -> Optional[MappingCandidate]:
         """값 패턴 기반 매칭 검사"""
         source_name = source_field['name']
-        target_name = target_field['name']
+        target_text = " ".join(self._field_name_candidates(target_field)).lower()
         
         # Get sample values
         source_values = [
@@ -424,27 +509,27 @@ class MappingSuggestionService:
         reasons = []
         
         # Email pattern
-        if source_patterns['is_email'] and 'email' in target_name.lower():
+        if source_patterns['is_email'] and any(term in target_text for term in ['email', 'e-mail', 'mail', '이메일']):
             confidence = 0.9 * self.weights['pattern_match']
             reasons.append('Values match email pattern')
         
         # Phone pattern
         elif source_patterns['is_phone'] and any(
-            term in target_name.lower() for term in ['phone', 'tel', 'mobile']
+            term in target_text for term in ['phone', 'tel', 'mobile', '전화', '연락처', '휴대폰']
         ):
             confidence = 0.9 * self.weights['pattern_match']
             reasons.append('Values match phone pattern')
         
         # Date pattern
         elif source_patterns['is_date'] and any(
-            term in target_name.lower() for term in ['date', 'time', 'created', 'updated']
+            term in target_text for term in ['date', 'time', 'created', 'updated', '날짜', '일시']
         ):
             confidence = 0.85 * self.weights['pattern_match']
             reasons.append('Values match date pattern')
         
         # ID pattern
         elif source_patterns['is_id'] and any(
-            term in target_name.lower() for term in ['id', 'key', 'code']
+            term in target_text for term in ['id', 'key', 'code', '아이디', '식별자']
         ):
             confidence = 0.8 * self.weights['pattern_match']
             reasons.append('Values match ID pattern')
@@ -452,7 +537,7 @@ class MappingSuggestionService:
         if confidence > 0:
             return MappingCandidate(
                 source_field=source_name,
-                target_field=target_name,
+                target_field=target_field['name'],
                 confidence=confidence,
                 match_type='pattern',
                 reasons=reasons

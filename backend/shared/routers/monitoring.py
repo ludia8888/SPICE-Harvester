@@ -692,7 +692,7 @@ async def get_active_background_tasks(
                     "created_at": task.created_at.isoformat(),
                     "started_at": task.started_at.isoformat() if task.started_at else None,
                     "duration_seconds": task.duration,
-                    "progress": task.progress.dict() if task.progress else None,
+                    "progress": task.progress.model_dump(mode="json") if task.progress else None,
                     "retry_count": task.retry_count,
                     "metadata": task.metadata
                 }

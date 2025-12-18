@@ -5,31 +5,31 @@ OMS 비동기 인스턴스 라우터 - Command Pattern 기반
 
 import logging
 from datetime import datetime, timezone
+import os
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
 
 from oms.dependencies import (
     JSONLDConverterDep,
     LabelMapperDep,
     TerminusServiceDep,
-    OutboxServiceDep,
     EventStoreDep,  # Added for S3/MinIO Event Store
     CommandStatusServiceDep,
     ValidatedDatabaseName,
     ValidatedClassId,
     ensure_database_exists
 )
-from oms.services.migration_helper import migration_helper
 from shared.dependencies.providers import RedisServiceDep
-from oms.database.postgres import db as postgres_db
-from oms.database.outbox import MessageType, OutboxService
+from shared.config.app_config import AppConfig
 from shared.models.commands import CommandType, InstanceCommand, CommandResult, CommandStatus
 from shared.models.common import BaseResponse
 from shared.services.command_status_service import CommandStatusService
 from shared.services.redis_service import RedisService
+from shared.models.event_envelope import EventEnvelope
+from shared.services.aggregate_sequence_allocator import OptimisticConcurrencyError
 from shared.security.input_sanitizer import (
     SecurityViolationError,
     sanitize_input,
@@ -41,6 +41,39 @@ from shared.security.input_sanitizer import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/instances/{db_name}/async", tags=["Async Instance Management"])
+
+
+async def _append_command_event(command: InstanceCommand, *, event_store, topic: str, actor: Optional[str]) -> None:
+    """Store command as an immutable event in S3/MinIO for the publisher to relay to Kafka."""
+    envelope = EventEnvelope.from_command(
+        command,
+        actor=actor,
+        kafka_topic=topic,
+        metadata={"service": "oms", "mode": "event_sourcing"},
+    )
+    await event_store.append_event(envelope)
+    logger.info(f"Stored command event {envelope.event_id} (seq={envelope.sequence_number}) to Event Store")
+
+
+def _derive_instance_id(class_id: str, payload: Dict[str, Any]) -> str:
+    """Derive a stable instance_id for CREATE_INSTANCE so command/event aggregate_id matches."""
+    if not isinstance(payload, dict):
+        raise SecurityViolationError("Instance payload must be an object")
+
+    expected_key = f"{class_id.lower()}_id"
+    candidate = payload.get(expected_key)
+    if not candidate:
+        for key in sorted(payload.keys()):
+            if key.endswith("_id") and payload.get(key):
+                candidate = payload.get(key)
+                break
+
+    if not candidate:
+        candidate = f"{class_id.lower()}_{uuid4().hex[:8]}"
+
+    instance_id = str(candidate)
+    validate_instance_id(instance_id)
+    return instance_id
 
 
 # Request Models
@@ -67,8 +100,8 @@ async def create_instance_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
     request: InstanceCreateRequest = ...,
-    outbox_service: Optional[OutboxService] = OutboxServiceDep,
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
+    event_store=EventStoreDep,
     user_id: Optional[str] = None,
 ):
     """
@@ -80,12 +113,17 @@ async def create_instance_async(
     try:
         # 입력 검증
         sanitized_data = sanitize_input(request.data)
+
+        # CREATE_INSTANCE는 aggregate_id 정합성을 위해 instance_id를 포함해야 함
+        instance_id = _derive_instance_id(class_id, sanitized_data)
         
         # Command 생성
         command = InstanceCommand(
             command_type=CommandType.CREATE_INSTANCE,
             db_name=db_name,
             class_id=class_id,
+            instance_id=instance_id,
+            expected_seq=0,
             payload=sanitized_data,
             metadata={
                 **request.metadata,
@@ -95,38 +133,46 @@ async def create_instance_async(
             created_by=user_id
         )
         
-        # 🔥 MIGRATION: Use migration helper for gradual S3 adoption
-        from shared.config.app_config import AppConfig
-        
-        if outbox_service:
-            async with postgres_db.transaction() as conn:
-                # Use migration helper for dual-write pattern
-                migration_result = await migration_helper.handle_command_with_migration(
-                    connection=conn,
-                    command=command,
-                    outbox_service=outbox_service,
+        enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
+        if enable_event_sourcing:
+            try:
+                await _append_command_event(
+                    command,
+                    event_store=event_store,
                     topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
-                    actor=user_id
+                    actor=user_id,
                 )
-                
-                # Log migration status for monitoring
-                logger.info(f"Migration result: {migration_result['migration_mode']} - "
-                          f"Storage: {', '.join(migration_result['storage'])}")
+            except OptimisticConcurrencyError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "error": "optimistic_concurrency_conflict",
+                        "aggregate_id": e.aggregate_id,
+                        "expected_seq": e.expected_last_sequence,
+                        "actual_seq": e.actual_last_sequence,
+                    },
+                )
         
         # Redis에 상태 저장 (if available)
         if command_status_service:
-            await command_status_service.set_command_status(
-                command_id=str(command.command_id),
-                status=CommandStatus.PENDING,
-                metadata={
-                    "command_type": command.command_type,
-                    "db_name": db_name,
-                    "class_id": class_id,
-                    "aggregate_id": command.aggregate_id,
-                    "created_at": command.created_at.isoformat(),
-                    "created_by": user_id
-                }
-            )
+            try:
+                await command_status_service.set_command_status(
+                    command_id=str(command.command_id),
+                    status=CommandStatus.PENDING,
+                    metadata={
+                        "command_type": command.command_type,
+                        "db_name": db_name,
+                        "class_id": class_id,
+                        "instance_id": instance_id,
+                        "aggregate_id": command.aggregate_id,
+                        "created_at": command.created_at.isoformat(),
+                        "created_by": user_id,
+                    },
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to persist command status (continuing without Redis): {e}"
+                )
         else:
             logger.warning(f"Command status tracking disabled for command {command.command_id}")
         
@@ -136,6 +182,7 @@ async def create_instance_async(
             status=CommandStatus.PENDING,
             result={
                 "message": f"Instance creation command accepted for class '{class_id}'",
+                "instance_id": instance_id,
                 "class_id": class_id,
                 "db_name": db_name
             }
@@ -160,9 +207,10 @@ async def update_instance_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
     instance_id: str = ...,
+    expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
     request: InstanceUpdateRequest = ...,
-    outbox_service: Optional[OutboxService] = OutboxServiceDep,
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
+    event_store=EventStoreDep,
     user_id: Optional[str] = None,
 ):
     """
@@ -179,6 +227,7 @@ async def update_instance_async(
             db_name=db_name,
             class_id=class_id,
             instance_id=instance_id,
+            expected_seq=expected_seq,
             payload=sanitized_data,
             metadata={
                 **request.metadata,
@@ -188,36 +237,48 @@ async def update_instance_async(
             created_by=user_id
         )
         
-        # 🔥 MIGRATION: Use migration helper for gradual S3 adoption
-        from shared.config.app_config import AppConfig
-        
-        if outbox_service:
-            async with postgres_db.transaction() as conn:
-                # Use migration helper for dual-write pattern
-                migration_result = await migration_helper.handle_command_with_migration(
-                    connection=conn,
-                    command=command,
-                    outbox_service=outbox_service,
+        enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
+        if enable_event_sourcing:
+            try:
+                await _append_command_event(
+                    command,
+                    event_store=event_store,
                     topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
-                    actor=user_id
+                    actor=user_id,
                 )
-                
-                logger.info(f"Migration: {migration_result['migration_mode']}")
+            except OptimisticConcurrencyError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "error": "optimistic_concurrency_conflict",
+                        "aggregate_id": e.aggregate_id,
+                        "expected_seq": e.expected_last_sequence,
+                        "actual_seq": e.actual_last_sequence,
+                    },
+                )
         
         # Redis에 상태 저장
-        await command_status_service.set_command_status(
-            command_id=str(command.command_id),
-            status=CommandStatus.PENDING,
-            metadata={
-                "command_type": command.command_type,
-                "db_name": db_name,
-                "class_id": class_id,
-                "instance_id": instance_id,
-                "aggregate_id": command.aggregate_id,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-                "updated_by": user_id
-            }
-        )
+        if command_status_service:
+            try:
+                await command_status_service.set_command_status(
+                    command_id=str(command.command_id),
+                    status=CommandStatus.PENDING,
+                    metadata={
+                        "command_type": command.command_type,
+                        "db_name": db_name,
+                        "class_id": class_id,
+                        "instance_id": instance_id,
+                        "aggregate_id": command.aggregate_id,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_by": user_id,
+                    },
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to persist command status (continuing without Redis): {e}"
+                )
+        else:
+            logger.warning(f"Command status tracking disabled for command {command.command_id}")
         
         return CommandResult(
             command_id=command.command_id,
@@ -249,8 +310,9 @@ async def delete_instance_async(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
     instance_id: str = ...,
-    outbox_service: Optional[OutboxService] = OutboxServiceDep,
+    expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
+    event_store=EventStoreDep,
     user_id: Optional[str] = None,
 ):
     """
@@ -266,6 +328,7 @@ async def delete_instance_async(
             db_name=db_name,
             class_id=class_id,
             instance_id=instance_id,
+            expected_seq=expected_seq,
             payload={},  # 삭제는 payload 필요 없음
             metadata={
                 "user_id": user_id,
@@ -274,36 +337,48 @@ async def delete_instance_async(
             created_by=user_id
         )
         
-        # 🔥 MIGRATION: Use migration helper for gradual S3 adoption
-        from shared.config.app_config import AppConfig
-        
-        if outbox_service:
-            async with postgres_db.transaction() as conn:
-                # Use migration helper for dual-write pattern
-                migration_result = await migration_helper.handle_command_with_migration(
-                    connection=conn,
-                    command=command,
-                    outbox_service=outbox_service,
+        enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
+        if enable_event_sourcing:
+            try:
+                await _append_command_event(
+                    command,
+                    event_store=event_store,
                     topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
-                    actor=user_id
+                    actor=user_id,
                 )
-                
-                logger.info(f"Migration: {migration_result['migration_mode']}")
+            except OptimisticConcurrencyError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "error": "optimistic_concurrency_conflict",
+                        "aggregate_id": e.aggregate_id,
+                        "expected_seq": e.expected_last_sequence,
+                        "actual_seq": e.actual_last_sequence,
+                    },
+                )
         
         # Redis에 상태 저장
-        await command_status_service.set_command_status(
-            command_id=str(command.command_id),
-            status=CommandStatus.PENDING,
-            metadata={
-                "command_type": command.command_type,
-                "db_name": db_name,
-                "class_id": class_id,
-                "instance_id": instance_id,
-                "aggregate_id": command.aggregate_id,
-                "deleted_at": datetime.now(timezone.utc).isoformat(),
-                "deleted_by": user_id
-            }
-        )
+        if command_status_service:
+            try:
+                await command_status_service.set_command_status(
+                    command_id=str(command.command_id),
+                    status=CommandStatus.PENDING,
+                    metadata={
+                        "command_type": command.command_type,
+                        "db_name": db_name,
+                        "class_id": class_id,
+                        "instance_id": instance_id,
+                        "aggregate_id": command.aggregate_id,
+                        "deleted_at": datetime.now(timezone.utc).isoformat(),
+                        "deleted_by": user_id,
+                    },
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to persist command status (continuing without Redis): {e}"
+                )
+        else:
+            logger.warning(f"Command status tracking disabled for command {command.command_id}")
         
         return CommandResult(
             command_id=command.command_id,
@@ -336,8 +411,8 @@ async def bulk_create_instances_async(
     class_id: str = Depends(ValidatedClassId),
     request: BulkInstanceCreateRequest = ...,
     background_tasks: BackgroundTasks = BackgroundTasks(),
-    outbox_service: Optional[OutboxService] = OutboxServiceDep,
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
+    event_store=EventStoreDep,
     user_id: Optional[str] = None,
 ):
     """
@@ -367,36 +442,37 @@ async def bulk_create_instances_async(
             created_by=user_id
         )
         
-        # 🔥 MIGRATION: Use migration helper for gradual S3 adoption
-        from shared.config.app_config import AppConfig
-        
-        if outbox_service:
-            async with postgres_db.transaction() as conn:
-                # Use migration helper for dual-write pattern
-                migration_result = await migration_helper.handle_command_with_migration(
-                    connection=conn,
-                    command=command,
-                    outbox_service=outbox_service,
-                    topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
-                    actor=user_id
-                )
-                
-                logger.info(f"Migration: {migration_result['migration_mode']}")
+        enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
+        if enable_event_sourcing:
+            await _append_command_event(
+                command,
+                event_store=event_store,
+                topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
+                actor=user_id,
+            )
         
         # Redis에 상태 저장
-        await command_status_service.set_command_status(
-            command_id=str(command.command_id),
-            status=CommandStatus.PENDING,
-            metadata={
-                "command_type": command.command_type,
-                "db_name": db_name,
-                "class_id": class_id,
-                "instance_count": len(sanitized_instances),
-                "aggregate_id": command.aggregate_id,
-                "created_at": command.created_at.isoformat(),
-                "created_by": user_id
-            }
-        )
+        if command_status_service:
+            try:
+                await command_status_service.set_command_status(
+                    command_id=str(command.command_id),
+                    status=CommandStatus.PENDING,
+                    metadata={
+                        "command_type": command.command_type,
+                        "db_name": db_name,
+                        "class_id": class_id,
+                        "instance_count": len(sanitized_instances),
+                        "aggregate_id": command.aggregate_id,
+                        "created_at": command.created_at.isoformat(),
+                        "created_by": user_id,
+                    },
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to persist command status (continuing without Redis): {e}"
+                )
+        else:
+            logger.warning(f"Command status tracking disabled for command {command.command_id}")
         
         # Add background task for progress tracking
         if len(sanitized_instances) > 10:  # Only for large batches
@@ -443,6 +519,20 @@ async def get_instance_command_status(
     인스턴스 명령의 상태 조회
     """
     try:
+        if not command_status_service:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Command status tracking is disabled (Redis unavailable)",
+            )
+
+        try:
+            command_uuid = UUID(command_id)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid command_id (must be UUID)",
+            )
+
         # Redis에서 상태 조회
         status_info = await command_status_service.get_command_status(command_id)
         
@@ -454,12 +544,22 @@ async def get_instance_command_status(
         
         # 결과 조회
         result = await command_status_service.get_command_result(command_id)
-        
+
+        raw_status = status_info.get("status", CommandStatus.PENDING)
+        if hasattr(raw_status, "value"):
+            raw_status = raw_status.value
+
+        try:
+            parsed_status = CommandStatus(raw_status)
+        except Exception:
+            parsed_status = CommandStatus.PENDING
+
         return CommandResult(
-            command_id=UUID(command_id),
-            status=CommandStatus(status_info.get("status", CommandStatus.PENDING)),
+            command_id=command_uuid,
+            status=parsed_status,
+            error=status_info.get("error"),
             result=result or {
-                "message": f"Command is {status_info.get('status', 'PENDING')}",
+                "message": f"Command is {raw_status}",
                 **status_info
             }
         )
@@ -488,6 +588,8 @@ async def _track_bulk_create_progress(
     import asyncio
     
     try:
+        if not command_status_service:
+            return
         logger.info(f"Starting progress tracking for bulk create command {command_id}")
         
         # Simulate progress updates (in real scenario, this would monitor actual progress)
@@ -495,18 +597,21 @@ async def _track_bulk_create_progress(
             # Update progress
             progress_percentage = (i / total_instances) * 100 if total_instances > 0 else 100
             
-            await command_status_service.set_command_status(
-                command_id=command_id,
-                status=CommandStatus.PROCESSING,
-                metadata={
-                    "progress": {
-                        "current": i,
-                        "total": total_instances,
-                        "percentage": progress_percentage,
-                        "message": f"Processing instance {i} of {total_instances}"
-                    }
-                }
-            )
+            try:
+                await command_status_service.set_command_status(
+                    command_id=command_id,
+                    status=CommandStatus.PROCESSING,
+                    metadata={
+                        "progress": {
+                            "current": i,
+                            "total": total_instances,
+                            "percentage": progress_percentage,
+                            "message": f"Processing instance {i} of {total_instances}",
+                        }
+                    },
+                )
+            except Exception as e:
+                logger.warning(f"Progress status update failed (continuing): {e}")
             
             # Simulate processing time
             await asyncio.sleep(0.5)
@@ -524,8 +629,8 @@ async def bulk_create_instances_with_tracking(
     class_id: str = Depends(ValidatedClassId),
     request: BulkInstanceCreateRequest = ...,
     background_tasks: BackgroundTasks = BackgroundTasks(),
-    outbox_service: Optional[OutboxService] = OutboxServiceDep,
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
+    event_store=EventStoreDep,
     user_id: Optional[str] = None,
 ):
     """
@@ -549,7 +654,7 @@ async def bulk_create_instances_with_tracking(
         instances=sanitized_instances,
         metadata=request.metadata,
         user_id=user_id,
-        outbox_service=outbox_service,
+        event_store=event_store,
         command_status_service=command_status_service
     )
     
@@ -570,7 +675,7 @@ async def _process_bulk_create_in_background(
     instances: List[Dict[str, Any]],
     metadata: Dict[str, Any],
     user_id: Optional[str],
-    outbox_service: Optional[OutboxService],
+    event_store,
     command_status_service: CommandStatusService
 ) -> None:
     """
@@ -596,29 +701,40 @@ async def _process_bulk_create_in_background(
             created_by=user_id
         )
         
-        # Save to outbox
-        if outbox_service:
-            from oms.database.postgres import db as postgres_db
-            async with postgres_db.transaction() as conn:
-                await outbox_service.publish_command(conn, command)
+        enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
+        if enable_event_sourcing:
+            await _append_command_event(
+                command,
+                event_store=event_store,
+                topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
+                actor=user_id,
+            )
         
-        # Update task status
-        await command_status_service.set_command_status(
-            command_id=task_id,
-            status=CommandStatus.COMPLETED,
-            metadata={
-                "command_id": str(command.command_id),
-                "result": "Bulk create command published successfully"
-            }
-        )
+        # Update task status (best-effort; Redis may be unavailable)
+        if command_status_service:
+            try:
+                await command_status_service.set_command_status(
+                    command_id=task_id,
+                    status=CommandStatus.COMPLETED,
+                    metadata={
+                        "command_id": str(command.command_id),
+                        "result": "Bulk create command published successfully",
+                    },
+                )
+            except Exception as e:
+                logger.warning(f"Task status update failed (continuing): {e}")
         
     except Exception as e:
         logger.error(f"Background bulk create failed for task {task_id}: {e}")
-        await command_status_service.set_command_status(
-            command_id=task_id,
-            status=CommandStatus.FAILED,
-            metadata={
-                "error": str(e),
-                "error_type": type(e).__name__
-            }
-        )
+        if command_status_service:
+            try:
+                await command_status_service.set_command_status(
+                    command_id=task_id,
+                    status=CommandStatus.FAILED,
+                    metadata={
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                    },
+                )
+            except Exception as status_err:
+                logger.warning(f"Task failure status update failed (continuing): {status_err}")

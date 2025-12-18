@@ -204,7 +204,7 @@ async def analyze_ontology(
         return {
             "ontology_id": request.ontology_id,
             "analysis": analysis,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
     except Exception as e:
@@ -237,7 +237,7 @@ async def get_ontology_suggestions(
             "db_name": db_name,
             "class_id": class_id,
             "suggestions": suggestions,
-            "generated_at": datetime.utcnow().isoformat()
+            "generated_at": datetime.now(timezone.utc).isoformat()
         }
         
     except Exception as e:
@@ -279,4 +279,4 @@ async def check_context7_health(
 
 
 # Import datetime for timestamp generation
-from datetime import datetime
+from datetime import datetime, timezone

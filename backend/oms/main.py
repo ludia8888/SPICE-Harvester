@@ -51,8 +51,6 @@ from shared.services.service_factory import OMS_SERVICE_INFO, create_fastapi_ser
 
 # OMS specific imports  
 from oms.services.async_terminus import AsyncTerminusService
-from oms.database.postgres import db as postgres_db
-from oms.database.outbox import OutboxService
 from oms.services.event_store import event_store
 from shared.models.config import ConnectionConfig
 from shared.services.redis_service import RedisService
@@ -73,7 +71,7 @@ from shared.observability.context_propagation import TraceContextMiddleware
 # Router imports
 from oms.routers import (
     branch, database, ontology, version,
-    instance_async, instance, pull_request, query
+    instance_async, instance, query, command_status
 )
 
 # Monitoring and observability routers
@@ -93,14 +91,13 @@ class OMSServiceContainer:
     OMS-specific service container to manage OMS services
     
     This class extends the core service container functionality
-    with OMS-specific services like AsyncTerminusService and OutboxService.
+    with OMS-specific services like AsyncTerminusService and the S3/MinIO Event Store.
     """
     
     def __init__(self, container, settings: ApplicationSettings):
         self.container = container
         self.settings = settings
         self._oms_services = {}
-        self._postgres_db = None
     
     async def initialize_oms_services(self) -> None:
         """Initialize OMS-specific services"""
@@ -118,27 +115,23 @@ class OMSServiceContainer:
         # 4. Initialize Label Mapper
         await self._initialize_label_mapper()
         
-        # 5. Initialize PostgreSQL and Outbox service
-        await self._initialize_postgres_and_outbox()
-        
-        # 6. Initialize Redis and Command Status service
+        # 5. Initialize Redis and Command Status service
         await self._initialize_redis_and_command_status()
         
-        # 7. Initialize Elasticsearch service
+        # 6. Initialize Elasticsearch service
         await self._initialize_elasticsearch()
         
-        # 8. Initialize Rate Limiter
+        # 7. Initialize Rate Limiter
         await self._initialize_rate_limiter()
         
-        # 9. Initialize Observability (Tracing & Metrics)
+        # 8. Initialize Observability (Tracing & Metrics)
         await self._initialize_observability()
         
         logger.info("OMS services initialized successfully")
     
     async def _initialize_event_store(self) -> None:
         """
-        Initialize S3/MinIO Event Store - The REAL Single Source of Truth.
-        PostgreSQL Outbox is NOT an event store, just delivery guarantee!
+        Initialize S3/MinIO Event Store - The Single Source of Truth.
         """
         try:
             logger.info("🔥 Initializing S3/MinIO Event Store (SSoT)...")
@@ -192,23 +185,6 @@ class OMSServiceContainer:
         label_mapper = LabelMapper()
         self._oms_services['label_mapper'] = label_mapper
         logger.info("Label mapper initialized")
-    
-    async def _initialize_postgres_and_outbox(self) -> None:
-        """Initialize PostgreSQL connection and Outbox service"""
-        try:
-            # Store reference for cleanup
-            self._postgres_db = postgres_db
-            
-            await postgres_db.connect()
-            outbox_service = OutboxService(postgres_db)
-            
-            self._oms_services['outbox_service'] = outbox_service
-            logger.info("PostgreSQL 연결 성공")
-            
-        except Exception as e:
-            logger.error(f"PostgreSQL 연결 실패: {e}")
-            # PostgreSQL failure is non-fatal - basic functionality can work
-            self._oms_services['outbox_service'] = None
     
     async def _initialize_redis_and_command_status(self) -> None:
         """Initialize Redis service and Command Status service"""
@@ -330,13 +306,6 @@ class OMSServiceContainer:
             except Exception as e:
                 logger.error(f"Error disconnecting Redis service: {e}")
         
-        if self._postgres_db:
-            try:
-                await self._postgres_db.disconnect()
-                logger.info("PostgreSQL disconnected")
-            except Exception as e:
-                logger.error(f"Error disconnecting PostgreSQL: {e}")
-        
         if 'terminus_service' in self._oms_services and self._oms_services['terminus_service']:
             try:
                 await self._oms_services['terminus_service'].disconnect()
@@ -364,10 +333,6 @@ class OMSServiceContainer:
         if 'label_mapper' not in self._oms_services:
             raise RuntimeError("Label mapper not initialized")
         return self._oms_services['label_mapper']
-    
-    def get_outbox_service(self) -> Optional[OutboxService]:
-        """Get outbox service instance (can be None)"""
-        return self._oms_services.get('outbox_service')
     
     def get_redis_service(self) -> Optional[RedisService]:
         """Get Redis service instance (can be None)"""
@@ -640,9 +605,6 @@ async def container_health_check():
             oms_services_status["label_mapper"] = f"unhealthy: {str(e)}"
         
         # Check optional services
-        outbox_service = _oms_container.get_outbox_service()
-        oms_services_status["outbox_service"] = "available" if outbox_service else "not_available"
-        
         redis_service = _oms_container.get_redis_service()
         oms_services_status["redis_service"] = "available" if redis_service else "not_available"
         
@@ -696,8 +658,16 @@ app.include_router(query.router, prefix="/api/v1", tags=["query"])
 app.include_router(instance_async.router, prefix="/api/v1", tags=["async-instance"])
 app.include_router(instance.router, prefix="/api/v1", tags=["instance"])
 app.include_router(branch.router, prefix="/api/v1", tags=["branch"])
-app.include_router(pull_request.router, prefix="/api/v1", tags=["pull-requests"])
 app.include_router(version.router, prefix="/api/v1", tags=["version"])
+app.include_router(command_status.router, prefix="/api/v1", tags=["command-status"])
+
+# Pull Request endpoints depend on Postgres MVCC; keep them opt-in only.
+if os.getenv("ENABLE_PULL_REQUESTS", "false").lower() == "true":
+    from oms.routers import pull_request
+
+    app.include_router(pull_request.router, prefix="/api/v1", tags=["pull-requests"])
+else:
+    logger.info("Pull request endpoints disabled (set ENABLE_PULL_REQUESTS=true to enable)")
 
 # Monitoring and observability endpoints (modernized architecture)
 app.include_router(monitoring.router, prefix="/api/v1/monitoring", tags=["monitoring"])

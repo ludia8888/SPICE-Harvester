@@ -6,7 +6,7 @@ Analyzes current SPICE HARVESTER system and identifies improvements
 
 import asyncio
 import json
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import Dict, List, Any
 
 # Simulating Context7 analysis since we can't actually connect
@@ -23,11 +23,11 @@ class SystemAnalyzer:
         
         # Simulate Context7 analysis of current codebase
         analysis = {
-            "timestamp": datetime.now(datetime.UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "system": "SPICE HARVESTER",
             "version": "1.0.0",
             "components_analyzed": [
-                "Event Sourcing (Kafka + Outbox)",
+                "Event Sourcing (Kafka + processed_events registry)",
                 "MVCC (PostgreSQL)",
                 "TerminusDB Integration",
                 "MCP Integration",
@@ -37,7 +37,7 @@ class SystemAnalyzer:
                 {
                     "area": "Event Sourcing",
                     "score": 85,
-                    "details": "Well-implemented Outbox pattern with Kafka integration"
+                    "details": "At-least-once publishing + consumer idempotency via processed_events registry"
                 },
                 {
                     "area": "MVCC",

@@ -17,9 +17,12 @@ from data_connector.google_sheets.models import (
     RegisteredSheet,
     SheetMetadata
 )
+from shared.models.google_sheets import GoogleSheetPreviewRequest, GoogleSheetPreviewResponse
 from shared.models.requests import ApiResponse
+from shared.models.sheet_grid import GoogleSheetGridRequest, SheetGrid
 from shared.middleware.rate_limiter import rate_limit, RateLimitPresets
 from shared.observability.tracing import trace_endpoint
+from shared.services.sheet_grid_parser import SheetGridParseOptions, SheetGridParser
 
 logger = logging.getLogger(__name__)
 
@@ -28,18 +31,108 @@ router = APIRouter()
 
 # Import the dependency functions from main
 # This avoids circular imports while maintaining clean dependency injection
-def get_kafka_producer() -> Producer:
+async def get_kafka_producer() -> Producer:
     """Import here to avoid circular dependency"""
     from bff.main import get_kafka_producer as _get_kafka_producer
-    import asyncio
-    return asyncio.run(_get_kafka_producer())
+
+    return await _get_kafka_producer()
 
 
-def get_google_sheets_service() -> GoogleSheetsService:
+async def get_google_sheets_service() -> GoogleSheetsService:
     """Import here to avoid circular dependency"""
     from bff.main import get_google_sheets_service as _get_google_sheets_service
-    import asyncio
-    return asyncio.run(_get_google_sheets_service())
+
+    return await _get_google_sheets_service()
+
+
+@router.post(
+    "/data-connectors/google-sheets/grid",
+    response_model=SheetGrid,
+    summary="Extract Google Sheets grid + merges",
+    description="Fetches values + metadata(merges) and returns normalized grid/merged_cells.",
+)
+@rate_limit(**RateLimitPresets.RELAXED)
+@trace_endpoint("extract_google_sheet_grid")
+async def extract_google_sheet_grid(
+    request: GoogleSheetGridRequest,
+    google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service),
+) -> SheetGrid:
+    try:
+        sheet_id, metadata, worksheet_title, worksheet_sheet_id, values = await google_sheets_service.fetch_sheet_values(
+            str(request.sheet_url),
+            worksheet_name=request.worksheet_name,
+            api_key=request.api_key,
+        )
+
+        merges = SheetGridParser.merged_cells_from_google_metadata(
+            metadata.model_dump(),
+            worksheet_name=worksheet_title,
+            sheet_id=worksheet_sheet_id,
+        )
+
+        sheet_grid = SheetGridParser.from_google_sheets_values(
+            values,
+            merged_cells=merges,
+            sheet_name=worksheet_title,
+            options=SheetGridParseOptions(
+                trim_trailing_empty=bool(request.trim_trailing_empty),
+                max_rows=request.max_rows,
+                max_cols=request.max_cols,
+            ),
+            metadata={
+                "sheet_id": sheet_id,
+                "sheet_title": metadata.title,
+                "worksheet_title": worksheet_title,
+                "sheet_url": str(request.sheet_url),
+            },
+        )
+
+        return sheet_grid
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to extract Google Sheets grid: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Grid extraction failed: {e}"
+        )
+
+
+@router.post(
+    "/data-connectors/google-sheets/preview",
+    response_model=GoogleSheetPreviewResponse,
+    summary="Preview Google Sheet data (for Funnel)",
+    description="Fetches formatted values and returns header + sample rows for type inference.",
+)
+@rate_limit(**RateLimitPresets.RELAXED)
+@trace_endpoint("preview_google_sheet_for_funnel")
+async def preview_google_sheet_for_funnel(
+    request: GoogleSheetPreviewRequest,
+    limit: int = 10,
+    google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service),
+) -> GoogleSheetPreviewResponse:
+    try:
+        preview = await google_sheets_service.preview_sheet(
+            str(request.sheet_url),
+            worksheet_name=request.worksheet_name,
+            limit=limit,
+            api_key=request.api_key,
+        )
+        return GoogleSheetPreviewResponse(
+            sheet_id=preview.sheet_id,
+            sheet_title=preview.sheet_title,
+            worksheet_title=preview.worksheet_title,
+            columns=preview.columns,
+            sample_rows=preview.sample_rows,
+            total_rows=preview.total_rows,
+            total_columns=preview.total_columns,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to preview Google Sheet: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Preview failed: {e}"
+        )
 
 
 @router.post(
@@ -74,11 +167,9 @@ async def register_google_sheet(
         ApiResponse containing registration details and sheet metadata
     """
     try:
-        # Extract required fields from request
         sheet_url = sheet_data.get("sheet_url")
-        database_name = sheet_data.get("database_name")
-        description = sheet_data.get("description", "")
-        monitoring_enabled = sheet_data.get("monitoring_enabled", True)
+        worksheet_name = sheet_data.get("worksheet_name") or sheet_data.get("worksheet_title")
+        polling_interval = int(sheet_data.get("polling_interval", 300))
         
         # Validate required fields
         if not sheet_url:
@@ -86,21 +177,13 @@ async def register_google_sheet(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="sheet_url is required"
             )
-        
-        if not database_name:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="database_name is required"
-            )
-        
-        logger.info(f"Registering Google Sheet: {sheet_url} for database: {database_name}")
-        
-        # Register the sheet using GoogleSheetsService
+
+        logger.info(f"Registering Google Sheet: {sheet_url} (worksheet={worksheet_name}, interval={polling_interval}s)")
+
         registration_result = await google_sheets_service.register_sheet(
             sheet_url=sheet_url,
-            database_name=database_name,
-            description=description,
-            monitoring_enabled=monitoring_enabled
+            worksheet_name=worksheet_name,
+            polling_interval=polling_interval,
         )
         
         logger.info(f"Successfully registered Google Sheet: {registration_result.sheet_id}")
@@ -154,18 +237,18 @@ async def preview_google_sheet(
     """
     try:
         logger.info(f"Previewing Google Sheet: {sheet_id}, worksheet: {worksheet_name}")
-        
-        # Get preview data using GoogleSheetsService
-        preview_result = await google_sheets_service.preview_sheet_data(
-            sheet_id=sheet_id,
+
+        sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
+        preview_result = await google_sheets_service.preview_sheet(
+            sheet_url,
             worksheet_name=worksheet_name,
-            limit=limit
+            limit=limit,
         )
-        
+
         return ApiResponse(
             success=True,
             message="Sheet preview retrieved successfully",
-            data=preview_result.dict()
+            data=preview_result.model_dump()
         )
         
     except ValueError as e:
@@ -205,18 +288,14 @@ async def list_registered_sheets(
     """
     try:
         logger.info(f"Listing registered sheets for database: {database_name}")
-        
-        # Get registered sheets using GoogleSheetsService
-        # Note: This would need to be implemented in GoogleSheetsService
-        # For now, return a placeholder response
-        
-        registered_sheets = []  # Placeholder - implement in GoogleSheetsService
-        
+
+        registered_sheets = await google_sheets_service.get_registered_sheets()
+
         return ApiResponse(
             success=True,
             message="Registered sheets retrieved successfully", 
             data={
-                "sheets": registered_sheets,
+                "sheets": [s.model_dump() for s in registered_sheets],
                 "count": len(registered_sheets),
                 "database_filter": database_name
             }
@@ -253,11 +332,14 @@ async def unregister_google_sheet(
     """
     try:
         logger.info(f"Unregistering Google Sheet: {sheet_id}")
-        
-        # Unregister sheet using GoogleSheetsService
-        # Note: This would need to be implemented in GoogleSheetsService
-        # For now, return a success response
-        
+
+        ok = await google_sheets_service.unregister_sheet(sheet_id)
+        if not ok:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Sheet is not registered",
+            )
+
         return ApiResponse(
             success=True,
             message="Google Sheet unregistered successfully",

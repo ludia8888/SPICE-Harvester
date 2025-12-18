@@ -74,15 +74,9 @@ class TokenBucket:
         local tokens_requested = tonumber(ARGV[3])
         local now = tonumber(ARGV[4])
         
-        -- Get current bucket state
-        local bucket = redis.call('HGETALL', key)
-        local tokens = capacity
-        local last_refill = now
-        
-        if #bucket > 0 then
-            tokens = tonumber(bucket[2]) or capacity
-            last_refill = tonumber(bucket[4]) or now
-        end
+        -- Get current bucket state (avoid HGETALL ordering assumptions)
+        local tokens = tonumber(redis.call('HGET', key, 'tokens')) or capacity
+        local last_refill = tonumber(redis.call('HGET', key, 'last_refill')) or now
         
         -- Calculate tokens to add based on time passed
         local time_passed = now - last_refill

@@ -1,11 +1,6 @@
 """
 Projection Worker Service
 Instance와 Ontology 이벤트를 Elasticsearch에 프로젝션하는 워커 서비스
-
-🔥 MIGRATION: Enhanced to support S3/MinIO Event Store
-- Can read events directly from S3 when reference is provided
-- Falls back to PostgreSQL payload for backward compatibility
-- Gradual migration from embedded payloads to S3 references
 """
 
 import asyncio
@@ -13,12 +8,11 @@ import json
 import logging
 import os
 import signal
-from datetime import datetime
+from contextlib import suppress
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
-from uuid import uuid4
 
-from confluent_kafka import Consumer, Producer, KafkaError, KafkaException
-import aioboto3
+from confluent_kafka import Consumer, Producer, KafkaError, KafkaException, TopicPartition
 
 from shared.config.service_config import ServiceConfig
 from shared.config.search_config import (
@@ -28,6 +22,7 @@ from shared.config.search_config import (
 )
 from shared.config.app_config import AppConfig
 from shared.config.settings import ApplicationSettings
+from shared.models.event_envelope import EventEnvelope
 from shared.models.events import (
     BaseEvent, EventType,
     InstanceEvent,
@@ -36,6 +31,10 @@ from shared.models.events import (
 from shared.services.redis_service import RedisService, create_redis_service
 from shared.services.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
 from shared.services.projection_manager import ProjectionManager
+from shared.services.processed_event_registry import ClaimDecision, ProcessedEventRegistry
+from shared.services.lineage_store import LineageStore
+from shared.services.audit_log_store import AuditLogStore
+from shared.utils.chaos import maybe_crash
 
 # Observability imports
 from shared.observability.tracing import get_tracing_service
@@ -50,12 +49,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+class _InProgressLeaseError(RuntimeError):
+    """Raised when another worker holds the processed_events lease for this event."""
+
+
 class ProjectionWorker:
     """Instance와 Ontology 이벤트를 Elasticsearch에 프로젝션하는 워커
-    
-    🔥 MIGRATION: Now supports reading from S3/MinIO Event Store
+
+    Kafka message contract:
+    - Projection topics carry EventEnvelope JSON (metadata.kind == "domain")
     """
-    
+
     def __init__(self):
         self.running = False
         self.kafka_servers = ServiceConfig.get_kafka_bootstrap_servers()
@@ -67,37 +71,165 @@ class ProjectionWorker:
         self.tracing_service = None
         self.metrics_collector = None
         self.context_propagator = ContextPropagator()
-        
-        # 🔥 S3/MinIO Event Store configuration
-        self.s3_event_store_enabled = os.getenv("ENABLE_S3_EVENT_STORE", "false").lower() == "true"
-        self.event_store_bucket = "spice-event-store"
-        self.aioboto_session = None
-        
+
+        # Durable idempotency (Postgres)
+        self.enable_processed_event_registry = (
+            os.getenv("ENABLE_PROCESSED_EVENT_REGISTRY", "true").lower() == "true"
+        )
+        self.processed_event_registry: Optional[ProcessedEventRegistry] = None
+
+        # First-class provenance/audit (fail-open by default)
+        self.enable_lineage = os.getenv("ENABLE_LINEAGE", "true").strip().lower() in {"1", "true", "yes", "on"}
+        self.enable_audit_logs = os.getenv("ENABLE_AUDIT_LOGS", "true").strip().lower() in {"1", "true", "yes", "on"}
+        self.lineage_store: Optional[LineageStore] = None
+        self.audit_store: Optional[AuditLogStore] = None
+
         # 생성된 인덱스 캐시 (중복 생성 방지)
         self.created_indices = set()
-        
+
         # DLQ 토픽
         self.dlq_topic = AppConfig.PROJECTION_DLQ_TOPIC
-        
+
         # 재시도 설정
-        self.max_retries = 5
+        self.max_retries = int(os.getenv("PROJECTION_WORKER_MAX_RETRIES", "5"))
         self.retry_count = {}
-        
+
         # Cache Stampede 방지 모니터링 메트릭
         self.cache_metrics = {
-            'cache_hits': 0,
-            'cache_misses': 0,
-            'negative_cache_hits': 0,
-            'lock_acquisitions': 0,
-            'lock_failures': 0,
-            'elasticsearch_queries': 0,
-            'fallback_queries': 0,
-            'total_lock_wait_time': 0.0,
-            # 🔥 S3 Event Store metrics
-            's3_reads': 0,
-            's3_read_failures': 0,
-            'payload_fallbacks': 0
+            "cache_hits": 0,
+            "cache_misses": 0,
+            "negative_cache_hits": 0,
+            "lock_acquisitions": 0,
+            "lock_failures": 0,
+            "elasticsearch_queries": 0,
+            "fallback_queries": 0,
+            "total_lock_wait_time": 0.0,
         }
+
+    @staticmethod
+    def _is_es_version_conflict(error: Exception) -> bool:
+        status = getattr(error, "status_code", None)
+        meta = getattr(error, "meta", None)
+        if meta is not None:
+            status = getattr(meta, "status", status)
+        return status == 409
+
+    @staticmethod
+    def _parse_sequence(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _extract_envelope_metadata(event_data: Dict[str, Any]) -> Dict[str, Optional[str]]:
+        metadata = event_data.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+        command_id = metadata.get("command_id")
+        trace_id = metadata.get("trace_id")
+        correlation_id = metadata.get("correlation_id")
+        service = metadata.get("service")
+        return {
+            "command_id": str(command_id) if command_id else None,
+            "trace_id": str(trace_id) if trace_id else None,
+            "correlation_id": str(correlation_id) if correlation_id else None,
+            "origin_service": str(service) if service else None,
+        }
+
+    async def _record_es_side_effect(
+        self,
+        *,
+        event_id: str,
+        event_data: Dict[str, Any],
+        db_name: str,
+        index_name: str,
+        doc_id: str,
+        operation: str,
+        status: str,
+        record_lineage: bool,
+        skip_reason: Optional[str] = None,
+        error: Optional[str] = None,
+        extra_metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Record projection side-effects for provenance (lineage) + audit.
+
+        - Lineage: domain event -> ES artifact (only when record_lineage=True)
+        - Audit: structured log (success/failure, skip_reason, ids)
+        """
+        occurred_at = datetime.now(timezone.utc)
+        meta = self._extract_envelope_metadata(event_data)
+        seq = self._parse_sequence(event_data.get("sequence_number"))
+
+        if self.audit_store:
+            try:
+                action = "PROJECTION_ES_INDEX" if operation == "index" else "PROJECTION_ES_DELETE"
+                audit_metadata = {
+                    "db_name": db_name,
+                    "index": index_name,
+                    "doc_id": doc_id,
+                    "operation": operation,
+                    "event_type": event_data.get("event_type"),
+                    "aggregate_id": event_data.get("aggregate_id"),
+                    "sequence_number": seq,
+                    "skipped": bool(skip_reason),
+                    "skip_reason": skip_reason,
+                    "origin_service": meta.get("origin_service"),
+                    "run_id": os.getenv("PIPELINE_RUN_ID") or os.getenv("RUN_ID") or os.getenv("EXECUTION_ID"),
+                    "code_sha": os.getenv("CODE_SHA") or os.getenv("GIT_SHA") or os.getenv("COMMIT_SHA"),
+                }
+                if isinstance(extra_metadata, dict) and extra_metadata:
+                    audit_metadata.update(extra_metadata)
+                await self.audit_store.log(
+                    partition_key=f"db:{db_name}",
+                    actor="projection_worker",
+                    action=action,
+                    status=status,
+                    resource_type="es_document",
+                    resource_id=f"{index_name}/{doc_id}",
+                    event_id=str(event_id) if event_id else None,
+                    command_id=meta.get("command_id"),
+                    trace_id=meta.get("trace_id"),
+                    correlation_id=meta.get("correlation_id"),
+                    metadata=audit_metadata,
+                    error=error,
+                    occurred_at=occurred_at,
+                )
+            except Exception as e:
+                logger.debug(f"Audit record failed (non-fatal): {e}")
+
+        if self.lineage_store and record_lineage:
+            try:
+                edge_type = "event_deleted_es_document" if operation == "delete" else "event_materialized_es_document"
+                await self.lineage_store.record_link(
+                    from_node_id=self.lineage_store.node_event(str(event_id)),
+                    to_node_id=self.lineage_store.node_artifact("es", index_name, doc_id),
+                    edge_type=edge_type,
+                    occurred_at=occurred_at,
+                    to_label=f"es:{index_name}/{doc_id}",
+                    edge_metadata={
+                        "db_name": db_name,
+                        "index": index_name,
+                        "doc_id": doc_id,
+                        "operation": operation,
+                        "sequence_number": seq,
+                    },
+                )
+            except Exception as e:
+                logger.debug(f"Lineage record failed (non-fatal): {e}")
+
+    async def _heartbeat_loop(self, *, handler: str, event_id: str) -> None:
+        if not self.processed_event_registry:
+            return
+        interval = int(os.getenv("PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS", "30"))
+        while True:
+            await asyncio.sleep(interval)
+            ok = await self.processed_event_registry.heartbeat(handler=handler, event_id=event_id)
+            if not ok:
+                return
         
     async def initialize(self):
         """워커 초기화"""
@@ -130,6 +262,33 @@ class ProjectionWorker:
         self.elasticsearch_service = create_elasticsearch_service(settings)
         await self.elasticsearch_service.connect()
         logger.info("Elasticsearch connection established")
+
+        # Durable processed-events registry (idempotency + ordering guard)
+        if self.enable_processed_event_registry:
+            self.processed_event_registry = ProcessedEventRegistry()
+            await self.processed_event_registry.connect()
+            logger.info("✅ ProcessedEventRegistry connected (Postgres)")
+        else:
+            logger.warning("⚠️ ProcessedEventRegistry disabled (duplicates may re-apply side-effects)")
+
+        # First-class lineage/audit (best-effort; do not fail the worker)
+        if self.enable_lineage:
+            try:
+                self.lineage_store = LineageStore()
+                await self.lineage_store.initialize()
+                logger.info("✅ LineageStore connected (Postgres)")
+            except Exception as e:
+                logger.warning(f"⚠️ LineageStore unavailable (continuing without lineage): {e}")
+                self.lineage_store = None
+
+        if self.enable_audit_logs:
+            try:
+                self.audit_store = AuditLogStore()
+                await self.audit_store.initialize()
+                logger.info("✅ AuditLogStore connected (Postgres)")
+            except Exception as e:
+                logger.warning(f"⚠️ AuditLogStore unavailable (continuing without audit logs): {e}")
+                self.audit_store = None
         
         # 인덱스 생성 및 매핑 설정
         await self._setup_indices()
@@ -142,14 +301,6 @@ class ProjectionWorker:
         # Initialize OpenTelemetry
         self.tracing_service = get_tracing_service("projection-worker")
         self.metrics_collector = get_metrics_collector("projection-worker")
-        
-        # 🔥 Initialize aioboto3 for async S3 operations (Event Store)
-        if self.s3_event_store_enabled:
-            self.aioboto_session = aioboto3.Session()
-            logger.info(f"🔥 S3/MinIO Event Store ENABLED - bucket: {self.event_store_bucket}")
-            logger.info("🔥 Projection Worker will read events from S3 when available")
-        else:
-            logger.info("⚠️ S3/MinIO Event Store DISABLED - using legacy payload mode")
         
         # 🎯 Initialize ProjectionManager for materialized views
         try:
@@ -165,76 +316,6 @@ class ProjectionWorker:
             # )
         except Exception as e:
             logger.warning(f"ProjectionManager initialization skipped: {e}")
-        
-    async def read_event_from_s3(self, s3_reference: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """
-        🔥 Read event from S3/MinIO Event Store
-        
-        Args:
-            s3_reference: Dictionary with bucket, key, and endpoint
-            
-        Returns:
-            Event payload from S3 or None if failed
-        """
-        if not self.s3_event_store_enabled or not self.aioboto_session:
-            return None
-            
-        try:
-            bucket = s3_reference.get('bucket', self.event_store_bucket)
-            key = s3_reference.get('key')
-            
-            if not key:
-                logger.warning("No S3 key provided in reference")
-                return None
-            
-            async with self.aioboto_session.client(
-                's3',
-                endpoint_url=os.getenv('MINIO_ENDPOINT_URL', 'http://localhost:9000'),
-                aws_access_key_id=os.getenv('MINIO_ACCESS_KEY', 'admin'),
-                aws_secret_access_key=os.getenv('MINIO_SECRET_KEY', 'spice123!'),
-                use_ssl=False
-            ) as s3:
-                response = await s3.get_object(Bucket=bucket, Key=key)
-                content = await response['Body'].read()
-                event_data = json.loads(content)
-                
-                self.cache_metrics['s3_reads'] += 1
-                logger.info(f"🔥 Read event from S3: {key}")
-                return event_data
-                
-        except Exception as e:
-            self.cache_metrics['s3_read_failures'] += 1
-            logger.error(f"Failed to read event from S3: {e}")
-            return None
-    
-    async def extract_payload_from_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        🔥 Extract payload from message, preferring S3 if available
-        
-        Supports both:
-        - New format: Read from S3 using reference
-        - Legacy format: Use embedded payload
-        """
-        # Check if this is the new format with S3 reference
-        if 's3_reference' in message and self.s3_event_store_enabled:
-            s3_ref = message['s3_reference']
-            logger.info(f"🔥 Message has S3 reference, attempting to read from Event Store")
-            
-            # Try to read from S3
-            event_data = await self.read_event_from_s3(s3_ref)
-            if event_data:
-                # Return the payload from S3 event
-                return event_data.get('payload', {})
-            else:
-                logger.warning("Failed to read from S3, falling back to embedded payload")
-                self.cache_metrics['payload_fallbacks'] += 1
-        
-        # Fall back to embedded payload (legacy or fallback)
-        if 'payload' in message:
-            return message['payload']
-        
-        # Very old format - the message itself is the event
-        return message
         
     async def _setup_indices(self):
         """매핑 파일 로드 (인덱스는 DB별로 동적 생성)"""
@@ -317,7 +398,11 @@ class ProjectionWorker:
                     # 이벤트 처리
                     await self._process_event(msg)
                     # 성공 시 오프셋 커밋
+                    maybe_crash("projection_worker:before_commit", logger=logger)
                     self.consumer.commit(msg)
+                    # Clear retry state for this offset
+                    key = f"{msg.topic()}:{msg.partition()}:{msg.offset()}"
+                    self.retry_count.pop(key, None)
                     
                 except Exception as e:
                     logger.error(f"Failed to process event: {e}")
@@ -334,32 +419,101 @@ class ProjectionWorker:
     async def _process_event(self, msg):
         """이벤트 처리"""
         try:
-            raw_message = json.loads(msg.value().decode('utf-8'))
-            
-            # 🔥 MIGRATION: Handle both new and legacy message formats
-            # New format has metadata with storage_mode
-            storage_mode = raw_message.get('metadata', {}).get('storage_mode', 'legacy')
-            logger.info(f"🔥 Message storage mode: {storage_mode}")
-            
-            # Extract the actual event payload
-            event_data = await self.extract_payload_from_message(raw_message)
-            event_type = event_data.get('event_type')
+            registry_event_id = None
+            registry_aggregate_id = None
+            registry_sequence = None
+            registry_claimed = False
+
+            try:
+                envelope = EventEnvelope.model_validate_json(msg.value())
+            except Exception as e:
+                raise ValueError(f"Invalid EventEnvelope JSON: {e}") from e
+
+            kind = envelope.metadata.get("kind") if isinstance(envelope.metadata, dict) else None
+            if kind != "domain":
+                raise ValueError(f"Unexpected envelope kind for projection topic {msg.topic()}: {kind}")
+
+            event_data = envelope.model_dump(mode="json")
+            event_type = envelope.event_type
             topic = msg.topic()
             
             logger.info(f"Processing event: {event_type} from topic: {topic}")
             
-            if topic == AppConfig.INSTANCE_EVENTS_TOPIC:
-                await self._handle_instance_event(event_data)
-            elif topic == AppConfig.ONTOLOGY_EVENTS_TOPIC:
-                await self._handle_ontology_event(event_data)
-            else:
-                logger.warning(f"Unknown topic: {topic}")
+            # Durable idempotency + ordering guard (Postgres)
+            registry_event_id = envelope.event_id
+            registry_aggregate_id = envelope.aggregate_id
+            registry_sequence = envelope.sequence_number
+            handler = f"projection_worker:{topic}"
+
+            if self.processed_event_registry and registry_event_id:
+                claim = await self.processed_event_registry.claim(
+                    handler=handler,
+                    event_id=str(registry_event_id),
+                    aggregate_id=str(registry_aggregate_id) if registry_aggregate_id else None,
+                    sequence_number=int(registry_sequence) if registry_sequence is not None else None,
+                )
+                if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
+                    logger.info(
+                        f"Skipping {claim.decision.value} event_id={registry_event_id} "
+                        f"(aggregate_id={registry_aggregate_id}, seq={registry_sequence})"
+                    )
+                    return
+                if claim.decision == ClaimDecision.IN_PROGRESS:
+                    raise _InProgressLeaseError(
+                        f"Event {registry_event_id} is already in progress elsewhere (lease not expired)"
+                    )
+                registry_claimed = True
+                maybe_crash("projection_worker:after_claim", logger=logger)
+
+            heartbeat_task = None
+            if registry_claimed and self.processed_event_registry and registry_event_id:
+                heartbeat_task = asyncio.create_task(
+                    self._heartbeat_loop(handler=handler, event_id=str(registry_event_id))
+                )
+            
+            try:
+                maybe_crash("projection_worker:before_side_effect", logger=logger)
+                if topic == AppConfig.INSTANCE_EVENTS_TOPIC:
+                    await self._handle_instance_event(event_data)
+                elif topic == AppConfig.ONTOLOGY_EVENTS_TOPIC:
+                    await self._handle_ontology_event(event_data)
+                else:
+                    logger.warning(f"Unknown topic: {topic}")
+                maybe_crash("projection_worker:after_side_effect", logger=logger)
+
+                if registry_claimed and self.processed_event_registry and registry_event_id:
+                    maybe_crash("projection_worker:before_mark_done", logger=logger)
+                    await self.processed_event_registry.mark_done(
+                        handler=handler,
+                        event_id=str(registry_event_id),
+                        aggregate_id=str(registry_aggregate_id) if registry_aggregate_id else None,
+                        sequence_number=int(registry_sequence) if registry_sequence is not None else None,
+                    )
+            finally:
+                if heartbeat_task:
+                    heartbeat_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await heartbeat_task
                 
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse event JSON: {e}")
             raise
         except Exception as e:
             logger.error(f"Error processing event: {e}")
+            if (
+                registry_claimed
+                and self.processed_event_registry
+                and registry_event_id
+                and "handler" in locals()
+            ):
+                try:
+                    await self.processed_event_registry.mark_failed(
+                        handler=handler,
+                        event_id=str(registry_event_id),
+                        error=str(e),
+                    )
+                except Exception as reg_err:
+                    logger.warning(f"Failed to mark event failed in registry: {reg_err}")
             raise
             
     async def _handle_instance_event(self, event_data: Dict[str, Any]):
@@ -421,30 +575,132 @@ class ProjectionWorker:
             class_label = await self._get_class_label(instance_data.get('class_id'), db_name)
             
             # Elasticsearch 문서 구성
+            instance_id = instance_data.get('instance_id')
+            if not instance_id:
+                raise ValueError("instance_id is required for instance creation")
+
+            incoming_seq = self._parse_sequence(event_data.get("sequence_number"))
+            if incoming_seq is None:
+                existing_doc = await self.elasticsearch_service.get_document(index_name, instance_id)
+                if existing_doc:
+                    if existing_doc.get("event_id") == event_id:
+                        logger.info(
+                            f"Skipping duplicate instance create event (event_id={event_id}, instance_id={instance_id})"
+                        )
+                        await self._record_es_side_effect(
+                            event_id=str(event_id),
+                            event_data=event_data,
+                            db_name=db_name,
+                            index_name=index_name,
+                            doc_id=str(instance_id),
+                            operation="index",
+                            status="success",
+                            record_lineage=True,
+                            skip_reason="duplicate",
+                        )
+                        return
+                    logger.info(
+                        f"Instance already exists; skipping create without sequence_number (instance_id={instance_id})"
+                    )
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(instance_id),
+                        operation="index",
+                        status="success",
+                        record_lineage=False,
+                        skip_reason="already_exists_no_sequence",
+                    )
+                    return
+
             doc = {
-                'instance_id': instance_data.get('instance_id'),
+                'instance_id': instance_id,
                 'class_id': instance_data.get('class_id'),
                 'class_label': class_label,
                 'properties': self._normalize_properties(instance_data.get('properties', [])),
                 'data': instance_data,  # 원본 데이터 (enabled: false)
                 'event_id': event_id,
-                'event_timestamp': event_data.get('timestamp'),
-                'version': 1,
+                'event_sequence': incoming_seq,
+                'event_timestamp': event_data.get('occurred_at') or event_data.get('timestamp'),
+                'version': int(incoming_seq) if incoming_seq is not None else 1,
                 'db_name': db_name,
                 'branch': instance_data.get('branch'),
-                'created_at': datetime.utcnow().isoformat(),
-                'updated_at': datetime.utcnow().isoformat()
+                'created_at': datetime.now(timezone.utc).isoformat(),
+                'updated_at': datetime.now(timezone.utc).isoformat()
             }
             
-            # 멱등성을 위해 event_id를 문서 ID로 사용
-            await self.elasticsearch_service.index_document(
-                index_name,
-                doc,
-                doc_id=event_id,
-                refresh=True
-            )
+            # instance_id를 문서 ID로 사용 (업데이트/삭제 정합성)
+            try:
+                await self.elasticsearch_service.index_document(
+                    index_name,
+                    doc,
+                    doc_id=instance_id,
+                    refresh=True,
+                    version=incoming_seq,
+                    version_type="external_gte" if incoming_seq is not None else None,
+                    op_type="create" if incoming_seq is None else None,
+                )
+            except Exception as e:
+                if incoming_seq is None and self._is_es_version_conflict(e):
+                    logger.info(
+                        f"Skipping instance create due to ES create conflict "
+                        f"(instance_id={instance_id})"
+                    )
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(instance_id),
+                        operation="index",
+                        status="success",
+                        record_lineage=False,
+                        skip_reason="es_create_conflict",
+                    )
+                    return
+                if incoming_seq is not None and self._is_es_version_conflict(e):
+                    logger.info(
+                        f"Skipping stale instance create event via ES version conflict "
+                        f"(seq={incoming_seq}, instance_id={instance_id})"
+                    )
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(instance_id),
+                        operation="index",
+                        status="success",
+                        record_lineage=False,
+                        skip_reason="stale_version_conflict",
+                    )
+                    return
+                await self._record_es_side_effect(
+                    event_id=str(event_id),
+                    event_data=event_data,
+                    db_name=db_name,
+                    index_name=index_name,
+                    doc_id=str(instance_id),
+                    operation="index",
+                    status="failure",
+                    record_lineage=False,
+                    error=str(e),
+                )
+                raise
             
-            logger.info(f"Instance created in Elasticsearch: {instance_data.get('instance_id')} in index: {index_name}")
+            logger.info(f"Instance created in Elasticsearch: {instance_id} in index: {index_name}")
+            await self._record_es_side_effect(
+                event_id=str(event_id),
+                event_data=event_data,
+                db_name=db_name,
+                index_name=index_name,
+                doc_id=str(instance_id),
+                operation="index",
+                status="success",
+                record_lineage=True,
+            )
             
         except Exception as e:
             logger.error(f"Failed to handle instance created: {e}")
@@ -465,40 +721,153 @@ class ProjectionWorker:
             class_label = await self._get_class_label(instance_data.get('class_id'), db_name)
             
             # 기존 문서 조회
+            instance_id = instance_data.get('instance_id')
+            if not instance_id:
+                raise ValueError("instance_id is required for instance update")
+
             existing_doc = await self.elasticsearch_service.get_document(
                 index_name,
-                instance_data.get('instance_id')
+                instance_id
             )
+
+            incoming_seq = self._parse_sequence(event_data.get("sequence_number"))
+            if existing_doc:
+                if existing_doc.get("event_id") == event_id:
+                    logger.info(
+                        f"Skipping duplicate instance update event (event_id={event_id}, instance_id={instance_id})"
+                    )
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(instance_id),
+                        operation="index",
+                        status="success",
+                        record_lineage=True,
+                        skip_reason="duplicate",
+                    )
+                    return
+
+            if incoming_seq is None and existing_doc:
+                logger.warning(
+                    f"Refusing to update instance without sequence_number (instance_id={instance_id})"
+                )
+                await self._record_es_side_effect(
+                    event_id=str(event_id),
+                    event_data=event_data,
+                    db_name=db_name,
+                    index_name=index_name,
+                    doc_id=str(instance_id),
+                    operation="index",
+                    status="success",
+                    record_lineage=False,
+                    skip_reason="missing_sequence_number",
+                )
+                return
             
             version = 1
+            if incoming_seq is not None:
+                version = int(incoming_seq)
+
+            created_at = None
             if existing_doc:
-                version = existing_doc.get('version', 0) + 1
+                created_at = existing_doc.get("created_at")
             
             # 업데이트 문서 구성
             doc = {
-                'instance_id': instance_data.get('instance_id'),
+                'instance_id': instance_id,
                 'class_id': instance_data.get('class_id'),
                 'class_label': class_label,
                 'properties': self._normalize_properties(instance_data.get('properties', [])),
                 'data': instance_data,
                 'event_id': event_id,
-                'event_timestamp': event_data.get('timestamp'),
+                'event_sequence': incoming_seq,
+                'event_timestamp': event_data.get('occurred_at') or event_data.get('timestamp'),
                 'version': version,
                 'db_name': db_name,
                 'branch': instance_data.get('branch'),
-                'updated_at': datetime.utcnow().isoformat()
+                'created_at': created_at or datetime.now(timezone.utc).isoformat(),
+                'updated_at': datetime.now(timezone.utc).isoformat()
             }
             
-            # 문서 업데이트
-            await self.elasticsearch_service.update_document(
-                index_name,
-                instance_data.get('instance_id'),
-                doc=doc,
-                upsert=doc,
-                refresh=True
-            )
+            try:
+                if incoming_seq is not None:
+                    await self.elasticsearch_service.index_document(
+                        index_name,
+                        doc,
+                        doc_id=instance_id,
+                        refresh=True,
+                        version=incoming_seq,
+                        version_type="external_gte",
+                    )
+                else:
+                    await self.elasticsearch_service.index_document(
+                        index_name,
+                        doc,
+                        doc_id=instance_id,
+                        refresh=True,
+                        op_type="create",
+                    )
+            except Exception as e:
+                if incoming_seq is not None and self._is_es_version_conflict(e):
+                    logger.info(
+                        f"Skipping stale instance update event via ES version conflict "
+                        f"(seq={incoming_seq}, instance_id={instance_id})"
+                    )
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(instance_id),
+                        operation="index",
+                        status="success",
+                        record_lineage=False,
+                        skip_reason="stale_version_conflict",
+                    )
+                    return
+                if incoming_seq is None and self._is_es_version_conflict(e):
+                    logger.info(
+                        f"Skipping instance update create due to ES conflict "
+                        f"(instance_id={instance_id})"
+                    )
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(instance_id),
+                        operation="index",
+                        status="success",
+                        record_lineage=False,
+                        skip_reason="es_create_conflict",
+                    )
+                    return
+                await self._record_es_side_effect(
+                    event_id=str(event_id),
+                    event_data=event_data,
+                    db_name=db_name,
+                    index_name=index_name,
+                    doc_id=str(instance_id),
+                    operation="index",
+                    status="failure",
+                    record_lineage=False,
+                    error=str(e),
+                )
+                raise
             
-            logger.info(f"Instance updated in Elasticsearch: {instance_data.get('instance_id')} in index: {index_name}")
+            logger.info(f"Instance updated in Elasticsearch: {instance_id} in index: {index_name}")
+            await self._record_es_side_effect(
+                event_id=str(event_id),
+                event_data=event_data,
+                db_name=db_name,
+                index_name=index_name,
+                doc_id=str(instance_id),
+                operation="index",
+                status="success",
+                record_lineage=True,
+            )
             
         except Exception as e:
             logger.error(f"Failed to handle instance updated: {e}")
@@ -515,18 +884,116 @@ class ProjectionWorker:
             # 인덱스 이름 결정
             index_name = get_instances_index_name(db_name)
             instance_id = instance_data.get('instance_id')
-            
-            # 문서 삭제
-            success = await self.elasticsearch_service.delete_document(
-                index_name,
-                instance_id,
-                refresh=True
-            )
+            if not instance_id:
+                raise ValueError("instance_id is required for instance deletion")
+
+            incoming_seq = self._parse_sequence(event_data.get("sequence_number"))
+            if incoming_seq is None:
+                existing_doc = await self.elasticsearch_service.get_document(index_name, instance_id)
+                if not existing_doc:
+                    logger.info(
+                        f"Instance already deleted (instance_id={instance_id}); treating delete as idempotent success"
+                    )
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(instance_id),
+                        operation="delete",
+                        status="success",
+                        record_lineage=False,
+                        skip_reason="already_deleted_no_sequence",
+                    )
+                    return
+                if existing_doc.get("event_id") == event_id:
+                    logger.info(
+                        f"Skipping duplicate instance delete event (event_id={event_id}, instance_id={instance_id})"
+                    )
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(instance_id),
+                        operation="delete",
+                        status="success",
+                        record_lineage=False,
+                        skip_reason="duplicate",
+                    )
+                    return
+
+                logger.warning(
+                    f"Refusing to delete instance without sequence_number (instance_id={instance_id})"
+                )
+                await self._record_es_side_effect(
+                    event_id=str(event_id),
+                    event_data=event_data,
+                    db_name=db_name,
+                    index_name=index_name,
+                    doc_id=str(instance_id),
+                    operation="delete",
+                    status="success",
+                    record_lineage=False,
+                    skip_reason="missing_sequence_number",
+                )
+                return
+
+            # 문서 삭제 (external version guard)
+            try:
+                success = await self.elasticsearch_service.delete_document(
+                    index_name,
+                    instance_id,
+                    refresh=True,
+                    version=incoming_seq,
+                    version_type="external_gte",
+                )
+            except Exception as e:
+                if self._is_es_version_conflict(e):
+                    logger.info(
+                        f"Skipping stale instance delete event via ES version conflict "
+                        f"(seq={incoming_seq}, instance_id={instance_id})"
+                    )
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(instance_id),
+                        operation="delete",
+                        status="success",
+                        record_lineage=False,
+                        skip_reason="stale_version_conflict",
+                    )
+                    return
+                await self._record_es_side_effect(
+                    event_id=str(event_id),
+                    event_data=event_data,
+                    db_name=db_name,
+                    index_name=index_name,
+                    doc_id=str(instance_id),
+                    operation="delete",
+                    status="failure",
+                    record_lineage=False,
+                    error=str(e),
+                )
+                raise
             
             if success:
                 logger.info(f"Instance deleted from Elasticsearch: {instance_id} from index: {index_name}")
             else:
                 logger.warning(f"Instance not found for deletion: {instance_id} in index: {index_name}")
+            await self._record_es_side_effect(
+                event_id=str(event_id),
+                event_data=event_data,
+                db_name=db_name,
+                index_name=index_name,
+                doc_id=str(instance_id),
+                operation="delete",
+                status="success",
+                record_lineage=True,
+                extra_metadata={"deleted": bool(success)},
+            )
                 
         except Exception as e:
             logger.error(f"Failed to handle instance deleted: {e}")
@@ -544,8 +1011,48 @@ class ProjectionWorker:
             index_name = await self._ensure_index_exists(db_name, "ontologies")
             
             # Elasticsearch 문서 구성
+            class_id = ontology_data.get('class_id') or ontology_data.get('id')
+            if not class_id:
+                raise ValueError("class_id is required for ontology class creation")
+
+            incoming_seq = self._parse_sequence(event_data.get("sequence_number"))
+            if incoming_seq is None:
+                existing_doc = await self.elasticsearch_service.get_document(index_name, class_id)
+                if existing_doc:
+                    if existing_doc.get("event_id") == event_id:
+                        logger.info(
+                            f"Skipping duplicate ontology create event (event_id={event_id}, class_id={class_id})"
+                        )
+                        await self._record_es_side_effect(
+                            event_id=str(event_id),
+                            event_data=event_data,
+                            db_name=db_name,
+                            index_name=index_name,
+                            doc_id=str(class_id),
+                            operation="index",
+                            status="success",
+                            record_lineage=True,
+                            skip_reason="duplicate",
+                        )
+                        return
+                    logger.info(
+                        f"Ontology already exists; skipping create without sequence_number (class_id={class_id})"
+                    )
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(class_id),
+                        operation="index",
+                        status="success",
+                        record_lineage=False,
+                        skip_reason="already_exists_no_sequence",
+                    )
+                    return
+
             doc = {
-                'class_id': ontology_data.get('id'),
+                'class_id': class_id,
                 'label': ontology_data.get('label'),
                 'description': ontology_data.get('description'),
                 'properties': ontology_data.get('properties', []),
@@ -554,29 +1061,91 @@ class ProjectionWorker:
                 'child_classes': ontology_data.get('child_classes', []),
                 'db_name': db_name,
                 'branch': ontology_data.get('branch'),
-                'version': 1,
+                'version': int(incoming_seq) if incoming_seq is not None else 1,
                 'event_id': event_id,
-                'event_timestamp': event_data.get('timestamp'),
-                'created_at': datetime.utcnow().isoformat(),
-                'updated_at': datetime.utcnow().isoformat()
+                'event_sequence': incoming_seq,
+                'event_timestamp': event_data.get('occurred_at') or event_data.get('timestamp'),
+                'created_at': datetime.now(timezone.utc).isoformat(),
+                'updated_at': datetime.now(timezone.utc).isoformat()
             }
             
-            # 인덱싱
-            await self.elasticsearch_service.index_document(
-                index_name,
-                doc,
-                doc_id=ontology_data.get('id'),
-                refresh=True
-            )
+            # 인덱싱 (external version guard)
+            try:
+                await self.elasticsearch_service.index_document(
+                    index_name,
+                    doc,
+                    doc_id=class_id,
+                    refresh=True,
+                    version=incoming_seq,
+                    version_type="external_gte" if incoming_seq is not None else None,
+                    op_type="create" if incoming_seq is None else None,
+                )
+            except Exception as e:
+                if incoming_seq is None and self._is_es_version_conflict(e):
+                    logger.info(
+                        f"Skipping ontology create due to ES create conflict "
+                        f"(class_id={class_id})"
+                    )
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(class_id),
+                        operation="index",
+                        status="success",
+                        record_lineage=False,
+                        skip_reason="es_create_conflict",
+                    )
+                    return
+                if incoming_seq is not None and self._is_es_version_conflict(e):
+                    logger.info(
+                        f"Skipping stale ontology create event via ES version conflict "
+                        f"(seq={incoming_seq}, class_id={class_id})"
+                    )
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(class_id),
+                        operation="index",
+                        status="success",
+                        record_lineage=False,
+                        skip_reason="stale_version_conflict",
+                    )
+                    return
+                await self._record_es_side_effect(
+                    event_id=str(event_id),
+                    event_data=event_data,
+                    db_name=db_name,
+                    index_name=index_name,
+                    doc_id=str(class_id),
+                    operation="index",
+                    status="failure",
+                    record_lineage=False,
+                    error=str(e),
+                )
+                raise
             
             # Redis에 클래스 라벨 캐싱 (DB별로 키 구분)
             await self._cache_class_label(
-                ontology_data.get('id'),
+                class_id,
                 ontology_data.get('label'),
                 db_name
             )
             
-            logger.info(f"Ontology class created in Elasticsearch: {ontology_data.get('id')} in index: {index_name}")
+            logger.info(f"Ontology class created in Elasticsearch: {class_id} in index: {index_name}")
+            await self._record_es_side_effect(
+                event_id=str(event_id),
+                event_data=event_data,
+                db_name=db_name,
+                index_name=index_name,
+                doc_id=str(class_id),
+                operation="index",
+                status="success",
+                record_lineage=True,
+            )
             
         except Exception as e:
             logger.error(f"Failed to handle ontology class created: {e}")
@@ -592,20 +1161,60 @@ class ProjectionWorker:
                 
             # 인덱스 확인 및 생성
             index_name = await self._ensure_index_exists(db_name, "ontologies")
+
+            class_id = ontology_data.get('class_id') or ontology_data.get('id')
             
             # 기존 문서 조회
             existing_doc = await self.elasticsearch_service.get_document(
                 index_name,
-                ontology_data.get('id')
+                class_id
             )
+
+            incoming_seq = self._parse_sequence(event_data.get("sequence_number"))
+            if existing_doc:
+                if existing_doc.get("event_id") == event_id:
+                    logger.info(f"Skipping duplicate ontology update event (event_id={event_id}, class_id={class_id})")
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(class_id),
+                        operation="index",
+                        status="success",
+                        record_lineage=True,
+                        skip_reason="duplicate",
+                    )
+                    return
+
+            if incoming_seq is None and existing_doc:
+                logger.warning(
+                    f"Refusing to update ontology class without sequence_number (class_id={class_id})"
+                )
+                await self._record_es_side_effect(
+                    event_id=str(event_id),
+                    event_data=event_data,
+                    db_name=db_name,
+                    index_name=index_name,
+                    doc_id=str(class_id),
+                    operation="index",
+                    status="success",
+                    record_lineage=False,
+                    skip_reason="missing_sequence_number",
+                )
+                return
             
             version = 1
+            if incoming_seq is not None:
+                version = int(incoming_seq)
+
+            created_at = None
             if existing_doc:
-                version = existing_doc.get('version', 0) + 1
+                created_at = existing_doc.get("created_at")
             
             # 업데이트 문서 구성
             doc = {
-                'class_id': ontology_data.get('id'),
+                'class_id': class_id,
                 'label': ontology_data.get('label'),
                 'description': ontology_data.get('description'),
                 'properties': ontology_data.get('properties', []),
@@ -616,27 +1225,96 @@ class ProjectionWorker:
                 'branch': ontology_data.get('branch'),
                 'version': version,
                 'event_id': event_id,
-                'event_timestamp': event_data.get('timestamp'),
-                'updated_at': datetime.utcnow().isoformat()
+                'event_sequence': incoming_seq,
+                'event_timestamp': event_data.get('occurred_at') or event_data.get('timestamp'),
+                'created_at': created_at or datetime.now(timezone.utc).isoformat(),
+                'updated_at': datetime.now(timezone.utc).isoformat()
             }
             
-            # 문서 업데이트
-            await self.elasticsearch_service.update_document(
-                index_name,
-                ontology_data.get('id'),
-                doc=doc,
-                upsert=doc,
-                refresh=True
-            )
+            try:
+                if incoming_seq is not None:
+                    await self.elasticsearch_service.index_document(
+                        index_name,
+                        doc,
+                        doc_id=class_id,
+                        refresh=True,
+                        version=incoming_seq,
+                        version_type="external_gte",
+                    )
+                else:
+                    await self.elasticsearch_service.index_document(
+                        index_name,
+                        doc,
+                        doc_id=class_id,
+                        refresh=True,
+                        op_type="create",
+                    )
+            except Exception as e:
+                if incoming_seq is not None and self._is_es_version_conflict(e):
+                    logger.info(
+                        f"Skipping stale ontology update event via ES version conflict "
+                        f"(seq={incoming_seq}, class_id={class_id})"
+                    )
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(class_id),
+                        operation="index",
+                        status="success",
+                        record_lineage=False,
+                        skip_reason="stale_version_conflict",
+                    )
+                    return
+                if incoming_seq is None and self._is_es_version_conflict(e):
+                    logger.info(
+                        f"Skipping ontology update create due to ES conflict "
+                        f"(class_id={class_id})"
+                    )
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(class_id),
+                        operation="index",
+                        status="success",
+                        record_lineage=False,
+                        skip_reason="es_create_conflict",
+                    )
+                    return
+                await self._record_es_side_effect(
+                    event_id=str(event_id),
+                    event_data=event_data,
+                    db_name=db_name,
+                    index_name=index_name,
+                    doc_id=str(class_id),
+                    operation="index",
+                    status="failure",
+                    record_lineage=False,
+                    error=str(e),
+                )
+                raise
             
             # Redis 캐시 업데이트 (DB별로 키 구분)
             await self._cache_class_label(
-                ontology_data.get('id'),
+                class_id,
                 ontology_data.get('label'),
                 db_name
             )
             
-            logger.info(f"Ontology class updated in Elasticsearch: {ontology_data.get('id')} in index: {index_name}")
+            logger.info(f"Ontology class updated in Elasticsearch: {class_id} in index: {index_name}")
+            await self._record_es_side_effect(
+                event_id=str(event_id),
+                event_data=event_data,
+                db_name=db_name,
+                index_name=index_name,
+                doc_id=str(class_id),
+                operation="index",
+                status="success",
+                record_lineage=True,
+            )
             
         except Exception as e:
             logger.error(f"Failed to handle ontology class updated: {e}")
@@ -652,14 +1330,103 @@ class ProjectionWorker:
                 
             # 인덱스 이름 결정
             index_name = get_ontologies_index_name(db_name)
-            class_id = ontology_data.get('id')
-            
-            # 문서 삭제
-            success = await self.elasticsearch_service.delete_document(
-                index_name,
-                class_id,
-                refresh=True
-            )
+            class_id = ontology_data.get('class_id') or ontology_data.get('id')
+            if not class_id:
+                raise ValueError("class_id is required for ontology class deletion")
+
+            incoming_seq = self._parse_sequence(event_data.get("sequence_number"))
+            if incoming_seq is None:
+                existing_doc = await self.elasticsearch_service.get_document(index_name, class_id)
+                if not existing_doc:
+                    logger.info(
+                        f"Ontology class already deleted (class_id={class_id}); treating delete as idempotent success"
+                    )
+                    await self.redis_service.delete(AppConfig.get_class_label_key(db_name, class_id))
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(class_id),
+                        operation="delete",
+                        status="success",
+                        record_lineage=False,
+                        skip_reason="already_deleted_no_sequence",
+                    )
+                    return
+                if existing_doc.get("event_id") == event_id:
+                    logger.info(
+                        f"Skipping duplicate ontology delete event (event_id={event_id}, class_id={class_id})"
+                    )
+                    await self.redis_service.delete(AppConfig.get_class_label_key(db_name, class_id))
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(class_id),
+                        operation="delete",
+                        status="success",
+                        record_lineage=False,
+                        skip_reason="duplicate",
+                    )
+                    return
+
+                logger.warning(
+                    f"Refusing to delete ontology class without sequence_number (class_id={class_id})"
+                )
+                await self._record_es_side_effect(
+                    event_id=str(event_id),
+                    event_data=event_data,
+                    db_name=db_name,
+                    index_name=index_name,
+                    doc_id=str(class_id),
+                    operation="delete",
+                    status="success",
+                    record_lineage=False,
+                    skip_reason="missing_sequence_number",
+                )
+                return
+
+            # 문서 삭제 (external version guard)
+            try:
+                success = await self.elasticsearch_service.delete_document(
+                    index_name,
+                    class_id,
+                    refresh=True,
+                    version=incoming_seq,
+                    version_type="external_gte",
+                )
+            except Exception as e:
+                if self._is_es_version_conflict(e):
+                    logger.info(
+                        f"Skipping stale ontology delete event via ES version conflict "
+                        f"(seq={incoming_seq}, class_id={class_id})"
+                    )
+                    await self._record_es_side_effect(
+                        event_id=str(event_id),
+                        event_data=event_data,
+                        db_name=db_name,
+                        index_name=index_name,
+                        doc_id=str(class_id),
+                        operation="delete",
+                        status="success",
+                        record_lineage=False,
+                        skip_reason="stale_version_conflict",
+                    )
+                    return
+                await self._record_es_side_effect(
+                    event_id=str(event_id),
+                    event_data=event_data,
+                    db_name=db_name,
+                    index_name=index_name,
+                    doc_id=str(class_id),
+                    operation="delete",
+                    status="failure",
+                    record_lineage=False,
+                    error=str(e),
+                )
+                raise
             
             # Redis 캐시 삭제 (DB별로 키 구분)
             await self.redis_service.delete(AppConfig.get_class_label_key(db_name, class_id))
@@ -668,6 +1435,17 @@ class ProjectionWorker:
                 logger.info(f"Ontology class deleted from Elasticsearch: {class_id} from index: {index_name}")
             else:
                 logger.warning(f"Ontology class not found for deletion: {class_id} in index: {index_name}")
+            await self._record_es_side_effect(
+                event_id=str(event_id),
+                event_data=event_data,
+                db_name=db_name,
+                index_name=index_name,
+                doc_id=str(class_id),
+                operation="delete",
+                status="success",
+                record_lineage=True,
+                extra_metadata={"deleted": bool(success)},
+            )
                 
         except Exception as e:
             logger.error(f"Failed to handle ontology class deleted: {e}")
@@ -692,7 +1470,7 @@ class ProjectionWorker:
             metadata_doc = {
                 'database_name': db_name,
                 'description': db_data.get('description', ''),
-                'created_at': datetime.utcnow().isoformat(),
+                'created_at': datetime.now(timezone.utc).isoformat(),
                 'created_by': event_data.get('occurred_by', 'system'),
                 'event_id': event_id,
                 'status': 'active'
@@ -759,7 +1537,7 @@ class ProjectionWorker:
                     db_name,
                     doc={
                         'status': 'deleted',
-                        'deleted_at': datetime.utcnow().isoformat(),
+                        'deleted_at': datetime.now(timezone.utc).isoformat(),
                         'deleted_by': event_data.get('occurred_by', 'system'),
                         'deletion_event_id': event_id
                     },
@@ -1006,17 +1784,68 @@ class ProjectionWorker:
                 'type': prop.get('type')
             })
         return normalized
+
+    @staticmethod
+    def _is_transient_infra_error(error: Exception) -> bool:
+        """
+        Return True for errors that are expected to recover via retry (e.g. ES outage).
+
+        Projection is a read-model: for transient infra failures we prefer "retry until success"
+        over DLQ/commit, to guarantee convergence after recovery.
+        """
+        msg = str(error).lower()
+        transient_markers = [
+            # Elasticsearch / aiohttp connection errors (common during ES restart)
+            "cannot connect to host elasticsearch",
+            "clientconnectorerror",
+            "connectionerror",
+            "connection error",
+            "connect call failed",
+            "connection refused",
+            "connection reset",
+            "temporarily unavailable",
+            "service unavailable",
+            "timeout",
+        ]
+        return any(marker in msg for marker in transient_markers)
         
     async def _handle_retry(self, msg, error):
         """재시도 처리"""
         try:
             key = f"{msg.topic()}:{msg.partition()}:{msg.offset()}"
+
+            # Lease contention is not a "failure": another worker is already processing this event_id.
+            # Never send this to DLQ; just retry later without consuming retry budget.
+            if isinstance(error, _InProgressLeaseError):
+                self.retry_count.pop(key, None)
+                logger.info(f"Lease in progress elsewhere; retrying later: {key}")
+                await asyncio.sleep(2)
+                if self.consumer:
+                    self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
+                return
+
+            # Transient infra failures (e.g. Elasticsearch down): retry indefinitely with capped backoff.
+            if self._is_transient_infra_error(error):
+                retry_count = self.retry_count.get(key, 0) + 1
+                self.retry_count[key] = retry_count
+                backoff_s = min(max(1, retry_count * 2), 30)
+                logger.warning(
+                    f"Transient infra error; retrying without DLQ (attempt {retry_count}, backoff={backoff_s}s): {key}"
+                )
+                await asyncio.sleep(backoff_s)
+                if self.consumer:
+                    self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
+                return
+
             retry_count = self.retry_count.get(key, 0) + 1
             
             if retry_count <= self.max_retries:
                 self.retry_count[key] = retry_count
                 logger.warning(f"Retrying message (attempt {retry_count}/{self.max_retries}): {key}")
-                await asyncio.sleep(retry_count * 2)  # 지수 백오프
+                await asyncio.sleep(min(retry_count * 2, 30))  # capped backoff (avoid max.poll.interval issues)
+                # Rewind to the failed offset so we don't accidentally commit past it.
+                if self.consumer:
+                    self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
                 return
                 
             # 최대 재시도 횟수 초과 시 DLQ로 전송
@@ -1042,7 +1871,7 @@ class ProjectionWorker:
                 'original_offset': msg.offset(),
                 'original_value': msg.value().decode('utf-8'),
                 'error': str(error),
-                'timestamp': datetime.utcnow().isoformat(),
+                'timestamp': datetime.now(timezone.utc).isoformat(),
                 'worker': 'projection-worker'
             }
             
@@ -1062,17 +1891,6 @@ class ProjectionWorker:
         """워커 종료"""
         logger.info("Shutting down Projection Worker...")
         
-        # 🔥 Log S3 Event Store metrics
-        if self.s3_event_store_enabled:
-            logger.info("🔥 S3/MinIO Event Store Metrics:")
-            logger.info(f"  - S3 reads: {self.cache_metrics['s3_reads']}")
-            logger.info(f"  - S3 read failures: {self.cache_metrics['s3_read_failures']}")
-            logger.info(f"  - Payload fallbacks: {self.cache_metrics['payload_fallbacks']}")
-            
-            if self.cache_metrics['s3_reads'] > 0:
-                success_rate = (self.cache_metrics['s3_reads'] - self.cache_metrics['s3_read_failures']) / self.cache_metrics['s3_reads'] * 100
-                logger.info(f"  - S3 read success rate: {success_rate:.1f}%")
-        
         self.running = False
         
         if self.consumer:
@@ -1083,6 +1901,9 @@ class ProjectionWorker:
             
         if self.elasticsearch_service:
             await self.elasticsearch_service.disconnect()
+
+        if self.processed_event_registry:
+            await self.processed_event_registry.close()
             
         if self.redis_service:
             await self.redis_service.disconnect()
