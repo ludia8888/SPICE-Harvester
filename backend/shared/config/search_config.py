@@ -4,6 +4,7 @@ Elasticsearch 인덱스 이름 규칙 중앙 관리
 """
 
 import hashlib
+import os
 import re
 from typing import Optional
 
@@ -158,23 +159,56 @@ def get_index_alias_name(index_name: str) -> str:
     return alias
 
 
-# 인덱스 설정 상수
 DEFAULT_NUMBER_OF_SHARDS = 1
-DEFAULT_NUMBER_OF_REPLICAS = 1
+DEFAULT_NUMBER_OF_REPLICAS_PROD = 1
+DEFAULT_NUMBER_OF_REPLICAS_DEV = 0
 DEFAULT_REFRESH_INTERVAL = "1s"
 
-# 인덱스 설정 템플릿
-DEFAULT_INDEX_SETTINGS = {
-    "number_of_shards": DEFAULT_NUMBER_OF_SHARDS,
-    "number_of_replicas": DEFAULT_NUMBER_OF_REPLICAS,
-    "refresh_interval": DEFAULT_REFRESH_INTERVAL,
-    "analysis": {
-        "analyzer": {
-            "korean_analyzer": {
-                "type": "custom",
-                "tokenizer": "standard",
-                "filter": ["lowercase", "stop"]
+
+def _coerce_int_env(name: str, *, default: int, min_value: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer (got {raw!r})") from exc
+    if value < min_value:
+        raise ValueError(f"{name} must be >= {min_value} (got {value})")
+    return value
+
+
+def get_default_index_settings() -> dict:
+    """Return default ES index settings with dev-safe replica defaults."""
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    is_prod = env in ("production", "prod")
+    default_replicas = DEFAULT_NUMBER_OF_REPLICAS_PROD if is_prod else DEFAULT_NUMBER_OF_REPLICAS_DEV
+
+    shards = _coerce_int_env(
+        "ELASTICSEARCH_DEFAULT_SHARDS",
+        default=DEFAULT_NUMBER_OF_SHARDS,
+        min_value=1,
+    )
+    replicas = _coerce_int_env(
+        "ELASTICSEARCH_DEFAULT_REPLICAS",
+        default=default_replicas,
+        min_value=0,
+    )
+
+    return {
+        "number_of_shards": shards,
+        "number_of_replicas": replicas,
+        "refresh_interval": DEFAULT_REFRESH_INTERVAL,
+        "analysis": {
+            "analyzer": {
+                "korean_analyzer": {
+                    "type": "custom",
+                    "tokenizer": "standard",
+                    "filter": ["lowercase", "stop"],
+                }
             }
-        }
+        },
     }
-}
+
+
+DEFAULT_INDEX_SETTINGS = get_default_index_settings()

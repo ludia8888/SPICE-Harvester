@@ -25,7 +25,8 @@ from .search_config import (
     get_instances_index_name,
     get_ontologies_index_name,
     sanitize_index_name,
-    DEFAULT_INDEX_SETTINGS
+    DEFAULT_INDEX_SETTINGS,
+    get_default_index_settings,
 )
 
 # Create unified Config class that inherits from AppConfig and adds other configs
@@ -92,7 +93,7 @@ class Config(AppConfig):
     @staticmethod
     def get_default_index_settings() -> dict:
         """기본 인덱스 설정"""
-        return DEFAULT_INDEX_SETTINGS.copy()
+        return get_default_index_settings()
     
     # ======================
     # Configuration Validation & Health Check
@@ -167,7 +168,8 @@ __all__ = [
     'get_instances_index_name',
     'get_ontologies_index_name',
     'sanitize_index_name',
-    'DEFAULT_INDEX_SETTINGS'
+    'DEFAULT_INDEX_SETTINGS',
+    'get_default_index_settings',
 ]
 
 # 하위 호환성을 위한 별칭들

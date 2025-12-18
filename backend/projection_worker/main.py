@@ -20,7 +20,7 @@ from shared.config.search_config import (
     get_instances_index_name,
     get_ontologies_index_name,
     sanitize_index_name,
-    DEFAULT_INDEX_SETTINGS
+    get_default_index_settings,
 )
 from shared.config.app_config import AppConfig
 from shared.config.settings import ApplicationSettings
@@ -375,7 +375,7 @@ class ProjectionWorker:
             if not await self.elasticsearch_service.index_exists(index_name):
                 # 설정 병합 (매핑 파일 설정 + 기본 설정)
                 settings = mapping.get('settings', {}).copy()
-                settings.update(DEFAULT_INDEX_SETTINGS)
+                settings.update(get_default_index_settings())
                 
                 await self.elasticsearch_service.create_index(
                     index_name,
@@ -1811,7 +1811,7 @@ class ProjectionWorker:
                             "status": {"type": "keyword"}
                         }
                     },
-                    settings=DEFAULT_INDEX_SETTINGS
+                    settings=get_default_index_settings()
                 )
             
             # 메타데이터 문서 인덱싱

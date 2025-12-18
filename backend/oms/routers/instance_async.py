@@ -306,6 +306,8 @@ async def create_instance_async(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error creating instance command: {e}")
         raise HTTPException(
@@ -419,6 +421,8 @@ async def update_instance_async(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error updating instance command: {e}")
         raise HTTPException(
@@ -526,6 +530,8 @@ async def delete_instance_async(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error deleting instance command: {e}")
         raise HTTPException(
@@ -651,6 +657,8 @@ async def bulk_create_instances_async(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error creating bulk instance command: {e}")
         raise HTTPException(

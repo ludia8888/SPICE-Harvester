@@ -25,7 +25,7 @@ from shared.config.settings import settings
 from shared.config.search_config import (
     get_instances_index_name,
     get_ontologies_index_name,
-    DEFAULT_INDEX_SETTINGS,
+    get_default_index_settings,
 )
 from shared.dependencies.providers import AuditLogStoreDep, LineageStoreDep
 from shared.models.lineage import LineageDirection
@@ -763,7 +763,7 @@ async def _recompute_projection_task(
 
     mapping = _load_projection_mapping(projection=projection)
     settings_payload = dict(mapping.get("settings", {}) or {})
-    settings_payload.update(DEFAULT_INDEX_SETTINGS)
+    settings_payload.update(get_default_index_settings())
 
     # Create fresh target index (delete if it already exists)
     if await elasticsearch_service.index_exists(new_index):
