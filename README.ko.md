@@ -1,24 +1,24 @@
 # SPICE HARVESTER
 
-[한국어 README](README.ko.md)
+[English README](README.md)
 
-## 1) What it is
+## 1) What it is (한 문단)
 
-SPICE HARVESTER is an **Event Sourcing + CQRS** platform for managing **ontology + graph relationships** (TerminusDB) and **document payload/search** (Elasticsearch), with a correctness layer designed to survive **at-least-once** delivery (Kafka redeliveries, worker restarts, replays) without producing duplicate side effects.
+SPICE HARVESTER는 **Event Sourcing + CQRS** 기반의 플랫폼으로, **온톨로지/관계 그래프(Triplestore/Graph)**는 TerminusDB에서, **문서 payload/검색**은 Elasticsearch에서 관리합니다. 그리고 Kafka의 **at-least-once** 전달(중복 발행/재전달/재시작/리플레이)이 발생해도 **side effect가 중복 적용되지 않도록** Postgres 기반 정합성 레이어(멱등/순서/OCC)를 강하게 보장합니다.
 
-## 2) Who it’s for / Use cases
+## 2) Who it’s for / Use cases (누구를 위한가)
 
-- Teams building a **knowledge graph** (product ↔ supplier ↔ customer, lineage, ownership, dependencies)
-- Data governance / platform teams needing **auditability** and reproducible state
-- “Spreadsheet-first” operations that want to **infer schema**, map columns, and import to a governed model
-- Systems integrating multiple upstream sources where **retries/duplicates are normal** and correctness must be enforced
-- PoCs that must later graduate to production without rewriting the core data model
+- **지식 그래프/온톨로지**를 구축하려는 팀 (product ↔ supplier ↔ customer, 소유/의존/라인리지)
+- 변경 이력/감사가 필수인 **데이터 거버넌스/플랫폼** 팀
+- “스프레드시트 중심” 운영 데이터를 **스키마 추론 → 매핑 → 임포트**로 온보딩하려는 팀
+- 여러 upstream을 통합하며 **재시도/중복**이 정상인 환경에서, 결과 동일성을 보장해야 하는 시스템
+- PoC로 시작하되, 나중에 프로덕션으로 올릴 때 **코어 모델을 다시 쓰고 싶지 않은** 팀
 
-## 3) What makes it different
+## 3) What makes it different (차별점 3가지)
 
-- **Correctness-first**: durable idempotency (`processed_events`) + ordering guard (`aggregate_versions`) + write-side OCC (`expected_seq`) are enforced and tested with no mocks.
-- **Lineage-first**: provenance/audit are first-class concepts (event → artifact links) so you can explain *why* a node/edge exists.
-- **Rebuildable**: read models (ES, lineage/audit projections) can be (re)materialized by replaying the Event Store instead of treating ES as truth.
+- **Correctness-first**: `processed_events`(멱등 레지스트리) + `aggregate_versions`(순서/스테일 가드) + write-side OCC(`expected_seq`)를 코드/테스트로 고정
+- **Lineage-first**: event → artifact(ES/Terminus/S3 등) 연결을 1급으로 다뤄 “왜 이 데이터가 존재하나?”를 설명이 아니라 증명으로 전환
+- **Rebuildable**: ES/프로젝션은 “진실”이 아니라 materialized view이며, Event Store replay로 재구축 가능
 
 ## 4) Architecture
 
@@ -52,16 +52,16 @@ flowchart LR
 - Immutable log: S3/MinIO Event Store (commands + domain events)
 - Correctness registry: Postgres (idempotency + ordering + seq allocator)
 
-## 5) Reliability Contract (short)
+## 5) Reliability Contract (짧게)
 
-1) **Delivery**: Publisher/Kafka are **at-least-once**. Consumers must be idempotent.  
-2) **Idempotency key**: the global idempotency key is `event_id` (same `event_id` must create side effects at most once).  
-3) **Ordering**: aggregate-level `sequence_number` is the truth; stale events must be ignored.  
-4) **OCC**: write-side commands carry `expected_seq`; mismatch is a real conflict (**409**) not a “silent last-write-wins”.
+1) **Delivery**: Publisher/Kafka는 **at-least-once**. 소비자는 멱등 처리가 계약  
+2) **Idempotency key**: 시스템 전체 멱등 키는 `event_id` (같은 `event_id`는 side effect를 최대 1회만 생성)  
+3) **Ordering**: aggregate 단위 `sequence_number`가 진실이며, 구버전 이벤트는 무시  
+4) **OCC**: write-side 커맨드는 `expected_seq`를 포함하며, 불일치는 **409 충돌**로 감지(조용한 last-write-wins 금지)
 
-Full contract: `docs/IDEMPOTENCY_CONTRACT.md`
+자세한 내용: `docs/IDEMPOTENCY_CONTRACT.md`
 
-## 6) Quick Start (5 min)
+## 6) Quick Start (5분)
 
 Prereq: Docker + Docker Compose.
 
@@ -69,7 +69,7 @@ Prereq: Docker + Docker Compose.
 git clone https://github.com/ludia8888/SPICE-Harvester.git
 cd SPICE-Harvester
 
-# Optional: avoid local port conflicts (example only)
+# 선택: 환경변수 템플릿(필요 시 편집)
 cp .env.example .env
 
 docker compose -f docker-compose.full.yml up -d
@@ -83,21 +83,21 @@ curl -fsS http://localhost:8002/health
 curl -fsS http://localhost:8003/health
 ```
 
-## 7) E2E demo (single PoC scenario)
+## 7) E2E demo (PoC 시나리오 1개)
 
-Scenario: **Customer + Product(owned_by Customer)**, then query the relationship via multi-hop federation.
+시나리오: **Customer + Product(owned_by Customer)** 생성 후, 멀티홉 federation 쿼리로 관계/문서 payload를 함께 조회합니다.
 
-Tip: examples below use `jq` for convenience.
+Tip: 아래 예시는 편의를 위해 `jq`를 사용합니다.
 
 ```bash
 DB=demo_db_$(date +%s)
 
-# 1) Create DB (OMS; async 202)
+# 1) DB 생성 (OMS; async 202)
 curl -fsS -X POST "http://localhost:8000/api/v1/database/create" \
   -H 'Content-Type: application/json' \
   -d "{\"name\":\"${DB}\",\"description\":\"demo\"}" | jq .
 
-# 2) Create ontologies (OMS; async 202)
+# 2) 온톨로지 생성 (OMS; async 202)
 curl -fsS -X POST "http://localhost:8000/api/v1/database/${DB}/ontology" \
   -H 'Content-Type: application/json' \
   -d '{
@@ -124,7 +124,7 @@ curl -fsS -X POST "http://localhost:8000/api/v1/database/${DB}/ontology" \
     ]
   }' | jq .
 
-# 3) Create instances (OMS; async 202) and capture command_ids
+# 3) 인스턴스 생성 (OMS; async 202) + command_id 캡처
 CUST_CMD=$(curl -fsS -X POST "http://localhost:8000/api/v1/instances/${DB}/async/Customer/create" \
   -H 'Content-Type: application/json' \
   -d '{"data":{"customer_id":"cust_001","name":"Alice"}}' | jq -r '.command_id')
@@ -133,11 +133,11 @@ PROD_CMD=$(curl -fsS -X POST "http://localhost:8000/api/v1/instances/${DB}/async
   -H 'Content-Type: application/json' \
   -d '{"data":{"product_id":"prod_001","name":"Shirt","owned_by":"Customer/cust_001"}}' | jq -r '.command_id')
 
-# 4) Observe async completion (OMS command status)
+# 4) 비동기 처리 상태 관측 (OMS command status)
 curl -fsS "http://localhost:8000/api/v1/commands/${CUST_CMD}/status" | jq .
 curl -fsS "http://localhost:8000/api/v1/commands/${PROD_CMD}/status" | jq .
 
-# 5) Multi-hop query (BFF federation)
+# 5) 멀티홉 쿼리 (BFF federation)
 curl -fsS -X POST "http://localhost:8002/api/v1/graph-query/${DB}" \
   -H 'Content-Type: application/json' \
   -d '{
@@ -153,17 +153,17 @@ curl -fsS -X POST "http://localhost:8002/api/v1/graph-query/${DB}" \
   }' | jq .
 ```
 
-Expected: the response includes nodes/edges and each node exposes `data_status=FULL|PARTIAL|MISSING` so UI can distinguish “index lag” from “missing entity”.
+기대: 응답에는 nodes/edges가 포함되고, 각 노드는 `data_status=FULL|PARTIAL|MISSING`를 제공해 “인덱싱 지연”과 “실제 누락”을 UI에서 구분할 수 있습니다.
 
 ## 8) Testing (no mocks)
 
-Production gate:
+프로덕션 게이트:
 
 ```bash
 PYTHON_BIN=python3.12 ./backend/run_production_tests.sh --full
 ```
 
-Chaos (destructive; stops/restarts infra and crashes workers on purpose):
+카오스(파괴적: docker compose stop/start/restart 및 워커 크래시 주입):
 
 ```bash
 PYTHON_BIN=python3.12 ./backend/run_production_tests.sh --full --chaos-lite
@@ -173,11 +173,11 @@ PYTHON_BIN=python3.12 SOAK_SECONDS=600 SOAK_SEED=123 ./backend/run_production_te
 
 ## 9) Limitations / PoC vs Production
 
-- **No Saga/compensation orchestration yet** (planned): failures are observable via command status, but automated compensation is not shipped.
-- **No automated drift reconciliation/backfill pipeline yet** (planned): projections can be replayed, but fully managed “reindex/backfill jobs + SLAs” are not turnkey.
-- **DLQ is a topic, not a full ops workflow by default**: projection sends to DLQ after retries, but continuous DLQ reprocessing/alerting needs production wiring.
-- **Security model is PoC-grade** unless you harden it (authn/authz, tenant isolation, secrets, rate limits, audit retention).
-- **Capacity planning** (indexes/retention/partitioning) must be done before high TPS (especially Postgres registry growth).
+- **Saga/보상 트랜잭션 오케스트레이션은 아직 없음**(계획): 실패는 command status로 관측 가능하지만 자동 보상은 미구현
+- **Drift 탐지/리컨실 + 백필 파이프라인은 아직 turnkey가 아님**(계획): replay로 재구축 가능하나, 운영용 잡/지표/SLA는 별도 패키징 필요
+- **DLQ는 “토픽”은 있으나 기본 운영 워크플로우(알림/재처리/대시보드)는 환경별 구성 필요**
+- **보안 모델은 PoC 기본값**: authn/authz, tenant isolation, secrets, rate limits, retention 등을 프로덕션 수준으로 강화해야 함
+- **용량/성장 전략 필요**: 특히 Postgres 레지스트리/인덱스 보존/파티셔닝(트래픽 증가 시 병목 지점이 됨)
 
 ## 10) Docs
 
@@ -186,3 +186,4 @@ PYTHON_BIN=python3.12 SOAK_SECONDS=600 SOAK_SEED=123 ./backend/run_production_te
 - Reliability contract: `docs/IDEMPOTENCY_CONTRACT.md`
 - Ops/runbook: `docs/OPERATIONS.md`, `backend/PRODUCTION_MIGRATION_RUNBOOK.md`
 - Production tests: `backend/docs/testing/OMS_PRODUCTION_TEST_README.md`
+
