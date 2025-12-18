@@ -51,6 +51,13 @@ class SheetGrid(BaseModel):
     merged_cells: List[MergeRange] = Field(
         default_factory=list, description="Merged cell ranges (0-based, inclusive)"
     )
+    cell_style_hints: Optional[List[List[int]]] = Field(
+        default=None,
+        description=(
+            "Optional per-cell style hints for advanced structure analysis (Excel-only). "
+            "Each cell is an int bitmask (implementation-defined)."
+        ),
+    )
 
     metadata: Dict[str, Any] = Field(default_factory=dict)
     warnings: List[str] = Field(default_factory=list)

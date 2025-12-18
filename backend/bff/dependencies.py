@@ -188,26 +188,26 @@ class TerminusService:
         response = await self.oms_client.check_database_exists(db_name)
         return response
 
-    async def list_classes(self, db_name: str):
+    async def list_classes(self, db_name: str, *, branch: str = "main"):
         """클래스 목록 조회"""
-        response = await self.oms_client.list_ontologies(db_name)
+        response = await self.oms_client.list_ontologies(db_name, branch=branch)
         if response.get("status") == "success":
             ontologies = response.get("data", {}).get("ontologies", [])
             return ontologies
         return []
 
-    async def create_class(self, db_name: str, class_data: dict):
+    async def create_class(self, db_name: str, class_data: dict, *, branch: str = "main"):
         """클래스 생성"""
-        response = await self.oms_client.create_ontology(db_name, class_data)
+        response = await self.oms_client.create_ontology(db_name, class_data, branch=branch)
         # Return the created data
         if response and response.get("status") == "success":
             return response.get("data", {})
         return response
 
-    async def get_class(self, db_name: str, class_id: str):
+    async def get_class(self, db_name: str, class_id: str, *, branch: str = "main"):
         """클래스 조회"""
         try:
-            response = await self.oms_client.get_ontology(db_name, class_id)
+            response = await self.oms_client.get_ontology(db_name, class_id, branch=branch)
             # Extract the data from the response
             if response and response.get("status") == "success":
                 return response.get("data", {})
@@ -222,16 +222,26 @@ class TerminusService:
             # Re-raise other exceptions
             raise
 
-    async def update_class(self, db_name: str, class_id: str, class_data: dict, *, expected_seq: int):
+    async def update_class(
+        self,
+        db_name: str,
+        class_id: str,
+        class_data: dict,
+        *,
+        expected_seq: int,
+        branch: str = "main",
+    ):
         """클래스 업데이트"""
         response = await self.oms_client.update_ontology(
-            db_name, class_id, class_data, expected_seq=int(expected_seq)
+            db_name, class_id, class_data, expected_seq=int(expected_seq), branch=branch
         )
         return response
 
-    async def delete_class(self, db_name: str, class_id: str, *, expected_seq: int):
+    async def delete_class(self, db_name: str, class_id: str, *, expected_seq: int, branch: str = "main"):
         """클래스 삭제"""
-        response = await self.oms_client.delete_ontology(db_name, class_id, expected_seq=int(expected_seq))
+        response = await self.oms_client.delete_ontology(
+            db_name, class_id, expected_seq=int(expected_seq), branch=branch
+        )
         return response
 
     async def query_database(self, db_name: str, query: str):

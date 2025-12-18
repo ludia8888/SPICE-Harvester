@@ -355,6 +355,7 @@ async def create_ontology(
 @router.get("")
 async def list_ontologies(
     db_name: str = Depends(ensure_database_exists),
+    branch: str = Query("main", description="Target branch (default: main)"),
     class_type: str = "sys:Class",
     limit: Optional[int] = 100,
     offset: int = 0,
@@ -363,6 +364,8 @@ async def list_ontologies(
 ):
     """내부 ID 기반 온톨로지 목록 조회"""
     try:
+        branch = validate_branch_name(branch)
+
         # 페이징 파라미터 검증
         if limit is not None and (limit < 1 or limit > 1000):
             raise HTTPException(
@@ -373,8 +376,8 @@ async def list_ontologies(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="offset은 0 이상이어야 합니다"
             )
 
-        # TerminusDB에서 조회
-        ontologies = await terminus.list_ontology_classes(db_name)
+        # TerminusDB에서 조회 (branch-aware)
+        ontologies = await terminus.get_ontology(db_name, branch=branch)
 
         # 레이블 적용 (다국어 지원)
         labeled_ontologies = []
@@ -395,6 +398,7 @@ async def list_ontologies(
                 "count": len(labeled_ontologies),
                 "limit": limit,
                 "offset": offset,
+                "branch": branch,
             },
         }
 
@@ -446,15 +450,17 @@ async def analyze_relationship_network(
 async def get_ontology(
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
+    branch: str = Query("main", description="Target branch (default: main)"),
     terminus: AsyncTerminusService = TerminusServiceDep,
     converter: JSONToJSONLDConverter = JSONLDConverterDep,
     label_mapper=LabelMapperDep,
 ):
     """내부 ID 기반 온톨로지 조회"""
     try:
+        branch = validate_branch_name(branch)
 
         # TerminusDB에서 조회
-        ontology = await terminus.get_ontology(db_name, class_id)
+        ontology = await terminus.get_ontology(db_name, class_id, branch=branch)
 
         if not ontology:
             raise HTTPException(
@@ -480,7 +486,7 @@ async def get_ontology(
         from shared.models.responses import ApiResponse
         return ApiResponse.success(
             message=f"온톨로지 '{class_id}'를 조회했습니다", 
-            data=result
+            data={**result, "branch": branch}
         ).to_dict()
 
     except SecurityViolationError as e:

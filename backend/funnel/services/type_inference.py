@@ -208,14 +208,42 @@ class PatternBasedTypeDetector:
 
         best = cls._select_best_candidate(candidates, adaptive_thresholds, name_hints)
         if best is not None:
-            return best
+            semantic_label, unit = cls._infer_semantic_label_and_unit(
+                values=str_values,
+                column_name=column_name,
+                inferred=best,
+            )
+            meta = dict(best.metadata or {})
+            if semantic_label:
+                meta["semantic_label"] = semantic_label
+            if unit:
+                meta["unit"] = unit
+            return TypeInferenceResult(
+                type=best.type,
+                confidence=best.confidence,
+                reason=best.reason,
+                metadata=meta or None,
+            )
 
         # Default to string
-        return TypeInferenceResult(
+        fallback = TypeInferenceResult(
             type=DataType.STRING.value,
             confidence=1.0,
             reason="No specific pattern detected, using string type",
         )
+        semantic_label, unit = cls._infer_semantic_label_and_unit(
+            values=str_values,
+            column_name=column_name,
+            inferred=fallback,
+        )
+        meta: Dict[str, Any] = {}
+        if semantic_label:
+            meta["semantic_label"] = semantic_label
+        if unit:
+            meta["unit"] = unit
+        if meta:
+            fallback.metadata = meta
+        return fallback
 
     @classmethod
     def _get_column_name_hint_scores(cls, column_name: Optional[str]) -> Dict[str, float]:
@@ -248,6 +276,189 @@ class PatternBasedTypeDetector:
                 hints[type_id] = max(hints.get(type_id, 0.0), score)
 
         return hints
+
+    # ---------------------------
+    # Semantic label + unit (meaning layer)
+    # ---------------------------
+
+    _UNIT_ALIASES: Dict[str, str] = {
+        # count/pieces
+        "pc": "pcs",
+        "pcs": "pcs",
+        "ea": "pcs",
+        "개": "pcs",
+        "건": "pcs",
+        "명": "pcs",
+        # percent
+        "%": "%",
+        "percent": "%",
+        # weight
+        "kg": "kg",
+        "g": "g",
+        "mg": "mg",
+        "lb": "lb",
+        "lbs": "lb",
+        "oz": "oz",
+        # length
+        "mm": "mm",
+        "cm": "cm",
+        "m": "m",
+        "km": "km",
+        "in": "in",
+        "inch": "in",
+        "ft": "ft",
+        # volume
+        "ml": "ml",
+        "l": "l",
+        "ℓ": "l",
+        "cc": "ml",
+        # currency-ish (when money type isn't enabled)
+        "원": "KRW",
+        "₩": "KRW",
+        "$": "USD",
+        "usd": "USD",
+        "eur": "EUR",
+        "€": "EUR",
+        "gbp": "GBP",
+        "£": "GBP",
+        "rmb": "CNY",
+        "cny": "CNY",
+        "jpy": "JPY",
+        "¥": "JPY",
+        "￥": "JPY",
+    }
+
+    @classmethod
+    def _extract_unit_from_values(cls, values: List[str]) -> Optional[str]:
+        """
+        Best-effort unit extraction from sample values.
+
+        Returns a canonical unit id (e.g., 'kg', 'pcs', '%', 'KRW'), or None.
+        """
+        if not values:
+            return None
+
+        counts: Counter[str] = Counter()
+        for raw in values[: min(200, len(values))]:
+            s = str(raw).strip()
+            if not s:
+                continue
+
+            # Percent
+            if s.endswith("%"):
+                counts["%"] += 1
+                continue
+
+            # Trailing unit token after a number (e.g., "10 kg", "2pcs", "15,000원")
+            if not re.search(r"\d", s):
+                continue
+            m = re.search(r"([A-Za-z%€£¥￥₩]+|[가-힣]{1,4})\s*$", s)
+            if not m:
+                continue
+            token = m.group(1).strip()
+            token_norm = token.lower()
+            canon = cls._UNIT_ALIASES.get(token_norm) or cls._UNIT_ALIASES.get(token)  # keep symbols
+            if canon:
+                counts[canon] += 1
+
+        if not counts:
+            return None
+
+        unit, n = counts.most_common(1)[0]
+        if n / max(1, sum(counts.values())) < 0.55:
+            return None
+        return unit
+
+    @classmethod
+    def _infer_semantic_label_and_unit(
+        cls,
+        *,
+        values: List[str],
+        column_name: Optional[str],
+        inferred: TypeInferenceResult,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Derive a semantic label (meaning) + unit from type + hints.
+
+        Output:
+        - semantic_label: e.g., PRICE, QTY, SKU, CUSTOMER_NAME, PHONE, EMAIL, DATE, PERCENT ...
+        - unit: canonical unit id (e.g., kg, pcs, %, KRW)
+        """
+        name = (column_name or "").strip().lower()
+        unit = cls._extract_unit_from_values(values)
+
+        # Prefer money metadata currency as unit when available
+        meta = inferred.metadata or {}
+        if inferred.type == DataType.MONEY.value:
+            cur = meta.get("currency") or meta.get("defaultCurrency")
+            if isinstance(cur, str) and cur:
+                unit = cur
+
+        # Basic semantic mapping by inferred type
+        if inferred.type == DataType.EMAIL.value:
+            return "EMAIL", None
+        if inferred.type == DataType.PHONE.value:
+            return "PHONE", None
+        if inferred.type == DataType.URI.value:
+            return "URL", None
+        if inferred.type == DataType.DATE.value:
+            return "DATE", None
+        if inferred.type == DataType.DATETIME.value:
+            return "DATETIME", None
+        if inferred.type == DataType.BOOLEAN.value:
+            return "FLAG", None
+
+        # Money / amount
+        if inferred.type == DataType.MONEY.value or (unit in {"KRW", "USD", "EUR", "GBP", "CNY", "JPY"}):
+            if any(k in name for k in ["price", "unit_price", "단가", "판매가", "가격"]):
+                return "PRICE", unit
+            if any(k in name for k in ["amount", "total", "sum", "금액", "총액", "합계", "대금"]):
+                return "AMOUNT", unit
+            return "AMOUNT", unit
+
+        # Numeric amount/price even when complex money detection isn't enabled
+        if inferred.type in {DataType.INTEGER.value, DataType.DECIMAL.value, DataType.FLOAT.value, DataType.DOUBLE.value}:
+            if any(k in name for k in ["price", "unit_price", "단가", "판매가", "가격"]):
+                return "PRICE", unit
+            if any(k in name for k in ["amount", "total", "sum", "금액", "총액", "합계", "대금"]):
+                return "AMOUNT", unit
+
+        # Percent
+        if unit == "%":
+            return "PERCENT", "%"
+
+        # Quantity / count
+        if any(k in name for k in ["qty", "quantity", "count", "cnt", "수량", "개수", "数量", "個数"]):
+            return "QTY", unit or "pcs"
+
+        # Weight / length / volume by unit
+        if unit in {"kg", "g", "mg", "lb", "oz"} or any(k in name for k in ["weight", "무게", "중량", "重量"]):
+            return "WEIGHT", unit
+        if unit in {"mm", "cm", "m", "km", "in", "ft"} or any(
+            k in name for k in ["length", "width", "height", "size", "길이", "가로", "세로", "높이", "サイズ"]
+        ):
+            return "LENGTH", unit
+        if unit in {"ml", "l"} or any(k in name for k in ["volume", "용량", "부피", "容量"]):
+            return "VOLUME", unit
+
+        # IDs / codes / SKU
+        if any(k in name for k in ["sku", "품번", "품목코드", "상품코드"]):
+            return "SKU", None
+        if any(k in name for k in ["id", "uuid", "guid", "번호", "no", "code", "코드"]):
+            return "ID", None
+
+        # Names / categories / status for strings
+        if inferred.type == DataType.STRING.value:
+            if any(k in name for k in ["name", "이름", "성명", "상품명", "고객명", "업체명"]):
+                return "NAME", None
+            if any(k in name for k in ["address", "addr", "주소", "住所", "地址"]):
+                return "ADDRESS", None
+            if any(k in name for k in ["status", "state", "상태", "구분", "状態"]):
+                return "STATUS", None
+            if any(k in name for k in ["category", "cat", "카테고리", "분류", "分類"]):
+                return "CATEGORY", None
+
+        return None, unit
 
     @classmethod
     def _min_confidence_for_type(

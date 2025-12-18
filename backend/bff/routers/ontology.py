@@ -21,13 +21,19 @@ from shared.models.ontology import (
     Property,
     Relationship,
 )
+from shared.models.responses import ApiResponse
 from shared.models.structure_analysis import BoundingBox
 
 # Add shared path for common utilities
 from shared.utils.language import get_accept_language
 
 # Security validation imports
-from shared.security.input_sanitizer import sanitize_input, validate_db_name, validate_class_id
+from shared.security.input_sanitizer import (
+    sanitize_input,
+    validate_branch_name,
+    validate_db_name,
+    validate_class_id,
+)
 
 
 # Schema suggestion request models
@@ -152,10 +158,20 @@ def get_bff_adapter(
 BFFAdapterServiceDep = Depends(get_bff_adapter)
 
 
-@router.post("/ontology", response_model=OntologyResponse)
+@router.post(
+    "/ontology",
+    response_model=ApiResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        status.HTTP_200_OK: {"model": ApiResponse, "description": "Direct mode (legacy)"},
+        status.HTTP_202_ACCEPTED: {"model": ApiResponse, "description": "Event-sourcing mode (async)"},
+        status.HTTP_409_CONFLICT: {"description": "Conflict (already exists / OCC)"},
+    },
+)
 async def create_ontology(
     db_name: str,
     ontology: OntologyCreateRequestBFF,  # 🔥 FIXED: Use proper Pydantic validation
+    branch: str = Query("main", description="Target branch (default: main)"),
     mapper: LabelMapper = LabelMapperDep,
     terminus: TerminusService = TerminusServiceDep,
     jsonld_conv: JSONToJSONLDConverter = JSONLDConverterDep,
@@ -169,6 +185,7 @@ async def create_ontology(
     try:
         # 입력 데이터 보안 검증
         db_name = validate_db_name(db_name)
+        branch = validate_branch_name(branch)
         
         # 입력 데이터 처리 (Pydantic model에서 dict로 변환)
         ontology_dict = ontology.model_dump(exclude_unset=True)  # Convert Pydantic model to dict
@@ -271,6 +288,7 @@ async def create_ontology(
             async with session.post(
                 f"{oms_url}/api/v1/database/{db_name}/ontology",
                 json=ontology_dict,
+                params={"branch": branch},
                 headers={"Content-Type": "application/json"}
             ) as response:
                 if response.status in [200, 202]:  # Accept both 200 (direct) and 202 (Event Sourcing)
@@ -297,48 +315,29 @@ async def create_ontology(
             if isinstance(rel, dict):
                 await mapper.register_relationship(db_name, rel.get('predicate', ''), rel.get('label', ''))
 
-        # OMS 응답에서 생성된 데이터 추출
-        if isinstance(result, dict):
-            # Event Sourcing 202 response
-            if result.get("status") == "accepted" and "data" in result:
-                # Event Sourcing mode - use the ontology_id from response
-                event_data = result["data"]
-                class_id = event_data.get("ontology_id", class_id)
-                logger.info(f"Event Sourcing: ontology {class_id} creation accepted with command_id {event_data.get('command_id')}")
-                return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=result)
-            # Direct mode 200 response
-            elif "data" in result and result.get("status") == "success":
-                created_data = result["data"]
-                # 생성된 ID 사용
-                if "id" in created_data:
-                    class_id = created_data["id"]
-            elif "id" in result:
-                # 직접 데이터 형식인 경우
-                created_data = result
-                class_id = result["id"]
+        # Event-sourcing 202 response (pass-through ApiResponse.accepted)
+        if isinstance(result, dict) and result.get("status") == "accepted" and "data" in result:
+            event_data = result["data"]
+            class_id = event_data.get("ontology_id", class_id)
+            logger.info(
+                f"Event Sourcing: ontology {class_id} creation accepted with command_id {event_data.get('command_id')}"
+            )
+            return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=result)
 
-        # 응답 생성
-        # Validate properties and relationships to ensure they're properly formatted
-        validated_properties = []
-        for prop in ontology_dict.get('properties', []):
-            if isinstance(prop, dict):
-                validated_properties.append(Property(**prop))
-                
-        validated_relationships = []
-        for rel in ontology_dict.get('relationships', []):
-            if isinstance(rel, dict):
-                validated_relationships.append(Relationship(**rel))
-        
-        # Create response
-        return OntologyResponse(
-            id=class_id,
-            label=ontology_dict.get('label', ''),
-            description=ontology_dict.get('description'),
-            parent_class=ontology_dict.get('parent_class'),
-            abstract=ontology_dict.get('abstract', False),
-            properties=validated_properties,
-            relationships=validated_relationships,
-            metadata={"created": True, "database": db_name}
+        # Some deployments may return ApiResponse even in direct mode. In that case, pass through.
+        if isinstance(result, dict) and "status" in result and "message" in result:
+            return JSONResponse(status_code=status.HTTP_200_OK, content=result)
+
+        # Direct mode (legacy): wrap raw ontology payload into ApiResponse for FE consistency
+        if isinstance(result, dict) and "id" in result:
+            class_id = result.get("id") or class_id
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=ApiResponse.success(
+                message=f"온톨로지 '{class_id}'이(가) 생성되었습니다",
+                data={"ontology_id": class_id, "ontology": result, "mode": "direct"},
+            ).to_dict(),
         )
 
     except HTTPException as he:
@@ -357,6 +356,7 @@ async def create_ontology(
 async def list_ontologies(
     db_name: str,
     request: Request,
+    branch: str = Query("main", description="Target branch (default: main)"),
     class_type: str = Query("sys:Class", description="클래스 타입"),
     limit: Optional[int] = Query(None, description="결과 개수 제한"),
     offset: int = Query(0, description="오프셋"),
@@ -373,6 +373,7 @@ async def list_ontologies(
     try:
         # 입력 데이터 보안 검증
         db_name = validate_db_name(db_name)
+        branch = validate_branch_name(branch)
         
         # class_type 파라미터 화이트리스트 검증 (Security Enhancement)
         allowed_class_types = {"sys:Class", "owl:Class", "rdfs:Class"}
@@ -383,7 +384,7 @@ async def list_ontologies(
             )
         
         # 온톨로지 목록 조회
-        ontologies = await terminus.list_classes(db_name)
+        ontologies = await terminus.list_classes(db_name, branch=branch)
         
         # Log ontology retrieval result
         logger.info(f"Retrieved {len(ontologies) if ontologies else 0} ontologies from database '{db_name}'")
@@ -397,6 +398,7 @@ async def list_ontologies(
             "ontologies": labeled_ontologies,
             "offset": offset,
             "limit": limit,
+            "branch": branch,
         }
 
     except HTTPException as he:
@@ -422,6 +424,7 @@ async def get_ontology(
     db_name: str,
     class_label: str,
     request: Request,
+    branch: str = Query("main", description="Target branch (default: main)"),
     mapper: LabelMapper = LabelMapperDep,
     terminus: TerminusService = TerminusServiceDep,
 ):
@@ -436,6 +439,7 @@ async def get_ontology(
         # 입력 데이터 보안 검증
         db_name = validate_db_name(db_name)
         class_label = sanitize_input(class_label)
+        branch = validate_branch_name(branch)
         # URL 파라미터 디버깅
         logger.info(
             f"Getting ontology - db_name: {db_name}, class_label: {class_label}, lang: {lang}"
@@ -451,7 +455,7 @@ async def get_ontology(
             logger.info(f"No mapping found, using label as ID: {class_id}")
 
         # 온톨로지 조회
-        result = await terminus.get_class(db_name, class_id)
+        result = await terminus.get_class(db_name, class_id, branch=branch)
 
         if not result:
             raise HTTPException(
@@ -500,7 +504,7 @@ async def get_ontology(
             "relationships": ontology_data.get("relationships", []),
             "parent_class": ontology_data.get("parent_class"),
             "abstract": ontology_data.get("abstract", False),
-            "metadata": ontology_data.get("metadata", {}),
+            "metadata": {**(ontology_data.get("metadata", {}) or {}), "branch": branch},
         }
 
         # OntologyResponse inherits from OntologyBase, so pass fields directly
@@ -516,13 +520,23 @@ async def get_ontology(
         )
 
 
-@router.put("/ontology/{class_label}")
+@router.put(
+    "/ontology/{class_label}",
+    response_model=ApiResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        status.HTTP_200_OK: {"model": ApiResponse, "description": "Direct mode (legacy)"},
+        status.HTTP_202_ACCEPTED: {"model": ApiResponse, "description": "Event-sourcing mode (async)"},
+        status.HTTP_409_CONFLICT: {"description": "OCC conflict"},
+    },
+)
 async def update_ontology(
     db_name: str,
     class_label: str,
     ontology: OntologyUpdateInput,
     request: Request,
     expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
+    branch: str = Query("main", description="Target branch (default: main)"),
     mapper: LabelMapper = LabelMapperDep,
     terminus: TerminusService = TerminusServiceDep,
 ):
@@ -537,6 +551,7 @@ async def update_ontology(
         # 입력 데이터 보안 검증
         db_name = validate_db_name(db_name)
         class_label = sanitize_input(class_label)
+        branch = validate_branch_name(branch)
         # 레이블로 ID 조회
         class_id = await mapper.get_class_id(db_name, class_label, lang)
         if not class_id:
@@ -547,7 +562,13 @@ async def update_ontology(
         update_data["id"] = class_id
 
         # 온톨로지 업데이트
-        result = await terminus.update_class(db_name, class_id, update_data, expected_seq=expected_seq)
+        result = await terminus.update_class(
+            db_name,
+            class_id,
+            update_data,
+            expected_seq=expected_seq,
+            branch=branch,
+        )
 
         # 레이블 매핑 업데이트 (BFF-local read model; update immediately on accept as well)
         await mapper.update_mappings(db_name, update_data)
@@ -555,11 +576,13 @@ async def update_ontology(
         if isinstance(result, dict) and result.get("status") == "accepted":
             return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=result)
 
-        return {
-            "message": f"온톨로지 '{class_label}'이(가) 수정되었습니다",
-            "id": class_id,
-            "updated_fields": list(update_data.keys()),
-        }
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=ApiResponse.success(
+                message=f"온톨로지 '{class_label}'이(가) 수정되었습니다",
+                data={"ontology_id": class_id, "updated_fields": list(update_data.keys()), "mode": "direct"},
+            ).to_dict(),
+        )
 
     except HTTPException:
         raise
@@ -571,12 +594,22 @@ async def update_ontology(
         )
 
 
-@router.delete("/ontology/{class_label}")
+@router.delete(
+    "/ontology/{class_label}",
+    response_model=ApiResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        status.HTTP_200_OK: {"model": ApiResponse, "description": "Direct mode (legacy)"},
+        status.HTTP_202_ACCEPTED: {"model": ApiResponse, "description": "Event-sourcing mode (async)"},
+        status.HTTP_409_CONFLICT: {"description": "OCC conflict"},
+    },
+)
 async def delete_ontology(
     db_name: str,
     class_label: str,
     request: Request,
     expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
+    branch: str = Query("main", description="Target branch (default: main)"),
     mapper: LabelMapper = LabelMapperDep,
     terminus: TerminusService = TerminusServiceDep,
 ):
@@ -592,13 +625,14 @@ async def delete_ontology(
         # 입력 데이터 보안 검증
         db_name = validate_db_name(db_name)
         class_label = sanitize_input(class_label)
+        branch = validate_branch_name(branch)
         # 레이블로 ID 조회
         class_id = await mapper.get_class_id(db_name, class_label, lang)
         if not class_id:
             class_id = class_label
 
         # 온톨로지 삭제
-        result = await terminus.delete_class(db_name, class_id, expected_seq=expected_seq)
+        result = await terminus.delete_class(db_name, class_id, expected_seq=expected_seq, branch=branch)
 
         # 레이블 매핑 삭제 (BFF-local read model; delete immediately on accept as well)
         await mapper.remove_class(db_name, class_id)
@@ -606,7 +640,13 @@ async def delete_ontology(
         if isinstance(result, dict) and result.get("status") == "accepted":
             return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=result)
 
-        return {"message": f"온톨로지 '{class_label}'이(가) 삭제되었습니다", "id": class_id}
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=ApiResponse.success(
+                message=f"온톨로지 '{class_label}'이(가) 삭제되었습니다",
+                data={"ontology_id": class_id, "mode": "direct"},
+            ).to_dict(),
+        )
 
     except HTTPException as e:
         raise HTTPException(
@@ -627,6 +667,7 @@ async def get_ontology_schema(
     class_id: str,
     request: Request,
     format: str = Query("json", description="스키마 형식 (json, jsonld, owl)"),
+    branch: str = Query("main", description="Target branch (default: main)"),
     mapper: LabelMapper = LabelMapperDep,
     terminus: TerminusService = TerminusServiceDep,
     jsonld_conv: JSONToJSONLDConverter = JSONLDConverterDep,
@@ -642,6 +683,7 @@ async def get_ontology_schema(
         # 입력 데이터 보안 검증
         db_name = validate_db_name(db_name)
         class_id = sanitize_input(class_id)
+        branch = validate_branch_name(branch)
         
         # format 파라미터 화이트리스트 검증 (Security Enhancement)
         allowed_formats = {"json", "jsonld", "owl"}
@@ -657,7 +699,7 @@ async def get_ontology_schema(
             actual_id = class_id
 
         # 온톨로지 조회
-        ontology = await terminus.get_class(db_name, actual_id)
+        ontology = await terminus.get_class(db_name, actual_id, branch=branch)
 
         if not ontology:
             raise HTTPException(

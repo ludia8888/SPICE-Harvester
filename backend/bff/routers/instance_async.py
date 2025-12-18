@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 from pydantic import BaseModel, Field
 
 from bff.dependencies import (
@@ -22,11 +22,14 @@ from shared.models.common import BaseResponse
 from shared.security.input_sanitizer import (
     SecurityViolationError,
     sanitize_input,
+    sanitize_label_input,
+    input_sanitizer,
     validate_branch_name,
     validate_db_name,
     validate_class_id,
     validate_instance_id,
 )
+from shared.utils.language import get_accept_language
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +59,9 @@ async def convert_labels_to_ids(
     data: Dict[str, Any],
     db_name: str,
     class_id: str,
-    label_mapper: LabelMapper
+    label_mapper: LabelMapper,
+    *,
+    lang: str = "ko",
 ) -> Dict[str, Any]:
     """
     Label 기반 데이터를 ID 기반으로 변환
@@ -70,33 +75,59 @@ async def convert_labels_to_ids(
     Returns:
         ID 기반 데이터
     """
-    # 클래스의 속성 매핑 정보 가져오기
-    mappings = await label_mapper.get_class_mappings(db_name, class_id)
-    
-    converted_data = {}
+    def _fallback_langs(primary: str) -> List[str]:
+        langs = [primary, "ko", "en"]
+        out: List[str] = []
+        for item in langs:
+            if item and item not in out:
+                out.append(item)
+        return out
+
+    converted: Dict[str, Any] = {}
+    unknown_labels: List[str] = []
+
     for label, value in data.items():
-        # Label을 ID로 변환
-        property_id = None
-        for prop_id, prop_info in mappings.get("properties", {}).items():
-            if prop_info.get("label") == label:
-                property_id = prop_id
+        property_id: Optional[str] = None
+        for candidate_lang in _fallback_langs(lang):
+            property_id = await label_mapper.get_property_id(db_name, class_id, label, candidate_lang)
+            if property_id:
                 break
-        
+
         if property_id:
-            converted_data[property_id] = value
-        else:
-            # 매핑되지 않은 Label은 그대로 사용 (새로운 속성일 수 있음)
-            logger.warning(f"No mapping found for label '{label}' in class '{class_id}'")
-            converted_data[label] = value
-    
-    return converted_data
+            converted[property_id] = value
+            continue
+
+        # Allow advanced clients to pass internal property_id directly (must be a safe field name).
+        try:
+            input_sanitizer.sanitize_field_name(label)
+            converted[label] = value
+        except Exception:
+            unknown_labels.append(label)
+
+    if unknown_labels:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "unknown_label_keys",
+                "class_id": class_id,
+                "labels": unknown_labels,
+                "hint": "Use existing property labels (as defined in ontology) or pass internal property_id keys.",
+            },
+        )
+
+    return converted
 
 
-@router.post("/{class_label}/create", response_model=CommandResult)
+@router.post(
+    "/{class_label}/create",
+    response_model=CommandResult,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def create_instance_async(
     db_name: str,
     class_label: str,
     request: InstanceCreateRequest,
+    http_request: Request,
     branch: str = Query("main", description="Target branch (default: main)"),
     oms_client: OMSClient = Depends(get_oms_client),
     label_mapper: LabelMapper = Depends(get_label_mapper),
@@ -112,22 +143,27 @@ async def create_instance_async(
         # 입력 검증
         db_name = validate_db_name(db_name)
         branch = validate_branch_name(branch)
-        sanitized_data = sanitize_input(request.data)
+        sanitized_data = sanitize_label_input(request.data)
         
-        # Label을 ID로 변환
-        class_id = await label_mapper.get_class_id_by_label(db_name, class_label)
+        lang = get_accept_language(http_request)
+
+        # Resolve class_label → class_id (fallback: treat class_label as class_id)
+        class_id = await label_mapper.get_class_id(db_name, class_label, lang)
         if not class_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"클래스 '{class_label}'을 찾을 수 없습니다"
-            )
+            class_id = await label_mapper.get_class_id(db_name, class_label, "ko")
+        if not class_id:
+            class_id = await label_mapper.get_class_id(db_name, class_label, "en")
+        if not class_id:
+            # Last resort: accept internal class_id directly if valid.
+            class_id = validate_class_id(class_label)
         
         # 데이터의 Label을 ID로 변환
         converted_data = await convert_labels_to_ids(
             sanitized_data,
             db_name,
             class_id,
-            label_mapper
+            label_mapper,
+            lang=lang,
         )
         
         # OMS 비동기 API 호출
@@ -165,12 +201,17 @@ async def create_instance_async(
         )
 
 
-@router.put("/{class_label}/{instance_id}/update", response_model=CommandResult)
+@router.put(
+    "/{class_label}/{instance_id}/update",
+    response_model=CommandResult,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def update_instance_async(
     db_name: str,
     class_label: str,
     instance_id: str,
     request: InstanceUpdateRequest,
+    http_request: Request,
     expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
     branch: str = Query("main", description="Target branch (default: main)"),
     oms_client: OMSClient = Depends(get_oms_client),
@@ -185,22 +226,25 @@ async def update_instance_async(
         db_name = validate_db_name(db_name)
         validate_instance_id(instance_id)
         branch = validate_branch_name(branch)
-        sanitized_data = sanitize_input(request.data)
+        sanitized_data = sanitize_label_input(request.data)
         
-        # Label을 ID로 변환
-        class_id = await label_mapper.get_class_id_by_label(db_name, class_label)
+        lang = get_accept_language(http_request)
+
+        class_id = await label_mapper.get_class_id(db_name, class_label, lang)
         if not class_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"클래스 '{class_label}'을 찾을 수 없습니다"
-            )
+            class_id = await label_mapper.get_class_id(db_name, class_label, "ko")
+        if not class_id:
+            class_id = await label_mapper.get_class_id(db_name, class_label, "en")
+        if not class_id:
+            class_id = validate_class_id(class_label)
         
         # 데이터의 Label을 ID로 변환
         converted_data = await convert_labels_to_ids(
             sanitized_data,
             db_name,
             class_id,
-            label_mapper
+            label_mapper,
+            lang=lang,
         )
         
         # OMS 비동기 API 호출
@@ -237,11 +281,16 @@ async def update_instance_async(
         )
 
 
-@router.delete("/{class_label}/{instance_id}/delete", response_model=CommandResult)
+@router.delete(
+    "/{class_label}/{instance_id}/delete",
+    response_model=CommandResult,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def delete_instance_async(
     db_name: str,
     class_label: str,
     instance_id: str,
+    http_request: Request,
     branch: str = Query("main", description="Target branch (default: main)"),
     expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
     oms_client: OMSClient = Depends(get_oms_client),
@@ -257,13 +306,15 @@ async def delete_instance_async(
         validate_instance_id(instance_id)
         branch = validate_branch_name(branch)
         
-        # Label을 ID로 변환
-        class_id = await label_mapper.get_class_id_by_label(db_name, class_label)
+        lang = get_accept_language(http_request)
+
+        class_id = await label_mapper.get_class_id(db_name, class_label, lang)
         if not class_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"클래스 '{class_label}'을 찾을 수 없습니다"
-            )
+            class_id = await label_mapper.get_class_id(db_name, class_label, "ko")
+        if not class_id:
+            class_id = await label_mapper.get_class_id(db_name, class_label, "en")
+        if not class_id:
+            class_id = validate_class_id(class_label)
         
         # OMS 비동기 API 호출
         response = await oms_client.delete(
@@ -289,11 +340,16 @@ async def delete_instance_async(
         )
 
 
-@router.post("/{class_label}/bulk-create", response_model=CommandResult)
+@router.post(
+    "/{class_label}/bulk-create",
+    response_model=CommandResult,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def bulk_create_instances_async(
     db_name: str,
     class_label: str,
     request: BulkInstanceCreateRequest,
+    http_request: Request,
     branch: str = Query("main", description="Target branch (default: main)"),
     oms_client: OMSClient = Depends(get_oms_client),
     label_mapper: LabelMapper = Depends(get_label_mapper),
@@ -306,15 +362,17 @@ async def bulk_create_instances_async(
         # 입력 검증
         db_name = validate_db_name(db_name)
         branch = validate_branch_name(branch)
-        sanitized_instances = [sanitize_input(instance) for instance in request.instances]
+        sanitized_instances = [sanitize_label_input(instance) for instance in request.instances]
         
-        # Label을 ID로 변환
-        class_id = await label_mapper.get_class_id_by_label(db_name, class_label)
+        lang = get_accept_language(http_request)
+
+        class_id = await label_mapper.get_class_id(db_name, class_label, lang)
         if not class_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"클래스 '{class_label}'을 찾을 수 없습니다"
-            )
+            class_id = await label_mapper.get_class_id(db_name, class_label, "ko")
+        if not class_id:
+            class_id = await label_mapper.get_class_id(db_name, class_label, "en")
+        if not class_id:
+            class_id = validate_class_id(class_label)
         
         # 각 인스턴스 데이터의 Label을 ID로 변환
         converted_instances = []
@@ -323,7 +381,8 @@ async def bulk_create_instances_async(
                 instance_data,
                 db_name,
                 class_id,
-                label_mapper
+                label_mapper,
+                lang=lang,
             )
             converted_instances.append(converted_data)
         

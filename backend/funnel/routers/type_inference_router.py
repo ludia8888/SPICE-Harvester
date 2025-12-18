@@ -11,6 +11,7 @@ from funnel.services.data_processor import FunnelDataProcessor
 from funnel.services.structure_analysis import FunnelStructureAnalyzer
 from shared.services.sheet_grid_parser import SheetGridParseOptions, SheetGridParser
 from shared.models.sheet_grid import GoogleSheetStructureAnalysisRequest, SheetGrid
+from shared.models.structure_patch import SheetStructurePatch
 from shared.models.structure_analysis import (
     SheetStructureAnalysisRequest,
     SheetStructureAnalysisResponse,
@@ -21,6 +22,8 @@ from shared.models.type_inference import (
     FunnelPreviewResponse,
 )
 from shared.utils.app_logger import get_logger
+from funnel.services.structure_patch import apply_structure_patch
+from funnel.services.structure_patch_store import delete_patch, get_patch, upsert_patch
 
 logger = get_logger(__name__)
 
@@ -78,14 +81,30 @@ async def analyze_sheet_structure(
 
     try:
         logger.info("Analyzing sheet structure...")
-        return await asyncio.to_thread(
+        analysis = await asyncio.to_thread(
             FunnelStructureAnalyzer.analyze,
             request.grid,
             include_complex_types=request.include_complex_types,
             merged_cells=request.merged_cells,
+            cell_style_hints=request.cell_style_hints,
             max_tables=request.max_tables,
             options=request.options,
         )
+        if bool((request.options or {}).get("apply_patches", True)):
+            sig = (analysis.metadata or {}).get("sheet_signature")
+            if isinstance(sig, str) and sig:
+                patch = get_patch(sig)
+                if patch:
+                    analysis = apply_structure_patch(
+                        analysis,
+                        patch=patch,
+                        grid=request.grid,
+                        merged_cells=request.merged_cells,
+                        cell_style_hints=request.cell_style_hints,
+                        include_complex_types=request.include_complex_types,
+                        options=request.options,
+                    )
+        return analysis
     except Exception as e:
         logger.error(f"Sheet structure analysis failed: {str(e)}")
         raise HTTPException(
@@ -134,7 +153,11 @@ async def analyze_excel_structure(
             SheetGridParser.from_excel_bytes,
             content,
             sheet_name=sheet_name,
-            options=SheetGridParseOptions(max_rows=max_rows, max_cols=max_cols),
+            options=SheetGridParseOptions(
+                max_rows=max_rows,
+                max_cols=max_cols,
+                excel_include_style_hints=True,
+            ),
         )
     except RuntimeError as e:
         # openpyxl missing or similar optional dependency issue
@@ -148,6 +171,7 @@ async def analyze_excel_structure(
             sheet_grid.grid,
             include_complex_types=include_complex_types,
             merged_cells=sheet_grid.merged_cells,
+            cell_style_hints=sheet_grid.cell_style_hints,
             max_tables=max_tables,
             options=opts,
         )
@@ -156,6 +180,21 @@ async def analyze_excel_structure(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Sheet structure analysis failed: {str(e)}",
         )
+
+    if bool(opts.get("apply_patches", True)):
+        sig = (analysis.metadata or {}).get("sheet_signature")
+        if isinstance(sig, str) and sig:
+            patch = get_patch(sig)
+            if patch:
+                analysis = apply_structure_patch(
+                    analysis,
+                    patch=patch,
+                    grid=sheet_grid.grid,
+                    merged_cells=sheet_grid.merged_cells,
+                    cell_style_hints=sheet_grid.cell_style_hints,
+                    include_complex_types=include_complex_types,
+                    options=opts,
+                )
 
     return SheetStructureAnalysisResponse(
         tables=analysis.tables,
@@ -215,6 +254,7 @@ async def analyze_google_sheets_structure(
             sheet_grid.grid,
             include_complex_types=request.include_complex_types,
             merged_cells=sheet_grid.merged_cells,
+            cell_style_hints=getattr(sheet_grid, "cell_style_hints", None),
             max_tables=request.max_tables,
             options=request.options,
         )
@@ -223,6 +263,21 @@ async def analyze_google_sheets_structure(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Sheet structure analysis failed: {str(e)}",
         )
+
+    if bool((request.options or {}).get("apply_patches", True)):
+        sig = (analysis.metadata or {}).get("sheet_signature")
+        if isinstance(sig, str) and sig:
+            patch = get_patch(sig)
+            if patch:
+                analysis = apply_structure_patch(
+                    analysis,
+                    patch=patch,
+                    grid=sheet_grid.grid,
+                    merged_cells=sheet_grid.merged_cells,
+                    cell_style_hints=getattr(sheet_grid, "cell_style_hints", None),
+                    include_complex_types=request.include_complex_types,
+                    options=request.options,
+                )
 
     return SheetStructureAnalysisResponse(
         tables=analysis.tables,
@@ -234,6 +289,28 @@ async def analyze_google_sheets_structure(
         },
         warnings=[*(analysis.warnings or []), *(sheet_grid.warnings or [])],
     )
+
+
+@router.post("/structure/patch", response_model=SheetStructurePatch)
+async def upsert_structure_patch(patch: SheetStructurePatch) -> SheetStructurePatch:
+    """Store/update a structure-analysis patch for a given sheet_signature."""
+    if not patch.ops:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Patch ops must not be empty")
+    return upsert_patch(patch)
+
+
+@router.get("/structure/patch/{sheet_signature}", response_model=SheetStructurePatch)
+async def get_structure_patch(sheet_signature: str) -> SheetStructurePatch:
+    patch = get_patch(sheet_signature)
+    if patch is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patch not found")
+    return patch
+
+
+@router.delete("/structure/patch/{sheet_signature}")
+async def delete_structure_patch(sheet_signature: str) -> Dict[str, Any]:
+    deleted = delete_patch(sheet_signature)
+    return {"deleted": bool(deleted), "sheet_signature": sheet_signature}
 
 
 @router.post("/preview/google-sheets", response_model=FunnelPreviewResponse)

@@ -272,6 +272,59 @@ class InputSanitizer:
 
         return value
 
+    def sanitize_label_key(self, value: str) -> str:
+        """
+        Label-key sanitizer for "label-based" payloads (BFF).
+
+        Unlike internal field names, labels may contain spaces and Unicode.
+        We still enforce:
+        - string type
+        - max length
+        - no control characters
+        - basic injection pattern checks (same as description text)
+        """
+        if not isinstance(value, str):
+            raise SecurityViolationError(f"Expected string, got {type(value)}")
+
+        if len(value) > 200:
+            raise SecurityViolationError(f"Label key too long: {len(value)} > 200")
+
+        sanitized = self.sanitize_description(value)
+        if not sanitized.strip():
+            raise SecurityViolationError("Label key must not be empty")
+        return sanitized
+
+    def sanitize_label_dict(
+        self, data: Dict[str, Any], max_depth: int = 10, current_depth: int = 0
+    ) -> Dict[str, Any]:
+        """
+        Sanitize a dict whose keys are *labels* (human-facing), not internal field names.
+
+        This is required for BFF endpoints that accept label-based instance payloads like:
+        {"Product ID": "...", "Name": "..."}.
+        """
+        if current_depth > max_depth:
+            raise SecurityViolationError(
+                f"Dictionary nesting too deep: {current_depth} > {max_depth}"
+            )
+
+        if not isinstance(data, dict):
+            raise SecurityViolationError(f"Expected dict, got {type(data)}")
+
+        if len(data) > 100:  # too many keys guard (same as sanitize_dict)
+            raise SecurityViolationError(f"Too many keys in dict: {len(data)} > 100")
+
+        sanitized: Dict[str, Any] = {}
+        for key, value in data.items():
+            if not isinstance(key, str):
+                raise SecurityViolationError("Label keys must be strings")
+
+            clean_key = self.sanitize_label_key(key)
+            clean_value = self.sanitize_any(value, max_depth, current_depth + 1)
+            sanitized[clean_key] = clean_value
+
+        return sanitized
+
     def sanitize_description(self, value: str) -> str:
         """설명 텍스트 정화 (command injection 체크 안함)"""
         if not isinstance(value, str):
@@ -499,6 +552,25 @@ def sanitize_input(data: Any) -> Any:
     except (ValueError, TypeError, AttributeError) as e:
         logger.error(f"Input sanitization error: {e}")
         raise SecurityViolationError(f"Input sanitization failed: {e}")
+
+
+def sanitize_label_input(data: Any) -> Any:
+    """
+    Sanitize a label-keyed payload (BFF).
+
+    Use this for payloads where dict keys are user-facing labels (can include spaces/Unicode),
+    e.g. instance async create/update endpoints.
+    """
+    try:
+        if not isinstance(data, dict):
+            raise SecurityViolationError("Label payload must be an object")
+        return input_sanitizer.sanitize_label_dict(data)
+    except SecurityViolationError as e:
+        logger.warning(f"Security violation detected (label payload): {e}")
+        raise
+    except (ValueError, TypeError, AttributeError) as e:
+        logger.error(f"Label payload sanitization error: {e}")
+        raise SecurityViolationError(f"Label payload sanitization failed: {e}")
 
 
 def validate_db_name(db_name: str) -> str:

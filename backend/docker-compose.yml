@@ -238,6 +238,8 @@ services:
       - funnel
     networks:
       - spice_network
+    volumes:
+      - bff_data:/app/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/api/v1/health"]
       interval: 30s
@@ -415,6 +417,7 @@ volumes:
   elasticsearch_data:
   minio_data:
   terminusdb_data:
+  bff_data:
 
 networks:
   spice_network:

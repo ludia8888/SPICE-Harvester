@@ -89,6 +89,15 @@ curl -fsS http://localhost:8003/health
 
 Tip: 아래 예시는 편의를 위해 `jq`를 사용합니다.
 
+⚠️ **경로 네이밍 주의(혼재)**  
+현재 BFF는 라우터 역사적 이유로 다음이 섞여 있습니다.
+- DB/브랜치: `/api/v1/databases/...` (복수형)
+- 온톨로지/인스턴스/쿼리: `/api/v1/database/{db_name}/...` (단수형)
+
+⚠️ **202 vs 200**  
+기본 설정(`ENABLE_EVENT_SOURCING=true`)에서는 write가 **202 Accepted + command_id**로 돌아오며, 반드시 command status를 폴링해야 합니다.  
+직접쓰기 모드(`ENABLE_EVENT_SOURCING=false`)에서는 일부 write가 200/201로 즉시 반영될 수 있습니다.
+
 ```bash
 DB=demo_db_$(date +%s)
 

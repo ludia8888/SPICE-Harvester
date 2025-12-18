@@ -148,7 +148,9 @@ class OMSClient:
             logger.error(f"데이터베이스 조회 실패 ({db_name}): {e}")
             raise
 
-    async def create_ontology(self, db_name: str, ontology_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def create_ontology(
+        self, db_name: str, ontology_data: Dict[str, Any], *, branch: str = "main"
+    ) -> Dict[str, Any]:
         """온톨로지 생성"""
         try:
             # 🔥 ULTRA DEBUG! Log what we're sending to OMS
@@ -165,7 +167,9 @@ class OMSClient:
             
             # Send data as-is to OMS (no format conversion needed)
             response = await self.client.post(
-                f"/api/v1/database/{db_name}/ontology", json=ontology_data
+                f"/api/v1/database/{db_name}/ontology",
+                params={"branch": branch},
+                json=ontology_data,
             )
             response.raise_for_status()
             return response.json()
@@ -173,12 +177,12 @@ class OMSClient:
             logger.error(f"온톨로지 생성 실패 ({db_name}): {e}")
             raise
 
-    async def get_ontology(self, db_name: str, class_id: str) -> Dict[str, Any]:
+    async def get_ontology(self, db_name: str, class_id: str, *, branch: str = "main") -> Dict[str, Any]:
         """온톨로지 조회"""
         try:
             url = f"/api/v1/database/{db_name}/ontology/{class_id}"
             logger.info(f"Requesting OMS: GET {self.base_url}{url}")
-            response = await self.client.get(url)
+            response = await self.client.get(url, params={"branch": branch})
             logger.info(f"OMS response status: {response.status_code}")
             response.raise_for_status()
             return response.json()
@@ -186,10 +190,13 @@ class OMSClient:
             logger.error(f"온톨로지 조회 실패 ({db_name}/{class_id}): {e}")
             raise
 
-    async def list_ontologies(self, db_name: str) -> Dict[str, Any]:
+    async def list_ontologies(self, db_name: str, *, branch: str = "main") -> Dict[str, Any]:
         """온톨로지 목록 조회"""
         try:
-            response = await self.client.get(f"/api/v1/database/{db_name}/ontology")
+            response = await self.client.get(
+                f"/api/v1/database/{db_name}/ontology",
+                params={"branch": branch},
+            )
             response.raise_for_status()
             return response.json()
         except Exception as e:
@@ -227,13 +234,19 @@ class OMSClient:
             raise
 
     async def update_ontology(
-        self, db_name: str, class_id: str, update_data: Dict[str, Any], *, expected_seq: int
+        self,
+        db_name: str,
+        class_id: str,
+        update_data: Dict[str, Any],
+        *,
+        expected_seq: int,
+        branch: str = "main",
     ) -> Dict[str, Any]:
         """온톨로지 업데이트"""
         try:
             response = await self.client.put(
                 f"/api/v1/database/{db_name}/ontology/{class_id}",
-                params={"expected_seq": int(expected_seq)},
+                params={"expected_seq": int(expected_seq), "branch": branch},
                 json=update_data,
             )
             response.raise_for_status()
@@ -242,12 +255,14 @@ class OMSClient:
             logger.error(f"온톨로지 업데이트 실패: {e}")
             raise
 
-    async def delete_ontology(self, db_name: str, class_id: str, *, expected_seq: int) -> Dict[str, Any]:
+    async def delete_ontology(
+        self, db_name: str, class_id: str, *, expected_seq: int, branch: str = "main"
+    ) -> Dict[str, Any]:
         """온톨로지 삭제"""
         try:
             response = await self.client.delete(
                 f"/api/v1/database/{db_name}/ontology/{class_id}",
-                params={"expected_seq": int(expected_seq)},
+                params={"expected_seq": int(expected_seq), "branch": branch},
             )
             response.raise_for_status()
             # 실제 삭제 응답 반환

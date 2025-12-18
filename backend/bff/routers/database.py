@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/databases", tags=["Database Management"])
 
 
-@router.get("")
+@router.get("", response_model=ApiResponse)
 async def list_databases(oms: OMSClient = OMSClientDep):
     """데이터베이스 목록 조회"""
     try:
@@ -49,7 +49,16 @@ async def list_databases(oms: OMSClient = OMSClientDep):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.post("", response_model=ApiResponse)
+@router.post(
+    "",
+    response_model=ApiResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        status.HTTP_201_CREATED: {"model": ApiResponse, "description": "Direct mode (legacy)"},
+        status.HTTP_202_ACCEPTED: {"model": ApiResponse, "description": "Event-sourcing mode (async)"},
+        status.HTTP_409_CONFLICT: {"description": "Conflict (already exists / OCC)"},
+    },
+)
 async def create_database(request: DatabaseCreateRequest, oms: OMSClient = OMSClientDep):
     """데이터베이스 생성"""
     logger.info(f"🔥 BFF: Database creation request received - name: {request.name}, description: {request.description}")
@@ -89,10 +98,13 @@ async def create_database(request: DatabaseCreateRequest, oms: OMSClient = OMSCl
             # 커밋 실패해도 데이터베이스 생성은 성공으로 처리
             logger.warning(f"Failed to auto-commit database creation for '{request.name}': {commit_error}")
 
-        return ApiResponse.created(
-            message=f"데이터베이스 '{request.name}'가 생성되었습니다",
-            data={"name": request.name, "result": result},
-        ).to_dict()
+        return JSONResponse(
+            status_code=status.HTTP_201_CREATED,
+            content=ApiResponse.created(
+                message=f"데이터베이스 '{request.name}'가 생성되었습니다",
+                data={"name": request.name, "result": result, "mode": "direct"},
+            ).to_dict(),
+        )
     except SecurityViolationError as e:
         # 보안 검증 실패는 400 Bad Request로 처리
         logger.warning(f"Security validation failed for database '{request.name}': {e}")
@@ -115,7 +127,16 @@ async def create_database(request: DatabaseCreateRequest, oms: OMSClient = OMSCl
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.delete("/{db_name}")
+@router.delete(
+    "/{db_name}",
+    response_model=ApiResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        status.HTTP_200_OK: {"model": ApiResponse, "description": "Direct mode (legacy)"},
+        status.HTTP_202_ACCEPTED: {"model": ApiResponse, "description": "Event-sourcing mode (async)"},
+        status.HTTP_409_CONFLICT: {"description": "OCC conflict"},
+    },
+)
 async def delete_database(
     db_name: str,
     expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
@@ -156,11 +177,13 @@ async def delete_database(
             # 커밋 실패해도 데이터베이스 삭제는 성공으로 처리
             logger.warning(f"Failed to auto-commit database deletion for '{validated_db_name}': {commit_error}")
 
-        return {
-            "status": "success",
-            "message": f"데이터베이스 '{validated_db_name}'이(가) 삭제되었습니다",
-            "database": validated_db_name,
-        }
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=ApiResponse.success(
+                message=f"데이터베이스 '{validated_db_name}'이(가) 삭제되었습니다",
+                data={"database_name": validated_db_name, "mode": "direct"},
+            ).to_dict(),
+        )
     except SecurityViolationError as e:
         # 보안 검증 실패는 400 Bad Request로 처리
         logger.warning(f"Security validation failed for database '{db_name}': {e}")

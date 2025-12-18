@@ -241,6 +241,19 @@ class TestTypeInference:
         assert result.inferred_type.metadata is not None
         assert result.inferred_type.metadata.get("currency") == "USD"
         assert "allowedCurrencies" in result.inferred_type.metadata.get("suggested_constraints", {})
+        assert result.inferred_type.metadata.get("semantic_label") == "AMOUNT"
+        assert result.inferred_type.metadata.get("unit") == "USD"
+
+    def test_semantic_label_qty_from_column_name(self):
+        """의미 라벨(QTY) - 컬럼명 힌트 기반"""
+        test_data = ["1", "2", "3", "4", "5"]
+
+        result = FunnelTypeInferenceService.infer_column_type(test_data, "수량")
+
+        assert result.inferred_type.type == DataType.INTEGER.value
+        assert result.inferred_type.metadata is not None
+        assert result.inferred_type.metadata.get("semantic_label") == "QTY"
+        assert result.inferred_type.metadata.get("unit") == "pcs"
 
     def test_money_detection_with_asian_currency_formats(self):
         """아시아권 통화 표기(¥/RMB/원) 기반 money 타입 감지 테스트"""

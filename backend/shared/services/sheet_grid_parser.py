@@ -35,6 +35,10 @@ class SheetGridParseOptions:
     # Excel-specific
     excel_data_only: bool = True
     excel_fallback_to_formula: bool = True
+    excel_include_style_hints: bool = False
+    # Safety valve: avoid exploding memory when style hints are enabled.
+    # (applies to the parsed grid region: max_rows * max_cols)
+    excel_style_hints_max_cells: int = 250_000
 
 
 class SheetGridParser:
@@ -183,25 +187,114 @@ class SheetGridParser:
 
         # Read cells (keep A1 anchor; downstream structure analyzer expects leading blanks too)
         grid: List[List[Any]] = []
+        style_hints: Optional[List[List[int]]] = None
         if max_row <= 0 or max_col <= 0:
             return SheetGrid(
                 source="excel",
                 sheet_name=str(ws.title),
                 grid=[],
                 merged_cells=[],
+                cell_style_hints=None,
                 metadata={"rows": 0, "cols": 0, **(metadata or {})},
                 warnings=warnings,
             )
 
+        include_styles = bool(getattr(opts, "excel_include_style_hints", False))
+        if include_styles:
+            try:
+                max_cells = int(getattr(opts, "excel_style_hints_max_cells", 250_000))
+            except Exception:
+                max_cells = 250_000
+            if max_row * max_col > max_cells:
+                include_styles = False
+                warnings.append(
+                    f"Style hints disabled (grid too large: {max_row}x{max_col} > {max_cells} cells)"
+                )
+            else:
+                style_hints = []
+
+        # Compact style hint bitmask (low 8 bits) + optional fill RGB (upper bits).
+        STYLE_BOLD = 1 << 0
+        STYLE_FILL = 1 << 1
+        STYLE_BORDER_TOP = 1 << 2
+        STYLE_BORDER_BOTTOM = 1 << 3
+        STYLE_BORDER_LEFT = 1 << 4
+        STYLE_BORDER_RIGHT = 1 << 5
+
+        def _rgb24_from_openpyxl_color(color: Any) -> int:
+            try:
+                rgb = getattr(color, "rgb", None)
+                if isinstance(rgb, str) and rgb:
+                    # openpyxl uses ARGB (e.g., 'FFFF0000')
+                    rgb6 = rgb[-6:]
+                    return int(rgb6, 16)
+                value = getattr(color, "value", None)
+                if isinstance(value, str) and value:
+                    return int(value[-6:], 16)
+            except Exception:
+                return 0
+            return 0
+
+        def _cell_style_hint(cell: Any) -> int:
+            mask = 0
+
+            try:
+                if bool(getattr(getattr(cell, "font", None), "bold", False)):
+                    mask |= STYLE_BOLD
+            except Exception:
+                pass
+
+            # Fill
+            fill_rgb = 0
+            try:
+                fill = getattr(cell, "fill", None)
+                pattern = getattr(fill, "patternType", None)
+                if pattern and str(pattern).lower() not in {"none"}:
+                    fg = getattr(fill, "fgColor", None) or getattr(fill, "start_color", None)
+                    fill_rgb = _rgb24_from_openpyxl_color(fg)
+            except Exception:
+                fill_rgb = 0
+            # Treat white/empty as no fill
+            if fill_rgb not in (0, 0xFFFFFF):
+                mask |= STYLE_FILL
+            else:
+                fill_rgb = 0
+
+            # Borders (side-specific)
+            try:
+                border = getattr(cell, "border", None)
+                if border:
+                    top = getattr(getattr(border, "top", None), "style", None)
+                    bottom = getattr(getattr(border, "bottom", None), "style", None)
+                    left = getattr(getattr(border, "left", None), "style", None)
+                    right = getattr(getattr(border, "right", None), "style", None)
+                    if top:
+                        mask |= STYLE_BORDER_TOP
+                    if bottom:
+                        mask |= STYLE_BORDER_BOTTOM
+                    if left:
+                        mask |= STYLE_BORDER_LEFT
+                    if right:
+                        mask |= STYLE_BORDER_RIGHT
+            except Exception:
+                pass
+
+            return mask | (fill_rgb << 8)
+
         # Iterate row-major for cache locality
         for r in range(1, max_row + 1):
             row_out: List[Any] = []
+            row_style: Optional[List[int]] = [] if include_styles and style_hints is not None else None
             for c in range(1, max_col + 1):
                 cell = ws.cell(row=r, column=c)
                 row_out.append(
                     cls._excel_cell_to_display_value(cell, fallback_to_formula=opts.excel_fallback_to_formula)
                 )
+                if row_style is not None:
+                    row_style.append(_cell_style_hint(cell))
             grid.append(row_out)
+            if row_style is not None and style_hints is not None:
+                style_hints.append(row_style)
 
         if opts.trim_trailing_empty:
             # Preserve trailing empty rows/cols that are part of merged ranges (e.g. A3:A4 where A4 is blank).
@@ -211,6 +304,11 @@ class SheetGridParser:
             grid, trim_meta = cls._trim_trailing_empty(grid, min_rows=min_rows, min_cols=min_cols)
             if trim_meta.get("trimmed"):
                 warnings.append("Trailing empty rows/cols trimmed")
+            if style_hints is not None and trim_meta.get("trimmed"):
+                try:
+                    style_hints = [row[: trim_meta["cols"]] for row in style_hints[: trim_meta["rows"]]]
+                except Exception:
+                    style_hints = None
 
         rows = len(grid)
         cols = max((len(r) for r in grid), default=0)
@@ -221,6 +319,7 @@ class SheetGridParser:
             sheet_name=str(ws.title),
             grid=grid,
             merged_cells=merges,
+            cell_style_hints=style_hints,
             metadata={"rows": rows, "cols": cols, **(metadata or {})},
             warnings=warnings,
         )

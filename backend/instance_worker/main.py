@@ -20,7 +20,7 @@ import logging
 import os
 from contextlib import suppress
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, Set, List
+from typing import Dict, Any, Optional, Set, List, Union
 from uuid import uuid4, uuid5, NAMESPACE_URL
 
 from confluent_kafka import Consumer, Producer, KafkaError, TopicPartition
@@ -36,7 +36,7 @@ from shared.services.command_status_service import (
 )
 from shared.config.settings import ApplicationSettings
 from shared.models.event_envelope import EventEnvelope
-from shared.security.input_sanitizer import validate_branch_name, validate_instance_id
+from shared.security.input_sanitizer import validate_branch_name, validate_class_id, validate_instance_id
 from shared.services.processed_event_registry import ClaimDecision, ProcessedEventRegistry
 from shared.services.lineage_store import LineageStore
 from shared.services.audit_log_store import AuditLogStore
@@ -242,17 +242,48 @@ class StrictPalantirInstanceWorker:
         return generated_id
     
     async def extract_relationships(
-        self, db_name: str, class_id: str, payload: Dict[str, Any], *, branch: str = "main"
-    ) -> Dict[str, str]:
+        self,
+        db_name: str,
+        class_id: str,
+        payload: Dict[str, Any],
+        *,
+        branch: str = "main",
+    ) -> Dict[str, Union[str, List[str]]]:
         """
         Extract ONLY relationship fields from payload
-        Returns: {field_name: target_id} for @id references only
+        Returns: {field_name: "<TargetClass>/<instance_id>" | ["<TargetClass>/<instance_id>", ...]}
         """
-        relationships = {}
+        relationships: Dict[str, Union[str, List[str]]] = {}
+
+        def _normalize_ref(ref: Any) -> str:
+            if not isinstance(ref, str):
+                raise ValueError(f"Relationship ref must be a string, got {type(ref).__name__}")
+
+            candidate = ref.strip()
+            if "/" not in candidate:
+                raise ValueError(
+                    f"Invalid relationship ref '{ref}'. Expected '<TargetClass>/<instance_id>'"
+                )
+
+            target_class, target_instance_id = candidate.split("/", 1)
+            validate_class_id(target_class)
+            validate_instance_id(target_instance_id)
+            return f"{target_class}/{target_instance_id}"
+
+        def _expects_many(cardinality: Optional[Any]) -> Optional[bool]:
+            if cardinality is None:
+                return None
+            try:
+                card = str(cardinality).strip()
+            except Exception:
+                return None
+            if not card:
+                return None
+            return card.endswith(":n") or card.endswith(":m")
 
         try:
             branch = validate_branch_name(branch)
-            # Get ontology to identify relationship fields
+            # Get ontology to identify relationship fields + cardinality
             ontology = await self.terminus_service.get_ontology(db_name, class_id, branch=branch)
             
             if ontology:
@@ -263,16 +294,41 @@ class StrictPalantirInstanceWorker:
                         field_name = None
                         if isinstance(rel, dict):
                             field_name = rel.get("predicate") or rel.get("name")
+                            cardinality = rel.get("cardinality")
                         else:
                             field_name = getattr(rel, "predicate", None) or getattr(rel, "name", None)
+                            cardinality = getattr(rel, "cardinality", None)
 
                         if not field_name or field_name not in payload:
                             continue
 
                         value = payload[field_name]
-                        if isinstance(value, str) and "/" in value:
-                            relationships[str(field_name)] = value
-                            logger.info(f"  📎 Found relationship: {field_name} → {value}")
+                        wants_many = _expects_many(cardinality)
+
+                        if wants_many is True:
+                            items = value if isinstance(value, list) else [value]
+                            normalized: List[str] = []
+                            for item in items:
+                                normalized.append(_normalize_ref(item))
+                            # Deduplicate while preserving order (Set semantics)
+                            seen: Set[str] = set()
+                            unique = [v for v in normalized if not (v in seen or seen.add(v))]
+                            relationships[str(field_name)] = unique
+                            logger.info(f"  📎 Found relationship (many): {field_name} → {unique}")
+                        else:
+                            if isinstance(value, list):
+                                if len(value) == 0:
+                                    continue
+                                if len(value) != 1:
+                                    raise ValueError(
+                                        f"Relationship '{field_name}' expects a single ref (cardinality={cardinality}), "
+                                        f"got {len(value)} items"
+                                    )
+                                value = value[0]
+
+                            normalized = _normalize_ref(value)
+                            relationships[str(field_name)] = normalized
+                            logger.info(f"  📎 Found relationship: {field_name} → {normalized}")
 
                 # Dict (OMS-like) shape
                 elif isinstance(ontology, dict):
@@ -284,19 +340,63 @@ class StrictPalantirInstanceWorker:
                             field_name = rel.get("predicate") or rel.get("name")
                             if not field_name or field_name not in payload:
                                 continue
+                            cardinality = rel.get("cardinality")
                             value = payload[field_name]
-                            if isinstance(value, str) and "/" in value:
-                                relationships[str(field_name)] = value
-                                logger.info(f"  📎 Found relationship: {field_name} → {value}")
+                            wants_many = _expects_many(cardinality)
+
+                            if wants_many is True:
+                                items = value if isinstance(value, list) else [value]
+                                normalized: List[str] = []
+                                for item in items:
+                                    normalized.append(_normalize_ref(item))
+                                seen: Set[str] = set()
+                                unique = [v for v in normalized if not (v in seen or seen.add(v))]
+                                relationships[str(field_name)] = unique
+                                logger.info(f"  📎 Found relationship (many): {field_name} → {unique}")
+                            else:
+                                if isinstance(value, list):
+                                    if len(value) == 0:
+                                        continue
+                                    if len(value) != 1:
+                                        raise ValueError(
+                                            f"Relationship '{field_name}' expects a single ref (cardinality={cardinality}), "
+                                            f"got {len(value)} items"
+                                        )
+                                    value = value[0]
+
+                                normalized = _normalize_ref(value)
+                                relationships[str(field_name)] = normalized
+                                logger.info(f"  📎 Found relationship: {field_name} → {normalized}")
 
                     # TerminusDB schema format (relationships as properties with @class)
                     else:
                         for key, value_def in ontology.items():
                             if isinstance(value_def, dict) and "@class" in value_def and key in payload:
                                 value = payload[key]
-                                if isinstance(value, str) and "/" in value:
-                                    relationships[str(key)] = value
-                                    logger.info(f"  📎 Found relationship: {key} → {value}")
+                                wants_many = True if str(value_def.get("@type") or "").strip() == "Set" else None
+
+                                if wants_many is True:
+                                    items = value if isinstance(value, list) else [value]
+                                    normalized: List[str] = []
+                                    for item in items:
+                                        normalized.append(_normalize_ref(item))
+                                    seen: Set[str] = set()
+                                    unique = [v for v in normalized if not (v in seen or seen.add(v))]
+                                    relationships[str(key)] = unique
+                                    logger.info(f"  📎 Found relationship (many): {key} → {unique}")
+                                else:
+                                    if isinstance(value, list):
+                                        if len(value) == 0:
+                                            continue
+                                        if len(value) != 1:
+                                            raise ValueError(
+                                                f"Relationship '{key}' expects a single ref, got {len(value)} items"
+                                            )
+                                        value = value[0]
+
+                                    normalized = _normalize_ref(value)
+                                    relationships[str(key)] = normalized
+                                    logger.info(f"  📎 Found relationship: {key} → {normalized}")
                             
         except Exception as e:
             logger.warning(f"Could not get ontology for relationship extraction: {e}")
@@ -304,12 +404,24 @@ class StrictPalantirInstanceWorker:
         # FALLBACK: Always check for common relationship patterns
         # This ensures relationships work even without schema
         for key, value in payload.items():
-            if isinstance(value, str) and '/' in value:
-                # Looks like an @id reference
-                if any(pattern in key for pattern in ['_by', '_to', '_ref', 'contains', 'linked']):
-                    if key not in relationships:  # Don't duplicate
-                        relationships[key] = value
-                        logger.info(f"  📎 Found relationship pattern: {key} → {value}")
+            if key in relationships:
+                continue
+
+            # Looks like an @id reference (string)
+            if isinstance(value, str) and "/" in value:
+                if any(pattern in key for pattern in ["_by", "_to", "_ref", "contains", "linked"]):
+                    relationships[key] = _normalize_ref(value)
+                    logger.info(f"  📎 Found relationship pattern: {key} → {relationships[key]}")
+                continue
+
+            # Looks like an @id reference (list)
+            if isinstance(value, list) and value:
+                if any(pattern in key for pattern in ["_by", "_to", "_ref", "contains", "linked"]):
+                    normalized: List[str] = [_normalize_ref(item) for item in value]
+                    seen: Set[str] = set()
+                    unique = [v for v in normalized if not (v in seen or seen.add(v))]
+                    relationships[key] = unique
+                    logger.info(f"  📎 Found relationship pattern (many): {key} → {unique}")
                         
         return relationships
 

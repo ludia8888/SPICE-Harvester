@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # Import VersionedModelMixin for MVCC support
 from .base import VersionedModelMixin
@@ -129,10 +129,17 @@ class Relationship(BaseModel):
 class Property(BaseModel):
     """Property model with class reference support"""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     name: str = Field(..., description="Property name")
     type: str = Field(..., description="Property data type or class reference")
     label: str = Field(..., description="English label")
     required: bool = Field(default=False, description="Whether property is required")
+    primary_key: bool = Field(
+        default=False,
+        description="Whether this property is the primary key",
+        alias="primaryKey",
+    )
     default: Optional[Any] = Field(None, description="Default value")
     description: Optional[str] = Field(None, description="English description")
     constraints: Dict[str, Any] = Field(default_factory=dict, description="Property constraints")
