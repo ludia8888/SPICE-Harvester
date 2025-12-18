@@ -79,7 +79,7 @@ Health:
 
 ```bash
 curl -fsS http://localhost:8000/health
-curl -fsS http://localhost:8002/health
+curl -fsS http://localhost:8002/api/v1/health
 curl -fsS http://localhost:8003/health
 ```
 

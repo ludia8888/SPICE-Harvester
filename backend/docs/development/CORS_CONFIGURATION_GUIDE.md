@@ -21,7 +21,7 @@ SPICE HARVESTER는 환경변수 기반의 **동적 CORS 설정**을 지원합니
 - ✅ **환경별 자동 설정**: 개발/스테이징/프로덕션 환경에 따른 자동 설정
 - ✅ **동적 포트 지원**: 프론트엔드 개발에서 사용하는 일반적인 포트들 자동 허용
 - ✅ **중앙 집중식 관리**: `ServiceConfig` 클래스를 통한 통일된 설정 관리
-- ✅ **실시간 디버깅**: 각 서비스의 `/debug/cors` 엔드포인트를 통한 설정 확인
+- ✅ **실시간 디버깅(옵트인)**: `ENABLE_DEBUG_ENDPOINTS=true`일 때 각 서비스의 `/debug/cors`로 설정 확인
 - ✅ **보안 강화**: 프로덕션 환경에서 제한적인 헤더 및 도메인 허용
 
 ---
@@ -54,7 +54,10 @@ python -m funnel.main &
 
 **3단계: CORS 설정 확인**
 ```bash
-# 각 서비스의 CORS 설정 확인
+# Debug endpoints는 기본값으로 비활성화되어 있습니다(보안/표면적 최소화).
+export ENABLE_DEBUG_ENDPOINTS=true
+
+# 각 서비스의 CORS 설정 확인 (development only)
 curl http://localhost:8002/debug/cors | jq  # BFF
 curl http://localhost:8000/debug/cors | jq  # OMS
 curl http://localhost:8003/debug/cors | jq  # Funnel
@@ -209,13 +212,13 @@ curl -X OPTIONS \\
      -H "Origin: http://localhost:3000" \\
      -H "Access-Control-Request-Method: GET" \\
      -H "Access-Control-Request-Headers: Content-Type" \\
-     http://localhost:8002/health -v
+     http://localhost:8002/api/v1/health -v
 
 # 실제 요청 테스트
 curl -X GET \\
      -H "Origin: http://localhost:3000" \\
      -H "Content-Type: application/json" \\
-     http://localhost:8002/health -v
+     http://localhost:8002/api/v1/health -v
 ```
 
 ---
@@ -226,13 +229,14 @@ curl -X GET \\
 
 1. **서비스 상태 확인**
    ```bash
-   curl http://localhost:8002/health
+   curl http://localhost:8002/api/v1/health
    curl http://localhost:8000/health
    curl http://localhost:8003/health
    ```
 
 2. **CORS 설정 확인**
    ```bash
+   export ENABLE_DEBUG_ENDPOINTS=true
    curl http://localhost:8002/debug/cors
    ```
 
@@ -340,10 +344,11 @@ python backend/start_services.py --env development
 python test_cors_configuration.py
 
 # 특정 서비스 CORS 설정 확인
+export ENABLE_DEBUG_ENDPOINTS=true
 curl http://localhost:8002/debug/cors | jq
 
 # 서비스 상태 확인
-curl http://localhost:8002/health
+curl http://localhost:8002/api/v1/health
 curl http://localhost:8000/health
 curl http://localhost:8003/health
 ```

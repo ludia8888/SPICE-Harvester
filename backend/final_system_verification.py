@@ -35,7 +35,7 @@ async def main():
         
         services = [
             ("OMS", "http://localhost:8000/health"),
-            ("BFF", "http://localhost:8002/health"),
+            ("BFF", "http://localhost:8002/api/v1/health"),
             ("Funnel", "http://localhost:8003/health")
         ]
         

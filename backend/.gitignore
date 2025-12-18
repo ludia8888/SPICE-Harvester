@@ -27,6 +27,8 @@ ENV/
 env/
 .venv
 .env
+test_env/
+test_venv/
 
 # IDE
 .vscode/
@@ -112,3 +114,7 @@ ssl/
 # Archived legacy code and tests
 archived_tests/
 tests_archive/
+
+# Legacy backups (do not commit)
+*_legacy_backup*.py
+_legacy_backup_*/

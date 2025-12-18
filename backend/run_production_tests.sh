@@ -209,7 +209,7 @@ if [[ "$WAIT_FOR_SERVICES" == "true" && "$MODE" == "full" ]]; then
   echo "⏳ Waiting for services (timeout=${TIMEOUT_SECONDS}s)..."
   wait_for_url "MinIO" "${MINIO_URL}/minio/health/live" "$TIMEOUT_SECONDS"
   wait_for_url "OMS" "${OMS_URL}/health" "$TIMEOUT_SECONDS"
-  wait_for_url "BFF" "${BFF_URL}/health" "$TIMEOUT_SECONDS"
+  wait_for_url "BFF" "${BFF_URL}/api/v1/health" "$TIMEOUT_SECONDS"
   wait_for_url "Funnel" "${FUNNEL_URL}/health" "$TIMEOUT_SECONDS"
 fi
 

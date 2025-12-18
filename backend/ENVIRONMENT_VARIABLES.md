@@ -214,7 +214,7 @@ python scripts/validate_connections.py
 
 # Test service endpoints
 curl http://localhost:8000/health
-curl http://localhost:8002/health
+curl http://localhost:8002/api/v1/health
 curl http://localhost:8003/health
 ```
 

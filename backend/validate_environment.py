@@ -289,7 +289,7 @@ class EnvironmentValidator:
         
         services = [
             ("OMS", f"http://localhost:{os.getenv('OMS_PORT', '8000')}/health"),
-            ("BFF", f"http://localhost:{os.getenv('BFF_PORT', '8002')}/health"),
+            ("BFF", f"http://localhost:{os.getenv('BFF_PORT', '8002')}/api/v1/health"),
             ("Funnel", f"http://localhost:{os.getenv('FUNNEL_PORT', '8003')}/health"),
         ]
         

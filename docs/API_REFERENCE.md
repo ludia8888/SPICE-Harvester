@@ -10,7 +10,6 @@
 2. [Authentication](#authentication)
 3. [BFF API Endpoints](#bff-api-endpoints)
 4. [OMS API Endpoints](#oms-api-endpoints)
-   - [Legacy Direct API](#legacy-direct-api)
    - [Asynchronous API](#asynchronous-api)
 5. [Funnel API Endpoints](#funnel-api-endpoints)
 6. [Git-like Features](#git-like-features)
@@ -1599,15 +1598,15 @@ Real-time command status updates via WebSocket connections.
 
 ### Base URL
 ```
-ws://localhost:8002/ws  (Development)
-wss://api.spiceharvester.com/ws  (Production)
+ws://localhost:8002/api/v1/ws  (Development)
+wss://api.spiceharvester.com/api/v1/ws  (Production)
 ```
 
 ### Connection Endpoints
 
 #### Subscribe to Specific Command
 ```
-ws://localhost:8002/ws/commands/{command_id}?client_id={client_id}&user_id={user_id}
+ws://localhost:8002/api/v1/ws/commands/{command_id}?client_id={client_id}&user_id={user_id}
 ```
 
 **Parameters:**
@@ -1617,7 +1616,7 @@ ws://localhost:8002/ws/commands/{command_id}?client_id={client_id}&user_id={user
 
 #### Subscribe to All User Commands
 ```
-ws://localhost:8002/ws/commands?user_id={user_id}&client_id={client_id}
+ws://localhost:8002/api/v1/ws/commands?user_id={user_id}&client_id={client_id}
 ```
 
 **Parameters:**
@@ -1713,61 +1712,16 @@ Clients can send these message types:
 }
 ```
 
-### REST Endpoints
+### Notes
 
-#### WebSocket Statistics
-```http
-GET /ws/stats
-```
-
-**Response:**
-```json
-{
-  "status": "success",
-  "data": {
-    "total_connections": 15,
-    "total_users": 8,
-    "command_subscriptions": 25,
-    "connections_per_user": {
-      "user1": 2,
-      "user2": 1
-    }
-  }
-}
-```
-
-#### Test Page
-```http
-GET /ws/test
-```
-
-Returns an interactive HTML page for testing WebSocket functionality.
-
-#### Manual Update Trigger (Testing)
-```http
-POST /ws/test/trigger-update/{command_id}?status=PROCESSING&progress=50
-```
-
-**Response:**
-```json
-{
-  "status": "success",
-  "message": "Test update sent to 3 clients",
-  "command_id": "550e8400-e29b-41d4-a716-446655440000",
-  "update_data": {
-    "status": "PROCESSING",
-    "progress": 50,
-    "updated_at": "2025-08-05T12:00:00Z",
-    "message": "Test update: PROCESSING"
-  }
-}
-```
+- WebSocket 테스트용 HTTP 엔드포인트(`/ws/test`, `/ws/stats` 등)는 제거되었습니다.
+- 로컬 수동 테스트는 `wscat`/`websocat` 같은 도구로 WebSocket 엔드포인트에 직접 연결하세요.
 
 ### JavaScript Client Example
 
 ```javascript
 // Connect to specific command updates
-const socket = new WebSocket('ws://localhost:8002/ws/commands/my-command-123');
+const socket = new WebSocket('ws://localhost:8002/api/v1/ws/commands/my-command-123');
 
 socket.onopen = function() {
     console.log('WebSocket connected');

@@ -103,7 +103,7 @@ TERMINUS_SERVER_URL=http://terminusdb:6363
 
 모든 서비스는 헬스 체크 엔드포인트를 포함합니다:
 
-- **BFF**: http://localhost:8002/health
+- **BFF**: http://localhost:8002/api/v1/health
 - **OMS**: http://localhost:8000/health
 - **Funnel**: http://localhost:8003/health
 - **TerminusDB**: http://localhost:6363/api/
@@ -295,7 +295,7 @@ services:
       - oms
       - funnel
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8002/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3

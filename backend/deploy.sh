@@ -82,7 +82,7 @@ start_services() {
     # Prefer explicit HTTP health checks (more reliable than parsing compose output).
     wait_for_url "MinIO" "http://localhost:9000/minio/health/live" 90
     wait_for_url "OMS" "http://localhost:8000/health" 120
-    wait_for_url "BFF" "http://localhost:8002/health" 120
+    wait_for_url "BFF" "http://localhost:8002/api/v1/health" 120
     wait_for_url "Funnel" "http://localhost:8003/health" 120
     wait_for_url "Elasticsearch" "http://localhost:9200/_cluster/health" 120 || true
     

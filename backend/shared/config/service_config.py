@@ -309,6 +309,11 @@ class ServiceConfig:
         return os.getenv("ENVIRONMENT", "development").lower() in ("production", "prod")
 
     @staticmethod
+    def is_debug_endpoints_enabled() -> bool:
+        """Enable opt-in debug endpoints (never on by default)."""
+        return os.getenv("ENABLE_DEBUG_ENDPOINTS", "false").lower() in ("true", "1", "yes", "on")
+
+    @staticmethod
     def get_ssl_cert_path() -> Optional[str]:
         """
         Get SSL certificate path from environment.

@@ -15,7 +15,7 @@ BFF_PID_FILE="$PID_DIR/bff.pid"
 OMS_PORT=8000
 BFF_PORT=8002
 OMS_HEALTH_URL="http://localhost:$OMS_PORT/health"
-BFF_HEALTH_URL="http://localhost:$BFF_PORT/health"
+BFF_HEALTH_URL="http://localhost:$BFF_PORT/api/v1/health"
 
 # Logging function with timestamps
 log_message() {

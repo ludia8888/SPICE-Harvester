@@ -548,7 +548,7 @@ class TestHealthEndpoints:
     async def test_bff_health(self):
         """Test BFF health endpoint"""
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"{BFF_URL}/health") as resp:
+            async with session.get(f"{BFF_URL}/api/v1/health") as resp:
                 assert resp.status == 200
                 result = await resp.json()
                 assert result.get("status") == "success"

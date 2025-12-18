@@ -423,7 +423,7 @@ sleep 2
 check_service_health "OMS" "http://localhost:8000/health" "$OMS_PID_FILE" "$OMS_LOG_FILE"
 
 # Check BFF health with detailed diagnostics
-check_service_health "BFF" "http://localhost:8002/health" "$BFF_PID_FILE" "$BFF_LOG_FILE"
+check_service_health "BFF" "http://localhost:8002/api/v1/health" "$BFF_PID_FILE" "$BFF_LOG_FILE"
 
 echo ""
 echo "=============================================="

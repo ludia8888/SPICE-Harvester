@@ -575,16 +575,15 @@ export const DataConnector: React.FC<DataConnectorProps> = ({
   //
   // 3. CQRS PATTERN: Separate read/write models
   //    - WRITE: Kafka Consumer processes import job
-  //    - READ: Elasticsearch for search queries, Cassandra for bulk data
+  //    - READ: Elasticsearch for search queries (graph federation via TerminusDB when needed)
   //
   // 4. EVENT FLOW:
-  //    CSV Upload -> S3 Event Store -> EventPublisher -> Kafka -> Import Service -> TerminusDB + Elasticsearch + Cassandra
+  //    CSV Upload -> S3 Event Store -> EventPublisher -> Kafka -> Import Service -> TerminusDB + Elasticsearch
   //
   // 5. IMPLEMENTATION CHECKLIST:
   //    [ ] Kafka topic (data-import-requests)
   //    [ ] Import service (Kafka consumer)
   //    [ ] Elasticsearch indexing
-  //    [ ] Cassandra bulk storage
   //    [ ] Progress tracking via WebSocket/SSE
   const importCsvData = async () => {
     if (!profiledData || !currentDatabase || !detailedAnalysis) return;

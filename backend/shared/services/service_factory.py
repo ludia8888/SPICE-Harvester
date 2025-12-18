@@ -104,7 +104,7 @@ def create_fastapi_service(
         _add_health_check(app, service_info)
     
     # Add CORS debug endpoint in non-production
-    if not ServiceConfig.is_production():
+    if ServiceConfig.is_debug_endpoints_enabled() and not ServiceConfig.is_production():
         _add_debug_endpoints(app)
     
     logger.info(f"✅ {service_info.name} FastAPI 앱 생성 완료")

@@ -17,7 +17,7 @@ from pathlib import Path
 # Disable SSL warnings for development
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-def start_service(name, path, command, port):
+def start_service(name, path, command, port, health_path="/health"):
     """Start a service and verify it's running"""
     print(f"\n🚀 Starting {name}...")
     
@@ -46,7 +46,7 @@ def start_service(name, path, command, port):
         try:
             # Use verify=False for self-signed certificates in development
             response = requests.get(
-                f"{protocol}://localhost:{port}/health",
+                f"{protocol}://localhost:{port}{health_path}",
                 verify=False if use_https else True
             )
             if response.status_code == 200:
@@ -163,7 +163,8 @@ def main():
             "BFF", 
             bff_path,
             f"{sys.executable} -m uvicorn main:app --host 0.0.0.0 --port 8002",
-            8002
+            8002,
+            health_path="/api/v1/health",
         )
         
         if not bff_process:

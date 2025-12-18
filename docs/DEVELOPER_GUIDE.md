@@ -57,7 +57,7 @@ python -m ontology_worker.main &
 python -m projection_worker.main &
 
 # 6. 서비스 상태 확인
-curl http://localhost:8002/health # BFF
+curl http://localhost:8002/api/v1/health # BFF
 ```
 
 ---

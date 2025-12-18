@@ -324,7 +324,7 @@ python scripts/bulk_import.py --database mydb --file data.csv --type Product
 
 ```bash
 # BFF health check
-curl http://localhost:8002/health
+curl http://localhost:8002/api/v1/health
 
 # OMS health check
 curl http://localhost:8000/health
@@ -347,7 +347,7 @@ import httpx
 from datetime import datetime
 
 SERVICES = {
-    "BFF": "http://localhost:8002/health",
+    "BFF": "http://localhost:8002/api/v1/health",
     "OMS": "http://localhost:8000/health",
     "Funnel": "http://localhost:8003/health",
 }
@@ -823,7 +823,7 @@ case $SERVICE in
     echo "Recovering BFF service..."
     sudo systemctl restart spice-harvester-bff
     sleep 5
-    curl -f http://localhost:8002/health || exit 1
+    curl -f http://localhost:8002/api/v1/health || exit 1
     ;;
   "oms")
     echo "Recovering OMS service..."

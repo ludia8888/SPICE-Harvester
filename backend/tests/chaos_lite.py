@@ -887,7 +887,7 @@ def main() -> None:
 
     # Health probes (best-effort)
     _wait_http_ok(f"{ENDPOINTS.oms}/health", timeout_s=120)
-    _wait_http_ok(f"{ENDPOINTS.bff}/health", timeout_s=120)
+    _wait_http_ok(f"{ENDPOINTS.bff}/api/v1/health", timeout_s=120)
 
     # Run scenarios
     if not args.skip_lite:
