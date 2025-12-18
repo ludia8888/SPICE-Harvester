@@ -29,8 +29,6 @@ from shared.middleware.rate_limiter import RateLimitPresets, rate_limit
 from shared.models.ai import AIAnswer, AIQueryPlan, AIQueryRequest, AIQueryResponse, AIQueryTool
 from shared.models.graph_query import GraphQueryRequest, GraphQueryResponse
 from shared.security.input_sanitizer import sanitize_input, validate_branch_name, validate_db_name
-from shared.services.graph_federation_service_woql import GraphFederationServiceWOQL
-from shared.services.lineage_store import LineageStore
 from shared.services.redis_service import RedisService
 from shared.services.llm_gateway import LLMOutputValidationError, LLMRequestError, LLMUnavailableError
 from shared.utils.language import get_accept_language
@@ -51,6 +49,31 @@ def _now_iso() -> str:
 
 def _cap_int(value: int, *, lo: int, hi: int) -> int:
     return max(lo, min(int(value), hi))
+
+
+def _wants_paths(question: str) -> bool:
+    """
+    Best-effort intent detection for "why/path" style questions.
+
+    We keep this deliberately simple and domain-neutral:
+    - Path questions often contain keywords like "경로", "path", "route".
+    - "왜/이유" alone is too broad, so we also look for graph-ish words like "연결/관계".
+    """
+    q = (question or "").strip()
+    if not q:
+        return False
+
+    q_lower = q.lower()
+    if any(token in q_lower for token in ("path", "route", "trace")) or "경로" in q:
+        return True
+
+    if ("왜" in q or "이유" in q) and ("연결" in q or "관계" in q):
+        return True
+
+    if "why" in q_lower and any(token in q_lower for token in ("connect", "linked", "relationship")):
+        return True
+
+    return False
 
 
 async def _load_schema_context(
@@ -195,6 +218,8 @@ def _build_plan_prompts(
         '  \"offset\": integer (>=0),\n'
         '  \"max_nodes\": integer,\n'
         '  \"max_edges\": integer,\n'
+        '  \"include_paths\": boolean,\n'
+        '  \"path_depth_limit\": integer | null,\n'
         '  \"include_documents\": boolean,\n'
         '  \"include_provenance\": boolean\n'
         "}\n"
@@ -218,7 +243,7 @@ def _build_plan_prompts(
 
 def _build_answer_prompts(*, question: str, grounding: Dict[str, Any]) -> tuple[str, str]:
     system = (
-        "You are a STRICT data assistant.\n"
+        "You are a helpful, friendly Korean assistant for SPICE-Harvester.\n"
         "Answer ONLY using the provided grounded execution result.\n"
         "If information is missing, say you cannot determine it from the available data.\n"
         "Return a single JSON object only (no markdown).\n"
@@ -231,9 +256,16 @@ def _build_answer_prompts(*, question: str, grounding: Dict[str, Any]) -> tuple[
         '  \"follow_ups\": string[]\n'
         "}\n"
         "\n"
-        "Requirements:\n"
+        "Tone & structure requirements:\n"
         "- Write the answer in Korean.\n"
-        "- When grounding includes provenance (event_id/occurred_at), include it as part of the rationale.\n"
+        "- Be natural and assistant-like (not stiff). Start with a direct 1-sentence answer.\n"
+        "- Then add a short '핵심 결과' section with up to 5 bullet points inside the answer string.\n"
+        "- If there are multiple matches, state the count and show representative items.\n"
+        "- Never fabricate data; only use what exists in grounding.\n"
+        "\n"
+        "Grounding requirements:\n"
+        "- When grounding includes provenance (event_id/occurred_at), include it in rationale as '출처: event_id=..., occurred_at=...'.\n"
+        "- When grounding includes sample_paths, include at least one path using arrow notation in the answer.\n"
         "- Do not mention internal implementation details like Elasticsearch/TerminusDB/fallback.\n"
     )
 
@@ -267,8 +299,26 @@ def _validate_and_cap_plan(plan: AIQueryPlan, *, limit_cap: int) -> AIQueryPlan:
         g.offset = max(0, int(g.offset))
         g.max_nodes = _cap_int(g.max_nodes, lo=1, hi=5000)
         g.max_edges = _cap_int(g.max_edges, lo=1, hi=50000)
+        if getattr(g, "path_depth_limit", None) is not None:
+            g.path_depth_limit = _cap_int(int(g.path_depth_limit), lo=1, hi=10)
+            if len(g.hops or []) > int(g.path_depth_limit):
+                g.hops = list(g.hops or [])[: int(g.path_depth_limit)]
+                plan.warnings.append(f"hops_truncated(path_depth_limit={g.path_depth_limit})")
         plan.graph_query = g
 
+    return plan
+
+
+def _apply_rule_based_overrides(plan: AIQueryPlan, *, question: str) -> AIQueryPlan:
+    """
+    Deterministic post-processing to reduce dependence on perfect LLM planning.
+    """
+    if _wants_paths(question):
+        if plan.tool == AIQueryTool.graph_query and plan.graph_query:
+            plan.graph_query.include_paths = True
+            plan.graph_query.no_cycles = True
+        else:
+            plan.warnings.append("path_intent_detected(recommend_graph_query)")
     return plan
 
 
@@ -340,12 +390,43 @@ def _ground_graph_query_result(execution: GraphQueryResponse, *, max_nodes: int 
             "predicate": getattr(e, "predicate", None),
         }
 
+    raw_paths = execution.paths or []
+    id_to_summary: Dict[str, str] = {}
+    for n in nodes:
+        node_id = getattr(n, "id", None)
+        if not node_id:
+            continue
+        display = getattr(n, "display", None)
+        summary = None
+        if isinstance(display, dict):
+            summary = display.get("summary") or display.get("name") or display.get("primary_key")
+        id_to_summary[str(node_id)] = str(summary) if summary is not None else str(node_id)
+
+    paths_payload: List[Dict[str, Any]] = []
+    for p in raw_paths[:20]:
+        if not isinstance(p, dict):
+            continue
+        nodes_list = p.get("nodes") if isinstance(p.get("nodes"), list) else []
+        edges_list = p.get("edges") if isinstance(p.get("edges"), list) else []
+        nodes_annotated = [
+            {"id": str(nid), "summary": id_to_summary.get(str(nid))}
+            for nid in nodes_list[:25]
+            if nid is not None
+        ]
+        paths_payload.append(
+            {
+                "nodes": nodes_annotated,
+                "edges": edges_list[:25],
+            }
+        )
+
     return {
         "tool": "graph_query",
         "count": execution.count,
         "warnings": execution.warnings,
         "sample_nodes": sample_items(mask_pii([_node_min(n) for n in nodes]), max_items=max_nodes),
         "sample_edges": sample_items(mask_pii([_edge_min(e) for e in edges]), max_items=max_edges),
+        "sample_paths": sample_items(mask_pii(paths_payload), max_items=10) if paths_payload else [],
     }
 
 
@@ -411,6 +492,7 @@ async def translate_query_plan(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
     plan = _validate_and_cap_plan(plan_raw, limit_cap=limit_cap)
+    plan = _apply_rule_based_overrides(plan, question=body.question)
 
     return {
         "plan": plan.model_dump(mode="json"),
@@ -437,7 +519,6 @@ async def ai_query(
     oms: OMSClient = Depends(get_oms_client),
     mapper: LabelMapper = Depends(get_label_mapper),
     terminus: TerminusService = Depends(get_terminus_service),
-    graph_service: GraphFederationServiceWOQL = Depends(_get_graph_federation_service),
 ):
     """
     End-to-end natural language query:
@@ -492,6 +573,7 @@ async def ai_query(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
     plan = _validate_and_cap_plan(plan_raw, limit_cap=limit_cap)
+    plan = _apply_rule_based_overrides(plan, question=body.question)
 
     if body.mode.value != "auto" and plan.tool.value != body.mode.value:
         raise HTTPException(
@@ -504,11 +586,27 @@ async def ai_query(
     grounding: Dict[str, Any] = {}
 
     if plan.tool == AIQueryTool.unsupported:
+        # Provide actionable guidance so the user can rephrase successfully.
+        available = [
+            (c.get("label") or c.get("id"))
+            for c in (schema_context.get("classes") or [])
+            if isinstance(c, dict) and (c.get("label") or c.get("id"))
+        ]
+        available = [str(x) for x in available if str(x).strip()]
+        class_hint = available[0] if available else "클래스"
+
         answer = AIAnswer(
-            answer=plan.interpretation,
+            answer=plan.interpretation or "현재 질문은 자동 쿼리로 변환하기 어렵습니다.",
             confidence=max(0.0, min(float(plan.confidence), 1.0)),
-            rationale="현재 스키마/쿼리 기능 범위에서 자동 질의로 변환할 수 없습니다.",
-            follow_ups=["어떤 클래스/필드를 기준으로 찾고 싶은지 구체적으로 알려주세요."],
+            rationale=(
+                "질문을 아래 템플릿 중 하나로 바꿔서 다시 시도해 주세요. "
+                "핵심은 (1) 어떤 대상을 찾는지(클래스/ID) (2) 어떤 조건인지(필드/값) (3) 관계 탐색인지(관계명) 입니다."
+            ),
+            follow_ups=[
+                f"간단 조회 예: \"{class_hint}에서 name이 Alice인 것 보여줘\"",
+                "관계 탐색 예: \"이 상품의 소유자는 누구야?\"",
+                "경로/이유 예: \"A에서 C까지 왜 연결돼? 경로 보여줘\"",
+            ],
         )
         return AIQueryResponse(
             answer=answer,
@@ -546,6 +644,7 @@ async def ai_query(
         graph_req.include_documents = bool(body.include_documents)
 
         try:
+            graph_service = await _get_graph_federation_service()
             graph_resp: GraphQueryResponse = await _execute_graph_query_route(
                 db_name=validated_db,
                 query=graph_req,

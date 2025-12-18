@@ -1,6 +1,6 @@
 # SPICE HARVESTER API Reference
 
-> **Last Updated**: 2025-12-17  
+> **Last Updated**: 2025-12-18  
 > **API Version**: v1  
 > **Status**: Event Sourcing steady state (docs are partially curated; OpenAPI is the source of truth)
 
@@ -18,6 +18,7 @@
 9. [Common Models](#common-models)
 10. [Error Handling](#error-handling)
 11. [Performance & Rate Limiting](#performance--rate-limiting)
+12. [AI (LLM-assisted)](#ai-llm-assisted)
 
 ## Overview
 
@@ -316,6 +317,89 @@ POST /database/{db_name}/query
   "order_direction": "desc"
 }
 ```
+
+<a id="ai-llm-assisted"></a>
+### AI (LLM-assisted Queries) ⭐ NEW
+
+자연어 질문을 LLM으로 **“안전한 쿼리 계획(JSON)”**으로 변환한 뒤, 서버가 결정론적 엔진(`/database/{db_name}/query` 또는 `/graph-query/{db_name}`)으로 실행하고, 결과를 다시 자연어로 요약합니다.
+
+핵심 안전장치:
+- LLM은 **실행/쓰기(write)를 하지 않고**, 오직 “계획”과 “요약”만 생성합니다.
+- 입력/결과는 **마스킹/샘플링**되어 LLM에 전달됩니다.
+- LLM 응답은 **JSON 스키마 검증**을 통과해야 합니다.
+
+#### 자연어 → 쿼리 계획(실행 없음)
+```http
+POST /ai/translate/query-plan/{db_name}
+```
+
+**Request Body (AIQueryRequest):**
+```json
+{
+  "question": "Name이 Alice인 고객 찾아줘",
+  "branch": "main",
+  "mode": "auto",
+  "limit": 50,
+  "include_provenance": true,
+  "include_documents": true
+}
+```
+
+**Response:**
+```json
+{
+  "plan": {
+    "tool": "label_query",
+    "interpretation": "Customer에서 Name이 Alice인 항목을 조회합니다.",
+    "confidence": 0.9,
+    "query": {
+      "class_id": "Customer",
+      "filters": [{"field": "Name", "operator": "eq", "value": "Alice"}],
+      "select": ["Name"],
+      "limit": 20,
+      "offset": 0,
+      "order_by": null,
+      "order_direction": "asc"
+    },
+    "graph_query": null,
+    "warnings": []
+  },
+  "llm": {
+    "provider": "openai_compat",
+    "model": "gpt-4.1-mini",
+    "cache_hit": false,
+    "latency_ms": 120
+  }
+}
+```
+
+#### 자연어 질의 실행 + 자연어 답변
+```http
+POST /ai/query/{db_name}
+```
+
+**Request Body:** 위와 동일(AIQueryRequest)
+
+**Response (AIQueryResponse):**
+```json
+{
+  "answer": {
+    "answer": "Name이 Alice인 Customer는 1건입니다.",
+    "confidence": 0.8,
+    "rationale": null,
+    "follow_ups": []
+  },
+  "plan": { "tool": "label_query", "interpretation": "...", "confidence": 0.9, "query": {...}, "graph_query": null, "warnings": [] },
+  "execution": { "results": [{"Name": "Alice"}], "total": 1, "query": {...} },
+  "llm": {
+    "plan": { "provider": "openai_compat", "model": "gpt-4.1-mini", "cache_hit": false, "latency_ms": 120 },
+    "answer": { "provider": "openai_compat", "model": "gpt-4.1-mini", "cache_hit": false, "latency_ms": 90 }
+  },
+  "warnings": []
+}
+```
+
+> 운영 설정/가드레일/감사 정책은 `docs/LLM_INTEGRATION.md`를 참고하세요.
 
 ### Mapping Management
 
@@ -1378,6 +1462,8 @@ interface Relationship {
 ```
 
 ## Rate Limiting
+
+> 참고: 레이트 리미팅은 Redis 백엔드를 사용하지만, Redis 장애 시에는 **서비스 가용성을 우선하여 fail-open(요청 허용)** 으로 동작합니다.
 
 ### Limits
 

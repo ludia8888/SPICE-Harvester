@@ -31,6 +31,9 @@ class GraphQueryRequest(BaseModel):
     max_nodes: int = 500
     max_edges: int = 2000
     include_paths: bool = False
+    # When include_paths=true, callers may optionally request a depth cap (in hops).
+    # The server may truncate `hops` to this depth to avoid path explosion.
+    path_depth_limit: Optional[int] = None
     max_paths: int = 100
     no_cycles: bool = False
     include_provenance: bool = False
@@ -81,4 +84,3 @@ class SimpleGraphQueryRequest(BaseModel):
     class_name: str
     filters: Optional[Dict[str, Any]] = None
     limit: int = 100
-

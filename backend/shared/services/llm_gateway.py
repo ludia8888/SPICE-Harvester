@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Type, TypeVar
@@ -186,9 +187,12 @@ class LLMGateway:
 
         try:
             if self.provider == "mock":
-                raw = os.getenv("LLM_MOCK_JSON", "").strip()
+                safe_task = re.sub(r"[^A-Z0-9]+", "_", (task or "").strip().upper()).strip("_")
+                task_key = f"LLM_MOCK_JSON_{safe_task}" if safe_task else ""
+                raw = (os.getenv(task_key) or os.getenv("LLM_MOCK_JSON") or "").strip()
                 if not raw:
-                    raise LLMRequestError("LLM_PROVIDER=mock requires LLM_MOCK_JSON to be set")
+                    hint = task_key or "LLM_MOCK_JSON"
+                    raise LLMRequestError(f"LLM_PROVIDER=mock requires {hint} (or LLM_MOCK_JSON) to be set")
                 obj = _extract_json_object(raw)
                 out_model = response_model.model_validate(obj)
                 output_digest = digest_for_audit(obj)
@@ -287,4 +291,3 @@ class LLMGateway:
 def create_llm_gateway(_settings: Any = None) -> LLMGateway:
     # The gateway is configured via env vars (LLM_*). Settings object is unused for now.
     return LLMGateway()
-

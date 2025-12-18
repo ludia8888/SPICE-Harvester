@@ -149,18 +149,37 @@ class RateLimiter:
         self.redis_url = redis_url or ServiceConfig.get_redis_url()
         self.redis_client: Optional[redis.Redis] = None
         self.buckets: Dict[str, TokenBucket] = {}
+        # Fail-open when Redis is unavailable (best-effort protection).
+        self._next_retry_at: float = 0.0
+        self._last_init_error: Optional[str] = None
         
     async def initialize(self):
         """Initialize Redis connection"""
-        if not self.redis_client:
+        if self.redis_client:
+            return
+
+        now = time.time()
+        if self._next_retry_at and now < self._next_retry_at:
+            return
+
+        # Throttle reconnect attempts to avoid log spam during outages.
+        self._next_retry_at = now + 5.0
+
+        try:
             self.redis_client = redis.from_url(
                 self.redis_url,
                 encoding="utf-8",
-                decode_responses=True
+                decode_responses=True,
             )
             await self.redis_client.ping()
+            self._last_init_error = None
+            self._next_retry_at = 0.0
             logger.info("Rate limiter Redis connection established")
-    
+        except Exception as e:
+            self.redis_client = None
+            self._last_init_error = str(e)
+            logger.warning(f"Rate limiter Redis unavailable (fail-open): {e}")
+
     async def close(self):
         """Close Redis connection"""
         if self.redis_client:
@@ -248,6 +267,16 @@ class RateLimiter:
         """
         if not self.redis_client:
             await self.initialize()
+        if not self.redis_client:
+            # Fail-open when Redis is down: do not block API traffic.
+            return True, {
+                "remaining": capacity,
+                "capacity": capacity,
+                "reset_in": 0,
+                "refill_rate": refill_rate,
+                "disabled": True,
+                "error": self._last_init_error,
+            }
             
         client_id = self.get_client_id(request, strategy)
         bucket = self.get_bucket(strategy, capacity, refill_rate)
