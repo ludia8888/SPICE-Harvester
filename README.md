@@ -92,13 +92,15 @@ Tip: examples below use `jq` for convenience.
 ```bash
 DB=demo_db_$(date +%s)
 
-# 1) Create DB (OMS; async 202)
-curl -fsS -X POST "http://localhost:8000/api/v1/database/create" \
+# 1) Create DB (BFF -> OMS; async 202)
+DB_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/databases" \
   -H 'Content-Type: application/json' \
-  -d "{\"name\":\"${DB}\",\"description\":\"demo\"}" | jq .
+  -d "{\"name\":\"${DB}\",\"description\":\"demo\"}" | jq -r '.data.command_id')
 
-# 2) Create ontologies (OMS; async 202)
-curl -fsS -X POST "http://localhost:8000/api/v1/database/${DB}/ontology" \
+curl -fsS "http://localhost:8002/api/v1/commands/${DB_CMD}/status" | jq .
+
+# 2) Create ontologies (BFF -> OMS; async 202)
+CUST_ONTO_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/database/${DB}/ontology" \
   -H 'Content-Type: application/json' \
   -d '{
     "id":"Customer",
@@ -108,9 +110,9 @@ curl -fsS -X POST "http://localhost:8000/api/v1/database/${DB}/ontology" \
       {"name":"name","type":"string","required":true}
     ],
     "relationships":[]
-  }' | jq .
+  }' | jq -r '.data.command_id')
 
-curl -fsS -X POST "http://localhost:8000/api/v1/database/${DB}/ontology" \
+PROD_ONTO_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/database/${DB}/ontology" \
   -H 'Content-Type: application/json' \
   -d '{
     "id":"Product",
@@ -122,20 +124,23 @@ curl -fsS -X POST "http://localhost:8000/api/v1/database/${DB}/ontology" \
     "relationships":[
       {"predicate":"owned_by","target":"Customer","label":"Owned By","cardinality":"n:1"}
     ]
-  }' | jq .
+  }' | jq -r '.data.command_id')
 
-# 3) Create instances (OMS; async 202) and capture command_ids
-CUST_CMD=$(curl -fsS -X POST "http://localhost:8000/api/v1/instances/${DB}/async/Customer/create" \
+curl -fsS "http://localhost:8002/api/v1/commands/${CUST_ONTO_CMD}/status" | jq .
+curl -fsS "http://localhost:8002/api/v1/commands/${PROD_ONTO_CMD}/status" | jq .
+
+# 3) Create instances (BFF label API; async 202) and capture command_ids
+CUST_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/database/${DB}/instances/Customer/create" \
   -H 'Content-Type: application/json' \
   -d '{"data":{"customer_id":"cust_001","name":"Alice"}}' | jq -r '.command_id')
 
-PROD_CMD=$(curl -fsS -X POST "http://localhost:8000/api/v1/instances/${DB}/async/Product/create" \
+PROD_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/database/${DB}/instances/Product/create" \
   -H 'Content-Type: application/json' \
   -d '{"data":{"product_id":"prod_001","name":"Shirt","owned_by":"Customer/cust_001"}}' | jq -r '.command_id')
 
-# 4) Observe async completion (OMS command status)
-curl -fsS "http://localhost:8000/api/v1/commands/${CUST_CMD}/status" | jq .
-curl -fsS "http://localhost:8000/api/v1/commands/${PROD_CMD}/status" | jq .
+# 4) Observe async completion (BFF command status proxy)
+curl -fsS "http://localhost:8002/api/v1/commands/${CUST_CMD}/status" | jq .
+curl -fsS "http://localhost:8002/api/v1/commands/${PROD_CMD}/status" | jq .
 
 # 5) Multi-hop query (BFF federation)
 curl -fsS -X POST "http://localhost:8002/api/v1/graph-query/${DB}" \
