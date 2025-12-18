@@ -2,39 +2,14 @@
 Language utilities for SPICE HARVESTER
 """
 
-from typing import List, Optional
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
 
 from fastapi import Request
 
 
-def get_accept_language(request: Request) -> str:
-    """
-    Get the preferred language from the request.
-
-    Args:
-        request: FastAPI request object
-
-    Returns:
-        Language code (e.g., 'en', 'ko')
-    """
-    # Get Accept-Language header
-    accept_language = request.headers.get("Accept-Language", "en")
-
-    # Parse the header and get the first language
-    if accept_language:
-        # Simple parsing: "en-US,en;q=0.9,ko;q=0.8" -> "en"
-        languages = accept_language.split(",")
-        if languages:
-            primary_lang = languages[0].strip()
-            # Extract language code: "en-US" -> "en"
-            if "-" in primary_lang:
-                primary_lang = primary_lang.split("-")[0]
-            # Remove quality values: "en;q=0.9" -> "en"
-            if ";" in primary_lang:
-                primary_lang = primary_lang.split(";")[0]
-            return primary_lang.lower()
-
-    return "en"  # Default to English
+SUPPORTED_LANGUAGES = ["en", "ko"]
 
 
 def get_supported_languages() -> List[str]:
@@ -44,20 +19,7 @@ def get_supported_languages() -> List[str]:
     Returns:
         List of supported language codes
     """
-    return ["en", "ko"]
-
-
-def is_supported_language(lang: str) -> bool:
-    """
-    Check if language is supported.
-
-    Args:
-        lang: Language code
-
-    Returns:
-        True if supported, False otherwise
-    """
-    return lang.lower() in get_supported_languages()
+    return list(SUPPORTED_LANGUAGES)
 
 
 def get_default_language() -> str:
@@ -70,33 +32,124 @@ def get_default_language() -> str:
     return "en"
 
 
+def is_supported_language(lang: str) -> bool:
+    """
+    Check if language is supported.
+
+    Args:
+        lang: Language code
+
+    Returns:
+        True if supported, False otherwise
+    """
+    return normalize_language(lang) in SUPPORTED_LANGUAGES
+
+
 def normalize_language(lang: Optional[str]) -> str:
     """
     Normalize language code.
 
-    Args:
-        lang: Language code to normalize
-
-    Returns:
-        Normalized language code
+    Supports:
+    - region codes (en-US -> en, ko-KR -> ko)
+    - common synonyms (eng/english, kor/korean/kr)
     """
     if not lang:
         return get_default_language()
 
-    # Convert to lowercase
-    lang = lang.lower()
+    raw = str(lang).strip().lower()
+    if not raw:
+        return get_default_language()
 
-    # Handle common variations
-    if lang in ["english", "eng"]:
+    # Strip quality values: "en;q=0.9"
+    if ";" in raw:
+        raw = raw.split(";", 1)[0].strip()
+
+    # Take primary subtag: "en-us" -> "en"
+    if "-" in raw:
+        raw = raw.split("-", 1)[0].strip()
+    if "_" in raw:
+        raw = raw.split("_", 1)[0].strip()
+
+    if raw in ("english", "eng"):
         return "en"
-    elif lang in ["korean", "kor"]:
+    if raw in ("korean", "kor", "kr"):
         return "ko"
 
-    # Check if supported
-    if is_supported_language(lang):
-        return lang
+    if raw in SUPPORTED_LANGUAGES:
+        return raw
 
-    # Default fallback
+    return get_default_language()
+
+
+def _parse_accept_language_header(value: str) -> List[str]:
+    """
+    Parse Accept-Language into a list of language codes ordered by preference.
+
+    Very small parser; we don't implement full RFC behavior, but we respect q=.
+    """
+    if not value:
+        return []
+
+    parts = [p.strip() for p in value.split(",") if p.strip()]
+    weighted: List[tuple[float, str]] = []
+    for part in parts:
+        lang = part
+        q = 1.0
+        if ";" in part:
+            lang, params = part.split(";", 1)
+            lang = lang.strip()
+            params = params.strip()
+            if params.startswith("q="):
+                try:
+                    q = float(params[2:])
+                except Exception:
+                    q = 1.0
+        weighted.append((q, normalize_language(lang)))
+
+    # Sort by q desc, stable otherwise
+    weighted.sort(key=lambda item: item[0], reverse=True)
+    return [lang for _, lang in weighted]
+
+
+def _normalize_language_map_key(key: str) -> Optional[str]:
+    """
+    Strict normalization for language-map keys.
+
+    Unlike `normalize_language()`, unknown keys are rejected (return None) instead of defaulting to "en",
+    to avoid accidentally clobbering translations when clients send unsupported languages.
+    """
+    raw = str(key).strip().lower()
+    if not raw:
+        return None
+    if ";" in raw:
+        raw = raw.split(";", 1)[0].strip()
+    if raw in ("english", "eng") or raw.startswith("en"):
+        return "en"
+    if raw in ("korean", "kor", "kr") or raw.startswith("ko"):
+        return "ko"
+    return None
+
+
+def get_accept_language(request: Request) -> str:
+    """
+    Get the preferred language from the request.
+
+    Args:
+        request: FastAPI request object
+
+    Returns:
+        Language code (e.g., 'en', 'ko')
+    """
+    # Explicit override (query param) beats header. FE can use this instead of setting headers.
+    query_lang = request.query_params.get("lang") or request.query_params.get("language")
+    if query_lang:
+        return normalize_language(query_lang)
+
+    accept_language = request.headers.get("Accept-Language", "")
+    for candidate in _parse_accept_language_header(accept_language):
+        if candidate in SUPPORTED_LANGUAGES:
+            return candidate
+
     return get_default_language()
 
 
@@ -136,6 +189,73 @@ def detect_language_from_text(text: str) -> str:
         return "ko"
 
     return "en"
+
+
+def fallback_languages(lang: str) -> List[str]:
+    """
+    Languages to try in order when a translation is missing.
+    """
+    primary = normalize_language(lang)
+    out: List[str] = []
+    for candidate in (primary, "en", "ko"):
+        if candidate not in out:
+            out.append(candidate)
+    return out
+
+
+def coerce_localized_text(value: Any, *, default_lang: Optional[str] = None) -> Dict[str, str]:
+    """
+    Coerce a LocalizedText-like value into a normalized language map.
+
+    - If value is a string, detect language (ko if contains Hangul) and store under that key.
+    - If value is a dict, normalize keys to en/ko (region codes supported).
+    - Drops empty strings and None values.
+    """
+    if value is None:
+        return {}
+
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return {}
+        lang = normalize_language(default_lang) if default_lang else detect_language_from_text(text)
+        return {lang: text}
+
+    if isinstance(value, dict):
+        out: Dict[str, str] = {}
+        for k, v in value.items():
+            if v is None:
+                continue
+            text = str(v).strip()
+            if not text:
+                continue
+            key = _normalize_language_map_key(str(k))
+            if not key:
+                continue
+            out[key] = text
+        return out
+
+    # Pydantic models or other objects (best-effort)
+    try:
+        text = str(value).strip()
+    except Exception:
+        return {}
+    if not text:
+        return {}
+    lang = normalize_language(default_lang) if default_lang else detect_language_from_text(text)
+    return {lang: text}
+
+
+def select_localized_text(value: Any, *, lang: str) -> str:
+    """
+    Choose the best string for the requested language from a LocalizedText-like input.
+    """
+    mapping = coerce_localized_text(value)
+    for candidate in fallback_languages(lang):
+        if candidate in mapping:
+            return mapping[candidate]
+    # Last resort: any available string
+    return next(iter(mapping.values()), "")
 
 
 class MultilingualText:

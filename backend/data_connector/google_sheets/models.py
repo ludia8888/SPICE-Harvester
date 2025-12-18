@@ -17,6 +17,8 @@ class GoogleSheetDataUpdate(BaseModel):
     changed_rows: int = Field(..., description="변경된 행 수")
     changed_columns: Optional[List[str]] = Field(None, description="변경된 컬럼 목록")
     timestamp: str = Field(..., description="변경 감지 시간 (ISO 8601)")
+    previous_hash: Optional[str] = Field(None, description="Previous data hash (optional)")
+    current_hash: Optional[str] = Field(None, description="Current data hash (optional)")
 
 
 class RegisteredSheet(BaseModel):
@@ -26,6 +28,12 @@ class RegisteredSheet(BaseModel):
     sheet_url: str
     worksheet_name: str
     polling_interval: int
+    # Optional pipeline config (used by google-sheets-worker / future auto-import)
+    database_name: Optional[str] = None
+    branch: str = "main"
+    class_label: Optional[str] = None
+    auto_import: bool = False
+    max_import_rows: Optional[int] = None
     last_polled: Optional[str] = None
     last_hash: Optional[str] = None
     is_active: bool = True
@@ -75,6 +83,12 @@ class GoogleSheetRegisterRequest(BaseModel):
     sheet_url: str = Field(..., description="Google Sheets URL")
     worksheet_name: str = Field(..., description="워크시트 이름")
     polling_interval: int = Field(default=300, description="폴링 간격 (초)")
+    # Optional: auto-import config (best-effort)
+    database_name: Optional[str] = Field(default=None, description="Target database (optional)")
+    branch: str = Field(default="main", description="Target branch (default: main)")
+    class_label: Optional[str] = Field(default=None, description="Target class label (optional)")
+    auto_import: bool = Field(default=False, description="Enable auto-import on change (default: false)")
+    max_import_rows: Optional[int] = Field(default=None, description="Max rows to import per run (optional)")
 
 
 class GoogleSheetRegisterResponse(BaseModel):

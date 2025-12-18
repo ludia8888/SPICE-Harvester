@@ -30,6 +30,7 @@ from typing import Any, Dict, Optional
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
+from fastapi.openapi.utils import get_openapi
 from confluent_kafka import Producer
 
 # Centralized configuration and dependency injection
@@ -293,6 +294,12 @@ class BFFServiceContainer:
             producer = self._bff_services.get('kafka_producer')
             if not producer:
                 logger.warning("Kafka producer not available; Google Sheets service will run without notifications")
+
+            # Redis is optional for preview/grid extraction; required for durable registrations in production.
+            redis_service = self._bff_services.get("redis_service")
+            redis_client = getattr(redis_service, "client", None) if redis_service else None
+            if not redis_client:
+                logger.warning("Redis not available; Google Sheets registrations will be in-memory (non-durable)")
             
             # Get Google API key from settings
             google_api_key = (self.settings.google_sheets.google_sheets_api_key or "").strip() or None
@@ -300,10 +307,12 @@ class BFFServiceContainer:
             # Create Google Sheets service
             google_sheets_service = GoogleSheetsService(
                 producer=producer,
-                api_key=google_api_key
+                api_key=google_api_key,
+                redis_client=redis_client,
             )
             
             self._bff_services['google_sheets_service'] = google_sheets_service
+            await google_sheets_service.start_polling_for_active_sheets()
             logger.info("Google Sheets service initialized successfully")
             
         except Exception as e:
@@ -536,6 +545,64 @@ app.include_router(graph.router)  # Graph router has its own /api/v1 prefix
 # Monitoring and observability endpoints (modernized architecture)
 app.include_router(monitoring.router, prefix="/api/v1/monitoring")
 app.include_router(config_monitoring.router, prefix="/api/v1/config")
+
+
+def _install_openapi_language_contract(app: FastAPI) -> None:
+    """
+    FE contract: every BFF endpoint supports output language selection.
+
+    Implementation is handled via `shared.utils.language.get_accept_language()` (query param + header),
+    but we also patch OpenAPI so frontend devs can discover the contract in Swagger.
+    """
+
+    def custom_openapi():
+        if app.openapi_schema:
+            return app.openapi_schema
+
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
+
+        lang_param = {
+            "name": "lang",
+            "in": "query",
+            "required": False,
+            "schema": {"type": "string", "enum": ["en", "ko"]},
+            "description": "Output language override for UI-facing fields (EN/KR). Overrides Accept-Language.",
+        }
+        accept_language_param = {
+            "name": "Accept-Language",
+            "in": "header",
+            "required": False,
+            "schema": {"type": "string"},
+            "description": "Preferred output language for UI-facing fields (fallback when ?lang is not provided).",
+            "example": "en-US,en;q=0.9,ko;q=0.8",
+        }
+
+        for path, methods in (schema.get("paths") or {}).items():
+            if not str(path).startswith("/api/v1"):
+                continue
+            for method, operation in (methods or {}).items():
+                if method.lower() not in {"get", "post", "put", "patch", "delete"}:
+                    continue
+                params = operation.setdefault("parameters", [])
+                has_lang = any(p.get("in") == "query" and p.get("name") == "lang" for p in params)
+                has_accept = any(p.get("in") == "header" and p.get("name") == "Accept-Language" for p in params)
+                if not has_lang:
+                    params.append(lang_param)
+                if not has_accept:
+                    params.append(accept_language_param)
+
+        app.openapi_schema = schema
+        return app.openapi_schema
+
+    app.openapi = custom_openapi
+
+
+_install_openapi_language_contract(app)
 
 
 if __name__ == "__main__":

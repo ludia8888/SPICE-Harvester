@@ -186,6 +186,20 @@ async def create_ontology(
         # 입력 데이터 보안 검증
         db_name = validate_db_name(db_name)
         branch = validate_branch_name(branch)
+
+        from shared.utils.id_generator import generate_simple_id
+
+        def _localized_to_string(value: Any) -> str:
+            if isinstance(value, str):
+                return value
+            if isinstance(value, dict):
+                # Prefer English for IDs (domain-neutral), then Korean, then any translation.
+                return (
+                    str(value.get("en") or "").strip()
+                    or str(value.get("ko") or "").strip()
+                    or next((str(v).strip() for v in value.values() if v and str(v).strip()), "")
+                )
+            return str(value).strip() if value is not None else ""
         
         # 입력 데이터 처리 (Pydantic model에서 dict로 변환)
         ontology_dict = ontology.model_dump(exclude_unset=True)  # Convert Pydantic model to dict
@@ -198,9 +212,10 @@ async def create_ontology(
             logger.info(f"Using provided class_id '{class_id}'")
         else:
             # ID가 제공되지 않은 경우 자동 생성
-            from shared.utils.id_generator import generate_simple_id
             class_id = generate_simple_id(
-                label=ontology_dict.get('label', ''), use_timestamp_for_korean=True, default_fallback="UnnamedClass"
+                label=_localized_to_string(ontology_dict.get("label", "")),
+                use_timestamp_for_korean=True,
+                default_fallback="UnnamedClass",
             )
             logger.info(f"Generated class_id '{class_id}' from label '{ontology_dict.get('label', '')}')")
 
@@ -209,35 +224,15 @@ async def create_ontology(
         # 🔥 THINK ULTRA! Transform properties for OMS compatibility
         # Convert 'target' to 'linkTarget' for link-type properties
         def transform_properties_for_oms(data):
-            # Extract string from language objects
-            def extract_string_value(value, field_name="field"):
-                """Extract string value from either a plain string or language object"""
-                if isinstance(value, str):
-                    return value
-                elif isinstance(value, dict):
-                    # Try to get Korean first, then English, then any available language
-                    return value.get('ko') or value.get('en') or next(iter(value.values()), '')
-                else:
-                    return str(value) if value else ''
-            
-            # Transform top-level label and description
-            if 'label' in data:
-                data['label'] = extract_string_value(data['label'], 'label')
-            if 'description' in data:
-                data['description'] = extract_string_value(data['description'], 'description')
-            
             if 'properties' in data and isinstance(data['properties'], list):
                 for i, prop in enumerate(data['properties']):
                     if isinstance(prop, dict):
-                        # Extract string values from language objects in properties
-                        if 'label' in prop:
-                            prop['label'] = extract_string_value(prop['label'], 'property label')
-                        if 'description' in prop:
-                            prop['description'] = extract_string_value(prop['description'], 'property description')
-                        
                         # Generate property name from label if missing
                         if 'name' not in prop and 'label' in prop:
-                            prop['name'] = generate_simple_id(prop['label'], use_timestamp_for_korean=False)
+                            prop['name'] = generate_simple_id(
+                                _localized_to_string(prop.get("label")),
+                                use_timestamp_for_korean=False,
+                            )
                         
                         # Convert generic types to XSD types for OMS compatibility
                         if prop.get('type') == 'STRING':
@@ -263,14 +258,7 @@ async def create_ontology(
                                 items['linkTarget'] = items.pop('target')
                                 logger.info(f"🔧 Converted array property '{prop.get('name')}' items target -> linkTarget: {items.get('linkTarget')}")
             
-            # Transform relationships
-            if 'relationships' in data and isinstance(data['relationships'], list):
-                for rel in data['relationships']:
-                    if isinstance(rel, dict):
-                        if 'label' in rel:
-                            rel['label'] = extract_string_value(rel['label'], 'relationship label')
-                        if 'description' in rel:
-                            rel['description'] = extract_string_value(rel['description'], 'relationship description')
+            # Relationships: keep localized labels as-is; only structural transformations belong here.
         
         # Apply transformation
         transform_properties_for_oms(ontology_dict)
@@ -520,6 +508,63 @@ async def get_ontology(
         )
 
 
+@router.post("/ontology/validate", response_model=ApiResponse)
+async def validate_ontology_create_bff(
+    db_name: str,
+    ontology: OntologyCreateRequestBFF,
+    request: Request,
+    branch: str = Query("main", description="Target branch (default: main)"),
+    oms_client: OMSClient = OMSClientDep,
+):
+    """온톨로지 생성 검증 (no write) - OMS proxy."""
+    try:
+        db_name = validate_db_name(db_name)
+        branch = validate_branch_name(branch)
+        payload = sanitize_input(ontology.model_dump(exclude_unset=True))
+        return await oms_client.validate_ontology_create(db_name, payload, branch=branch)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to validate ontology create: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"온톨로지 생성 검증 실패: {str(e)}",
+        )
+
+
+@router.post("/ontology/{class_label}/validate", response_model=ApiResponse)
+async def validate_ontology_update_bff(
+    db_name: str,
+    class_label: str,
+    ontology: OntologyUpdateInput,
+    request: Request,
+    branch: str = Query("main", description="Target branch (default: main)"),
+    mapper: LabelMapper = LabelMapperDep,
+    oms_client: OMSClient = OMSClientDep,
+):
+    """온톨로지 업데이트 검증 (no write) - OMS proxy."""
+    lang = get_accept_language(request)
+    try:
+        db_name = validate_db_name(db_name)
+        class_label = sanitize_input(class_label)
+        branch = validate_branch_name(branch)
+
+        class_id = await mapper.get_class_id(db_name, class_label, lang)
+        if not class_id:
+            class_id = class_label
+
+        payload = sanitize_input(ontology.model_dump(exclude_unset=True))
+        return await oms_client.validate_ontology_update(db_name, class_id, payload, branch=branch)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to validate ontology update: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"온톨로지 업데이트 검증 실패: {str(e)}",
+        )
+
+
 @router.put(
     "/ontology/{class_label}",
     response_model=ApiResponse,
@@ -561,6 +606,12 @@ async def update_ontology(
         update_data = ontology.model_dump(exclude_unset=True)
         update_data["id"] = class_id
 
+        forward_headers: Dict[str, str] = {}
+        for key in ("X-Admin-Token", "X-Change-Reason", "X-Admin-Actor", "X-Actor", "Authorization"):
+            value = request.headers.get(key)
+            if value:
+                forward_headers[key] = value
+
         # 온톨로지 업데이트
         result = await terminus.update_class(
             db_name,
@@ -568,6 +619,7 @@ async def update_ontology(
             update_data,
             expected_seq=expected_seq,
             branch=branch,
+            headers=forward_headers or None,
         )
 
         # 레이블 매핑 업데이트 (BFF-local read model; update immediately on accept as well)
@@ -631,8 +683,15 @@ async def delete_ontology(
         if not class_id:
             class_id = class_label
 
-        # 온톨로지 삭제
-        result = await terminus.delete_class(db_name, class_id, expected_seq=expected_seq, branch=branch)
+        forward_headers: Dict[str, str] = {}
+        for key in ("X-Admin-Token", "X-Change-Reason", "X-Admin-Actor", "X-Actor", "Authorization"):
+            value = request.headers.get(key)
+            if value:
+                forward_headers[key] = value
+
+        result = await terminus.delete_class(
+            db_name, class_id, expected_seq=expected_seq, branch=branch, headers=forward_headers or None
+        )
 
         # 레이블 매핑 삭제 (BFF-local read model; delete immediately on accept as well)
         await mapper.remove_class(db_name, class_id)
@@ -740,6 +799,7 @@ async def get_ontology_schema(
 async def create_ontology_with_relationship_validation(
     db_name: str,
     ontology: OntologyCreateRequestBFF,
+    request: Request,
     adapter: BFFAdapterService = BFFAdapterServiceDep,
 ):
     """
@@ -755,11 +815,12 @@ async def create_ontology_with_relationship_validation(
     - 다국어 레이블 매핑
     """
     try:
+        lang = get_accept_language(request)
         # BFF Adapter를 통해 모든 로직 위임 (중복 제거)
         return await adapter.create_advanced_ontology(
             db_name=db_name,
             ontology_data=ontology.model_dump(exclude_unset=True),
-            language="ko"
+            language=lang,
         )
 
     except HTTPException:
@@ -776,6 +837,7 @@ async def create_ontology_with_relationship_validation(
 async def validate_ontology_relationships_bff(
     db_name: str,
     ontology: OntologyCreateRequestBFF,
+    request: Request,
     adapter: BFFAdapterService = BFFAdapterServiceDep,
 ):
     """
@@ -784,11 +846,12 @@ async def validate_ontology_relationships_bff(
     이제 중복 로직 없이 BFF Adapter를 통해 OMS로 모든 비즈니스 로직을 위임합니다.
     """
     try:
+        lang = get_accept_language(request)
         # BFF Adapter를 통해 모든 로직 위임 (중복 제거)
         return await adapter.validate_relationships(
             db_name=db_name,
             validation_data=ontology.model_dump(exclude_unset=True),
-            language="ko"
+            language=lang,
         )
 
     except HTTPException:
@@ -804,6 +867,7 @@ async def validate_ontology_relationships_bff(
 @router.post("/check-circular-references")
 async def check_circular_references_bff(
     db_name: str,
+    request: Request,
     ontology: Optional[OntologyCreateRequestBFF] = None,
     adapter: BFFAdapterService = BFFAdapterServiceDep,
 ):
@@ -813,6 +877,7 @@ async def check_circular_references_bff(
     이제 중복 로직 없이 BFF Adapter를 통해 OMS로 모든 비즈니스 로직을 위임합니다.
     """
     try:
+        lang = get_accept_language(request)
         # 새 온톨로지 데이터 준비
         detection_data = {}
         if ontology:
@@ -822,7 +887,7 @@ async def check_circular_references_bff(
         return await adapter.detect_circular_references(
             db_name=db_name,
             detection_data=detection_data,
-            language="ko"
+            language=lang,
         )
 
     except Exception as e:

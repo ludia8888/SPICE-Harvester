@@ -17,6 +17,7 @@ from oms.exceptions import (
 )
 from shared.models.ontology import OntologyBase, OntologyResponse, Property, Relationship
 from shared.models.common import DataType
+from shared.utils.language import coerce_localized_text, select_localized_text
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,16 @@ class OntologyService(BaseTerminusService):
             if await self.ontology_exists(db_name, ontology.id, branch=branch):
                 raise DuplicateOntologyError(f"온톨로지 '{ontology.id}'이(가) 이미 존재합니다")
             
+            label_i18n = coerce_localized_text(ontology.label)
+            description_i18n = coerce_localized_text(ontology.description) if ontology.description else {}
+
+            label_display = select_localized_text(label_i18n, lang="en") or select_localized_text(label_i18n, lang="ko") or ontology.id
+            description_display = (
+                select_localized_text(description_i18n, lang="en")
+                or select_localized_text(description_i18n, lang="ko")
+                or f"{label_display} class"
+            )
+
             # 스키마 문서 생성 - 🔥 CRITICAL FIX: Correct TerminusDB format
             schema_doc = {
                 "@type": "Class",
@@ -72,8 +83,11 @@ class OntologyService(BaseTerminusService):
                     "@type": "Random"
                 },
                 "@documentation": {
-                    "@comment": ontology.description or f"{ontology.label} class",
-                    "@label": ontology.label
+                    "@comment": description_display,
+                    "@label": label_display,
+                    # Extra fields are safe to store in TerminusDB and allow EN/KR round-trip.
+                    "@comment_i18n": description_i18n,
+                    "@label_i18n": label_i18n,
                 }
             }
             
@@ -421,11 +435,14 @@ class OntologyService(BaseTerminusService):
         # 기본 정보 추출
         ontology_id = doc.get("@id", "")
         documentation = doc.get("@documentation", {})
+
+        label_i18n = documentation.get("@label_i18n")
+        comment_i18n = documentation.get("@comment_i18n")
         
         ontology = OntologyResponse(
             id=ontology_id,
-            label=documentation.get("@label", ontology_id),
-            description=documentation.get("@comment", ""),
+            label=label_i18n if isinstance(label_i18n, dict) and label_i18n else documentation.get("@label", ontology_id),
+            description=comment_i18n if isinstance(comment_i18n, dict) and comment_i18n else documentation.get("@comment", ""),
             properties=[],
             relationships=[],
             created_at=datetime.now(timezone.utc),

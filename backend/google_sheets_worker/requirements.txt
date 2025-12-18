@@ -1,0 +1,5 @@
+# Google Sheets Worker dependencies
+#
+# Shared package is the single source of truth for all external deps.
+-e ../shared
+

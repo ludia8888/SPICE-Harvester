@@ -17,6 +17,7 @@ import aiosqlite
 
 # shared 모델 import
 from shared.models.ontology import QueryFilter, QueryInput
+from shared.utils.language import coerce_localized_text, fallback_languages, normalize_language
 
 logger = logging.getLogger(__name__)
 
@@ -261,19 +262,34 @@ class LabelMapper:
 
         await self._init_database()
         async with self._get_connection() as conn:
-            # IN 절을 위한 placeholders 생성
-            placeholders = ",".join(["?" for _ in class_ids])
+            normalized_lang = normalize_language(lang)
 
-            query = f"""
-                SELECT class_id, label FROM class_mappings 
-                WHERE db_name = ? AND label_lang = ? AND class_id IN ({placeholders})
-            """
+            async def _fetch(ids: List[str], lang_code: str) -> Dict[str, str]:
+                if not ids:
+                    return {}
+                placeholders = ",".join(["?" for _ in ids])
+                query = f"""
+                    SELECT class_id, label FROM class_mappings
+                    WHERE db_name = ? AND label_lang = ? AND class_id IN ({placeholders})
+                """
+                params = [db_name, lang_code] + ids
+                cursor = await conn.execute(query, params)
+                rows = await cursor.fetchall()
+                return {row["class_id"]: row["label"] for row in rows}
 
-            params = [db_name, lang] + class_ids
-            cursor = await conn.execute(query, params)
-            rows = await cursor.fetchall()
+            labels = await _fetch(class_ids, normalized_lang)
 
-            return {row["class_id"]: row["label"] for row in rows}
+            missing = [cid for cid in class_ids if cid not in labels]
+            for fallback in fallback_languages(normalized_lang):
+                if not missing:
+                    break
+                if fallback == normalized_lang:
+                    continue
+                more = await _fetch(missing, fallback)
+                labels.update(more)
+                missing = [cid for cid in missing if cid not in labels]
+
+            return labels
 
     async def get_property_labels_in_batch(
         self, db_name: str, class_id: str, property_ids: List[str], lang: str = "ko"
@@ -295,18 +311,34 @@ class LabelMapper:
 
         await self._init_database()
         async with self._get_connection() as conn:
-            placeholders = ",".join(["?" for _ in property_ids])
+            normalized_lang = normalize_language(lang)
 
-            query = f"""
-                SELECT property_id, label FROM property_mappings 
-                WHERE db_name = ? AND class_id = ? AND label_lang = ? AND property_id IN ({placeholders})
-            """
+            async def _fetch(ids: List[str], lang_code: str) -> Dict[str, str]:
+                if not ids:
+                    return {}
+                placeholders = ",".join(["?" for _ in ids])
+                query = f"""
+                    SELECT property_id, label FROM property_mappings
+                    WHERE db_name = ? AND class_id = ? AND label_lang = ? AND property_id IN ({placeholders})
+                """
+                params = [db_name, class_id, lang_code] + ids
+                cursor = await conn.execute(query, params)
+                rows = await cursor.fetchall()
+                return {row["property_id"]: row["label"] for row in rows}
 
-            params = [db_name, class_id, lang] + property_ids
-            cursor = await conn.execute(query, params)
-            rows = await cursor.fetchall()
+            labels = await _fetch(property_ids, normalized_lang)
 
-            return {row["property_id"]: row["label"] for row in rows}
+            missing = [pid for pid in property_ids if pid not in labels]
+            for fallback in fallback_languages(normalized_lang):
+                if not missing:
+                    break
+                if fallback == normalized_lang:
+                    continue
+                more = await _fetch(missing, fallback)
+                labels.update(more)
+                missing = [pid for pid in missing if pid not in labels]
+
+            return labels
 
     async def get_all_property_labels_in_batch(
         self, db_name: str, class_property_pairs: List[Tuple[str, str]], lang: str = "ko"
@@ -327,23 +359,37 @@ class LabelMapper:
 
         await self._init_database()
         async with self._get_connection() as conn:
-            # WHERE 절을 위한 조건 생성
-            conditions = []
-            params = [db_name, lang]
+            normalized_lang = normalize_language(lang)
 
-            for class_id, property_id in class_property_pairs:
-                conditions.append("(class_id = ? AND property_id = ?)")
-                params.extend([class_id, property_id])
+            async def _fetch(pairs: List[Tuple[str, str]], lang_code: str) -> Dict[Tuple[str, str], str]:
+                if not pairs:
+                    return {}
+                conditions = []
+                params = [db_name, lang_code]
+                for class_id, property_id in pairs:
+                    conditions.append("(class_id = ? AND property_id = ?)")
+                    params.extend([class_id, property_id])
+                query = f"""
+                    SELECT class_id, property_id, label FROM property_mappings
+                    WHERE db_name = ? AND label_lang = ? AND ({' OR '.join(conditions)})
+                """
+                cursor = await conn.execute(query, params)
+                rows = await cursor.fetchall()
+                return {(row["class_id"], row["property_id"]): row["label"] for row in rows}
 
-            query = f"""
-                SELECT class_id, property_id, label FROM property_mappings 
-                WHERE db_name = ? AND label_lang = ? AND ({' OR '.join(conditions)})
-            """
+            labels = await _fetch(class_property_pairs, normalized_lang)
 
-            cursor = await conn.execute(query, params)
-            rows = await cursor.fetchall()
+            missing = [pair for pair in class_property_pairs if pair not in labels]
+            for fallback in fallback_languages(normalized_lang):
+                if not missing:
+                    break
+                if fallback == normalized_lang:
+                    continue
+                more = await _fetch(missing, fallback)
+                labels.update(more)
+                missing = [pair for pair in missing if pair not in labels]
 
-            return {(row["class_id"], row["property_id"]): row["label"] for row in rows}
+            return labels
 
     async def get_relationship_labels_in_batch(
         self, db_name: str, predicates: List[str], lang: str = "ko"
@@ -364,18 +410,34 @@ class LabelMapper:
 
         await self._init_database()
         async with self._get_connection() as conn:
-            placeholders = ",".join(["?" for _ in predicates])
+            normalized_lang = normalize_language(lang)
 
-            query = f"""
-                SELECT predicate, label FROM relationship_mappings 
-                WHERE db_name = ? AND label_lang = ? AND predicate IN ({placeholders})
-            """
+            async def _fetch(keys: List[str], lang_code: str) -> Dict[str, str]:
+                if not keys:
+                    return {}
+                placeholders = ",".join(["?" for _ in keys])
+                query = f"""
+                    SELECT predicate, label FROM relationship_mappings
+                    WHERE db_name = ? AND label_lang = ? AND predicate IN ({placeholders})
+                """
+                params = [db_name, lang_code] + keys
+                cursor = await conn.execute(query, params)
+                rows = await cursor.fetchall()
+                return {row["predicate"]: row["label"] for row in rows}
 
-            params = [db_name, lang] + predicates
-            cursor = await conn.execute(query, params)
-            rows = await cursor.fetchall()
+            labels = await _fetch(predicates, normalized_lang)
 
-            return {row["predicate"]: row["label"] for row in rows}
+            missing = [p for p in predicates if p not in labels]
+            for fallback in fallback_languages(normalized_lang):
+                if not missing:
+                    break
+                if fallback == normalized_lang:
+                    continue
+                more = await _fetch(missing, fallback)
+                labels.update(more)
+                missing = [p for p in missing if p not in labels]
+
+            return labels
 
     def _extract_ids_from_data_list(self, data_list: List[Dict[str, Any]]) -> tuple:
         """Extract class IDs, property IDs, and predicates from data list."""
@@ -637,16 +699,21 @@ class LabelMapper:
         """
         await self._init_database()
         async with self._get_connection() as conn:
-            cursor = await conn.execute(
-                """
-                SELECT class_id FROM class_mappings 
-                WHERE db_name = ? AND label = ? AND label_lang = ?
-            """,
-                (db_name, label, lang),
-            )
+            normalized_lang = normalize_language(lang)
 
-            row = await cursor.fetchone()
-            return row["class_id"] if row else None
+            for candidate_lang in fallback_languages(normalized_lang):
+                cursor = await conn.execute(
+                    """
+                    SELECT class_id FROM class_mappings
+                    WHERE db_name = ? AND label = ? AND label_lang = ?
+                """,
+                    (db_name, label, candidate_lang),
+                )
+                row = await cursor.fetchone()
+                if row:
+                    return row["class_id"]
+
+            return None
 
     async def get_class_label(self, db_name: str, class_id: str, lang: str = "ko") -> Optional[str]:
         """
@@ -662,16 +729,21 @@ class LabelMapper:
         """
         await self._init_database()
         async with self._get_connection() as conn:
-            cursor = await conn.execute(
-                """
-                SELECT label FROM class_mappings 
-                WHERE db_name = ? AND class_id = ? AND label_lang = ?
-            """,
-                (db_name, class_id, lang),
-            )
+            normalized_lang = normalize_language(lang)
 
-            row = await cursor.fetchone()
-            return row["label"] if row else None
+            for candidate_lang in fallback_languages(normalized_lang):
+                cursor = await conn.execute(
+                    """
+                    SELECT label FROM class_mappings
+                    WHERE db_name = ? AND class_id = ? AND label_lang = ?
+                """,
+                    (db_name, class_id, candidate_lang),
+                )
+                row = await cursor.fetchone()
+                if row:
+                    return row["label"]
+
+            return None
 
     async def get_property_id(
         self, db_name: str, class_id: str, label: str, lang: str = "ko"
@@ -690,16 +762,21 @@ class LabelMapper:
         """
         await self._init_database()
         async with self._get_connection() as conn:
-            cursor = await conn.execute(
-                """
-                SELECT property_id FROM property_mappings 
-                WHERE db_name = ? AND class_id = ? AND label = ? AND label_lang = ?
-            """,
-                (db_name, class_id, label, lang),
-            )
+            normalized_lang = normalize_language(lang)
 
-            row = await cursor.fetchone()
-            return row["property_id"] if row else None
+            for candidate_lang in fallback_languages(normalized_lang):
+                cursor = await conn.execute(
+                    """
+                    SELECT property_id FROM property_mappings
+                    WHERE db_name = ? AND class_id = ? AND label = ? AND label_lang = ?
+                """,
+                    (db_name, class_id, label, candidate_lang),
+                )
+                row = await cursor.fetchone()
+                if row:
+                    return row["property_id"]
+
+            return None
 
     async def get_predicate(self, db_name: str, label: str, lang: str = "ko") -> Optional[str]:
         """
@@ -715,16 +792,21 @@ class LabelMapper:
         """
         await self._init_database()
         async with self._get_connection() as conn:
-            cursor = await conn.execute(
-                """
-                SELECT predicate FROM relationship_mappings 
-                WHERE db_name = ? AND label = ? AND label_lang = ?
-            """,
-                (db_name, label, lang),
-            )
+            normalized_lang = normalize_language(lang)
 
-            row = await cursor.fetchone()
-            return row["predicate"] if row else None
+            for candidate_lang in fallback_languages(normalized_lang):
+                cursor = await conn.execute(
+                    """
+                    SELECT predicate FROM relationship_mappings
+                    WHERE db_name = ? AND label = ? AND label_lang = ?
+                """,
+                    (db_name, label, candidate_lang),
+                )
+                row = await cursor.fetchone()
+                if row:
+                    return row["predicate"]
+
+            return None
 
     async def convert_query_to_internal(
         self, db_name: str, query: Dict[str, Any], lang: str = "ko"
@@ -856,16 +938,21 @@ class LabelMapper:
         """속성 ID로 레이블 조회 (내부 메서드)"""
         await self._init_database()
         async with self._get_connection() as conn:
-            cursor = await conn.execute(
-                """
-                SELECT label FROM property_mappings 
-                WHERE db_name = ? AND class_id = ? AND property_id = ? AND label_lang = ?
-            """,
-                (db_name, class_id, property_id, lang),
-            )
+            normalized_lang = normalize_language(lang)
 
-            row = await cursor.fetchone()
-            return row["label"] if row else None
+            for candidate_lang in fallback_languages(normalized_lang):
+                cursor = await conn.execute(
+                    """
+                    SELECT label FROM property_mappings
+                    WHERE db_name = ? AND class_id = ? AND property_id = ? AND label_lang = ?
+                """,
+                    (db_name, class_id, property_id, candidate_lang),
+                )
+                row = await cursor.fetchone()
+                if row:
+                    return row["label"]
+
+            return None
 
     async def _get_relationship_label(
         self, db_name: str, predicate: str, lang: str = "ko"
@@ -873,16 +960,21 @@ class LabelMapper:
         """관계 술어로 레이블 조회"""
         await self._init_database()
         async with self._get_connection() as conn:
-            cursor = await conn.execute(
-                """
-                SELECT label FROM relationship_mappings 
-                WHERE db_name = ? AND predicate = ? AND label_lang = ?
-            """,
-                (db_name, predicate, lang),
-            )
+            normalized_lang = normalize_language(lang)
 
-            row = await cursor.fetchone()
-            return row["label"] if row else None
+            for candidate_lang in fallback_languages(normalized_lang):
+                cursor = await conn.execute(
+                    """
+                    SELECT label FROM relationship_mappings
+                    WHERE db_name = ? AND predicate = ? AND label_lang = ?
+                """,
+                    (db_name, predicate, candidate_lang),
+                )
+                row = await cursor.fetchone()
+                if row:
+                    return row["label"]
+
+            return None
 
     def _extract_labels(self, label: Any) -> Dict[str, str]:
         """
@@ -898,17 +990,16 @@ class LabelMapper:
             return {}
 
         if isinstance(label, str):
-            return {"ko": label} if label.strip() else {}  # 빈 문자열 체크
+            return coerce_localized_text(label)  # auto-detect ko vs en
 
         if isinstance(label, dict):
-            # MultiLingualText의 dict 형태
-            return {k: str(v).strip() for k, v in label.items() if v and str(v).strip()}
+            return coerce_localized_text(label)
 
         if hasattr(label, "model_dump") or hasattr(label, "dict"):
             # Pydantic 모델
             try:
                 data = label.model_dump() if hasattr(label, "model_dump") else label.dict()
-                return {k: str(v).strip() for k, v in data.items() if v and str(v).strip()}
+                return coerce_localized_text(data)
             except Exception as e:
                 logger.warning(f"Failed to extract labels from Pydantic model: {e}")
                 return {}
@@ -916,7 +1007,7 @@ class LabelMapper:
         # 기타 타입은 문자열로 변환
         try:
             label_str = str(label).strip()
-            return {"ko": label_str} if label_str else {}
+            return coerce_localized_text(label_str)
         except Exception as e:
             logger.warning(f"Failed to convert label to string: {e}")
             return {}

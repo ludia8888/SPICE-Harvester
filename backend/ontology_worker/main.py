@@ -439,6 +439,15 @@ class OntologyWorker:
             # 업데이트 데이터 병합
             merged_data = {**existing_dict, **updates}
             merged_data["id"] = class_id  # ID는 변경 불가
+
+            # LocalizedText merge: allow partial updates like {"en": "..."} without dropping other translations.
+            for key in ("label", "description"):
+                incoming = updates.get(key)
+                existing_value = existing_dict.get(key) if isinstance(existing_dict, dict) else None
+                if isinstance(existing_value, dict) and isinstance(incoming, dict):
+                    merged = dict(existing_value)
+                    merged.update(incoming)
+                    merged_data[key] = merged
             
             # TerminusDB 업데이트
             from shared.models.ontology import OntologyBase

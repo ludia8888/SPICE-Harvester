@@ -149,7 +149,12 @@ class OMSClient:
             raise
 
     async def create_ontology(
-        self, db_name: str, ontology_data: Dict[str, Any], *, branch: str = "main"
+        self,
+        db_name: str,
+        ontology_data: Dict[str, Any],
+        *,
+        branch: str = "main",
+        headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """온톨로지 생성"""
         try:
@@ -170,11 +175,32 @@ class OMSClient:
                 f"/api/v1/database/{db_name}/ontology",
                 params={"branch": branch},
                 json=ontology_data,
+                headers=headers,
             )
             response.raise_for_status()
             return response.json()
         except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
             logger.error(f"온톨로지 생성 실패 ({db_name}): {e}")
+            raise
+
+    async def validate_ontology_create(
+        self,
+        db_name: str,
+        ontology_data: Dict[str, Any],
+        *,
+        branch: str = "main",
+    ) -> Dict[str, Any]:
+        """온톨로지 생성 검증 (no write)."""
+        try:
+            response = await self.client.post(
+                f"/api/v1/database/{db_name}/ontology/validate",
+                params={"branch": branch},
+                json=ontology_data,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"온톨로지 생성 검증 실패 ({db_name}): {e}")
             raise
 
     async def get_ontology(self, db_name: str, class_id: str, *, branch: str = "main") -> Dict[str, Any]:
@@ -241,6 +267,7 @@ class OMSClient:
         *,
         expected_seq: int,
         branch: str = "main",
+        headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """온톨로지 업데이트"""
         try:
@@ -248,6 +275,7 @@ class OMSClient:
                 f"/api/v1/database/{db_name}/ontology/{class_id}",
                 params={"expected_seq": int(expected_seq), "branch": branch},
                 json=update_data,
+                headers=headers,
             )
             response.raise_for_status()
             return response.json()
@@ -255,14 +283,42 @@ class OMSClient:
             logger.error(f"온톨로지 업데이트 실패: {e}")
             raise
 
+    async def validate_ontology_update(
+        self,
+        db_name: str,
+        class_id: str,
+        update_data: Dict[str, Any],
+        *,
+        branch: str = "main",
+    ) -> Dict[str, Any]:
+        """온톨로지 업데이트 검증 (no write)."""
+        try:
+            response = await self.client.post(
+                f"/api/v1/database/{db_name}/ontology/{class_id}/validate",
+                params={"branch": branch},
+                json=update_data,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"온톨로지 업데이트 검증 실패 ({db_name}/{class_id}): {e}")
+            raise
+
     async def delete_ontology(
-        self, db_name: str, class_id: str, *, expected_seq: int, branch: str = "main"
+        self,
+        db_name: str,
+        class_id: str,
+        *,
+        expected_seq: int,
+        branch: str = "main",
+        headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """온톨로지 삭제"""
         try:
             response = await self.client.delete(
                 f"/api/v1/database/{db_name}/ontology/{class_id}",
                 params={"expected_seq": int(expected_seq), "branch": branch},
+                headers=headers,
             )
             response.raise_for_status()
             # 실제 삭제 응답 반환

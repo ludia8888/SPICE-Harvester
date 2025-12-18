@@ -4,6 +4,7 @@ OMS 온톨로지 라우터 - 내부 ID 기반 온톨로지 관리
 
 import logging
 import os
+import hmac
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -31,6 +32,9 @@ from shared.models.event_envelope import EventEnvelope
 from shared.services.aggregate_sequence_allocator import OptimisticConcurrencyError
 from shared.security.input_sanitizer import validate_db_name
 from shared.utils.ontology_version import build_ontology_version, normalize_ontology_version
+from shared.utils.language import coerce_localized_text, get_accept_language, select_localized_text
+from shared.services.ontology_linter import OntologyLinterConfig, lint_ontology_create, lint_ontology_update
+from shared.models.ontology_lint import LintReport
 
 # OMS 서비스 import
 from oms.services.async_terminus import AsyncTerminusService
@@ -66,6 +70,121 @@ from shared.middleware.rate_limiter import rate_limit, RateLimitPresets
 from shared.config.rate_limit_config import RateLimitConfig, EndpointCategory
 
 logger = logging.getLogger(__name__)
+
+
+_PROTECTED_BRANCHES_DEFAULT = {"main", "master", "production", "prod"}
+
+
+def _get_protected_branches() -> set[str]:
+    raw = (os.getenv("ONTOLOGY_PROTECTED_BRANCHES") or "").strip()
+    if not raw:
+        return set(_PROTECTED_BRANCHES_DEFAULT)
+    branches = {b.strip() for b in raw.split(",") if b.strip()}
+    return branches or set(_PROTECTED_BRANCHES_DEFAULT)
+
+
+def _is_protected_branch(branch: str) -> bool:
+    return branch in _get_protected_branches()
+
+
+def _get_configured_admin_token() -> Optional[str]:
+    for key in ("OMS_ADMIN_TOKEN", "BFF_ADMIN_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN"):
+        value = (os.getenv(key) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _extract_presented_admin_token(request: Request) -> Optional[str]:
+    raw = (request.headers.get("X-Admin-Token") or "").strip()
+    if raw:
+        return raw
+    auth = (request.headers.get("Authorization") or "").strip()
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip() or None
+    return None
+
+
+def _admin_authorized(request: Request) -> bool:
+    expected = _get_configured_admin_token()
+    if not expected:
+        return False
+    presented = _extract_presented_admin_token(request)
+    if not presented:
+        return False
+    return hmac.compare_digest(presented, expected)
+
+
+def _extract_change_reason(request: Request) -> Optional[str]:
+    reason = (request.headers.get("X-Change-Reason") or "").strip()
+    return reason or None
+
+
+def _extract_actor(request: Request) -> Optional[str]:
+    actor = (request.headers.get("X-Admin-Actor") or request.headers.get("X-Actor") or "").strip()
+    return actor or None
+
+
+def _localized_to_string(value: Any, *, lang: str) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, dict):
+        preferred = str(value.get(lang) or "").strip() if lang else ""
+        if preferred:
+            return preferred
+        for fallback in ("en", "ko"):
+            candidate = str(value.get(fallback) or "").strip()
+            if candidate:
+                return candidate
+        for v in value.values():
+            candidate = str(v).strip() if v is not None else ""
+            if candidate:
+                return candidate
+        return None
+    candidate = str(value).strip()
+    return candidate or None
+
+
+def _compute_risk_score(*, errors: int, warnings: int, infos: int) -> float:
+    score = 0.0
+    score += 30.0 * float(errors)
+    score += 10.0 * float(warnings)
+    score += 2.0 * float(infos)
+    return max(0.0, min(100.0, score))
+
+
+def _risk_level(score: float) -> str:
+    if score >= 75.0:
+        return "critical"
+    if score >= 50.0:
+        return "high"
+    if score >= 25.0:
+        return "medium"
+    return "low"
+
+
+def _merge_lint_reports(*reports: LintReport) -> LintReport:
+    errors = []
+    warnings = []
+    infos = []
+    for report in reports:
+        if not report:
+            continue
+        errors.extend(report.errors or [])
+        warnings.extend(report.warnings or [])
+        infos.extend(report.infos or [])
+
+    score = _compute_risk_score(errors=len(errors), warnings=len(warnings), infos=len(infos))
+    return LintReport(
+        ok=len(errors) == 0,
+        risk_score=score,
+        risk_level=_risk_level(score),
+        errors=errors,
+        warnings=warnings,
+        infos=infos,
+    )
 
 
 def _coerce_commit_id(value: Any) -> Optional[str]:
@@ -132,6 +251,7 @@ router = APIRouter(prefix="/database/{db_name}/ontology", tags=["Ontology Manage
 @rate_limit(**RateLimitPresets.WRITE)
 async def create_ontology(
     ontology_request: OntologyCreateRequest,  # Request body first (no default)
+    request: Request,
     db_name: str = Path(..., description="Database name"),  # URL path parameter
     branch: str = Query("main", description="Target branch (default: main)"),
     terminus: AsyncTerminusService = TerminusServiceDep,
@@ -146,6 +266,7 @@ async def create_ontology(
     try:
         enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
         branch = validate_branch_name(branch)
+        lang = get_accept_language(request)
 
         # 🔥 FIXED: 데이터베이스 존재 확인 (dependency 제거로 인해 수동 처리)
         db_name = validate_db_name(db_name)
@@ -169,24 +290,34 @@ async def create_ontology(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Ontology ID is required"
             )
 
-        # 레이블을 간단한 문자열로 처리 (Event Sourcing과 직접 생성 모두에서 사용)
-        label_data = ontology_data.get(
-            "label", ontology_data.get("rdfs:label", ontology_data.get("id"))
-        )
-        if isinstance(label_data, dict):
-            # 딕셔너리에서 적절한 언어의 문자열 추출
-            label = label_data.get("en") or label_data.get("ko") or list(label_data.values())[0] if label_data else ontology_data.get("id", "Unknown")
-        else:
-            label = str(label_data) if label_data else ontology_data.get("id", "Unknown")
+        raw_label = ontology_data.get("label", ontology_data.get("rdfs:label", ontology_data.get("id")))
+        raw_description = ontology_data.get("description", ontology_data.get("rdfs:comment"))
 
-        # 설명을 간단한 문자열로 처리
-        description_data = ontology_data.get("description", ontology_data.get("rdfs:comment"))
-        description = None
-        if description_data:
-            if isinstance(description_data, dict):
-                description = description_data.get("en") or description_data.get("ko") or list(description_data.values())[0] if description_data else None
-            else:
-                description = str(description_data)
+        label_i18n = coerce_localized_text(raw_label)
+        description_i18n = coerce_localized_text(raw_description) if raw_description is not None else {}
+
+        label_display = select_localized_text(label_i18n, lang=lang) or str(ontology_data.get("id") or "Unknown")
+        description_display = (
+            select_localized_text(description_i18n, lang=lang) if description_i18n else None
+        )
+
+        lint_report = lint_ontology_create(
+            class_id=str(ontology_data.get("id")),
+            label=label_display,
+            abstract=bool(ontology_data.get("abstract", False)),
+            properties=list(ontology_request.properties or []),
+            relationships=list(ontology_request.relationships or []),
+            config=OntologyLinterConfig.from_env(),
+        )
+        if not lint_report.ok:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ApiResponse.error(
+                    message="온톨로지 스키마 검증에 실패했습니다",
+                    errors=[issue.message for issue in lint_report.errors],
+                ).to_dict()
+                | {"data": {"lint_report": lint_report.model_dump()}},
+            )
 
         if enable_event_sourcing:
             ontology_version = await _resolve_ontology_version(terminus, db_name=db_name, branch=branch)
@@ -201,19 +332,20 @@ async def create_ontology(
                     "db_name": db_name,
                     "branch": branch,
                     "class_id": ontology_data.get("id"),
-                    "label": label,
-                    "description": description,
+                    "label": label_i18n,
+                    "description": description_i18n or None,
                     "properties": ontology_data.get("properties", []),
                     "relationships": ontology_data.get("relationships", []),
                     "parent_class": ontology_data.get("parent_class"),
                     "abstract": ontology_data.get("abstract", False),
                 },
                 metadata={"source": "OMS", "user": "system", "ontology": ontology_version},
+                created_by=_extract_actor(request),
             )
 
             envelope = EventEnvelope.from_command(
                 command,
-                actor="system",
+                actor=_extract_actor(request) or "system",
                 kafka_topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC,
                 metadata={"service": "oms", "mode": "event_sourcing"},
             )
@@ -271,6 +403,8 @@ async def create_ontology(
         # 직접 생성 모드 (Event Sourcing 비활성화 시)
         # TerminusDB에 직접 저장 (create_ontology 사용)
         from shared.models.ontology import OntologyBase
+        ontology_data["label"] = label_i18n
+        ontology_data["description"] = description_i18n or None
         ontology_obj = OntologyBase(**ontology_data)
         result = await terminus.create_ontology(db_name, ontology_obj)
 
@@ -279,12 +413,7 @@ async def create_ontology(
         if class_id:
             try:
                 # 레이블 정보 추출 및 등록
-                label_info = ontology_data.get("label", ontology_data.get("rdfs:label", class_id))
-                description_info = ontology_data.get(
-                    "description", ontology_data.get("rdfs:comment", "")
-                )
-
-                await label_mapper.register_class(db_name, class_id, label_info, description_info)
+                await label_mapper.register_class(db_name, class_id, raw_label, raw_description)
 
                 # 속성 레이블 등록 (있는 경우)
                 properties = ontology_data.get("properties", {})
@@ -303,8 +432,8 @@ async def create_ontology(
         # 생성된 온톨로지 데이터를 OntologyResponse 형식으로 직접 변환
         return OntologyResponse(
             id=ontology_data.get("id"),
-            label=label,
-            description=description,
+            label=label_i18n,
+            description=description_i18n or None,
             properties=ontology_data.get("properties", []),
             relationships=ontology_data.get("relationships", []),
             parent_class=ontology_data.get("parent_class"),
@@ -350,6 +479,153 @@ async def create_ontology(
         else:
             # 그 외의 경우에만 500 반환
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/validate")
+async def validate_ontology_create(
+    ontology_request: OntologyCreateRequest,
+    request: Request,
+    db_name: str = Path(..., description="Database name"),
+    branch: str = Query("main", description="Target branch (default: main)"),
+    terminus: AsyncTerminusService = TerminusServiceDep,
+) -> Dict[str, Any]:
+    """온톨로지 생성 검증 (no write)."""
+    try:
+        db_name = validate_db_name(db_name)
+        branch = validate_branch_name(branch)
+        lang = get_accept_language(request)
+
+        if not await terminus.database_exists(db_name):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"데이터베이스 '{db_name}'을(를) 찾을 수 없습니다",
+            )
+
+        payload = ontology_request.model_dump()
+        raw_label = payload.get("label") or payload.get("rdfs:label") or payload.get("id") or ""
+
+        if payload.get("id"):
+            class_id = validate_class_id(payload.get("id"))
+            id_generated = False
+        else:
+            from shared.utils.id_generator import generate_simple_id
+
+            class_id = generate_simple_id(
+                label=raw_label,
+                use_timestamp_for_korean=True,
+                default_fallback="UnnamedClass",
+            )
+            id_generated = True
+
+        label = _localized_to_string(raw_label, lang=lang) or class_id
+
+        lint_report = lint_ontology_create(
+            class_id=class_id,
+            label=label,
+            abstract=bool(payload.get("abstract", False)),
+            properties=list(ontology_request.properties or []),
+            relationships=list(ontology_request.relationships or []),
+            config=OntologyLinterConfig.from_env(),
+        )
+        return ApiResponse.success(
+            message="온톨로지 스키마 검증 결과입니다",
+            data={
+                "db_name": db_name,
+                "branch": branch,
+                "class_id": class_id,
+                "id_generated": id_generated,
+                "lint_report": lint_report.model_dump(),
+            },
+        ).to_dict()
+    except SecurityViolationError as e:
+        logger.warning(f"Security violation in validate_ontology_create: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to validate ontology create: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/{class_id}/validate")
+async def validate_ontology_update(
+    ontology_data: OntologyUpdateRequest,
+    request: Request,
+    db_name: str = Depends(ensure_database_exists),
+    class_id: str = Depends(ValidatedClassId),
+    branch: str = Query("main", description="Target branch (default: main)"),
+    terminus: AsyncTerminusService = TerminusServiceDep,
+) -> Dict[str, Any]:
+    """온톨로지 업데이트 검증 (no write)."""
+    try:
+        branch = validate_branch_name(branch)
+        lang = get_accept_language(request)
+
+        existing = await terminus.get_ontology(db_name, class_id, branch=branch)
+        if not existing:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"온톨로지 '{class_id}'를 찾을 수 없습니다",
+            )
+
+        patch = sanitize_input(ontology_data.model_dump(mode="json", exclude_unset=True))
+
+        updated_properties = ontology_data.properties if ontology_data.properties is not None else existing.properties
+        updated_relationships = (
+            ontology_data.relationships if ontology_data.relationships is not None else existing.relationships
+        )
+        updated_abstract = ontology_data.abstract if ontology_data.abstract is not None else existing.abstract
+
+        raw_label = patch.get("label") if "label" in patch else existing.label
+        label = _localized_to_string(raw_label, lang=lang) or str(existing.label)
+
+        baseline = lint_ontology_create(
+            class_id=class_id,
+            label=label,
+            abstract=bool(updated_abstract),
+            properties=list(updated_properties or []),
+            relationships=list(updated_relationships or []),
+            config=OntologyLinterConfig.from_env(),
+        )
+        diff = lint_ontology_update(
+            existing_properties=list(existing.properties or []),
+            existing_relationships=list(existing.relationships or []),
+            updated_properties=list(updated_properties or []),
+            updated_relationships=list(updated_relationships or []),
+            config=OntologyLinterConfig.from_env(),
+        )
+        merged = _merge_lint_reports(baseline, diff)
+
+        high_risk = any((issue.rule_id or "").startswith("ONT9") for issue in diff.warnings or [])
+        protected_branch = _is_protected_branch(branch)
+
+        return ApiResponse.success(
+            message="온톨로지 스키마 검증 결과입니다",
+            data={
+                "db_name": db_name,
+                "branch": branch,
+                "class_id": class_id,
+                "protected_branch": protected_branch,
+                "requires_proof": bool(protected_branch and high_risk),
+                "lint_report": merged.model_dump(),
+                "lint_report_create": baseline.model_dump(),
+                "lint_report_diff": diff.model_dump(),
+            },
+        ).to_dict()
+    except SecurityViolationError as e:
+        logger.warning(f"Security violation in validate_ontology_update: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to validate ontology update: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.get("")
@@ -518,6 +794,7 @@ async def get_ontology(
 @router.put("/{class_id}", response_model=OntologyResponse)
 async def update_ontology(
     ontology_data: OntologyUpdateRequest,
+    request: Request,
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
     branch: str = Query("main", description="Target branch (default: main)"),
@@ -531,6 +808,7 @@ async def update_ontology(
     try:
         enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
         branch = validate_branch_name(branch)
+        lang = get_accept_language(request)
 
         # 요청 데이터 정화
         sanitized_data = sanitize_input(ontology_data.model_dump(mode="json", exclude_unset=True))
@@ -544,8 +822,76 @@ async def update_ontology(
                 detail=f"온톨로지 '{class_id}'를 찾을 수 없습니다",
             )
 
+        # Preserve EN/KR localized fields (string or language map) end-to-end.
+        if "label" in sanitized_data:
+            label_value = sanitized_data.get("label")
+            if isinstance(label_value, (str, dict)):
+                sanitized_data["label"] = coerce_localized_text(label_value)
+
+        if "description" in sanitized_data:
+            description_value = sanitized_data.get("description")
+            if description_value is None:
+                # Explicit null means "clear".
+                sanitized_data["description"] = None
+            elif isinstance(description_value, (str, dict)):
+                sanitized_data["description"] = coerce_localized_text(description_value)
+
+        updated_properties = ontology_data.properties if ontology_data.properties is not None else existing.properties
+        updated_relationships = (
+            ontology_data.relationships if ontology_data.relationships is not None else existing.relationships
+        )
+        updated_abstract = ontology_data.abstract if ontology_data.abstract is not None else existing.abstract
+
+        if "label" in sanitized_data:
+            label_for_lint = select_localized_text(sanitized_data.get("label"), lang=lang) or class_id
+        else:
+            label_for_lint = select_localized_text(existing.label, lang=lang) or class_id
+
+        baseline = lint_ontology_create(
+            class_id=class_id,
+            label=str(label_for_lint or class_id),
+            abstract=bool(updated_abstract),
+            properties=list(updated_properties or []),
+            relationships=list(updated_relationships or []),
+            config=OntologyLinterConfig.from_env(),
+        )
+        diff = lint_ontology_update(
+            existing_properties=list(existing.properties or []),
+            existing_relationships=list(existing.relationships or []),
+            updated_properties=list(updated_properties or []),
+            updated_relationships=list(updated_relationships or []),
+            config=OntologyLinterConfig.from_env(),
+        )
+        merged_lint = _merge_lint_reports(baseline, diff)
+
+        if not merged_lint.ok:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ApiResponse.error(
+                    message="온톨로지 스키마 검증에 실패했습니다",
+                    errors=[issue.message for issue in merged_lint.errors],
+                ).to_dict()
+                | {"data": {"lint_report": merged_lint.model_dump()}},
+            )
+
+        protected_branch = _is_protected_branch(branch)
+        high_risk = any((issue.rule_id or "").startswith("ONT9") for issue in diff.warnings or [])
+        if protected_branch and high_risk:
+            if not _extract_change_reason(request):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="X-Change-Reason 헤더가 필요합니다 (protected branch + 고위험 스키마 변경)",
+                )
+            if not _admin_authorized(request):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="관리자 토큰이 필요합니다 (protected branch + 고위험 스키마 변경)",
+                )
+
         if enable_event_sourcing:
             ontology_version = await _resolve_ontology_version(terminus, db_name=db_name, branch=branch)
+            actor = _extract_actor(request)
+            change_reason = _extract_change_reason(request)
             # Event Sourcing: publish UPDATE command (actual write is async in worker)
             command = OntologyCommand(
                 command_type=CommandType.UPDATE_ONTOLOGY_CLASS,
@@ -559,12 +905,19 @@ async def update_ontology(
                     "class_id": class_id,
                     "updates": sanitized_data,
                 },
-                metadata={"source": "OMS", "user": "system", "ontology": ontology_version},
+                metadata={
+                    "source": "OMS",
+                    "user": actor or "system",
+                    "ontology": ontology_version,
+                    "change_reason": change_reason,
+                    "lint": merged_lint.model_dump(),
+                },
+                created_by=actor,
             )
 
             envelope = EventEnvelope.from_command(
                 command,
-                actor="system",
+                actor=actor or "system",
                 kafka_topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC,
                 metadata={"service": "oms", "mode": "event_sourcing"},
             )
@@ -615,13 +968,23 @@ async def update_ontology(
             )
 
         # Direct update mode
-        merged_data = {**converter.extract_from_jsonld(existing), **sanitized_data}
+        from shared.models.ontology import OntologyBase
+
+        existing_dict = existing.model_dump() if hasattr(existing, "model_dump") else dict(existing)
+        merged_data = {**existing_dict, **sanitized_data}
         merged_data["id"] = class_id  # ID는 변경 불가
-        jsonld_data = converter.convert_with_labels(merged_data)
-        result = await terminus.update_ontology(db_name, class_id, jsonld_data)
-        return OntologyResponse(
-            status="success", message=f"온톨로지 '{class_id}'가 업데이트되었습니다", data=result
-        )
+
+        # LocalizedText merge: allow partial updates like {"en": "..."} without dropping {"ko": "..."}.
+        for key in ("label", "description"):
+            incoming = sanitized_data.get(key)
+            existing_value = existing_dict.get(key)
+            if isinstance(existing_value, dict) and isinstance(incoming, dict):
+                merged = dict(existing_value)
+                merged.update(incoming)
+                merged_data[key] = merged
+
+        ontology_obj = OntologyBase(**merged_data)
+        return await terminus.update_ontology(db_name, class_id, ontology_obj, branch=branch)
 
     except SecurityViolationError as e:
         logger.warning(f"Security violation in update_ontology: {e}")
@@ -638,6 +1001,7 @@ async def update_ontology(
 
 @router.delete("/{class_id}", response_model=BaseResponse)
 async def delete_ontology(
+    request: Request,
     db_name: str = Depends(ensure_database_exists),
     class_id: str = Depends(ValidatedClassId),
     branch: str = Query("main", description="Target branch (default: main)"),
@@ -650,6 +1014,19 @@ async def delete_ontology(
     try:
         enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
         branch = validate_branch_name(branch)
+
+        protected_branch = _is_protected_branch(branch)
+        if protected_branch:
+            if not _extract_change_reason(request):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="X-Change-Reason 헤더가 필요합니다 (protected branch 삭제)",
+                )
+            if not _admin_authorized(request):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="관리자 토큰이 필요합니다 (protected branch 삭제)",
+                )
 
         # Best-effort command-side validation:
         # - Safe on main branch.
@@ -665,6 +1042,8 @@ async def delete_ontology(
 
         if enable_event_sourcing:
             ontology_version = await _resolve_ontology_version(terminus, db_name=db_name, branch=branch)
+            actor = _extract_actor(request)
+            change_reason = _extract_change_reason(request)
             command = OntologyCommand(
                 command_type=CommandType.DELETE_ONTOLOGY_CLASS,
                 aggregate_id=f"{db_name}:{branch}:{class_id}",
@@ -672,12 +1051,18 @@ async def delete_ontology(
                 branch=branch,
                 expected_seq=expected_seq,
                 payload={"db_name": db_name, "branch": branch, "class_id": class_id},
-                metadata={"source": "OMS", "user": "system", "ontology": ontology_version},
+                metadata={
+                    "source": "OMS",
+                    "user": actor or "system",
+                    "ontology": ontology_version,
+                    "change_reason": change_reason,
+                },
+                created_by=actor,
             )
 
             envelope = EventEnvelope.from_command(
                 command,
-                actor="system",
+                actor=actor or "system",
                 kafka_topic=AppConfig.ONTOLOGY_COMMANDS_TOPIC,
                 metadata={"service": "oms", "mode": "event_sourcing"},
             )

@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from confluent_kafka import Producer
+from redis.asyncio import Redis
+from uuid import uuid4
 
 from .models import (
     GoogleSheetDataUpdate,
@@ -18,6 +20,7 @@ from .models import (
     RegisteredSheet,
     SheetMetadata,
 )
+from .registry import GoogleSheetsRegistry
 from .utils import (
     build_sheets_api_url,
     build_sheets_metadata_url,
@@ -35,21 +38,41 @@ logger = logging.getLogger(__name__)
 class GoogleSheetsService:
     """Google Sheets API 서비스"""
 
-    def __init__(self, producer: Optional[Producer] = None, api_key: Optional[str] = None):
+    _LOCK_PREFIX = "spice:google_sheets:poll_lock"
+    _LOCK_RELEASE_SCRIPT = """
+    if redis.call("GET", KEYS[1]) == ARGV[1] then
+      return redis.call("DEL", KEYS[1])
+    else
+      return 0
+    end
+    """
+
+    def __init__(
+        self,
+        producer: Optional[Producer] = None,
+        api_key: Optional[str] = None,
+        *,
+        redis_client: Optional[Redis] = None,
+        registry: Optional[GoogleSheetsRegistry] = None,
+    ):
         """
         초기화
 
         Args:
             producer: Kafka Producer instance
             api_key: Google API Key (환경변수 대체 가능)
+            redis_client: Optional Redis client (durable registrations + scale-out safe locks)
+            registry: Optional registry override (tests)
         """
         self.producer = producer
         self.api_key = api_key or os.getenv("GOOGLE_API_KEY", "")
         if not self.api_key:
             logger.warning("Google API key not configured. Only public sheets will be accessible.")
 
-        # 등록된 시트 저장소 (실제로는 DB나 Redis 사용)
-        self._registered_sheets: Dict[str, RegisteredSheet] = {}
+        self._redis = redis_client
+        self._registry = registry or GoogleSheetsRegistry(redis_client)
+        self._poller_id = uuid4().hex
+        self._polling_tasks: Dict[str, asyncio.Task] = {}
 
         # HTTP 클라이언트
         self._client = None
@@ -172,7 +195,16 @@ class GoogleSheetsService:
         )
 
     async def register_sheet(
-        self, sheet_url: str, worksheet_name: Optional[str] = None, polling_interval: int = 300
+        self,
+        sheet_url: str,
+        worksheet_name: Optional[str] = None,
+        polling_interval: int = 300,
+        *,
+        database_name: Optional[str] = None,
+        branch: str = "main",
+        class_label: Optional[str] = None,
+        auto_import: bool = False,
+        max_import_rows: Optional[int] = None,
     ) -> GoogleSheetRegisterResponse:
         """
         Google Sheet 등록 (폴링용)
@@ -181,6 +213,11 @@ class GoogleSheetsService:
             sheet_url: Google Sheets URL
             worksheet_name: 워크시트 이름
             polling_interval: 폴링 간격 (초)
+            database_name: Optional target database (auto-import)
+            branch: Optional target branch (auto-import)
+            class_label: Optional target class label (auto-import)
+            auto_import: Enable auto-import on change
+            max_import_rows: Optional max rows imported per run
 
         Returns:
             등록 응답
@@ -197,20 +234,37 @@ class GoogleSheetsService:
             else:
                 worksheet_name = "Sheet1"
 
-        # Create registered sheet record
+        now_iso = format_datetime_iso(datetime.now(timezone.utc))
+
+        # Create registered sheet record (durable)
         registered_sheet = RegisteredSheet(
             sheet_id=sheet_id,
             sheet_url=str(sheet_url),
-            worksheet_name=sanitize_worksheet_name(worksheet_name),
+            worksheet_name=str(worksheet_name),
             polling_interval=polling_interval,
-            registered_at=format_datetime_iso(datetime.now(timezone.utc)),
+            database_name=database_name,
+            branch=branch or "main",
+            class_label=class_label,
+            auto_import=bool(auto_import),
+            max_import_rows=max_import_rows,
+            registered_at=now_iso,
         )
 
-        # Store in memory (실제로는 DB 저장)
-        self._registered_sheets[sheet_id] = registered_sheet
+        # Best-effort: establish an initial hash baseline at registration time.
+        try:
+            range_name = registered_sheet.worksheet_name
+            if any(ch in range_name for ch in (" ", "/", "(", ")")):
+                range_name = f"'{range_name}'"
+            data = await self._get_sheet_data(sheet_id, range_name)
+            registered_sheet.last_hash = calculate_data_hash(data)
+            registered_sheet.last_polled = now_iso
+        except Exception as e:
+            logger.warning(f"Initial sheet fetch failed (sheet_id={sheet_id}): {e}")
 
-        # Start polling task (실제로는 별도 worker 사용)
-        asyncio.create_task(self._start_polling(sheet_id))
+        await self._registry.upsert(registered_sheet)
+
+        # Start polling task (durable registrations will be reloaded on restart)
+        self._ensure_polling_task(sheet_id)
 
         return GoogleSheetRegisterResponse(
             sheet_id=sheet_id,
@@ -218,6 +272,50 @@ class GoogleSheetsService:
             message=f"Successfully registered sheet {sheet_id} for polling",
             registered_sheet=registered_sheet,
         )
+
+    async def start_polling_for_active_sheets(self) -> None:
+        """
+        Start pollers for all active sheets in the registry.
+
+        Intended to be called once at service startup so registrations survive restarts.
+        """
+        try:
+            sheets = await self.get_registered_sheets()
+        except Exception as e:
+            logger.warning(f"Failed to load registered sheets for polling: {e}")
+            return
+
+        for sheet in sheets:
+            if sheet and sheet.is_active:
+                self._ensure_polling_task(sheet.sheet_id)
+
+    def _ensure_polling_task(self, sheet_id: str) -> None:
+        existing = self._polling_tasks.get(sheet_id)
+        if existing and not existing.done():
+            return
+        self._polling_tasks[sheet_id] = asyncio.create_task(self._start_polling(sheet_id))
+
+    async def _try_acquire_poll_lock(self, sheet_id: str, *, ttl_seconds: int) -> bool:
+        if not self._redis:
+            return True
+        if ttl_seconds < 10:
+            ttl_seconds = 10
+        key = f"{self._LOCK_PREFIX}:{sheet_id}"
+        try:
+            return bool(await self._redis.set(key, self._poller_id, nx=True, ex=int(ttl_seconds)))
+        except Exception as e:
+            logger.warning(f"Failed to acquire poll lock (sheet_id={sheet_id}): {e}")
+            # Fail-open in dev; worst case we might double-poll briefly.
+            return True
+
+    async def _release_poll_lock(self, sheet_id: str) -> None:
+        if not self._redis:
+            return
+        key = f"{self._LOCK_PREFIX}:{sheet_id}"
+        try:
+            await self._redis.eval(self._LOCK_RELEASE_SCRIPT, 1, key, self._poller_id)
+        except Exception as e:
+            logger.debug(f"Failed to release poll lock (sheet_id={sheet_id}): {e}")
 
     async def _get_sheet_metadata(self, sheet_id: str, *, api_key: Optional[str] = None) -> SheetMetadata:
         """
@@ -309,19 +407,36 @@ class GoogleSheetsService:
         Args:
             sheet_id: Sheet ID
         """
-        registered_sheet = self._registered_sheets.get(sheet_id)
-        if not registered_sheet:
-            return
-
         logger.info(f"Starting polling for sheet {sheet_id}")
 
-        while registered_sheet.is_active:
+        while True:
             try:
+                registered_sheet = await self._registry.get(sheet_id)
+                if not registered_sheet or not registered_sheet.is_active:
+                    return
+
                 # Wait for polling interval
-                await asyncio.sleep(registered_sheet.polling_interval)
+                await asyncio.sleep(int(registered_sheet.polling_interval))
+
+                # Refresh config (interval/worksheet may have changed)
+                registered_sheet = await self._registry.get(sheet_id)
+                if not registered_sheet or not registered_sheet.is_active:
+                    return
+
+                # Scale-out safety: ensure only one instance polls a sheet per cycle.
+                # TTL is short because we release after each poll.
+                acquired = await self._try_acquire_poll_lock(
+                    sheet_id,
+                    ttl_seconds=min(300, max(30, int(registered_sheet.polling_interval))) + 60,
+                )
+                if not acquired:
+                    continue
 
                 # Get current data
-                data = await self._get_sheet_data(sheet_id, registered_sheet.worksheet_name)
+                range_name = registered_sheet.worksheet_name
+                if any(ch in range_name for ch in (" ", "/", "(", ")")):
+                    range_name = f"'{range_name}'"
+                data = await self._get_sheet_data(sheet_id, range_name)
 
                 # Calculate hash
                 current_hash = calculate_data_hash(data)
@@ -338,6 +453,8 @@ class GoogleSheetsService:
                         changed_rows=len(rows),
                         changed_columns=columns,
                         timestamp=format_datetime_iso(datetime.now(timezone.utc)),
+                        previous_hash=registered_sheet.last_hash,
+                        current_hash=current_hash,
                     )
 
                     # Send notification to Kafka
@@ -346,11 +463,14 @@ class GoogleSheetsService:
                 # Update polling info
                 registered_sheet.last_hash = current_hash
                 registered_sheet.last_polled = format_datetime_iso(datetime.now(timezone.utc))
+                await self._registry.upsert(registered_sheet)
 
             except Exception as e:
                 logger.error(f"Polling error for sheet {sheet_id}: {e}")
                 # Continue polling even on error
                 await asyncio.sleep(60)  # Wait 1 minute on error
+            finally:
+                await self._release_poll_lock(sheet_id)
 
     async def _notify_data_change(self, update: GoogleSheetDataUpdate):
         """
@@ -363,7 +483,9 @@ class GoogleSheetsService:
             if not self.producer:
                 logger.warning("Kafka producer not configured; skipping update notification")
                 return
-            topic = "google-sheets-updates"
+            from shared.config.app_config import AppConfig
+
+            topic = AppConfig.GOOGLE_SHEETS_UPDATES_TOPIC
             value = update.model_dump_json()
             key = update.sheet_id.encode("utf-8")
 
@@ -385,12 +507,13 @@ class GoogleSheetsService:
         Returns:
             성공 여부
         """
-        if sheet_id in self._registered_sheets:
-            self._registered_sheets[sheet_id].is_active = False
-            del self._registered_sheets[sheet_id]
+        deleted = await self._registry.delete(sheet_id)
+        task = self._polling_tasks.pop(sheet_id, None)
+        if task and not task.done():
+            task.cancel()
+        if deleted:
             logger.info(f"Unregistered sheet {sheet_id}")
-            return True
-        return False
+        return bool(deleted)
 
     async def get_registered_sheets(self) -> List[RegisteredSheet]:
         """
@@ -399,7 +522,7 @@ class GoogleSheetsService:
         Returns:
             등록된 시트 목록
         """
-        return list(self._registered_sheets.values())
+        return await self._registry.list()
 
     async def close(self):
         """리소스 정리"""
@@ -407,6 +530,8 @@ class GoogleSheetsService:
             await self._client.aclose()
             self._client = None
 
-        # Stop all polling tasks
-        for sheet in self._registered_sheets.values():
-            sheet.is_active = False
+        # Stop polling tasks (registrations remain in the registry)
+        for task in list(self._polling_tasks.values()):
+            if task and not task.done():
+                task.cancel()
+        self._polling_tasks.clear()

@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 # Import VersionedModelMixin for MVCC support
 from .base import VersionedModelMixin
+from .i18n import LocalizedText
 
 
 class Cardinality(Enum):
@@ -24,7 +25,41 @@ class Cardinality(Enum):
     MANY = "many"
 
 
-# MultiLingualText removed - using simple strings for better stability
+def _validate_localized_required(value: Any, *, field_name: str) -> LocalizedText:
+    if isinstance(value, str):
+        if not value.strip():
+            raise ValueError(f"{field_name} must be a non-empty string")
+        return value
+
+    if isinstance(value, dict):
+        cleaned: Dict[str, str] = {}
+        for k, v in value.items():
+            if v is None:
+                continue
+            text = str(v).strip()
+            if not text:
+                continue
+            raw_key = str(k).strip()
+            key_lower = raw_key.lower()
+            if key_lower in ("english", "eng") or key_lower.startswith("en"):
+                normalized = "en"
+            elif key_lower in ("korean", "kor", "kr") or key_lower.startswith("ko"):
+                normalized = "ko"
+            else:
+                raise ValueError(f"{field_name} has unsupported language key: {raw_key!r} (supported: en, ko)")
+            cleaned[normalized] = text
+
+        if not cleaned:
+            raise ValueError(f"{field_name} must contain at least one non-empty translation")
+        return cleaned
+
+    raise ValueError(f"{field_name} must be a string or a language map")
+
+
+def _validate_localized_optional(value: Any, *, field_name: str) -> Optional[LocalizedText]:
+    if value is None:
+        return None
+    return _validate_localized_required(value, field_name=field_name)
 
 
 class QueryOperator(BaseModel):
@@ -48,8 +83,8 @@ class OntologyBase(VersionedModelMixin):
     """
 
     id: str = Field(..., description="Ontology identifier")
-    label: str = Field(..., description="English label")
-    description: Optional[str] = Field(None, description="English description")
+    label: LocalizedText = Field(..., description="UI label (string or language map)")
+    description: Optional[LocalizedText] = Field(None, description="UI description (string or language map)")
     created_at: Optional[datetime] = Field(None, description="Creation timestamp")
     updated_at: Optional[datetime] = Field(None, description="Last update timestamp")
     parent_class: Optional[str] = Field(None, description="Parent class identifier")
@@ -69,11 +104,13 @@ class OntologyBase(VersionedModelMixin):
 
     @field_validator("label")
     @classmethod
-    def validate_label(cls, v) -> str:
-        """Validate label is not empty"""
-        if not v or not isinstance(v, str):
-            raise ValueError("Label must be a non-empty string")
-        return v
+    def validate_label(cls, v) -> LocalizedText:
+        return _validate_localized_required(v, field_name="label")
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v) -> Optional[LocalizedText]:
+        return _validate_localized_optional(v, field_name="description")
 
     @model_validator(mode="before")
     @classmethod
@@ -102,11 +139,26 @@ class Relationship(BaseModel):
 
     predicate: str = Field(..., description="Relationship predicate")
     target: str = Field(..., description="Target class")
-    label: str = Field(..., description="English label")
+    label: LocalizedText = Field(..., description="UI label (string or language map)")
     cardinality: str = Field(default="1:n", description="Relationship cardinality")
-    description: Optional[str] = Field(None, description="English description")
+    description: Optional[LocalizedText] = Field(None, description="UI description (string or language map)")
     inverse_predicate: Optional[str] = Field(None, description="Inverse relationship predicate")
-    inverse_label: Optional[str] = Field(None, description="Inverse relationship label")
+    inverse_label: Optional[LocalizedText] = Field(None, description="Inverse relationship label (string or language map)")
+
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, v) -> LocalizedText:
+        return _validate_localized_required(v, field_name="relationship.label")
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v) -> Optional[LocalizedText]:
+        return _validate_localized_optional(v, field_name="relationship.description")
+
+    @field_validator("inverse_label")
+    @classmethod
+    def validate_inverse_label(cls, v) -> Optional[LocalizedText]:
+        return _validate_localized_optional(v, field_name="relationship.inverse_label")
 
     @field_validator("cardinality")
     @classmethod
@@ -133,7 +185,7 @@ class Property(BaseModel):
 
     name: str = Field(..., description="Property name")
     type: str = Field(..., description="Property data type or class reference")
-    label: str = Field(..., description="English label")
+    label: LocalizedText = Field(..., description="UI label (string or language map)")
     required: bool = Field(default=False, description="Whether property is required")
     primary_key: bool = Field(
         default=False,
@@ -141,7 +193,7 @@ class Property(BaseModel):
         alias="primaryKey",
     )
     default: Optional[Any] = Field(None, description="Default value")
-    description: Optional[str] = Field(None, description="English description")
+    description: Optional[LocalizedText] = Field(None, description="UI description (string or language map)")
     constraints: Dict[str, Any] = Field(default_factory=dict, description="Property constraints")
     
     # 🔥 THINK ULTRA! Class reference support for ObjectProperty conversion
@@ -168,6 +220,16 @@ class Property(BaseModel):
         if not v or not isinstance(v, str):
             raise ValueError("Property type must be a non-empty string")
         return v
+
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, v) -> LocalizedText:
+        return _validate_localized_required(v, field_name="property.label")
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v) -> Optional[LocalizedText]:
+        return _validate_localized_optional(v, field_name="property.description")
 
     def validate_value(self, value: Any) -> List[str]:
         """Validate property value"""
@@ -267,8 +329,8 @@ class OntologyCreateRequest(BaseModel):
     """Request model for creating ontology"""
 
     id: Optional[str] = Field(None, description="Ontology identifier (auto-generated if not provided)")
-    label: str = Field(..., description="English label")
-    description: Optional[str] = Field(None, description="English description")
+    label: LocalizedText = Field(..., description="UI label (string or language map)")
+    description: Optional[LocalizedText] = Field(None, description="UI description (string or language map)")
     parent_class: Optional[str] = Field(None, description="Parent class identifier")
     abstract: bool = Field(default=False, description="Whether class is abstract")
     properties: List[Property] = Field(default_factory=list, description="Class properties")
@@ -279,19 +341,27 @@ class OntologyCreateRequest(BaseModel):
 
     @field_validator("id")
     @classmethod
-    def validate_id(cls, v) -> str:
-        """Validate ID format"""
-        if not v or not isinstance(v, str):
+    def validate_id(cls, v) -> Optional[str]:
+        """Validate ID format (optional)."""
+        if v is None:
+            return None
+        if not isinstance(v, str) or not v.strip():
             raise ValueError("ID must be a non-empty string")
         return v
 
     @field_validator("label")
     @classmethod
-    def validate_label(cls, v) -> str:
-        """Validate label is not empty"""
-        if not v or not isinstance(v, str):
-            raise ValueError("Label must be a non-empty string")
-        return v
+    def validate_label(cls, v) -> LocalizedText:
+        """Validate label is not empty (string or language map)."""
+        if isinstance(v, str):
+            if not v.strip():
+                raise ValueError("Label must be a non-empty string")
+            return v
+        if isinstance(v, dict):
+            if not any(str(val).strip() for val in v.values() if val is not None):
+                raise ValueError("Label must have at least one non-empty translation")
+            return v
+        raise ValueError("Label must be a string or a language map")
 
     @field_validator("properties")
     @classmethod
@@ -317,13 +387,23 @@ class OntologyCreateRequest(BaseModel):
 class OntologyUpdateRequest(BaseModel):
     """Request model for updating ontology"""
 
-    label: Optional[str] = Field(None, description="English label")
-    description: Optional[str] = Field(None, description="English description")
+    label: Optional[LocalizedText] = Field(None, description="UI label (string or language map)")
+    description: Optional[LocalizedText] = Field(None, description="UI description (string or language map)")
     parent_class: Optional[str] = Field(None, description="Parent class identifier")
     abstract: Optional[bool] = Field(None, description="Whether class is abstract")
     properties: Optional[List[Property]] = Field(None, description="Class properties")
     relationships: Optional[List[Relationship]] = Field(None, description="Class relationships")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
+
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, v) -> Optional[LocalizedText]:
+        return _validate_localized_optional(v, field_name="label")
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v) -> Optional[LocalizedText]:
+        return _validate_localized_optional(v, field_name="description")
 
     @field_validator("properties")
     @classmethod

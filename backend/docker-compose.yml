@@ -246,6 +246,33 @@ services:
       timeout: 10s
       retries: 5
 
+  # Google Sheets Update Worker (consumes google-sheets-updates)
+  google-sheets-worker:
+    build:
+      context: .
+      dockerfile: ./google_sheets_worker/Dockerfile
+    container_name: spice_google_sheets_worker
+    environment:
+      - KAFKA_HOST=kafka
+      - KAFKA_PORT=29092
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-spicepass123}
+      # IMPORTANT: override ServiceConfig default (127.0.0.1) in Docker
+      - BFF_BASE_URL=http://bff:8002
+      - LOG_LEVEL=INFO
+      - DOCKER_CONTAINER=true
+      # Optional (public sheets work without it)
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GOOGLE_SHEETS_UPDATES_TOPIC=google-sheets-updates
+    depends_on:
+      - bff
+      - kafka
+      - redis
+    networks:
+      - spice_network
+    restart: unless-stopped
+
   # Funnel
   funnel:
     build:

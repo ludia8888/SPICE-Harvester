@@ -196,9 +196,16 @@ class TerminusService:
             return ontologies
         return []
 
-    async def create_class(self, db_name: str, class_data: dict, *, branch: str = "main"):
+    async def create_class(
+        self,
+        db_name: str,
+        class_data: dict,
+        *,
+        branch: str = "main",
+        headers: Optional[Dict[str, str]] = None,
+    ):
         """클래스 생성"""
-        response = await self.oms_client.create_ontology(db_name, class_data, branch=branch)
+        response = await self.oms_client.create_ontology(db_name, class_data, branch=branch, headers=headers)
         # Return the created data
         if response and response.get("status") == "success":
             return response.get("data", {})
@@ -230,17 +237,26 @@ class TerminusService:
         *,
         expected_seq: int,
         branch: str = "main",
+        headers: Optional[Dict[str, str]] = None,
     ):
         """클래스 업데이트"""
         response = await self.oms_client.update_ontology(
-            db_name, class_id, class_data, expected_seq=int(expected_seq), branch=branch
+            db_name, class_id, class_data, expected_seq=int(expected_seq), branch=branch, headers=headers
         )
         return response
 
-    async def delete_class(self, db_name: str, class_id: str, *, expected_seq: int, branch: str = "main"):
+    async def delete_class(
+        self,
+        db_name: str,
+        class_id: str,
+        *,
+        expected_seq: int,
+        branch: str = "main",
+        headers: Optional[Dict[str, str]] = None,
+    ):
         """클래스 삭제"""
         response = await self.oms_client.delete_ontology(
-            db_name, class_id, expected_seq=int(expected_seq), branch=branch
+            db_name, class_id, expected_seq=int(expected_seq), branch=branch, headers=headers
         )
         return response
 

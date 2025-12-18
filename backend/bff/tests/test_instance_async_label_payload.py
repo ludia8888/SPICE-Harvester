@@ -43,7 +43,7 @@ def test_instance_create_allows_label_keys_with_spaces():
     finally:
         app.dependency_overrides.clear()
 
-    assert res.status_code == 200
+    assert res.status_code == 202
     payload = res.json()
     assert payload["command_id"] == "123e4567-e89b-12d3-a456-426614174000"
 

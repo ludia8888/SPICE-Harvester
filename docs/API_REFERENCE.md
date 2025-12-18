@@ -74,6 +74,18 @@ This mix is historical (routers were added at different times) and is a **known 
 | `instance_id` | Internal, stable identifier for an instance (entity). Typically derived from `{class_id.lower()}_id`. | **Stable** |
 | `expected_seq` | Optimistic concurrency token for write commands (409 on mismatch). | **Stable** |
 
+### Language / i18n (EN + KO)
+
+- Supported languages: `en`, `ko`
+- For UI-facing text fields, the API accepts **either**:
+  - a plain string (legacy), or
+  - a language map: `{"en": "...", "ko": "..."}` (recommended)
+- Output language selection:
+  - Recommended: `?lang=en|ko` (query param override)
+  - Also supported: `Accept-Language: en-US,en;q=0.9,ko;q=0.8`
+  - If both are present, `?lang` wins.
+- When a translation is missing, the API falls back to the other supported language.
+
 ### Write mode (202 vs 200/201)
 
 Most “write” endpoints behave differently depending on deployment mode:
@@ -370,7 +382,9 @@ Notes:
 
 ### Ontology Management (**Stable**)
 - `POST /api/v1/database/{db_name}/ontology?branch=<branch>` — create ontology class (async in event-sourcing mode)
+- `POST /api/v1/database/{db_name}/ontology/validate?branch=<branch>` — validate ontology create (lint report, no write)
 - `GET /api/v1/database/{db_name}/ontology/{class_label}?branch=<branch>` — get ontology class
+- `POST /api/v1/database/{db_name}/ontology/{class_label}/validate?branch=<branch>` — validate ontology update (lint+diff, no write)
 - `PUT /api/v1/database/{db_name}/ontology/{class_label}?branch=<branch>&expected_seq=...` — update ontology (async in event-sourcing mode; requires `expected_seq`)
 - `DELETE /api/v1/database/{db_name}/ontology/{class_label}?branch=<branch>&expected_seq=...` — delete ontology (async in event-sourcing mode; requires `expected_seq`)
 - `GET /api/v1/database/{db_name}/ontology/list?branch=<branch>` — list ontologies
@@ -391,6 +405,13 @@ Notes:
 - `POST /api/v1/database/{db_name}/import-from-excel/dry-run` — import dry-run (no write)
 - `POST /api/v1/database/{db_name}/import-from-excel/commit` — import commit (submits async writes to OMS)
 - `POST /api/v1/database/{db_name}/ontology/{class_id}/mapping-metadata` — save mapping metadata
+
+**Protected branch policy (schema safety)**
+- Default protected branches: `main`, `master`, `production`, `prod` (configurable via `ONTOLOGY_PROTECTED_BRANCHES`)
+- On protected branches, **high-risk schema changes** (e.g., property removal/type change) and deletes require:
+  - `X-Change-Reason: <text>` (required)
+  - `X-Admin-Token: <secret>` or `Authorization: Bearer <secret>` (required)
+  - Optional: `X-Admin-Actor: <name>` for audit/traceability
 
 ### Query (**Stable**)
 - `POST /api/v1/database/{db_name}/query` — execute query

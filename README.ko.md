@@ -89,14 +89,21 @@ curl -fsS http://localhost:8003/health
 
 Tip: 아래 예시는 편의를 위해 `jq`를 사용합니다.
 
-⚠️ **경로 네이밍 주의(혼재)**  
-현재 BFF는 라우터 역사적 이유로 다음이 섞여 있습니다.
-- DB/브랜치: `/api/v1/databases/...` (복수형)
-- 온톨로지/인스턴스/쿼리: `/api/v1/database/{db_name}/...` (단수형)
+⚠️ **경로(Endpoint) 네이밍 혼재**  
+현재 BFF는 라우터 추가 시점이 달라 두 가지 URL 패턴이 공존합니다(legacy).
+- DB/브랜치/DB 삭제: `/api/v1/databases/...` (복수형 컬렉션)
+- 온톨로지/인스턴스/쿼리/매핑: `/api/v1/database/{db_name}/...` (DB 스코프, 단수형)
 
-⚠️ **202 vs 200**  
-기본 설정(`ENABLE_EVENT_SOURCING=true`)에서는 write가 **202 Accepted + command_id**로 돌아오며, 반드시 command status를 폴링해야 합니다.  
-직접쓰기 모드(`ENABLE_EVENT_SOURCING=false`)에서는 일부 write가 200/201로 즉시 반영될 수 있습니다.
+이 문서의 예시는 “현재 계약된 경로”를 그대로 사용합니다. (향후 `/api/v1/databases/{db_name}/...`로 통일 예정)
+
+⚠️ **비동기 Write(202) vs 즉시 반영(200/201)**  
+기본 설정(`ENABLE_EVENT_SOURCING=true`)에서는 대부분의 write가 **202 Accepted + command_id**로 반환되며, 아래를 폴링해 완료를 확인해야 합니다.  
+`GET /api/v1/commands/{command_id}/status` → `COMPLETED`
+
+Tip: `command_id` 위치가 응답 타입에 따라 다를 수 있습니다. (예: DB/온톨로지 `ApiResponse`는 `.data.command_id`, 인스턴스 `CommandResult`는 `.command_id`)
+
+직접쓰기 모드(`ENABLE_EVENT_SOURCING=false`)에서는 DB/온톨로지 등 일부 write가 `200/201`로 즉시 반영될 수 있습니다.  
+다만 `/api/v1/database/{db_name}/instances/...`(Async Instance) API는 “커맨드 제출” API이므로 **항상 202로 취급**하는 것이 안전합니다.
 
 ```bash
 DB=demo_db_$(date +%s)

@@ -170,6 +170,15 @@ async def register_google_sheet(
         sheet_url = sheet_data.get("sheet_url")
         worksheet_name = sheet_data.get("worksheet_name") or sheet_data.get("worksheet_title")
         polling_interval = int(sheet_data.get("polling_interval", 300))
+        database_name = sheet_data.get("database_name")
+        branch = sheet_data.get("branch") or "main"
+        class_label = sheet_data.get("class_label")
+        auto_import = bool(sheet_data.get("auto_import", False))
+        max_import_rows = sheet_data.get("max_import_rows")
+        try:
+            max_import_rows = int(max_import_rows) if max_import_rows is not None else None
+        except Exception:
+            max_import_rows = None
         
         # Validate required fields
         if not sheet_url:
@@ -184,6 +193,11 @@ async def register_google_sheet(
             sheet_url=sheet_url,
             worksheet_name=worksheet_name,
             polling_interval=polling_interval,
+            database_name=database_name,
+            branch=branch,
+            class_label=class_label,
+            auto_import=auto_import,
+            max_import_rows=max_import_rows,
         )
         
         logger.info(f"Successfully registered Google Sheet: {registration_result.sheet_id}")
@@ -290,6 +304,8 @@ async def list_registered_sheets(
         logger.info(f"Listing registered sheets for database: {database_name}")
 
         registered_sheets = await google_sheets_service.get_registered_sheets()
+        if database_name:
+            registered_sheets = [s for s in registered_sheets if s.database_name == database_name]
 
         return ApiResponse(
             success=True,

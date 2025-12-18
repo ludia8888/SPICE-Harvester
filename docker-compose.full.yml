@@ -77,6 +77,15 @@ services:
       - kafka
       - message-relay
       - postgres
+
+  google-sheets-worker:
+    extends:
+      file: backend/docker-compose.yml
+      service: google-sheets-worker
+    depends_on:
+      - bff
+      - redis
+      - kafka
       
   # Database services
   postgres:
