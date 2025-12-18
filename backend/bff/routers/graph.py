@@ -586,16 +586,23 @@ class ProjectionQueryRequest(BaseModel):
     limit: int = 100
 
 
-@router.post("/projections/{db_name}/register")
+@router.post(
+    "/projections/{db_name}/register",
+    summary="🚧 (WIP) Register a projection (materialized view)",
+    tags=["Projections (WIP)"],
+)
 async def register_projection(
     db_name: str,
     request: ProjectionRegistrationRequest,
     graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service)
 ):
     """
-    빈번한 멀티홉 쿼리를 프로젝션으로 등록
+    🚧 (WIP) 빈번한 멀티홉 쿼리를 “프로젝션(=materialized view)”으로 등록
     
-    팔란티어 원칙: 빈번한 고비용 멀티홉 = 프로젝션/뷰 materialize
+    주의:
+    - 현재 이 엔드포인트는 “겉 API만 존재”하며, 실제 materialize(저장/갱신/조회)는 구현되어 있지 않습니다.
+    - 프론트엔드는 이 기능을 사용하지 마세요. (Swagger/OpenAPI에 보이더라도 WIP입니다.)
+    - 현재 제품 UI는 `/graph-query/{db_name}`(실시간 federation) 기반으로 구현해야 합니다.
     
     Example:
     ```json
@@ -632,16 +639,23 @@ async def register_projection(
         )
 
 
-@router.post("/projections/{db_name}/query")
+@router.post(
+    "/projections/{db_name}/query",
+    summary="🚧 (WIP) Query a projection (materialized view)",
+    tags=["Projections (WIP)"],
+)
 async def query_projection(
     db_name: str,
     request: ProjectionQueryRequest,
     graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service)
 ):
     """
-    프로젝션 뷰 조회 (캐시된 데이터)
+    🚧 (WIP) 프로젝션 뷰 조회 (캐시된 데이터)
     
-    저비용 조회로 전환된 materialized view 접근
+    주의:
+    - 현재는 프로젝션이 materialize 되지 않으므로, 의미있는 데이터를 반환하지 않습니다.
+    - 프론트엔드는 이 엔드포인트를 사용하지 마세요.
+    - 대신 `/graph-query/{db_name}`를 사용하세요.
     
     Example:
     ```json
@@ -674,13 +688,21 @@ async def query_projection(
         )
 
 
-@router.get("/projections/{db_name}/list")
+@router.get(
+    "/projections/{db_name}/list",
+    summary="🚧 (WIP) List projections (materialized views)",
+    tags=["Projections (WIP)"],
+)
 async def list_projections(
     db_name: str,
     graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service)
 ):
     """
-    등록된 프로젝션 목록 조회
+    🚧 (WIP) 등록된 프로젝션 목록 조회
+
+    주의:
+    - 현재는 ProjectionManager가 없어서 항상 빈 리스트를 반환합니다.
+    - 프론트엔드는 이 엔드포인트를 사용하지 마세요.
     """
     try:
         db_name = validate_db_name(db_name)

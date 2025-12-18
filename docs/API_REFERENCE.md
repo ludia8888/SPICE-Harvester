@@ -707,6 +707,19 @@ POST /graph-query/{db_name}?branch=<branch>
 - `max_nodes`/`max_edges`/`no_cycles`로 폭발/순환을 제어합니다.
 - 관계 의미(도메인/레인지) 검증은 기본 ON(`GRAPH_QUERY_ENFORCE_SEMANTICS=true`)입니다.
 
+### Projections (Materialized Views) 🚧 WIP
+
+자주 쓰는 멀티홉 쿼리를 “미리 계산해서 저장해두는(view/materialized)” 기능을 위한 API가 BFF에 노출되어 있습니다.
+
+⚠️ **중요**: 현재는 아직 materialize(저장/갱신/조회)가 구현되어 있지 않아, 프론트엔드에서 사용하면 “있는 것처럼 보이지만 실제로는 동작하지 않는” 혼란을 만들 수 있습니다.  
+따라서 **UI 구현 시에는 아래 엔드포인트들을 사용하지 마세요.** (다음 스프린트로 이관)
+
+- `POST /projections/{db_name}/register` (현재: `status=pending` placeholder)
+- `POST /projections/{db_name}/query` (현재: `status=fallback` placeholder + empty data)
+- `GET /projections/{db_name}/list` (현재: 항상 빈 리스트)
+
+대신 현재 제품 UI는 **`POST /graph-query/{db_name}`(실시간 federation)** 기반으로 구현해야 합니다.
+
 ### Lineage (Provenance) ⭐ NEW
 
 #### Get Lineage Graph
