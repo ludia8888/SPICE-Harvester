@@ -93,7 +93,7 @@ from bff.services.oms_client import OMSClient
 from data_connector.google_sheets.service import GoogleSheetsService
 from bff.routers import (
     database, health, mapping, merge_conflict, ontology, query, 
-    instances, instance_async, websocket, tasks, admin, data_connector, command_status, graph, lineage, audit
+    instances, instance_async, websocket, tasks, admin, data_connector, command_status, graph, lineage, audit, ai
 )
 
 # Monitoring and observability routers
@@ -530,6 +530,7 @@ app.include_router(admin.router, prefix="/api/v1", tags=["admin"])
 app.include_router(data_connector.router, prefix="/api/v1", tags=["data-connector"])
 app.include_router(lineage.router, prefix="/api/v1", tags=["lineage"])
 app.include_router(audit.router, prefix="/api/v1", tags=["audit"])
+app.include_router(ai.router, prefix="/api/v1", tags=["ai"])
 app.include_router(graph.router, tags=["graph"])  # Graph router has its own prefix
 
 # Monitoring and observability endpoints (modernized architecture)

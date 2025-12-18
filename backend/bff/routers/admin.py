@@ -30,8 +30,11 @@ from shared.config.search_config import (
 from shared.dependencies.providers import AuditLogStoreDep, LineageStoreDep
 from shared.models.lineage import LineageDirection
 from shared.services.storage_service import StorageService
-from shared.services.background_task_manager import BackgroundTaskManager
-from shared.services.redis_service import RedisService
+from shared.services.background_task_manager import (
+    BackgroundTaskManager,
+    create_background_task_manager,
+)
+from shared.services.redis_service import RedisService, create_redis_service
 from shared.services.elasticsearch_service import ElasticsearchService
 from shared.dependencies import get_container, ServiceContainer
 from shared.models.background_task import TaskStatus
@@ -143,23 +146,25 @@ async def get_task_manager(
     container: ServiceContainer = Depends(get_container)
 ) -> BackgroundTaskManager:
     """Get BackgroundTaskManager from container."""
-    if not container.has(BackgroundTaskManager):
-        # Register BackgroundTaskManager if not already registered
-        def create_task_manager(container: ServiceContainer) -> BackgroundTaskManager:
-            from shared.services.background_task_manager import create_background_task_manager
-            redis_service = container.get_sync('RedisService')
-            return create_background_task_manager(redis_service)
-        
-        container.register_singleton(BackgroundTaskManager, create_task_manager)
-    
-    return await container.get(BackgroundTaskManager)
+    if container.has(BackgroundTaskManager) and container.is_created(BackgroundTaskManager):
+        return await container.get(BackgroundTaskManager)
+
+    if not container.has(RedisService):
+        container.register_singleton(RedisService, create_redis_service)
+    redis_service = await container.get(RedisService)
+
+    task_manager = create_background_task_manager(redis_service)
+    container.register_instance(BackgroundTaskManager, task_manager)
+    return task_manager
 
 
 async def get_redis_service(
     container: ServiceContainer = Depends(get_container)
 ) -> RedisService:
     """Get RedisService from container."""
-    return await container.get('RedisService')
+    if not container.has(RedisService):
+        container.register_singleton(RedisService, create_redis_service)
+    return await container.get(RedisService)
 
 
 # API Endpoints

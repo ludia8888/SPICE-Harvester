@@ -26,7 +26,11 @@ from shared.models.background_task import (
     TaskMetrics,
     TaskFilter
 )
-from shared.services.background_task_manager import BackgroundTaskManager
+from shared.services.background_task_manager import (
+    BackgroundTaskManager,
+    create_background_task_manager,
+)
+from shared.services.redis_service import RedisService, create_redis_service
 from shared.dependencies import get_container, ServiceContainer
 
 logger = logging.getLogger(__name__)
@@ -66,25 +70,17 @@ async def get_task_manager(
     container: ServiceContainer = Depends(get_container)
 ) -> BackgroundTaskManager:
     """Get BackgroundTaskManager from container."""
-    if not container.has(BackgroundTaskManager):
-        # Register BackgroundTaskManager if not already registered
-        def create_task_manager(container: ServiceContainer) -> BackgroundTaskManager:
-            from shared.services.background_task_manager import create_background_task_manager
-            redis_service = container.get_sync('RedisService')
-            websocket_service = None
-            
-            # Try to get WebSocket service if available
-            try:
-                websocket_service = container.get_sync('WebSocketNotificationService')
-            except:
-                pass
-                
-            return create_background_task_manager(redis_service, websocket_service)
-        
-        container.register_singleton(BackgroundTaskManager, create_task_manager)
-    
     try:
-        return await container.get(BackgroundTaskManager)
+        if container.has(BackgroundTaskManager) and container.is_created(BackgroundTaskManager):
+            return await container.get(BackgroundTaskManager)
+
+        if not container.has(RedisService):
+            container.register_singleton(RedisService, create_redis_service)
+        redis_service = await container.get(RedisService)
+
+        task_manager = create_background_task_manager(redis_service)
+        container.register_instance(BackgroundTaskManager, task_manager)
+        return task_manager
     except Exception as e:
         logger.error(f"Failed to get BackgroundTaskManager: {e}")
         raise HTTPException(
@@ -112,19 +108,19 @@ async def get_task_status(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Task {task_id} not found"
         )
-    
-        return TaskStatusResponse(
-            task_id=task.task_id,
-            task_name=task.task_name,
-            task_type=task.task_type,
-            status=task.status,
-            created_at=task.created_at,
-            started_at=task.started_at,
-            completed_at=task.completed_at,
-            duration=task.duration,
+
+    return TaskStatusResponse(
+        task_id=task.task_id,
+        task_name=task.task_name,
+        task_type=task.task_type,
+        status=task.status,
+        created_at=task.created_at,
+        started_at=task.started_at,
+        completed_at=task.completed_at,
+        duration=task.duration,
         progress=task.progress.model_dump(mode="json") if task.progress else None,
-        result=task.result.model_dump(mode="json") if task.result else None
-        )
+        result=task.result.model_dump(mode="json") if task.result else None,
+    )
 
 
 @router.get("/", response_model=TaskListResponse)
@@ -147,7 +143,7 @@ async def list_tasks(
     )
     
     task_responses = [
-            TaskStatusResponse(
+        TaskStatusResponse(
             task_id=task.task_id,
             task_name=task.task_name,
             task_type=task.task_type,
@@ -157,8 +153,8 @@ async def list_tasks(
             completed_at=task.completed_at,
             duration=task.duration,
             progress=task.progress.model_dump(mode="json") if task.progress else None,
-            result=task.result.model_dump(mode="json") if task.result else None
-            )
+            result=task.result.model_dump(mode="json") if task.result else None,
+        )
         for task in tasks
     ]
     

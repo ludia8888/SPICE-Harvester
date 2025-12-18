@@ -21,6 +21,7 @@ from shared.services.redis_service import RedisService, create_redis_service
 from shared.services.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
 from shared.services.lineage_store import LineageStore, create_lineage_store
 from shared.services.audit_log_store import AuditLogStore, create_audit_log_store
+from shared.services.llm_gateway import LLMGateway, create_llm_gateway
 
 # Import container and settings
 from shared.dependencies.container import get_container, ServiceContainer
@@ -115,6 +116,14 @@ async def get_audit_log_store(
         container.register_singleton(AuditLogStore, create_audit_log_store)
     return await container.get(AuditLogStore)
 
+async def get_llm_gateway(
+    container: ServiceContainer = Depends(get_container),
+) -> LLMGateway:
+    """FastAPI dependency to get LLMGateway instance."""
+    if not container.has(LLMGateway):
+        container.register_singleton(LLMGateway, create_llm_gateway)
+    return await container.get(LLMGateway)
+
 
 # Type annotations for cleaner dependency injection - storage is now always available
 StorageServiceDep = Annotated[StorageService, Depends(get_storage_service)]
@@ -123,6 +132,7 @@ RedisServiceDep = Annotated[RedisService, Depends(get_redis_service)]
 ElasticsearchServiceDep = Annotated[ElasticsearchService, Depends(get_elasticsearch_service)]
 LineageStoreDep = Annotated[LineageStore, Depends(get_lineage_store)]
 AuditLogStoreDep = Annotated[AuditLogStore, Depends(get_audit_log_store)]
+LLMGatewayDep = Annotated[LLMGateway, Depends(get_llm_gateway)]
 SettingsDep = Annotated[ApplicationSettings, Depends(get_settings_dependency)]
 
 
@@ -142,6 +152,7 @@ def register_core_services(container: ServiceContainer) -> None:
     container.register_singleton(ElasticsearchService, create_elasticsearch_service)
     container.register_singleton(LineageStore, create_lineage_store)
     container.register_singleton(AuditLogStore, create_audit_log_store)
+    container.register_singleton(LLMGateway, create_llm_gateway)
     
     # Log registration
     import logging

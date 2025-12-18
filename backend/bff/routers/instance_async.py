@@ -361,31 +361,8 @@ async def bulk_create_instances_async(
         )
 
 
-@router.get("/command/{command_id}/status", response_model=CommandResult)
-async def get_instance_command_status(
-    db_name: str,
-    command_id: str,
-    oms_client: OMSClient = Depends(get_oms_client),
-):
-    """
-    인스턴스 명령의 상태 조회
-    """
-    try:
-        # 입력 검증
-        db_name = validate_db_name(db_name)
-        
-        # OMS API 호출
-        response = await oms_client.get(
-            f"/api/v1/instances/{db_name}/async/command/{command_id}/status"
-        )
-        
-        return CommandResult(**response)
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting command status: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"명령 상태 조회 실패: {str(e)}"
-        )
+#
+# NOTE: Command status is global and should be queried via:
+#   GET /api/v1/commands/{command_id}/status
+# This avoids misleading db-scoped status endpoints that cannot reliably prove
+# the command belongs to the given db_name.

@@ -15,7 +15,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from oms.dependencies import get_redis_service
 from shared.services.redis_service import RedisService
 from shared.models.background_task import TaskStatus, BackgroundTask
-from shared.services.background_task_manager import BackgroundTaskManager
+from shared.services.background_task_manager import (
+    BackgroundTaskManager,
+    create_background_task_manager,
+)
+from shared.services.redis_service import create_redis_service
 from shared.dependencies import get_container, ServiceContainer
 
 logger = logging.getLogger(__name__)
@@ -28,17 +32,17 @@ async def get_task_manager(
     container: ServiceContainer = Depends(get_container)
 ) -> BackgroundTaskManager:
     """Get BackgroundTaskManager from container."""
-    if not container.has(BackgroundTaskManager):
-        # Register BackgroundTaskManager if not already registered
-        def create_task_manager(container: ServiceContainer) -> BackgroundTaskManager:
-            from shared.services.background_task_manager import create_background_task_manager
-            redis_service = container.get_sync('RedisService')
-            return create_background_task_manager(redis_service)
-        
-        container.register_singleton(BackgroundTaskManager, create_task_manager)
-    
     try:
-        return await container.get(BackgroundTaskManager)
+        if container.has(BackgroundTaskManager) and container.is_created(BackgroundTaskManager):
+            return await container.get(BackgroundTaskManager)
+
+        if not container.has(RedisService):
+            container.register_singleton(RedisService, create_redis_service)
+        redis_service = await container.get(RedisService)
+
+        task_manager = create_background_task_manager(redis_service)
+        container.register_instance(BackgroundTaskManager, task_manager)
+        return task_manager
     except Exception as e:
         logger.error(f"Failed to get BackgroundTaskManager: {e}")
         raise HTTPException(

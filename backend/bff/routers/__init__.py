@@ -19,6 +19,7 @@ from . import command_status
 from . import graph
 from . import lineage
 from . import audit
+from . import ai
 
 __all__ = [
     "database",
@@ -36,4 +37,5 @@ __all__ = [
     "graph",
     "lineage",
     "audit",
+    "ai",
 ]
