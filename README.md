@@ -1,30 +1,24 @@
 # SPICE HARVESTER
 
-SPICE HARVESTER는 **Event Sourcing + CQRS** 기반의 온톨로지/그래프 데이터 관리 플랫폼입니다.
+## 1) What it is
 
-- **Schema / Graph authority**: TerminusDB (온톨로지 + 관계 그래프)
-- **Event log (SSoT)**: S3/MinIO Event Store (Command/Domain Event immutable log)
-- **Read model (payload/index)**: Elasticsearch (문서/검색)
-- **Correctness layer (필수)**: Postgres (`processed_events`, `aggregate_versions`, write-side seq allocator)
-- **Transport**: Kafka (at-least-once)
-- **Command status / cache**: Redis
+SPICE HARVESTER is an **Event Sourcing + CQRS** platform for managing **ontology + graph relationships** (TerminusDB) and **document payload/search** (Elasticsearch), with a correctness layer designed to survive **at-least-once** delivery (Kafka redeliveries, worker restarts, replays) without producing duplicate side effects.
 
-핵심 목표는 하나입니다: **중복 발행/재전달/재시작/리플레이가 있어도 결과가 동일하게 수렴**하도록 “계약(Contract)”을 코드와 테스트로 고정하는 것.
+## 2) Who it’s for / Use cases
 
----
+- Teams building a **knowledge graph** (product ↔ supplier ↔ customer, lineage, ownership, dependencies)
+- Data governance / platform teams needing **auditability** and reproducible state
+- “Spreadsheet-first” operations that want to **infer schema**, map columns, and import to a governed model
+- Systems integrating multiple upstream sources where **retries/duplicates are normal** and correctness must be enforced
+- PoCs that must later graduate to production without rewriting the core data model
 
-## 이 프로젝트로 가능한 것
+## 3) What makes it different
 
-- 데이터베이스(테넌트) 생성/삭제(비동기 커맨드)
-- 온톨로지(클래스/속성/관계) 생성/수정/삭제 + Git-like 버전 컨트롤(브랜치/커밋/diff/merge/rollback)
-- 인스턴스 생성/수정/삭제(비동기 커맨드, OCC 지원)
-- 멀티홉 그래프 쿼리(관계는 TerminusDB, payload는 ES로 federation)
-- Spreadsheet/표 데이터 구조 분석 및 타입 추론(Funnel) + 매핑/임포트 보조(BFF)
-- Audit logs / Data lineage(provenance) 기반 운영 관측(선택 기능이지만 코드 경로 존재)
+- **Correctness-first**: durable idempotency (`processed_events`) + ordering guard (`aggregate_versions`) + write-side OCC (`expected_seq`) are enforced and tested with no mocks.
+- **Lineage-first**: provenance/audit are first-class concepts (event → artifact links) so you can explain *why* a node/edge exists.
+- **Rebuildable**: read models (ES, lineage/audit projections) can be (re)materialized by replaying the Event Store instead of treating ES as truth.
 
----
-
-## 아키텍처(요약)
+## 4) Architecture
 
 ```mermaid
 flowchart LR
@@ -51,70 +45,58 @@ flowchart LR
   ProjectionWorker --> PG
 ```
 
----
+**Truth sources (SSoT)**:
+- Graph/schema authority: TerminusDB
+- Immutable log: S3/MinIO Event Store (commands + domain events)
+- Correctness registry: Postgres (idempotency + ordering + seq allocator)
 
-## 신뢰성 계약(반드시 읽을 것)
+## 5) Reliability Contract (short)
 
-- Delivery semantics: Publisher/Kafka는 **at-least-once**, Consumer는 **멱등 처리**가 계약
-- Idempotency key: 시스템 전체 멱등 키는 `event_id` (handler별 `processed_events`로 side-effect 1회 보장)
-- Ordering rule: aggregate 단위 `sequence_number`가 진실이며, 구버전은 무시(`aggregate_versions` 단조 증가)
-- Write-side OCC: Command는 `expected_seq` 기반으로 충돌을 **409**로 감지 (Postgres seq allocator가 원자 보장)
+1) **Delivery**: Publisher/Kafka are **at-least-once**. Consumers must be idempotent.  
+2) **Idempotency key**: the global idempotency key is `event_id` (same `event_id` must create side effects at most once).  
+3) **Ordering**: aggregate-level `sequence_number` is the truth; stale events must be ignored.  
+4) **OCC**: write-side commands carry `expected_seq`; mismatch is a real conflict (**409**) not a “silent last-write-wins”.
 
-자세한 내용: `docs/IDEMPOTENCY_CONTRACT.md`
+Full contract: `docs/IDEMPOTENCY_CONTRACT.md`
 
----
+## 6) Quick Start (5 min)
 
-## 빠른 시작 (Docker Compose)
-
-### 1) 실행
+Prereq: Docker + Docker Compose.
 
 ```bash
 git clone https://github.com/ludia8888/SPICE-Harvester.git
 cd SPICE-Harvester
 
+# Optional: avoid local port conflicts (example only)
+cp .env.example .env
+
 docker compose -f docker-compose.full.yml up -d
 ```
 
-### 2) (선택) 로컬 포트 충돌 회피
-
-`docker-compose.*.yml`은 다음 env로 호스트 포트를 오버라이드할 수 있습니다(기본값은 각 compose 파일의 `:-` 값).
-
-예시 `.env`:
+Health:
 
 ```bash
-POSTGRES_PORT_HOST=15433
-REDIS_PORT_HOST=16379
-ELASTICSEARCH_PORT_HOST=19200
-MINIO_PORT_HOST=19000
-MINIO_CONSOLE_PORT_HOST=19001
-KAFKA_PORT_HOST=19092
-KAFKA_UI_PORT_HOST=18080
+curl -fsS http://localhost:8000/health
+curl -fsS http://localhost:8002/health
+curl -fsS http://localhost:8003/health
 ```
 
-### 3) 헬스체크
+## 7) E2E demo (single PoC scenario)
+
+Scenario: **Customer + Product(owned_by Customer)**, then query the relationship via multi-hop federation.
+
+Tip: examples below use `jq` for convenience.
 
 ```bash
-curl -fsS http://localhost:8000/health | jq .
-curl -fsS http://localhost:8002/health | jq .
-curl -fsS http://localhost:8003/health | jq .
-```
+DB=demo_db_$(date +%s)
 
----
-
-## 최소 E2E 예시 (curl)
-
-### 1) DB 생성 (BFF)
-
-```bash
-curl -fsS -X POST http://localhost:8002/api/v1/databases \
+# 1) Create DB (OMS; async 202)
+curl -fsS -X POST "http://localhost:8000/api/v1/database/create" \
   -H 'Content-Type: application/json' \
-  -d '{"name":"demo_db","description":"demo"}' | jq .
-```
+  -d "{\"name\":\"${DB}\",\"description\":\"demo\"}" | jq .
 
-### 2) 온톨로지 생성 (BFF → OMS)
-
-```bash
-curl -fsS -X POST http://localhost:8002/api/v1/database/demo_db/ontology \
+# 2) Create ontologies (OMS; async 202)
+curl -fsS -X POST "http://localhost:8000/api/v1/database/${DB}/ontology" \
   -H 'Content-Type: application/json' \
   -d '{
     "id":"Customer",
@@ -125,49 +107,61 @@ curl -fsS -X POST http://localhost:8002/api/v1/database/demo_db/ontology \
     ],
     "relationships":[]
   }' | jq .
-```
 
-### 3) 인스턴스 생성(비동기) + 상태 조회 (BFF)
-
-```bash
-CREATE=$(curl -fsS -X POST http://localhost:8002/api/v1/database/demo_db/instances/Customer/create \
-  -H 'Content-Type: application/json' \
-  -d '{"data":{"customer_id":"cust_001","name":"Alice"}}')
-
-CMD=$(echo "$CREATE" | jq -r '.command_id')
-curl -fsS "http://localhost:8002/api/v1/database/demo_db/instances/command/${CMD}/status" | jq .
-```
-
-### 4) 멀티홉 쿼리(그래프 + ES federation)
-
-```bash
-curl -fsS -X POST http://localhost:8002/api/v1/graph-query/demo_db \
+curl -fsS -X POST "http://localhost:8000/api/v1/database/${DB}/ontology" \
   -H 'Content-Type: application/json' \
   -d '{
-    "start_class":"Customer",
-    "hops":[],
-    "filters":{"customer_id":"cust_001"},
+    "id":"Product",
+    "label":"Product",
+    "properties":[
+      {"name":"product_id","type":"string","required":true},
+      {"name":"name","type":"string","required":true}
+    ],
+    "relationships":[
+      {"predicate":"owned_by","target":"Customer","label":"Owned By","cardinality":"n:1"}
+    ]
+  }' | jq .
+
+# 3) Create instances (OMS; async 202) and capture command_ids
+CUST_CMD=$(curl -fsS -X POST "http://localhost:8000/api/v1/instances/${DB}/async/Customer/create" \
+  -H 'Content-Type: application/json' \
+  -d '{"data":{"customer_id":"cust_001","name":"Alice"}}' | jq -r '.command_id')
+
+PROD_CMD=$(curl -fsS -X POST "http://localhost:8000/api/v1/instances/${DB}/async/Product/create" \
+  -H 'Content-Type: application/json' \
+  -d '{"data":{"product_id":"prod_001","name":"Shirt","owned_by":"Customer/cust_001"}}' | jq -r '.command_id')
+
+# 4) Observe async completion (OMS command status)
+curl -fsS "http://localhost:8000/api/v1/commands/${CUST_CMD}/status" | jq .
+curl -fsS "http://localhost:8000/api/v1/commands/${PROD_CMD}/status" | jq .
+
+# 5) Multi-hop query (BFF federation)
+curl -fsS -X POST "http://localhost:8002/api/v1/graph-query/${DB}" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "start_class":"Product",
+    "hops":[{"predicate":"owned_by","target_class":"Customer"}],
+    "filters":{"product_id":"prod_001"},
     "limit":10,
     "offset":0,
     "max_nodes":200,
     "max_edges":500,
-    "include_paths":false,
     "no_cycles":true,
     "include_documents":true
   }' | jq .
 ```
 
----
+Expected: the response includes nodes/edges and each node exposes `data_status=FULL|PARTIAL|MISSING` so UI can distinguish “index lag” from “missing entity”.
 
-## 테스트(무목, 실제 인프라)
+## 8) Testing (no mocks)
 
-프로덕션 게이트(기본):
+Production gate:
 
 ```bash
 PYTHON_BIN=python3.12 ./backend/run_production_tests.sh --full
 ```
 
-추가 카오스 시나리오(파괴적: docker compose stop/start/restart 포함):
+Chaos (destructive; stops/restarts infra and crashes workers on purpose):
 
 ```bash
 PYTHON_BIN=python3.12 ./backend/run_production_tests.sh --full --chaos-lite
@@ -175,22 +169,18 @@ PYTHON_BIN=python3.12 ./backend/run_production_tests.sh --full --chaos-out-of-or
 PYTHON_BIN=python3.12 SOAK_SECONDS=600 SOAK_SEED=123 ./backend/run_production_tests.sh --full --chaos-soak
 ```
 
----
+## 9) Limitations / PoC vs Production
 
-## 문서
+- **No Saga/compensation orchestration yet** (planned): failures are observable via command status, but automated compensation is not shipped.
+- **No automated drift reconciliation/backfill pipeline yet** (planned): projections can be replayed, but fully managed “reindex/backfill jobs + SLAs” are not turnkey.
+- **DLQ is a topic, not a full ops workflow by default**: projection sends to DLQ after retries, but continuous DLQ reprocessing/alerting needs production wiring.
+- **Security model is PoC-grade** unless you harden it (authn/authz, tenant isolation, secrets, rate limits, audit retention).
+- **Capacity planning** (indexes/retention/partitioning) must be done before high TPS (especially Postgres registry growth).
 
-- 문서 인덱스: `docs/README.md`
-- 아키텍처: `docs/ARCHITECTURE.md`
-- 멱등/순서/OCC 계약: `docs/IDEMPOTENCY_CONTRACT.md`
-- 운영/런북: `docs/OPERATIONS.md`, `backend/PRODUCTION_MIGRATION_RUNBOOK.md`
-- 백엔드 프로덕션 테스트 가이드: `backend/docs/testing/OMS_PRODUCTION_TEST_README.md`
+## 10) Docs
 
----
-
-## 주의 사항(운영 관점)
-
-- Postgres(`processed_events`/`aggregate_versions`/seq allocator)는 이제 “선택”이 아니라 **정합성 계약의 핵심 의존성**입니다.
-- Kafka/Publisher는 at-least-once이므로, Consumer 멱등/순서 가드가 “마지막 관문”입니다.
-- `expected_seq`를 올바르게 사용하면 write-side에서 충돌을 409로 감지할 수 있습니다(충돌 시 재시도/리프레시 정책 필요).
-
-마지막 업데이트: 2025-12-18
+- Index: `docs/README.md`
+- Architecture: `docs/ARCHITECTURE.md`
+- Reliability contract: `docs/IDEMPOTENCY_CONTRACT.md`
+- Ops/runbook: `docs/OPERATIONS.md`, `backend/PRODUCTION_MIGRATION_RUNBOOK.md`
+- Production tests: `backend/docs/testing/OMS_PRODUCTION_TEST_README.md`
