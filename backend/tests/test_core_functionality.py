@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 from tests.utils.auth import bff_auth_headers, oms_auth_headers
+from shared.config.search_config import get_ontologies_index_name
 
 # Real service endpoints
 OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhost:8000").rstrip("/")
@@ -193,6 +194,30 @@ async def _wait_for_ontology_present(
     raise AssertionError(f"Timed out waiting for ontology '{ontology_id}' (last={last})")
 
 
+async def _wait_for_es_doc(
+    session: aiohttp.ClientSession,
+    *,
+    index_name: str,
+    doc_id: str,
+    timeout_seconds: int = 60,
+    poll_interval_seconds: float = 1.0,
+) -> Dict[str, Any]:
+    deadline = time.monotonic() + timeout_seconds
+    last: Optional[Dict[str, Any]] = None
+
+    while time.monotonic() < deadline:
+        async with session.get(f"{ELASTICSEARCH_URL}/{index_name}/_doc/{doc_id}") as resp:
+            if resp.status == 200:
+                payload = await resp.json()
+                if payload.get("found") is True or payload.get("_source"):
+                    return payload
+            else:
+                last = {"status": resp.status, "body": await resp.text()}
+        await asyncio.sleep(poll_interval_seconds)
+
+    raise AssertionError(f"Timed out waiting for ES doc {index_name}/{doc_id} (last={last})")
+
+
 class TestCoreOntologyManagement:
     """Test suite for Ontology Management Service"""
     pytestmark = pytest.mark.integration
@@ -303,6 +328,110 @@ class TestCoreOntologyManagement:
                 assert "command_id" in (result.get("data") or {})
 
             await _wait_for_ontology_present(session, db_name=db_name, ontology_id="TestProduct")
+
+    @pytest.mark.asyncio
+    async def test_ontology_i18n_label_projection(self):
+        """Ensure i18n labels are normalized for ES and preserved in label_i18n."""
+        async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
+            db_name = f"test_ontology_i18n_db_{uuid.uuid4().hex[:8]}"
+
+            async with session.post(
+                f"{OMS_URL}/api/v1/database/create",
+                json={"name": db_name, "description": "Ontology i18n test"},
+            ) as resp:
+                assert resp.status == 202
+
+            await _wait_for_db_exists(session, db_name=db_name, expected=True)
+
+            customer = {
+                "id": "Customer",
+                "label": {"en": "Customer", "ko": "고객"},
+                "description": {"en": "Customer target", "ko": "관계 대상 고객"},
+                "properties": [
+                    {
+                        "name": "customer_id",
+                        "type": "string",
+                        "label": {"en": "Customer ID", "ko": "고객 ID"},
+                        "required": True,
+                    }
+                ],
+                "relationships": [],
+            }
+            async with session.post(f"{OMS_URL}/api/v1/database/{db_name}/ontology", json=customer) as resp:
+                assert resp.status == 202
+
+            await _wait_for_ontology_present(session, db_name=db_name, ontology_id="Customer")
+
+            product = {
+                "id": "I18nProduct",
+                "label": {"en": "Product", "ko": "제품"},
+                "description": {"en": "Product data", "ko": "제품 데이터"},
+                "properties": [
+                    {
+                        "name": "product_id",
+                        "type": "string",
+                        "label": {"en": "Product ID", "ko": "제품 ID"},
+                        "description": {"en": "Primary product identifier", "ko": "제품 기본 ID"},
+                        "required": True,
+                    }
+                ],
+                "relationships": [
+                    {
+                        "predicate": "owned_by",
+                        "target": "Customer",
+                        "label": {"en": "Owned By", "ko": "소유자"},
+                        "inverse_label": {"en": "Owns", "ko": "소유"},
+                        "description": {"en": "Ownership link", "ko": "소유 관계"},
+                        "cardinality": "n:1",
+                    }
+                ],
+            }
+
+            async with session.post(f"{OMS_URL}/api/v1/database/{db_name}/ontology", json=product) as resp:
+                assert resp.status == 202
+                result = await resp.json()
+                assert result.get("status") == "accepted"
+
+            await _wait_for_ontology_present(session, db_name=db_name, ontology_id="I18nProduct")
+
+            index_name = get_ontologies_index_name(db_name)
+            es_doc = await _wait_for_es_doc(
+                session,
+                index_name=index_name,
+                doc_id="I18nProduct",
+            )
+            source = es_doc.get("_source") or {}
+
+            label_value = source.get("label")
+            assert isinstance(label_value, str)
+            assert label_value == "제품"
+            label_i18n = source.get("label_i18n") or {}
+            assert label_i18n.get("en") == "Product"
+            assert label_i18n.get("ko") == "제품"
+
+            props = {p.get("name"): p for p in (source.get("properties") or [])}
+            prop = props.get("product_id")
+            assert prop is not None
+            assert isinstance(prop.get("label"), str)
+            assert prop.get("label") == "제품 ID"
+            prop_label_i18n = prop.get("label_i18n") or {}
+            assert prop_label_i18n.get("en") == "Product ID"
+            assert prop_label_i18n.get("ko") == "제품 ID"
+            prop_desc_i18n = prop.get("description_i18n") or {}
+            assert prop_desc_i18n.get("en") == "Primary product identifier"
+            assert prop_desc_i18n.get("ko") == "제품 기본 ID"
+
+            rels = {(r.get("predicate"), r.get("target")): r for r in (source.get("relationships") or [])}
+            rel = rels.get(("owned_by", "Customer"))
+            assert rel is not None
+            assert isinstance(rel.get("label"), str)
+            assert rel.get("label") == "소유자"
+            rel_label_i18n = rel.get("label_i18n") or {}
+            assert rel_label_i18n.get("en") == "Owned By"
+            assert rel_label_i18n.get("ko") == "소유자"
+            rel_inverse_i18n = rel.get("inverse_label_i18n") or {}
+            assert rel_inverse_i18n.get("en") == "Owns"
+            assert rel_inverse_i18n.get("ko") == "소유"
 
     @pytest.mark.asyncio
     async def test_ontology_creation_advanced_relationships(self):

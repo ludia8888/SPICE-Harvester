@@ -43,6 +43,7 @@ from shared.services.lineage_store import LineageStore
 from shared.services.audit_log_store import AuditLogStore
 from shared.utils.chaos import maybe_crash
 from shared.utils.ontology_version import split_ref_commit
+from shared.utils.language import coerce_localized_text, select_localized_text, get_default_language
 
 # Observability imports
 from shared.observability.tracing import get_tracing_service
@@ -129,6 +130,102 @@ class ProjectionWorker:
             return int(value)
         except Exception:
             return None
+
+    @staticmethod
+    def _normalize_localized_field(value: Any, *, default_lang: str) -> tuple[str, Dict[str, str]]:
+        i18n_map = coerce_localized_text(value, default_lang=default_lang)
+        text = select_localized_text(value, lang=default_lang)
+        if not text and value is not None and not i18n_map:
+            try:
+                text = str(value).strip()
+            except Exception:
+                text = ""
+        return text, i18n_map
+
+    def _normalize_ontology_properties(
+        self,
+        properties: List[Any],
+        *,
+        default_lang: str,
+    ) -> List[Dict[str, Any]]:
+        normalized: List[Dict[str, Any]] = []
+        for prop in properties or []:
+            if not isinstance(prop, dict):
+                logger.warning(f"Skipping non-dict ontology property payload: {prop}")
+                continue
+            item = dict(prop)
+            label_text, label_i18n = self._normalize_localized_field(
+                prop.get("label"),
+                default_lang=default_lang,
+            )
+            if label_text or "label" in item:
+                item["label"] = label_text
+            if label_i18n:
+                item["label_i18n"] = label_i18n
+            else:
+                item.pop("label_i18n", None)
+
+            description_text, description_i18n = self._normalize_localized_field(
+                prop.get("description"),
+                default_lang=default_lang,
+            )
+            if description_text or "description" in item:
+                item["description"] = description_text
+            if description_i18n:
+                item["description_i18n"] = description_i18n
+            else:
+                item.pop("description_i18n", None)
+
+            normalized.append(item)
+        return normalized
+
+    def _normalize_ontology_relationships(
+        self,
+        relationships: List[Any],
+        *,
+        default_lang: str,
+    ) -> List[Dict[str, Any]]:
+        normalized: List[Dict[str, Any]] = []
+        for rel in relationships or []:
+            if not isinstance(rel, dict):
+                logger.warning(f"Skipping non-dict ontology relationship payload: {rel}")
+                continue
+            item = dict(rel)
+            label_text, label_i18n = self._normalize_localized_field(
+                rel.get("label"),
+                default_lang=default_lang,
+            )
+            if label_text or "label" in item:
+                item["label"] = label_text
+            if label_i18n:
+                item["label_i18n"] = label_i18n
+            else:
+                item.pop("label_i18n", None)
+
+            description_text, description_i18n = self._normalize_localized_field(
+                rel.get("description"),
+                default_lang=default_lang,
+            )
+            if description_text or "description" in item:
+                item["description"] = description_text
+            if description_i18n:
+                item["description_i18n"] = description_i18n
+            else:
+                item.pop("description_i18n", None)
+
+            inverse_label_text, inverse_label_i18n = self._normalize_localized_field(
+                rel.get("inverse_label"),
+                default_lang=default_lang,
+            )
+            if inverse_label_text or "inverse_label" in item:
+                item["inverse_label"] = inverse_label_text
+            if inverse_label_i18n:
+                item["inverse_label_i18n"] = inverse_label_i18n
+            else:
+                item.pop("inverse_label_i18n", None)
+
+            normalized.append(item)
+        return normalized
 
     @staticmethod
     def _extract_envelope_metadata(event_data: Dict[str, Any]) -> Dict[str, Optional[str]]:
@@ -395,6 +492,40 @@ class ProjectionWorker:
                 )
             except Exception as e:
                 logger.debug(f"Failed to update mapping for ontology stamps (index={index_name}): {e}")
+
+            if index_type == "ontologies":
+                try:
+                    i18n_text_mapping = {
+                        "type": "object",
+                        "properties": {
+                            "en": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
+                            "ko": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
+                        },
+                    }
+                    await self.elasticsearch_service.update_mapping(
+                        index_name,
+                        properties={
+                            "label_i18n": i18n_text_mapping,
+                            "description_i18n": i18n_text_mapping,
+                            "properties": {
+                                "type": "nested",
+                                "properties": {
+                                    "label_i18n": i18n_text_mapping,
+                                    "description_i18n": i18n_text_mapping,
+                                },
+                            },
+                            "relationships": {
+                                "type": "nested",
+                                "properties": {
+                                    "label_i18n": i18n_text_mapping,
+                                    "description_i18n": i18n_text_mapping,
+                                    "inverse_label_i18n": i18n_text_mapping,
+                                },
+                            },
+                        },
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to update mapping for i18n labels (index={index_name}): {e}")
                 
             self.created_indices.add(index_name)
             return index_name
@@ -1236,12 +1367,30 @@ class ProjectionWorker:
                 event_meta = {}
             ontology_ref, ontology_commit = split_ref_commit(event_meta.get("ontology"))
 
+            default_lang = get_default_language()
+            label_text, label_i18n = self._normalize_localized_field(
+                ontology_data.get('label'),
+                default_lang=default_lang,
+            )
+            description_text, description_i18n = self._normalize_localized_field(
+                ontology_data.get('description'),
+                default_lang=default_lang,
+            )
+            properties = self._normalize_ontology_properties(
+                ontology_data.get('properties', []),
+                default_lang=default_lang,
+            )
+            relationships = self._normalize_ontology_relationships(
+                ontology_data.get('relationships', []),
+                default_lang=default_lang,
+            )
+
             doc = {
                 'class_id': class_id,
-                'label': ontology_data.get('label'),
-                'description': ontology_data.get('description'),
-                'properties': ontology_data.get('properties', []),
-                'relationships': ontology_data.get('relationships', []),
+                'label': label_text,
+                'description': description_text,
+                'properties': properties,
+                'relationships': relationships,
                 'parent_classes': ontology_data.get('parent_classes', []),
                 'child_classes': ontology_data.get('child_classes', []),
                 'db_name': db_name,
@@ -1255,6 +1404,10 @@ class ProjectionWorker:
                 'created_at': datetime.now(timezone.utc).isoformat(),
                 'updated_at': datetime.now(timezone.utc).isoformat()
             }
+            if label_i18n:
+                doc['label_i18n'] = label_i18n
+            if description_i18n:
+                doc['description_i18n'] = description_i18n
             
             # 인덱싱 (external version guard)
             try:
@@ -1318,7 +1471,7 @@ class ProjectionWorker:
             # Redis에 클래스 라벨 캐싱 (DB별로 키 구분)
             await self._cache_class_label(
                 class_id,
-                ontology_data.get('label'),
+                label_text,
                 db_name,
                 branch=branch,
             )
@@ -1407,12 +1560,29 @@ class ProjectionWorker:
             ontology_ref, ontology_commit = split_ref_commit(event_meta.get("ontology"))
             
             # 업데이트 문서 구성
+            default_lang = get_default_language()
+            label_text, label_i18n = self._normalize_localized_field(
+                ontology_data.get('label'),
+                default_lang=default_lang,
+            )
+            description_text, description_i18n = self._normalize_localized_field(
+                ontology_data.get('description'),
+                default_lang=default_lang,
+            )
+            properties = self._normalize_ontology_properties(
+                ontology_data.get('properties', []),
+                default_lang=default_lang,
+            )
+            relationships = self._normalize_ontology_relationships(
+                ontology_data.get('relationships', []),
+                default_lang=default_lang,
+            )
             doc = {
                 'class_id': class_id,
-                'label': ontology_data.get('label'),
-                'description': ontology_data.get('description'),
-                'properties': ontology_data.get('properties', []),
-                'relationships': ontology_data.get('relationships', []),
+                'label': label_text,
+                'description': description_text,
+                'properties': properties,
+                'relationships': relationships,
                 'parent_classes': ontology_data.get('parent_classes', []),
                 'child_classes': ontology_data.get('child_classes', []),
                 'db_name': db_name,
@@ -1426,6 +1596,10 @@ class ProjectionWorker:
                 'created_at': created_at or datetime.now(timezone.utc).isoformat(),
                 'updated_at': datetime.now(timezone.utc).isoformat()
             }
+            if label_i18n:
+                doc['label_i18n'] = label_i18n
+            if description_i18n:
+                doc['description_i18n'] = description_i18n
             
             try:
                 if incoming_seq is not None:
@@ -1496,7 +1670,7 @@ class ProjectionWorker:
             # Redis 캐시 업데이트 (DB별로 키 구분)
             await self._cache_class_label(
                 class_id,
-                ontology_data.get('label'),
+                label_text,
                 db_name,
                 branch=branch,
             )
@@ -1970,6 +2144,8 @@ class ProjectionWorker:
                         
                         if doc:
                             label = doc.get('label')
+                            if isinstance(label, dict):
+                                label = select_localized_text(label, lang=get_default_language())
                             if label:
                                 # 캐시에 저장 (1시간 TTL)
                                 await self.redis_service.client.setex(
@@ -2024,6 +2200,8 @@ class ProjectionWorker:
             
             if doc:
                 label = doc.get('label')
+                if isinstance(label, dict):
+                    label = select_localized_text(label, lang=get_default_language())
                 if label:
                     # 짧은 시간만 캐싱 (경합 상황이므로)
                     cache_key = AppConfig.get_class_label_key(db_name, class_id, branch)
