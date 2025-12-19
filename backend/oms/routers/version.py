@@ -8,7 +8,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from oms.dependencies import TerminusServiceDep
 from oms.services.async_terminus import AsyncTerminusService
@@ -58,9 +58,14 @@ class MergeRequest(BaseModel):
 class RollbackRequest(BaseModel):
     """롤백 요청"""
 
-    target: str  # 커밋 ID 또는 상대 참조 (예: HEAD~1)
+    # Accept both `target_commit` (new) and legacy `target` payloads.
+    target_commit: str = Field(..., alias="target")  # 커밋 ID 또는 상대 참조 (예: HEAD~1)
+    reason: Optional[str] = None
 
-    model_config = ConfigDict(json_schema_extra={"example": {"target": "HEAD~1"}})
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={"example": {"target_commit": "HEAD~1", "reason": "Rollback to stable commit"}},
+    )
 
 
 _PROTECTED_BRANCHES = {"main", "master", "production", "prod"}
@@ -394,7 +399,7 @@ async def rollback(
 
         # 요청 데이터 정화
         sanitized_data = sanitize_input(request.model_dump(mode="json"))
-        target = sanitized_data["target"]
+        target = sanitized_data["target_commit"]
 
         target_branch = branch
         if target_branch:
@@ -417,6 +422,7 @@ async def rollback(
                         "db_name": db_name,
                         "branch": target_branch,
                         "target": target,
+                        "target_commit": target,
                         "protected": True,
                         "reason": "protected_branch",
                     },
@@ -449,6 +455,8 @@ async def rollback(
                     "db_name": db_name,
                     "branch": target_branch,
                     "target": target,
+                    "target_commit": target,
+                    "reason": getattr(request, "reason", None),
                 },
             )
         except Exception as e:
@@ -474,6 +482,7 @@ async def rollback(
                     "db_name": db_name,
                     "branch": target_branch,
                     "target": target,
+                    "target_commit": target,
                 },
             )
         except Exception:
@@ -484,6 +493,7 @@ async def rollback(
             message=f"'{target}'(으)로 롤백했습니다",
             data={
                 "target": target,
+                "target_commit": target,
                 "branch": target_branch,
                 "current_branch": await terminus.get_current_branch(db_name),
             }
@@ -508,7 +518,13 @@ async def rollback(
                 status="failure",
                 resource_type="terminus_branch",
                 resource_id=f"terminus:{db_name}:{branch or 'current'}",
-                metadata={"db_name": db_name, "branch": branch, "target": getattr(request, "target", None)},
+                metadata={
+                    "db_name": db_name,
+                    "branch": branch,
+                    "target": getattr(request, "target_commit", None),
+                    "target_commit": getattr(request, "target_commit", None),
+                    "reason": getattr(request, "reason", None),
+                },
                 error=str(e),
             )
         except Exception:
