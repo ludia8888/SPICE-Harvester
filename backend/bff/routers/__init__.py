@@ -20,6 +20,7 @@ from . import graph
 from . import lineage
 from . import audit
 from . import ai
+from . import summary
 
 __all__ = [
     "database",
@@ -38,4 +39,5 @@ __all__ = [
     "lineage",
     "audit",
     "ai",
+    "summary",
 ]

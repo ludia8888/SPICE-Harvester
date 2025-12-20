@@ -4,9 +4,12 @@ Handles database creation, deletion, and listing
 """
 
 import logging
+import os
+import re
 from typing import Any, Dict, List, Optional
 
 import httpx
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 from fastapi.responses import JSONResponse
 
@@ -23,10 +26,35 @@ from shared.security.input_sanitizer import (
 
 # Add shared path for common utilities
 from shared.utils.language import get_accept_language
+from shared.config.service_config import ServiceConfig
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/databases", tags=["Database Management"])
+
+
+async def _get_expected_seq_for_database(db_name: str) -> int:
+    schema = os.getenv("EVENT_STORE_SEQUENCE_SCHEMA", "spice_event_registry")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", schema):
+        raise ValueError(f"Invalid EVENT_STORE_SEQUENCE_SCHEMA: {schema!r}")
+
+    prefix = (os.getenv("EVENT_STORE_SEQUENCE_HANDLER_PREFIX", "write_side") or "write_side").strip()
+    handler = f"{prefix}:Database"
+
+    conn = await asyncpg.connect(ServiceConfig.get_postgres_url())
+    try:
+        value = await conn.fetchval(
+            f"""
+            SELECT last_sequence
+            FROM {schema}.aggregate_versions
+            WHERE handler = $1 AND aggregate_id = $2
+            """,
+            handler,
+            db_name,
+        )
+        return int(value or 0)
+    finally:
+        await conn.close()
 
 
 @router.get("", response_model=ApiResponse)
@@ -294,6 +322,32 @@ async def get_database(db_name: str, oms: OMSClient = OMSClientDep):
             )
 
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/{db_name}/expected-seq", response_model=ApiResponse)
+async def get_database_expected_seq(
+    db_name: str,
+):
+    """
+    Resolve the current `expected_seq` for database (aggregate) operations.
+
+    Frontend policy: OCC tokens should be treated as resource versions, not user input.
+    """
+    try:
+        db_name = validate_db_name(db_name)
+        expected_seq = await _get_expected_seq_for_database(db_name)
+        return ApiResponse.success(
+            message="Database expected_seq fetched",
+            data={"db_name": db_name, "expected_seq": expected_seq},
+        ).to_dict()
+    except SecurityViolationError as e:
+        logger.warning(f"Security validation failed for expected-seq ({db_name}): {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    except Exception as e:
+        logger.error(f"Failed to get expected_seq for database '{db_name}': {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
 
 
 @router.get("/{db_name}/classes")

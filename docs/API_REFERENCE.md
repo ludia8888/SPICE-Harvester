@@ -266,6 +266,9 @@ docker compose -f docker-compose.full.yml up -d --build
 - `POST /api/v1/ai/query/{db_name}` — DB 대상 LLM 보조 질의 실행. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: JSON(OpenAPI 스키마).
 - `POST /api/v1/ai/translate/query-plan/{db_name}` — 쿼리 플랜을 실행 가능한 질의로 변환. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: JSON(OpenAPI 스키마).
 
+### Summary (**안정**)
+- `GET /api/v1/summary?db=<db_name>&branch=<branch>` — 프론트엔드용 시스템 요약(컨텍스트/보호 브랜치 정책/Redis·ES 헬스/Terminus 브랜치 정보). 응답: `ApiResponse`.
+
 ### 관리자 작업 (**운영자 전용**)
 - `POST /api/v1/admin/replay-instance-state` — 이벤트 재생으로 인스턴스 상태 재구성 작업 생성. 권한: 운영자 전용. 요청: JSON 바디(OpenAPI 스키마). 응답: 작업 ID/상태 포함 JSON(OpenAPI 스키마).
 - `GET /api/v1/admin/replay-instance-state/{task_id}/result` — 재생 작업 결과 조회. 권한: 운영자 전용. 요청: 경로 `task_id`. 응답: 결과 JSON(OpenAPI 스키마).
@@ -327,6 +330,7 @@ docker compose -f docker-compose.full.yml up -d --build
 - `POST /api/v1/databases` — 데이터베이스 생성(비동기, **HTTP 202**). 요청: JSON 바디(`name`, `description` 등; OpenAPI 스키마). 응답: `ApiResponse` + `data.command_id`.
 - `GET /api/v1/databases/{db_name}` — 데이터베이스 정보 조회. 요청: 경로 `db_name`. 응답: JSON(OpenAPI 스키마).
 - `DELETE /api/v1/databases/{db_name}` — 데이터베이스 삭제(비동기, **HTTP 202**). 요청: 경로 `db_name`, `expected_seq` 필요(OCC, 위치/형식 OpenAPI 참고). 응답: `ApiResponse` + `command_id`.
+- `GET /api/v1/databases/{db_name}/expected-seq` — 데이터베이스 OCC 토큰(`expected_seq`) 조회(프론트 편의). 응답: `ApiResponse` + `data.expected_seq`.
 - `GET /api/v1/databases/{db_name}/branches` — 브랜치 목록 조회. 요청: 경로 `db_name`. 응답: JSON(OpenAPI 스키마).
 - `POST /api/v1/databases/{db_name}/branches` — 브랜치 생성. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: JSON(OpenAPI 스키마).
 - `GET /api/v1/databases/{db_name}/branches/{branch_name}` — 브랜치 정보 조회. 요청: 경로 `db_name`, `branch_name`. 응답: JSON(OpenAPI 스키마).

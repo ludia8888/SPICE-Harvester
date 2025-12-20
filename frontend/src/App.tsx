@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Alignment,
-  Alert,
   Button,
   Card,
   Divider,
@@ -16,100 +16,28 @@ import {
   NavbarHeading,
   Popover,
   Position,
+  Switch,
   Text,
   TextArea,
   Intent,
 } from '@blueprintjs/core'
+import type { IconName } from '@blueprintjs/icons'
+import {
+  createDatabase,
+  deleteDatabase,
+  getDatabaseExpectedSeq,
+  listDatabases,
+  openDatabase,
+} from './api/bff'
+import { DangerConfirmDialog } from './components/DangerConfirmDialog'
+import { classifyError } from './errors/classifyError'
+import { qk } from './query/queryKeys'
+import { useAppStore } from './store/useAppStore'
+import type { Language } from './types/app'
 import './App.css'
 
-const fallbackDatabases = ['demo_db', 'supply_chain', 'energy_ops']
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api/v1'
-type Language = 'en' | 'ko'
 type StatusMessage = { type: 'success' | 'error' | 'info'; text: string }
 
-const PROJECT_QUERY_KEY = 'project'
-const STORAGE_KEYS = {
-  project: 'spice.project',
-  adminToken: 'spice.adminToken',
-}
-
-const buildApiUrl = (path: string, language: Language) => {
-  const normalizedPath = path.replace(/^\/+/, '')
-  const base = API_BASE_URL.replace(/\/+$/, '')
-  const url = base.startsWith('http')
-    ? new URL(`${base}/${normalizedPath}`)
-    : new URL(`${base}/${normalizedPath}`, window.location.origin)
-  url.searchParams.set('lang', language)
-  return url.toString()
-}
-
-const buildHeaders = (language: Language, adminToken: string, json = false) => {
-  const headers = new Headers({ 'Accept-Language': language })
-  if (adminToken) {
-    headers.set('X-Admin-Token', adminToken)
-  }
-  if (json) {
-    headers.set('Content-Type', 'application/json')
-  }
-  return headers
-}
-
-const readPersistedProject = () => {
-  if (typeof window === 'undefined') {
-    return null
-  }
-
-  const params = new URLSearchParams(window.location.search)
-  const fromUrl = params.get(PROJECT_QUERY_KEY)
-  if (fromUrl) {
-    return fromUrl
-  }
-
-  try {
-    return localStorage.getItem(STORAGE_KEYS.project)
-  } catch {
-    return null
-  }
-}
-
-const readPersistedAdminToken = () => {
-  const fromEnv = import.meta.env.VITE_ADMIN_TOKEN
-  if (fromEnv) {
-    return fromEnv
-  }
-  if (typeof window === 'undefined') {
-    return null
-  }
-  try {
-    return localStorage.getItem(STORAGE_KEYS.adminToken)
-  } catch {
-    return null
-  }
-}
-
-const syncProjectSelection = (project: string | null) => {
-  if (typeof window === 'undefined') {
-    return
-  }
-
-  const url = new URL(window.location.href)
-  if (project) {
-    url.searchParams.set(PROJECT_QUERY_KEY, project)
-    try {
-      localStorage.setItem(STORAGE_KEYS.project, project)
-    } catch (error) {
-      void error
-    }
-  } else {
-    url.searchParams.delete(PROJECT_QUERY_KEY)
-    try {
-      localStorage.removeItem(STORAGE_KEYS.project)
-    } catch (error) {
-      void error
-    }
-  }
-  window.history.replaceState({}, '', url)
-}
 const copyByLang = {
   en: {
     navTitle: 'SPICE Harvester',
@@ -162,6 +90,9 @@ const copyByLang = {
       { label: 'English', value: 'en' },
       { label: '한국어', value: 'ko' },
     ],
+    branchLabel: 'Branch',
+    branchHelper: 'Branch is part of the URL context (SSoT).',
+    branchPlaceholder: 'e.g. main',
     loadError: 'Failed to load projects. Check the BFF server.',
     projectHelper: 'Selected project (db_name)',
     projectEmpty: 'No project selected',
@@ -191,6 +122,18 @@ const copyByLang = {
     tokenLabel: 'Admin token',
     tokenHelper: 'Uses X-Admin-Token header for BFF.',
     tokenPlaceholder: 'e.g. change_me',
+    rememberTokenLabel: 'Remember token on this device',
+    adminModeLabel: 'Admin mode (dangerous actions)',
+    adminModeWarning: 'Admin mode enables irreversible operations. Proceed carefully.',
+    auditLinkLabel: 'Open recent audit logs',
+    adminModeRequired: 'Enable Admin mode to perform this action.',
+    changeReasonLabel: 'Change reason',
+    changeReasonPlaceholder: 'Why are you doing this?',
+    typedConfirmLabel: 'Type the project name to confirm',
+    dangerConfirmHint: 'Required for auditability and safer operations.',
+    commandsTitle: 'Commands',
+    commandsCurrent: 'This context',
+    commandsOther: 'Other contexts',
   },
   ko: {
     navTitle: 'SPICE Harvester',
@@ -243,6 +186,9 @@ const copyByLang = {
       { label: '한국어', value: 'ko' },
       { label: 'English', value: 'en' },
     ],
+    branchLabel: '브랜치',
+    branchHelper: '브랜치는 URL 컨텍스트(SSoT)에 포함됩니다.',
+    branchPlaceholder: '예: main',
     loadError: '프로젝트 목록을 불러오지 못했습니다. BFF 서버를 확인하세요.',
     projectHelper: '선택된 프로젝트 (db_name)',
     projectEmpty: '선택된 프로젝트 없음',
@@ -272,30 +218,50 @@ const copyByLang = {
     tokenLabel: '관리자 토큰',
     tokenHelper: 'BFF 호출 시 X-Admin-Token 헤더를 사용합니다.',
     tokenPlaceholder: '예: change_me',
+    rememberTokenLabel: '이 기기에서 토큰 기억하기',
+    adminModeLabel: '관리자 모드(위험 작업)',
+    adminModeWarning: '관리자 모드는 되돌릴 수 없는 작업을 활성화합니다. 주의하세요.',
+    auditLinkLabel: '최근 감사 로그 보기',
+    adminModeRequired: '이 작업을 하려면 관리자 모드를 켜야 합니다.',
+    changeReasonLabel: '변경 사유',
+    changeReasonPlaceholder: '왜 이 작업을 하나요?',
+    typedConfirmLabel: '확인을 위해 프로젝트 이름을 입력하세요',
+    dangerConfirmHint: '감사/추적과 안전한 운영을 위해 필요합니다.',
+    commandsTitle: '커맨드',
+    commandsCurrent: '현재 컨텍스트',
+    commandsOther: '다른 컨텍스트',
   },
 } as const
 
 function App() {
-  const [selectedDb, setSelectedDb] = useState(
-    () => readPersistedProject() ?? fallbackDatabases[0],
-  )
+  const queryClient = useQueryClient()
+  const context = useAppStore((state) => state.context)
+  const adminToken = useAppStore((state) => state.adminToken)
+  const rememberToken = useAppStore((state) => state.rememberToken)
+  const adminMode = useAppStore((state) => state.adminMode)
+  const commands = useAppStore((state) => state.commands)
+
+  const setProject = useAppStore((state) => state.setProject)
+  const setBranch = useAppStore((state) => state.setBranch)
+  const setLanguage = useAppStore((state) => state.setLanguage)
+  const setAdminToken = useAppStore((state) => state.setAdminToken)
+  const setRememberToken = useAppStore((state) => state.setRememberToken)
+  const setAdminMode = useAppStore((state) => state.setAdminMode)
+  const trackCommand = useAppStore((state) => state.trackCommand)
+
+  const selectedDb = context.project ?? ''
+  const canRead = Boolean(adminToken)
+  const canWrite = Boolean(adminToken) && adminMode
+
   const [newDbName, setNewDbName] = useState('')
   const [newDbDescription, setNewDbDescription] = useState('')
-  const [language, setLanguage] = useState<Language>('ko')
-  const [adminToken, setAdminToken] = useState(() => readPersistedAdminToken() ?? '')
-  const [databases, setDatabases] = useState<string[]>(fallbackDatabases)
-  const [dbLoading, setDbLoading] = useState(false)
-  const [dbError, setDbError] = useState<string | null>(null)
-  const [openLoading, setOpenLoading] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
-  const [deleteLoading, setDeleteLoading] = useState(false)
-  const [deleteExpectedSeq, setDeleteExpectedSeq] = useState('1')
   const [deleteStatus, setDeleteStatus] = useState<StatusMessage | null>(null)
-  const [createLoading, setCreateLoading] = useState(false)
   const [selectStatus, setSelectStatus] = useState<StatusMessage | null>(null)
   const [createStatus, setCreateStatus] = useState<StatusMessage | null>(null)
-  const copy = copyByLang[language]
-  const railItems = [
+
+  const copy = copyByLang[context.language]
+  const railItems: Array<{ icon: IconName; label: string; active?: boolean }> = [
     { icon: 'home', label: copy.rail.home },
     { icon: 'folder-open', label: copy.rail.projects, active: true },
     { icon: 'database', label: copy.rail.db },
@@ -306,263 +272,243 @@ function App() {
     { icon: 'console', label: copy.rail.commands },
     { icon: 'dashboard', label: copy.rail.monitoring },
   ]
-  const loadDatabases = useCallback(async () => {
-    setDbLoading(true)
-    setDbError(null)
 
-    try {
-      const response = await fetch(buildApiUrl('databases', language), {
-        headers: buildHeaders(language, adminToken),
-      })
+  const requestContext = useMemo(
+    () => ({ language: context.language, adminToken }),
+    [adminToken, context.language],
+  )
 
-      if (response.status === 401) {
-        setDbError(copy.authRequired)
-        return
-      }
+  const databasesQuery = useQuery({
+    queryKey: qk.databases(context.language),
+    queryFn: () => listDatabases(requestContext),
+    enabled: canRead,
+  })
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-
-      const payload = (await response.json()) as {
-        data?: { databases?: Array<{ name?: string }> }
-      }
-
-      const names =
-        payload?.data?.databases
-          ?.map((db) => db?.name)
-          .filter((name): name is string => Boolean(name)) ?? []
-
-      setDatabases(names)
-      setSelectedDb((current) => (names.includes(current) ? current : names[0] ?? ''))
-    } catch (error) {
-      console.error('Failed to load projects', error)
-      setDbError(copy.loadError)
-    } finally {
-      setDbLoading(false)
+  const databases = useMemo(() => (canRead ? databasesQuery.data ?? [] : []), [canRead, databasesQuery.data])
+  const projectOptions = useMemo(() => {
+    const options = databases.map((name) => ({ label: name, value: name }))
+    if (selectedDb && !databases.includes(selectedDb)) {
+      options.unshift({ label: selectedDb, value: selectedDb })
     }
-  }, [adminToken, copy.authRequired, copy.loadError, language])
+    if (options.length === 0) {
+      options.push({ label: copy.projectEmpty, value: '' })
+    }
+    return options
+  }, [copy.projectEmpty, databases, selectedDb])
+
+  const dbError = useMemo(() => {
+    if (!adminToken) {
+      return copy.authRequired
+    }
+    const error = databasesQuery.error
+    if (!error) {
+      return null
+    }
+    if (classifyError(error).kind === 'AUTH') {
+      return copy.authRequired
+    }
+    return copy.loadError
+  }, [adminToken, copy.authRequired, copy.loadError, databasesQuery.error])
 
   useEffect(() => {
-    void loadDatabases()
-  }, [loadDatabases])
-
-  useEffect(() => {
-    syncProjectSelection(selectedDb || null)
-  }, [selectedDb])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (context.project) {
       return
     }
-    try {
-      if (adminToken) {
-        localStorage.setItem(STORAGE_KEYS.adminToken, adminToken)
-      } else {
-        localStorage.removeItem(STORAGE_KEYS.adminToken)
-      }
-    } catch (error) {
-      void error
+    const first = databases[0]
+    if (first) {
+      setProject(first)
     }
-  }, [adminToken])
+  }, [context.project, databases, setProject])
 
-  const handleOpen = useCallback(async () => {
+  const openMutation = useMutation({
+    mutationFn: (dbName: string) => openDatabase(requestContext, dbName),
+    onSuccess: (_data, dbName) => {
+      setSelectStatus({ type: 'success', text: `${copy.openSuccess} ${dbName}` })
+    },
+    onError: (error: unknown) => {
+      if (classifyError(error).kind === 'AUTH') {
+        setSelectStatus({ type: 'error', text: copy.authRequired })
+        return
+      }
+      console.error('Failed to open project', error)
+      setSelectStatus({ type: 'error', text: copy.openError })
+    },
+  })
+
+  const handleOpen = useCallback(() => {
     if (!selectedDb) {
       setSelectStatus({ type: 'error', text: copy.openMissing })
       return
     }
-
-    setOpenLoading(true)
+    if (!adminToken) {
+      setSelectStatus({ type: 'error', text: copy.authRequired })
+      return
+    }
     setSelectStatus(null)
+    openMutation.mutate(selectedDb)
+  }, [adminToken, copy.authRequired, copy.openMissing, openMutation, selectedDb])
 
-    try {
-      const response = await fetch(
-        buildApiUrl(`databases/${encodeURIComponent(selectedDb)}`, language),
-        {
-          headers: buildHeaders(language, adminToken),
-        },
-      )
+  const createMutation = useMutation({
+    mutationFn: (input: { name: string; description?: string }) => createDatabase(requestContext, input),
+    onSuccess: (result, variables) => {
+      const suffix = result.commandId ? ` ${copy.commandLabel} ${result.commandId}` : ''
+      if (result.status === 202) {
+        setCreateStatus({ type: 'info', text: `${copy.createAccepted}${suffix}` })
+      } else {
+        setCreateStatus({ type: 'success', text: `${copy.createSuccess} ${variables.name}` })
+      }
 
-      if (response.status === 401) {
-        setSelectStatus({ type: 'error', text: copy.authRequired })
+      if (result.commandId) {
+        trackCommand({
+          id: result.commandId,
+          kind: 'CREATE_DATABASE',
+          target: { dbName: variables.name },
+          context: { project: variables.name, branch: context.branch },
+          submittedAt: new Date().toISOString(),
+          writePhase: 'SUBMITTED',
+          indexPhase: 'UNKNOWN',
+          title: `${copy.createTitle}: ${variables.name}`,
+        })
+      } else {
+        void queryClient.invalidateQueries({ queryKey: qk.databases(context.language) })
+      }
+
+      setProject(variables.name)
+      setNewDbName('')
+      setNewDbDescription('')
+    },
+    onError: (error: unknown) => {
+      if (classifyError(error).kind === 'AUTH') {
+        setCreateStatus({ type: 'error', text: copy.authRequired })
         return
       }
+      console.error('Failed to create project', error)
+      setCreateStatus({ type: 'error', text: copy.createError })
+    },
+  })
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-
-      setSelectStatus({ type: 'success', text: `${copy.openSuccess} ${selectedDb}` })
-    } catch (error) {
-      console.error('Failed to open project', error)
-      setSelectStatus({ type: 'error', text: copy.openError })
-    } finally {
-      setOpenLoading(false)
-    }
-  }, [
-    adminToken,
-    copy.authRequired,
-    copy.openError,
-    copy.openMissing,
-    copy.openSuccess,
-    language,
-    selectedDb,
-  ])
-
-  const handleCreate = useCallback(async () => {
+  const handleCreate = useCallback(() => {
     const trimmedName = newDbName.trim()
     if (!trimmedName) {
       setCreateStatus({ type: 'error', text: copy.createMissingName })
       return
     }
+    if (!adminToken) {
+      setCreateStatus({ type: 'error', text: copy.authRequired })
+      return
+    }
+    if (!adminMode) {
+      setCreateStatus({ type: 'error', text: copy.adminModeRequired })
+      return
+    }
 
-    setCreateLoading(true)
     setCreateStatus(null)
-
-    const payload = {
+    createMutation.mutate({
       name: trimmedName,
       description: newDbDescription.trim() || undefined,
-    }
+    })
+  }, [adminMode, adminToken, copy.adminModeRequired, copy.authRequired, copy.createMissingName, createMutation, newDbDescription, newDbName])
 
-    try {
-      const response = await fetch(buildApiUrl('databases', language), {
-        method: 'POST',
-        headers: buildHeaders(language, adminToken, true),
-        body: JSON.stringify(payload),
-      })
-
-      if (response.status === 401) {
-        setCreateStatus({ type: 'error', text: copy.authRequired })
-        return
-      }
-
-      let data: { data?: { command_id?: string }; command_id?: string } | null = null
+  const deleteMutation = useMutation({
+    mutationFn: async (vars: { dbName: string; reason: string }) => {
+      const expectedSeq = await getDatabaseExpectedSeq(requestContext, vars.dbName)
       try {
-        data = (await response.json()) as {
-          data?: { command_id?: string }
-          command_id?: string
-        }
+        return await deleteDatabase(requestContext, vars.dbName, expectedSeq, {
+          'X-Change-Reason': vars.reason,
+        })
       } catch (error) {
-        void error
+        if (classifyError(error).kind === 'OCC_CONFLICT') {
+          const retrySeq = await getDatabaseExpectedSeq(requestContext, vars.dbName)
+          return await deleteDatabase(requestContext, vars.dbName, retrySeq, {
+            'X-Change-Reason': vars.reason,
+          })
+        }
+        throw error
       }
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-
-      const commandId = data?.data?.command_id ?? data?.command_id
-      if (response.status === 202) {
-        const suffix = commandId ? ` ${copy.commandLabel} ${commandId}` : ''
-        setCreateStatus({ type: 'info', text: `${copy.createAccepted}${suffix}` })
+    },
+    onSuccess: (result, variables) => {
+      if (result.status === 202) {
+        setDeleteStatus({ type: 'info', text: copy.deleteAccepted })
       } else {
-        setCreateStatus({ type: 'success', text: `${copy.createSuccess} ${trimmedName}` })
+        setDeleteStatus({ type: 'success', text: `${copy.deleteSuccess} ${variables.dbName}` })
       }
 
-      setNewDbName('')
-      setNewDbDescription('')
-      void loadDatabases()
-    } catch (error) {
-      console.error('Failed to create project', error)
-      setCreateStatus({ type: 'error', text: copy.createError })
-    } finally {
-      setCreateLoading(false)
-    }
-  }, [
-    adminToken,
-    copy.authRequired,
-    copy.commandLabel,
-    copy.createAccepted,
-    copy.createError,
-    copy.createMissingName,
-    copy.createSuccess,
-    language,
-    loadDatabases,
-    newDbDescription,
-    newDbName,
-  ])
+      if (result.commandId) {
+        trackCommand({
+          id: result.commandId,
+          kind: 'DELETE_DATABASE',
+          target: { dbName: variables.dbName },
+          context: { project: variables.dbName, branch: context.branch },
+          submittedAt: new Date().toISOString(),
+          writePhase: 'SUBMITTED',
+          indexPhase: 'UNKNOWN',
+          title: `${copy.deleteLabel}: ${variables.dbName}`,
+        })
+      } else {
+        void queryClient.invalidateQueries({ queryKey: qk.databases(context.language) })
+      }
 
-  const handleDelete = useCallback(async () => {
-    if (!selectedDb) {
-      setDeleteStatus({ type: 'error', text: copy.deleteMissing })
-      return
-    }
+      if (variables.dbName === context.project) {
+        setProject(null)
+      }
 
-    const expectedSeq = Number(deleteExpectedSeq)
-    if (!Number.isFinite(expectedSeq) || expectedSeq < 0) {
-      setDeleteStatus({ type: 'error', text: copy.deleteInvalidSeq })
-      return
-    }
-
-    setDeleteLoading(true)
-    setDeleteStatus(null)
-
-    try {
-      const url = new URL(
-        buildApiUrl(`databases/${encodeURIComponent(selectedDb)}`, language),
-      )
-      url.searchParams.set('expected_seq', String(expectedSeq))
-
-      const response = await fetch(url.toString(), {
-        method: 'DELETE',
-        headers: buildHeaders(language, adminToken),
-      })
-
-      if (response.status === 401) {
+      setDeleteOpen(false)
+    },
+    onError: (error: unknown) => {
+      const classified = classifyError(error)
+      if (classified.kind === 'AUTH') {
         setDeleteStatus({ type: 'error', text: copy.authRequired })
         return
       }
-
-      let detail: unknown = null
-      try {
-        detail = await response.json()
-      } catch (error) {
-        void error
-      }
-
-      if (response.status === 409) {
-        const conflict = detail as { detail?: { expected_seq?: number; actual_seq?: number } }
-        const expected = conflict?.detail?.expected_seq
-        const actual = conflict?.detail?.actual_seq
+      if (classified.kind === 'OCC_CONFLICT') {
+        const detail = (classified.detail ?? {}) as {
+          detail?: { expected_seq?: number; actual_seq?: number }
+          expected_seq?: number
+          actual_seq?: number
+        }
+        const expected = detail?.detail?.expected_seq ?? detail?.expected_seq
+        const actual = detail?.detail?.actual_seq ?? detail?.actual_seq
         const suffix =
-          expected !== undefined && actual !== undefined
-            ? ` (expected ${expected}, actual ${actual})`
-            : ''
+          expected !== undefined && actual !== undefined ? ` (expected ${expected}, actual ${actual})` : ''
         setDeleteStatus({ type: 'error', text: `${copy.deleteConflict}${suffix}` })
         return
       }
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-
-      if (response.status === 202) {
-        setDeleteStatus({ type: 'info', text: copy.deleteAccepted })
-      } else {
-        setDeleteStatus({ type: 'success', text: `${copy.deleteSuccess} ${selectedDb}` })
-      }
-
-      void loadDatabases()
-      setDeleteOpen(false)
-    } catch (error) {
       console.error('Failed to delete project', error)
       setDeleteStatus({ type: 'error', text: copy.deleteError })
-    } finally {
-      setDeleteLoading(false)
-    }
-  }, [
-    adminToken,
-    copy.authRequired,
-    copy.deleteAccepted,
-    copy.deleteConflict,
-    copy.deleteError,
-    copy.deleteInvalidSeq,
-    copy.deleteMissing,
-    copy.deleteSuccess,
-    deleteExpectedSeq,
-    language,
-    loadDatabases,
-    selectedDb,
-  ])
+    },
+  })
+
+  const handleDelete = useCallback(
+    ({ reason }: { reason: string }) => {
+      if (!selectedDb) {
+        setDeleteStatus({ type: 'error', text: copy.deleteMissing })
+        return
+      }
+      if (!adminToken) {
+        setDeleteStatus({ type: 'error', text: copy.authRequired })
+        return
+      }
+      if (!adminMode) {
+        setDeleteStatus({ type: 'error', text: copy.adminModeRequired })
+        return
+      }
+
+      setDeleteStatus(null)
+      deleteMutation.mutate({ dbName: selectedDb, reason })
+    },
+    [adminMode, adminToken, copy.adminModeRequired, copy.authRequired, copy.deleteMissing, deleteMutation, selectedDb],
+  )
+
+  const commandGroups = useMemo(() => {
+    const list = Object.values(commands)
+    const currentKey = `${context.project ?? ''}::${context.branch}`
+    const current = list.filter((cmd) => `${cmd.context.project ?? ''}::${cmd.context.branch}` === currentKey)
+    const other = list.filter((cmd) => `${cmd.context.project ?? ''}::${cmd.context.branch}` !== currentKey)
+    const activeCount = (items: typeof list) =>
+      items.filter((cmd) => cmd.writePhase === 'SUBMITTED' || cmd.indexPhase !== 'VISIBLE_IN_SEARCH').length
+    return { currentActive: activeCount(current), otherActive: activeCount(other) }
+  }, [commands, context.branch, context.project])
 
   return (
     <div className="app-shell">
@@ -592,8 +538,15 @@ function App() {
                 <FormGroup label={copy.languageLabel} helperText={copy.languageHelper}>
                   <HTMLSelect
                     options={copy.languageOptions}
-                    value={language}
-                    onChange={(event) => setLanguage(event.currentTarget.value as 'en' | 'ko')}
+                    value={context.language}
+                    onChange={(event) => setLanguage(event.currentTarget.value as Language)}
+                  />
+                </FormGroup>
+                <FormGroup label={copy.branchLabel} helperText={copy.branchHelper}>
+                  <InputGroup
+                    placeholder={copy.branchPlaceholder}
+                    value={context.branch}
+                    onChange={(event) => setBranch(event.currentTarget.value)}
                   />
                 </FormGroup>
                 <FormGroup label={copy.tokenLabel} helperText={copy.tokenHelper}>
@@ -604,6 +557,27 @@ function App() {
                     onChange={(event) => setAdminToken(event.currentTarget.value)}
                   />
                 </FormGroup>
+                <Switch
+                  checked={rememberToken}
+                  label={copy.rememberTokenLabel}
+                  onChange={(event) => setRememberToken(event.currentTarget.checked)}
+                />
+                <Switch
+                  checked={adminMode}
+                  disabled={!adminToken}
+                  label={copy.adminModeLabel}
+                  onChange={(event) => setAdminMode(event.currentTarget.checked)}
+                />
+                {adminMode ? (
+                  <>
+                    <Text className="muted small">{copy.adminModeWarning}</Text>
+                    <Text className="muted small">
+                      <a href="/api/v1/audit/logs?limit=50" target="_blank" rel="noreferrer">
+                        {copy.auditLinkLabel}
+                      </a>
+                    </Text>
+                  </>
+                ) : null}
               </Card>
             }
             position={Position.RIGHT}
@@ -639,6 +613,9 @@ function App() {
             <div>
               <div className="project-name">{selectedDb || copy.projectEmpty}</div>
               <div className="project-meta">{copy.projectHelper}</div>
+              <div className="project-meta">
+                {copy.branchLabel}: {context.branch}
+              </div>
             </div>
           </div>
 
@@ -657,6 +634,16 @@ function App() {
               </li>
             ))}
           </ol>
+
+          <div className="sidebar-title">{copy.commandsTitle}</div>
+          <div className="source-card">
+            <div className="source-meta">
+              {copy.commandsCurrent}: {commandGroups.currentActive}
+            </div>
+            <div className="source-meta">
+              {copy.commandsOther}: {commandGroups.otherActive}
+            </div>
+          </div>
         </aside>
 
         <main className="main">
@@ -674,17 +661,29 @@ function App() {
               </div>
               <FormGroup label={copy.selectLabel} helperText={copy.selectHelper}>
                 <HTMLSelect
-                  options={databases}
+                  options={projectOptions}
                   value={selectedDb}
-                  onChange={(event) => setSelectedDb(event.currentTarget.value)}
+                  onChange={(event) => setProject(event.currentTarget.value || null)}
                 />
               </FormGroup>
               <Divider />
               <div className="db-actions">
-                <Button icon="folder-open" intent="primary" loading={openLoading} onClick={handleOpen}>
+                <Button
+                  icon="folder-open"
+                  intent="primary"
+                  loading={openMutation.isPending}
+                  onClick={handleOpen}
+                  disabled={!selectedDb || !canRead}
+                >
                   {copy.openLabel}
                 </Button>
-                <Button minimal icon="refresh" loading={dbLoading} onClick={loadDatabases}>
+                <Button
+                  minimal
+                  icon="refresh"
+                  loading={databasesQuery.isFetching}
+                  onClick={() => void databasesQuery.refetch()}
+                  disabled={!canRead}
+                >
                   {copy.refreshLabel}
                 </Button>
                 <Button
@@ -694,7 +693,7 @@ function App() {
                     setDeleteStatus(null)
                     setDeleteOpen(true)
                   }}
-                  disabled={!selectedDb}
+                  disabled={!selectedDb || !canWrite}
                 >
                   {copy.deleteLabel}
                 </Button>
@@ -704,6 +703,11 @@ function App() {
               {selectStatus ? (
                 <Text className={`small status-message ${selectStatus.type}`}>
                   {selectStatus.text}
+                </Text>
+              ) : null}
+              {deleteStatus ? (
+                <Text className={`small status-message ${deleteStatus.type}`}>
+                  {deleteStatus.text}
                 </Text>
               ) : null}
             </Card>
@@ -731,8 +735,9 @@ function App() {
                 <Button
                   icon="folder-new"
                   intent="primary"
-                  loading={createLoading}
+                  loading={createMutation.isPending}
                   onClick={handleCreate}
+                  disabled={!canWrite}
                 >
                   {copy.createLabel}
                 </Button>
@@ -751,33 +756,22 @@ function App() {
         </main>
       </div>
 
-      <Alert
+      <DangerConfirmDialog
         isOpen={deleteOpen}
-        intent={Intent.DANGER}
-        icon="trash"
-        confirmButtonText={copy.deleteConfirmAction}
-        cancelButtonText={copy.deleteCancelAction}
-        onConfirm={handleDelete}
+        title={copy.deleteConfirmTitle}
+        description={copy.deleteConfirmBody}
+        confirmLabel={copy.deleteConfirmAction}
+        cancelLabel={copy.deleteCancelAction}
+        confirmTextToType={selectedDb}
+        reasonLabel={copy.changeReasonLabel}
+        reasonPlaceholder={copy.changeReasonPlaceholder}
+        typedLabel={copy.typedConfirmLabel}
+        typedPlaceholder={selectedDb || copy.projectEmpty}
+        footerHint={copy.dangerConfirmHint}
         onCancel={() => setDeleteOpen(false)}
-        canEscapeKeyCancel
-        canOutsideClickCancel
-        loading={deleteLoading}
-      >
-        <Text className="alert-title">{copy.deleteConfirmTitle}</Text>
-        <Text className="muted">{copy.deleteConfirmBody}</Text>
-        <FormGroup label={copy.expectedSeqLabel} helperText={copy.expectedSeqHelper}>
-          <InputGroup
-            placeholder={copy.expectedSeqPlaceholder}
-            value={deleteExpectedSeq}
-            onChange={(event) => setDeleteExpectedSeq(event.currentTarget.value)}
-          />
-        </FormGroup>
-        {deleteStatus ? (
-          <Text className={`small status-message ${deleteStatus.type}`}>
-            {deleteStatus.text}
-          </Text>
-        ) : null}
-      </Alert>
+        onConfirm={handleDelete}
+        loading={deleteMutation.isPending}
+      />
     </div>
   )
 }

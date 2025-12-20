@@ -12,6 +12,7 @@
   "dependencies": {
     "@blueprintjs/core": "^6.4.1",
     "@blueprintjs/icons": "^6.3.2",
+    "@tanstack/react-query": "^5.90.12",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^5.0.9"
