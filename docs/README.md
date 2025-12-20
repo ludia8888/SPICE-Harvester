@@ -4,59 +4,27 @@ Welcome to the SPICE HARVESTER project documentation. This directory contains al
 
 ## Documentation Overview
 
-### Sphinx Site (Buildable)
-
-This repository ships a buildable Sphinx site that ingests the Markdown docs in this folder.
-
-- Entry: `index.md`
-- Config: `conf.py`
-- Auto-managed pages are regenerated during `sphinx-build` (see `conf.py`).
-
-Build (recommended, isolated venv):
-```bash
-python3.11 -m venv .venv-docs
-source .venv-docs/bin/activate
-pip install -r docs/requirements.txt
-make -C docs html
-```
-
-Docs QA (generators up-to-date + warnings-as-errors):
-```bash
-# With the docs venv activated:
-python scripts/check_docs.py
-
-# Or explicitly:
-./.venv-docs/bin/python scripts/check_docs.py
-```
-
-Docs update (auto-managed generators only):
-```bash
-python scripts/update_docs.py
-```
-
 ### Core Documentation
 
 - **[System Architecture](ARCHITECTURE.md)** - Comprehensive system architecture with microservices design, implementation status, and performance metrics
-- **[Frontend UI/UX Spec](frontend.md)** - BFF-aligned frontend implementation spec (Blueprint.js + 3-pane layout)
+- **[Frontend UI/UX Spec](frontend.md)** - BFF-aligned frontend implementation spec (Blueprint.js + Palantir 3-pane)
 - **[Frontend Policies](FRONTEND_POLICIES.md)** - Frontend state/auth/query/command tracking policies
-- **[API Reference](API_REFERENCE.md)** - BFF API documentation (frontend contract)
+- **[API Reference](API_REFERENCE.md)** - Complete API documentation for all services
 - **[Operations Manual](OPERATIONS.md)** - Deployment, maintenance, and operational procedures
 - **[DevOps Risk & Cost Report](DEVOPS_MSA_RISK_COST_REPORT.md)** - Senior DevOps 관점 운영 리스크/코스트 분석 및 우선순위 개선안
 - **[LLM Integration Blueprint](LLM_INTEGRATION.md)** - LLM을 Funnel/OMS/Graph/Lineage에 안전하게 결합하는 설계(도메인 중립)
-- **[Pipeline Agent + Pipeline Plans](PIPELINE_AGENT.md)** - 자연어 기반 데이터 ETL 오케스트레이션(단일 autonomous loop + MCP tools) 가이드
 - **[Security Documentation](SECURITY.md)** - Security architecture, guidelines, and compliance
 - **[Data Lineage](DATA_LINEAGE.md)** - Provenance/lineage 그래프 설계 및 운영(백필/지표 포함)
 - **[Audit Logs](AUDIT_LOGS.md)** - 감사 로그 스키마/보장(guarantees) 및 운영 가이드
 - **[Idempotency Contract](IDEMPOTENCY_CONTRACT.md)** - 재시도/중복 처리(At-least-once) 안전성 계약
-- **[Action Writeback Design](ACTION_WRITEBACK_DESIGN.md)** - Action writeback 실행/overlay/충돌 정책 설계
 - **[UI/UX Guidelines](UIUX.md)** - User interface and experience design standards
 - **[Design System](DesignSystem.md)** - Design system documentation and guidelines
 
 ### Quick Start Guides
 
 #### For Developers
-1. Start with the [System Architecture](ARCHITECTURE.md) to understand the system topology and data/control planes
-2. Follow the root `README.md` for backend setup instructions
+1. Start with the [System Architecture](ARCHITECTURE.md) to understand the system (90-95% complete backend)
+2. Follow the root [README](../README.md) for backend setup instructions
 3. Use the [Frontend UI/UX Spec](frontend.md) for frontend development
 4. Review the [API Reference](API_REFERENCE.md) for endpoint details
 5. Check [Security Documentation](SECURITY.md) for secure coding practices
@@ -75,7 +43,7 @@ python scripts/update_docs.py
 4. Check monitoring and maintenance procedures (incl. [Data Lineage](DATA_LINEAGE.md), [Audit Logs](AUDIT_LOGS.md))
 
 #### For QA Engineers
-1. Review the test structure in `backend/docs/testing/COMPLEX_TYPES_TEST_README.md`
+1. Review the test structure in [Backend testing docs](../backend/docs/testing/COMPLEX_TYPES_TEST_README.md)
 2. Check API endpoints in [API Reference](API_REFERENCE.md)
 3. Follow testing procedures in relevant sections
 
@@ -83,14 +51,11 @@ python scripts/update_docs.py
 
 ```
 docs/
-├── conf.py                 # Sphinx config (builds the repo-wide docs site)
-├── index.md                # Sphinx root document (toctree)
 ├── README.md               # This file - documentation index
 ├── ARCHITECTURE.md         # 🔄 Unified system architecture (3 docs merged)
 ├── frontend.md             # ✅ Frontend UI/UX spec (BFF-aligned)
 ├── FRONTEND_POLICIES.md    # Frontend policies (URL SSoT, auth, command tracking)
 ├── API_REFERENCE.md        # Complete API documentation
-├── PIPELINE_AGENT.md       # Pipeline Agent (single loop + MCP tools) developer guide
 ├── OPERATIONS.md          # Operations and deployment manual
 ├── DEVOPS_MSA_RISK_COST_REPORT.md  # 🆕 DevOps 운영 리스크/코스트 보고서
 ├── LLM_INTEGRATION.md      # 🆕 LLM 결합 설계(도메인 중립/엔터프라이즈 안전)
@@ -98,30 +63,24 @@ docs/
 ├── DATA_LINEAGE.md        # Data lineage / provenance 운영 가이드
 ├── AUDIT_LOGS.md          # Audit logs 스키마/보장 및 운영
 ├── IDEMPOTENCY_CONTRACT.md  # Idempotency(멱등성) 계약/가이드
-├── ACTION_WRITEBACK_DESIGN.md  # Action writeback 설계 (atomic patchset + ES overlay)
 ├── UIUX.md               # UI/UX guidelines
 ├── DesignSystem.md       # 🔄 Design system (renamed from DesignSysyem.md)
-├── reference/             # Sphinx reference section (mostly auto-generated)
-│   ├── index.md
-│   └── _generated/
-│       ├── PIPELINE_MCP_TOOLS.md
-│       ├── PIPELINE_AGENT_ALLOWED_TOOLS.md
-│       └── REPO_FILE_INVENTORY.md
 └── architecture/         # Architecture diagrams and details
     └── README.md
 
-backend/docs/              # Backend-specific docs (not in the Sphinx toctree)
-├── API_RATE_LIMITING.md
-├── OPENTELEMETRY_OBSERVABILITY.md
-├── kafka_broker_config.md
-├── Command/
-│   └── Event Sourcing + CQRS 아키텍처 설계 원칙.md
+backend/docs/              # Backend-specific documentation
 ├── api/
 │   └── OMS_DATABASE_ENDPOINTS.md
 ├── deployment/
-│   └── PORT_CONFIGURATION.md
+│   ├── DEPLOYMENT_GUIDE.md
+│   └── PORT_CONFIGURATION.md     # 📁 Moved from backend root
 ├── development/
-│   └── CORS_CONFIGURATION_GUIDE.md
+│   ├── FRONTEND_DEVELOPMENT_GUIDE.md  # Backend-specific frontend guide
+│   ├── CORS_CONFIGURATION_GUIDE.md
+│   ├── CORS_QUICK_START.md       # 📁 Moved from backend root
+│   └── DATABASE_LIST_FIX_SUMMARY.md
+├── security/
+│   └── SECURITY.md
 └── testing/
     ├── COMPLEX_TYPES_TEST_README.md
     └── OMS_PRODUCTION_TEST_README.md
@@ -130,41 +89,40 @@ backend/docs/              # Backend-specific docs (not in the Sphinx toctree)
 ## Key Features Documented
 
 ### Enterprise Microservices Architecture
-- **BFF (Backend for Frontend)** - Port 8002: API gateway, routing, async command tracking (external entrypoint)
-- **OMS (Ontology Management Service)** - Port 8000: Ontology + graph operations on TerminusDB (internal; debug ports only)
-- **Funnel (Type Inference Service)** - Port 8003: schema/type inference utilities (internal; debug ports only)
-- **Agent (Tool Runner)** - Port 8004: internal agent runs + audit/event logging (BFF proxy only)
-- **Pipeline/Objectify Workers** - ETL transforms + dataset → ontology instance mapping
-- **Connector Services** - Google Sheets ingest/preview/polling
-- **Shared Components** - registries, validators, security, observability
+- **BFF (Backend for Frontend)** - Port 8002: User-friendly API gateway with Service Factory pattern
+- **OMS (Ontology Management Service)** - Port 8000: Core ontology operations with 18+ validators
+- **Funnel (Type Inference Service)** - Port 8003: AI-powered data analysis with 1,048 lines of algorithms
+- **Shared Components** - Service Factory, validators, and utilities
 
 ### Technical Capabilities
-- **Event sourcing + idempotency** - processed_event registry, expected_seq OCC, replayable projections
-- **Ontology + relationship management** - schema validation, link types, link edits overlay
-- **Data plane** - ingest, pipeline transforms (filter/join/cast/dedupe), schema contracts, expectations
-- **Objectify** - mapping spec → bulk instance creation
-- **Branching/versions** - TerminusDB-backed branches, diffs, merges
-- **Lineage + audit** - lineage graph, audit logs, gate results
-- **Connectors** - Google Sheets OAuth + ingest flow
-- **Security/observability** - input sanitization, rate limiting, metrics, tracing
+- **Complex Type System** - Support for 18+ data types (MONEY, EMAIL, PHONE, COORDINATE, ADDRESS, etc.)
+- **Advanced AI Type Inference** - Multilingual pattern recognition (Korean, Japanese, Chinese)
+- **Git-like Version Control** - 7/7 git features working (100% complete)
+  - Branch management, commits, diff, merge, PR, rollback, history
+  - 3-stage diff engine and rebase-based merging
+- **Relationship Management** - Automatic Property-to-Relationship conversion
+- **Multi-language Support** - Comprehensive internationalization
+- **Performance Optimization** - 95%+ success rate, <5s response time
+- **Security Features** - Input sanitization, authentication, audit logging
+- **TerminusDB Integration** - Full schema type support
 
 ### Frontend Technology Stack
 - **React 18 + TypeScript 5** - Modern UI framework with strict typing
-- **Blueprint.js 6** - Enterprise-grade UI toolkit
+- **Blueprint.js 6** - Palantir's enterprise UI toolkit
 - **Vite 7** - Fast build tool and development server
 - **State Management** - Zustand + TanStack Query
 - **UI Icons** - @blueprintjs/icons
 
 ### Current Implementation Status
-- **Backend services/workers**: runnable via `docker-compose.full.yml`; production readiness depends on environment hardening
-- **Frontend**: React + Blueprint app scaffold with BFF-aligned API routes
+- **Backend Services**: ✅ 90-95% Complete (Production-ready)
+- **Frontend Infrastructure**: ✅ 100% Complete (Development-ready)
+- **Frontend Components**: ✅ Core screens implemented; UX polish and QA in progress
 
 ### Service Configuration
-- **Port Assignments** (host exposure):
+- **Port Assignments**:
   - BFF: 8002 (Frontend API gateway)
-  - OMS: 8000 (internal; expose via `backend/docker-compose.debug-ports.yml` when needed)
-  - Funnel: 8003 (internal; expose via `backend/docker-compose.debug-ports.yml` when needed)
-  - Agent: 8004 (internal; expose via `backend/docker-compose.debug-ports.yml` when needed)
+  - OMS: 8000 (Core ontology service)
+  - Funnel: 8003 (Type inference service)
   - TerminusDB: 6363 (Graph database)
 
 ## Documentation Standards
@@ -243,6 +201,6 @@ For documentation issues or questions:
 - Submit a pull request with improvements
 
 ---
-*Last updated: 2026-01-25*
+*Last updated: 2025-12-17*
 *Documentation reorganization: Complete*
 *Version: 3.0 (Major reorganization)*

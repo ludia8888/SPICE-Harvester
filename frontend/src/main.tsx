@@ -6,7 +6,10 @@ import '@blueprintjs/icons/lib/css/blueprint-icons.css'
 import '@blueprintjs/select/lib/css/blueprint-select.css'
 import 'reactflow/dist/style.css'
 import './styles.css'
-import { AppShell } from './app/AppShell'
+import './index.css'
+import App from './AppShell.tsx'
+import { AppBootstrap } from './app/AppBootstrap.tsx'
+import { AppErrorBoundary } from './app/AppErrorBoundary.tsx'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -19,7 +22,10 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <AppShell />
+      <AppErrorBoundary>
+        <AppBootstrap />
+        <App />
+      </AppErrorBoundary>
     </QueryClientProvider>
   </StrictMode>,
 )
