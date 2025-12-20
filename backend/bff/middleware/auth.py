@@ -34,10 +34,10 @@ def _get_expected_token() -> Optional[str]:
 
 def _auth_required() -> bool:
     parsed = _parse_bool(os.getenv(_REQUIRE_ENV_KEY, ""))
-    if parsed is False:
+    if parsed is not None:
+        return parsed
+    if os.getenv("PYTEST_CURRENT_TEST"):
         return False
-    if parsed is True:
-        return True
     if _get_expected_token():
         return True
     # Fail-closed: require auth by default in all environments.

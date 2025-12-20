@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend-unit:
+    name: Backend Unit
+    uses: ./.github/workflows/backend-coverage.yml
+    with:
+      python-version: "3.11"
+      make-target: backend-unit
+
+  backend-coverage:
+    name: Backend Coverage
+    uses: ./.github/workflows/backend-coverage.yml
+    with:
+      python-version: "3.11"
+      make-target: backend-coverage
+      upload-coverage: true
+      coverage-file: coverage.xml
+      codecov-flags: backend
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  frontend-check:
+    name: Frontend Lint + Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+  backend-stack-tests:
+    name: Backend Stack Tests
+    uses: ./.github/workflows/backend-stack-tests.yml
+    with:
+      python-version: "3.11"
+      script-args: "--full"
+      timeout-seconds: 300

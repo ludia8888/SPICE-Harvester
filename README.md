@@ -83,6 +83,28 @@ curl -fsS http://localhost:8002/api/v1/health
 curl -fsS http://localhost:8003/health
 ```
 
+## 6.1) Frontend (Vite + React)
+
+Prereq: Node 20+.
+
+```bash
+cd frontend
+cp .env.example .env  # optional
+npm ci
+npm run dev
+```
+
+Dev/preview proxy:
+- requests under `/api/*` proxy to `VITE_API_PROXY_TARGET` (or `BFF_BASE_URL`, default `http://localhost:8002`)
+- client calls default to `VITE_API_BASE_URL=/api/v1`
+
+Preview (build-like) with proxy enabled:
+
+```bash
+npm run build
+npm run preview
+```
+
 ## 7) E2E demo (single PoC scenario)
 
 Scenario: **Customer + Product(owned_by Customer)**, then query the relationship via multi-hop federation.
@@ -187,6 +209,12 @@ curl -fsS -X PUT "http://localhost:8002/api/v1/database/${DB}/instances/Product/
 
 ## 8) Testing (no mocks)
 
+Fast unit tests (no docker):
+
+```bash
+make backend-unit
+```
+
 Production gate:
 
 ```bash
@@ -200,6 +228,25 @@ PYTHON_BIN=python3.12 ./backend/run_production_tests.sh --full --chaos-lite
 PYTHON_BIN=python3.12 ./backend/run_production_tests.sh --full --chaos-out-of-order
 PYTHON_BIN=python3.12 SOAK_SECONDS=600 SOAK_SEED=123 ./backend/run_production_tests.sh --full --chaos-soak
 ```
+
+### Coverage (pytest-cov + Codecov)
+
+```bash
+make backend-coverage
+```
+
+CI: `.github/workflows/ci.yml` uploads `coverage.xml` to Codecov.  
+For private repos, set `CODECOV_TOKEN` in GitHub Actions secrets.
+
+### Performance (k6)
+
+Requires the full docker stack running.
+
+```bash
+make backend-perf-k6-smoke
+```
+
+See `backend/perf/README.md` for tuning / cleanup.
 
 ## 9) Limitations / PoC vs Production
 

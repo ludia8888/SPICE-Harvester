@@ -4,7 +4,7 @@
   font-family: "IBM Plex Sans", "Segoe UI", "Helvetica Neue", sans-serif;
   line-height: 1.45;
   font-weight: 400;
-  color: #1b2631;
+  color: var(--text-primary);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -20,6 +20,36 @@
   --success: #0f9960;
   --warning: #d9822b;
   --danger: #c23030;
+  --app-bg: #f4f7fa;
+  --app-bg-gradient-top: rgba(255, 255, 255, 0.78);
+  --app-bg-gradient-bottom: rgba(244, 247, 250, 0.98);
+  --app-grid-color: rgba(16, 22, 26, 0.04);
+  --rail-bg: #1f262d;
+  --rail-border: #11161b;
+  --rail-button: #cbd2d9;
+  --rail-button-active: #f5f8fa;
+  --rail-button-active-bg: rgba(255, 255, 255, 0.12);
+  --rail-button-hover: #ffffff;
+  --rail-button-hover-bg: rgba(255, 255, 255, 0.08);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --text-primary: #f5f8fa;
+  --text-muted: rgba(245, 248, 250, 0.72);
+  --panel: #1f262d;
+  --panel-soft: rgba(255, 255, 255, 0.06);
+  --sidebar-bg: #0f171f;
+  --border: rgba(255, 255, 255, 0.12);
+  --accent: #48aff0;
+  --accent-strong: #2d72d2;
+  --success: #3dcc91;
+  --warning: #fbb360;
+  --danger: #ff7373;
+  --app-bg: #0f171f;
+  --app-bg-gradient-top: rgba(15, 23, 31, 0.94);
+  --app-bg-gradient-bottom: rgba(15, 23, 31, 1);
+  --app-grid-color: rgba(255, 255, 255, 0.04);
 }
 
 * {
@@ -30,11 +60,11 @@ body {
   margin: 0;
   min-height: 100vh;
   font-size: 14px;
-  background-color: #f4f7fa;
+  background-color: var(--app-bg);
   background-image:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(244, 247, 250, 0.98)),
-    linear-gradient(90deg, rgba(16, 22, 26, 0.04) 1px, transparent 1px),
-    linear-gradient(rgba(16, 22, 26, 0.04) 1px, transparent 1px);
+    linear-gradient(180deg, var(--app-bg-gradient-top), var(--app-bg-gradient-bottom)),
+    linear-gradient(90deg, var(--app-grid-color) 1px, transparent 1px),
+    linear-gradient(var(--app-grid-color) 1px, transparent 1px);
   background-size: auto, 36px 36px, 36px 36px;
   background-position: 0 0, -1px -1px, -1px -1px;
 }

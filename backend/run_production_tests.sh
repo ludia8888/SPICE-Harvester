@@ -233,6 +233,16 @@ if [[ "$MODE" == "full" ]]; then
     "$PYTHON_BIN" -m pytest tests/test_core_functionality.py -q
   fi
 
+  # 4b) Additional E2E + contract smoke tests (no mocks)
+  "$PYTHON_BIN" -m pytest tests/test_openapi_contract_smoke.py -q
+  "$PYTHON_BIN" -m pytest tests/test_auth_hardening_e2e.py -q
+  "$PYTHON_BIN" -m pytest tests/test_websocket_auth_e2e.py -q
+  RUN_LIVE_BRANCH_VIRTUALIZATION=true "$PYTHON_BIN" -m pytest tests/test_branch_virtualization_e2e.py -q
+  "$PYTHON_BIN" -m pytest tests/test_command_status_ttl_e2e.py -q
+  "$PYTHON_BIN" -m pytest tests/test_worker_lease_safety_e2e.py -q
+  "$PYTHON_BIN" -m pytest tests/test_event_store_tls_guard.py -q
+  "$PYTHON_BIN" -m pytest tests/test_critical_fixes_e2e.py -q
+
   # 5) Chaos-lite (no mocks; controls docker-compose)
   if [[ "$RUN_CHAOS_LITE" == "true" ]]; then
     if ! command -v docker >/dev/null 2>&1; then

@@ -1,6 +1,5 @@
 import type { Language } from '../types/app'
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api/v1'
+import { API_BASE_URL } from './config'
 
 export class HttpError extends Error {
   status: number

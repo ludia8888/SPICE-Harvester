@@ -171,17 +171,11 @@ class OMSClient:
     ) -> Dict[str, Any]:
         """온톨로지 생성"""
         try:
-            # 🔥 ULTRA DEBUG! Log what we're sending to OMS
-            import json
-            import datetime
-            debug_log = json.dumps(ontology_data, indent=2, ensure_ascii=False)
-            logger.warning(debug_log)
-            print(debug_log)
-            
-            # Write to file for verification
-            debug_file = f"/tmp/oms_client_debug_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            with open(debug_file, 'w') as f:
-                f.write(debug_log)
+            debug_payload = os.getenv("OMS_CLIENT_DEBUG_PAYLOAD", "").strip().lower() in {"1", "true", "yes", "on"}
+            if debug_payload:
+                import json
+
+                logger.debug("OMS create_ontology payload: %s", json.dumps(ontology_data, ensure_ascii=False))
             
             # Send data as-is to OMS (no format conversion needed)
             response = await self.client.post(

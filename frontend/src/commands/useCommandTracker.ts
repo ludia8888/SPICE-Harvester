@@ -10,11 +10,9 @@ const TERMINAL_STATUSES = new Set(['COMPLETED', 'FAILED', 'CANCELLED'])
 export const useCommandTracker = () => {
   const queryClient = useQueryClient()
 
-  const { context, adminToken, commands } = useAppStore((state) => ({
-    context: state.context,
-    adminToken: state.adminToken,
-    commands: state.commands,
-  }))
+  const context = useAppStore((state) => state.context)
+  const adminToken = useAppStore((state) => state.adminToken)
+  const commands = useAppStore((state) => state.commands)
   const patchCommand = useAppStore((state) => state.patchCommand)
 
   const trackedCommands = useMemo(
@@ -106,4 +104,3 @@ export const useCommandTracker = () => {
     })
   }, [patchCommand, visibilityCandidates, visibilityQueries])
 }
-

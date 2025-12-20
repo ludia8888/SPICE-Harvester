@@ -22,6 +22,7 @@ import hashlib
 from urllib.parse import urlparse
 
 import aioboto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from shared.config.service_config import ServiceConfig
@@ -84,6 +85,13 @@ class EventStore:
                     f"Event Store requires TLS but endpoint is not https: {self.endpoint_url}"
                 )
             verify_ssl = os.getenv("EVENT_STORE_SSL_VERIFY", "true").strip().lower() in {"1", "true", "yes", "on"}
+            addressing_style = (os.getenv("EVENT_STORE_S3_ADDRESSING_STYLE") or "").strip().lower()
+            if addressing_style in {"path", "virtual"}:
+                client_config = Config(s3={"addressing_style": addressing_style})
+            else:
+                host = (parsed.hostname or "").lower()
+                use_path_style = host in {"localhost", "127.0.0.1", "0.0.0.0"} or host.endswith(".localhost")
+                client_config = Config(s3={"addressing_style": "path"}) if use_path_style else None
 
             async with self.session.client(
                 's3',
@@ -92,6 +100,7 @@ class EventStore:
                 aws_secret_access_key=self.secret_key,
                 use_ssl=use_ssl,
                 verify=verify_ssl if use_ssl else None,
+                config=client_config,
             ) as s3:
                 # Ensure bucket exists
                 try:

@@ -6,6 +6,7 @@ import '@blueprintjs/core/lib/css/blueprint.css'
 import './index.css'
 import App from './App.tsx'
 import { AppBootstrap } from './app/AppBootstrap.tsx'
+import { AppErrorBoundary } from './app/AppErrorBoundary.tsx'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -18,8 +19,10 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <AppBootstrap />
-      <App />
+      <AppErrorBoundary>
+        <AppBootstrap />
+        <App />
+      </AppErrorBoundary>
     </QueryClientProvider>
   </StrictMode>,
 )

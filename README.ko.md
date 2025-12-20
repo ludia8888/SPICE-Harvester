@@ -83,6 +83,28 @@ curl -fsS http://localhost:8002/api/v1/health
 curl -fsS http://localhost:8003/health
 ```
 
+## 6.1) 프론트엔드 (Vite + React)
+
+Prereq: Node 20+.
+
+```bash
+cd frontend
+cp .env.example .env  # 선택
+npm ci
+npm run dev
+```
+
+Dev/preview 프록시:
+- `/api/*` 요청은 `VITE_API_PROXY_TARGET`(또는 `BFF_BASE_URL`, 기본값 `http://localhost:8002`)로 프록시됩니다.
+- 클라이언트 기본 API base는 `VITE_API_BASE_URL=/api/v1` 입니다.
+
+Preview (빌드 기반) + 프록시:
+
+```bash
+npm run build
+npm run preview
+```
+
 ## 7) E2E demo (PoC 시나리오 1개)
 
 시나리오: **Customer + Product(owned_by Customer)** 생성 후, 멀티홉 federation 쿼리로 관계/문서 payload를 함께 조회합니다.
@@ -216,6 +238,30 @@ PYTHON_BIN=python3.12 ./backend/run_production_tests.sh --full --chaos-lite
 PYTHON_BIN=python3.12 ./backend/run_production_tests.sh --full --chaos-out-of-order
 PYTHON_BIN=python3.12 SOAK_SECONDS=600 SOAK_SEED=123 ./backend/run_production_tests.sh --full --chaos-soak
 ```
+
+### Coverage (pytest-cov + Codecov)
+
+유닛 테스트 중심 커버리지(로컬):
+
+```bash
+PYTHONPATH=backend python -m pytest -q \
+  backend/tests/unit backend/bff/tests backend/funnel/tests \
+  --cov=backend/bff --cov=backend/oms --cov=backend/funnel --cov=backend/shared --cov=backend/instance_worker \
+  --cov-branch --cov-report=term --cov-report=xml:coverage.xml
+```
+
+CI에서는 `.github/workflows/ci.yml` 가 `coverage.xml` 을 Codecov로 업로드합니다.  
+Private repo라면 GitHub Actions secrets에 `CODECOV_TOKEN` 을 설정하세요.
+
+### 성능 테스트 (k6)
+
+풀 스택(docker compose)이 실행 중이어야 합니다.
+
+```bash
+make backend-perf-k6-smoke
+```
+
+튜닝/정리(테스트 DB cleanup)는 `backend/perf/README.md` 를 참고하세요.
 
 ## 9) Limitations / PoC vs Production
 

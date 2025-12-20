@@ -22,6 +22,49 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/database/{db_name}", tags=["Instance Management"])
 
+def _normalize_es_search_result(result: Any) -> tuple[int, List[Dict[str, Any]]]:
+    """
+    Normalize Elasticsearch search results across return shapes.
+
+    Supported shapes:
+    1) elasticsearch-py raw: {"hits": {"total": {"value": int}, "hits": [{"_source": {...}}]}}
+    2) shared ElasticsearchService.search(): {"total": int, "hits": [{...}], "aggregations": {...}}
+    """
+    if not result or not isinstance(result, dict):
+        return 0, []
+
+    # shared ElasticsearchService.search() shape
+    hits = result.get("hits")
+    total = result.get("total")
+    if isinstance(hits, list):
+        try:
+            total_value = int(total or 0)
+        except (TypeError, ValueError):
+            total_value = len(hits)
+        return total_value, [h for h in hits if isinstance(h, dict)]
+
+    # raw elasticsearch-py shape
+    if isinstance(hits, dict):
+        total_obj = hits.get("total") if isinstance(hits.get("total"), dict) else None
+        total_value_raw = (
+            total_obj.get("value") if isinstance(total_obj, dict) else hits.get("total")
+        )
+        try:
+            total_value = int(total_value_raw or 0)
+        except (TypeError, ValueError):
+            total_value = 0
+
+        sources: List[Dict[str, Any]] = []
+        for hit in hits.get("hits") or []:
+            if not isinstance(hit, dict):
+                continue
+            source = hit.get("_source")
+            if isinstance(source, dict):
+                sources.append(source)
+        return total_value, sources
+
+    return 0, []
+
 
 @router.get("/class/{class_id}/instances")
 async def get_class_instances(
@@ -117,17 +160,7 @@ async def get_class_instances(
         
         # Elasticsearch 결과 처리
         if es_result and not es_error:
-            # 결과 처리
-            instances = []
-            total = 0
-            
-            if es_result:
-                total = es_result.get("hits", {}).get("total", {}).get("value", 0)
-                hits = es_result.get("hits", {}).get("hits", [])
-                
-                for hit in hits:
-                    instance_data = hit["_source"]
-                    instances.append(instance_data)
+            total, instances = _normalize_es_search_result(es_result)
             
             return {
                 "class_id": class_id,
@@ -153,15 +186,39 @@ async def get_class_instances(
                 )
                 
                 # API 응답에서 데이터 추출
-                if result and result.get("status") == "success":
+                # OMS 응답은 환경/버전에 따라 형태가 다를 수 있음:
+                # - 최신: {"status":"success","total":..,"instances":[...]}
+                # - 레거시: [{"...":...}, ...]
+                if isinstance(result, list):
                     return {
                         "class_id": class_id,
-                        "total": result.get("total", 0),
+                        "total": len(result),
                         "limit": limit,
                         "offset": offset,
                         "search": search,
-                        "instances": result.get("instances", [])
+                        "instances": result,
                     }
+                if isinstance(result, dict):
+                    if result.get("status") == "success":
+                        return {
+                            "class_id": class_id,
+                            "total": result.get("total", 0),
+                            "limit": limit,
+                            "offset": offset,
+                            "search": search,
+                            "instances": result.get("instances", []),
+                        }
+                    instances = result.get("instances")
+                    if isinstance(instances, list):
+                        total = result.get("total")
+                        return {
+                            "class_id": class_id,
+                            "total": int(total) if isinstance(total, int) else len(instances),
+                            "limit": limit,
+                            "offset": offset,
+                            "search": search,
+                            "instances": instances,
+                        }
                 else:
                     # API 응답이 실패인 경우
                     logger.error(f"OMS Instance API returned error: {result}")
@@ -327,14 +384,12 @@ async def get_instance(
                 size=1
             )
             
-            if result and result.get("hits", {}).get("total", {}).get("value", 0) > 0:
-                hits = result["hits"]["hits"]
-                if hits:
-                    instance_data = hits[0]["_source"]
-                    return {
-                        "status": "success",
-                        "data": instance_data
-                    }
+            _total, sources = _normalize_es_search_result(result)
+            if sources:
+                return {
+                    "status": "success",
+                    "data": sources[0],
+                }
             
             # ES에 문서가 없는 경우 - TerminusDB fallback
             logger.info(f"Instance {instance_id} not in Elasticsearch index, querying TerminusDB directly for latest state")

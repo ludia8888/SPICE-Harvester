@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 from pydantic import BaseModel, Field
 
@@ -34,6 +35,26 @@ from shared.utils.language import get_accept_language
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/database/{db_name}/instances", tags=["Async Instance Management"])
+
+def _raise_httpx_as_http_exception(exc: httpx.HTTPStatusError) -> None:
+    resp = getattr(exc, "response", None)
+    if resp is None:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="OMS 요청 실패",
+        ) from exc
+
+    detail: Any
+    try:
+        payload = resp.json()
+        if isinstance(payload, dict) and "detail" in payload:
+            detail = payload["detail"]
+        else:
+            detail = payload
+    except Exception:
+        detail = (resp.text or "").strip() or f"OMS returned HTTP {resp.status_code}"
+
+    raise HTTPException(status_code=int(resp.status_code), detail=detail) from exc
 
 
 # Request Models (Label 기반)
@@ -187,6 +208,10 @@ async def create_instance_async(
         
     except HTTPException:
         raise
+    except httpx.HTTPStatusError as e:
+        _raise_httpx_as_http_exception(e)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="OMS 요청 실패") from e
     except SecurityViolationError as e:
         logger.warning(f"Security violation in instance creation: {e}")
         raise HTTPException(
@@ -267,6 +292,10 @@ async def update_instance_async(
         
     except HTTPException:
         raise
+    except httpx.HTTPStatusError as e:
+        _raise_httpx_as_http_exception(e)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="OMS 요청 실패") from e
     except SecurityViolationError as e:
         logger.warning(f"Security violation in instance update: {e}")
         raise HTTPException(
@@ -326,6 +355,10 @@ async def delete_instance_async(
         
     except HTTPException:
         raise
+    except httpx.HTTPStatusError as e:
+        _raise_httpx_as_http_exception(e)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="OMS 요청 실패") from e
     except SecurityViolationError as e:
         logger.warning(f"Security violation in instance deletion: {e}")
         raise HTTPException(
@@ -406,6 +439,10 @@ async def bulk_create_instances_async(
         
     except HTTPException:
         raise
+    except httpx.HTTPStatusError as e:
+        _raise_httpx_as_http_exception(e)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="OMS 요청 실패") from e
     except SecurityViolationError as e:
         logger.warning(f"Security violation in bulk instance creation: {e}")
         raise HTTPException(

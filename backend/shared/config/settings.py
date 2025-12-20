@@ -138,6 +138,10 @@ class DatabaseSettings(BaseSettings):
         default=9200,
         description="Elasticsearch port"
     )
+    elasticsearch_request_timeout: int = Field(
+        default=60,
+        description="Elasticsearch request timeout in seconds"
+    )
     elasticsearch_username: Optional[str] = Field(
         default=None,
         description="Elasticsearch username"

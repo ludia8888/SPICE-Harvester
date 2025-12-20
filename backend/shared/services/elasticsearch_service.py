@@ -106,7 +106,8 @@ class ElasticsearchService:
         """Get Elasticsearch cluster health status."""
         try:
             health = await self.client.cluster.health()
-            return health
+            # elasticsearch-py returns ObjectApiResponse (not JSON-serializable) in v8+.
+            return getattr(health, "body", health)
         except Exception as e:
             logger.error(f"Error getting cluster health: {e}")
             raise
@@ -613,7 +614,8 @@ def create_elasticsearch_service(settings: 'ApplicationSettings') -> Elasticsear
         host=settings.database.elasticsearch_host,
         port=settings.database.elasticsearch_port,
         username=settings.database.elasticsearch_username,
-        password=settings.database.elasticsearch_password
+        password=settings.database.elasticsearch_password,
+        request_timeout=settings.database.elasticsearch_request_timeout,
     )
 
 
@@ -644,5 +646,6 @@ def create_elasticsearch_service_legacy(
         host=host or os.getenv("ELASTICSEARCH_HOST", "localhost"),
         port=port or int(os.getenv("ELASTICSEARCH_PORT", "9200")),
         username=username or os.getenv("ELASTICSEARCH_USERNAME"),
-        password=password or os.getenv("ELASTICSEARCH_PASSWORD")
+        password=password or os.getenv("ELASTICSEARCH_PASSWORD"),
+        request_timeout=int(os.getenv("ELASTICSEARCH_REQUEST_TIMEOUT", "60")),
     )

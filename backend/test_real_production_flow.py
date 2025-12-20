@@ -14,7 +14,7 @@ from uuid import uuid4
 import subprocess
 
 # REAL production configuration
-os.environ.update({
+PRODUCTION_ENV = {
     "DOCKER_CONTAINER": "false",
     "MINIO_ENDPOINT_URL": "http://localhost:9000",
     "MINIO_ACCESS_KEY": "admin",
@@ -32,8 +32,8 @@ os.environ.update({
     "REDIS_HOST": "localhost",
     "REDIS_PORT": "6379",
     "REDIS_PASSWORD": "spice123!",
-    "TERMINUS_SERVER_URL": "http://localhost:6363"
-})
+    "TERMINUS_SERVER_URL": "http://localhost:6363",
+}
 
 
 class ProductionFlowTest:
@@ -447,6 +447,7 @@ class ProductionFlowTest:
 
 async def main():
     """Run the production test"""
+    os.environ.update(PRODUCTION_ENV)
     tester = ProductionFlowTest()
     success = await tester.run_complete_test()
     return 0 if success else 1

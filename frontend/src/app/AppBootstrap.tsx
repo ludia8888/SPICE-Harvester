@@ -7,6 +7,7 @@ export const AppBootstrap = () => {
   const queryClient = useQueryClient()
   const adminToken = useAppStore((state) => state.adminToken)
   const context = useAppStore((state) => state.context)
+  const theme = useAppStore((state) => state.theme)
 
   useCommandTracker()
 
@@ -18,6 +19,15 @@ export const AppBootstrap = () => {
     }
     document.documentElement.lang = context.language
   }, [context.language])
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return
+    }
+
+    document.documentElement.dataset.theme = theme
+    document.documentElement.classList.toggle('bp6-dark', theme === 'dark')
+  }, [theme])
 
   const previousContextRef = useRef(context)
   useEffect(() => {
@@ -47,4 +57,3 @@ export const AppBootstrap = () => {
 
   return null
 }
-

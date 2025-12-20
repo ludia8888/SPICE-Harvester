@@ -15,7 +15,7 @@
   box-shadow: none;
 }
 
-.top-nav .bp5-navbar-heading {
+.top-nav .bp6-navbar-heading {
   font-weight: 600;
   letter-spacing: 0.02em;
 }
@@ -28,8 +28,8 @@
 }
 
 .sidebar-rail {
-  background: #1f262d;
-  border-right: 1px solid #11161b;
+  background: var(--rail-bg);
+  border-right: 1px solid var(--rail-border);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -37,19 +37,19 @@
   gap: 0.4rem;
 }
 
-.rail-button.bp5-button {
-  color: #cbd2d9;
+.rail-button.bp6-button {
+  color: var(--rail-button);
   padding: 0.35rem;
 }
 
-.rail-button.bp5-button.is-active {
-  color: #f5f8fa;
-  background: rgba(255, 255, 255, 0.12);
+.rail-button.bp6-button.is-active {
+  color: var(--rail-button-active);
+  background: var(--rail-button-active-bg);
 }
 
-.rail-button.bp5-button:hover {
-  color: #ffffff;
-  background: rgba(255, 255, 255, 0.08);
+.rail-button.bp6-button:hover {
+  color: var(--rail-button-hover);
+  background: var(--rail-button-hover-bg);
 }
 
 .rail-spacer {
@@ -57,7 +57,7 @@
 }
 
 .sidebar-panel {
-  background: #ffffff;
+  background: var(--panel);
   border-right: 1px solid var(--border);
   padding: 1.25rem 1rem;
   display: flex;
@@ -96,12 +96,12 @@
   gap: 0.6rem;
   align-items: start;
   border: 1px solid var(--border);
-  background: #ffffff;
+  background: var(--panel);
   border-radius: 8px;
   padding: 0.7rem;
 }
 
-.project-card .bp5-icon {
+.project-card .bp6-icon {
   color: var(--accent);
   margin-top: 2px;
 }
@@ -127,11 +127,11 @@
   margin-bottom: 0.6rem;
 }
 
-.settings-popover .bp5-form-group {
+.settings-popover .bp6-form-group {
   margin-bottom: 0.6rem;
 }
 
-.settings-popover .bp5-form-group:last-child {
+.settings-popover .bp6-form-group:last-child {
   margin-bottom: 0;
 }
 
@@ -154,7 +154,7 @@
 }
 
 .step-item.is-active {
-  background: #eef2f7;
+  background: var(--panel-soft);
   border: 1px solid var(--border);
 }
 
@@ -168,7 +168,7 @@
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-muted);
-  background: #ffffff;
+  background: var(--panel);
 }
 
 .step-item.is-active .step-index {
@@ -280,7 +280,7 @@
     justify-content: flex-start;
     padding: 0.5rem;
     border-right: none;
-    border-bottom: 1px solid #11161b;
+    border-bottom: 1px solid var(--rail-border);
   }
 
   .rail-spacer {

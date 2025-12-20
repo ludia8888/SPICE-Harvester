@@ -14,9 +14,6 @@ import {
   Navbar,
   NavbarGroup,
   NavbarHeading,
-  Popover,
-  Position,
-  Switch,
   Text,
   TextArea,
   Intent,
@@ -30,10 +27,11 @@ import {
   openDatabase,
 } from './api/bff'
 import { DangerConfirmDialog } from './components/DangerConfirmDialog'
+import { SettingsPopoverContent } from './components/layout/SettingsPopoverContent'
+import { SidebarRail } from './components/layout/SidebarRail'
 import { classifyError } from './errors/classifyError'
 import { qk } from './query/queryKeys'
 import { useAppStore } from './store/useAppStore'
-import type { Language } from './types/app'
 import './App.css'
 
 type StatusMessage = { type: 'success' | 'error' | 'info'; text: string }
@@ -86,6 +84,8 @@ const copyByLang = {
     settingsTitle: 'Settings',
     languageLabel: 'Language',
     languageHelper: 'UI uses `?lang=ko|en`.',
+    darkModeLabel: 'Dark mode',
+    themeHelper: 'Saved on this device.',
     languageOptions: [
       { label: 'English', value: 'en' },
       { label: '한국어', value: 'ko' },
@@ -182,6 +182,8 @@ const copyByLang = {
     settingsTitle: '설정',
     languageLabel: '언어',
     languageHelper: 'UI는 `?lang=ko|en`을 사용합니다.',
+    darkModeLabel: '다크 모드',
+    themeHelper: '이 기기에 저장됩니다.',
     languageOptions: [
       { label: '한국어', value: 'ko' },
       { label: 'English', value: 'en' },
@@ -237,16 +239,10 @@ function App() {
   const queryClient = useQueryClient()
   const context = useAppStore((state) => state.context)
   const adminToken = useAppStore((state) => state.adminToken)
-  const rememberToken = useAppStore((state) => state.rememberToken)
   const adminMode = useAppStore((state) => state.adminMode)
   const commands = useAppStore((state) => state.commands)
 
   const setProject = useAppStore((state) => state.setProject)
-  const setBranch = useAppStore((state) => state.setBranch)
-  const setLanguage = useAppStore((state) => state.setLanguage)
-  const setAdminToken = useAppStore((state) => state.setAdminToken)
-  const setRememberToken = useAppStore((state) => state.setRememberToken)
-  const setAdminMode = useAppStore((state) => state.setAdminMode)
   const trackCommand = useAppStore((state) => state.trackCommand)
 
   const selectedDb = context.project ?? ''
@@ -519,85 +515,12 @@ function App() {
       </Navbar>
 
       <div className="app-body">
-        <aside className="sidebar-rail">
-          {railItems.map((item) => (
-            <Button
-              key={item.label}
-              minimal
-              icon={item.icon}
-              className={`rail-button ${item.active ? 'is-active' : ''}`}
-              aria-label={item.label}
-              title={item.label}
-            />
-          ))}
-          <div className="rail-spacer" />
-          <Popover
-            content={
-              <Card className="settings-popover" elevation={2}>
-                <div className="settings-title">{copy.settingsTitle}</div>
-                <FormGroup label={copy.languageLabel} helperText={copy.languageHelper}>
-                  <HTMLSelect
-                    options={copy.languageOptions}
-                    value={context.language}
-                    onChange={(event) => setLanguage(event.currentTarget.value as Language)}
-                  />
-                </FormGroup>
-                <FormGroup label={copy.branchLabel} helperText={copy.branchHelper}>
-                  <InputGroup
-                    placeholder={copy.branchPlaceholder}
-                    value={context.branch}
-                    onChange={(event) => setBranch(event.currentTarget.value)}
-                  />
-                </FormGroup>
-                <FormGroup label={copy.tokenLabel} helperText={copy.tokenHelper}>
-                  <InputGroup
-                    type="password"
-                    placeholder={copy.tokenPlaceholder}
-                    value={adminToken}
-                    onChange={(event) => setAdminToken(event.currentTarget.value)}
-                  />
-                </FormGroup>
-                <Switch
-                  checked={rememberToken}
-                  label={copy.rememberTokenLabel}
-                  onChange={(event) => setRememberToken(event.currentTarget.checked)}
-                />
-                <Switch
-                  checked={adminMode}
-                  disabled={!adminToken}
-                  label={copy.adminModeLabel}
-                  onChange={(event) => setAdminMode(event.currentTarget.checked)}
-                />
-                {adminMode ? (
-                  <>
-                    <Text className="muted small">{copy.adminModeWarning}</Text>
-                    <Text className="muted small">
-                      <a href="/api/v1/audit/logs?limit=50" target="_blank" rel="noreferrer">
-                        {copy.auditLinkLabel}
-                      </a>
-                    </Text>
-                  </>
-                ) : null}
-              </Card>
-            }
-            position={Position.RIGHT}
-          >
-            <Button
-              minimal
-              icon="cog"
-              className="rail-button"
-              aria-label={copy.rail.settings}
-              title={copy.rail.settings}
-            />
-          </Popover>
-          <Button
-            minimal
-            icon="user"
-            className="rail-button"
-            aria-label={copy.rail.user}
-            title={copy.rail.user}
-          />
-        </aside>
+        <SidebarRail
+          items={railItems}
+          settingsContent={<SettingsPopoverContent copy={copy} />}
+          settingsLabel={copy.rail.settings}
+          userLabel={copy.rail.user}
+        />
 
         <aside className="sidebar-panel">
           <div className="sidebar-title">{copy.dataSourceTitle}</div>

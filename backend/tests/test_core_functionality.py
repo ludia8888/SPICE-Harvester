@@ -572,9 +572,18 @@ class TestEventSourcingInfrastructure:
         """Verify S3/MinIO event storage is working"""
         import boto3
         from botocore.exceptions import ClientError
+        from botocore.config import Config
+        from urllib.parse import urlparse
         bucket_name = os.getenv("EVENT_STORE_BUCKET", "spice-event-store")
         explicit_minio_access_key = (os.getenv("MINIO_ACCESS_KEY") or "").strip()
         explicit_minio_secret_key = (os.getenv("MINIO_SECRET_KEY") or "").strip()
+        parsed = urlparse(MINIO_URL)
+        host = (parsed.hostname or "").lower()
+        client_config = (
+            Config(s3={"addressing_style": "path"})
+            if host in {"localhost", "127.0.0.1", "0.0.0.0"} or host.endswith(".localhost")
+            else None
+        )
         
         client = boto3.client(
             's3',
@@ -582,7 +591,8 @@ class TestEventSourcingInfrastructure:
             aws_access_key_id=explicit_minio_access_key or "minioadmin",
             aws_secret_access_key=explicit_minio_secret_key or "minioadmin123",
             use_ssl=False,
-            verify=False
+            verify=False,
+            config=client_config,
         )
         
         # Check if events bucket exists (and create if missing, like EventStore.connect)

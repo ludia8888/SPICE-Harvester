@@ -1,11 +1,12 @@
 import { create } from 'zustand'
 import { readUrlContext, subscribeUrlContext, writeUrlContext } from '../state/urlContext'
-import { DEFAULT_CONTEXT, type AppContext, type Language } from '../types/app'
+import { DEFAULT_CONTEXT, DEFAULT_THEME, type AppContext, type Language, type Theme } from '../types/app'
 
 const STORAGE_KEYS = {
   project: 'spice.project',
   branch: 'spice.branch',
   language: 'spice.language',
+  theme: 'spice.theme',
   rememberToken: 'spice.rememberToken',
   adminToken: 'spice.adminToken',
 } as const
@@ -31,11 +32,13 @@ export type TrackedCommand = {
 
 type AppState = {
   context: AppContext
+  theme: Theme
   adminToken: string
   rememberToken: boolean
   adminMode: boolean
   commands: Record<string, TrackedCommand>
   syncContextFromUrl: () => void
+  setTheme: (theme: Theme) => void
   setProject: (project: string | null) => void
   setBranch: (branch: string) => void
   setLanguage: (language: Language) => void
@@ -88,6 +91,14 @@ const readCachedLanguage = (): Language | null => {
   return null
 }
 
+const readCachedTheme = (): Theme | null => {
+  const value = safeLocalStorageGet(STORAGE_KEYS.theme)
+  if (value === 'light' || value === 'dark') {
+    return value
+  }
+  return null
+}
+
 const readCachedBranch = () => {
   const value = safeLocalStorageGet(STORAGE_KEYS.branch)
   return value?.trim() ? value.trim() : null
@@ -134,9 +145,11 @@ export const useAppStore = create<AppState>((set, get) => {
   const tokenFromEnv = import.meta.env.VITE_ADMIN_TOKEN ?? ''
   const adminToken = tokenFromEnv || (rememberToken ? readCachedAdminToken() : '')
   const context = getInitialContext()
+  const theme = readCachedTheme() ?? DEFAULT_THEME
 
   return {
     context,
+    theme,
     adminToken,
     rememberToken,
     adminMode: false,
@@ -152,6 +165,10 @@ export const useAppStore = create<AppState>((set, get) => {
         safeLocalStorageRemove(STORAGE_KEYS.project)
       }
       ensureUrlContext(next)
+    },
+    setTheme: (next) => {
+      set({ theme: next })
+      safeLocalStorageSet(STORAGE_KEYS.theme, next)
     },
     setProject: (project) => {
       writeUrlContext({ project }, 'replace')
