@@ -2,20 +2,19 @@
 Data Connector Router - Google Sheets Integration
 
 This router handles data connector registration and management,
-specifically for Google Sheets integration with Kafka messaging.
+specifically for Google Sheets integration with the connector runtime.
 """
 
 import logging
-from typing import Dict, Any, Union
+from datetime import timezone
+from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from confluent_kafka import Producer
 
 from data_connector.google_sheets.service import GoogleSheetsService
 from data_connector.google_sheets.models import (
     GoogleSheetRegisterResponse,
     RegisteredSheet,
-    SheetMetadata
 )
 from shared.models.google_sheets import GoogleSheetPreviewRequest, GoogleSheetPreviewResponse
 from shared.models.requests import ApiResponse
@@ -23,6 +22,7 @@ from shared.models.sheet_grid import GoogleSheetGridRequest, SheetGrid
 from shared.middleware.rate_limiter import rate_limit, RateLimitPresets
 from shared.observability.tracing import trace_endpoint
 from shared.services.sheet_grid_parser import SheetGridParseOptions, SheetGridParser
+from shared.services.connector_registry import ConnectorRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -31,18 +31,18 @@ router = APIRouter(tags=["Data Connectors"])
 
 # Import the dependency functions from main
 # This avoids circular imports while maintaining clean dependency injection
-async def get_kafka_producer() -> Producer:
-    """Import here to avoid circular dependency"""
-    from bff.main import get_kafka_producer as _get_kafka_producer
-
-    return await _get_kafka_producer()
-
-
 async def get_google_sheets_service() -> GoogleSheetsService:
     """Import here to avoid circular dependency"""
     from bff.main import get_google_sheets_service as _get_google_sheets_service
 
     return await _get_google_sheets_service()
+
+
+async def get_connector_registry() -> ConnectorRegistry:
+    """Import here to avoid circular dependency"""
+    from bff.main import get_connector_registry as _get_connector_registry
+
+    return await _get_connector_registry()
 
 
 @router.post(
@@ -148,7 +148,8 @@ async def preview_google_sheet_for_funnel(
 async def register_google_sheet(
     sheet_data: Dict[str, Any],
     http_request: Request,
-    google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service)
+    google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service),
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
 ) -> Dict[str, Any]:
     """
     Register a Google Sheet for data monitoring and automatic import.
@@ -178,6 +179,7 @@ async def register_google_sheet(
         class_label = sheet_data.get("class_label")
         auto_import = bool(sheet_data.get("auto_import", False))
         max_import_rows = sheet_data.get("max_import_rows")
+        api_key = sheet_data.get("api_key")
         try:
             max_import_rows = int(max_import_rows) if max_import_rows is not None else None
         except Exception:
@@ -192,18 +194,63 @@ async def register_google_sheet(
 
         logger.info(f"Registering Google Sheet: {sheet_url} (worksheet={worksheet_name}, interval={polling_interval}s)")
 
-        registration_result = await google_sheets_service.register_sheet(
-            sheet_url=sheet_url,
+        # Validate + resolve sheet_id/worksheet name via connector I/O (no durable state here).
+        sheet_id, _, resolved_worksheet, _, _ = await google_sheets_service.fetch_sheet_values(
+            str(sheet_url),
             worksheet_name=worksheet_name,
-            polling_interval=polling_interval,
-            database_name=database_name,
-            branch=branch,
-            class_label=class_label,
-            auto_import=auto_import,
+            api_key=api_key,
+        )
+
+        # Foundry policy: durable registry is Postgres (connector_sources + mappings).
+        source = await connector_registry.upsert_source(
+            source_type="google_sheets",
+            source_id=str(sheet_id),
+            enabled=True,
+            config_json={
+                "sheet_url": str(sheet_url),
+                "worksheet_name": str(resolved_worksheet),
+                "polling_interval": int(polling_interval),
+                "max_import_rows": int(max_import_rows) if max_import_rows is not None else None,
+            },
+        )
+
+        mapping_enabled = bool(auto_import and (database_name or "").strip() and (class_label or "").strip())
+        mapping_status = "confirmed" if mapping_enabled else "draft"
+        await connector_registry.upsert_mapping(
+            source_type="google_sheets",
+            source_id=str(sheet_id),
+            enabled=mapping_enabled,
+            status=mapping_status,
+            target_db_name=database_name,
+            target_branch=branch,
+            target_class_label=class_label,
+            field_mappings=[],
+        )
+
+        registered_sheet = RegisteredSheet(
+            sheet_id=str(sheet_id),
+            sheet_url=str(sheet_url),
+            worksheet_name=str(resolved_worksheet),
+            polling_interval=int(polling_interval),
+            database_name=(database_name or "").strip() or None,
+            branch=(branch or "main").strip() or "main",
+            class_label=(class_label or "").strip() or None,
+            auto_import=bool(mapping_enabled),
             max_import_rows=max_import_rows,
+            last_polled=None,
+            last_hash=None,
+            is_active=True,
+            registered_at=source.created_at.astimezone(timezone.utc).isoformat(),
+        )
+
+        registration_result = GoogleSheetRegisterResponse(
+            sheet_id=str(sheet_id),
+            status="success",
+            message=f"Successfully registered sheet {sheet_id} for monitoring",
+            registered_sheet=registered_sheet,
         )
         
-        logger.info(f"Successfully registered Google Sheet: {registration_result.sheet_id}")
+        logger.info(f"Successfully registered Google Sheet: {registration_result.sheet_id} (postgres registry)")
         
         return ApiResponse.success(
             message="Google Sheet registered successfully",
@@ -239,7 +286,8 @@ async def preview_google_sheet(
     http_request: Request,
     worksheet_name: str = None,
     limit: int = 10,
-    google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service)
+    google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service),
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
 ) -> Dict[str, Any]:
     """
     Preview data from a registered Google Sheet.
@@ -255,20 +303,24 @@ async def preview_google_sheet(
     try:
         logger.info(f"Previewing Google Sheet: {sheet_id}, worksheet: {worksheet_name}")
 
-        # This endpoint is intended as "preview registered sheet".
-        # If not registered, fail fast without external calls.
-        registered = await google_sheets_service.get_registered_sheets()
-        sheet = next((s for s in registered if s.sheet_id == sheet_id), None)
-        if not sheet:
+        source = await connector_registry.get_source(source_type="google_sheets", source_id=sheet_id)
+        if not source or not source.enabled:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Sheet is not registered",
             )
 
-        sheet_url = sheet.sheet_url
+        sheet_url = (source.config_json or {}).get("sheet_url")
+        if not sheet_url:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Registered sheet is missing sheet_url",
+            )
+
+        default_ws = (source.config_json or {}).get("worksheet_name")
         preview_result = await google_sheets_service.preview_sheet(
             sheet_url,
-            worksheet_name=worksheet_name or sheet.worksheet_name,
+            worksheet_name=worksheet_name or default_ws,
             limit=limit,
         )
 
@@ -304,7 +356,7 @@ async def preview_google_sheet(
 async def list_registered_sheets(
     http_request: Request,
     database_name: str = None,
-    google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service)
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
 ) -> Dict[str, Any]:
     """
     List all registered Google Sheets.
@@ -318,9 +370,31 @@ async def list_registered_sheets(
     try:
         logger.info(f"Listing registered sheets for database: {database_name}")
 
-        registered_sheets = await google_sheets_service.get_registered_sheets()
-        if database_name:
-            registered_sheets = [s for s in registered_sheets if s.database_name == database_name]
+        sources = await connector_registry.list_sources(source_type="google_sheets", enabled=True, limit=1000)
+        registered_sheets: list[RegisteredSheet] = []
+        for src in sources:
+            mapping = await connector_registry.get_mapping(source_type=src.source_type, source_id=src.source_id)
+            if database_name and mapping and mapping.target_db_name != database_name:
+                continue
+            state = await connector_registry.get_sync_state(source_type=src.source_type, source_id=src.source_id)
+            cfg = src.config_json or {}
+            registered_sheets.append(
+                RegisteredSheet(
+                    sheet_id=src.source_id,
+                    sheet_url=str(cfg.get("sheet_url") or ""),
+                    worksheet_name=str(cfg.get("worksheet_name") or ""),
+                    polling_interval=int(cfg.get("polling_interval") or 300),
+                    database_name=(mapping.target_db_name if mapping else None),
+                    branch=(mapping.target_branch if mapping and mapping.target_branch else "main"),
+                    class_label=(mapping.target_class_label if mapping else None),
+                    auto_import=bool(mapping.enabled) if mapping else False,
+                    max_import_rows=cfg.get("max_import_rows"),
+                    last_polled=state.last_polled_at.astimezone(timezone.utc).isoformat() if state and state.last_polled_at else None,
+                    last_hash=state.last_seen_cursor if state else None,
+                    is_active=bool(src.enabled),
+                    registered_at=src.created_at.astimezone(timezone.utc).isoformat(),
+                )
+            )
 
         return ApiResponse.success(
             message="Registered sheets retrieved successfully",
@@ -352,7 +426,7 @@ async def list_registered_sheets(
 async def unregister_google_sheet(
     sheet_id: str,
     http_request: Request,
-    google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service)
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
 ) -> Dict[str, str]:
     """
     Unregister a Google Sheet from monitoring.
@@ -366,11 +440,24 @@ async def unregister_google_sheet(
     try:
         logger.info(f"Unregistering Google Sheet: {sheet_id}")
 
-        ok = await google_sheets_service.unregister_sheet(sheet_id)
+        ok = await connector_registry.set_source_enabled(source_type="google_sheets", source_id=sheet_id, enabled=False)
         if not ok:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Sheet is not registered",
+            )
+        # Disable auto-import mapping as well (kept for audit/history).
+        existing_mapping = await connector_registry.get_mapping(source_type="google_sheets", source_id=sheet_id)
+        if existing_mapping:
+            await connector_registry.upsert_mapping(
+                source_type="google_sheets",
+                source_id=sheet_id,
+                enabled=False,
+                status=existing_mapping.status,
+                target_db_name=existing_mapping.target_db_name,
+                target_branch=existing_mapping.target_branch,
+                target_class_label=existing_mapping.target_class_label,
+                field_mappings=existing_mapping.field_mappings,
             )
 
         return ApiResponse.success(

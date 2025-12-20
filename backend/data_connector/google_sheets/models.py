@@ -2,23 +2,11 @@
 Google Sheets Connector - Request/Response Models
 """
 
-from typing import List, Optional, Dict, Any
+from typing import Any, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
 # Import shared models
-
-
-class GoogleSheetDataUpdate(BaseModel):
-    """Google Sheet 데이터 업데이트 알림 모델"""
-
-    sheet_id: str = Field(..., description="Google Sheets ID")
-    worksheet_name: str = Field(..., description="워크시트 이름")
-    changed_rows: int = Field(..., description="변경된 행 수")
-    changed_columns: Optional[List[str]] = Field(None, description="변경된 컬럼 목록")
-    timestamp: str = Field(..., description="변경 감지 시간 (ISO 8601)")
-    previous_hash: Optional[str] = Field(None, description="Previous data hash (optional)")
-    current_hash: Optional[str] = Field(None, description="Current data hash (optional)")
 
 
 class RegisteredSheet(BaseModel):
@@ -28,7 +16,7 @@ class RegisteredSheet(BaseModel):
     sheet_url: str
     worksheet_name: str
     polling_interval: int
-    # Optional pipeline config (used by google-sheets-worker / future auto-import)
+    # Optional pipeline config (maps source → ontology; auto-import requires confirmed mapping)
     database_name: Optional[str] = None
     branch: str = "main"
     class_label: Optional[str] = None

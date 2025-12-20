@@ -78,14 +78,23 @@ services:
       - message-relay
       - postgres
 
-  google-sheets-worker:
+  # Foundry-style connector runtime (trigger + sync)
+  connector-trigger-service:
     extends:
       file: backend/docker-compose.yml
-      service: google-sheets-worker
+      service: connector-trigger-service
+    depends_on:
+      - kafka
+      - postgres
+
+  connector-sync-worker:
+    extends:
+      file: backend/docker-compose.yml
+      service: connector-sync-worker
     depends_on:
       - bff
-      - redis
       - kafka
+      - postgres
       
   # Database services
   postgres:

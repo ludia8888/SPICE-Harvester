@@ -250,29 +250,62 @@ services:
       timeout: 10s
       retries: 5
 
-  # Google Sheets Update Worker (consumes google-sheets-updates)
-  google-sheets-worker:
+  # Connector Trigger Service (Foundry-style; polls + emits connector-updates)
+  connector-trigger-service:
     build:
       context: .
-      dockerfile: ./google_sheets_worker/Dockerfile
-    container_name: spice_google_sheets_worker
+      dockerfile: ./connector_trigger_service/Dockerfile
+    container_name: spice_connector_trigger_service
     environment:
       - KAFKA_HOST=kafka
       - KAFKA_PORT=29092
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-spicepass123}
-      # IMPORTANT: override ServiceConfig default (127.0.0.1) in Docker
-      - BFF_BASE_URL=http://bff:8002
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
+      - POSTGRES_DB=${POSTGRES_DB:-spicedb}
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
+      - CONNECTOR_UPDATES_TOPIC=connector-updates
+      - CONNECTOR_TRIGGER_SOURCE_TYPE=google_sheets
+      - CONNECTOR_TRIGGER_TICK_SECONDS=5
+      - CONNECTOR_TRIGGER_POLL_CONCURRENCY=5
       # Optional (public sheets work without it)
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
-      - GOOGLE_SHEETS_UPDATES_TOPIC=google-sheets-updates
+    depends_on:
+      - kafka
+      - postgres
+    networks:
+      - spice_network
+    restart: unless-stopped
+
+  # Connector Sync Worker (Foundry-style; consumes connector-updates and submits writes)
+  connector-sync-worker:
+    build:
+      context: .
+      dockerfile: ./connector_sync_worker/Dockerfile
+    container_name: spice_connector_sync_worker
+    environment:
+      - KAFKA_HOST=kafka
+      - KAFKA_PORT=29092
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
+      - POSTGRES_DB=${POSTGRES_DB:-spicedb}
+      # IMPORTANT: override ServiceConfig default (127.0.0.1) in Docker
+      - BFF_BASE_URL=http://bff:8002
+      - ADMIN_TOKEN=${ADMIN_TOKEN:?ADMIN_TOKEN is required}
+      - LOG_LEVEL=INFO
+      - DOCKER_CONTAINER=true
+      - CONNECTOR_UPDATES_TOPIC=connector-updates
+      - CONNECTOR_UPDATES_DLQ_TOPIC=connector-updates-dlq
+      # Optional (public sheets work without it)
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
     depends_on:
       - bff
       - kafka
-      - redis
+      - postgres
     networks:
       - spice_network
     restart: unless-stopped

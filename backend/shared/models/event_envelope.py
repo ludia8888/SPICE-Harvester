@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
-from uuid import UUID, uuid4
+from typing import Any, ClassVar, Dict, Optional
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from pydantic import BaseModel, Field
 
@@ -43,6 +43,8 @@ class EventEnvelope(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Event metadata")
     schema_version: str = Field("1", description="Envelope schema version")
     sequence_number: Optional[int] = Field(None, description="Per-aggregate sequence/version")
+
+    _CONNECTOR_EVENT_NAMESPACE: ClassVar[UUID] = uuid5(NAMESPACE_URL, "spice-harvester:connector-events")
 
     @staticmethod
     def _normalize_datetime(value: datetime) -> datetime:
@@ -119,6 +121,79 @@ class EventEnvelope(BaseModel):
             metadata=base_metadata,
             schema_version=event.schema_version or "1",
             sequence_number=event.sequence_number,
+        )
+
+    @classmethod
+    def from_connector_update(
+        cls,
+        *,
+        source_type: str,
+        source_id: str,
+        cursor: Optional[str],
+        previous_cursor: Optional[str] = None,
+        sequence_number: Optional[int] = None,
+        occurred_at: Optional[datetime] = None,
+        event_type: str = "CONNECTOR_UPDATE_DETECTED",
+        actor: Optional[str] = None,
+        kafka_topic: Optional[str] = None,
+        data: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> "EventEnvelope":
+        """
+        Build a canonical connector update envelope.
+
+        Contract:
+        - `metadata.kind == 'connector_update'`
+        - deterministic `event_id` derived from (source_type,source_id,cursor,sequence_number)
+        - aggregate is the connector source (so per-source ordering can be enforced)
+        """
+        st = (source_type or "").strip()
+        sid = (source_id or "").strip()
+        if not st:
+            raise ValueError("source_type is required")
+        if not sid:
+            raise ValueError("source_id is required")
+
+        occurred_at = cls._normalize_datetime(occurred_at or datetime.now(timezone.utc))
+        cursor_norm = (cursor or "").strip()
+        prev_norm = (previous_cursor or "").strip() or None
+
+        deterministic_key = f"{st}:{sid}:{cursor_norm}:{sequence_number or ''}"
+        event_id = str(uuid5(cls._CONNECTOR_EVENT_NAMESPACE, deterministic_key))
+
+        base_data: Dict[str, Any] = {
+            "source_type": st,
+            "source_id": sid,
+            "cursor": cursor_norm or None,
+            "previous_cursor": prev_norm,
+        }
+        if data:
+            base_data.update(data)
+
+        base_metadata: Dict[str, Any] = {
+            "kind": "connector_update",
+            "source_type": st,
+            "source_id": sid,
+            "run_id": os.getenv("PIPELINE_RUN_ID") or os.getenv("RUN_ID") or os.getenv("EXECUTION_ID"),
+            "code_sha": os.getenv("CODE_SHA") or os.getenv("GIT_SHA") or os.getenv("COMMIT_SHA"),
+            "service": os.getenv("SERVICE_NAME") or os.getenv("HOSTNAME"),
+        }
+        if kafka_topic:
+            base_metadata["kafka_topic"] = kafka_topic
+        if metadata:
+            base_metadata.update(metadata)
+
+        return cls(
+            event_id=event_id,
+            event_type=event_type,
+            aggregate_type="connector_source",
+            aggregate_id=f"{st}:{sid}",
+            occurred_at=occurred_at,
+            actor=actor,
+            data=base_data,
+            metadata=base_metadata,
+            schema_version="1",
+            sequence_number=sequence_number,
         )
 
     def as_kafka_key(self) -> bytes:

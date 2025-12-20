@@ -30,7 +30,6 @@ from typing import Any, Dict, Optional
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
-from confluent_kafka import Producer
 
 # Centralized configuration and dependency injection
 from shared.config.settings import settings, ApplicationSettings
@@ -49,6 +48,7 @@ from shared.dependencies.providers import (
 
 # Service factory import
 from shared.services.service_factory import BFF_SERVICE_INFO, create_fastapi_service, run_service
+from shared.services.connector_registry import ConnectorRegistry
 
 # Shared models and utilities
 from shared.models.ontology import (
@@ -138,10 +138,10 @@ class BFFServiceContainer:
         # 5. Initialize Rate Limiter
         await self._initialize_rate_limiter()
 
-        # 6. Initialize Kafka Producer
-        await self._initialize_kafka_producer()
+        # 6. Initialize Connector Registry (Postgres; Foundry-style durability)
+        await self._initialize_connector_registry()
         
-        # 7. Initialize Google Sheets Service
+        # 7. Initialize Google Sheets Service (connector library)
         await self._initialize_google_sheets_service()
         
         logger.info("BFF services initialized successfully")
@@ -227,66 +227,32 @@ class BFFServiceContainer:
         except Exception as e:
             logger.error(f"Failed to initialize rate limiter: {e}")
             # Continue without rate limiting - service can still work
-    
-    async def _initialize_kafka_producer(self) -> None:
-        """Initialize Kafka producer"""
-        try:
-            logger.info("Initializing Kafka producer...")
-            
-            # Kafka configuration from ServiceConfig (works in Docker + local dev)
-            from shared.config.service_config import ServiceConfig
-            bootstrap_servers = ServiceConfig.get_kafka_bootstrap_servers()
 
-            # Kafka configuration
-            kafka_config = {
-                'bootstrap.servers': bootstrap_servers,
-                'client.id': 'bff-service',
-                'acks': 'all',
-                'retries': 3,
-                'retry.backoff.ms': 100,
-                'batch.size': 16384,
-                'linger.ms': 10,
-                'compression.type': 'snappy'
-            }
-            
-            # Create Kafka producer
-            producer = Producer(kafka_config)
-            
-            self._bff_services['kafka_producer'] = producer
-            logger.info("Kafka producer initialized successfully")
-            
+    async def _initialize_connector_registry(self) -> None:
+        """Initialize Postgres-backed connector registry."""
+        try:
+            logger.info("Initializing ConnectorRegistry (Postgres)...")
+            registry = ConnectorRegistry()
+            await registry.initialize()
+            self._bff_services["connector_registry"] = registry
+            logger.info("ConnectorRegistry initialized successfully")
         except Exception as e:
-            logger.error(f"Failed to initialize Kafka producer: {e}")
-            # Continue without Kafka - service can still work in limited mode
+            logger.error(f"Failed to initialize ConnectorRegistry: {e}")
+            # Continue without it; connector endpoints will 503.
     
     async def _initialize_google_sheets_service(self) -> None:
-        """Initialize Google Sheets service"""
+        """Initialize Google Sheets service (connector library)"""
         try:
-            logger.info("Initializing Google Sheets service...")
-            
-            # Kafka producer is optional for preview/grid extraction; required only for change notifications.
-            producer = self._bff_services.get('kafka_producer')
-            if not producer:
-                logger.warning("Kafka producer not available; Google Sheets service will run without notifications")
-
-            # Redis is optional for preview/grid extraction; required for durable registrations in production.
-            redis_service = self._bff_services.get("redis_service")
-            redis_client = getattr(redis_service, "client", None) if redis_service else None
-            if not redis_client:
-                logger.warning("Redis not available; Google Sheets registrations will be in-memory (non-durable)")
+            logger.info("Initializing Google Sheets service (connector library)...")
             
             # Get Google API key from settings
             google_api_key = (self.settings.google_sheets.google_sheets_api_key or "").strip() or None
             
-            # Create Google Sheets service
-            google_sheets_service = GoogleSheetsService(
-                producer=producer,
-                api_key=google_api_key,
-                redis_client=redis_client,
-            )
+            # Foundry policy: connector library does only I/O (preview/fetch/normalize).
+            # Change detection belongs to the Trigger layer.
+            google_sheets_service = GoogleSheetsService(api_key=google_api_key)
             
             self._bff_services['google_sheets_service'] = google_sheets_service
-            await google_sheets_service.start_polling_for_active_sheets()
             logger.info("Google Sheets service initialized successfully")
             
         except Exception as e:
@@ -341,14 +307,13 @@ class BFFServiceContainer:
                 logger.info("Google Sheets service cleaned up")
             except Exception as e:
                 logger.error(f"Error cleaning up Google Sheets service: {e}")
-        
-        if 'kafka_producer' in self._bff_services:
+
+        if "connector_registry" in self._bff_services:
             try:
-                producer = self._bff_services['kafka_producer']
-                producer.flush(timeout=5)  # Wait up to 5 seconds for delivery
-                logger.info("Kafka producer flushed and closed")
+                await self._bff_services["connector_registry"].close()
+                logger.info("ConnectorRegistry closed")
             except Exception as e:
-                logger.error(f"Error closing Kafka producer: {e}")
+                logger.error(f"Error closing ConnectorRegistry: {e}")
         
         self._bff_services.clear()
         logger.info("BFF services shutdown completed")
@@ -365,17 +330,17 @@ class BFFServiceContainer:
             raise RuntimeError("Label mapper not initialized")
         return self._bff_services['label_mapper']
     
-    def get_kafka_producer(self) -> Producer:
-        """Get Kafka producer instance"""
-        if 'kafka_producer' not in self._bff_services:
-            raise RuntimeError("Kafka producer not initialized")
-        return self._bff_services['kafka_producer']
-    
     def get_google_sheets_service(self) -> GoogleSheetsService:
         """Get Google Sheets service instance"""
         if 'google_sheets_service' not in self._bff_services:
             raise RuntimeError("Google Sheets service not initialized")
         return self._bff_services['google_sheets_service']
+
+    def get_connector_registry(self) -> ConnectorRegistry:
+        """Get connector registry instance"""
+        if "connector_registry" not in self._bff_services:
+            raise RuntimeError("ConnectorRegistry not initialized")
+        return self._bff_services["connector_registry"]
 
 
 # Global BFF service container (replaces global variables)
@@ -467,16 +432,6 @@ async def get_label_mapper() -> LabelMapper:
     return _bff_container.get_label_mapper()
 
 
-async def get_kafka_producer() -> Producer:
-    """Get Kafka producer from BFF container"""
-    if _bff_container is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="BFF services not initialized"
-        )
-    return _bff_container.get_kafka_producer()
-
-
 async def get_google_sheets_service() -> GoogleSheetsService:
     """Get Google Sheets service from BFF container"""
     if _bff_container is None:
@@ -485,6 +440,16 @@ async def get_google_sheets_service() -> GoogleSheetsService:
             detail="BFF services not initialized"
         )
     return _bff_container.get_google_sheets_service()
+
+
+async def get_connector_registry() -> ConnectorRegistry:
+    """Get ConnectorRegistry from BFF container"""
+    if _bff_container is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="BFF services not initialized"
+        )
+    return _bff_container.get_connector_registry()
 
 
 # Router registration (unchanged)

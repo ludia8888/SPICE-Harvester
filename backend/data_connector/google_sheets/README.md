@@ -6,7 +6,7 @@ Google Sheets를 SPICE HARVESTER 온톨로지 시스템과 연동하는 커넥�
 
 - **URL 기반 연결**: Google Sheets 공유 URL만으로 간편하게 연결
 - **데이터 미리보기**: 컬럼 헤더와 샘플 데이터 추출
-- **실시간 동기화**: 주기적인 폴링으로 데이터 변경 감지
+- **동기화 런타임 분리**: Trigger(변경 감지) + Sync Worker(반영)로 확장 가능하게 분리
 - **다국어 지원**: 한국어, 영어, 일본어, 중국어 시트 이름 처리
 - **보안**: 공개 시트만 접근 (OAuth2는 향후 지원 예정)
 
@@ -66,7 +66,7 @@ POST /api/v1/data-connectors/google-sheets/grid
 }
 ```
 
-### 2) 시트 등록 (폴링/모니터링)
+### 2) 시트 등록 (Sync 대상 등록)
 
 ```bash
 POST /api/v1/data-connectors/google-sheets/register
@@ -90,13 +90,16 @@ POST /api/v1/data-connectors/google-sheets/register
 
 #### 등록 정보 저장 방식 (중요)
 
-- 운영 환경에서는 **Redis**에 등록 정보를 저장해 BFF 재시작/스케일아웃에도 추적이 유지됩니다.
-- Redis가 없으면 dev 편의를 위해 **in-memory fallback**으로 동작하며(비권장), 재시작 시 등록이 사라질 수 있습니다.
+- 등록 정보/상태는 **Postgres**에 영속 저장됩니다. (Foundry-style)
+  - `connector_sources`: source_type/source_id + config_json + enabled
+  - `connector_mappings`: Source → Ontology 매핑(초안/확정) + enabled
+  - `connector_sync_state`: last cursor/hash, last_success/failure, 재시도 등 운영 상태
 
 #### auto_import (중요)
 
-- `auto_import=true`로 등록하면, 시트 변경 감지 이벤트(`google-sheets-updates`)를 소비하는 **`google-sheets-worker`**가 자동으로 인스턴스 bulk-create를 호출합니다.
-- Docker 기준으로는 `backend/docker-compose.yml` / `docker-compose.full.yml`에 `google-sheets-worker`가 포함되어 있습니다.
+- `auto_import`는 커넥터가 아니라 **공용 Sync Worker**가 수행합니다.
+- **매핑이 확정된 경우에만**(`database_name` + `class_label` 등) Sync Worker가 데이터를 fetch/normalize한 뒤 BFF의 bulk-create 커맨드를 제출합니다.
+- 변경 감지는 Trigger 서비스가 수행하고, 이벤트는 Kafka `connector-updates`(EventEnvelope)로 통일됩니다.
 
 ### 3) 등록된 시트 목록
 
@@ -193,14 +196,15 @@ curl -X POST http://localhost:8002/api/v1/data-connectors/google-sheets/register
 
 4. **주기적 동기화**
    - `POST /api/v1/data-connectors/google-sheets/register`로 시트 등록
-   - 설정된 간격으로 자동 업데이트
+   - `connector-trigger-service`가 변경 감지(폴링/웹훅) → `connector-updates` 발행
+   - `connector-sync-worker`가 매핑이 확정된 소스만 반영(큐잉/백오프/DLQ 기본)
 
 ## 🚧 제한사항
 
 - 현재는 공개 시트만 지원 (OAuth2는 개발 중)
 - 미리보기는 기본 `limit=10` (필요 시 쿼리 파라미터로 조정)
 - `polling_interval`은 seconds 단위이며 너무 짧으면 외부 API/비용 이슈가 생길 수 있음
-- `auto_import`는 “변경 감지 → bulk-create 제출”까지의 최소 파이프라인이며, 데이터 정규화/업서트/삭제 동기화는 별도 정책이 필요합니다.
+- `auto_import`는 “변경 감지 → bulk-create 제출”까지의 최소 파이프라인입니다. 업서트/삭제/PK 전략은 `connector_mappings`로 제품화(Foundry-style)하는 것이 안전합니다.
 - `auto_import`에서 중복 생성을 피하려면, 시트에 안정적인 식별자 컬럼(예: `customer_id`)을 포함시키는 것을 권장합니다.
 
 ## 🔮 향후 계획

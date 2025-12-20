@@ -22,7 +22,8 @@ class AppConfig:
     INSTANCE_EVENTS_TOPIC = "instance_events"
     ONTOLOGY_EVENTS_TOPIC = "ontology_events"
     PROJECTION_DLQ_TOPIC = "projection_failures_dlq"
-    GOOGLE_SHEETS_UPDATES_TOPIC = "google-sheets-updates"
+    CONNECTOR_UPDATES_TOPIC = "connector-updates"
+    CONNECTOR_UPDATES_DLQ_TOPIC = "connector-updates-dlq"
     
     # Command Topics (used by workers to consume commands)
     INSTANCE_COMMANDS_TOPIC = "instance_commands"
@@ -208,7 +209,8 @@ class AppConfig:
             cls.INSTANCE_EVENTS_TOPIC,
             cls.ONTOLOGY_EVENTS_TOPIC,
             cls.PROJECTION_DLQ_TOPIC,
-            cls.GOOGLE_SHEETS_UPDATES_TOPIC,
+            cls.CONNECTOR_UPDATES_TOPIC,
+            cls.CONNECTOR_UPDATES_DLQ_TOPIC,
             cls.INSTANCE_COMMANDS_TOPIC,
             cls.ONTOLOGY_COMMANDS_TOPIC,
             cls.DATABASE_COMMANDS_TOPIC

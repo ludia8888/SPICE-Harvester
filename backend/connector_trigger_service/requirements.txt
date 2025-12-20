@@ -1,4 +1,4 @@
-# Google Sheets Worker dependencies
+# Connector Trigger Service dependencies
 #
 # Shared package is the single source of truth for all external deps.
 -e ../shared

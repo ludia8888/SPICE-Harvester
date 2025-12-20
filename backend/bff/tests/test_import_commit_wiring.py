@@ -27,6 +27,9 @@ class _FakeFunnelClient:
 def test_google_sheets_import_commit_submits_to_oms(monkeypatch):
     import bff.services.funnel_client as funnel_client_module
 
+    # Unit tests should be hermetic: enforce a local auth token and present it.
+    monkeypatch.setenv("BFF_ADMIN_TOKEN", "testtoken")
+
     _FakeFunnelClient.google_result = {
         "table": {"id": "t1", "mode": "table", "bbox": {"top": 1, "left": 1, "bottom": 3, "right": 1}},
         "preview": {"columns": ["Name"], "sample_data": [["Alice"], ["Bob"]]},
@@ -46,6 +49,7 @@ def test_google_sheets_import_commit_submits_to_oms(monkeypatch):
     try:
         res = client.post(
             "/api/v1/database/testdb/import-from-google-sheets/commit",
+            headers={"X-Admin-Token": "testtoken"},
             json={
                 "sheet_url": "https://docs.google.com/spreadsheets/d/example",
                 "worksheet_name": "Sheet1",
@@ -70,6 +74,9 @@ def test_google_sheets_import_commit_submits_to_oms(monkeypatch):
 def test_excel_import_commit_submits_to_oms(monkeypatch):
     import bff.services.funnel_client as funnel_client_module
 
+    # Unit tests should be hermetic: enforce a local auth token and present it.
+    monkeypatch.setenv("BFF_ADMIN_TOKEN", "testtoken")
+
     _FakeFunnelClient.excel_result = {
         "table": {"id": "t1", "mode": "table", "bbox": {"top": 1, "left": 1, "bottom": 3, "right": 1}},
         "preview": {"columns": ["Name"], "sample_data": [["Alice"]]},
@@ -89,6 +96,7 @@ def test_excel_import_commit_submits_to_oms(monkeypatch):
     try:
         res = client.post(
             "/api/v1/database/testdb/import-from-excel/commit",
+            headers={"X-Admin-Token": "testtoken"},
             data={
                 "target_class_id": "Customer",
                 "target_schema_json": json.dumps([{"name": "name", "type": "xsd:string"}]),
@@ -112,4 +120,3 @@ def test_excel_import_commit_submits_to_oms(monkeypatch):
     fake_oms.post.assert_awaited_once()
     called_path = fake_oms.post.await_args.args[0]
     assert called_path == "/api/v1/instances/testdb/async/Customer/bulk-create"
-
