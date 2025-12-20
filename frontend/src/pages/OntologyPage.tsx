@@ -229,7 +229,7 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
     setDraftError(null)
     try {
       JSON.parse(draft)
-      validateMutation.mutate()
+      validateMutation.mutate(undefined)
     } catch (error) {
       setDraftError('Invalid JSON')
     }
@@ -247,7 +247,7 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
       setConfirmAction('apply')
       return
     }
-    applyMutation.mutate()
+    applyMutation.mutate(undefined)
   }
 
   const handleDelete = () => {
@@ -258,7 +258,7 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
       setConfirmAction('delete')
       return
     }
-    deleteMutation.mutate()
+    deleteMutation.mutate(undefined)
   }
 
   return (

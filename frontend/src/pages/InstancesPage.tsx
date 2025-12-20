@@ -91,7 +91,7 @@ const extractUnknownLabels = (error: unknown) => {
   const payload = detail as { error?: string; labels?: unknown }
   if (payload.error !== 'unknown_label_keys') return []
   if (!Array.isArray(payload.labels)) return []
-  return payload.labels.filter((item): item is string => typeof item === 'string' && item.trim())
+  return payload.labels.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
 }
 
 const parseJsonObject = (raw: string, label: string) => {
@@ -606,7 +606,7 @@ export const InstancesPage = ({ dbName }: { dbName: string }) => {
                   <div className="form-row">
                     <Button
                       intent={Intent.PRIMARY}
-                      onClick={() => updateMutation.mutate()}
+                      onClick={() => updateMutation.mutate(undefined)}
                       disabled={!selectedId}
                       loading={updateMutation.isPending}
                     >
@@ -614,7 +614,7 @@ export const InstancesPage = ({ dbName }: { dbName: string }) => {
                     </Button>
                     <Button
                       intent={Intent.DANGER}
-                      onClick={() => deleteMutation.mutate()}
+                      onClick={() => deleteMutation.mutate(undefined)}
                       disabled={!selectedId}
                       loading={deleteMutation.isPending}
                     >
