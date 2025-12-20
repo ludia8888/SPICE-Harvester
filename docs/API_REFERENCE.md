@@ -486,6 +486,569 @@ docker compose -f docker-compose.full.yml up -d --build
 - `GET /api/v1/database/{db_name}/query/builder` — 쿼리 빌더 정보 조회. 요청: 경로 `db_name`. 응답: 빌더 정보 JSON(OpenAPI 스키마).
 - `POST /api/v1/database/{db_name}/query/raw` — 원시 쿼리 실행. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 결과 JSON(OpenAPI 스키마).
 
+## 상세 API 가이드 (FE 구현용)
+
+이 섹션은 프론트엔드가 **API 목록만 보고도 구현**할 수 있도록 요청/응답/역할/주의사항을 상세히 정리한다.
+
+### 공통 데이터 구조
+
+**LocalizedText**
+- 문자열 또는 언어 맵을 허용한다.
+- 예: `"제품"` 또는 `{"ko":"제품","en":"Product"}`
+
+**Ontology: Class Create/Update**
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| id | string | N | 클래스 ID. 없으면 `label` 기반 자동 생성 |
+| label | LocalizedText | Y | UI 라벨 |
+| description | LocalizedText | N | 설명 |
+| parent_class | string | N | 부모 클래스 ID |
+| abstract | boolean | N | 추상 클래스 여부 |
+| properties | Property[] | N | 속성 정의 |
+| relationships | Relationship[] | N | 관계 정의 |
+| metadata | object | N | 임의 메타데이터 |
+
+**Property**
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| name | string | Y | 속성 ID |
+| type | string | Y | 데이터 타입 (`xsd:string`, `xsd:date`, `xsd:decimal` 등) |
+| label | LocalizedText | Y | UI 라벨 |
+| required | boolean | N | 필수 여부 |
+| primary_key | boolean | N | PK 여부 |
+| description | LocalizedText | N | 설명 |
+| constraints | object | N | 제약(도메인별) |
+| target / linkTarget | string | N | 관계형 속성일 때 대상 클래스 |
+| cardinality | string | N | 관계형 속성일 때 카디널리티 |
+
+**Relationship**
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| predicate | string | Y | 관계 ID |
+| target | string | Y | 대상 클래스 ID |
+| label | LocalizedText | Y | UI 라벨 |
+| cardinality | string | N | `1:1`, `1:n`, `n:1`, `n:m` |
+| description | LocalizedText | N | 설명 |
+| inverse_predicate | string | N | 역관계 ID |
+| inverse_label | LocalizedText | N | 역관계 라벨 |
+
+**Import 공통 구조**
+| 구조 | 설명 |
+|---|---|
+| ImportFieldMapping | `{ "source_field": "컬럼명", "target_field": "속성ID" }` |
+| ImportTargetField | `{ "name": "속성ID", "type": "xsd:string" }` |
+| BoundingBox | `{ "top":0,"left":0,"bottom":10,"right":5 }` (0-based, inclusive) |
+
+**ImportFromGoogleSheetsRequest**
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| sheet_url | string | Y | Google Sheet URL |
+| worksheet_name | string | N | 시트 탭 이름 |
+| api_key | string | N | Google API key |
+| target_class_id | string | Y | 타겟 클래스 ID |
+| target_schema | ImportTargetField[] | Y | 타입 정보 |
+| mappings | ImportFieldMapping[] | N | 컬럼 → 속성 매핑 |
+| table_id | string | N | 선택된 테이블 ID |
+| table_bbox | BoundingBox | N | 테이블 범위 |
+| max_tables | number | N | 테이블 탐색 상한 |
+| max_rows/max_cols | number | N | 샘플 제한 |
+| trim_trailing_empty | boolean | N | trailing empty 제거 |
+| allow_partial | boolean | N | 오류 행 스킵 허용 |
+| dry_run_rows | number | N | dry-run 샘플 행 수 |
+| max_import_rows | number | N | 커밋 시 최대 행 수 |
+| batch_size | number | N | 커밋 배치 크기 |
+| return_instances | boolean | N | 응답에 인스턴스 포함 |
+| max_return_instances | number | N | 응답 인스턴스 상한 |
+| options | object | N | Funnel 옵션 |
+
+---
+
+### 1) Summary / Health
+
+**GET /api/v1/summary**
+- 역할: 현재 컨텍스트 + 보호 브랜치 정책 + Redis/ES 헬스 요약을 **단일 응답**으로 제공.
+- 쿼리: `db`, `branch`
+- 응답(`ApiResponse.data`):
+  - `context`: `{ db_name, branch }`
+  - `policy`: `{ protected_branches, is_protected_branch }`
+  - `services`: `{ redis: { ok }, elasticsearch: { ok, health, error } }`
+  - `terminus`: OMS 브랜치 info (있을 때만)
+
+**GET /api/v1/**
+- 역할: 서비스 기본 정보(서비스명/버전).
+
+**GET /api/v1/health**
+- 역할: BFF + OMS 연결 상태 헬스 체크.
+- 응답 예시:
+  ```json
+  { "status":"success", "data": { "service":"BFF", "version":"2.0.0", "oms_connected": true } }
+  ```
+
+---
+
+### 2) 데이터베이스 / 브랜치
+
+**GET /api/v1/databases**
+- 역할: DB 이름 목록 조회.
+- 응답: `ApiResponse.data.databases`는 **문자열 배열**(DB 이름).
+
+**POST /api/v1/databases**
+- 역할: DB 생성 (비동기).
+- 바디:
+  | 필드 | 타입 | 필수 | 설명 |
+  |---|---|---|---|
+  | name | string | Y | DB 이름 |
+  | description | string | N | 설명 |
+- 응답: `202` + `data.command_id` (Command 추적).
+
+**GET /api/v1/databases/{db_name}**
+- 역할: DB 존재 여부 조회.
+- 응답: `ApiResponse.data.exists` (boolean)
+
+**DELETE /api/v1/databases/{db_name}?expected_seq=...**
+- 역할: DB 삭제 (비동기, OCC).
+- 응답: `202` + `command_id` (또는 legacy 200)
+
+**GET /api/v1/databases/{db_name}/expected-seq**
+- 역할: DB 삭제용 OCC 토큰 획득.
+- 응답: `ApiResponse.data.expected_seq`
+
+**GET /api/v1/databases/{db_name}/branches**
+- 역할: 브랜치 목록 조회.
+- 응답: `{ branches: [...], count }`
+
+**POST /api/v1/databases/{db_name}/branches**
+- 역할: 브랜치 생성.
+- 바디: `{ "name": "feature/x", "from_branch": "main" }`
+- 응답: `{ status: "success", name: "...", data: <OMS 응답> }`
+
+**GET /api/v1/databases/{db_name}/branches/{branch_name}**
+- 역할: 브랜치 상세 조회 (OMS branch info pass-through).
+- `branch_name`은 `/` 포함 가능. URL 인코딩 필요.
+
+**DELETE /api/v1/databases/{db_name}/branches/{branch_name}?force=false**
+- 역할: 브랜치 삭제.
+
+**GET /api/v1/databases/{db_name}/classes**
+- 역할: 클래스 목록 조회.
+- 응답: `{ classes: [...], count }`
+- 비고: OMS 전체 온톨로지 목록을 반환하므로 FE는 `type=="Class"` 필터를 권장.
+
+**POST /api/v1/databases/{db_name}/classes**
+- 역할: 레거시 JSON-LD 클래스 생성.
+- 바디: JSON-LD(`@id` 필수). BFF가 `@id` → `id`로 변환.
+
+**GET /api/v1/databases/{db_name}/classes/{class_id}**
+- 역할: 특정 클래스 조회 (OMS pass-through).
+
+**GET /api/v1/databases/{db_name}/versions**
+- 역할: DB 버전/커밋 히스토리 조회.
+- 응답: `{ versions: [...], count }`
+
+---
+
+### 3) 온톨로지 CRUD
+
+**POST /api/v1/database/{db_name}/ontology?branch=...**
+- 역할: 클래스 생성(비동기). `id` 없으면 자동 생성.
+- 바디: `OntologyCreateRequest`
+- 응답: `202` + `command_id`
+
+**POST /api/v1/database/{db_name}/ontology/validate?branch=...**
+- 역할: 생성 요청 사전 검증(쓰기 없음).
+- 바디: `OntologyCreateRequest`
+- 응답: 검증 리포트(JSON)
+
+**GET /api/v1/database/{db_name}/ontology/{class_label}?branch=...**
+- 역할: 클래스 조회 (라벨 기반). `class_label`은 라벨 또는 class_id.
+
+**POST /api/v1/database/{db_name}/ontology/{class_label}/validate?branch=...**
+- 역할: 업데이트 검증(린트+diff).
+- 바디: `OntologyUpdateRequest`
+
+**PUT /api/v1/database/{db_name}/ontology/{class_label}?branch=...&expected_seq=...**
+- 역할: 클래스 업데이트(비동기, OCC).
+- 바디: `OntologyUpdateRequest`
+- 응답: `202` + `command_id`
+
+**DELETE /api/v1/database/{db_name}/ontology/{class_label}?branch=...&expected_seq=...**
+- 역할: 클래스 삭제(비동기, OCC).
+
+**GET /api/v1/database/{db_name}/ontology/list?branch=...**
+- 역할: 클래스 목록(라벨 매핑 포함).
+
+**GET /api/v1/database/{db_name}/ontology/{class_id}/schema?branch=...&format=json|jsonld|owl**
+- 역할: 스키마 내보내기.
+
+---
+
+### 4) 관계/스키마 검증 (고급)
+
+**POST /api/v1/database/{db_name}/ontology-advanced**
+- 역할: 관계 검증/순환 참조 체크를 포함한 생성(비동기).
+- 쿼리: `branch`, `auto_generate_inverse`(미구현, true면 501), `validate_relationships`, `check_circular_references`
+- 바디: `OntologyCreateRequest`
+
+**POST /api/v1/database/{db_name}/validate-relationships**
+- 역할: 관계 검증(쓰기 없음).
+
+**POST /api/v1/database/{db_name}/check-circular-references**
+- 역할: 순환 참조 검사(쓰기 없음).
+
+**GET /api/v1/database/{db_name}/relationship-network/analyze**
+- 역할: 관계 네트워크 분석.
+
+**GET /api/v1/database/{db_name}/relationship-paths**
+- 역할: 관계 경로 탐색(라벨 기반 힌트 제공용).
+
+---
+
+### 5) 스키마/매핑 제안 (Funnel)
+
+**POST /api/v1/database/{db_name}/suggest-schema-from-data**
+- 역할: 샘플 데이터 기반 클래스/타입 제안.
+- 바디:
+  | 필드 | 타입 | 필수 | 설명 |
+  |---|---|---|---|
+  | data | array[] | Y | row 배열 |
+  | columns | string[] | Y | 컬럼명 |
+  | class_name | string | N | 클래스 라벨 힌트 |
+  | include_complex_types | boolean | N | 복합 타입 추론 |
+- 응답: `suggested_schema`, `analysis_summary`, `detailed_analysis`
+
+**POST /api/v1/database/{db_name}/suggest-schema-from-google-sheets**
+- 역할: Google Sheets 기반 스키마 제안.
+- 바디: `sheet_url`, `worksheet_name`, `api_key`, `table_id`, `table_bbox` 등.
+
+**POST /api/v1/database/{db_name}/suggest-schema-from-excel**
+- 역할: Excel 업로드 기반 스키마 제안.
+- 요청: `multipart/form-data` (파일 + 폼 필드)
+
+**POST /api/v1/database/{db_name}/suggest-mappings**
+- 역할: 소스/타겟 스키마 간 매핑 제안.
+- 바디:
+  | 필드 | 타입 | 필수 | 설명 |
+  |---|---|---|---|
+  | source_schema | object[] | Y | `{name,type}` 리스트 |
+  | target_schema | object[] | Y | `{name,type}` 리스트 |
+  | sample_data | object[] | N | 샘플 값 |
+  | target_sample_data | object[] | N | 타겟 샘플 값 |
+
+**POST /api/v1/database/{db_name}/suggest-mappings-from-google-sheets**
+- 역할: Google Sheets → 타겟 클래스 매핑 제안.
+- 바디: `sheet_url`, `worksheet_name`, `target_class_id`, `target_schema`, `table_id`, `table_bbox`,
+  `include_relationships`, `enable_semantic_hints`
+
+**POST /api/v1/database/{db_name}/suggest-mappings-from-excel**
+- 역할: Excel → 타겟 클래스 매핑 제안.
+
+---
+
+### 6) Import (Google Sheets / Excel)
+
+**POST /api/v1/database/{db_name}/import-from-google-sheets/dry-run**
+- 역할: 타입 변환/매핑 검증(쓰기 없음).
+- 바디: `ImportFromGoogleSheetsRequest`
+- 응답: `stats`, `errors`, `preview_data`, `structure`, `sample_instances`
+
+**POST /api/v1/database/{db_name}/import-from-google-sheets/commit**
+- 역할: OMS bulk-create로 비동기 쓰기 제출(배치).
+- 바디: `ImportFromGoogleSheetsRequest`
+- 응답: `write.commands[]` (각 항목에 `command_id`, `status_url`)
+- 비고: 현재 `branch=main` 고정.
+
+**POST /api/v1/database/{db_name}/import-from-excel/dry-run**
+- 역할: Excel 파일 기반 dry-run.
+- 요청: `multipart/form-data`
+  - `file` (xlsx/xlsm)
+  - `target_class_id` (string)
+  - `target_schema_json` (JSON string, ImportTargetField[])
+  - `mappings_json` (JSON string, ImportFieldMapping[])
+  - `sheet_name`, `table_id`, `table_top/left/bottom/right`, `dry_run_rows`, `options_json` 등
+
+**POST /api/v1/database/{db_name}/import-from-excel/commit**
+- 역할: Excel 파일 기반 커밋(배치).
+- 응답: `write.commands[]` 포함.
+
+**POST /api/v1/database/{db_name}/ontology/{class_id}/mapping-metadata**
+- 역할: 매핑 이력/통계 메타데이터를 클래스에 저장.
+- 바디: 임의 JSON (권장 키: `sourceFile`, `mappingsCount`, `averageConfidence`, `mappingDetails`, `timestamp`)
+
+---
+
+### 7) 라벨 매핑
+
+**GET /api/v1/database/{db_name}/mappings/**
+- 역할: 매핑 요약 통계(언어별 집계).
+
+**POST /api/v1/database/{db_name}/mappings/export**
+- 역할: 전체 매핑 번들 다운로드(JSON).
+- 응답: `Content-Disposition` 첨부파일.
+
+**POST /api/v1/database/{db_name}/mappings/import**
+- 역할: 매핑 번들 업로드/적용.
+- 요청: `multipart/form-data`의 `file`(JSON).
+
+**POST /api/v1/database/{db_name}/mappings/validate**
+- 역할: 업로드 매핑 검증(쓰기 없음).
+- 요청: `multipart/form-data`의 `file`(JSON).
+- 응답: `validation_passed`, `details`(unmapped/충돌 목록)
+
+**DELETE /api/v1/database/{db_name}/mappings/**
+- 역할: 매핑 전체 삭제.
+
+---
+
+### 8) 인스턴스 쓰기 (비동기)
+
+**POST /api/v1/database/{db_name}/instances/{class_label}/create?branch=...**
+- 역할: 단건 생성(라벨 기반).
+- 바디: `{ data: { <label>: <value> }, metadata?: object }`
+- 응답: `CommandResult` (`command_id`, `status` 등)
+- 에러: `unknown_label_keys`, `409`(OCC), `400`(검증 실패)
+
+**PUT /api/v1/database/{db_name}/instances/{class_label}/{instance_id}/update?branch=...&expected_seq=...**
+- 역할: 단건 업데이트(OCC 필요).
+- 바디: `{ data: {...}, metadata?: {...} }`
+
+**DELETE /api/v1/database/{db_name}/instances/{class_label}/{instance_id}/delete?branch=...&expected_seq=...**
+- 역할: 단건 삭제(OCC 필요).
+
+**POST /api/v1/database/{db_name}/instances/{class_label}/bulk-create?branch=...**
+- 역할: 다건 생성(라벨 기반).
+- 바디: `{ instances: [ {<label>:<value>}, ... ], metadata?: {...} }`
+
+- **expected_seq 주의**: 인스턴스용 expected_seq 조회 엔드포인트는 없으므로,
+  최신 조회 응답의 `version`(ES) 또는 `409` 응답의 `actual_seq`를 사용한다.
+
+---
+
+### 9) 인스턴스 읽기 (ES 우선, TerminusDB 폴백)
+
+**GET /api/v1/database/{db_name}/class/{class_id}/instances**
+- 쿼리: `limit`(<=1000), `offset`, `search`(문자열)
+- 응답: `{ class_id, total, limit, offset, search, instances }`
+- 비고: 현재 `branch` 미지원.
+  - ES 응답에는 `version`, `event_timestamp`, `class_id`, `instance_id` 등이 포함될 수 있다.
+
+**GET /api/v1/database/{db_name}/class/{class_id}/instance/{instance_id}**
+- 응답: `{ status: "success", data: <instance> }`
+
+**GET /api/v1/database/{db_name}/class/{class_id}/sample-values**
+- 쿼리: `property_name` (선택)
+- 응답:
+  - `property_name` 있을 때: `{ values: [...] }`
+  - 없을 때: `{ property_values: { field: [...] } }`
+
+---
+
+### 10) 그래프 쿼리 (Terminus + ES 페더레이션)
+
+**POST /api/v1/graph-query/{db_name}?branch=...**
+- 역할: 멀티홉 그래프 쿼리 + ES 문서 결합.
+- 바디: `GraphQueryRequest`
+  | 필드 | 타입 | 설명 |
+  |---|---|---|
+  | start_class | string | 시작 클래스 ID |
+  | hops | GraphHop[] | `{predicate,target_class}` |
+  | filters | object | 시작 클래스 필터(베스트에포트, **내부 property_id 기준**) |
+  | limit/offset | number | 페이지네이션 |
+  | max_nodes/max_edges | number | 폭발 방지 |
+  | include_documents | boolean | ES 문서 포함 |
+  | include_paths | boolean | 경로 포함 |
+  | include_provenance | boolean | provenance/lag 정보 |
+  | include_audit | boolean | audit 최소 정보 |
+- 응답: `GraphQueryResponse`
+  - `nodes[]`: `{ id, type, data_status(FULL|PARTIAL|MISSING), data?, display?, provenance?, index_status? }`
+  - `edges[]`: `{ from_node, to_node, predicate }`
+- `data_status`:
+  - `FULL`: ES 문서 포함
+  - `PARTIAL`: ES 일부 누락/지연 가능
+  - `MISSING`: ES 문서 미존재(프로젝션 지연 또는 미인덱스)
+
+**POST /api/v1/graph-query/{db_name}/simple?branch=...**
+- 역할: 단일 클래스 간단 조회(필터).
+- 바디: `{ class_name, filters?, limit? }`
+- 비고: 현재 limit이 엄격히 적용되지 않을 수 있음.
+
+**POST /api/v1/graph-query/{db_name}/multi-hop?branch=...**
+- 역할: 멀티홉 헬퍼(legacy).
+
+**GET /api/v1/graph-query/{db_name}/paths?source_class=...&target_class=...&max_depth=...&branch=...**
+- 역할: 클래스 간 가능한 경로 목록.
+- 응답: `{ source_class, target_class, paths, count, max_depth }`
+
+---
+
+### 11) 머지 충돌
+
+**POST /api/v1/database/{db_name}/merge/simulate**
+- 역할: 충돌 미리보기.
+- 바디: `{ source_branch, target_branch, message?, strategy? }`
+- 응답: `merge_preview` + `conflicts[]`
+
+**POST /api/v1/database/{db_name}/merge/resolve**
+- 역할: 충돌 해결 + 병합 실행.
+- 바디:
+  - `source_branch`, `target_branch`, `strategy`, `message`, `author`
+  - `resolutions[]`: `{ path, resolution_type, resolved_value, metadata? }`
+
+---
+
+### 12) 감사 (Audit)
+
+**GET /api/v1/audit/logs**
+- 역할: 감사 로그 조회.
+- 쿼리: `partition_key=db:<db_name>` 권장, `action`, `status`, `resource_type`, `event_id`, `command_id`, `since`, `until`, `limit`, `offset`
+
+**GET /api/v1/audit/chain-head**
+- 역할: 해시 체인 헤드 확인.
+- 쿼리: `partition_key` 필수
+
+---
+
+### 13) 라인리지 (Lineage)
+
+**GET /api/v1/lineage/graph**
+- 쿼리: `root` 필수, `db_name` 권장, `direction`, `max_depth`, `max_nodes`, `max_edges`
+
+**GET /api/v1/lineage/impact**
+- 쿼리: `root` 필수, `artifact_kind`(es|s3|terminus 등)
+
+**GET /api/v1/lineage/metrics**
+- 쿼리: `db_name`(선택), `window_minutes`(기본 60)
+
+---
+
+### 14) 백그라운드 작업
+
+**GET /api/v1/tasks/**
+- 역할: 작업 목록 조회.
+- 쿼리: `status`, `task_type`, `limit`
+
+**GET /api/v1/tasks/{task_id}**
+- 역할: 작업 상태/진행률 조회.
+
+**GET /api/v1/tasks/{task_id}/result**
+- 역할: 완료된 작업 결과 조회.
+
+**DELETE /api/v1/tasks/{task_id}**
+- 역할: 작업 취소.
+
+**GET /api/v1/tasks/metrics/summary**
+- 역할: 작업/큐 메트릭 요약.
+
+---
+
+### 15) 커맨드 상태
+
+**GET /api/v1/commands/{command_id}/status**
+- 역할: 202 커맨드 상태 폴링.
+- 응답: `CommandResult`
+- 비고: 상태 TTL(기본 24h) 이후 404 가능.
+
+---
+
+### 16) 데이터 커넥터 (Google Sheets)
+
+**POST /api/v1/data-connectors/google-sheets/grid**
+- 역할: 시트 그리드 + merge 정보 추출.
+- 바디: `{ sheet_url, worksheet_name?, api_key?, max_rows?, max_cols?, trim_trailing_empty? }`
+- 응답: `SheetGrid` (grid + merged_cells + metadata)
+
+**POST /api/v1/data-connectors/google-sheets/preview**
+- 역할: 컬럼 + 샘플 데이터 미리보기.
+- 쿼리: `limit` (기본 10)
+- 바디: `{ sheet_url, worksheet_name?, api_key? }`
+
+**POST /api/v1/data-connectors/google-sheets/register**
+- 역할: 시트 모니터링 등록(레지스트리 저장).
+- 바디: `{ sheet_url, worksheet_name?, polling_interval?, database_name?, branch?, class_label?, auto_import?, max_import_rows?, api_key? }`
+- 응답: `ApiResponse.data.registered_sheet`
+
+**GET /api/v1/data-connectors/google-sheets/registered**
+- 역할: 등록된 시트 목록.
+- 쿼리: `database_name`(필터)
+- 응답(`ApiResponse.data.sheets[]`): `sheet_id`, `sheet_url`, `worksheet_name`, `polling_interval`,
+  `database_name`, `branch`, `class_label`, `auto_import`, `last_polled`, `last_hash`, `is_active`, `registered_at`
+
+**GET /api/v1/data-connectors/google-sheets/{sheet_id}/preview**
+- 역할: 등록된 시트 미리보기.
+- 쿼리: `worksheet_name`, `limit`
+
+**DELETE /api/v1/data-connectors/google-sheets/{sheet_id}**
+- 역할: 등록 해제.
+
+---
+
+### 17) 쿼리 (Label 기반)
+
+**POST /api/v1/database/{db_name}/query**
+- 역할: 라벨 기반 쿼리 실행.
+- 바디 예시:
+  ```json
+  {
+    "class_label": "제품",
+    "filters": [
+      { "field": "가격", "operator": "ge", "value": 10000 },
+      { "field": "카테고리", "operator": "eq", "value": "전자제품" }
+    ],
+    "select": ["이름", "가격"],
+    "order_by": "가격",
+    "order_direction": "desc",
+    "limit": 10
+  }
+  ```
+- operator 허용값: `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `like`, `in`, `not_in`, `is_null`, `is_not_null`
+- UI 빌더에서 제공되는 기호(`=`, `!=`, `>=` 등)는 위 연산자 키로 매핑해서 전송해야 한다.
+
+**GET /api/v1/database/{db_name}/query/builder**
+- 역할: UI 빌더용 연산자/예시 제공.
+
+**POST /api/v1/database/{db_name}/query/raw**
+- 역할: 제한된 원시 쿼리. 허용 타입: `select|count|exists`
+
+---
+
+### 18) AI (NLQ)
+
+**POST /api/v1/ai/translate/query-plan/{db_name}**
+- 역할: 자연어 → 실행 계획(JSON) 생성 (실행 없음).
+- 바디: `{ question, branch?, mode?, limit?, include_provenance?, include_documents? }`
+
+**POST /api/v1/ai/query/{db_name}**
+- 역할: 자연어 → 실행 → 답변 생성.
+- 바디: 동일 (AIQueryRequest)
+- 응답: `{ answer, plan, execution, llm, warnings }`
+
+---
+
+### 19) 운영자 전용 (Admin)
+
+**POST /api/v1/admin/replay-instance-state**
+- 역할: 이벤트 스토어 리플레이로 인스턴스 상태 복원(백그라운드).
+- 바디: `{ db_name, class_id, instance_id, store_result?, result_ttl? }`
+- 응답: `{ task_id, status_url }`
+
+**GET /api/v1/admin/replay-instance-state/{task_id}/result**
+- 역할: 리플레이 결과 조회.
+
+**GET /api/v1/admin/replay-instance-state/{task_id}/trace**
+- 역할: 리플레이 감사/라인리지 추적 결과 조회.
+
+**POST /api/v1/admin/recompute-projection**
+- 역할: ES 프로젝션 재계산(백그라운드).
+- 바디: `{ db_name, projection, branch, from_ts, to_ts?, promote?, allow_delete_base_index?, max_events? }`
+
+**GET /api/v1/admin/recompute-projection/{task_id}/result**
+- 역할: 재계산 결과 조회.
+
+**POST /api/v1/admin/cleanup-old-replays**
+- 역할: Redis 리플레이 결과 정리.
+
+**GET /api/v1/admin/system-health**
+- 역할: 시스템 상태 요약.
+
 ## 웹소켓 (실시간 업데이트)
 
 웹소켓 경로는 OpenAPI에 포함되지 않는다.
@@ -497,12 +1060,24 @@ docker compose -f docker-compose.full.yml up -d --build
 
 클라이언트 수신 이벤트:
 - `connection_established`
-- `command_update` (상태 변경 시)
+- `command_update` (상태 변경 시, `data`에 CommandResult payload 포함)
+- `pong` (ping 응답)
+- `subscription_result` (subscribe/unsubscribe 결과)
+- `error`
+
+클라이언트 → 서버 메시지:
+```json
+{ "type": "ping", "timestamp": "..." }
+{ "type": "subscribe", "command_id": "uuid" }
+{ "type": "unsubscribe", "command_id": "uuid" }
+{ "type": "get_subscriptions" }
+```
 
 ### 사용자 전체 커맨드 구독
 
 - `WS /api/v1/ws/commands?user_id=...`
   - 인증이 활성화되어 있으면 `?token=<admin_token>` 또는 `X-Admin-Token` 헤더를 전달한다.
+  - 연결 후 동일한 메시지 프로토콜(ping/subscribe/unsubscribe)을 사용한다.
 
 ## 핵심 플로우 (프론트엔드 레시피)
 
