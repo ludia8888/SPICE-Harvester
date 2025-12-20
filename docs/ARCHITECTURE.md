@@ -101,9 +101,9 @@ graph TD
   end
 
   subgraph API["API Layer"]
-    BFF[BFF (FastAPI) :8002]
-    OMS[OMS (FastAPI) :8000]
-    Funnel[Funnel (FastAPI) :8003]
+    BFF["BFF (FastAPI)<br/>8002"]
+    OMS["OMS (FastAPI)<br/>8000"]
+    Funnel["Funnel (FastAPI)<br/>8003"]
   end
 
   subgraph WritePath["Write Path"]
@@ -378,8 +378,8 @@ Domain event 예시(개념; instance-worker가 생성):
 ```mermaid
 sequenceDiagram
   participant Client
-  participant BFF as BFF (:8002)
-  participant OMS as OMS (:8000)
+  participant BFF as BFF (8002)
+  participant OMS as OMS (8000)
   participant ESStore as S3/MinIO Event Store
   participant Relay as EventPublisher(message_relay)
   participant Kafka
