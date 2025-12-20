@@ -63,11 +63,14 @@ load_dotenv_defaults "$REPO_ROOT/.env"
 
 # Compose-aligned defaults (local host ports may be overridden by `.env`)
 POSTGRES_PORT_HOST="${POSTGRES_PORT_HOST:-5433}"
+REDIS_PORT_HOST="${REDIS_PORT_HOST:-6379}"
 MINIO_PORT_HOST="${MINIO_PORT_HOST:-9000}"
 ELASTICSEARCH_PORT_HOST="${ELASTICSEARCH_PORT_HOST:-9200}"
 KAFKA_PORT_HOST="${KAFKA_PORT_HOST:-9092}"
 
 export POSTGRES_URL="${POSTGRES_URL:-postgresql://spiceadmin:spicepass123@localhost:${POSTGRES_PORT_HOST}/spicedb}"
+REDIS_PASSWORD="${REDIS_PASSWORD:-spicepass123}"
+export REDIS_URL="${REDIS_URL:-redis://:${REDIS_PASSWORD}@localhost:${REDIS_PORT_HOST}/0}"
 export MINIO_ENDPOINT_URL="${MINIO_ENDPOINT_URL:-http://localhost:${MINIO_PORT_HOST}}"
 export ELASTICSEARCH_URL="${ELASTICSEARCH_URL:-http://localhost:${ELASTICSEARCH_PORT_HOST}}"
 export KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-localhost:${KAFKA_PORT_HOST}}"
