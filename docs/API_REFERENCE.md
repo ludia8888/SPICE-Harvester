@@ -31,6 +31,56 @@ docker compose -f docker-compose.full.yml up -d --build
 - 요청: `Content-Type: application/json`
 - 응답: `application/json` (파일 업로드 엔드포인트 제외)
 
+### 인증 / 권한
+
+- 기본적으로 BFF는 **인증 필수**로 동작한다.
+- 인증 토큰 전달 방식 (둘 중 하나):
+  - `X-Admin-Token: <token>`
+  - `Authorization: Bearer <token>`
+- WebSocket은 `?token=<token>` 쿼리 또는 헤더 방식 사용 가능.
+- 운영자 전용(Admin) 엔드포인트는 위 토큰이 **반드시** 필요하며, 미제공 시 `401/403`.
+
+### 레이트 리밋 (429)
+
+- 일부 엔드포인트는 레이트 리밋이 적용된다(특히 AI/데이터 커넥터).
+- 초과 시 HTTP `429` + `Retry-After` 헤더 반환.
+- 표준 헤더:
+  - `X-RateLimit-Limit`
+  - `X-RateLimit-Remaining`
+  - `X-RateLimit-Reset`
+  - `Retry-After`
+
+### 에러 응답 패턴
+
+- FastAPI 기본 에러: `{"detail": "..."}`
+- 도메인 에러 상세 예시:
+  - `unknown_label_keys`:
+    ```json
+    { "detail": { "error": "unknown_label_keys", "labels": ["..."], "class_id": "..." } }
+    ```
+  - OCC 충돌:
+    ```json
+    { "detail": { "error": "optimistic_concurrency_conflict", "expected_seq": 3, "actual_seq": 4 } }
+    ```
+- 흔한 HTTP 코드:
+  - `400` 입력 검증 실패
+  - `401/403` 인증/권한 실패
+  - `404` 리소스 없음
+  - `409` OCC 충돌
+  - `429` 레이트 리밋
+  - `5xx` 서버/의존성 오류
+
+### 페이징 / 정렬
+
+- 목록 조회는 보통 `limit` + `offset`을 사용한다.
+- 기본값은 엔드포인트마다 다르며, 상한은 100~1000 사이로 제한된다.
+
+### 브랜치 컨텍스트
+
+- 많은 쓰기/그래프/온톨로지 API는 `?branch=`를 사용한다(기본 `main`).
+- 일부 읽기 API는 **branch를 받지 않거나 무시**한다(예: 인스턴스 리스트/샘플값).
+- Google Sheets/Excel 커밋은 현재 `branch=main` 고정이다.
+
 ### 경로 (⚠️ 현재 네이밍 혼재)
 
 현재 BFF에는 두 가지 URL 형식이 공존한다:
@@ -64,6 +114,9 @@ docker compose -f docker-compose.full.yml up -d --build
 - `instance_id`: 영숫자 + `_`/`-`/`:` (검증됨)
 - `command_id`: UUID
 
+브랜치가 path 파라미터로 쓰이는 엔드포인트(예: `/databases/{db_name}/branches/{branch_name}`)는
+`{branch_name:path}`로 `/` 포함 브랜치를 허용한다.
+
 ### 용어 정리 (헷갈리기 쉬운 항목)
 
 | 용어 | 의미 | 안정성 |
@@ -89,9 +142,11 @@ docker compose -f docker-compose.full.yml up -d --build
 
 ### 쓰기 모드 (202 대 200/201)
 
-지원되는 운영 모드에서 “쓰기” 엔드포인트는 모두 **비동기**다:
+지원되는 운영 모드에서 핵심 쓰기(데이터베이스/온톨로지/인스턴스)는 **비동기**다:
 
-- 쓰기 요청은 커맨드를 제출하고 HTTP `202` + `command_id`를 반환한다(폴링 필요).
+- 대부분의 쓰기 요청은 HTTP `202` + `command_id`를 반환한다(폴링 필요).
+- 배치형 임포트 커밋(예: Google Sheets/Excel)은 HTTP `200`으로 여러 command를 반환하며, 각 항목의 `command_id`/`status_url`을 따라 폴링한다.
+- 브랜치 생성/삭제, 라벨 매핑 import 등 일부 관리성 작업은 동기 응답(200/201)일 수 있다.
 - 직접 쓰기 모드(`ENABLE_EVENT_SOURCING=false`)는 핵심 쓰기 경로에서 **지원하지 않는다**(시도 시 `5xx` 가능).
 
 비고:
@@ -289,9 +344,11 @@ docker compose -f docker-compose.full.yml up -d --build
 - 라벨을 해석할 수 없으면 HTTP `400`과 `detail.error="unknown_label_keys"`를 반환합니다.
 - 라벨 매핑은 보통 온톨로지 생성/수정 흐름 또는 라벨 매핑 가져오기 API로 채워집니다.
 
+공통 쿼리: `branch` (default: `main`)
+
 ### 감사 (**안정**)
-- `GET /api/v1/audit/logs` — 감사 로그 목록 조회. 요청: 쿼리 파라미터(OpenAPI 스키마). 응답: JSON(OpenAPI 스키마).
-- `GET /api/v1/audit/chain-head` — 감사 체인 헤드 검증. 응답: 검증 결과 JSON(OpenAPI 스키마).
+- `GET /api/v1/audit/logs` — 감사 로그 목록 조회. 요청: 쿼리 파라미터(`partition_key=db:<db_name>` 등; OpenAPI 스키마). 응답: JSON(OpenAPI 스키마).
+- `GET /api/v1/audit/chain-head` — 감사 체인 헤드 검증. 요청: 쿼리 `partition_key` 필수. 응답: 검증 결과 JSON(OpenAPI 스키마).
 
 ### 백그라운드 작업 (**안정**)
 - `GET /api/v1/tasks/` — 백그라운드 작업 목록 조회. 응답: JSON(OpenAPI 스키마).
@@ -347,6 +404,8 @@ docker compose -f docker-compose.full.yml up -d --build
 - `POST /api/v1/graph-query/{db_name}/multi-hop` — 멀티홉 전용 헬퍼 질의. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 결과 JSON(OpenAPI 스키마).
 - `GET /api/v1/graph-query/{db_name}/paths` — 클래스 간 관계 경로 탐색. 요청: 경로 `db_name`, 쿼리 파라미터(OpenAPI 스키마). 응답: 경로 JSON(OpenAPI 스키마).
 
+공통 쿼리: `branch` (default: `main`). `start_class`/`target_class`/`predicate`는 내부 `class_id`/관계 ID 기준.
+
 ### 헬스 (**안정**)
 - `GET /api/v1/` — 루트 엔드포인트(서비스 기본 정보/헬스 확인용). 응답: JSON(OpenAPI 스키마).
 - `GET /api/v1/health` — 헬스 체크. 응답: JSON(OpenAPI 스키마).
@@ -358,15 +417,15 @@ docker compose -f docker-compose.full.yml up -d --build
 
 ### 라벨 매핑 (**안정**)
 - `GET /api/v1/database/{db_name}/mappings/` — 라벨 매핑 요약 조회. 요청: 경로 `db_name`. 응답: JSON(OpenAPI 스키마).
-- `POST /api/v1/database/{db_name}/mappings/export` — 라벨 매핑 내보내기. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: JSON/OpenAPI 스키마.
-- `POST /api/v1/database/{db_name}/mappings/import` — 라벨 매핑 가져오기. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: JSON/OpenAPI 스키마.
+- `POST /api/v1/database/{db_name}/mappings/export` — 라벨 매핑 내보내기. 요청: 경로 `db_name` (바디 없음). 응답: JSON 파일 다운로드(`Content-Disposition`).
+- `POST /api/v1/database/{db_name}/mappings/import` — 라벨 매핑 가져오기. 요청: `multipart/form-data`의 `file`(JSON). 응답: JSON(OpenAPI 스키마).
 - `POST /api/v1/database/{db_name}/mappings/validate` — 라벨 매핑 검증(쓰기 없음). 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 검증 결과 JSON(OpenAPI 스키마).
 - `DELETE /api/v1/database/{db_name}/mappings/` — 라벨 매핑 전체 삭제. 요청: 경로 `db_name`. 응답: JSON(OpenAPI 스키마).
 
 ### 라인리지 (**안정**)
-- `GET /api/v1/lineage/graph` — 라인리지 그래프 조회. 응답: JSON(OpenAPI 스키마).
-- `GET /api/v1/lineage/impact` — 영향 분석 결과 조회. 응답: JSON(OpenAPI 스키마).
-- `GET /api/v1/lineage/metrics` — 라인리지 메트릭 조회. 응답: JSON(OpenAPI 스키마).
+- `GET /api/v1/lineage/graph` — 라인리지 그래프 조회. 요청: 쿼리 `root` 필수(예: `event:<uuid>`), `db_name` 권장. 응답: JSON(OpenAPI 스키마).
+- `GET /api/v1/lineage/impact` — 영향 분석 결과 조회. 요청: 쿼리 `root` 필수, `db_name` 권장. 응답: JSON(OpenAPI 스키마).
+- `GET /api/v1/lineage/metrics` — 라인리지 메트릭 조회. 요청: 쿼리 `db_name`(선택), `window_minutes`(기본 60). 응답: JSON(OpenAPI 스키마).
 
 ### 머지 충돌 해결 (**안정**)
 - `POST /api/v1/database/{db_name}/merge/simulate` — 머지 충돌 시뮬레이션. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 시뮬레이션 결과 JSON(OpenAPI 스키마).
@@ -408,10 +467,12 @@ docker compose -f docker-compose.full.yml up -d --build
 - `POST /api/v1/database/{db_name}/suggest-mappings-from-google-sheets` — 구글 시트 기반 매핑 제안. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 제안 매핑 JSON(OpenAPI 스키마).
 - `POST /api/v1/database/{db_name}/suggest-mappings-from-excel` — 엑셀 기반 매핑 제안. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 제안 매핑 JSON(OpenAPI 스키마).
 - `POST /api/v1/database/{db_name}/import-from-google-sheets/dry-run` — 구글 시트 임포트 드라이런(쓰기 없음). 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 미리보기/검증 JSON(OpenAPI 스키마).
-- `POST /api/v1/database/{db_name}/import-from-google-sheets/commit` — 구글 시트 임포트 커밋(OMS 비동기 쓰기 제출). 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: `ApiResponse` + `command_id`.
-- `POST /api/v1/database/{db_name}/import-from-excel/dry-run` — 엑셀 임포트 드라이런(쓰기 없음). 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 미리보기/검증 JSON(OpenAPI 스키마).
-- `POST /api/v1/database/{db_name}/import-from-excel/commit` — 엑셀 임포트 커밋(OMS 비동기 쓰기 제출). 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: `ApiResponse` + `command_id`.
+- `POST /api/v1/database/{db_name}/import-from-google-sheets/commit` — 구글 시트 임포트 커밋(OMS 비동기 쓰기 제출, 배치). 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 배치 제출 결과 JSON(여러 `command_id` 포함).
+- `POST /api/v1/database/{db_name}/import-from-excel/dry-run` — 엑셀 임포트 드라이런(쓰기 없음). 요청: `multipart/form-data`(파일 + 폼 필드; OpenAPI 참고). 응답: 미리보기/검증 JSON(OpenAPI 스키마).
+- `POST /api/v1/database/{db_name}/import-from-excel/commit` — 엑셀 임포트 커밋(OMS 비동기 쓰기 제출, 배치). 요청: `multipart/form-data`(파일 + 폼 필드). 응답: 배치 제출 결과 JSON(여러 `command_id` 포함).
 - `POST /api/v1/database/{db_name}/ontology/{class_id}/mapping-metadata` — 매핑 메타데이터 저장. 요청: 경로 `db_name`, `class_id`, JSON 바디(OpenAPI 스키마). 응답: 저장 결과 JSON(OpenAPI 스키마).
+
+비고: Google Sheets/Excel 커밋은 배치로 OMS bulk-create를 호출하며 응답에 `write.commands[]`가 포함된다. 현재 커밋은 `branch=main` 고정이다.
 
 **보호 브랜치 정책(스키마 안전)**
 - 기본 보호 브랜치: `main`, `master`, `production`, `prod` (`ONTOLOGY_PROTECTED_BRANCHES`로 변경 가능)
