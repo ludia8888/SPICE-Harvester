@@ -118,6 +118,15 @@ export const mockBffRoutes = async (page: Page, options: MockBffOptions = {}) =>
       })
     }
 
+    const commandStatusMatch = path.match(/^\/api\/v1\/commands\/([^/]+)\/status$/)
+    if (commandStatusMatch && method === 'GET') {
+      const commandId = decodeURIComponent(commandStatusMatch[1])
+      return route.fulfill({
+        status: 200,
+        json: { command_id: commandId, status: 'COMPLETED', result: {} },
+      })
+    }
+
     const commandMatch = path.match(/^\/api\/v1\/commands\/([^/]+)$/)
     if (commandMatch && method === 'GET') {
       const commandId = decodeURIComponent(commandMatch[1])
@@ -134,10 +143,16 @@ export const mockBffRoutes = async (page: Page, options: MockBffOptions = {}) =>
   })
 }
 
-export const enableAdminMode = async (page: Page) => {
+export const openSettingsPopover = async (page: Page) => {
   await page.getByRole('button', { name: 'Settings', exact: true }).click()
-  await page.locator('.settings-popover').waitFor({ state: 'visible' })
-  const adminToggle = page.getByRole('checkbox', { name: 'Admin mode (dangerous actions)', exact: true })
+  const popover = page.locator('.settings-popover')
+  await popover.waitFor({ state: 'visible' })
+  return popover
+}
+
+export const enableAdminMode = async (page: Page) => {
+  const popover = await openSettingsPopover(page)
+  const adminToggle = popover.getByRole('checkbox', { name: 'Admin mode (dangerous actions)', exact: true })
   await adminToggle.check({ force: true })
   await page.keyboard.press('Escape')
 }
