@@ -30,6 +30,7 @@ import { DangerConfirmDialog } from './components/DangerConfirmDialog'
 import { SettingsPopoverContent } from './components/layout/SettingsPopoverContent'
 import { SidebarRail } from './components/layout/SidebarRail'
 import { classifyError } from './errors/classifyError'
+import { toastApiError } from './errors/toastApiError'
 import { qk } from './query/queryKeys'
 import { useAppStore } from './store/useAppStore'
 import './App.css'
@@ -322,6 +323,7 @@ function App() {
       setSelectStatus({ type: 'success', text: `${copy.openSuccess} ${dbName}` })
     },
     onError: (error: unknown) => {
+      toastApiError(error, context.language)
       if (classifyError(error).kind === 'AUTH') {
         setSelectStatus({ type: 'error', text: copy.authRequired })
         return
@@ -374,6 +376,7 @@ function App() {
       setNewDbDescription('')
     },
     onError: (error: unknown) => {
+      toastApiError(error, context.language)
       if (classifyError(error).kind === 'AUTH') {
         setCreateStatus({ type: 'error', text: copy.authRequired })
         return
@@ -451,6 +454,7 @@ function App() {
       setDeleteOpen(false)
     },
     onError: (error: unknown) => {
+      toastApiError(error, context.language)
       const classified = classifyError(error)
       if (classified.kind === 'AUTH') {
         setDeleteStatus({ type: 'error', text: copy.authRequired })
