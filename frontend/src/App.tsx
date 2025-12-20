@@ -26,6 +26,7 @@ import {
   listDatabases,
   openDatabase,
 } from './api/bff'
+import { CommandTrackerDrawer } from './commands/CommandTrackerDrawer'
 import { DangerConfirmDialog } from './components/DangerConfirmDialog'
 import { SettingsPopoverContent } from './components/layout/SettingsPopoverContent'
 import { SidebarRail } from './components/layout/SidebarRail'
@@ -135,6 +136,38 @@ const copyByLang = {
     commandsTitle: 'Commands',
     commandsCurrent: 'This context',
     commandsOther: 'Other contexts',
+    commandDrawer: {
+      title: 'Command tracker',
+      tabs: {
+        active: 'Active',
+        completed: 'Completed',
+        failed: 'Failed',
+        expired: 'Expired',
+      },
+      addLabel: 'Add command id',
+      addPlaceholder: 'Paste command id',
+      addButton: 'Add',
+      clearExpired: 'Clear expired',
+      removeLabel: 'Remove',
+      noGlobalList: 'No server-wide command list. Only the IDs tracked in this browser are shown.',
+      emptyState: 'No commands in this view.',
+      columns: {
+        id: 'Command ID',
+        status: 'Status',
+        context: 'Context',
+        submitted: 'Submitted',
+        actions: 'Actions',
+      },
+      detailsTitle: 'Details',
+      detailsHint: 'Select a command to view the latest status.',
+      detailsTokenHint: 'Set an admin token to fetch command status.',
+      detailsStatusLabel: 'Status',
+      detailsErrorLabel: 'Error',
+      detailsResultLabel: 'Result',
+      detailsContextLabel: 'Context',
+      detailsSubmittedLabel: 'Submitted',
+      detailsUnknown: 'Unknown',
+    },
   },
   ko: {
     navTitle: 'SPICE Harvester',
@@ -233,6 +266,38 @@ const copyByLang = {
     commandsTitle: '커맨드',
     commandsCurrent: '현재 컨텍스트',
     commandsOther: '다른 컨텍스트',
+    commandDrawer: {
+      title: '커맨드 트래커',
+      tabs: {
+        active: '진행 중',
+        completed: '완료',
+        failed: '실패',
+        expired: '만료',
+      },
+      addLabel: '커맨드 ID 추가',
+      addPlaceholder: 'command_id 붙여넣기',
+      addButton: '추가',
+      clearExpired: '만료 정리',
+      removeLabel: '삭제',
+      noGlobalList: '서버 전역 리스트는 없습니다. 이 브라우저에 추적된 ID만 표시합니다.',
+      emptyState: '표시할 커맨드가 없습니다.',
+      columns: {
+        id: '커맨드 ID',
+        status: '상태',
+        context: '컨텍스트',
+        submitted: '등록 시각',
+        actions: '작업',
+      },
+      detailsTitle: '상세',
+      detailsHint: '커맨드를 선택하면 최신 상태를 확인합니다.',
+      detailsTokenHint: '커맨드 상태 조회를 위해 관리자 토큰이 필요합니다.',
+      detailsStatusLabel: '상태',
+      detailsErrorLabel: '에러',
+      detailsResultLabel: '결과',
+      detailsContextLabel: '컨텍스트',
+      detailsSubmittedLabel: '등록 시각',
+      detailsUnknown: '알 수 없음',
+    },
   },
 } as const
 
@@ -256,9 +321,10 @@ function App() {
   const [deleteStatus, setDeleteStatus] = useState<StatusMessage | null>(null)
   const [selectStatus, setSelectStatus] = useState<StatusMessage | null>(null)
   const [createStatus, setCreateStatus] = useState<StatusMessage | null>(null)
+  const [commandDrawerOpen, setCommandDrawerOpen] = useState(false)
 
   const copy = copyByLang[context.language]
-  const railItems: Array<{ icon: IconName; label: string; active?: boolean }> = [
+  const railItems: Array<{ icon: IconName; label: string; active?: boolean; onClick?: () => void }> = [
     { icon: 'home', label: copy.rail.home },
     { icon: 'folder-open', label: copy.rail.projects, active: true },
     { icon: 'database', label: copy.rail.db },
@@ -266,7 +332,7 @@ function App() {
     { icon: 'cube', label: copy.rail.instances },
     { icon: 'search', label: copy.rail.queries },
     { icon: 'exchange', label: copy.rail.mappings },
-    { icon: 'console', label: copy.rail.commands },
+    { icon: 'console', label: copy.rail.commands, onClick: () => setCommandDrawerOpen(true) },
     { icon: 'dashboard', label: copy.rail.monitoring },
   ]
 
@@ -506,15 +572,30 @@ function App() {
     const current = list.filter((cmd) => `${cmd.context.project ?? ''}::${cmd.context.branch}` === currentKey)
     const other = list.filter((cmd) => `${cmd.context.project ?? ''}::${cmd.context.branch}` !== currentKey)
     const activeCount = (items: typeof list) =>
-      items.filter((cmd) => cmd.writePhase === 'SUBMITTED' || cmd.indexPhase !== 'VISIBLE_IN_SEARCH').length
+      items.filter(
+        (cmd) =>
+          !cmd.expired &&
+          (cmd.writePhase === 'SUBMITTED' || cmd.indexPhase !== 'VISIBLE_IN_SEARCH'),
+      ).length
     return { currentActive: activeCount(current), otherActive: activeCount(other) }
   }, [commands, context.branch, context.project])
+
+  const commandActiveTotal = commandGroups.currentActive + commandGroups.otherActive
+  const commandButtonLabel =
+    commandActiveTotal > 0
+      ? `${copy.commandsTitle} (${commandActiveTotal})`
+      : copy.commandsTitle
 
   return (
     <div className="app-shell">
       <Navbar className="top-nav">
         <NavbarGroup align={Alignment.LEFT}>
           <NavbarHeading>{copy.navTitle}</NavbarHeading>
+        </NavbarGroup>
+        <NavbarGroup align={Alignment.RIGHT}>
+          <Button minimal icon="console" onClick={() => setCommandDrawerOpen(true)}>
+            {commandButtonLabel}
+          </Button>
         </NavbarGroup>
       </Navbar>
 
@@ -698,6 +779,11 @@ function App() {
         onCancel={() => setDeleteOpen(false)}
         onConfirm={handleDelete}
         loading={deleteMutation.isPending}
+      />
+      <CommandTrackerDrawer
+        isOpen={commandDrawerOpen}
+        onClose={() => setCommandDrawerOpen(false)}
+        copy={copy.commandDrawer}
       />
     </div>
   )

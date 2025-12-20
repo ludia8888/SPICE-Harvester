@@ -270,6 +270,102 @@
   align-items: center;
 }
 
+.command-drawer .bp6-drawer-body {
+  padding: 0;
+}
+
+.command-drawer-body {
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.command-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+
+.command-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 240px;
+}
+
+.command-form-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.command-input {
+  min-width: 260px;
+}
+
+.command-callout {
+  margin-bottom: 0.5rem;
+}
+
+.command-table {
+  width: 100%;
+}
+
+.command-id {
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+}
+
+.command-meta {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.command-row.is-selected {
+  background: var(--panel-soft);
+}
+
+.command-empty {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.command-details {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  padding: 0.75rem;
+}
+
+.command-details-title {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.command-details-grid {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 0.4rem 0.75rem;
+  font-size: 0.8rem;
+}
+
+.command-details-label {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.65rem;
+}
+
+.command-details-value {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+}
+
 @media (max-width: 900px) {
   .app-body {
     grid-template-columns: 1fr;
