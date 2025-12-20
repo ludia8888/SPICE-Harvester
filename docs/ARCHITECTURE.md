@@ -97,18 +97,18 @@ SSoT는 “저장소별 책임”이 아니라 “데이터 종류별 진실의 
 ```mermaid
 graph TD
   subgraph Client
-    UI[Web UI / API Clients]
+    UI["Web UI<br/>API Clients"]
   end
 
   subgraph API["API Layer"]
-    BFF["BFF (FastAPI)<br/>8002"]
-    OMS["OMS (FastAPI)<br/>8000"]
-    Funnel["Funnel (FastAPI)<br/>8003"]
+    BFF["BFF FastAPI<br/>8002"]
+    OMS["OMS FastAPI<br/>8000"]
+    Funnel["Funnel FastAPI<br/>8003"]
   end
 
   subgraph WritePath["Write Path"]
-    ESStore[S3/MinIO Event Store (EVENT_STORE_BUCKET)]
-    Relay[EventPublisher / message_relay]
+    ESStore["S3 MinIO Event Store<br/>EVENT_STORE_BUCKET"]
+    Relay["EventPublisher<br/>message_relay"]
     Kafka[Kafka Topics]
     IW[Instance Worker]
     OW[Ontology Worker]
@@ -117,53 +117,53 @@ graph TD
   subgraph ReadPath["Read Path"]
     PW[Projection Worker]
     ES[Elasticsearch Read Model]
-    TDB[TerminusDB (graph + ontology state)]
-    Redis[Redis (optional)]
+    TDB["TerminusDB<br/>graph and ontology state"]
+    Redis["Redis<br/>optional"]
   end
 
-  subgraph Postgres["PostgreSQL (registries)"]
-    PER[processed_events + aggregate_versions]
+  subgraph Postgres["PostgreSQL<br/>registries"]
+    PER[processed_events and aggregate_versions]
     LIN[spice_lineage]
     AUD[spice_audit]
     CONN[spice_connectors]
   end
 
-  subgraph ConnectorRuntime["Connector Runtime (Foundry-style)"]
+  subgraph ConnectorRuntime["Connector Runtime<br/>Foundry-style"]
     CT[connector-trigger-service]
     CS[connector-sync-worker]
   end
 
-  UI -->|HTTP /api/v1| BFF
-  BFF -->|Write (proxy)| OMS
+  UI -->|HTTP api v1| BFF
+  BFF -->|write proxy| OMS
   BFF -->|Type inference calls| Funnel
 
-  OMS -->|append EventEnvelope(kind=command)| ESStore
-  ESStore -->|tail indexes/by-date| Relay
+  OMS -->|append EventEnvelope command| ESStore
+  ESStore -->|tail indexes by-date| Relay
   Relay -->|publish EventEnvelope JSON| Kafka
 
   Kafka -->|instance_commands| IW
-  Kafka -->|ontology_commands + database_commands| OW
+  Kafka -->|ontology and database commands| OW
 
-  IW -->|claim/mark| PER
-  OW -->|claim/mark| PER
-  PW -->|claim/mark| PER
+  IW -->|claim and mark| PER
+  OW -->|claim and mark| PER
+  PW -->|claim and mark| PER
 
   IW -->|write minimal graph| TDB
-  OW -->|mutate schema/branches| TDB
-  IW -->|append EventEnvelope(kind=domain)| ESStore
-  OW -->|append EventEnvelope(kind=domain)| ESStore
+  OW -->|mutate schema branches| TDB
+  IW -->|append EventEnvelope domain| ESStore
+  OW -->|append EventEnvelope domain| ESStore
 
-  Kafka -->|instance_events + ontology_events| PW
+  Kafka -->|instance and ontology events| PW
   PW -->|index| ES
 
-  BFF -->|search/list| ES
-  BFF -->|direct get/query| TDB
-  BFF -->|status/websocket/rate-limit| Redis
+  BFF -->|search list| ES
+  BFF -->|direct get query| TDB
+  BFF -->|status websocket rate limit| Redis
 
   CT --> CONN
   CS --> CONN
-  CT -->|publish connector-updates| Kafka
-  Kafka -->|connector-updates| CS
+  CT -->|publish connector updates| Kafka
+  Kafka -->|connector updates| CS
   CS -->|submit async writes| BFF
 ```
 
