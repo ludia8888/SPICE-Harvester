@@ -9,9 +9,10 @@ const STORAGE_KEYS = {
   theme: 'spice.theme',
   rememberToken: 'spice.rememberToken',
   adminToken: 'spice.adminToken',
+  commands: 'commandTracker.items',
 } as const
 
-export type CommandKind = 'CREATE_DATABASE' | 'DELETE_DATABASE'
+export type CommandKind = 'CREATE_DATABASE' | 'DELETE_DATABASE' | 'UNKNOWN'
 export type WritePhase = 'SUBMITTED' | 'WRITE_DONE' | 'FAILED' | 'CANCELLED'
 export type IndexPhase = 'UNKNOWN' | 'INDEXING_PENDING' | 'VISIBLE_IN_SEARCH'
 
@@ -28,6 +29,7 @@ export type TrackedCommand = {
   status?: string
   error?: string | null
   title?: string
+  expired?: boolean
 }
 
 type AppState = {
@@ -81,6 +83,69 @@ const safeLocalStorageRemove = (key: string) => {
   } catch (error) {
     void error
   }
+}
+
+const normalizeCommand = (value: unknown): TrackedCommand | null => {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+  const item = value as Partial<TrackedCommand>
+  if (typeof item.id !== 'string' || !item.id.trim()) {
+    return null
+  }
+  const contextProject =
+    typeof item.context?.project === 'string' ? item.context.project : null
+  const contextBranch =
+    typeof item.context?.branch === 'string' && item.context.branch.trim()
+      ? item.context.branch
+      : DEFAULT_CONTEXT.branch
+  const target =
+    item.target && typeof item.target.dbName === 'string'
+      ? item.target
+      : { dbName: contextProject ?? '' }
+
+  return {
+    id: item.id,
+    kind: item.kind ?? 'UNKNOWN',
+    target,
+    context: { project: contextProject, branch: contextBranch },
+    submittedAt:
+      typeof item.submittedAt === 'string' ? item.submittedAt : new Date().toISOString(),
+    writePhase: item.writePhase ?? 'SUBMITTED',
+    indexPhase: item.indexPhase ?? 'UNKNOWN',
+    status: item.status,
+    error: item.error ?? null,
+    title: item.title,
+    expired: item.expired ?? false,
+  }
+}
+
+const readCachedCommands = (): Record<string, TrackedCommand> => {
+  const raw = safeLocalStorageGet(STORAGE_KEYS.commands)
+  if (!raw) {
+    return {}
+  }
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) {
+      return {}
+    }
+    const entries = parsed
+      .map((item) => normalizeCommand(item))
+      .filter((item): item is TrackedCommand => Boolean(item))
+    return Object.fromEntries(entries.map((item) => [item.id, item]))
+  } catch {
+    return {}
+  }
+}
+
+const persistCommands = (commands: Record<string, TrackedCommand>) => {
+  const items = Object.values(commands)
+  if (items.length === 0) {
+    safeLocalStorageRemove(STORAGE_KEYS.commands)
+    return
+  }
+  safeLocalStorageSet(STORAGE_KEYS.commands, JSON.stringify(items))
 }
 
 const readCachedLanguage = (): Language | null => {
@@ -153,7 +218,7 @@ export const useAppStore = create<AppState>((set, get) => {
     adminToken,
     rememberToken,
     adminMode: false,
-    commands: {},
+    commands: readCachedCommands(),
     syncContextFromUrl: () => {
       const next = getInitialContext()
       set({ context: next })
@@ -200,15 +265,23 @@ export const useAppStore = create<AppState>((set, get) => {
     },
     setAdminMode: (enabled) => set({ adminMode: enabled }),
     trackCommand: (command) =>
-      set((state) => ({
-        commands: { ...state.commands, [command.id]: command },
-      })),
+      set((state) => {
+        const next = { ...state.commands, [command.id]: command }
+        persistCommands(next)
+        return { commands: next }
+      }),
     patchCommand: (commandId, patch) =>
-      set((state) => ({
-        commands: state.commands[commandId]
-          ? { ...state.commands, [commandId]: { ...state.commands[commandId], ...patch } }
-          : state.commands,
-      })),
+      set((state) => {
+        if (!state.commands[commandId]) {
+          return state
+        }
+        const next = {
+          ...state.commands,
+          [commandId]: { ...state.commands[commandId], ...patch },
+        }
+        persistCommands(next)
+        return { commands: next }
+      }),
     removeCommand: (commandId) =>
       set((state) => {
         if (!state.commands[commandId]) {
@@ -216,6 +289,7 @@ export const useAppStore = create<AppState>((set, get) => {
         }
         const next = { ...state.commands }
         delete next[commandId]
+        persistCommands(next)
         return { commands: next }
       }),
   }

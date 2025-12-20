@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { useQueries, useQueryClient } from '@tanstack/react-query'
-import { getCommandStatus, listDatabases } from '../api/bff'
+import { getCommandStatus, HttpError, listDatabases } from '../api/bff'
 import { getInvalidationKeys } from './commandInvalidationMap'
 import { qk } from '../query/queryKeys'
 import { useAppStore } from '../store/useAppStore'
@@ -21,7 +21,7 @@ export const useCommandTracker = () => {
   )
 
   const pollingCommands = useMemo(
-    () => trackedCommands.filter((cmd) => cmd.writePhase === 'SUBMITTED'),
+    () => trackedCommands.filter((cmd) => cmd.writePhase === 'SUBMITTED' && !cmd.expired),
     [trackedCommands],
   )
 
@@ -46,6 +46,13 @@ export const useCommandTracker = () => {
       if (!command) {
         return
       }
+      if (query.error instanceof HttpError && query.error.status === 404) {
+        if (!command.expired) {
+          patchCommand(command.id, { expired: true, status: 'EXPIRED' })
+        }
+        return
+      }
+
       const status = query.data?.status
       if (!status) {
         return
@@ -71,7 +78,10 @@ export const useCommandTracker = () => {
   }, [context.language, patchCommand, pollingCommands, queryClient, statusQueries])
 
   const visibilityCandidates = useMemo(
-    () => trackedCommands.filter((cmd) => cmd.writePhase === 'WRITE_DONE' && cmd.indexPhase !== 'VISIBLE_IN_SEARCH'),
+    () =>
+      trackedCommands.filter(
+        (cmd) => cmd.writePhase === 'WRITE_DONE' && cmd.indexPhase !== 'VISIBLE_IN_SEARCH' && !cmd.expired,
+      ),
     [trackedCommands],
   )
 
