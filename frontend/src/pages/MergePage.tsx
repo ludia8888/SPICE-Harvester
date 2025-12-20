@@ -20,6 +20,13 @@ import { toastApiError } from '../errors/toastApiError'
 import { qk } from '../query/queryKeys'
 import { useAppStore } from '../store/useAppStore'
 
+type ResolutionPayload = {
+  path: string
+  resolution_type: string
+  resolved_value: unknown
+  metadata: { conflict_id: string; option_id: unknown }
+}
+
 export const MergePage = ({ dbName }: { dbName: string }) => {
   const requestContext = useRequestContext()
   const language = useAppStore((state) => state.context.language)
@@ -149,7 +156,7 @@ export const MergePage = ({ dbName }: { dbName: string }) => {
 
   const handleResolve = () => {
     const errors: Record<string, string> = {}
-    const resolutions = conflicts.map((conflict) => {
+    const resolutions: Array<ResolutionPayload | null> = conflicts.map((conflict) => {
       const conflictId = String(conflict.id ?? '')
       const selection = resolutionSelections[conflictId]
       if (!selection?.optionId) {
@@ -170,7 +177,7 @@ export const MergePage = ({ dbName }: { dbName: string }) => {
         errors[conflictId] = 'Invalid JSON value.'
         return null
       }
-      return {
+      const resolution: ResolutionPayload = {
         path: getConflictRawPath(conflict) || getConflictPath(conflict),
         resolution_type: 'use_value',
         resolved_value: resolvedValue,
@@ -179,6 +186,7 @@ export const MergePage = ({ dbName }: { dbName: string }) => {
           option_id: option.id,
         },
       }
+      return resolution
     })
 
     if (Object.keys(errors).length) {
@@ -192,7 +200,7 @@ export const MergePage = ({ dbName }: { dbName: string }) => {
       strategy: 'merge',
       message: message || undefined,
       author: author || undefined,
-      resolutions: resolutions.filter((item): item is Record<string, unknown> => Boolean(item)),
+      resolutions: resolutions.filter((item): item is ResolutionPayload => Boolean(item)),
     })
   }
 

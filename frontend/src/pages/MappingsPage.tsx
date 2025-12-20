@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Callout, FormGroup, Intent, Text } from '@blueprintjs/core'
+import { Button, Card, Callout, FormGroup, Intent } from '@blueprintjs/core'
 import { clearMappings, exportMappings, getMappingsSummary, importMappings, validateMappings } from '../api/bff'
 import { useRequestContext } from '../api/useRequestContext'
 import { PageHeader } from '../components/layout/PageHeader'

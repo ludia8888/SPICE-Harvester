@@ -288,6 +288,13 @@
   align-items: center;
 }
 
+.stepper-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
 .json-viewer {
   background: var(--panel-soft);
   border: 1px solid var(--border);

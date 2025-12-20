@@ -31,6 +31,8 @@ type NavSection = {
   items: NavItem[]
 }
 
+type Copy = (typeof copyByLang)[keyof typeof copyByLang]
+
 const copyByLang = {
   en: {
     appTitle: 'SPICE Harvester',
@@ -224,7 +226,7 @@ const copyByLang = {
   },
 } as const
 
-const getNavSections = (project: string | null, copy: (typeof copyByLang)['en']) => {
+const getNavSections = (project: string | null, copy: Copy) => {
   if (!project) {
     return [
       {
@@ -282,7 +284,7 @@ const getNavSections = (project: string | null, copy: (typeof copyByLang)['en'])
 const getRailItems = (
   project: string | null,
   pathname: string,
-  copy: (typeof copyByLang)['en'],
+  copy: Copy,
 ) => {
   const items = [] as Array<{ icon: string; label: string; path: string; match?: string }>
 

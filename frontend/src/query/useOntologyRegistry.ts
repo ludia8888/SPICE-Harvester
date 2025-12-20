@@ -44,7 +44,7 @@ const coerceLabel = (value: unknown, fallback: string) => {
   return fallback
 }
 
-const normalizeProperties = (raw: unknown) => {
+const normalizeProperties = (raw: unknown): Record<string, unknown>[] => {
   if (Array.isArray(raw)) {
     return raw.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
   }
@@ -54,7 +54,7 @@ const normalizeProperties = (raw: unknown) => {
       .map(([name, value]) => ({
         name,
         type: typeof value === 'string' ? value : (value as { '@class'?: string })['@class'],
-      }))
+      }) as Record<string, unknown>)
   }
   return []
 }

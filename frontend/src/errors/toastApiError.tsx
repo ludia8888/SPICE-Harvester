@@ -121,7 +121,9 @@ const extractUnknownLabels = (detail: unknown) => {
   }
   const labelsRaw = candidate.labels
   const labels = Array.isArray(labelsRaw)
-    ? labelsRaw.filter((item): item is string => typeof item === 'string' && item.trim()).map((item) => item.trim())
+    ? labelsRaw
+        .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        .map((item) => item.trim())
     : []
   const classId = typeof candidate.class_id === 'string' ? candidate.class_id : undefined
   return { labels, classId }

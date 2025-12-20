@@ -8,8 +8,6 @@ import {
   HTMLSelect,
   InputGroup,
   Intent,
-  Step,
-  Stepper,
   TextArea,
 } from '@blueprintjs/core'
 import {
@@ -22,6 +20,7 @@ import { useRateLimitRetry } from '../api/useRateLimitRetry'
 import { useRequestContext } from '../api/useRequestContext'
 import { PageHeader } from '../components/layout/PageHeader'
 import { JsonViewer } from '../components/JsonViewer'
+import { StepperBar } from '../components/StepperBar'
 import { showAppToast } from '../app/AppToaster'
 import { useCommandRegistration } from '../commands/useCommandRegistration'
 import { extractCommandId } from '../commands/extractCommandId'
@@ -347,14 +346,12 @@ export const ImportExcelPage = ({ dbName }: { dbName: string }) => {
     ],
   )
 
+  const stepLabels = useMemo(() => stepPanels.map((panel) => panel.title), [stepPanels])
+
   return (
     <div>
       <PageHeader title="Import (Excel)" subtitle={`Branch context: ${branch} (commit writes to main)`} />
-      <Stepper activeStep={step} onChange={(next) => setStep(next)}>
-        {stepPanels.map((panel) => (
-          <Step key={panel.title} title={panel.title} />
-        ))}
-      </Stepper>
+      <StepperBar steps={stepLabels} activeStep={step} onStepChange={(next) => setStep(next)} />
       <div style={{ marginTop: 16 }}>{stepPanels[step]?.content}</div>
       <div className="form-row" style={{ marginTop: 16 }}>
         <Button onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0}>
