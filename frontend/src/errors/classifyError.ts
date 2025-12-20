@@ -1,6 +1,13 @@
 import { HttpError } from '../api/bff'
 
-export type ErrorKind = 'AUTH' | 'NOT_FOUND' | 'OCC_CONFLICT' | 'VALIDATION' | 'TEMPORARY' | 'UNKNOWN'
+export type ErrorKind =
+  | 'AUTH'
+  | 'NOT_FOUND'
+  | 'OCC_CONFLICT'
+  | 'VALIDATION'
+  | 'RATE_LIMIT'
+  | 'TEMPORARY'
+  | 'UNKNOWN'
 
 export type ClassifiedError = {
   kind: ErrorKind
@@ -22,6 +29,9 @@ export const classifyError = (error: unknown): ClassifiedError => {
     }
     if (status === 400 || status === 422) {
       return { kind: 'VALIDATION', status, detail: error.detail }
+    }
+    if (status === 429) {
+      return { kind: 'RATE_LIMIT', status, detail: error.detail }
     }
     if (status === 502 || status === 503 || status === 504) {
       return { kind: 'TEMPORARY', status, detail: error.detail }

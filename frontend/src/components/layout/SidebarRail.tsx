@@ -3,7 +3,7 @@ import { Button, Popover, Position } from '@blueprintjs/core'
 import type { IconName } from '@blueprintjs/icons'
 
 export type RailItem = {
-  icon: IconName
+  icon: IconName | string
   label: string
   active?: boolean
   onClick?: () => void
@@ -23,7 +23,7 @@ export const SidebarRail = ({ items, settingsContent, settingsLabel, userLabel }
         <Button
           key={item.label}
           minimal
-          icon={item.icon}
+          icon={item.icon as IconName}
           className={`rail-button ${item.active ? 'is-active' : ''}`}
           aria-label={item.label}
           title={item.label}

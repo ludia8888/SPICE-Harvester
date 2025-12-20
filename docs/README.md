@@ -7,9 +7,9 @@ Welcome to the SPICE HARVESTER project documentation. This directory contains al
 ### Core Documentation
 
 - **[System Architecture](ARCHITECTURE.md)** - Comprehensive system architecture with microservices design, implementation status, and performance metrics
-- **[Frontend Development Guide](FRONTEND_GUIDE.md)** - Complete frontend development guide with React, TypeScript, and Blueprint.js
+- **[Frontend UI/UX Spec](frontend.md)** - BFF-aligned frontend implementation spec (Blueprint.js + Palantir 3-pane)
+- **[Frontend Policies](FRONTEND_POLICIES.md)** - Frontend state/auth/query/command tracking policies
 - **[API Reference](API_REFERENCE.md)** - Complete API documentation for all services
-- **[Developer Guide](DEVELOPER_GUIDE.md)** - Development setup, guidelines, and best practices
 - **[Operations Manual](OPERATIONS.md)** - Deployment, maintenance, and operational procedures
 - **[DevOps Risk & Cost Report](DEVOPS_MSA_RISK_COST_REPORT.md)** - Senior DevOps 관점 운영 리스크/코스트 분석 및 우선순위 개선안
 - **[LLM Integration Blueprint](LLM_INTEGRATION.md)** - LLM을 Funnel/OMS/Graph/Lineage에 안전하게 결합하는 설계(도메인 중립)
@@ -24,16 +24,17 @@ Welcome to the SPICE HARVESTER project documentation. This directory contains al
 
 #### For Developers
 1. Start with the [System Architecture](ARCHITECTURE.md) to understand the system (90-95% complete backend)
-2. Follow the [Developer Guide](DEVELOPER_GUIDE.md) for backend setup instructions
-3. Use the [Frontend Development Guide](FRONTEND_GUIDE.md) for frontend development
+2. Follow the root [README](../README.md) for backend setup instructions
+3. Use the [Frontend UI/UX Spec](frontend.md) for frontend development
 4. Review the [API Reference](API_REFERENCE.md) for endpoint details
 5. Check [Security Documentation](SECURITY.md) for secure coding practices
 
 #### For Frontend Developers
-1. Read the [Frontend Development Guide](FRONTEND_GUIDE.md) for comprehensive setup and patterns
+1. Read the [Frontend UI/UX Spec](frontend.md) for comprehensive setup and patterns
 2. Check the [System Architecture](ARCHITECTURE.md) to understand backend services
 3. Review [Design System](DesignSystem.md) for UI component guidelines
 4. Follow [UI/UX Guidelines](UIUX.md) for design standards
+5. Follow [Frontend Policies](FRONTEND_POLICIES.md) for state/auth/query rules
 
 #### For DevOps Engineers
 1. Follow the [Operations Manual](OPERATIONS.md) for deployment
@@ -42,7 +43,7 @@ Welcome to the SPICE HARVESTER project documentation. This directory contains al
 4. Check monitoring and maintenance procedures (incl. [Data Lineage](DATA_LINEAGE.md), [Audit Logs](AUDIT_LOGS.md))
 
 #### For QA Engineers
-1. Review the test structure in [Developer Guide](DEVELOPER_GUIDE.md#testing-guidelines)
+1. Review the test structure in [Backend testing docs](../backend/docs/testing/COMPLEX_TYPES_TEST_README.md)
 2. Check API endpoints in [API Reference](API_REFERENCE.md)
 3. Follow testing procedures in relevant sections
 
@@ -52,9 +53,9 @@ Welcome to the SPICE HARVESTER project documentation. This directory contains al
 docs/
 ├── README.md               # This file - documentation index
 ├── ARCHITECTURE.md         # 🔄 Unified system architecture (3 docs merged)
-├── FRONTEND_GUIDE.md       # 🆕 Unified frontend guide (7 docs merged)
+├── frontend.md             # ✅ Frontend UI/UX spec (BFF-aligned)
+├── FRONTEND_POLICIES.md    # Frontend policies (URL SSoT, auth, command tracking)
 ├── API_REFERENCE.md        # Complete API documentation
-├── DEVELOPER_GUIDE.md      # Developer onboarding and guidelines
 ├── OPERATIONS.md          # Operations and deployment manual
 ├── DEVOPS_MSA_RISK_COST_REPORT.md  # 🆕 DevOps 운영 리스크/코스트 보고서
 ├── LLM_INTEGRATION.md      # 🆕 LLM 결합 설계(도메인 중립/엔터프라이즈 안전)
@@ -107,18 +108,15 @@ backend/docs/              # Backend-specific documentation
 
 ### Frontend Technology Stack
 - **React 18 + TypeScript 5** - Modern UI framework with strict typing
-- **Blueprint.js 5** - Palantir's enterprise UI toolkit
-- **Vite 5** - Fast build tool and development server
-- **State Management** - Zustand with immer, Relay for GraphQL
-- **Visualization** - Cytoscape.js, D3.js, React Flow, Three.js
-- **Real-time Collaboration** - Yjs CRDT, Socket.io
-- **Testing** - Vitest, React Testing Library, MSW v2
-- **Accessibility** - WCAG 2.0 compliant with comprehensive keyboard navigation
+- **Blueprint.js 6** - Palantir's enterprise UI toolkit
+- **Vite 7** - Fast build tool and development server
+- **State Management** - Zustand + TanStack Query
+- **UI Icons** - @blueprintjs/icons
 
 ### Current Implementation Status
 - **Backend Services**: ✅ 90-95% Complete (Production-ready)
 - **Frontend Infrastructure**: ✅ 100% Complete (Development-ready)
-- **Frontend Components**: ⚠️ 30-40% Complete (GlobalSidebar done, core features needed)
+- **Frontend Components**: ✅ Core screens implemented; UX polish and QA in progress
 
 ### Service Configuration
 - **Port Assignments**:
@@ -168,7 +166,7 @@ When adding new documentation:
 ### ✅ Completed Reorganization
 - **Deleted 22 duplicate/obsolete files**: Removed redundant documentation and temporary files
 - **Merged 3 architecture documents** into unified [ARCHITECTURE.md](ARCHITECTURE.md)
-- **Merged 7 frontend documents** into comprehensive [FRONTEND_GUIDE.md](FRONTEND_GUIDE.md)
+- **Frontend spec** consolidated in [frontend.md](frontend.md) with BFF-aligned UI/UX details
 - **Moved 2 files** to appropriate backend documentation folders
 - **Fixed 1 filename typo**: DesignSysyem.md → DesignSystem.md
 - **Reorganized structure** for clarity and maintainability
