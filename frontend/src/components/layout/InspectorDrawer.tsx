@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Drawer, Tab, Tabs, Text } from '@blueprintjs/core'
 import { useAppStore } from '../../store/useAppStore'
 
@@ -7,7 +7,7 @@ export const InspectorDrawer = () => {
   const setInspector = useAppStore((state) => state.setInspector)
   const [tabId, setTabId] = useState('summary')
 
-  const jsonText = useMemo(() => {
+  const jsonText = (() => {
     if (!inspector?.data) {
       return ''
     }
@@ -16,7 +16,7 @@ export const InspectorDrawer = () => {
     } catch {
       return String(inspector.data)
     }
-  }, [inspector?.data])
+  })()
 
   return (
     <Drawer

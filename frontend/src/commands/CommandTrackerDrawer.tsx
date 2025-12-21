@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Button,
@@ -108,12 +108,7 @@ export const CommandTrackerDrawer = ({
   const [tabId, setTabId] = useState<CommandTab>('active')
   const [inputValue, setInputValue] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (selectedId && !commands[selectedId]) {
-      setSelectedId(null)
-    }
-  }, [commands, selectedId])
+  const resolvedSelectedId = selectedId && commands[selectedId] ? selectedId : null
 
   const commandList = useMemo(
     () => Object.values(commands).sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)),
@@ -139,9 +134,9 @@ export const CommandTrackerDrawer = ({
   )
 
   const selectedQuery = useQuery({
-    queryKey: selectedId ? qk.commandStatus(selectedId, context.language) : ['command-status', 'none'],
-    queryFn: () => getCommandStatus(requestContext, selectedId ?? ''),
-    enabled: Boolean(selectedId && adminToken && isOpen),
+    queryKey: resolvedSelectedId ? qk.commandStatus(resolvedSelectedId, context.language) : ['command-status', 'none'],
+    queryFn: () => getCommandStatus(requestContext, resolvedSelectedId ?? ''),
+    enabled: Boolean(resolvedSelectedId && adminToken && isOpen),
     retry: false,
   })
 
@@ -167,12 +162,14 @@ export const CommandTrackerDrawer = ({
   }
 
   const handleClearExpired = () => {
-    commandList
-      .filter((command) => command.expired)
-      .forEach((command) => removeCommand(command.id))
+    const expiredIds = commandList.filter((command) => command.expired).map((command) => command.id)
+    expiredIds.forEach((id) => removeCommand(id))
+    if (resolvedSelectedId && expiredIds.includes(resolvedSelectedId)) {
+      setSelectedId(null)
+    }
   }
 
-  const selectedCommand = selectedId ? commands[selectedId] : null
+  const selectedCommand = resolvedSelectedId ? commands[resolvedSelectedId] : null
   const selectedError = selectedQuery.error
   const selectedStatus = selectedQuery.data
   const statusTag = selectedCommand ? getStatusTag(selectedCommand) : null
@@ -240,7 +237,7 @@ export const CommandTrackerDrawer = ({
             <tbody>
               {filtered.map((command) => {
                 const tag = getStatusTag(command)
-                const isSelected = command.id === selectedId
+                const isSelected = command.id === resolvedSelectedId
                 return (
                   <tr
                     key={command.id}
@@ -267,6 +264,9 @@ export const CommandTrackerDrawer = ({
                         onClick={(event) => {
                           event.stopPropagation()
                           removeCommand(command.id)
+                          if (command.id === resolvedSelectedId) {
+                            setSelectedId(null)
+                          }
                         }}
                       >
                         {copy.removeLabel}

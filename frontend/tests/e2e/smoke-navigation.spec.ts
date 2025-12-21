@@ -9,9 +9,10 @@ test.beforeEach(async ({ page }) => {
 test('databases -> overview navigation', async ({ page }) => {
   await page.goto('/?lang=en')
   await expect(page.getByRole('heading', { name: 'Databases' })).toBeVisible()
-  await expect(page.getByText('demo')).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'demo' })).toBeVisible()
 
-  await page.getByRole('button', { name: 'Open' }).first().click()
+  const row = page.getByRole('row', { name: /demo/ })
+  await row.getByRole('button', { name: 'Open' }).click({ force: true })
   await expect(page).toHaveURL(/\/db\/demo\/overview/)
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible()
 })

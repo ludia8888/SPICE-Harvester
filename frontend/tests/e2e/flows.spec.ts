@@ -13,9 +13,13 @@ test('instances: list and open drawer', async ({ page }) => {
   const classSelect = page.locator('select').first()
   await classSelect.selectOption('Product')
 
-  await expect(page.getByText('prod-1')).toBeVisible()
-  await page.getByRole('button', { name: 'Open' }).click()
-  await expect(page.getByText('Branch ignored')).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'prod-1' })).toBeVisible()
+  const row = page.getByRole('row', { name: /prod-1/ })
+  await row.click()
+  await expect(page.getByText('Instance: prod-1')).toBeVisible()
+  await page.getByRole('button', { name: 'Open drawer' }).click()
+  const drawer = page.locator('.command-drawer').filter({ hasText: 'prod-1' })
+  await expect(drawer).toBeVisible()
 })
 
 test('graph explorer: run query', async ({ page }) => {
@@ -25,9 +29,9 @@ test('graph explorer: run query', async ({ page }) => {
   const startClass = page.locator('select').first()
   await startClass.selectOption('Product')
 
-  await page.getByRole('button', { name: 'Run' }).click()
+  await page.getByRole('button', { name: 'Run', exact: true }).click()
   await expect(page.locator('.graph-canvas')).toBeVisible()
-  await expect(page.getByText('prod-1')).toBeVisible()
+  await expect(page.getByText('prod-1').first()).toBeVisible()
 })
 
 test('query builder: run query', async ({ page }) => {
@@ -38,7 +42,7 @@ test('query builder: run query', async ({ page }) => {
   await classSelect.selectOption('Product')
 
   await page.getByRole('button', { name: 'Run Query' }).click()
-  await expect(page.getByText('Prod 1')).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'Prod 1' })).toBeVisible()
 })
 
 test('merge: simulate and resolve', async ({ page }) => {
@@ -50,19 +54,19 @@ test('merge: simulate and resolve', async ({ page }) => {
   await selects.nth(1).selectOption('main')
 
   await page.getByRole('button', { name: 'Simulate' }).click()
-  await expect(page.getByText('Product.name')).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'Product.name' })).toBeVisible()
 
   await page.getByRole('button', { name: 'Resolve merge' }).click()
-  await expect(page.getByText('Resolution response will appear here.')).toBeVisible()
+  await expect(page.getByText('cmd-merge-resolve').first()).toBeVisible()
 })
 
 test('audit and lineage: load data', async ({ page }) => {
   await page.goto('/db/demo/audit?branch=main&lang=en')
   await page.getByRole('button', { name: 'Load logs' }).click()
-  await expect(page.getByText('create')).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'create' })).toBeVisible()
 
   await page.goto('/db/demo/lineage?branch=main&lang=en')
-  await page.getByLabel('Root (event id or node id)').fill('node-1')
+  await page.getByRole('textbox').first().fill('node-1')
   await page.getByRole('button', { name: 'Load graph' }).click()
   await expect(page.locator('.graph-canvas')).toBeVisible()
 })

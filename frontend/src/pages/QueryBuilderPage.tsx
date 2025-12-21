@@ -130,10 +130,16 @@ export const QueryBuilderPage = ({ dbName }: { dbName: string }) => {
     onError: (error) => toastApiError(error, language),
   })
 
-  const resultPayload = runMutation.data as
-    | { results?: Array<Record<string, unknown>>; total?: number }
-    | undefined
-  const results = resultPayload?.results ?? []
+  const { results, total } = useMemo(() => {
+    const resultPayload = runMutation.data as
+      | { results?: Array<Record<string, unknown>>; total?: number }
+      | undefined
+    const rows = resultPayload?.results ?? []
+    return {
+      results: rows,
+      total: typeof resultPayload?.total === 'number' ? resultPayload.total : rows.length,
+    }
+  }, [runMutation.data])
   const columns = useMemo(() => {
     const keys = new Set<string>()
     results.forEach((row) => {
@@ -151,8 +157,6 @@ export const QueryBuilderPage = ({ dbName }: { dbName: string }) => {
       return String(value)
     }
   }
-  const total = typeof resultPayload?.total === 'number' ? resultPayload.total : results.length
-
   return (
     <div>
       <PageHeader title="Query Builder" subtitle={`Label-based query (branch context: ${branch})`} />

@@ -13,9 +13,6 @@ export type SettingsCopy = {
   branchLabel: string
   branchHelper: string
   branchPlaceholder: string
-  authTokenLabel: string
-  authTokenHelper: string
-  authTokenPlaceholder: string
   tokenLabel: string
   tokenHelper: string
   tokenPlaceholder: string
@@ -40,14 +37,12 @@ export const SettingsForm = ({
 }) => {
   const context = useAppStore((state) => state.context)
   const theme = useAppStore((state) => state.theme)
-  const authToken = useAppStore((state) => state.authToken)
   const adminToken = useAppStore((state) => state.adminToken)
   const rememberToken = useAppStore((state) => state.rememberToken)
   const adminMode = useAppStore((state) => state.adminMode)
 
   const setLanguage = useAppStore((state) => state.setLanguage)
   const setBranch = useAppStore((state) => state.setBranch)
-  const setAuthToken = useAppStore((state) => state.setAuthToken)
   const setAdminToken = useAppStore((state) => state.setAdminToken)
   const setRememberToken = useAppStore((state) => state.setRememberToken)
   const setTheme = useAppStore((state) => state.setTheme)
@@ -68,14 +63,6 @@ export const SettingsForm = ({
           placeholder={copy.branchPlaceholder}
           value={context.branch}
           onChange={(event) => setBranch(event.currentTarget.value)}
-        />
-      </FormGroup>
-      <FormGroup label={copy.authTokenLabel} helperText={copy.authTokenHelper}>
-        <InputGroup
-          type="password"
-          placeholder={copy.authTokenPlaceholder}
-          value={authToken}
-          onChange={(event) => setAuthToken(event.currentTarget.value)}
         />
       </FormGroup>
       <FormGroup label={copy.tokenLabel} helperText={copy.tokenHelper}>

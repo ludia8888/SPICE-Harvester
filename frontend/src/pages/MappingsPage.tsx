@@ -30,7 +30,7 @@ export const MappingsPage = ({ dbName }: { dbName: string }) => {
       const anchor = document.createElement('a')
       const match = /filename=([^;]+)/i.exec(disposition)
       anchor.href = url
-      anchor.download = match ? match[1].replace(/\"/g, '') : `${dbName}_mappings.json`
+      anchor.download = match ? match[1].replace(/"/g, '') : `${dbName}_mappings.json`
       anchor.click()
       URL.revokeObjectURL(url)
     },

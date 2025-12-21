@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Button,
@@ -121,7 +121,15 @@ export const InstancesPage = ({ dbName }: { dbName: string }) => {
   const [search, setSearch] = useState('')
   const [limit, setLimit] = useState('100')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [editJson, setEditJson] = useState('')
+  const [editDraft, setEditDraft] = useState<{
+    instanceId: string | null
+    value: string
+    dirty: boolean
+  }>({
+    instanceId: null,
+    value: '',
+    dirty: false,
+  })
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('view')
   const [occRetry, setOccRetry] = useState<{ action: 'update' | 'delete'; actualSeq: number } | null>(null)
@@ -134,6 +142,15 @@ export const InstancesPage = ({ dbName }: { dbName: string }) => {
   const [bulkJsonError, setBulkJsonError] = useState<string | null>(null)
   const [createUnknownLabels, setCreateUnknownLabels] = useState<string[]>([])
   const [bulkUnknownLabels, setBulkUnknownLabels] = useState<string[]>([])
+
+  const selectInstance = (id: string, options?: { openDrawer?: boolean }) => {
+    setSelectedId(id)
+    setDrawerOpen(options?.openDrawer ?? drawerOpen)
+    setActiveTab('view')
+    setOccRetry(null)
+    setUnknownLabels([])
+    setEditDraft({ instanceId: id, value: '', dirty: false })
+  }
 
   const classesQuery = useQuery({
     queryKey: qk.classes(dbName, requestContext.language),
@@ -163,27 +180,30 @@ export const InstancesPage = ({ dbName }: { dbName: string }) => {
     enabled: Boolean(classId),
   })
 
-  useEffect(() => {
-    if (detailQuery.data) {
-      const payload = detailQuery.data as { data?: InstanceItem }
-      const data = payload.data ?? payload
-      setEditJson(JSON.stringify(data, null, 2))
-      setOccRetry(null)
-      setUnknownLabels([])
-      setActiveTab('view')
-    }
-  }, [detailQuery.data])
-
   const selectedInstance = useMemo(() => {
     if (!detailQuery.data) return null
     const payload = detailQuery.data as { data?: InstanceItem }
     return payload.data ?? payload
   }, [detailQuery.data])
 
+  const baseEditJson = useMemo(() => {
+    if (!selectedInstance) {
+      return ''
+    }
+    try {
+      return JSON.stringify(selectedInstance, null, 2)
+    } catch {
+      return ''
+    }
+  }, [selectedInstance])
+
+  const editJsonValue =
+    editDraft.dirty && editDraft.instanceId === selectedId ? editDraft.value : baseEditJson
+
   const updateMutation = useMutation({
     mutationFn: async (vars?: { expectedSeqOverride?: number }) => {
       if (!selectedId) throw new Error('Select an instance')
-      const parsed = JSON.parse(editJson)
+      const parsed = JSON.parse(editJsonValue)
       const expectedSeq =
         vars?.expectedSeqOverride ??
         getExpectedSeq(
@@ -252,6 +272,7 @@ export const InstancesPage = ({ dbName }: { dbName: string }) => {
       }
       setOccRetry(null)
       setUnknownLabels([])
+      setEditDraft({ instanceId: null, value: '', dirty: false })
       void showAppToast({ intent: Intent.WARNING, message: 'Delete submitted.' })
       void queryClient.invalidateQueries({ queryKey: qk.instances(dbName, classId, requestContext.language, { limit, search }) })
       setSelectedId(null)
@@ -406,8 +427,13 @@ export const InstancesPage = ({ dbName }: { dbName: string }) => {
                     formatTimestamp(item.updated_at) ||
                     formatTimestamp(item.created_at)
                   const summary = getInstanceSummary(item)
+                  const isSelected = id === selectedId
                   return (
-                    <tr key={id}>
+                    <tr
+                      key={id}
+                      className={isSelected ? 'command-row is-selected' : 'command-row'}
+                      onClick={() => selectInstance(id)}
+                    >
                       <td>{id}</td>
                       <td>{version ?? ''}</td>
                       <td>{timestamp}</td>
@@ -415,9 +441,9 @@ export const InstancesPage = ({ dbName }: { dbName: string }) => {
                       <td>
                         <Button
                           small
-                          onClick={() => {
-                            setSelectedId(id)
-                            setDrawerOpen(true)
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            selectInstance(id, { openDrawer: true })
                           }}
                         >
                           Open
@@ -545,7 +571,13 @@ export const InstancesPage = ({ dbName }: { dbName: string }) => {
 
       <Drawer
         isOpen={drawerOpen && Boolean(selectedId)}
-        onClose={() => setDrawerOpen(false)}
+        onClose={() => {
+          setDrawerOpen(false)
+          setEditDraft({ instanceId: null, value: '', dirty: false })
+          setActiveTab('view')
+          setOccRetry(null)
+          setUnknownLabels([])
+        }}
         position="right"
         title={selectedId ?? 'Instance'}
         className="command-drawer"
@@ -572,7 +604,17 @@ export const InstancesPage = ({ dbName }: { dbName: string }) => {
               panel={
                 <div className="card-stack">
                   <FormGroup label="Edit payload (JSON)">
-                    <TextArea value={editJson} onChange={(event) => setEditJson(event.currentTarget.value)} rows={10} />
+                    <TextArea
+                      value={editJsonValue}
+                      onChange={(event) =>
+                        setEditDraft({
+                          instanceId: selectedId,
+                          value: event.currentTarget.value,
+                          dirty: true,
+                        })
+                      }
+                      rows={10}
+                    />
                   </FormGroup>
                   {unknownLabels.length ? (
                     <Callout intent={Intent.WARNING}>

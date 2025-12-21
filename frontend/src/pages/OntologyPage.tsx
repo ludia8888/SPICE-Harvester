@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Button,
@@ -66,10 +66,19 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
 
   const [selectedClass, setSelectedClass] = useState<string | null>(null)
   const [draft, setDraft] = useState(() => JSON.stringify(buildNewOntologyDraft(language), null, 2))
+  const [draftDirty, setDraftDirty] = useState(false)
   const [draftError, setDraftError] = useState<string | null>(null)
   const [validationResult, setValidationResult] = useState<unknown>(null)
   const [confirmAction, setConfirmAction] = useState<'apply' | 'delete' | null>(null)
   const [schemaFormat, setSchemaFormat] = useState<'json' | 'jsonld' | 'owl'>('json')
+
+  const resetDraftState = (nextClass: string | null) => {
+    setSelectedClass(nextClass)
+    setDraft('')
+    setDraftDirty(false)
+    setDraftError(null)
+    setValidationResult(null)
+  }
 
   const listQuery = useQuery({
     queryKey: qk.ontologyList(dbName, branch, requestContext.language),
@@ -102,17 +111,17 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
     (summaryQuery.data as { data?: { policy?: { is_protected_branch?: boolean } } } | undefined)?.data
       ?.policy?.is_protected_branch,
   )
-
-  useEffect(() => {
+  const baseDraft = useMemo(() => {
     if (!selectedClass) {
-      const next = buildNewOntologyDraft(language)
-      setDraft(JSON.stringify(next, null, 2))
-      return
+      return JSON.stringify(buildNewOntologyDraft(language), null, 2)
     }
     if (detailQuery.data) {
-      setDraft(JSON.stringify(detailQuery.data, null, 2))
+      return JSON.stringify(detailQuery.data, null, 2)
     }
+    return ''
   }, [detailQuery.data, language, selectedClass])
+
+  const effectiveDraft = draftDirty ? draft : baseDraft
 
   const ontologies = useMemo(() => {
     const payload = listQuery.data ?? {}
@@ -130,9 +139,9 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
   const validateMutation = useMutation({
     mutationFn: async () => {
       if (!selectedClass) {
-        return validateOntologyCreate(requestContext, dbName, branch, JSON.parse(draft))
+        return validateOntologyCreate(requestContext, dbName, branch, JSON.parse(effectiveDraft))
       }
-      const payload = sanitizeUpdatePayload(JSON.parse(draft))
+      const payload = sanitizeUpdatePayload(JSON.parse(effectiveDraft))
       return validateOntologyUpdate(requestContext, dbName, selectedClass, branch, payload)
     },
     onSuccess: (result) => setValidationResult(result),
@@ -144,7 +153,7 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
 
   const applyMutation = useMutation({
     mutationFn: async (reason?: string) => {
-      const parsed = JSON.parse(draft)
+      const parsed = JSON.parse(effectiveDraft)
       if (!selectedClass) {
         return createOntology(requestContext, dbName, branch, parsed, reason ? { 'X-Change-Reason': reason } : undefined)
       }
@@ -167,7 +176,7 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
       let targetClassId = selectedClass ?? undefined
       if (!targetClassId) {
         try {
-          const parsed = JSON.parse(draft) as { id?: string; '@id'?: string; label?: unknown }
+          const parsed = JSON.parse(effectiveDraft) as { id?: string; '@id'?: string; label?: unknown }
           targetClassId = String(parsed.id ?? parsed['@id'] ?? '').trim() || undefined
         } catch {
           targetClassId = undefined
@@ -219,7 +228,7 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
       }
       void showAppToast({ intent: Intent.WARNING, message: 'Delete submitted.' })
       void queryClient.invalidateQueries({ queryKey: qk.ontologyList(dbName, branch, requestContext.language) })
-      setSelectedClass(null)
+      resetDraftState(null)
     },
     onError: (error) => toastApiError(error, language),
     onSettled: () => setConfirmAction(null),
@@ -228,9 +237,9 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
   const handleValidate = () => {
     setDraftError(null)
     try {
-      JSON.parse(draft)
+      JSON.parse(effectiveDraft)
       validateMutation.mutate(undefined)
-    } catch (error) {
+    } catch {
       setDraftError('Invalid JSON')
     }
   }
@@ -238,7 +247,7 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
   const handleApply = () => {
     setDraftError(null)
     try {
-      JSON.parse(draft)
+      JSON.parse(effectiveDraft)
     } catch {
       setDraftError('Invalid JSON')
       return
@@ -274,15 +283,15 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
       <div className="page-grid two-col">
         <Card>
           <div className="card-title">
-            <Text>Classes</Text>
-            <Button
-              small
-              icon="plus"
-              onClick={() => setSelectedClass(null)}
-            >
-              New
-            </Button>
-          </div>
+              <Text>Classes</Text>
+              <Button
+                small
+                icon="plus"
+                onClick={() => resetDraftState(null)}
+              >
+                New
+              </Button>
+            </div>
           {listQuery.isFetching ? <Text className="muted small">Loading...</Text> : null}
           {ontologies.length === 0 ? (
             <Text className="muted">No classes found.</Text>
@@ -296,7 +305,7 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
                   <button
                     key={id ?? label}
                     className={`nav-item ${active ? 'is-active' : ''}`}
-                    onClick={() => setSelectedClass(id ?? label)}
+                    onClick={() => resetDraftState(id ?? label)}
                   >
                     {label}
                   </button>
@@ -341,8 +350,11 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
             </FormGroup>
             <FormGroup label="JSON payload">
               <TextArea
-                value={draft}
-                onChange={(event) => setDraft(event.currentTarget.value)}
+                value={effectiveDraft}
+                onChange={(event) => {
+                  setDraft(event.currentTarget.value)
+                  setDraftDirty(true)
+                }}
                 rows={14}
               />
             </FormGroup>

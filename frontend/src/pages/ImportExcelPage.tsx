@@ -339,6 +339,7 @@ export const ImportExcelPage = ({ dbName }: { dbName: string }) => {
       suggestMutation,
       dryRunMutation,
       commitMutation,
+      importCooldown,
       tableBBoxError,
       confirmMain,
       canCommit,

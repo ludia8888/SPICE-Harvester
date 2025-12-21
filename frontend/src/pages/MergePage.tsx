@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   Button,
@@ -76,28 +76,10 @@ export const MergePage = ({ dbName }: { dbName: string }) => {
     return payload?.data?.merge_preview ?? payload?.merge_preview ?? null
   })()
 
-  const conflicts = (mergePreview?.conflicts as Array<Record<string, unknown>> | undefined) ?? []
-
-  useEffect(() => {
-    if (conflicts.length === 0) {
-      return
-    }
-    setResolutionSelections((prev) => {
-      const next = { ...prev }
-      conflicts.forEach((conflict) => {
-        const id = String(conflict.id ?? '')
-        if (!id || next[id]) {
-          return
-        }
-        const options = getConflictOptionList(conflict)
-        const recommended = options.find((option) => option.recommended) ?? options[0]
-        if (recommended?.id) {
-          next[id] = { optionId: String(recommended.id), manualValue: '' }
-        }
-      })
-      return next
-    })
-  }, [conflicts])
+  const conflicts = useMemo(
+    () => (mergePreview?.conflicts as Array<Record<string, unknown>> | undefined) ?? [],
+    [mergePreview],
+  )
 
   const summaryQuery = useQuery({
     queryKey: qk.summary({ dbName, branch: targetBranch, language: requestContext.language }),
@@ -143,6 +125,25 @@ export const MergePage = ({ dbName }: { dbName: string }) => {
     ]
   }
 
+  const resolvedSelections = (() => {
+    if (conflicts.length === 0) {
+      return resolutionSelections
+    }
+    const next = { ...resolutionSelections }
+    conflicts.forEach((conflict) => {
+      const id = String(conflict.id ?? '')
+      if (!id || next[id]) {
+        return
+      }
+      const options = getConflictOptionList(conflict)
+      const recommended = options.find((option) => option.recommended) ?? options[0]
+      if (recommended?.id) {
+        next[id] = { optionId: String(recommended.id), manualValue: '' }
+      }
+    })
+    return next
+  })()
+
   const parseManualValue = (raw: string) => {
     if (!raw.trim()) {
       return null
@@ -158,7 +159,7 @@ export const MergePage = ({ dbName }: { dbName: string }) => {
     const errors: Record<string, string> = {}
     const resolutions: Array<ResolutionPayload | null> = conflicts.map((conflict) => {
       const conflictId = String(conflict.id ?? '')
-      const selection = resolutionSelections[conflictId]
+      const selection = resolvedSelections[conflictId]
       if (!selection?.optionId) {
         errors[conflictId] = 'Select a resolution option.'
         return null
@@ -265,7 +266,7 @@ export const MergePage = ({ dbName }: { dbName: string }) => {
                   const sourcePreview = sides?.source?.preview ?? JSON.stringify(sides?.source?.value ?? '')
                   const targetPreview = sides?.target?.preview ?? JSON.stringify(sides?.target?.value ?? '')
                   const options = getConflictOptionList(conflict)
-                  const selection = resolutionSelections[conflictId] ?? { optionId: '', manualValue: '' }
+                  const selection = resolvedSelections[conflictId] ?? { optionId: '', manualValue: '' }
                   const manualEnabled = selection.optionId === 'manual_merge'
                   return (
                     <tr key={conflictId}>
@@ -280,9 +281,13 @@ export const MergePage = ({ dbName }: { dbName: string }) => {
                           }))]}
                           value={selection.optionId}
                           onChange={(event) => {
-                            const next = { ...resolutionSelections }
-                            next[conflictId] = { optionId: event.currentTarget.value, manualValue: selection.manualValue }
-                            setResolutionSelections(next)
+                            setResolutionSelections((prev) => ({
+                              ...prev,
+                              [conflictId]: {
+                                optionId: event.currentTarget.value,
+                                manualValue: selection.manualValue,
+                              },
+                            }))
                             setManualErrors((prev) => {
                               const updated = { ...prev }
                               delete updated[conflictId]
@@ -297,11 +302,15 @@ export const MergePage = ({ dbName }: { dbName: string }) => {
                       <td>
                         <TextArea
                           value={selection.manualValue}
-                          onChange={(event) => {
-                            const next = { ...resolutionSelections }
-                            next[conflictId] = { optionId: selection.optionId, manualValue: event.currentTarget.value }
-                            setResolutionSelections(next)
-                          }}
+                          onChange={(event) =>
+                            setResolutionSelections((prev) => ({
+                              ...prev,
+                              [conflictId]: {
+                                optionId: selection.optionId,
+                                manualValue: event.currentTarget.value,
+                              },
+                            }))
+                          }
                           disabled={!manualEnabled}
                           rows={3}
                           placeholder={manualEnabled ? 'JSON value' : 'Select "Manual value" to edit'}

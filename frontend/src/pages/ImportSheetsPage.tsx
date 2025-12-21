@@ -347,6 +347,7 @@ export const ImportSheetsPage = ({ dbName }: { dbName: string }) => {
       suggestMutation,
       dryRunMutation,
       commitMutation,
+      importCooldown,
       tableBBoxError,
       confirmMain,
       canCommit,

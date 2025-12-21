@@ -152,12 +152,16 @@ export const GraphExplorerPage = ({ dbName }: { dbName: string }) => {
     if (typeof graph.no_cycles === 'boolean') setNoCycles(graph.no_cycles)
   }
 
-  const resultPayload = runMutation.data as
-    | { nodes?: Array<Record<string, unknown>>; edges?: Array<Record<string, unknown>>; warnings?: string[] }
-    | undefined
-  const nodes = resultPayload?.nodes ?? []
-  const edges = resultPayload?.edges ?? []
-  const warnings = resultPayload?.warnings ?? []
+  const { nodes, edges, warnings } = useMemo(() => {
+    const resultPayload = runMutation.data as
+      | { nodes?: Array<Record<string, unknown>>; edges?: Array<Record<string, unknown>>; warnings?: string[] }
+      | undefined
+    return {
+      nodes: resultPayload?.nodes ?? [],
+      edges: resultPayload?.edges ?? [],
+      warnings: resultPayload?.warnings ?? [],
+    }
+  }, [runMutation.data])
   const hasPartial = nodes.some((node) => {
     const status = node.data_status
     return status === 'PARTIAL' || status === 'MISSING'
