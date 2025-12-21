@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
@@ -108,14 +108,10 @@ export const InstancesPage = () => {
         : ['bff', 'instance', 'empty'],
     queryFn: () => getInstance(requestContext, db ?? '', classId, getInstanceId(selectedInstance)),
     enabled: Boolean(db && classId && selectedInstance),
+    onSuccess: (data) => {
+      setEditJson(JSON.stringify(data, null, 2))
+    },
   })
-
-  useEffect(() => {
-    if (detailQuery.data === undefined) {
-      return
-    }
-    setEditJson(JSON.stringify(detailQuery.data, null, 2))
-  }, [detailQuery.data])
 
   const createMutation = useMutation<CommandResult>({
     mutationFn: async () => {

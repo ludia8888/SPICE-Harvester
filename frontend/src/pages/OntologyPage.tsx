@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
@@ -152,17 +152,13 @@ export const OntologyPage = () => {
         : ['bff', 'ontology-detail', 'empty'],
     queryFn: () => getOntology(requestContext, db ?? '', selectedClassId, context.branch),
     enabled: Boolean(db && selectedClassId),
+    onSuccess: (data) => {
+      setDraft(buildDraftFromClass(data as OntologyClass, context.language))
+      setSchemaResult(null)
+      setValidationResult(null)
+      setActualSeqHint(null)
+    },
   })
-
-  useEffect(() => {
-    if (!selectedClassId || !detailQuery.data) {
-      return
-    }
-    setDraft(buildDraftFromClass(detailQuery.data as OntologyClass, context.language))
-    setSchemaResult(null)
-    setValidationResult(null)
-    setActualSeqHint(null)
-  }, [detailQuery.data, context.language, selectedClassId])
 
   const detailRecord = asRecord(detailQuery.data)
   const expectedSeq = getNumber(detailRecord.version) ?? getNumber(detailRecord.expected_seq)
