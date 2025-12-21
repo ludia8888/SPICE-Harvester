@@ -242,6 +242,9 @@ export const GraphExplorerPage = () => {
     setNoCycles(getBoolean(plan.no_cycles) ?? noCycles)
   }
 
+  const aiPlanContainer = asRecord(asRecord(aiPlan).plan)
+  const canApplyAiPlan = Boolean(aiPlanContainer.graph_query ?? aiPlanContainer.graphQuery)
+
   const handleSelect = (selection: GraphCanvasSelect) => {
     setSelectedElement(selection)
     const dataRecord = asRecord(selection.data)
@@ -309,7 +312,7 @@ export const GraphExplorerPage = () => {
           >
             Generate Plan {aiCooldown.active ? `(${aiCooldown.remainingSeconds}s)` : ''}
           </Button>
-          <Button onClick={applyAiPlan} disabled={!aiPlan?.plan?.graph_query && !aiPlan?.plan?.graphQuery}>
+          <Button onClick={applyAiPlan} disabled={!canApplyAiPlan}>
             Apply Plan
           </Button>
           <Button onClick={() => aiQueryMutation.mutate()} disabled={!aiQuestion || aiCooldown.active}>

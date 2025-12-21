@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
@@ -86,6 +86,13 @@ export const InstancesPage = () => {
     [adminToken, authToken, context.language],
   )
 
+  const requireCommandResult = (result: CommandResult | null, label: string) => {
+    if (!result) {
+      throw new Error(`${label} failed`)
+    }
+    return result
+  }
+
   const listQuery = useQuery<InstanceListResponse>({
     queryKey: classId
       ? qk.instances({ dbName: db ?? '', classId, limit, offset, search, language: context.language })
@@ -101,10 +108,14 @@ export const InstancesPage = () => {
         : ['bff', 'instance', 'empty'],
     queryFn: () => getInstance(requestContext, db ?? '', classId, getInstanceId(selectedInstance)),
     enabled: Boolean(db && classId && selectedInstance),
-    onSuccess: (data) => {
-      setEditJson(JSON.stringify(data, null, 2))
-    },
   })
+
+  useEffect(() => {
+    if (detailQuery.data === undefined) {
+      return
+    }
+    setEditJson(JSON.stringify(detailQuery.data, null, 2))
+  }, [detailQuery.data])
 
   const createMutation = useMutation<CommandResult>({
     mutationFn: async () => {
@@ -112,7 +123,8 @@ export const InstancesPage = () => {
         throw new Error('Missing class')
       }
       const data = JSON.parse(createJson || '{}')
-      return createInstance(requestContext, db, classId, context.branch, { data })
+      const result = await createInstance(requestContext, db, classId, context.branch, { data })
+      return requireCommandResult(result, 'Create instance')
     },
     onSuccess: (result) => {
       setWriteError(null)
@@ -140,7 +152,8 @@ export const InstancesPage = () => {
         throw new Error('Missing class')
       }
       const instances = JSON.parse(bulkJson || '[]')
-      return bulkCreateInstances(requestContext, db, classId, context.branch, { instances })
+      const result = await bulkCreateInstances(requestContext, db, classId, context.branch, { instances })
+      return requireCommandResult(result, 'Bulk create instances')
     },
     onSuccess: (result) => {
       setWriteError(null)
@@ -172,9 +185,10 @@ export const InstancesPage = () => {
         throw new Error('expected_seq missing')
       }
       const data = JSON.parse(editJson || '{}')
-      return updateInstance(requestContext, db, classId, getInstanceId(selectedInstance), context.branch, expectedSeq, {
+      const result = await updateInstance(requestContext, db, classId, getInstanceId(selectedInstance), context.branch, expectedSeq, {
         data,
       })
+      return requireCommandResult(result, 'Update instance')
     },
     onSuccess: (result) => {
       setActualSeqHint(null)
@@ -207,7 +221,8 @@ export const InstancesPage = () => {
       if (typeof expectedSeq !== 'number') {
         throw new Error('expected_seq missing')
       }
-      return deleteInstance(requestContext, db, classId, getInstanceId(selectedInstance), context.branch, expectedSeq)
+      const result = await deleteInstance(requestContext, db, classId, getInstanceId(selectedInstance), context.branch, expectedSeq)
+      return requireCommandResult(result, 'Delete instance')
     },
     onSuccess: (result) => {
       setActualSeqHint(null)

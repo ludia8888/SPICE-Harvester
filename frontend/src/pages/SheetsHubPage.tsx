@@ -55,6 +55,20 @@ export const SheetsHubPage = () => {
   const [registerClassLabel, setRegisterClassLabel] = useState('')
   const [registerBranch, setRegisterBranch] = useState('main')
 
+  const formatCellValue = (value: unknown) => {
+    if (value === null || value === undefined) {
+      return ''
+    }
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      return String(value)
+    }
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return String(value)
+    }
+  }
+
   const previewCooldown = useCooldown()
   const gridCooldown = useCooldown()
   const registerCooldown = useCooldown()
@@ -271,7 +285,7 @@ export const SheetsHubPage = () => {
                 {previewRows.map((row, index) => (
                   <tr key={index}>
                     {asArray<unknown>(row).map((cell, idx) => (
-                      <td key={idx}>{cell}</td>
+                      <td key={idx}>{formatCellValue(cell)}</td>
                     ))}
                   </tr>
                 ))}
@@ -299,7 +313,7 @@ export const SheetsHubPage = () => {
                 {gridPreview.map((row, rowIndex) => (
                   <tr key={`row-${rowIndex}`}>
                     {row.map((cell, colIndex) => (
-                      <td key={`cell-${rowIndex}-${colIndex}`}>{cell ?? ''}</td>
+                      <td key={`cell-${rowIndex}-${colIndex}`}>{formatCellValue(cell)}</td>
                     ))}
                   </tr>
                 ))}

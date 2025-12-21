@@ -21,7 +21,7 @@ import { showAppToast } from '../app/AppToaster'
 import { toastApiError } from '../errors/toastApiError'
 import { qk } from '../query/queryKeys'
 import { useAppStore } from '../store/useAppStore'
-import { asArray, asRecord, getString, type UnknownRecord } from '../utils/typed'
+import { asArray, asRecord, getString, isRecord, type UnknownRecord } from '../utils/typed'
 
 export const MappingsPage = () => {
   const { db } = useParams()
@@ -62,7 +62,7 @@ export const MappingsPage = () => {
       if (!result) {
         return
       }
-      setMappingData(result.json)
+      setMappingData(isRecord(result.json) ? result.json : null)
       const url = URL.createObjectURL(result.blob)
       const link = document.createElement('a')
       link.href = url
@@ -82,7 +82,7 @@ export const MappingsPage = () => {
       return validateMappings(requestContext, db, file)
     },
     onSuccess: (result) => {
-      setMappingData(result)
+      setMappingData(isRecord(result) ? result : null)
     },
     onError: (error) => toastApiError(error, context.language),
   })

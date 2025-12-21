@@ -59,6 +59,20 @@ export const ImportSheetsPage = () => {
     return Number.isFinite(parsed) ? parsed : null
   }
 
+  const formatCellValue = (value: unknown) => {
+    if (value === null || value === undefined) {
+      return ''
+    }
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      return String(value)
+    }
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return String(value)
+    }
+  }
+
   const [step, setStep] = useState(0)
   const [sheetUrl, setSheetUrl] = useState(searchParams.get('sheet_url') ?? '')
   const [worksheetName, setWorksheetName] = useState(searchParams.get('worksheet_name') ?? '')
@@ -426,9 +440,9 @@ export const ImportSheetsPage = () => {
                   </thead>
                   <tbody>
                     {previewRows.map((row, index) => (
-                      <tr key={`preview-${index}`}>
+                        <tr key={`preview-${index}`}>
                         {asArray<unknown>(row).map((cell, idx) => (
-                          <td key={idx}>{cell}</td>
+                          <td key={idx}>{formatCellValue(cell)}</td>
                         ))}
                       </tr>
                     ))}
@@ -448,7 +462,7 @@ export const ImportSheetsPage = () => {
                     {gridPreview.map((row, rowIndex) => (
                       <tr key={`grid-${rowIndex}`}>
                         {row.map((cell, colIndex) => (
-                          <td key={`grid-cell-${rowIndex}-${colIndex}`}>{cell ?? ''}</td>
+                          <td key={`grid-cell-${rowIndex}-${colIndex}`}>{formatCellValue(cell)}</td>
                         ))}
                       </tr>
                     ))}

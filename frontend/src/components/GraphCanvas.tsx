@@ -1,5 +1,5 @@
 import CytoscapeComponent from 'react-cytoscapejs'
-import type { Core, ElementDefinition, EventObject, LayoutOptions, Stylesheet } from 'cytoscape'
+import type { Core, ElementDefinition, EventObject, LayoutOptions } from 'cytoscape'
 
 export type GraphCanvasSelect = {
   kind: 'node' | 'edge'
@@ -64,7 +64,7 @@ export const GraphCanvas = ({
           selector: '.status-missing',
           style: { 'background-color': '#c23030' },
         },
-      ] as Stylesheet[]
+      ]
       }
       cy={(cy: Core) => {
         if (!onSelect) {
