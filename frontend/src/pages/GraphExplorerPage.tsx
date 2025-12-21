@@ -1,548 +1,471 @@
-import { useCallback, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useMemo, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import {
   Button,
   Card,
   Callout,
-  Checkbox,
   FormGroup,
-  H5,
   HTMLSelect,
   HTMLTable,
   InputGroup,
   Intent,
-  NumericInput,
+  Switch,
   Tag,
+  Text,
   TextArea,
 } from '@blueprintjs/core'
-import { aiQuery, aiTranslatePlan, graphPaths, graphQuery } from '../api/bff'
-import { HttpError } from '../api/bff'
-import { GraphCanvas, type GraphCanvasSelect } from '../components/GraphCanvas'
-import { PageHeader } from '../components/PageHeader'
-import { JsonView } from '../components/JsonView'
-import { useOntologyRegistry } from '../hooks/useOntologyRegistry'
-import { useCooldown } from '../hooks/useCooldown'
+import { getGraphHealth, getGraphPaths, runAiQuery, runGraphQuery, translateQueryPlan } from '../api/bff'
+import { useRateLimitRetry } from '../api/useRateLimitRetry'
+import { useRequestContext } from '../api/useRequestContext'
+import { GraphCanvas } from '../components/GraphCanvas'
+import { PageHeader } from '../components/layout/PageHeader'
+import { JsonViewer } from '../components/JsonViewer'
 import { toastApiError } from '../errors/toastApiError'
+import { useOntologyRegistry } from '../query/useOntologyRegistry'
 import { useAppStore } from '../store/useAppStore'
-import { formatLabel } from '../utils/labels'
-import { asArray, asRecord, getBoolean, getNumber, getString, type UnknownRecord } from '../utils/typed'
 
 type Hop = { predicate: string; target_class: string }
 
-type GraphNode = {
-  id: string
-  type?: string
-  data_status?: string
-  display?: UnknownRecord
-  data?: UnknownRecord
-  [key: string]: unknown
+const parseJson = <T,>(raw: string, fallback: T): T => {
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    return fallback
+  }
 }
 
-type GraphEdge = {
-  from_node: string
-  to_node: string
-  predicate: string
-  [key: string]: unknown
-}
-
-const downloadJson = (filename: string, data: unknown) => {
-  const blob = new Blob([JSON.stringify(data ?? {}, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = filename
-  anchor.click()
-  URL.revokeObjectURL(url)
-}
-
-const buildElements = (
-  nodes: GraphNode[],
-  edges: GraphEdge[],
-  labelForClass: (id: string) => string,
-  labelForPredicate: (id: string) => string,
-) => {
-  const nodeElements = nodes.map((node) => ({
-    data: {
-      id: node.id,
-      label: getString(asRecord(node.display).label) ?? labelForClass(node.type ?? node.id) ?? node.id,
-      raw: node,
-    },
-    classes:
-      node.data_status === 'FULL'
-        ? 'status-full'
-        : node.data_status === 'PARTIAL'
-          ? 'status-partial'
-          : node.data_status === 'MISSING'
-            ? 'status-missing'
-            : undefined,
-  }))
-
-  const edgeElements = edges.map((edge, index) => ({
-    data: {
-      id: `edge-${index}-${edge.from_node}-${edge.to_node}`,
-      source: edge.from_node,
-      target: edge.to_node,
-      label: labelForPredicate(edge.predicate) || edge.predicate,
-      raw: edge,
-    },
-  }))
-
-  return [...nodeElements, ...edgeElements]
-}
-
-export const GraphExplorerPage = () => {
-  const { db } = useParams()
-  const context = useAppStore((state) => state.context)
-  const authToken = useAppStore((state) => state.authToken)
-  const adminToken = useAppStore((state) => state.adminToken)
+export const GraphExplorerPage = ({ dbName }: { dbName: string }) => {
+  const requestContext = useRequestContext()
+  const language = useAppStore((state) => state.context.language)
+  const branch = useAppStore((state) => state.context.branch)
   const setInspector = useAppStore((state) => state.setInspector)
+  const { cooldown: aiCooldown, withRateLimitRetry } = useRateLimitRetry(1)
+  const registry = useOntologyRegistry(dbName, branch)
 
-  const registry = useOntologyRegistry(db, context.branch)
-
-  const [startClassId, setStartClassId] = useState('')
+  const [startClass, setStartClass] = useState('')
+  const [targetClass, setTargetClass] = useState('')
   const [hops, setHops] = useState<Hop[]>([])
-  const [filtersJson, setFiltersJson] = useState('')
-  const [limit, setLimit] = useState(10)
-  const [maxNodes, setMaxNodes] = useState(200)
-  const [maxEdges, setMaxEdges] = useState(500)
-  const [noCycles, setNoCycles] = useState(true)
-  const [includeDocuments, setIncludeDocuments] = useState(true)
+  const [filtersJson, setFiltersJson] = useState('{}')
+  const [limit, setLimit] = useState('10')
+  const [maxNodes, setMaxNodes] = useState('200')
+  const [maxEdges, setMaxEdges] = useState('500')
+  const [includeDocs, setIncludeDocs] = useState(true)
   const [includePaths, setIncludePaths] = useState(false)
   const [includeProvenance, setIncludeProvenance] = useState(false)
   const [includeAudit, setIncludeAudit] = useState(false)
+  const [noCycles, setNoCycles] = useState(true)
+  const [showResults, setShowResults] = useState(true)
 
-  const [graphResult, setGraphResult] = useState<unknown>(null)
-  const [pathsResult, setPathsResult] = useState<unknown>(null)
-  const [selectedElement, setSelectedElement] = useState<GraphCanvasSelect | null>(null)
-  const [showResults, setShowResults] = useState(false)
+  const [question, setQuestion] = useState('')
 
-  const [aiQuestion, setAiQuestion] = useState('')
-  const [aiPlan, setAiPlan] = useState<unknown>(null)
-  const [aiAnswer, setAiAnswer] = useState<unknown>(null)
-  const aiCooldown = useCooldown()
+  const classOptions = useMemo(() => {
+    const list = registry.classes.map((item) => ({
+      label: item.label ? `${item.label} (${item.id})` : item.id,
+      value: item.id,
+    }))
+    return [{ label: 'Select class', value: '' }, ...list]
+  }, [registry.classes])
 
-  const requestContext = useMemo(
-    () => ({ language: context.language, authToken, adminToken }),
-    [adminToken, authToken, context.language],
-  )
+  const relationshipOptions = useMemo(() => {
+    const seen = new Set<string>()
+    const options = [] as Array<{ label: string; value: string }>
+    registry.classes.forEach((item) => {
+      item.relationships.forEach((rel) => {
+        if (!rel.predicate || seen.has(rel.predicate)) {
+          return
+        }
+        seen.add(rel.predicate)
+        options.push({
+          label: rel.label ? `${rel.label} (${rel.predicate})` : rel.predicate,
+          value: rel.predicate,
+        })
+      })
+    })
+    return [{ label: 'Select predicate', value: '' }, ...options]
+  }, [registry.classes])
 
-  const graphMutation = useMutation({
+  const runMutation = useMutation({
     mutationFn: () => {
-      const filters = filtersJson ? JSON.parse(filtersJson) : undefined
-      return graphQuery(requestContext, db ?? '', context.branch, {
-        start_class: startClassId,
-        hops,
+      const filters = parseJson<Record<string, unknown>>(filtersJson, {})
+      const normalizedHops = hops.filter((hop) => hop.predicate && hop.target_class)
+      return runGraphQuery(requestContext, dbName, branch, {
+        start_class: startClass,
+        hops: normalizedHops,
         filters,
-        limit,
-        max_nodes: maxNodes,
-        max_edges: maxEdges,
-        no_cycles: noCycles,
-        include_documents: includeDocuments,
+        limit: Number(limit) || 10,
+        max_nodes: Number(maxNodes) || 200,
+        max_edges: Number(maxEdges) || 500,
+        include_documents: includeDocs,
         include_paths: includePaths,
         include_provenance: includeProvenance,
         include_audit: includeAudit,
+        no_cycles: noCycles,
       })
     },
-    onSuccess: (result) => setGraphResult(result),
-    onError: (error) => toastApiError(error, context.language),
+    onError: (error) => toastApiError(error, language),
   })
 
   const pathsMutation = useMutation({
     mutationFn: () =>
-      graphPaths(requestContext, db ?? '', {
-        source_class: startClassId,
-        target_class: hops[hops.length - 1]?.target_class ?? startClassId,
-        max_depth: hops.length || 2,
-        branch: context.branch,
+      getGraphPaths(requestContext, dbName, {
+        source_class: startClass,
+        target_class: targetClass || undefined,
+        max_depth: 3,
+        branch,
       }),
-    onSuccess: (result) => setPathsResult(result),
-    onError: (error) => toastApiError(error, context.language),
+    onError: (error) => toastApiError(error, language),
   })
 
-  const aiPlanMutation = useMutation({
-    mutationFn: () =>
-      aiTranslatePlan(requestContext, db ?? '', {
-        question: aiQuestion,
-        branch: context.branch,
-        mode: 'auto',
-        limit,
-        include_provenance: includeProvenance,
-        include_documents: includeDocuments,
-      }),
-    onSuccess: (result) => setAiPlan(result),
-    onError: (error) => {
-      if (error instanceof HttpError) {
-        aiCooldown.startCooldown(error.retryAfterSeconds)
-      }
-      toastApiError(error, context.language)
-    },
-  }) 
-
-  const aiQueryMutation = useMutation({
-    mutationFn: () =>
-      aiQuery(requestContext, db ?? '', {
-        question: aiQuestion,
-        branch: context.branch,
-        mode: 'auto',
-        limit,
-        include_provenance: includeProvenance,
-        include_documents: includeDocuments,
-      }),
-    onSuccess: (result) => setAiAnswer(result),
-    onError: (error) => {
-      if (error instanceof HttpError) {
-        aiCooldown.startCooldown(error.retryAfterSeconds)
-      }
-      toastApiError(error, context.language)
-    },
+  const healthMutation = useMutation({
+    mutationFn: () => getGraphHealth(requestContext),
+    onError: (error) => toastApiError(error, language),
   })
 
-  const labelForClass = useCallback(
-    (id: string) => formatLabel(registry.classMap.get(id)?.label, context.language, id),
-    [context.language, registry.classMap],
-  )
-  const labelForPredicate = useCallback(
-    (id: string) => registry.predicateMap.get(id) ?? id,
-    [registry.predicateMap],
-  )
+  const planMutation = useMutation({
+    mutationFn: () =>
+      withRateLimitRetry(() =>
+        translateQueryPlan(requestContext, dbName, { question, branch, mode: 'graph_query', limit: 20 }),
+      ),
+    onError: (error) => toastApiError(error, language),
+  })
 
-  const classOptions = useMemo(
-    () => [{ label: 'Select class', value: '' }, ...registry.classOptions.map((item) => ({
-      label: `${item.label} (${item.value})`,
-      value: item.value,
-    }))],
-    [registry.classOptions],
-  )
+  const aiMutation = useMutation({
+    mutationFn: () =>
+      withRateLimitRetry(() => runAiQuery(requestContext, dbName, { question, branch, mode: 'auto', limit: 20 })),
+    onError: (error) => toastApiError(error, language),
+  })
 
-  const predicateOptions = useMemo(() => {
-    const entries = Array.from(registry.predicateMap.entries())
-    return [
-      { label: 'Select predicate', value: '' },
-      ...entries.map(([id, label]) => ({ label: `${label} (${id})`, value: id })),
-    ]
-  }, [registry.predicateMap])
-
-  const applyAiPlan = () => {
-    const planRoot = asRecord(aiPlan)
-    const planContainer = asRecord(planRoot.plan)
-    const plan = (planContainer.graph_query ?? planContainer.graphQuery) as UnknownRecord | undefined
-    if (!plan) {
-      return
-    }
-    setStartClassId(getString(plan.start_class) ?? getString(plan.startClass) ?? '')
-    setHops(asArray<Hop>(plan.hops))
-    setLimit(getNumber(plan.limit) ?? limit)
-    setMaxNodes(getNumber(plan.max_nodes) ?? maxNodes)
-    setMaxEdges(getNumber(plan.max_edges) ?? maxEdges)
-    setIncludePaths(getBoolean(plan.include_paths) ?? includePaths)
-    setIncludeProvenance(getBoolean(plan.include_provenance) ?? includeProvenance)
-    setIncludeAudit(getBoolean(plan.include_audit) ?? includeAudit)
-    setIncludeDocuments(getBoolean(plan.include_documents) ?? includeDocuments)
-    setNoCycles(getBoolean(plan.no_cycles) ?? noCycles)
+  const applyPlan = () => {
+    const planPayload = planMutation.data as { plan?: { graph_query?: Record<string, unknown> } } | undefined
+    const graph = planPayload?.plan?.graph_query
+    if (!graph) return
+    setStartClass(String(graph.start_class ?? ''))
+    setHops(Array.isArray(graph.hops) ? (graph.hops as Hop[]) : [])
+    setFiltersJson(JSON.stringify(graph.filters ?? {}, null, 2))
+    if (graph.limit) setLimit(String(graph.limit))
+    if (graph.max_nodes) setMaxNodes(String(graph.max_nodes))
+    if (graph.max_edges) setMaxEdges(String(graph.max_edges))
+    if (typeof graph.include_documents === 'boolean') setIncludeDocs(graph.include_documents)
+    if (typeof graph.include_paths === 'boolean') setIncludePaths(graph.include_paths)
+    if (typeof graph.include_provenance === 'boolean') setIncludeProvenance(graph.include_provenance)
+    if (typeof graph.include_audit === 'boolean') setIncludeAudit(graph.include_audit)
+    if (typeof graph.no_cycles === 'boolean') setNoCycles(graph.no_cycles)
   }
 
-  const aiPlanContainer = asRecord(asRecord(aiPlan).plan)
-  const canApplyAiPlan = Boolean(aiPlanContainer.graph_query ?? aiPlanContainer.graphQuery)
-
-  const handleSelect = (selection: GraphCanvasSelect) => {
-    setSelectedElement(selection)
-    const dataRecord = asRecord(selection.data)
-    const rawRecord = asRecord(dataRecord.raw ?? dataRecord)
-    const label = getString(dataRecord.label)
-    const title =
-      selection.kind === 'edge'
-        ? label ?? getString(rawRecord.predicate) ?? 'Edge'
-        : label ?? getString(rawRecord.id) ?? getString(rawRecord.node_id) ?? 'Node'
-    const subtitle =
-      selection.kind === 'edge'
-        ? `${getString(rawRecord.from_node) ?? getString(rawRecord.from_node_id) ?? ''} → ${getString(rawRecord.to_node) ?? getString(rawRecord.to_node_id) ?? ''}`.trim()
-        : getString(rawRecord.type) ?? getString(rawRecord.node_type)
-    const metadata = asRecord(rawRecord.metadata)
-    const commandId =
-      getString(rawRecord.command_id) ?? getString(rawRecord.commandId) ?? getString(metadata.command_id)
-    const nodeId = getString(rawRecord.id) ?? getString(rawRecord.node_id) ?? getString(rawRecord.nodeId)
-    setInspector({
-      title,
-      subtitle: subtitle || undefined,
-      data: rawRecord,
-      kind: selection?.kind === 'edge' ? 'GraphEdge' : 'GraphNode',
-      auditCommandId: commandId,
-      lineageRootId: selection?.kind === 'node' && nodeId ? String(nodeId) : undefined,
-    })
+  const resultPayload = runMutation.data as
+    | { nodes?: Array<Record<string, unknown>>; edges?: Array<Record<string, unknown>>; warnings?: string[] }
+    | undefined
+  const nodes = resultPayload?.nodes ?? []
+  const edges = resultPayload?.edges ?? []
+  const warnings = resultPayload?.warnings ?? []
+  const hasPartial = nodes.some((node) => {
+    const status = node.data_status
+    return status === 'PARTIAL' || status === 'MISSING'
+  })
+  const statusIntent = (status?: string) => {
+    if (status === 'FULL') return Intent.SUCCESS
+    if (status === 'PARTIAL') return Intent.WARNING
+    if (status === 'MISSING') return Intent.DANGER
+    return Intent.NONE
   }
 
   const graphNodes = useMemo(
-    () => asArray<GraphNode>(asRecord(graphResult).nodes),
-    [graphResult],
+    () =>
+      nodes
+        .map((node) => {
+          const id = String(node.id ?? '')
+          if (!id) return null
+          const display = node.display as { label?: string; name?: string } | undefined
+          const label =
+            display?.label ||
+            display?.name ||
+            String(node.label ?? node.type ?? node.id ?? '')
+          return {
+            id,
+            label,
+            status: String(node.data_status ?? 'UNKNOWN'),
+            raw: node,
+          }
+        })
+        .filter((item): item is { id: string; label: string; status: string; raw: Record<string, unknown> } => Boolean(item)),
+    [nodes],
   )
+
   const graphEdges = useMemo(
-    () => asArray<GraphEdge>(asRecord(graphResult).edges),
-    [graphResult],
+    () =>
+      edges
+        .map((edge, index) => {
+          const source = String(edge.from_node ?? '')
+          const target = String(edge.to_node ?? '')
+          if (!source || !target) return null
+          const label = String(edge.predicate ?? '')
+          return {
+            id: `${source}-${label || 'edge'}-${target}-${index}`,
+            source,
+            target,
+            label,
+            raw: edge,
+          }
+        })
+        .filter((item): item is { id: string; source: string; target: string; label: string; raw: Record<string, unknown> } => Boolean(item)),
+    [edges],
   )
-
-  const elements = useMemo(
-    () => buildElements(graphNodes, graphEdges, labelForClass, labelForPredicate),
-    [graphEdges, graphNodes, labelForClass, labelForPredicate],
-  )
-
-  const selectedData = asRecord(selectedElement?.data)
-  const selectedRaw = asRecord(selectedData.raw ?? selectedData)
-  const selectedStatus = getString(selectedRaw.data_status)
-  const selectedNodeId =
-    getString(selectedRaw.id) ?? getString(selectedRaw.node_id) ?? getString(selectedData.id)
-  const selectedCommandId =
-    getString(selectedRaw.command_id) ?? getString(selectedRaw.commandId) ?? getString(asRecord(selectedRaw.metadata).command_id) ?? null
 
   return (
     <div>
-      <PageHeader title="Graph Explorer" subtitle="Graph traversal + ES 문서 조합" />
+      <PageHeader title="Graph Explorer" subtitle={`Branch: ${branch}`} />
 
-      <Card elevation={1} className="section-card">
-        <div className="card-title">
-          <H5>AI Assist</H5>
-        </div>
-        <Callout intent={Intent.PRIMARY}>AI는 실행 전 Plan 검토를 권장합니다.</Callout>
-        <div className="form-row">
-          <InputGroup value={aiQuestion} onChange={(event) => setAiQuestion(event.currentTarget.value)} placeholder="질문을 입력하세요" />
-          <Button
-            intent={Intent.PRIMARY}
-            onClick={() => aiPlanMutation.mutate()}
-            disabled={!aiQuestion || aiCooldown.active}
-          >
-            Generate Plan {aiCooldown.active ? `(${aiCooldown.remainingSeconds}s)` : ''}
-          </Button>
-          <Button onClick={applyAiPlan} disabled={!canApplyAiPlan}>
-            Apply Plan
-          </Button>
-          <Button onClick={() => aiQueryMutation.mutate()} disabled={!aiQuestion || aiCooldown.active}>
-            Ask & Run
-          </Button>
-        </div>
-        <JsonView value={aiPlan} />
-        <JsonView value={aiAnswer} />
-      </Card>
-
-      <div className="graph-layout">
-        <Card elevation={1} className="section-card">
-          <div className="card-title">
-            <H5>Builder</H5>
-            <Tag minimal>branch: {context.branch}</Tag>
-          </div>
-          <FormGroup label="Start class">
+      <div className="page-grid two-col">
+        <Card className="card-stack">
+          <div className="card-title">Builder</div>
+          <FormGroup label="Start class id">
             <HTMLSelect
-              value={startClassId}
-              onChange={(event) => setStartClassId(event.currentTarget.value)}
               options={classOptions}
+              value={startClass}
+              onChange={(event) => setStartClass(event.currentTarget.value)}
             />
           </FormGroup>
-          <Button
-            minimal
-            icon="add"
-            onClick={() => setHops((prev) => [...prev, { predicate: '', target_class: '' }])}
-          >
-            Add hop
-          </Button>
-          {hops.map((hop, index) => (
-            <div key={`${hop.predicate}-${index}`} className="row-grid">
-              <HTMLSelect
-                value={hop.predicate}
-                onChange={(event) => {
-                  const value = event.currentTarget.value
-                  setHops((prev) => {
-                    const next = [...prev]
-                    next[index] = { ...next[index], predicate: value }
-                    return next
-                  })
-                }}
-                options={predicateOptions}
-              />
-              <HTMLSelect
-                value={hop.target_class}
-                onChange={(event) => {
-                  const value = event.currentTarget.value
-                  setHops((prev) => {
-                    const next = [...prev]
-                    next[index] = { ...next[index], target_class: value }
-                    return next
-                  })
-                }}
-                options={classOptions}
-              />
-              <Button
-                minimal
-                icon="trash"
-                onClick={() => setHops((prev) => prev.filter((_, i) => i !== index))}
-              />
+          <FormGroup label="Hops">
+            {hops.length === 0 ? (
+              <Text className="muted small">No hops defined yet.</Text>
+            ) : (
+              hops.map((hop, index) => (
+                <div className="form-row" key={`${hop.predicate}-${hop.target_class}-${index}`}>
+                  <HTMLSelect
+                    options={relationshipOptions}
+                    value={hop.predicate}
+                    onChange={(event) => {
+                      const next = [...hops]
+                      next[index] = { ...hop, predicate: event.currentTarget.value }
+                      setHops(next)
+                    }}
+                  />
+                  <HTMLSelect
+                    options={classOptions}
+                    value={hop.target_class}
+                    onChange={(event) => {
+                      const next = [...hops]
+                      next[index] = { ...hop, target_class: event.currentTarget.value }
+                      setHops(next)
+                    }}
+                  />
+                  <Button
+                    icon="cross"
+                    minimal
+                    onClick={() => setHops(hops.filter((_item, hopIndex) => hopIndex !== index))}
+                  />
+                </div>
+              ))
+            )}
+            <Button
+              icon="plus"
+              small
+              onClick={() => setHops([...hops, { predicate: '', target_class: '' }])}
+            >
+              Add hop
+            </Button>
+          </FormGroup>
+          <FormGroup label="Filters (JSON object)">
+            <TextArea value={filtersJson} onChange={(event) => setFiltersJson(event.currentTarget.value)} rows={3} />
+          </FormGroup>
+          <FormGroup label="Limit / Max nodes / Max edges">
+            <div className="form-row">
+              <InputGroup value={limit} onChange={(event) => setLimit(event.currentTarget.value)} placeholder="limit" />
+              <InputGroup value={maxNodes} onChange={(event) => setMaxNodes(event.currentTarget.value)} placeholder="max nodes" />
+              <InputGroup value={maxEdges} onChange={(event) => setMaxEdges(event.currentTarget.value)} placeholder="max edges" />
             </div>
-          ))}
-          <FormGroup label="Filters (JSON)">
-            <TextArea
-              rows={5}
-              value={filtersJson}
-              onChange={(event) => setFiltersJson(event.currentTarget.value)}
-              placeholder='{"field":"property_id","operator":"eq","value":"..."}'
-            />
           </FormGroup>
           <div className="form-row">
-            <NumericInput value={limit} min={1} max={500} onValueChange={(value) => setLimit(value)} />
-            <NumericInput value={maxNodes} min={10} max={2000} onValueChange={(value) => setMaxNodes(value)} />
-            <NumericInput value={maxEdges} min={10} max={5000} onValueChange={(value) => setMaxEdges(value)} />
+            <Switch checked={includeDocs} label="Include documents" onChange={(event) => setIncludeDocs(event.currentTarget.checked)} />
+            <Switch checked={includePaths} label="Include paths" onChange={(event) => setIncludePaths(event.currentTarget.checked)} />
+            <Switch checked={includeProvenance} label="Include provenance" onChange={(event) => setIncludeProvenance(event.currentTarget.checked)} />
+            <Switch checked={includeAudit} label="Include audit" onChange={(event) => setIncludeAudit(event.currentTarget.checked)} />
+            <Switch checked={noCycles} label="No cycles" onChange={(event) => setNoCycles(event.currentTarget.checked)} />
           </div>
-          <Checkbox checked={noCycles} onChange={(event) => setNoCycles(event.currentTarget.checked)}>
-            no cycles
-          </Checkbox>
-          <Checkbox
-            checked={includeDocuments}
-            onChange={(event) => setIncludeDocuments(event.currentTarget.checked)}
-          >
-            include documents
-          </Checkbox>
-          <Checkbox checked={includePaths} onChange={(event) => setIncludePaths(event.currentTarget.checked)}>
-            include paths
-          </Checkbox>
-          <Checkbox
-            checked={includeProvenance}
-            onChange={(event) => setIncludeProvenance(event.currentTarget.checked)}
-          >
-            include provenance
-          </Checkbox>
-          <Checkbox checked={includeAudit} onChange={(event) => setIncludeAudit(event.currentTarget.checked)}>
-            include audit
-          </Checkbox>
-          <div className="button-row">
-            <Button intent={Intent.PRIMARY} onClick={() => graphMutation.mutate()} disabled={!startClassId}>
+          <div className="form-row">
+            <Button intent={Intent.PRIMARY} onClick={() => runMutation.mutate()} disabled={!startClass} loading={runMutation.isPending}>
               Run
             </Button>
-            <Button onClick={() => pathsMutation.mutate()} disabled={!startClassId}>
-              Suggest Paths
+            <HTMLSelect
+              options={classOptions}
+              value={targetClass}
+              onChange={(event) => setTargetClass(event.currentTarget.value)}
+            />
+            <Button onClick={() => pathsMutation.mutate()} disabled={!startClass} loading={pathsMutation.isPending}>
+              Suggest paths
+            </Button>
+            <Button onClick={() => healthMutation.mutate()} loading={healthMutation.isPending}>
+              Health
             </Button>
           </div>
-          <JsonView value={pathsResult} />
+          <JsonViewer value={pathsMutation.data} empty="Path suggestions will appear here." />
+          <JsonViewer value={healthMutation.data} empty="Graph service health will appear here." />
         </Card>
 
-        <Card elevation={1} className="section-card graph-panel">
-          <div className="card-title">
-            <H5>Graph Canvas</H5>
-          </div>
-          {graphNodes.length ? (
-            <GraphCanvas elements={elements} onSelect={handleSelect} />
+        <Card className="card-stack">
+          <div className="card-title">Graph canvas</div>
+          {graphNodes.length === 0 ? (
+            <Text className="muted">Run a query to render the graph.</Text>
           ) : (
-            <Callout intent={Intent.PRIMARY}>Run a query to render the graph.</Callout>
+            <GraphCanvas
+              nodes={graphNodes}
+              edges={graphEdges}
+              height={380}
+              onNodeSelect={(node) =>
+                setInspector({
+                  title: node.label,
+                  kind: 'Graph node',
+                  data: node.raw,
+                })
+              }
+              onEdgeSelect={(edge) =>
+                setInspector({
+                  title: edge.label || 'Edge',
+                  kind: 'Graph edge',
+                  data: edge.raw,
+                })
+              }
+            />
           )}
-        </Card>
 
-        <Card elevation={1} className="section-card">
-          <div className="card-title">
-            <H5>Inspector</H5>
+          <div className="card-title">Results</div>
+          {warnings.length ? (
+            <Callout intent={Intent.WARNING}>
+              {warnings.map((warning, index) => (
+                <div key={`${warning}-${index}`}>{warning}</div>
+              ))}
+            </Callout>
+          ) : null}
+          {hasPartial ? (
+            <Callout intent={Intent.WARNING}>
+              data_status PARTIAL/MISSING may be a projection delay. Re-run after indexing.
+            </Callout>
+          ) : null}
+          <div className="form-row">
+            <Switch
+              checked={showResults}
+              label="Show results table"
+              onChange={(event) => setShowResults(event.currentTarget.checked)}
+            />
           </div>
-          {selectedElement ? (
+          {showResults ? (
             <>
-              {selectedStatus ? <Tag intent={Intent.PRIMARY}>data_status: {selectedStatus}</Tag> : null}
-              {selectedStatus === 'PARTIAL' || selectedStatus === 'MISSING' ? (
-                <Callout intent={Intent.WARNING}>프로젝션 지연으로 일부 데이터가 누락될 수 있습니다.</Callout>
-              ) : null}
-              <div className="button-row">
-                {selectedNodeId && db ? (
-                  <Link to={`/db/${encodeURIComponent(db)}/lineage?root=${encodeURIComponent(String(selectedNodeId))}`}>
-                    <Button minimal>Set as Lineage root</Button>
-                  </Link>
-                ) : null}
-                {selectedCommandId && db ? (
-                  <Link to={`/db/${encodeURIComponent(db)}/audit?command_id=${encodeURIComponent(String(selectedCommandId))}`}>
-                    <Button minimal>Open Audit</Button>
-                  </Link>
-                ) : null}
-              </div>
-              <JsonView value={selectedRaw} />
+              {nodes.length === 0 ? (
+                <Text className="muted">No nodes returned yet.</Text>
+              ) : (
+                <HTMLTable striped interactive className="command-table">
+                  <thead>
+                    <tr>
+                      <th>Node ID</th>
+                      <th>Type</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {nodes.map((node) => {
+                      const id = String(node.id ?? '')
+                      const status = String(node.data_status ?? '')
+                      return (
+                        <tr key={id}>
+                          <td>{id}</td>
+                          <td>{String(node.type ?? '')}</td>
+                          <td>
+                            <Tag minimal intent={statusIntent(status)}>{status || 'UNKNOWN'}</Tag>
+                          </td>
+                          <td>
+                            <Button
+                              small
+                              onClick={() =>
+                                setInspector({
+                                  title: id,
+                                  kind: 'Graph node',
+                                  data: node,
+                                })
+                              }
+                            >
+                              Inspect
+                            </Button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </HTMLTable>
+              )}
+              {edges.length === 0 ? null : (
+                <HTMLTable striped interactive className="command-table">
+                  <thead>
+                    <tr>
+                      <th>From</th>
+                      <th>Predicate</th>
+                      <th>To</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {edges.map((edge, index) => {
+                      const fromNode = String(edge.from_node ?? '')
+                      const predicate = String(edge.predicate ?? '')
+                      const toNode = String(edge.to_node ?? '')
+                      return (
+                        <tr key={`${fromNode}-${predicate}-${toNode}-${index}`}>
+                          <td>{fromNode}</td>
+                          <td>{predicate}</td>
+                          <td>{toNode}</td>
+                          <td>
+                            <Button
+                              small
+                              onClick={() =>
+                                setInspector({
+                                  title: predicate || 'Edge',
+                                  kind: 'Graph edge',
+                                  data: edge,
+                                })
+                              }
+                            >
+                              Inspect
+                            </Button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </HTMLTable>
+              )}
             </>
-          ) : (
-            <Callout intent={Intent.PRIMARY}>Select a node or edge.</Callout>
-          )}
+          ) : null}
+          <JsonViewer value={runMutation.data} empty="Run a query to see results." />
         </Card>
       </div>
 
-      <Card elevation={1} className="section-card">
-        <div className="card-title">
-          <H5>Results</H5>
-          <div className="button-row">
-            <Button
-              minimal
-              icon="refresh"
-              onClick={() => graphMutation.mutate()}
-              disabled={!startClassId || graphMutation.isPending}
-            >
-              Re-run
-            </Button>
-            <Button
-              minimal
-              icon="export"
-              onClick={() => downloadJson(`graph-nodes-${db ?? 'db'}.json`, graphNodes)}
-              disabled={!graphNodes.length}
-            >
-              Export Nodes
-            </Button>
-            <Button
-              minimal
-              icon="export"
-              onClick={() => downloadJson(`graph-edges-${db ?? 'db'}.json`, graphEdges)}
-              disabled={!graphEdges.length}
-            >
-              Export Edges
-            </Button>
-            <Button
-              minimal
-              icon={showResults ? 'chevron-up' : 'chevron-down'}
-              onClick={() => setShowResults((prev) => !prev)}
-            >
-              {showResults ? 'Collapse' : 'Expand'}
-            </Button>
-          </div>
+      <Card className="card-stack" style={{ marginTop: 16 }}>
+        <div className="card-title">AI Assist</div>
+        <FormGroup label="Question">
+          <InputGroup value={question} onChange={(event) => setQuestion(event.currentTarget.value)} />
+        </FormGroup>
+        <div className="form-row">
+          <Button
+            onClick={() => planMutation.mutate()}
+            disabled={!question || aiCooldown > 0}
+            loading={planMutation.isPending}
+          >
+            {aiCooldown > 0 ? `Retry in ${aiCooldown}s` : 'Generate plan'}
+          </Button>
+          <Button onClick={applyPlan} disabled={!planMutation.data}>
+            Apply plan
+          </Button>
+          <Button
+            intent={Intent.PRIMARY}
+            onClick={() => aiMutation.mutate()}
+            disabled={!question || aiCooldown > 0}
+            loading={aiMutation.isPending}
+          >
+            {aiCooldown > 0 ? `Retry in ${aiCooldown}s` : 'Ask & run'}
+          </Button>
         </div>
-        {showResults ? (
-          <>
-            <H5>Nodes</H5>
-            <HTMLTable striped className="full-width">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Type</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {graphNodes.map((node) => (
-                  <tr key={node.id}>
-                    <td>{node.id}</td>
-                    <td>{node.type ?? '-'}</td>
-                    <td>{node.data_status ?? '-'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </HTMLTable>
-            <H5>Edges</H5>
-            <HTMLTable striped className="full-width">
-              <thead>
-                <tr>
-                  <th>From</th>
-                  <th>To</th>
-                  <th>Predicate</th>
-                </tr>
-              </thead>
-              <tbody>
-                {graphEdges.map((edge, index) => (
-                  <tr key={`${edge.from_node}-${edge.to_node}-${index}`}>
-                    <td>{edge.from_node}</td>
-                    <td>{edge.to_node}</td>
-                    <td>{edge.predicate}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </HTMLTable>
-          </>
-        ) : (
-          <Callout intent={Intent.PRIMARY}>결과 테이블을 열어 노드/엣지 목록을 확인하세요.</Callout>
-        )}
+        <JsonViewer value={planMutation.data} empty="Plan will appear here." />
+        <JsonViewer value={aiMutation.data} empty="AI answer will appear here." />
       </Card>
     </div>
   )

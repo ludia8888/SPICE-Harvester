@@ -1,100 +1,28 @@
 import type { Language } from '../types/app'
-import { useAppStore, type SettingsDialogReason } from '../store/useAppStore'
-import { asArray, asRecord, getString } from '../utils/typed'
+import { useAppStore } from '../store/useAppStore'
 import { API_BASE_URL } from './config'
 
 export class HttpError extends Error {
   status: number
   detail: unknown
-  retryAfterSeconds?: number
+  retryAfter: number | null
 
-  constructor(status: number, message: string, detail: unknown, retryAfterSeconds?: number) {
+  constructor(status: number, message: string, detail: unknown, retryAfter: number | null = null) {
     super(message)
     this.name = 'HttpError'
     this.status = status
     this.detail = detail
-    this.retryAfterSeconds = retryAfterSeconds
+    this.retryAfter = retryAfter
   }
 }
 
-type RequestContext = {
+export type RequestContext = {
   language: Language
-  authToken?: string
-  adminToken?: string
+  adminToken: string
   adminActor?: string
-  changeReason?: string
 }
 
 type SearchParams = Record<string, string | number | boolean | null | undefined>
-
-type RetryPolicy = {
-  retries: number
-  retryOnStatus?: number[]
-}
-
-type RequestOptions = {
-  retry?: RetryPolicy
-  extraHeaders?: HeadersInit
-  skipAuthRetry?: boolean
-}
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-
-type PendingAuthRetry = {
-  path: string
-  init: RequestInit
-  searchParams?: SearchParams
-  options?: RequestOptions
-}
-
-let pendingAuthRetry: PendingAuthRetry | null = null
-
-const shouldQueueAuthRetry = (status: number, context: RequestContext) => {
-  if (status === 401 || status === 403) {
-    return true
-  }
-  if (status === 503) {
-    return !(context.authToken || context.adminToken)
-  }
-  return false
-}
-
-const resolveAuthReason = (status: number, context: RequestContext): SettingsDialogReason | null => {
-  if (status === 401) {
-    return 'UNAUTHORIZED'
-  }
-  if (status === 403) {
-    return 'FORBIDDEN'
-  }
-  if (status === 503 && !(context.authToken || context.adminToken)) {
-    return 'TOKEN_MISSING'
-  }
-  return null
-}
-
-const queueAuthRetry = (
-  status: number,
-  context: RequestContext,
-  request: PendingAuthRetry,
-) => {
-  if (request.options?.skipAuthRetry) {
-    return
-  }
-  if (!shouldQueueAuthRetry(status, context)) {
-    return
-  }
-  const reason = resolveAuthReason(status, context)
-  if (!reason) {
-    return
-  }
-  pendingAuthRetry = {
-    path: request.path,
-    init: { ...request.init },
-    searchParams: request.searchParams,
-    options: request.options,
-  }
-  useAppStore.getState().openSettingsDialog(reason)
-}
 
 const buildApiUrl = (path: string, language: Language, searchParams?: SearchParams) => {
   const normalizedPath = path.replace(/^\/+/, '')
@@ -116,26 +44,13 @@ const buildApiUrl = (path: string, language: Language, searchParams?: SearchPara
   return url.toString()
 }
 
-const buildHeaders = (context: RequestContext, json = false, extraHeaders?: HeadersInit) => {
-  const headers = new Headers({ 'Accept-Language': context.language })
-  if (context.authToken) {
-    headers.set('Authorization', `Bearer ${context.authToken}`)
-  }
-  if (context.adminToken) {
-    headers.set('X-Admin-Token', context.adminToken)
-  }
-  if (context.adminActor) {
-    headers.set('X-Admin-Actor', context.adminActor)
-  }
-  if (context.changeReason) {
-    headers.set('X-Change-Reason', context.changeReason)
+const buildHeaders = (language: Language, adminToken: string, json = false) => {
+  const headers = new Headers({ 'Accept-Language': language })
+  if (adminToken) {
+    headers.set('X-Admin-Token', adminToken)
   }
   if (json) {
     headers.set('Content-Type', 'application/json')
-  }
-  if (extraHeaders) {
-    const extra = new Headers(extraHeaders)
-    extra.forEach((value, key) => headers.set(key, value))
   }
   return headers
 }
@@ -148,20 +63,20 @@ const parseJson = async (response: Response) => {
   }
 }
 
-const parseRetryAfter = (value: string | null) => {
+const parseRetryAfterSeconds = (value: string | null) => {
   if (!value) {
-    return undefined
+    return null
   }
-  const asNumber = Number(value)
-  if (!Number.isNaN(asNumber) && Number.isFinite(asNumber)) {
-    return Math.max(0, Math.ceil(asNumber))
+  const numeric = Number(value)
+  if (Number.isFinite(numeric)) {
+    return Math.max(0, Math.round(numeric))
   }
   const date = new Date(value)
   if (!Number.isNaN(date.valueOf())) {
-    const diffSeconds = Math.ceil((date.getTime() - Date.now()) / 1000)
-    return diffSeconds > 0 ? diffSeconds : 0
+    const diff = Math.ceil((date.getTime() - Date.now()) / 1000)
+    return Math.max(0, diff)
   }
-  return undefined
+  return null
 }
 
 const requestJson = async <T>(
@@ -169,51 +84,52 @@ const requestJson = async <T>(
   init: RequestInit,
   context: RequestContext,
   searchParams?: SearchParams,
-  options?: RequestOptions,
-): Promise<{ status: number; payload: T | null; headers: Headers }> => {
-  const attempt = async (retriesLeft: number): Promise<{ status: number; payload: T | null; headers: Headers }> => {
-    const hasJsonBody =
-      init.body !== undefined && init.body !== null && !(init.body instanceof FormData)
-    const headers = buildHeaders(context, hasJsonBody, options?.extraHeaders)
-    const response = await fetch(buildApiUrl(path, context.language, searchParams), {
-      ...init,
-      headers,
-    })
+  extraHeaders?: HeadersInit,
+): Promise<{ status: number; payload: T | null }> => {
+  const isJsonBody = init.body !== undefined && !(init.body instanceof FormData)
+  const headers = buildHeaders(context.language, context.adminToken, isJsonBody)
+  if (context.adminActor) {
+    headers.set('X-Admin-Actor', context.adminActor)
+  }
+  if (extraHeaders) {
+    const extra = new Headers(extraHeaders)
+    extra.forEach((value, key) => headers.set(key, value))
+  }
 
-    const payload = (await parseJson(response)) as T | null
+  const response = await fetch(buildApiUrl(path, context.language, searchParams), {
+    ...init,
+    headers,
+  })
 
-    if (!response.ok) {
-      if (response.status === 429) {
-        const retryAfter = parseRetryAfter(response.headers.get('Retry-After'))
-        if (retriesLeft > 0) {
-          const delayMs = retryAfter ? retryAfter * 1000 : 1000
-          await sleep(delayMs)
-          return attempt(retriesLeft - 1)
-        }
-        throw new HttpError(response.status, `HTTP ${response.status}`, payload, retryAfter)
-      }
-      queueAuthRetry(response.status, context, { path, init, searchParams, options })
-      throw new HttpError(response.status, `HTTP ${response.status}`, payload)
+  const payload = (await parseJson(response)) as T | null
+
+  if (!response.ok) {
+    const retryAfter = parseRetryAfterSeconds(response.headers.get('Retry-After'))
+    if (response.status === 401 || response.status === 403 || response.status === 503) {
+      useAppStore.getState().setSettingsOpen(true)
     }
-
-    return { status: response.status, payload, headers: response.headers }
+    throw new HttpError(response.status, `HTTP ${response.status}`, payload, retryAfter)
   }
 
-  const retryOn = options?.retry?.retryOnStatus ?? [429]
-  const retries = options?.retry?.retries ?? 0
-  if (retries > 0 && retryOn.includes(429)) {
-    return attempt(retries)
-  }
-  return attempt(0)
+  return { status: response.status, payload }
 }
 
-const requestBlob = async (
+const requestRaw = async (
   path: string,
   init: RequestInit,
   context: RequestContext,
   searchParams?: SearchParams,
-): Promise<{ status: number; blob: Blob; filename?: string }> => {
-  const headers = buildHeaders(context, false)
+  extraHeaders?: HeadersInit,
+): Promise<Response> => {
+  const headers = buildHeaders(context.language, context.adminToken, false)
+  if (context.adminActor) {
+    headers.set('X-Admin-Actor', context.adminActor)
+  }
+  if (extraHeaders) {
+    const extra = new Headers(extraHeaders)
+    extra.forEach((value, key) => headers.set(key, value))
+  }
+
   const response = await fetch(buildApiUrl(path, context.language, searchParams), {
     ...init,
     headers,
@@ -221,50 +137,18 @@ const requestBlob = async (
 
   if (!response.ok) {
     const payload = await parseJson(response)
-    queueAuthRetry(response.status, context, { path, init, searchParams })
-    throw new HttpError(response.status, `HTTP ${response.status}`, payload)
+    const retryAfter = parseRetryAfterSeconds(response.headers.get('Retry-After'))
+    if (response.status === 401 || response.status === 403 || response.status === 503) {
+      useAppStore.getState().setSettingsOpen(true)
+    }
+    throw new HttpError(response.status, `HTTP ${response.status}`, payload, retryAfter)
   }
 
-  const blob = await response.blob()
-  const disposition = response.headers.get('Content-Disposition') ?? ''
-  const match = disposition.match(/filename=([^;]+)/i)
-  const filename = match ? match[1].replace(/"/g, '') : undefined
-  return { status: response.status, blob, filename }
-}
-
-export const retryPendingAuthRequest = async (context: RequestContext) => {
-  if (!pendingAuthRetry) {
-    return null
-  }
-  const pending = pendingAuthRetry
-  pendingAuthRetry = null
-  const { payload } = await requestJson<unknown>(
-    pending.path,
-    pending.init,
-    context,
-    pending.searchParams,
-    { ...pending.options, skipAuthRetry: true },
-  )
-  return payload
+  return response
 }
 
 type DatabaseListResponse = {
   data?: { databases?: Array<{ name?: string }> }
-}
-
-export type BranchListResponse = {
-  branches?: Array<{ name?: string }>
-  count?: number
-}
-
-export type InstanceListResponse = {
-  class_id?: string
-  total?: number
-  limit?: number
-  offset?: number
-  search?: string | null
-  instances?: Array<Record<string, unknown>>
-  data?: { instances?: Array<Record<string, unknown>> }
 }
 
 type AcceptedContract = {
@@ -291,28 +175,12 @@ export type CommandResult = {
   retry_count?: number
 }
 
-const extractCommandId = (payload: AcceptedContract | null) =>
-  payload?.data?.command_id ?? payload?.command_id
-
-const extractBatchCommandIds = (payload: unknown): string[] => {
-  const root = asRecord(payload)
-  const write = asRecord(root.write)
-  const commands = asArray<unknown>(write.commands ?? root.commands)
-  return commands
-    .map((command) => {
-      const record = asRecord(command)
-      const direct = getString(record.command_id)
-      if (direct) {
-        return direct
-      }
-      const nested = asRecord(record.command)
-      return getString(nested.command_id) ?? getString(nested.id) ?? null
-    })
-    .filter((value): value is string => Boolean(value))
-}
-
 export const listDatabases = async (context: RequestContext): Promise<string[]> => {
-  const { payload } = await requestJson<DatabaseListResponse>('databases', { method: 'GET' }, context)
+  const { payload } = await requestJson<DatabaseListResponse>(
+    'databases',
+    { method: 'GET' },
+    context,
+  )
 
   const names =
     payload?.data?.databases
@@ -323,7 +191,11 @@ export const listDatabases = async (context: RequestContext): Promise<string[]> 
 }
 
 export const openDatabase = async (context: RequestContext, dbName: string) => {
-  await requestJson<unknown>(`databases/${encodeURIComponent(dbName)}`, { method: 'GET' }, context)
+  await requestJson<unknown>(
+    `databases/${encodeURIComponent(dbName)}`,
+    { method: 'GET' },
+    context,
+  )
 }
 
 export const createDatabase = async (
@@ -336,10 +208,11 @@ export const createDatabase = async (
     { method: 'POST', body: JSON.stringify(input) },
     context,
     undefined,
-    { extraHeaders },
+    extraHeaders,
   )
 
-  return { status, commandId: extractCommandId(payload) }
+  const commandId = payload?.data?.command_id ?? payload?.command_id
+  return { status, commandId }
 }
 
 export const deleteDatabase = async (
@@ -353,10 +226,11 @@ export const deleteDatabase = async (
     { method: 'DELETE' },
     context,
     { expected_seq: expectedSeq },
-    { extraHeaders },
+    extraHeaders,
   )
 
-  return { status, commandId: extractCommandId(payload) }
+  const commandId = payload?.data?.command_id ?? payload?.command_id
+  return { status, commandId }
 }
 
 export const getDatabaseExpectedSeq = async (
@@ -411,48 +285,69 @@ export const getCommandStatus = async (
   return payload
 }
 
-export const listBranches = async (
-  context: RequestContext,
-  dbName: string,
-): Promise<BranchListResponse> => {
-  const { payload } = await requestJson<BranchListResponse>(
+export type ApiEnvelope<T = Record<string, unknown>> = {
+  status?: string
+  message?: string
+  data?: T
+  [key: string]: unknown
+}
+
+export const listBranches = async (context: RequestContext, dbName: string) => {
+  const { payload } = await requestJson<{ branches?: unknown[]; count?: number }>(
     `databases/${encodeURIComponent(dbName)}/branches`,
     { method: 'GET' },
     context,
   )
-  return payload ?? {}
+  return payload ?? { branches: [], count: 0 }
 }
 
 export const createBranch = async (
   context: RequestContext,
   dbName: string,
   input: { name: string; from_branch?: string },
-) => {
-  const { payload } = await requestJson<unknown>(
+): Promise<ApiEnvelope> => {
+  const { payload } = await requestJson<ApiEnvelope>(
     `databases/${encodeURIComponent(dbName)}/branches`,
     { method: 'POST', body: JSON.stringify(input) },
     context,
   )
-  return payload
+  return payload ?? {}
 }
 
-export const deleteBranch = async (context: RequestContext, dbName: string, branchName: string) => {
-  const { payload } = await requestJson<unknown>(
+export const deleteBranch = async (
+  context: RequestContext,
+  dbName: string,
+  branchName: string,
+): Promise<ApiEnvelope> => {
+  const { payload } = await requestJson<ApiEnvelope>(
     `databases/${encodeURIComponent(dbName)}/branches/${encodeURIComponent(branchName)}`,
     { method: 'DELETE' },
     context,
   )
-  return payload
+  return payload ?? {}
 }
 
-export const listOntologies = async (context: RequestContext, dbName: string, branch: string) => {
-  const { payload } = await requestJson<unknown>(
+export const listDatabaseClasses = async (context: RequestContext, dbName: string) => {
+  const { payload } = await requestJson<{ classes?: unknown[]; count?: number }>(
+    `databases/${encodeURIComponent(dbName)}/classes`,
+    { method: 'GET' },
+    context,
+  )
+  return payload ?? { classes: [], count: 0 }
+}
+
+export const listOntology = async (
+  context: RequestContext,
+  dbName: string,
+  branch: string,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
     `database/${encodeURIComponent(dbName)}/ontology/list`,
     { method: 'GET' },
     context,
     { branch },
   )
-  return payload
+  return payload ?? {}
 }
 
 export const getOntology = async (
@@ -461,28 +356,45 @@ export const getOntology = async (
   classLabel: string,
   branch: string,
 ) => {
-  const { payload } = await requestJson<unknown>(
+  const { payload } = await requestJson<ApiEnvelope>(
     `database/${encodeURIComponent(dbName)}/ontology/${encodeURIComponent(classLabel)}`,
     { method: 'GET' },
     context,
     { branch },
   )
-  return payload
+  return payload ?? {}
 }
 
-export const validateOntology = async (
+export const validateOntologyCreate = async (
   context: RequestContext,
   dbName: string,
   branch: string,
-  body: unknown,
+  input: Record<string, unknown>,
 ) => {
-  const { payload } = await requestJson<unknown>(
+  const { payload } = await requestJson<ApiEnvelope>(
     `database/${encodeURIComponent(dbName)}/ontology/validate`,
-    { method: 'POST', body: JSON.stringify(body) },
+    { method: 'POST', body: JSON.stringify(input) },
     context,
     { branch },
   )
-  return payload
+  return payload ?? {}
+}
+
+export const createOntology = async (
+  context: RequestContext,
+  dbName: string,
+  branch: string,
+  input: Record<string, unknown>,
+  extraHeaders?: HeadersInit,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    `database/${encodeURIComponent(dbName)}/ontology`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+    { branch },
+    extraHeaders,
+  )
+  return payload ?? {}
 }
 
 export const validateOntologyUpdate = async (
@@ -490,32 +402,15 @@ export const validateOntologyUpdate = async (
   dbName: string,
   classLabel: string,
   branch: string,
-  body: unknown,
+  input: Record<string, unknown>,
 ) => {
-  const { payload } = await requestJson<unknown>(
+  const { payload } = await requestJson<ApiEnvelope>(
     `database/${encodeURIComponent(dbName)}/ontology/${encodeURIComponent(classLabel)}/validate`,
-    { method: 'POST', body: JSON.stringify(body) },
+    { method: 'POST', body: JSON.stringify(input) },
     context,
     { branch },
   )
-  return payload
-}
-
-export const createOntology = async (
-  context: RequestContext,
-  dbName: string,
-  branch: string,
-  body: unknown,
-  extraHeaders?: HeadersInit,
-) => {
-  const { payload } = await requestJson<AcceptedContract>(
-    `database/${encodeURIComponent(dbName)}/ontology`,
-    { method: 'POST', body: JSON.stringify(body) },
-    context,
-    { branch },
-    { extraHeaders },
-  )
-  return { payload, commandId: extractCommandId(payload) }
+  return payload ?? {}
 }
 
 export const updateOntology = async (
@@ -524,17 +419,17 @@ export const updateOntology = async (
   classLabel: string,
   branch: string,
   expectedSeq: number,
-  body: unknown,
+  input: Record<string, unknown>,
   extraHeaders?: HeadersInit,
 ) => {
-  const { payload } = await requestJson<AcceptedContract>(
+  const { payload } = await requestJson<ApiEnvelope>(
     `database/${encodeURIComponent(dbName)}/ontology/${encodeURIComponent(classLabel)}`,
-    { method: 'PUT', body: JSON.stringify(body) },
+    { method: 'PUT', body: JSON.stringify(input) },
     context,
     { branch, expected_seq: expectedSeq },
-    { extraHeaders },
+    extraHeaders,
   )
-  return { payload, commandId: extractCommandId(payload) }
+  return payload ?? {}
 }
 
 export const deleteOntology = async (
@@ -545,14 +440,14 @@ export const deleteOntology = async (
   expectedSeq: number,
   extraHeaders?: HeadersInit,
 ) => {
-  const { payload } = await requestJson<AcceptedContract>(
+  const { payload } = await requestJson<ApiEnvelope>(
     `database/${encodeURIComponent(dbName)}/ontology/${encodeURIComponent(classLabel)}`,
     { method: 'DELETE' },
     context,
     { branch, expected_seq: expectedSeq },
-    { extraHeaders },
+    extraHeaders,
   )
-  return { payload, commandId: extractCommandId(payload) }
+  return payload ?? {}
 }
 
 export const getOntologySchema = async (
@@ -560,208 +455,229 @@ export const getOntologySchema = async (
   dbName: string,
   classId: string,
   branch: string,
-  format = 'json',
+  format: 'json' | 'jsonld' | 'owl' = 'json',
 ) => {
-  const { payload } = await requestJson<unknown>(
+  const { payload } = await requestJson<ApiEnvelope>(
     `database/${encodeURIComponent(dbName)}/ontology/${encodeURIComponent(classId)}/schema`,
     { method: 'GET' },
     context,
     { branch, format },
   )
-  return payload
-}
-
-export const saveMappingMetadata = async (
-  context: RequestContext,
-  dbName: string,
-  classId: string,
-  body: unknown,
-) => {
-  const { payload } = await requestJson<unknown>(
-    `database/${encodeURIComponent(dbName)}/ontology/${encodeURIComponent(classId)}/mapping-metadata`,
-    { method: 'POST', body: JSON.stringify(body) },
-    context,
-  )
-  return payload
+  return payload ?? {}
 }
 
 export const getMappingsSummary = async (context: RequestContext, dbName: string) => {
-  const { payload } = await requestJson<unknown>(
+  const { payload } = await requestJson<Record<string, unknown>>(
     `database/${encodeURIComponent(dbName)}/mappings/`,
     { method: 'GET' },
     context,
   )
-  return payload
+  return payload ?? {}
 }
 
-export const exportMappings = async (context: RequestContext, dbName: string) =>
-  requestBlob(`database/${encodeURIComponent(dbName)}/mappings/export`, { method: 'POST' }, context)
+export const exportMappings = async (context: RequestContext, dbName: string) => {
+  const response = await requestRaw(
+    `database/${encodeURIComponent(dbName)}/mappings/export`,
+    { method: 'POST' },
+    context,
+  )
+  const blob = await response.blob()
+  const disposition = response.headers.get('Content-Disposition') ?? ''
+  return { blob, disposition }
+}
 
-export const validateMappings = async (context: RequestContext, dbName: string, file: File) => {
-  const form = new FormData()
-  form.append('file', file)
-  const { payload } = await requestJson<unknown>(
+export const validateMappings = async (
+  context: RequestContext,
+  dbName: string,
+  file: File,
+) => {
+  const body = new FormData()
+  body.append('file', file)
+  const { payload } = await requestJson<ApiEnvelope>(
     `database/${encodeURIComponent(dbName)}/mappings/validate`,
-    { method: 'POST', body: form },
+    { method: 'POST', body },
     context,
   )
-  return payload
+  return payload ?? {}
 }
 
-export const importMappings = async (context: RequestContext, dbName: string, file: File) => {
-  const form = new FormData()
-  form.append('file', file)
-  const { payload } = await requestJson<unknown>(
+export const importMappings = async (
+  context: RequestContext,
+  dbName: string,
+  file: File,
+) => {
+  const body = new FormData()
+  body.append('file', file)
+  const { payload } = await requestJson<ApiEnvelope>(
     `database/${encodeURIComponent(dbName)}/mappings/import`,
-    { method: 'POST', body: form },
+    { method: 'POST', body },
     context,
   )
-  return payload
+  return payload ?? {}
 }
 
-export const previewSheet = async (
+export const clearMappings = async (context: RequestContext, dbName: string) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    `database/${encodeURIComponent(dbName)}/mappings/`,
+    { method: 'DELETE' },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const previewGoogleSheet = async (
   context: RequestContext,
   input: { sheet_url: string; worksheet_name?: string; api_key?: string },
   limit = 10,
 ) => {
-  const { payload } = await requestJson<unknown>(
+  const { payload } = await requestJson<ApiEnvelope>(
     'data-connectors/google-sheets/preview',
     { method: 'POST', body: JSON.stringify(input) },
     context,
     { limit },
-    { retry: { retries: 1 } },
   )
-  return payload
+  return payload ?? {}
 }
 
-export const gridSheet = async (
+export const gridGoogleSheet = async (
   context: RequestContext,
-  input: {
-    sheet_url: string
-    worksheet_name?: string
-    api_key?: string
-    max_rows?: number
-    max_cols?: number
-    trim_trailing_empty?: boolean
-  },
+  input: { sheet_url: string; worksheet_name?: string; api_key?: string; max_rows?: number; max_cols?: number; trim_trailing_empty?: boolean },
 ) => {
-  const { payload } = await requestJson<unknown>(
+  const { payload } = await requestJson<ApiEnvelope>(
     'data-connectors/google-sheets/grid',
     { method: 'POST', body: JSON.stringify(input) },
     context,
-    undefined,
-    { retry: { retries: 1 } },
   )
-  return payload
+  return payload ?? {}
 }
 
-export const registerSheet = async (context: RequestContext, input: Record<string, unknown>) => {
-  const { payload } = await requestJson<unknown>(
+export const registerGoogleSheet = async (
+  context: RequestContext,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
     'data-connectors/google-sheets/register',
     { method: 'POST', body: JSON.stringify(input) },
     context,
-    undefined,
-    { retry: { retries: 1 } },
   )
-  return payload
+  return payload ?? {}
 }
 
-export const listRegisteredSheets = async (context: RequestContext, dbName?: string) => {
-  const { payload } = await requestJson<unknown>(
+export const listRegisteredSheets = async (
+  context: RequestContext,
+  databaseName?: string,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
     'data-connectors/google-sheets/registered',
     { method: 'GET' },
     context,
-    { database_name: dbName ?? undefined },
+    { database_name: databaseName },
   )
-  return payload
+  return payload ?? {}
 }
 
 export const previewRegisteredSheet = async (
   context: RequestContext,
   sheetId: string,
-  worksheetName?: string,
-  limit = 10,
+  params?: { worksheet_name?: string; limit?: number },
 ) => {
-  const { payload } = await requestJson<unknown>(
+  const { payload } = await requestJson<ApiEnvelope>(
     `data-connectors/google-sheets/${encodeURIComponent(sheetId)}/preview`,
     { method: 'GET' },
     context,
-    { worksheet_name: worksheetName ?? undefined, limit },
+    { worksheet_name: params?.worksheet_name, limit: params?.limit },
   )
-  return payload
+  return payload ?? {}
 }
 
-export const deleteRegisteredSheet = async (context: RequestContext, sheetId: string) => {
-  const { payload } = await requestJson<unknown>(
+export const unregisterSheet = async (context: RequestContext, sheetId: string) => {
+  const { payload } = await requestJson<ApiEnvelope>(
     `data-connectors/google-sheets/${encodeURIComponent(sheetId)}`,
     { method: 'DELETE' },
     context,
   )
-  return payload
+  return payload ?? {}
 }
 
-export const suggestMappingsFromSheets = async (context: RequestContext, dbName: string, body: unknown) => {
-  const { payload } = await requestJson<unknown>(
+export const suggestMappingsFromGoogleSheets = async (
+  context: RequestContext,
+  dbName: string,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
     `database/${encodeURIComponent(dbName)}/suggest-mappings-from-google-sheets`,
-    { method: 'POST', body: JSON.stringify(body) },
+    { method: 'POST', body: JSON.stringify(input) },
     context,
-    undefined,
-    { retry: { retries: 1 } },
   )
-  return payload
-}
-
-export const importFromSheetsDryRun = async (context: RequestContext, dbName: string, body: unknown) => {
-  const { payload } = await requestJson<unknown>(
-    `database/${encodeURIComponent(dbName)}/import-from-google-sheets/dry-run`,
-    { method: 'POST', body: JSON.stringify(body) },
-    context,
-    undefined,
-    { retry: { retries: 1 } },
-  )
-  return payload
-}
-
-export const importFromSheetsCommit = async (context: RequestContext, dbName: string, body: unknown) => {
-  const { payload } = await requestJson<unknown>(
-    `database/${encodeURIComponent(dbName)}/import-from-google-sheets/commit`,
-    { method: 'POST', body: JSON.stringify(body) },
-    context,
-    undefined,
-    { retry: { retries: 1 } },
-  )
-  return payload
+  return payload ?? {}
 }
 
 export const suggestMappingsFromExcel = async (
   context: RequestContext,
   dbName: string,
-  targetClassId: string,
+  params: { target_class_id: string; sheet_name?: string; table_id?: string; table_top?: number; table_left?: number; table_bottom?: number; table_right?: number },
   file: File,
   targetSchemaJson?: string,
 ) => {
-  const form = new FormData()
-  form.append('file', file)
+  const body = new FormData()
+  body.append('file', file)
   if (targetSchemaJson) {
-    form.append('target_schema_json', targetSchemaJson)
+    body.append('target_schema_json', targetSchemaJson)
   }
-  const { payload } = await requestJson<unknown>(
+  if (params.sheet_name) {
+    body.append('sheet_name', params.sheet_name)
+  }
+  if (params.table_id) {
+    body.append('table_id', params.table_id)
+  }
+  if (params.table_top !== undefined) {
+    body.append('table_top', String(params.table_top))
+    body.append('table_left', String(params.table_left ?? 0))
+    body.append('table_bottom', String(params.table_bottom ?? 0))
+    body.append('table_right', String(params.table_right ?? 0))
+  }
+  const { payload } = await requestJson<ApiEnvelope>(
     `database/${encodeURIComponent(dbName)}/suggest-mappings-from-excel`,
-    { method: 'POST', body: form },
+    { method: 'POST', body },
     context,
-    { target_class_id: targetClassId },
-    { retry: { retries: 1 } },
+    { target_class_id: params.target_class_id },
   )
-  return payload
+  return payload ?? {}
 }
 
-export const importFromExcelDryRun = async (
+export const dryRunImportFromGoogleSheets = async (
+  context: RequestContext,
+  dbName: string,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    `database/${encodeURIComponent(dbName)}/import-from-google-sheets/dry-run`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const commitImportFromGoogleSheets = async (
+  context: RequestContext,
+  dbName: string,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    `database/${encodeURIComponent(dbName)}/import-from-google-sheets/commit`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const dryRunImportFromExcel = async (
   context: RequestContext,
   dbName: string,
   payload: {
     file: File
     target_class_id: string
-    target_schema_json?: string
+    target_schema_json: string
     mappings_json: string
     sheet_name?: string
     table_id?: string
@@ -769,55 +685,49 @@ export const importFromExcelDryRun = async (
     table_left?: number
     table_bottom?: number
     table_right?: number
+    max_tables?: number
     max_rows?: number
+    max_cols?: number
+    dry_run_rows?: number
+    max_import_rows?: number
+    options_json?: string
   },
 ) => {
-  const form = new FormData()
-  form.append('file', payload.file)
-  form.append('target_class_id', payload.target_class_id)
-  form.append('mappings_json', payload.mappings_json)
-  if (payload.target_schema_json) {
-    form.append('target_schema_json', payload.target_schema_json)
+  const body = new FormData()
+  body.append('file', payload.file)
+  body.append('target_class_id', payload.target_class_id)
+  body.append('target_schema_json', payload.target_schema_json)
+  body.append('mappings_json', payload.mappings_json)
+  if (payload.sheet_name) body.append('sheet_name', payload.sheet_name)
+  if (payload.table_id) body.append('table_id', payload.table_id)
+  if (payload.table_top !== undefined) {
+    body.append('table_top', String(payload.table_top))
+    body.append('table_left', String(payload.table_left ?? 0))
+    body.append('table_bottom', String(payload.table_bottom ?? 0))
+    body.append('table_right', String(payload.table_right ?? 0))
   }
-  if (payload.sheet_name) {
-    form.append('sheet_name', payload.sheet_name)
-  }
-  if (payload.table_id) {
-    form.append('table_id', payload.table_id)
-  }
-  if (typeof payload.table_top === 'number') {
-    form.append('table_top', String(payload.table_top))
-  }
-  if (typeof payload.table_left === 'number') {
-    form.append('table_left', String(payload.table_left))
-  }
-  if (typeof payload.table_bottom === 'number') {
-    form.append('table_bottom', String(payload.table_bottom))
-  }
-  if (typeof payload.table_right === 'number') {
-    form.append('table_right', String(payload.table_right))
-  }
-  if (typeof payload.max_rows === 'number') {
-    form.append('max_rows', String(payload.max_rows))
-  }
+  if (payload.max_tables !== undefined) body.append('max_tables', String(payload.max_tables))
+  if (payload.max_rows !== undefined) body.append('max_rows', String(payload.max_rows))
+  if (payload.max_cols !== undefined) body.append('max_cols', String(payload.max_cols))
+  if (payload.dry_run_rows !== undefined) body.append('dry_run_rows', String(payload.dry_run_rows))
+  if (payload.max_import_rows !== undefined) body.append('max_import_rows', String(payload.max_import_rows))
+  if (payload.options_json) body.append('options_json', payload.options_json)
 
-  const { payload: response } = await requestJson<unknown>(
+  const { payload: result } = await requestJson<ApiEnvelope>(
     `database/${encodeURIComponent(dbName)}/import-from-excel/dry-run`,
-    { method: 'POST', body: form },
+    { method: 'POST', body },
     context,
-    undefined,
-    { retry: { retries: 1 } },
   )
-  return response
+  return result ?? {}
 }
 
-export const importFromExcelCommit = async (
+export const commitImportFromExcel = async (
   context: RequestContext,
   dbName: string,
   payload: {
     file: File
     target_class_id: string
-    target_schema_json?: string
+    target_schema_json: string
     mappings_json: string
     sheet_name?: string
     table_id?: string
@@ -825,66 +735,107 @@ export const importFromExcelCommit = async (
     table_left?: number
     table_bottom?: number
     table_right?: number
+    max_tables?: number
     max_rows?: number
+    max_cols?: number
+    max_import_rows?: number
+    options_json?: string
   },
 ) => {
-  const form = new FormData()
-  form.append('file', payload.file)
-  form.append('target_class_id', payload.target_class_id)
-  form.append('mappings_json', payload.mappings_json)
-  if (payload.target_schema_json) {
-    form.append('target_schema_json', payload.target_schema_json)
+  const body = new FormData()
+  body.append('file', payload.file)
+  body.append('target_class_id', payload.target_class_id)
+  body.append('target_schema_json', payload.target_schema_json)
+  body.append('mappings_json', payload.mappings_json)
+  if (payload.sheet_name) body.append('sheet_name', payload.sheet_name)
+  if (payload.table_id) body.append('table_id', payload.table_id)
+  if (payload.table_top !== undefined) {
+    body.append('table_top', String(payload.table_top))
+    body.append('table_left', String(payload.table_left ?? 0))
+    body.append('table_bottom', String(payload.table_bottom ?? 0))
+    body.append('table_right', String(payload.table_right ?? 0))
   }
-  if (payload.sheet_name) {
-    form.append('sheet_name', payload.sheet_name)
-  }
-  if (payload.table_id) {
-    form.append('table_id', payload.table_id)
-  }
-  if (typeof payload.table_top === 'number') {
-    form.append('table_top', String(payload.table_top))
-  }
-  if (typeof payload.table_left === 'number') {
-    form.append('table_left', String(payload.table_left))
-  }
-  if (typeof payload.table_bottom === 'number') {
-    form.append('table_bottom', String(payload.table_bottom))
-  }
-  if (typeof payload.table_right === 'number') {
-    form.append('table_right', String(payload.table_right))
-  }
-  if (typeof payload.max_rows === 'number') {
-    form.append('max_rows', String(payload.max_rows))
-  }
+  if (payload.max_tables !== undefined) body.append('max_tables', String(payload.max_tables))
+  if (payload.max_rows !== undefined) body.append('max_rows', String(payload.max_rows))
+  if (payload.max_cols !== undefined) body.append('max_cols', String(payload.max_cols))
+  if (payload.max_import_rows !== undefined) body.append('max_import_rows', String(payload.max_import_rows))
+  if (payload.options_json) body.append('options_json', payload.options_json)
 
-  const { payload: response } = await requestJson<unknown>(
+  const { payload: result } = await requestJson<ApiEnvelope>(
     `database/${encodeURIComponent(dbName)}/import-from-excel/commit`,
-    { method: 'POST', body: form },
+    { method: 'POST', body },
     context,
-    undefined,
-    { retry: { retries: 1 } },
   )
-  return response
+  return result ?? {}
 }
 
-export const suggestSchemaFromSheets = async (context: RequestContext, dbName: string, body: unknown) => {
-  const { payload } = await requestJson<unknown>(
-    `database/${encodeURIComponent(dbName)}/suggest-schema-from-google-sheets`,
-    { method: 'POST', body: JSON.stringify(body) },
-    context,
-    undefined,
-    { retry: { retries: 1 } },
-  )
-  return payload
-}
-
-export const suggestSchemaFromData = async (context: RequestContext, dbName: string, body: unknown) => {
-  const { payload } = await requestJson<unknown>(
+export const suggestSchemaFromData = async (
+  context: RequestContext,
+  dbName: string,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
     `database/${encodeURIComponent(dbName)}/suggest-schema-from-data`,
-    { method: 'POST', body: JSON.stringify(body) },
+    { method: 'POST', body: JSON.stringify(input) },
     context,
   )
-  return payload
+  return payload ?? {}
+}
+
+export const suggestSchemaFromGoogleSheets = async (
+  context: RequestContext,
+  dbName: string,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    `database/${encodeURIComponent(dbName)}/suggest-schema-from-google-sheets`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const suggestSchemaFromExcel = async (
+  context: RequestContext,
+  dbName: string,
+  file: File,
+  params?: {
+    sheet_name?: string
+    class_name?: string
+    table_id?: string
+    table_top?: number
+    table_left?: number
+    table_bottom?: number
+    table_right?: number
+    include_complex_types?: boolean
+    max_tables?: number
+    max_rows?: number
+    max_cols?: number
+  },
+) => {
+  const body = new FormData()
+  body.append('file', file)
+  if (params?.sheet_name) body.append('sheet_name', params.sheet_name)
+  if (params?.class_name) body.append('class_name', params.class_name)
+  if (params?.table_id) body.append('table_id', params.table_id)
+  if (params?.table_top !== undefined) {
+    body.append('table_top', String(params.table_top))
+    body.append('table_left', String(params.table_left ?? 0))
+    body.append('table_bottom', String(params.table_bottom ?? 0))
+    body.append('table_right', String(params.table_right ?? 0))
+  }
+  if (params?.include_complex_types !== undefined) {
+    body.append('include_complex_types', String(params.include_complex_types))
+  }
+  if (params?.max_tables !== undefined) body.append('max_tables', String(params.max_tables))
+  if (params?.max_rows !== undefined) body.append('max_rows', String(params.max_rows))
+  if (params?.max_cols !== undefined) body.append('max_cols', String(params.max_cols))
+  const { payload } = await requestJson<ApiEnvelope>(
+    `database/${encodeURIComponent(dbName)}/suggest-schema-from-excel`,
+    { method: 'POST', body },
+    context,
+  )
+  return payload ?? {}
 }
 
 export const listInstances = async (
@@ -892,8 +843,8 @@ export const listInstances = async (
   dbName: string,
   classId: string,
   params: { limit?: number; offset?: number; search?: string },
-): Promise<InstanceListResponse> => {
-  const { payload } = await requestJson<InstanceListResponse>(
+) => {
+  const { payload } = await requestJson<Record<string, unknown>>(
     `database/${encodeURIComponent(dbName)}/class/${encodeURIComponent(classId)}/instances`,
     { method: 'GET' },
     context,
@@ -902,22 +853,31 @@ export const listInstances = async (
   return payload ?? {}
 }
 
-export const getInstance = async (context: RequestContext, dbName: string, classId: string, instanceId: string) => {
-  const { payload } = await requestJson<unknown>(
+export const getInstance = async (
+  context: RequestContext,
+  dbName: string,
+  classId: string,
+  instanceId: string,
+) => {
+  const { payload } = await requestJson<Record<string, unknown>>(
     `database/${encodeURIComponent(dbName)}/class/${encodeURIComponent(classId)}/instance/${encodeURIComponent(instanceId)}`,
     { method: 'GET' },
     context,
   )
-  return payload
+  return payload ?? {}
 }
 
-export const getSampleValues = async (context: RequestContext, dbName: string, classId: string) => {
-  const { payload } = await requestJson<unknown>(
+export const getSampleValues = async (
+  context: RequestContext,
+  dbName: string,
+  classId: string,
+) => {
+  const { payload } = await requestJson<Record<string, unknown>>(
     `database/${encodeURIComponent(dbName)}/class/${encodeURIComponent(classId)}/sample-values`,
     { method: 'GET' },
     context,
   )
-  return payload
+  return payload ?? {}
 }
 
 export const createInstance = async (
@@ -925,31 +885,15 @@ export const createInstance = async (
   dbName: string,
   classLabel: string,
   branch: string,
-  body: unknown,
+  input: Record<string, unknown>,
 ) => {
   const { payload } = await requestJson<CommandResult>(
     `database/${encodeURIComponent(dbName)}/instances/${encodeURIComponent(classLabel)}/create`,
-    { method: 'POST', body: JSON.stringify(body) },
+    { method: 'POST', body: JSON.stringify(input) },
     context,
     { branch },
   )
-  return payload
-}
-
-export const bulkCreateInstances = async (
-  context: RequestContext,
-  dbName: string,
-  classLabel: string,
-  branch: string,
-  body: unknown,
-) => {
-  const { payload } = await requestJson<CommandResult>(
-    `database/${encodeURIComponent(dbName)}/instances/${encodeURIComponent(classLabel)}/bulk-create`,
-    { method: 'POST', body: JSON.stringify(body) },
-    context,
-    { branch },
-  )
-  return payload
+  return payload ?? ({} as CommandResult)
 }
 
 export const updateInstance = async (
@@ -959,15 +903,15 @@ export const updateInstance = async (
   instanceId: string,
   branch: string,
   expectedSeq: number,
-  body: unknown,
+  input: Record<string, unknown>,
 ) => {
   const { payload } = await requestJson<CommandResult>(
     `database/${encodeURIComponent(dbName)}/instances/${encodeURIComponent(classLabel)}/${encodeURIComponent(instanceId)}/update`,
-    { method: 'PUT', body: JSON.stringify(body) },
+    { method: 'PUT', body: JSON.stringify(input) },
     context,
     { branch, expected_seq: expectedSeq },
   )
-  return payload
+  return payload ?? ({} as CommandResult)
 }
 
 export const deleteInstance = async (
@@ -984,260 +928,306 @@ export const deleteInstance = async (
     context,
     { branch, expected_seq: expectedSeq },
   )
-  return payload
+  return payload ?? ({} as CommandResult)
 }
 
-export const graphQuery = async (
+export const bulkCreateInstances = async (
   context: RequestContext,
   dbName: string,
+  classLabel: string,
   branch: string,
-  body: unknown,
+  input: Record<string, unknown>,
 ) => {
-  const { payload } = await requestJson<unknown>(
-    `graph-query/${encodeURIComponent(dbName)}`,
-    { method: 'POST', body: JSON.stringify(body) },
+  const { payload } = await requestJson<CommandResult>(
+    `database/${encodeURIComponent(dbName)}/instances/${encodeURIComponent(classLabel)}/bulk-create`,
+    { method: 'POST', body: JSON.stringify(input) },
     context,
     { branch },
   )
-  return payload
+  return payload ?? ({} as CommandResult)
 }
 
-export const graphPaths = async (
+export const runGraphQuery = async (
   context: RequestContext,
   dbName: string,
-  params: { source_class: string; target_class: string; max_depth?: number; branch?: string },
+  branch: string,
+  input: Record<string, unknown>,
 ) => {
-  const { payload } = await requestJson<unknown>(
+  const { payload } = await requestJson<Record<string, unknown>>(
+    `graph-query/${encodeURIComponent(dbName)}`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+    { branch },
+  )
+  return payload ?? {}
+}
+
+export const getGraphPaths = async (
+  context: RequestContext,
+  dbName: string,
+  params: { source_class: string; target_class?: string; max_depth?: number; branch?: string },
+) => {
+  const { payload } = await requestJson<Record<string, unknown>>(
     `graph-query/${encodeURIComponent(dbName)}/paths`,
     { method: 'GET' },
     context,
     params,
   )
-  return payload
+  return payload ?? {}
 }
 
-export const graphHealth = async (context: RequestContext) => {
-  const { payload } = await requestJson<unknown>('graph-query/health', { method: 'GET' }, context)
-  return payload
+export const getGraphHealth = async (context: RequestContext) => {
+  const { payload } = await requestJson<Record<string, unknown>>(
+    'graph-query/health',
+    { method: 'GET' },
+    context,
+  )
+  return payload ?? {}
 }
 
 export const queryBuilderInfo = async (context: RequestContext, dbName: string) => {
-  const { payload } = await requestJson<unknown>(
+  const { payload } = await requestJson<Record<string, unknown>>(
     `database/${encodeURIComponent(dbName)}/query/builder`,
     { method: 'GET' },
     context,
   )
-  return payload
+  return payload ?? {}
 }
 
-export const runQuery = async (context: RequestContext, dbName: string, body: unknown) => {
-  const { payload } = await requestJson<unknown>(
+export const runQuery = async (
+  context: RequestContext,
+  dbName: string,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<Record<string, unknown>>(
     `database/${encodeURIComponent(dbName)}/query`,
-    { method: 'POST', body: JSON.stringify(body) },
+    { method: 'POST', body: JSON.stringify(input) },
     context,
   )
-  return payload
+  return payload ?? {}
 }
 
-export const runRawQuery = async (context: RequestContext, dbName: string, body: unknown) => {
-  const { payload } = await requestJson<unknown>(
+export const runRawQuery = async (
+  context: RequestContext,
+  dbName: string,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<Record<string, unknown>>(
     `database/${encodeURIComponent(dbName)}/query/raw`,
-    { method: 'POST', body: JSON.stringify(body) },
+    { method: 'POST', body: JSON.stringify(input) },
     context,
   )
-  return payload
+  return payload ?? {}
 }
 
-export const simulateMerge = async (context: RequestContext, dbName: string, body: unknown) => {
-  const { payload } = await requestJson<unknown>(
+export const simulateMerge = async (
+  context: RequestContext,
+  dbName: string,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<Record<string, unknown>>(
     `database/${encodeURIComponent(dbName)}/merge/simulate`,
-    { method: 'POST', body: JSON.stringify(body) },
+    { method: 'POST', body: JSON.stringify(input) },
     context,
   )
-  return payload
+  return payload ?? {}
 }
 
-export const resolveMerge = async (context: RequestContext, dbName: string, body: unknown, extraHeaders?: HeadersInit) => {
-  const { payload } = await requestJson<unknown>(
+export const resolveMerge = async (
+  context: RequestContext,
+  dbName: string,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<Record<string, unknown>>(
     `database/${encodeURIComponent(dbName)}/merge/resolve`,
-    { method: 'POST', body: JSON.stringify(body) },
+    { method: 'POST', body: JSON.stringify(input) },
     context,
-    undefined,
-    { extraHeaders },
   )
-  return payload
+  return payload ?? {}
 }
 
 export const listAuditLogs = async (
   context: RequestContext,
-  params: { partition_key: string } & Record<string, string | number | boolean | undefined>,
+  params: Record<string, unknown>,
 ) => {
-  const { payload } = await requestJson<unknown>(
+  const { payload } = await requestJson<ApiEnvelope>(
     'audit/logs',
     { method: 'GET' },
     context,
-    params,
+    params as SearchParams,
   )
-  return payload
+  return payload ?? {}
 }
 
 export const getAuditChainHead = async (
   context: RequestContext,
-  params: { partition_key: string },
+  partitionKey: string,
 ) => {
-  const { payload } = await requestJson<unknown>(
+  const { payload } = await requestJson<ApiEnvelope>(
     'audit/chain-head',
     { method: 'GET' },
     context,
-    params,
+    { partition_key: partitionKey },
   )
-  return payload
+  return payload ?? {}
 }
 
 export const getLineageGraph = async (
   context: RequestContext,
-  params: { root: string; db_name: string; max_depth?: number; direction?: string },
+  params: { root: string; db_name: string },
 ) => {
-  const { payload } = await requestJson<unknown>('lineage/graph', { method: 'GET' }, context, params)
-  return payload
+  const { payload } = await requestJson<Record<string, unknown>>(
+    'lineage/graph',
+    { method: 'GET' },
+    context,
+    params,
+  )
+  return payload ?? {}
 }
 
 export const getLineageImpact = async (
   context: RequestContext,
-  params: { root: string; db_name: string; max_depth?: number; direction?: string },
+  params: { root: string; db_name: string },
 ) => {
-  const { payload } = await requestJson<unknown>('lineage/impact', { method: 'GET' }, context, params)
-  return payload
+  const { payload } = await requestJson<Record<string, unknown>>(
+    'lineage/impact',
+    { method: 'GET' },
+    context,
+    params,
+  )
+  return payload ?? {}
 }
 
 export const getLineageMetrics = async (
   context: RequestContext,
   params: { db_name: string; window_minutes?: number },
 ) => {
-  const { payload } = await requestJson<unknown>('lineage/metrics', { method: 'GET' }, context, params)
-  return payload
+  const { payload } = await requestJson<Record<string, unknown>>(
+    'lineage/metrics',
+    { method: 'GET' },
+    context,
+    params,
+  )
+  return payload ?? {}
 }
 
 export const listTasks = async (
   context: RequestContext,
-  params: { status?: string; task_type?: string; limit?: number },
+  params?: { status?: string; task_type?: string; limit?: number },
 ) => {
-  const { payload } = await requestJson<unknown>('tasks/', { method: 'GET' }, context, params)
-  return payload
+  const { payload } = await requestJson<Record<string, unknown>>(
+    'tasks/',
+    { method: 'GET' },
+    context,
+    params,
+  )
+  return payload ?? {}
 }
 
 export const getTask = async (context: RequestContext, taskId: string) => {
-  const { payload } = await requestJson<unknown>(
+  const { payload } = await requestJson<Record<string, unknown>>(
     `tasks/${encodeURIComponent(taskId)}`,
     { method: 'GET' },
     context,
   )
-  return payload
+  return payload ?? {}
 }
 
 export const getTaskResult = async (context: RequestContext, taskId: string) => {
-  const { payload } = await requestJson<unknown>(
+  const { payload } = await requestJson<Record<string, unknown>>(
     `tasks/${encodeURIComponent(taskId)}/result`,
     { method: 'GET' },
     context,
   )
-  return payload
+  return payload ?? {}
 }
 
 export const cancelTask = async (context: RequestContext, taskId: string) => {
-  const { payload } = await requestJson<unknown>(
+  const { payload } = await requestJson<Record<string, unknown>>(
     `tasks/${encodeURIComponent(taskId)}`,
     { method: 'DELETE' },
     context,
   )
-  return payload
+  return payload ?? {}
 }
 
 export const getTaskMetrics = async (context: RequestContext) => {
-  const { payload } = await requestJson<unknown>('tasks/metrics/summary', { method: 'GET' }, context)
-  return payload
+  const { payload } = await requestJson<Record<string, unknown>>(
+    'tasks/metrics/summary',
+    { method: 'GET' },
+    context,
+  )
+  return payload ?? {}
 }
 
-export const replayInstanceState = async (context: RequestContext, body: unknown) => {
-  const { payload } = await requestJson<unknown>(
+export const replayInstanceState = async (
+  context: RequestContext,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<Record<string, unknown>>(
     'admin/replay-instance-state',
-    { method: 'POST', body: JSON.stringify(body) },
+    { method: 'POST', body: JSON.stringify(input) },
     context,
   )
-  return payload
+  return payload ?? {}
 }
 
-export const getReplayResult = async (context: RequestContext, taskId: string) => {
-  const { payload } = await requestJson<unknown>(
-    `admin/replay-instance-state/${encodeURIComponent(taskId)}/result`,
-    { method: 'GET' },
-    context,
-  )
-  return payload
-}
-
-export const getReplayTrace = async (context: RequestContext, taskId: string) => {
-  const { payload } = await requestJson<unknown>(
-    `admin/replay-instance-state/${encodeURIComponent(taskId)}/trace`,
-    { method: 'GET' },
-    context,
-  )
-  return payload
-}
-
-export const recomputeProjection = async (context: RequestContext, body: unknown) => {
-  const { payload } = await requestJson<unknown>(
+export const recomputeProjection = async (
+  context: RequestContext,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<Record<string, unknown>>(
     'admin/recompute-projection',
-    { method: 'POST', body: JSON.stringify(body) },
+    { method: 'POST', body: JSON.stringify(input) },
     context,
   )
-  return payload
+  return payload ?? {}
 }
 
-export const getRecomputeResult = async (context: RequestContext, taskId: string) => {
-  const { payload } = await requestJson<unknown>(
-    `admin/recompute-projection/${encodeURIComponent(taskId)}/result`,
-    { method: 'GET' },
-    context,
-  )
-  return payload
-}
-
-export const cleanupOldReplays = async (context: RequestContext, olderThanHours: number) => {
-  const { payload } = await requestJson<unknown>(
+export const cleanupOldReplays = async (
+  context: RequestContext,
+  input: { older_than_hours?: number },
+) => {
+  const { payload } = await requestJson<Record<string, unknown>>(
     'admin/cleanup-old-replays',
     { method: 'POST' },
     context,
-    { older_than_hours: olderThanHours },
+    { older_than_hours: input.older_than_hours ?? 24 },
   )
-  return payload
+  return payload ?? {}
 }
 
 export const getSystemHealth = async (context: RequestContext) => {
-  const { payload } = await requestJson<unknown>('admin/system-health', { method: 'GET' }, context)
-  return payload
+  const { payload } = await requestJson<Record<string, unknown>>(
+    'admin/system-health',
+    { method: 'GET' },
+    context,
+  )
+  return payload ?? {}
 }
 
-export const aiTranslatePlan = async (context: RequestContext, dbName: string, body: unknown) => {
-  const { payload } = await requestJson<unknown>(
+export const translateQueryPlan = async (
+  context: RequestContext,
+  dbName: string,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<Record<string, unknown>>(
     `ai/translate/query-plan/${encodeURIComponent(dbName)}`,
-    { method: 'POST', body: JSON.stringify(body) },
+    { method: 'POST', body: JSON.stringify(input) },
     context,
-    undefined,
-    { retry: { retries: 1 } },
   )
-  return payload
+  return payload ?? {}
 }
 
-export const aiQuery = async (context: RequestContext, dbName: string, body: unknown) => {
-  const { payload } = await requestJson<unknown>(
+export const runAiQuery = async (
+  context: RequestContext,
+  dbName: string,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<Record<string, unknown>>(
     `ai/query/${encodeURIComponent(dbName)}`,
-    { method: 'POST', body: JSON.stringify(body) },
+    { method: 'POST', body: JSON.stringify(input) },
     context,
-    undefined,
-    { retry: { retries: 1 } },
   )
-  return payload
+  return payload ?? {}
 }
-
-export const extractWriteCommandIds = (payload: unknown) => extractBatchCommandIds(payload)

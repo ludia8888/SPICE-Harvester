@@ -1,149 +1,132 @@
 import { useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
-import { useMutation, useQuery } from '@tanstack/react-query'
-import {
-  Button,
-  Card,
-  FormGroup,
-  H5,
-  HTMLSelect,
-  HTMLTable,
-  InputGroup,
-  Intent,
-} from '@blueprintjs/core'
-import { createBranch, deleteBranch, listBranches, type BranchListResponse } from '../api/bff'
-import { PageHeader } from '../components/PageHeader'
+import { Button, Card, FormGroup, HTMLTable, InputGroup, Intent, Text } from '@blueprintjs/core'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { createBranch, deleteBranch, listBranches } from '../api/bff'
+import { useRequestContext } from '../api/useRequestContext'
+import { PageHeader } from '../components/layout/PageHeader'
 import { showAppToast } from '../app/AppToaster'
 import { toastApiError } from '../errors/toastApiError'
 import { qk } from '../query/queryKeys'
 import { useAppStore } from '../store/useAppStore'
 
-export const BranchesPage = () => {
-  const { db } = useParams()
-  const context = useAppStore((state) => state.context)
-  const authToken = useAppStore((state) => state.authToken)
-  const adminToken = useAppStore((state) => state.adminToken)
+type BranchItem = Record<string, unknown>
+
+export const BranchesPage = ({ dbName }: { dbName: string }) => {
+  const queryClient = useQueryClient()
+  const requestContext = useRequestContext()
+  const language = useAppStore((state) => state.context.language)
   const setBranch = useAppStore((state) => state.setBranch)
 
-  const [branchName, setBranchName] = useState('')
+  const [name, setName] = useState('')
   const [fromBranch, setFromBranch] = useState('main')
 
-  const requestContext = useMemo(
-    () => ({ language: context.language, authToken, adminToken }),
-    [adminToken, authToken, context.language],
-  )
-
-  const branchesQuery = useQuery<BranchListResponse>({
-    queryKey: db ? qk.branches(db, context.language) : ['bff', 'branches', 'empty'],
-    queryFn: () => listBranches(requestContext, db ?? ''),
-    enabled: Boolean(db),
+  const listQuery = useQuery({
+    queryKey: qk.branches(dbName, requestContext.language),
+    queryFn: () => listBranches(requestContext, dbName),
   })
 
   const createMutation = useMutation({
-    mutationFn: () =>
-      createBranch(requestContext, db ?? '', { name: branchName.trim(), from_branch: fromBranch }),
+    mutationFn: () => createBranch(requestContext, dbName, { name: name.trim(), from_branch: fromBranch.trim() || 'main' }),
     onSuccess: () => {
-      void branchesQuery.refetch()
-      setBranchName('')
-      void showAppToast({ intent: Intent.SUCCESS, message: '브랜치 생성 완료' })
+      void queryClient.invalidateQueries({ queryKey: qk.branches(dbName, requestContext.language) })
+      void showAppToast({ intent: Intent.SUCCESS, message: `Branch created: ${name.trim()}` })
+      setName('')
     },
-    onError: (error) => toastApiError(error, context.language),
+    onError: (error) => toastApiError(error, language),
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (name: string) => deleteBranch(requestContext, db ?? '', name),
-    onSuccess: () => {
-      void branchesQuery.refetch()
-      void showAppToast({ intent: Intent.SUCCESS, message: '브랜치 삭제 완료' })
+    mutationFn: (branchName: string) => deleteBranch(requestContext, dbName, branchName),
+    onSuccess: (_payload, branchName) => {
+      void queryClient.invalidateQueries({ queryKey: qk.branches(dbName, requestContext.language) })
+      void showAppToast({ intent: Intent.WARNING, message: `Branch deleted: ${branchName}` })
     },
-    onError: (error) => toastApiError(error, context.language),
+    onError: (error) => toastApiError(error, language),
   })
 
-  const branchNames = useMemo(() => {
-    const branches = branchesQuery.data?.branches ?? []
-    return branches
-      .map((branch) => (typeof branch === 'string' ? branch : branch?.name))
-      .filter((name): name is string => typeof name === 'string' && name.length > 0)
-  }, [branchesQuery.data])
+  const branches = useMemo(() => {
+    const payload = listQuery.data ?? {}
+    const list = (payload as { branches?: BranchItem[] }).branches ?? []
+    return list
+  }, [listQuery.data])
+
+  const renderName = (branch: BranchItem) => {
+    const nameValue =
+      (branch.name as string | undefined) ||
+      (branch.branch_name as string | undefined) ||
+      (branch.id as string | undefined)
+    return nameValue ?? 'unknown'
+  }
 
   return (
     <div>
-      <PageHeader title="Branches" subtitle="브랜치를 생성하고 전환합니다." />
+      <PageHeader title="Branches" subtitle="Create and manage branches for experiments." />
 
-      <Card elevation={1} className="section-card">
-        <div className="card-title">
-          <H5>브랜치 생성</H5>
-        </div>
-        <div className="form-row">
-          <FormGroup label="Branch name">
-            <InputGroup value={branchName} onChange={(event) => setBranchName(event.currentTarget.value)} />
-          </FormGroup>
-          <FormGroup label="From branch">
-            <HTMLSelect
-              value={fromBranch}
-              onChange={(event) => setFromBranch(event.currentTarget.value)}
-              options={['main', ...branchNames]}
-            />
-          </FormGroup>
-          <Button
-            intent={Intent.PRIMARY}
-            icon="git-branch"
-            onClick={() => createMutation.mutate()}
-            disabled={!branchName.trim()}
-            loading={createMutation.isPending}
-          >
-            Create Branch
-          </Button>
-        </div>
-      </Card>
+      <div className="card-stack">
+        <Card>
+          <div className="card-title">Create branch</div>
+          <div className="form-row">
+            <FormGroup label="Name">
+              <InputGroup value={name} onChange={(event) => setName(event.currentTarget.value)} />
+            </FormGroup>
+            <FormGroup label="From branch">
+              <InputGroup value={fromBranch} onChange={(event) => setFromBranch(event.currentTarget.value)} />
+            </FormGroup>
+            <Button
+              intent={Intent.PRIMARY}
+              onClick={() => createMutation.mutate()}
+              disabled={!name.trim() || createMutation.isPending}
+              loading={createMutation.isPending}
+            >
+              Create
+            </Button>
+          </div>
+        </Card>
 
-      <Card elevation={1} className="section-card">
-        <div className="card-title">
-          <H5>브랜치 목록</H5>
-          <Button minimal icon="refresh" onClick={() => branchesQuery.refetch()}>
-            Refresh
-          </Button>
-        </div>
-        <HTMLTable striped interactive className="full-width">
-          <thead>
-            <tr>
-              <th>Branch</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {branchNames.map((name) => {
-              const isActive = name === context.branch
-              return (
-                <tr key={name}>
-                  <td>{name}</td>
-                  <td>
-                    <Button
-                      minimal
-                      icon="git-branch"
-                      disabled={isActive}
-                      onClick={() => {
-                        setBranch(name)
-                        void showAppToast({ intent: Intent.SUCCESS, message: `브랜치 전환: ${name}` })
-                      }}
-                    >
-                      Switch to
-                    </Button>
-                    <Button
-                      minimal
-                      icon="trash"
-                      intent={Intent.DANGER}
-                      onClick={() => deleteMutation.mutate(name)}
-                    >
-                      Delete
-                    </Button>
-                  </td>
+        <Card>
+          <div className="card-title">
+            <Text>Branches</Text>
+            {listQuery.isFetching ? <Text className="muted small">Loading...</Text> : null}
+          </div>
+          {branches.length === 0 ? (
+            <Text className="muted">No branches yet.</Text>
+          ) : (
+            <HTMLTable striped interactive className="command-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Actions</th>
                 </tr>
-              )
-            })}
-          </tbody>
-        </HTMLTable>
-      </Card>
+              </thead>
+              <tbody>
+                {branches.map((branch) => {
+                  const branchName = renderName(branch)
+                  return (
+                    <tr key={branchName}>
+                      <td>{branchName}</td>
+                      <td>
+                        <Button small icon="git-branch" onClick={() => setBranch(branchName)}>
+                          Switch
+                        </Button>
+                        <Button
+                          small
+                          icon="trash"
+                          intent={Intent.DANGER}
+                          style={{ marginLeft: 8 }}
+                          onClick={() => deleteMutation.mutate(branchName)}
+                          disabled={deleteMutation.isPending}
+                        >
+                          Delete
+                        </Button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </HTMLTable>
+          )}
+        </Card>
+      </div>
     </div>
   )
 }

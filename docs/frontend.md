@@ -18,30 +18,6 @@
 
 ⸻
 
-구현 현황 (현재 브랜치 기준)
-
-✅ 개발 완료
-	•	App Shell: ContextNavbar + Sidebar + InspectorPanel + CommandTrackerDrawer
-	•	주요 화면: Databases, Overview(요약), Branches, Ontology, Mappings, Sheets Hub,
-		Import Sheets/Excel, Instances, Graph Explorer, Query Builder, Merge, Audit, Lineage,
-		Operations(Tasks/Admin)
-	•	Core UX: Command Tracker 로컬 추적, 429 카운트다운(AI/Import/Connector),
-		409(actual_seq 재시도), unknown_label_keys 표+Mappings CTA
-	•	Graph: Cytoscape 기반 GraphCanvas + data_status 표시/콜아웃
-	•	SettingsDialog 강제 오픈 + 실패 요청 1회 재시도(503/401/403)
-	•	WebSocket 기반 Command 구독(선택 기능)
-	•	Inspector Drawer 탭형 상세 패널(Summary/JSON/Audit/Lineage)
-	•	AsyncCommandButton/ApiErrorCallout 공용 컴포넌트화
-	•	Overview “Next Steps” 카드
-	•	Schema Suggestion 카드형 UI + Validate 단계 + 테이블 선택 UX
-	•	Graph Explorer 결과 export + Re-run 버튼
-	•	Query Builder raw query UI
-	•	Audit Reset 버튼 + Command Tracker 연동 CTA
-	•	Lineage 화면 내 “Use Selected Graph Node” 버튼
-	•	Branches 페이지 “SwitchTo” 버튼(전환은 현재 상단 ContextNavbar에서 처리)
-
-⸻
-
 1) 제품 범위와 핵심 제약
 
 아래는 API 레퍼런스에 의해 “UI가 절대 가정하면 안 되는 것”과 “UI가 반드시 해야 하는 것”입니다.
@@ -109,28 +85,22 @@
 3) 전역 UX 패턴
 
 3.1 인증(503/401/403) 처리
-
-구현 상태: ✅ 개발 완료 (SettingsDialog 강제 오픈 + 마지막 실패 요청 1회 재시도)
-
-	•	모든 요청은 토큰 필요(Authorization: Bearer 또는 X-Admin-Token). 토큰 없으면 503이 나올 수 있음.
+	•	기본 정책: 모든 HTTP 요청에 토큰 필요 (예외: /api/v1/, /api/v1/health)
+	•	헤더: X-Admin-Token 또는 Authorization: Bearer <token>
 	•	전역 인터셉터 규칙:
-	•	503 + 토큰 미설정 추정 → SettingsDialog 강제 오픈 + “토큰 필요”
-	•	401/403 → “권한/토큰 오류” Callout + Settings 유도
+	•	503: BFF auth required but 서버에 토큰 미설정 → “서버 설정 필요” 안내
+	•	401: 토큰 미제공 → SettingsDialog 열기 + “토큰 필요”
+	•	403: 토큰 불일치 또는 admin endpoint disabled → “권한/토큰 오류”
 	•	설정 저장 후: 마지막 실패 요청 한 번만 재시도(루프 방지)
 
 3.2 레이트리밋(429) 처리
-
-구현 상태: ✅ 개발 완료 (AI/Import/Connector 1회 재시도 + 카운트다운)
-
 	•	Retry‑After를 읽어:
 	•	Toaster: “레이트리밋. N초 후 재시도 가능”
-	•	AI/커넥터/Import는 자동 재시도 0~1회만(폭주 방지)
+	•	AI/커넥터/Import만 자동 재시도 1회(폭주 방지)
+	•	그 외 요청은 자동 재시도 없음(사용자가 직접 재시도)
 	•	사용자가 버튼을 다시 누를 수 있게 버튼에 카운트다운 표시
 
 3.3 비동기 커맨드(202) 처리 — Command Tracker가 핵심
-
-구현 상태: ✅ 개발 완료 (로컬 추적 + 폴링)
-
 	•	202 응답이면 command_id를 즉시 로컬 추적 저장
 	•	폴링: GET /api/v1/commands/{id}/status
 	•	상태:
@@ -140,9 +110,6 @@
 	•	404 → TTL 만료/알 수 없음 → EXPIRED/UNKNOWN로 표시
 
 3.4 WebSocket 커맨드 구독(선택, UX 향상)
-
-구현 상태: ✅ 개발 완료 (WS 구독 + 폴링 폴백)
-
 	•	상세 화면(커맨드 Drawer 열렸을 때)에 한해:
 	•	WS /api/v1/ws/commands/{command_id}?token=...
 	•	이벤트:
@@ -150,17 +117,11 @@
 	•	WS 실패 시 폴링으로 자동 폴백
 
 3.5 브랜치 컨텍스트 규칙
-
-구현 상태: ✅ 개발 완료
-
 	•	branch 유효: Ontology / Graph Query / Instance 쓰기(create/update/delete/bulk‑create) / Query / Suggest
 	•	branch 무시/미지원: Instances 읽기(리스트/샘플/단건)
 → 해당 페이지 상단에 “Branch Ignored” 고정 배지
 
 3.6 Graph 데이터 상태(data_status)
-
-구현 상태: ✅ 개발 완료
-
 	•	FULL: ES 문서 join 완료
 	•	PARTIAL: 일부 누락/지연
 	•	MISSING: 문서 없음(지연/미인덱스)
@@ -174,24 +135,20 @@
 4) 프론트 상태 모델(스토어/캐시/로컬 추적)
 
 4.1 LocalStorage(필수)
-
-구현 상태: ✅ 개발 완료
-
-	•	spice.authToken (Authorization: Bearer 권장)
-	•	spice.adminToken (X-Admin-Token)
+	•	spice.project (db_name)
+	•	spice.branch
 	•	spice.language (ko|en)
-	•	spice.rememberToken
-	•	spice.project / spice.branch / spice.theme (호환 캐시)
+	•	spice.theme (light|dark)
+	•	spice.rememberToken (true|false)
+	•	spice.adminToken (X-Admin-Token/Authorization: Bearer)
 	•	commandTracker.items[]
-	•	{ command_id, source, createdAt, lastStatus?, lastFetchedAt?, expired? }
-	•	spice.recentContext
-	•	{ lastDb, lastBranchByDb: { [db]: branch } }
+	•	{
+	•	  id, kind, target:{dbName}, context:{project,branch}, submittedAt,
+	•	  writePhase, indexPhase, status?, error?, title?, expired?
+	•	}
 
 4.2 Runtime Store(예: Zustand)
-
-구현 상태: ✅ 개발 완료
-
-	•	context.db, context.branch, context.lang
+	•	context.project, context.branch, context.language
 	•	registry.classesById
 	•	온톨로지/클래스/관계 선택을 위한 캐시(아래 4.3)
 	•	commandTracker.map + pollingJobs
@@ -199,8 +156,6 @@
 	•	ui.toasts
 
 4.3 Class/Predicate Registry(중요)
-
-구현 상태: ✅ 개발 완료
 
 Graph Query는 ID 기반이므로, UI는 최소한 이 캐시가 필요합니다.
 	•	소스:
@@ -224,35 +179,24 @@ Graph Query는 ID 기반이므로, UI는 최소한 이 캐시가 필요합니다
 아래는 “페이지를 구성하는 레고”입니다. 이 단위로 컴포넌트를 만들면 개발이 빠릅니다.
 
 5.1 ContextNavbar
-
-구현 상태: ✅ 개발 완료
-
 	•	Blueprint: Navbar, Popover, Menu, Tag, Button
 	•	Props:
-	•	db, branch, lang
+	•	project(db_name), branch, lang
 	•	onDbChange, onBranchChange, onLangChange
 	•	commandActiveCount
-	•	동작:
-	•	DB 바꾸면 해당 DB의 lastBranch를 복원(없으면 main)
+	•	동작: project 전환 시 URL 컨텍스트 기준으로 branch 유지(기본 main)
 
 5.2 SettingsDialog
-
-구현 상태: ✅ 개발 완료 (SettingsDialog + 강제 오픈/재시도)
-
 	•	Props:
 	•	isOpen, onClose, onSave
 	•	Fields:
-	•	Token(Bearer)
-	•	Admin Token
-	•	Language
+	•	Token (X-Admin-Token 또는 Authorization: Bearer)
+	•	Remember token / Theme / Language / Admin mode
 	•	저장 시:
 	•	메모리/스토리지 동기화
 	•	선택적으로 마지막 실패 요청 1회 재시도
 
 5.3 CommandTrackerDrawer
-
-구현 상태: ✅ 개발 완료
-
 	•	핵심 컴포넌트(서버 전역 목록이 아니라 로컬 추적)
 	•	UI:
 	•	Tabs(Active/Completed/Failed/Expired)
@@ -264,9 +208,6 @@ Graph Query는 ID 기반이므로, UI는 최소한 이 캐시가 필요합니다
 	•	Detail view(선택 command_id → status 호출)
 
 5.4 AsyncCommandButton
-
-구현 상태: ✅ 개발 완료 (공용 컴포넌트화)
-
 	•	어떤 “쓰기 액션”이든 이 패턴을 사용
 	•	입력:
 	•	submit(): Promise<{command_id}> 또는 배치 {commands:[...]}
@@ -274,17 +215,11 @@ Graph Query는 ID 기반이므로, UI는 최소한 이 캐시가 필요합니다
 	•	성공 시 Tracker 등록 + Toast + 버튼 상태 변경
 
 5.5 ClassSelector / PredicateSelector
-
-구현 상태: ✅ 개발 완료 (페이지 내 셀렉트로 구현)
-
 	•	값: 내부 ID
 	•	표시: label(ko/en) + (id: ...)
 	•	Registry 기반
 
 5.6 ApiErrorCallout
-
-구현 상태: ✅ 개발 완료 (공용 Callout + 404 NonIdealState)
-
 	•	에러 JSON 패턴 처리:
 	•	{detail: string}
 	•	{detail:{error:"unknown_label_keys", labels:[]}}
@@ -295,17 +230,11 @@ Graph Query는 ID 기반이므로, UI는 최소한 이 캐시가 필요합니다
 	•	429 → “Retry after N sec”
 
 5.7 GraphCanvas
-
-구현 상태: ✅ 개발 완료 (Cytoscape)
-
 	•	Cytoscape/ForceGraph wrapper
 	•	node click/edge click → InspectorContext 설정
 	•	node badge: data_status 표시
 
 5.8 InspectorDrawer
-
-구현 상태: ✅ 개발 완료 (탭형 Summary/JSON/Audit/Lineage)
-
 	•	Tabs:
 	•	Summary / JSON / Audit(링크) / Lineage(링크)
 	•	Context 타입:
@@ -320,8 +249,6 @@ Graph Query는 ID 기반이므로, UI는 최소한 이 캐시가 필요합니다
 ⸻
 
 6.1 Databases /
-
-구현 상태: ✅ 개발 완료
 
 목적
 
@@ -357,8 +284,6 @@ API
 
 6.2 Overview /db/:db/overview?branch=...
 
-구현 상태: ✅ 개발 완료 (Summary + Next Steps)
-
 목적
 
 현재 컨텍스트 요약 + “다음 행동” 가이드
@@ -389,8 +314,6 @@ API
 
 6.3 Branches /db/:db/branches
 
-구현 상태: ✅ 개발 완료 (SwitchTo 버튼 + ContextNavbar 전환)
-
 목적
 
 스키마/데이터 실험 브랜치 생성/관리
@@ -416,8 +339,6 @@ API
 ⸻
 
 6.4 Ontology /db/:db/ontology?branch=...
-
-구현 상태: ✅ 개발 완료
 
 목적
 
@@ -466,8 +387,6 @@ OCC 처리
 
 6.5 Mappings /db/:db/mappings
 
-구현 상태: ✅ 개발 완료
-
 목적
 
 라벨→property_id 매핑 관리(unknown_label_keys 해결의 핵심)
@@ -501,8 +420,6 @@ API
 
 6.6 Sheets Hub /db/:db/data/sheets
 
-구현 상태: ✅ 개발 완료
-
 목적
 
 Sheets 소스 확인(Preview/Grid/Register)
@@ -512,10 +429,10 @@ Sheets 소스 확인(Preview/Grid/Register)
 ┌──────────────────────────────[Main] Google Sheets───────────────────────────┐
 │ [Tabs: Preview | Grid Detect | Registered]                                   │
 │                                                                              │
-│ Preview: sheet_url [InputGroup] worksheet [InputGroup] [Button:Preview]      │
+│ Preview: sheet_url [InputGroup] worksheet [InputGroup] api_key [Input] [Preview]│
 │  → [Table] sample rows                                                       │
 │                                                                              │
-│ Grid: sheet_url ... [Button:Detect Grid]                                     │
+│ Grid: sheet_url + worksheet + api_key [Button:Detect Grid]                   │
 │  → [Table] detected tables (table_id, bbox) [Button:Use in Import]           │
 │                                                                              │
 │ Registered: [Button:Register] [Table] sheet_id | db | branch | class_label... │
@@ -538,8 +455,6 @@ Register UX 주의
 
 6.7 Import Wizard (Sheets) /db/:db/data/import/sheets
 
-구현 상태: ✅ 개발 완료
-
 목적
 
 Prepare → Suggest Mappings → Dry‑run → Commit
@@ -551,8 +466,8 @@ Prepare → Suggest Mappings → Dry‑run → Commit
 │ [Stepper: 1 Prepare → 2 Suggest → 3 Dry‑run → 4 Commit]                      │
 │                                                                              │
 │ Step 1 Prepare                                                               │
-│  sheet_url [Input] worksheet [Input] [Button:Preview]                        │
-│  [Button:Detect Grid] → tables [Select table_id] bbox auto                    │
+│  sheet_url [Input] worksheet [Input] api_key [Input] [Button:Preview]        │
+│  table_id [Input] table_bbox [Inputs] (optional)                             │
 │  target_class_id [Select]  [Button:Load Target Schema]                       │
 │  target_schema (read-only)                                                   │
 │  [Button:Next] (enabled when sheet_url+table+schema ready)                   │
@@ -581,10 +496,9 @@ API
 
 Prepare 단계 구현 디테일(중요)
 	•	target_schema 생성:
-	•	1순위: GET /api/v1/database/{db}/ontology/{class_id}/schema?branch=...&format=json에서 파싱
-	•	2순위(더 단순): ontology list/get의 properties를 {name,type}로 변환
+	•	ontology list/get의 properties를 {name,type}로 변환
 	•	table_id/bbox:
-	•	grid 응답에서 사용자가 table 선택하면 자동 채움
+	•	Sheets Hub의 grid detect 결과를 복사하거나 수동 입력
 
 Commit 경고 UX(필수)
 	•	현재 UI 컨텍스트 branch가 main이 아니면:
@@ -610,8 +524,6 @@ Commit 경고 UX(필수)
 
 6.8 Import Wizard (Excel) /db/:db/data/import/excel
 
-구현 상태: ✅ 개발 완료
-
 목적
 
 Excel 파일 업로드 기반 Dry‑run/Commit (multipart)
@@ -619,7 +531,7 @@ Excel 파일 업로드 기반 Dry‑run/Commit (multipart)
 레이아웃(핵심만)
 
 ┌──────────────────────────────[Main] Import: Excel────────────────────────────┐
-│ file [FileInput] sheet_name [Input]                                          │
+│ file [FileInput] sheet_name [Input] table_id [Input]                         │
 │ target_class_id [Select] [Load Target Schema]                                │
 │ mappings (json editor or upload)                                              │
 │ table bbox (optional)                                                        │
@@ -639,8 +551,6 @@ API
 
 6.9 Schema Suggestion /db/:db/data/schema-suggestion
 
-구현 상태: ✅ 개발 완료 (카드형 UI + Validate 단계 + 테이블 선택)
-
 목적
 
 샘플 데이터 → 스키마 후보 생성 → Ontology 생성으로 연결
@@ -648,27 +558,28 @@ API
 레이아웃
 
 ┌──────────────────────────────[Main] Schema Suggestion────────────────────────┐
-│ source [Select: sheets | paste]                                              │
-│ (sheets) sheet_url + table select + [Suggest Schema]                         │
-│ (paste) columns + rows json + [Suggest Schema]                               │
+│ [Tabs: sheets | excel | paste]                                               │
+│ (sheets) sheet_url + worksheet + api_key + table_id/bbox + [Suggest Schema]  │
+│ (excel)  file + sheet_name + table_id/bbox + [Suggest Schema]                │
+│ (paste)  columns + rows json + [Suggest Schema]                              │
 │                                                                              │
 │ Suggested classes [Cards]                                                    │
 │  - class_id suggestion + properties + relationships                           │
-│  [Validate Ontology] [Apply (202)]                                           │
+│  [Validate Ontology] [Apply (202)] (protected branch guard)                  │
 └──────────────────────────────────────────────────────────────────────────────┘
 
 API
 	•	sheets: POST /api/v1/database/{db}/suggest-schema-from-google-sheets
+	•	excel: POST /api/v1/database/{db}/suggest-schema-from-excel (multipart)
 	•	paste: POST /api/v1/database/{db}/suggest-schema-from-data
 	•	적용:
+	•	각 클래스별 POST /api/v1/database/{db}/ontology/validate?branch=...
 	•	각 클래스별 POST /api/v1/database/{db}/ontology?branch=... (202)
 	•	생성 커맨드들을 Tracker에 등록(“Batch group” 표시)
 
 ⸻
 
 6.10 Instances /db/:db/instances (읽기 중심, branch ignored)
-
-구현 상태: ✅ 개발 완료
 
 목적
 
@@ -680,6 +591,11 @@ API
 │ [Tag WARNING] Branch ignored (instances read uses ES w/o branch)              │
 │ class_id [Select] search [InputGroup] limit [Numeric] [Refresh]              │
 │ [Table] instance_id | version | event_timestamp | summary... | [Open]         │
+│ [Divider]                                                                    │
+│ Write instances (branch-aware)                                               │
+│ [Tabs: Create | Bulk create]                                                 │
+│ Create: payload(json) + metadata(json) + [Create]                            │
+│ Bulk:   instances(json[]) + metadata(json) + [Submit]                        │
 └──────────────────────────────────────────────────────────────────────────────┘
 
 [Drawer:R] Instance Detail
@@ -691,12 +607,17 @@ API
 	•	one: GET /api/v1/database/{db}/class/{class_id}/instance/{instance_id}
 	•	sample-values: GET /api/v1/database/{db}/class/{class_id}/sample-values
 
+Create/Bulk Create (비동기)
+	•	create: POST /api/v1/database/{db}/instances/{class_label}/create?branch=...
+	•	bulk: POST /api/v1/database/{db}/instances/{class_label}/bulk-create?branch=...
+	•	응답: command_id → Command Tracker 등록
+
 Update/Delete(비동기, OCC) 지원 방식
 	•	API:
 	•	update: PUT /api/v1/database/{db}/instances/{class_label}/{instance_id}/update?branch=...&expected_seq=...
 	•	delete: DELETE /api/v1/database/{db}/instances/{class_label}/{instance_id}/delete?branch=...&expected_seq=...
 	•	expected_seq 확보 규칙(레퍼런스 근거):
-	•	최신 조회 응답의 version을 expected_seq로 사용
+	•	최신 조회 응답의 version(또는 index_status.event_sequence) 사용
 	•	409 발생 시 actual_seq를 받아 “Use actual_seq” 재시도 버튼 제공
 
 unknown_label_keys 처리
@@ -707,8 +628,6 @@ unknown_label_keys 처리
 ⸻
 
 6.11 Explore: Graph Explorer /db/:db/explore/graph?branch=...
-
-구현 상태: ✅ 개발 완료 (결과 export + Re‑run 포함)
 
 목적(제품의 메인)
 
@@ -722,7 +641,7 @@ Graph traversal( Term) + ES 문서 join을 한 화면에서
 │ [Callout] AI는 실행 전 Plan 검토를 권장                                      │
 │                                                                              │
 │ ┌──────────────┬───────────────────────────────┬───────────────────────────┐ │
-│ │ [Card] Builder│ [Card] Graph Canvas           │ [Card] Inspector           │ │
+│ │ [Card] Builder│ [Card] Graph Canvas (Cytoscape)│ [Card] Inspector           │ │
 │ │ start_class_id│ (Graph view)                   │ node/edge details          │ │
 │ │ hops[]        │                                │ data_status Tag            │ │
 │ │ filters       │                                │ ES payload(json)           │ │
@@ -769,7 +688,7 @@ API
 AI Assist(자연어) — “안전한 방식” 기준
 	•	“Generate Plan(실행 없음)”:
 	•	POST /api/v1/ai/translate/query-plan/{db}
-	•	응답의 plan을 Builder에 적용(Apply)
+	•	응답: { plan, llm } → plan.tool=graph_query일 때 plan.graph_query를 Builder에 적용(Apply)
 	•	“Ask&Run(선택)”:
 	•	POST /api/v1/ai/query/{db}
 	•	응답의 answer + warnings + plan + execution을 별도 패널에 표시
@@ -786,8 +705,6 @@ AI Assist(자연어) — “안전한 방식” 기준
 ⸻
 
 6.12 Explore: Query Builder(라벨 기반) /db/:db/explore/query?branch=...
-
-구현 상태: ✅ 개발 완료 (raw query UI 포함)
 
 목적
 
@@ -809,15 +726,14 @@ API
 	•	raw(run 제한): POST /api/v1/database/{db}/query/raw
 
 구현 디테일
-	•	operator UI(=, >=, like …)는 API operator 키(eq, ge, like …)로 매핑
+	•	operator UI는 /query/builder 값을 표시하되, 전송 시 QueryInput operator(eq/ne/gt/ge/lt/le/like/in/not_in/is_null/is_not_null)로 매핑
+	•	NOT_LIKE는 QueryInput에 없으므로 비활성/미노출
 	•	field 선택은 “클래스 properties label”을 사용(라벨 기반 계약)
 	•	unknown_label_keys 발생 시 mappings로 유도
 
 ⸻
 
 6.13 Merge /db/:db/merge?branch=...
-
-구현 상태: ✅ 개발 완료
 
 목적
 
@@ -827,8 +743,8 @@ API
 
 ┌──────────────────────────────[Main] Merge────────────────────────────────────┐
 │ source_branch [Select] target_branch [Select] [Simulate]                     │
-│ conflicts [Table] [Open]                                                     │
-│ conflict detail + resolution (ours/theirs/custom json)                        │
+│ conflicts [Table]                                                            │
+│  path | source | target | resolution(select) | manual value(textarea)         │
 │ [Resolve] (필요시 protected guard)                                            │
 └──────────────────────────────────────────────────────────────────────────────┘
 
@@ -839,8 +755,6 @@ API
 ⸻
 
 6.14 Audit /db/:db/audit
-
-구현 상태: ✅ 개발 완료 (Reset 버튼 + Command Tracker 연동)
 
 목적
 
@@ -866,8 +780,6 @@ Inspector 연계
 
 6.15 Lineage /db/:db/lineage
 
-구현 상태: ✅ 개발 완료 (Use Selected Graph Node 포함)
-
 목적
 
 root 기반 라인리지 그래프/영향 분석
@@ -890,8 +802,6 @@ API
 
 6.16 Operations: Tasks /operations/tasks
 
-구현 상태: ✅ 개발 완료
-
 목적
 
 백그라운드 작업 모니터링/취소
@@ -906,8 +816,6 @@ API
 ⸻
 
 6.17 Operations: Admin /operations/admin (Admin Token 필요)
-
-구현 상태: ✅ 개발 완료
 
 목적
 
@@ -927,15 +835,16 @@ UX
 
 7) 에러/상태 매트릭스 (필수 UX)
 
-구현 상태: ✅ 개발 완료 (SettingsDialog 강제 오픈 + 404 NonIdealState)
-
 7.1 HTTP 코드별 전역 동작
 	•	400
 	•	detail.error가 unknown_label_keys면:
 	•	labels 표 출력 + “Open Mappings”
 	•	그 외: detail 문자열 그대로 Callout
 	•	401/403
-	•	SettingsDialog 열기 + “권한/토큰”
+	•	401: 토큰 미제공 → SettingsDialog 열기
+	•	403: 토큰 불일치 또는 admin endpoint disabled
+	•	503
+	•	서버에 BFF_ADMIN_TOKEN 미설정 → “서버 설정 필요” 안내
 	•	404
 	•	command status에서 404면 “EXPIRED/UNKNOWN”(TTL)
 	•	일반 리소스 404면 NonIdealState
@@ -944,6 +853,7 @@ UX
 	•	“Use actual_seq and retry”
 	•	429
 	•	Retry‑After 기반 카운트다운 + 버튼 disable
+	•	AI/Import/Connector만 자동 재시도 1회, 그 외는 수동 재시도
 	•	5xx
 	•	재시도 안내(자동 1회 이하), 이후 사용자가 재시도
 
@@ -958,20 +868,19 @@ UX
 ⸻
 
 8) 구현 순서(가장 안전한 개발 플랜)
-
-구현 상태: ✅ 개발 완료 (체크리스트 기준 전부 구현됨)
 	1.	API Client + 전역 인터셉터(503/401/403/429/409)
 	2.	SettingsDialog(토큰 저장) + AppShell
 	3.	CommandTrackerDrawer(로컬 저장 + 폴링 + WS 옵션)
 	4.	Databases + Branches
 	5.	Ontology(list/get/validate/apply + protected guard + registry 구축)
 	6.	Sheets Hub(preview/grid/register)
-	7.	Import Wizard(Sheets) — Prepare/Mapping/Dry‑run/Commit + 배치 커맨드 추적
-	8.	Graph Explorer(ID 기반 Builder + paths + data_status)
-	9.	Mappings(export/import/validate file)
-	10.	Instances(read + update/delete with version/actual_seq)
-	11.	Audit(partition_key 강제) + Lineage(root 필수)
-	12.	Merge(simulate/resolve)
-	13.	Operations(Tasks/Admin)
+	7.	Import Wizard(Sheets/Excel) — Prepare/Mapping/Dry‑run/Commit + 배치 커맨드 추적
+	8.	Schema Suggestion(Sheets/Excel/Paste + validate/apply)
+	9.	Graph Explorer(ID 기반 Builder + paths + data_status + Cytoscape)
+	10.	Mappings(export/import/validate file)
+	11.	Instances(read + create/bulk + update/delete with version/actual_seq)
+	12.	Audit(partition_key 강제) + Lineage(root 필수)
+	13.	Merge(simulate/resolve, table-based)
+	14.	Operations(Tasks/Admin)
 
 ⸻

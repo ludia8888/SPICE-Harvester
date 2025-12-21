@@ -1,430 +1,421 @@
 import { useMemo, useState } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   Button,
-  Card,
   Callout,
+  Card,
   FormGroup,
-  H5,
-  HTMLSelect,
-  HTMLTable,
   InputGroup,
   Intent,
-  NumericInput,
-  Tag,
+  Tab,
+  Tabs,
   TextArea,
 } from '@blueprintjs/core'
-import { createOntology, gridSheet, suggestSchemaFromData, suggestSchemaFromSheets, validateOntology } from '../api/bff'
-import { AsyncCommandButton } from '../components/AsyncCommandButton'
-import { PageHeader } from '../components/PageHeader'
-import { JsonView } from '../components/JsonView'
+import {
+  createOntology,
+  getSummary,
+  suggestSchemaFromData,
+  suggestSchemaFromExcel,
+  suggestSchemaFromGoogleSheets,
+  validateOntologyCreate,
+} from '../api/bff'
+import { useRateLimitRetry } from '../api/useRateLimitRetry'
+import { useRequestContext } from '../api/useRequestContext'
+import { PageHeader } from '../components/layout/PageHeader'
+import { JsonViewer } from '../components/JsonViewer'
+import { showAppToast } from '../app/AppToaster'
+import { useCommandRegistration } from '../commands/useCommandRegistration'
+import { extractCommandId } from '../commands/extractCommandId'
 import { toastApiError } from '../errors/toastApiError'
+import { qk } from '../query/queryKeys'
 import { useAppStore } from '../store/useAppStore'
-import { asArray, asRecord, getNumber, getString, type UnknownRecord } from '../utils/typed'
 
-type TableCandidate = { id: string; bbox: UnknownRecord | null }
+const parseJson = (raw: string) => JSON.parse(raw)
 
-const extractSuggestedClasses = (payload: unknown): UnknownRecord[] => {
-  const root = asRecord(payload)
-  const suggestion = root.suggested_schema ?? root.schema_suggestion ?? payload
-  if (Array.isArray(suggestion)) {
-    return suggestion.map((item) => asRecord(item))
+type SuggestedSchema = Record<string, unknown>
+
+const parseBBoxNumber = (value: string) => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const coerceLabel = (value: unknown, fallback: string) => {
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim()
   }
-  const suggestionRecord = asRecord(suggestion)
-  const classes = asArray<UnknownRecord>(suggestionRecord.classes ?? suggestionRecord.ontologies)
-  if (classes.length) {
-    return classes
+  if (value && typeof value === 'object') {
+    const localized = value as Record<string, unknown>
+    const ko = typeof localized.ko === 'string' ? localized.ko.trim() : ''
+    const en = typeof localized.en === 'string' ? localized.en.trim() : ''
+    if (ko) return ko
+    if (en) return en
+    const first = Object.values(localized).find((item) => typeof item === 'string' && item.trim())
+    if (typeof first === 'string') return first.trim()
   }
-  if (suggestionRecord.class_id || suggestionRecord.id) {
-    return [suggestionRecord]
+  return fallback
+}
+
+const extractSuggestedSchemas = (payload: unknown): SuggestedSchema[] => {
+  if (!payload || typeof payload !== 'object') return []
+  const data = payload as Record<string, unknown>
+  const candidate =
+    data.suggested_schema ||
+    data.schema_suggestion ||
+    (data.data as Record<string, unknown> | undefined)?.suggested_schema ||
+    (data.data as Record<string, unknown> | undefined)?.schema_suggestion
+  if (Array.isArray(candidate)) {
+    return candidate.filter((item): item is SuggestedSchema => Boolean(item && typeof item === 'object'))
+  }
+  if (candidate && typeof candidate === 'object') {
+    return [candidate as SuggestedSchema]
   }
   return []
 }
 
-const buildOntologyPayload = (klass: UnknownRecord) => ({
-  id: getString(klass.id) ?? getString(klass.class_id) ?? getString(klass.name),
-  label: getString(klass.label) ?? getString(klass.name) ?? getString(klass.id),
-  description: getString(klass.description) ?? undefined,
-  properties: asArray<UnknownRecord>(klass.properties),
-  relationships: asArray<UnknownRecord>(klass.relationships),
-})
+const getSchemaId = (schema: SuggestedSchema) =>
+  String(schema.id ?? schema['@id'] ?? schema.class_id ?? schema.name ?? '').trim()
 
-export const SchemaSuggestionPage = () => {
-  const { db } = useParams()
-  const [searchParams] = useSearchParams()
-  const context = useAppStore((state) => state.context)
-  const authToken = useAppStore((state) => state.authToken)
+const getSchemaLabel = (schema: SuggestedSchema) =>
+  coerceLabel(schema.label ?? schema['@label'] ?? schema.display_label, getSchemaId(schema) || 'Unnamed')
+
+export const SchemaSuggestionPage = ({ dbName }: { dbName: string }) => {
+  const requestContext = useRequestContext()
+  const registerCommand = useCommandRegistration()
+  const language = useAppStore((state) => state.context.language)
+  const branch = useAppStore((state) => state.context.branch)
   const adminToken = useAppStore((state) => state.adminToken)
+  const adminMode = useAppStore((state) => state.adminMode)
+  const { cooldown: suggestCooldown, withRateLimitRetry } = useRateLimitRetry(1)
 
-  const requestContext = useMemo(
-    () => ({ language: context.language, authToken, adminToken }),
-    [adminToken, authToken, context.language],
-  )
+  const [sheetUrl, setSheetUrl] = useState('')
+  const [worksheetName, setWorksheetName] = useState('')
+  const [apiKey, setApiKey] = useState('')
+  const [sheetTableId, setSheetTableId] = useState('')
+  const [sheetTableTop, setSheetTableTop] = useState('')
+  const [sheetTableLeft, setSheetTableLeft] = useState('')
+  const [sheetTableBottom, setSheetTableBottom] = useState('')
+  const [sheetTableRight, setSheetTableRight] = useState('')
+  const [sheetTableError, setSheetTableError] = useState<string | null>(null)
+  const [className, setClassName] = useState('')
+  const [columnsJson, setColumnsJson] = useState('[]')
+  const [dataJson, setDataJson] = useState('[]')
+  const [excelFile, setExcelFile] = useState<File | null>(null)
+  const [excelSheetName, setExcelSheetName] = useState('')
+  const [excelTableId, setExcelTableId] = useState('')
+  const [excelTableTop, setExcelTableTop] = useState('')
+  const [excelTableLeft, setExcelTableLeft] = useState('')
+  const [excelTableBottom, setExcelTableBottom] = useState('')
+  const [excelTableRight, setExcelTableRight] = useState('')
+  const [excelTableError, setExcelTableError] = useState<string | null>(null)
 
-  const readNumberParam = (key: string) => {
-    const value = searchParams.get(key)
-    if (!value) {
-      return null
+  const buildSheetTableBBox = () => {
+    const values = [sheetTableTop, sheetTableLeft, sheetTableBottom, sheetTableRight]
+    if (values.every((value) => value.trim() === '')) {
+      setSheetTableError(null)
+      return undefined
     }
-    const parsed = Number(value)
-    return Number.isFinite(parsed) ? parsed : null
+    if (values.some((value) => value.trim() === '')) {
+      setSheetTableError('Provide all table bbox values or leave them blank.')
+      return undefined
+    }
+    const parsed = values.map(parseBBoxNumber)
+    if (parsed.some((value) => value === null)) {
+      setSheetTableError('Table bbox must be numeric values.')
+      return undefined
+    }
+    setSheetTableError(null)
+    return {
+      top: parsed[0] ?? 0,
+      left: parsed[1] ?? 0,
+      bottom: parsed[2] ?? 0,
+      right: parsed[3] ?? 0,
+    }
   }
 
-  const [source, setSource] = useState<'sheets' | 'paste'>('sheets')
-  const [sheetUrl, setSheetUrl] = useState(searchParams.get('sheet_url') ?? '')
-  const [worksheetName, setWorksheetName] = useState(searchParams.get('worksheet_name') ?? '')
-  const [apiKey, setApiKey] = useState(searchParams.get('api_key') ?? '')
-  const [tableId, setTableId] = useState(searchParams.get('table_id') ?? '')
-  const [bboxTop, setBboxTop] = useState<number | null>(readNumberParam('bbox_top'))
-  const [bboxLeft, setBboxLeft] = useState<number | null>(readNumberParam('bbox_left'))
-  const [bboxBottom, setBboxBottom] = useState<number | null>(readNumberParam('bbox_bottom'))
-  const [bboxRight, setBboxRight] = useState<number | null>(readNumberParam('bbox_right'))
-  const [className, setClassName] = useState('')
-  const [columnsJson, setColumnsJson] = useState('')
-  const [rowsJson, setRowsJson] = useState('')
-  const [gridResult, setGridResult] = useState<unknown>(null)
-  const [result, setResult] = useState<unknown>(null)
-  const [validationResult, setValidationResult] = useState<Record<string, unknown>>({})
+  const buildExcelTableBBox = () => {
+    const values = [excelTableTop, excelTableLeft, excelTableBottom, excelTableRight]
+    if (values.every((value) => value.trim() === '')) {
+      setExcelTableError(null)
+      return undefined
+    }
+    if (values.some((value) => value.trim() === '')) {
+      setExcelTableError('Provide all table bbox values or leave them blank.')
+      return undefined
+    }
+    const parsed = values.map(parseBBoxNumber)
+    if (parsed.some((value) => value === null)) {
+      setExcelTableError('Table bbox must be numeric values.')
+      return undefined
+    }
+    setExcelTableError(null)
+    return {
+      top: parsed[0] ?? 0,
+      left: parsed[1] ?? 0,
+      bottom: parsed[2] ?? 0,
+      right: parsed[3] ?? 0,
+    }
+  }
 
-  const suggestMutation = useMutation({
-    mutationFn: async () => {
-      if (!db) {
-        throw new Error('Missing db')
-      }
-      if (source === 'sheets') {
-        const table_bbox =
-          bboxTop !== null && bboxLeft !== null && bboxBottom !== null && bboxRight !== null
-            ? { top: bboxTop, left: bboxLeft, bottom: bboxBottom, right: bboxRight }
-            : undefined
-        return suggestSchemaFromSheets(requestContext, db, {
+  const sheetsMutation = useMutation({
+    mutationFn: () =>
+      withRateLimitRetry(() =>
+        suggestSchemaFromGoogleSheets(requestContext, dbName, {
           sheet_url: sheetUrl,
           worksheet_name: worksheetName || undefined,
-          class_name: className || undefined,
           api_key: apiKey || undefined,
-          table_id: tableId || undefined,
-          table_bbox,
-        })
-      }
-      const columns = JSON.parse(columnsJson || '[]')
-      const data = JSON.parse(rowsJson || '[]')
-      return suggestSchemaFromData(requestContext, db, {
-        columns,
-        data,
-        class_name: className || undefined,
-      })
-    },
-    onSuccess: (payload) => {
-      setResult(payload)
-      setValidationResult({})
-    },
-    onError: (error) => toastApiError(error, context.language),
+          class_name: className || undefined,
+          table_id: sheetTableId || undefined,
+          table_bbox: buildSheetTableBBox(),
+        }),
+      ),
+    onError: (error) => toastApiError(error, language),
   })
 
-  const gridMutation = useMutation({
+  const dataMutation = useMutation({
     mutationFn: () =>
-      gridSheet(requestContext, {
-        sheet_url: sheetUrl,
-        worksheet_name: worksheetName || undefined,
-        api_key: apiKey || undefined,
+      suggestSchemaFromData(requestContext, dbName, {
+        columns: parseJson(columnsJson),
+        data: parseJson(dataJson),
+        class_name: className || undefined,
+        include_complex_types: true,
       }),
-    onSuccess: (payload) => setGridResult(payload),
-    onError: (error) => toastApiError(error, context.language),
+    onError: (error) => toastApiError(error, language),
   })
+
+  const excelMutation = useMutation({
+    mutationFn: () => {
+      if (!excelFile) {
+        throw new Error('Upload an Excel file first')
+      }
+      const tableBBox = buildExcelTableBBox()
+      return withRateLimitRetry(() =>
+        suggestSchemaFromExcel(requestContext, dbName, excelFile, {
+          sheet_name: excelSheetName || undefined,
+          class_name: className || undefined,
+          table_id: excelTableId || undefined,
+          table_top: tableBBox?.top,
+          table_left: tableBBox?.left,
+          table_bottom: tableBBox?.bottom,
+          table_right: tableBBox?.right,
+        }),
+      )
+    },
+    onError: (error) => toastApiError(error, language),
+  })
+
+  const summaryQuery = useQuery({
+    queryKey: qk.summary({ dbName, branch, language: requestContext.language }),
+    queryFn: () => getSummary(requestContext, { dbName, branch }),
+  })
+
+  const isProtected = Boolean(
+    (summaryQuery.data as { data?: { policy?: { is_protected_branch?: boolean } } } | undefined)?.data
+      ?.policy?.is_protected_branch,
+  )
 
   const validateMutation = useMutation({
-    mutationFn: async () => {
-      if (!db) {
-        return {}
-      }
-      const classes = extractSuggestedClasses(result)
-      const next: Record<string, unknown> = {}
-      for (const klass of classes) {
-        const payload = buildOntologyPayload(klass)
-        const key = payload.id ?? payload.label ?? 'class'
-        next[key] = await validateOntology(requestContext, db, context.branch, payload)
-      }
-      return next
-    },
-    onSuccess: (payload) => setValidationResult(payload),
-    onError: (error) => toastApiError(error, context.language),
+    mutationFn: (schema: SuggestedSchema) =>
+      validateOntologyCreate(requestContext, dbName, branch, schema),
+    onError: (error) => toastApiError(error, language),
   })
 
-  const gridTables = useMemo<TableCandidate[]>(() => {
-    const gridRecord = asRecord(gridResult)
-    const direct = gridRecord.tables ?? gridRecord.table_candidates
-    const nested =
-      asRecord(gridRecord.structure).tables ??
-      asRecord(asRecord(gridRecord.data).structure).tables ??
-      asRecord(gridRecord.data).tables
-    const tables = Array.isArray(direct) ? direct : Array.isArray(nested) ? nested : []
-    return tables.map((table, index) => {
-      const record = asRecord(table)
-      const bbox = asRecord(record.bbox ?? record.bounding_box ?? record.table_bbox ?? record.tableBBox)
-      return {
-        id:
-          getString(record.table_id) ??
-          getString(record.id) ??
-          getString(record.tableId) ??
-          `table-${index + 1}`,
-        bbox: Object.keys(bbox).length ? bbox : null,
+  const applyMutation = useMutation({
+    mutationFn: (schema: SuggestedSchema) => createOntology(requestContext, dbName, branch, schema),
+    onSuccess: (payload, schema) => {
+      const commandId = extractCommandId(payload)
+      if (commandId) {
+        registerCommand({
+          commandId,
+          kind: 'CREATE_ONTOLOGY',
+          targetClassId: getSchemaId(schema),
+          title: `Create ontology: ${getSchemaLabel(schema)}`,
+        })
       }
-    })
-  }, [gridResult])
+      void showAppToast({ intent: Intent.SUCCESS, message: 'Ontology create submitted.' })
+    },
+    onError: (error) => toastApiError(error, language),
+  })
 
-  const applyTableSelection = (table: TableCandidate) => {
-    if (!table.id) {
-      return
+  const sheetSchemas = useMemo(() => extractSuggestedSchemas(sheetsMutation.data), [sheetsMutation.data])
+  const dataSchemas = useMemo(() => extractSuggestedSchemas(dataMutation.data), [dataMutation.data])
+  const excelSchemas = useMemo(() => extractSuggestedSchemas(excelMutation.data), [excelMutation.data])
+  const canApply = !isProtected || (adminMode && adminToken)
+
+  const renderSchemaCards = (schemas: SuggestedSchema[]) => {
+    if (schemas.length === 0) {
+      return <Callout intent={Intent.PRIMARY}>No suggestions yet.</Callout>
     }
-    setTableId(table.id)
-    if (table.bbox) {
-      setBboxTop(getNumber(table.bbox.top) ?? null)
-      setBboxLeft(getNumber(table.bbox.left) ?? null)
-      setBboxBottom(getNumber(table.bbox.bottom) ?? null)
-      setBboxRight(getNumber(table.bbox.right) ?? null)
-    }
+    return (
+      <div className="card-stack">
+        {schemas.map((schema) => {
+          const schemaId = getSchemaId(schema)
+          const schemaLabel = getSchemaLabel(schema)
+          const properties = Array.isArray(schema.properties) ? schema.properties : []
+          const relationships = Array.isArray(schema.relationships) ? schema.relationships : []
+          return (
+            <Card key={schemaId || schemaLabel} className="card-stack">
+              <div className="card-title">
+                <div>
+                  <div>{schemaLabel}</div>
+                  <div className="muted small">{schemaId}</div>
+                </div>
+                <div className="form-row">
+                  <Button
+                    small
+                    icon="tick-circle"
+                    onClick={() => validateMutation.mutate(schema)}
+                    loading={validateMutation.isPending}
+                  >
+                    Validate
+                  </Button>
+                  <Button
+                    small
+                    intent={Intent.PRIMARY}
+                    icon="cloud-upload"
+                    onClick={() => applyMutation.mutate(schema)}
+                    disabled={!canApply}
+                    loading={applyMutation.isPending}
+                  >
+                    Apply
+                  </Button>
+                </div>
+              </div>
+              <TextArea value={JSON.stringify(schema, null, 2)} readOnly rows={8} />
+              <div className="form-row">
+                <Callout intent={Intent.NONE}>Properties: {properties.length}</Callout>
+                <Callout intent={Intent.NONE}>Relationships: {relationships.length}</Callout>
+              </div>
+            </Card>
+          )
+        })}
+      </div>
+    )
   }
-
-  const suggestedClasses = extractSuggestedClasses(result)
 
   return (
     <div>
-      <PageHeader title="Schema Suggestion" subtitle="샘플 데이터를 기반으로 스키마를 제안합니다." />
+      <PageHeader title="Schema Suggestion" subtitle="Generate ontology suggestions from data." />
 
-      <Card elevation={1} className="section-card">
-        <div className="form-row">
-          <HTMLSelect
-            value={source}
-            onChange={(event) => setSource(event.currentTarget.value as 'sheets' | 'paste')}
-            options={[
-              { label: 'Google Sheets', value: 'sheets' },
-              { label: 'Paste JSON', value: 'paste' },
-            ]}
-          />
-          <InputGroup
-            placeholder="Class name (optional)"
-            value={className}
-            onChange={(event) => setClassName(event.currentTarget.value)}
-          />
-        </div>
+      {isProtected ? (
+        <Callout intent={Intent.WARNING} style={{ marginBottom: 12 }}>
+          Protected branch. Admin token + Admin mode required for apply.
+        </Callout>
+      ) : null}
 
-        {source === 'sheets' ? (
-          <>
-            <div className="form-grid">
+      <Tabs id="schema-tabs" defaultSelectedTabId="sheets">
+        <Tab
+          id="sheets"
+          title="Google Sheets"
+          panel={
+            <Card className="card-stack">
               <FormGroup label="Sheet URL">
                 <InputGroup value={sheetUrl} onChange={(event) => setSheetUrl(event.currentTarget.value)} />
               </FormGroup>
-              <FormGroup label="Worksheet">
+              <FormGroup label="Worksheet (optional)">
                 <InputGroup value={worksheetName} onChange={(event) => setWorksheetName(event.currentTarget.value)} />
               </FormGroup>
-              <FormGroup label="API Key">
+              <FormGroup label="API key (optional)">
                 <InputGroup value={apiKey} onChange={(event) => setApiKey(event.currentTarget.value)} />
               </FormGroup>
-            </div>
-            <div className="form-grid">
-              <FormGroup label="Table ID">
-                <InputGroup value={tableId} onChange={(event) => setTableId(event.currentTarget.value)} />
+              <FormGroup label="Table ID (optional)">
+                <InputGroup value={sheetTableId} onChange={(event) => setSheetTableId(event.currentTarget.value)} />
               </FormGroup>
-              <FormGroup label="BBox Top">
-                <NumericInput
-                  value={bboxTop ?? undefined}
-                  onValueChange={(value) => setBboxTop(Number.isNaN(value) ? null : value)}
-                />
+              <FormGroup label="Table bbox (optional)">
+                <div className="form-row">
+                  <InputGroup placeholder="top" value={sheetTableTop} onChange={(event) => setSheetTableTop(event.currentTarget.value)} />
+                  <InputGroup placeholder="left" value={sheetTableLeft} onChange={(event) => setSheetTableLeft(event.currentTarget.value)} />
+                  <InputGroup placeholder="bottom" value={sheetTableBottom} onChange={(event) => setSheetTableBottom(event.currentTarget.value)} />
+                  <InputGroup placeholder="right" value={sheetTableRight} onChange={(event) => setSheetTableRight(event.currentTarget.value)} />
+                </div>
               </FormGroup>
-              <FormGroup label="BBox Left">
-                <NumericInput
-                  value={bboxLeft ?? undefined}
-                  onValueChange={(value) => setBboxLeft(Number.isNaN(value) ? null : value)}
-                />
+              <FormGroup label="Class name (optional)">
+                <InputGroup value={className} onChange={(event) => setClassName(event.currentTarget.value)} />
               </FormGroup>
-              <FormGroup label="BBox Bottom">
-                <NumericInput
-                  value={bboxBottom ?? undefined}
-                  onValueChange={(value) => setBboxBottom(Number.isNaN(value) ? null : value)}
-                />
-              </FormGroup>
-              <FormGroup label="BBox Right">
-                <NumericInput
-                  value={bboxRight ?? undefined}
-                  onValueChange={(value) => setBboxRight(Number.isNaN(value) ? null : value)}
-                />
-              </FormGroup>
-            </div>
-            <div className="button-row">
               <Button
-                onClick={() => gridMutation.mutate()}
-                disabled={!sheetUrl}
-                loading={gridMutation.isPending}
+                intent={Intent.PRIMARY}
+                onClick={() => sheetsMutation.mutate()}
+                disabled={!sheetUrl || Boolean(sheetTableError) || suggestCooldown > 0}
+                loading={sheetsMutation.isPending}
               >
-                Detect Tables
+                {suggestCooldown > 0 ? `Retry in ${suggestCooldown}s` : 'Suggest schema'}
               </Button>
-            </div>
-            {gridTables.length ? (
-              <HTMLTable striped className="full-width">
-                <thead>
-                  <tr>
-                    <th>Table ID</th>
-                    <th>Bounding Box</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {gridTables.map((table) => (
-                    <tr key={table.id}>
-                      <td>{table.id}</td>
-                      <td>
-                        {table.bbox
-                          ? `top:${getNumber(table.bbox.top) ?? '-'}, left:${getNumber(table.bbox.left) ?? '-'}, bottom:${getNumber(table.bbox.bottom) ?? '-'}, right:${getNumber(table.bbox.right) ?? '-'}`
-                          : '-'}
-                      </td>
-                      <td>
-                        <Button minimal onClick={() => applyTableSelection(table)}>
-                          Use
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </HTMLTable>
-            ) : (
-              <Callout intent={Intent.PRIMARY}>테이블 감지가 없으면 Table ID/BBox를 수동으로 입력하세요.</Callout>
-            )}
-          </>
-        ) : (
-          <div className="form-grid">
-            <FormGroup label="Columns (JSON array)">
-              <TextArea
-                rows={6}
-                value={columnsJson}
-                onChange={(event) => setColumnsJson(event.currentTarget.value)}
-                placeholder='["col1","col2"]'
-              />
-            </FormGroup>
-            <FormGroup label="Rows (JSON array)">
-              <TextArea
-                rows={6}
-                value={rowsJson}
-                onChange={(event) => setRowsJson(event.currentTarget.value)}
-                placeholder='[["a","b"],["c","d"]]'
-              />
-            </FormGroup>
-          </div>
-        )}
+              {sheetTableError ? <Callout intent={Intent.WARNING}>{sheetTableError}</Callout> : null}
+              <JsonViewer value={sheetsMutation.data} empty="Suggestion results will appear here." />
+              {renderSchemaCards(sheetSchemas)}
+            </Card>
+          }
+        />
+        <Tab
+          id="excel"
+          title="Excel"
+          panel={
+            <Card className="card-stack">
+              <FormGroup label="Upload Excel">
+                <input
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={(event) => setExcelFile(event.currentTarget.files?.[0] ?? null)}
+                />
+              </FormGroup>
+              <FormGroup label="Sheet name (optional)">
+                <InputGroup value={excelSheetName} onChange={(event) => setExcelSheetName(event.currentTarget.value)} />
+              </FormGroup>
+              <FormGroup label="Table ID (optional)">
+                <InputGroup value={excelTableId} onChange={(event) => setExcelTableId(event.currentTarget.value)} />
+              </FormGroup>
+              <FormGroup label="Table bbox (optional)">
+                <div className="form-row">
+                  <InputGroup placeholder="top" value={excelTableTop} onChange={(event) => setExcelTableTop(event.currentTarget.value)} />
+                  <InputGroup placeholder="left" value={excelTableLeft} onChange={(event) => setExcelTableLeft(event.currentTarget.value)} />
+                  <InputGroup placeholder="bottom" value={excelTableBottom} onChange={(event) => setExcelTableBottom(event.currentTarget.value)} />
+                  <InputGroup placeholder="right" value={excelTableRight} onChange={(event) => setExcelTableRight(event.currentTarget.value)} />
+                </div>
+              </FormGroup>
+              <FormGroup label="Class name (optional)">
+                <InputGroup value={className} onChange={(event) => setClassName(event.currentTarget.value)} />
+              </FormGroup>
+              <Button
+                intent={Intent.PRIMARY}
+                onClick={() => excelMutation.mutate()}
+                disabled={!excelFile || Boolean(excelTableError) || suggestCooldown > 0}
+                loading={excelMutation.isPending}
+              >
+                {suggestCooldown > 0 ? `Retry in ${suggestCooldown}s` : 'Suggest schema'}
+              </Button>
+              {excelTableError ? <Callout intent={Intent.WARNING}>{excelTableError}</Callout> : null}
+              <JsonViewer value={excelMutation.data} empty="Suggestion results will appear here." />
+              {renderSchemaCards(excelSchemas)}
+            </Card>
+          }
+        />
+        <Tab
+          id="paste"
+          title="Paste Data"
+          panel={
+            <Card className="card-stack">
+              <FormGroup label="Columns (JSON array)">
+                <TextArea value={columnsJson} onChange={(event) => setColumnsJson(event.currentTarget.value)} rows={4} />
+              </FormGroup>
+              <FormGroup label="Rows (JSON array of arrays)">
+                <TextArea value={dataJson} onChange={(event) => setDataJson(event.currentTarget.value)} rows={6} />
+              </FormGroup>
+              <FormGroup label="Class name (optional)">
+                <InputGroup value={className} onChange={(event) => setClassName(event.currentTarget.value)} />
+              </FormGroup>
+              <Button intent={Intent.PRIMARY} onClick={() => dataMutation.mutate()} loading={dataMutation.isPending}>
+                Suggest schema
+              </Button>
+              <JsonViewer value={dataMutation.data} empty="Suggestion results will appear here." />
+              {renderSchemaCards(dataSchemas)}
+            </Card>
+          }
+        />
+      </Tabs>
 
-        <Button intent={Intent.PRIMARY} onClick={() => suggestMutation.mutate()} loading={suggestMutation.isPending}>
-          Suggest Schema
-        </Button>
-      </Card>
-
-      <Card elevation={1} className="section-card">
-        <div className="card-title">
-          <H5>Suggested Schema</H5>
-          <div className="button-row">
-            <Button
-              icon="endorsed"
-              onClick={() => validateMutation.mutate()}
-              disabled={suggestedClasses.length === 0}
-              loading={validateMutation.isPending}
-            >
-              Validate Ontology
-            </Button>
-            <AsyncCommandButton
-              intent={Intent.SUCCESS}
-              icon="cloud-upload"
-              disabled={suggestedClasses.length === 0}
-              commandKind="ONTOLOGY_APPLY"
-              commandTitle="Apply suggested schema"
-              dbName={db ?? undefined}
-              branch={context.branch}
-              successMessage="Schema apply 요청을 전송했습니다."
-              onSubmit={async () => {
-                if (!db) {
-                  return []
-                }
-                const responses = []
-                for (const klass of suggestedClasses) {
-                  const payload = buildOntologyPayload(klass)
-                  responses.push(await createOntology(requestContext, db, context.branch, payload))
-                }
-                return responses
-              }}
-            >
-              Apply (202)
-            </AsyncCommandButton>
-          </div>
-        </div>
-        {suggestedClasses.length ? (
-          <div className="card-grid">
-            {suggestedClasses.map((klass) => {
-              const payload = buildOntologyPayload(klass)
-              const key = payload.id ?? payload.label ?? 'class'
-              const properties = payload.properties
-              const relationships = payload.relationships
-              return (
-                <Card key={key} elevation={0} className="schema-card">
-                  <div className="card-title">
-                    <H5>{payload.label ?? payload.id ?? 'Class'}</H5>
-                    {payload.id ? <Tag minimal>id: {payload.id}</Tag> : null}
-                  </div>
-                  <div className="muted small">Properties</div>
-                  {properties.length ? (
-                    <HTMLTable striped className="full-width">
-                      <thead>
-                        <tr>
-                          <th>Name</th>
-                          <th>Type</th>
-                          <th>Required</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {properties.map((prop, index) => (
-                          <tr key={`${getString(prop.name) ?? getString(prop.id) ?? index}`}>
-                            <td>{getString(prop.name) ?? getString(prop.id) ?? getString(prop.property_id) ?? '-'}</td>
-                            <td>{getString(prop.type) ?? getString(prop.datatype) ?? '-'}</td>
-                            <td>{typeof prop.required === 'boolean' ? (prop.required ? 'yes' : 'no') : '-'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </HTMLTable>
-                  ) : (
-                    <div className="muted small">No properties</div>
-                  )}
-                  <div className="muted small" style={{ marginTop: 8 }}>
-                    Relationships
-                  </div>
-                  {relationships.length ? (
-                    <HTMLTable striped className="full-width">
-                      <thead>
-                        <tr>
-                          <th>Predicate</th>
-                          <th>Target</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {relationships.map((rel, index) => (
-                          <tr key={`${getString(rel.predicate) ?? getString(rel.target) ?? index}`}>
-                            <td>{getString(rel.predicate) ?? getString(rel.name) ?? '-'}</td>
-                            <td>{getString(rel.target) ?? getString(rel.to) ?? '-'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </HTMLTable>
-                  ) : (
-                    <div className="muted small">No relationships</div>
-                  )}
-                  {validationResult[key] ? (
-                    <div style={{ marginTop: 8 }}>
-                      <Tag minimal intent={Intent.SUCCESS}>Validated</Tag>
-                      <JsonView value={validationResult[key]} />
-                    </div>
-                  ) : null}
-                </Card>
-              )
-            })}
-          </div>
-        ) : (
-          <JsonView value={result} fallback="스키마 제안을 실행하세요." />
-        )}
+      <Card className="card-stack" style={{ marginTop: 16 }}>
+        <div className="card-title">Validation / Apply response</div>
+        <JsonViewer value={validateMutation.data} empty="Validation results will appear here." />
+        <JsonViewer value={applyMutation.data} empty="Apply responses will appear here." />
       </Card>
     </div>
   )

@@ -5,8 +5,9 @@
 ## 1) 컨텍스트 정책: URL이 SSoT, Store는 캐시
 
 - 컨텍스트(세계관): `project(db_name)`, `branch`, `lang`
-- **SSoT**: URL path + query (`/db/:db` + `?branch=...&lang=...`)
+- **SSoT**: URL query (`?project=...&branch=...&lang=...`)
 - Zustand는 UI가 쓰기 쉬운 “캐시”이며, URL이 바뀌면 항상 Zustand가 따라갑니다.
+- LocalStorage 키: `spice.project`, `spice.branch`, `spice.language`
 - 구현:
   - URL 파싱/구독: `frontend/src/state/urlContext.ts`
   - Zustand 컨텍스트 스토어: `frontend/src/store/useAppStore.ts`
@@ -14,13 +15,14 @@
 
 ## 2) 인증 정책: 기본은 메모리, Remember me는 옵션
 
-- `authToken`(Bearer)과 `adminToken`은 기본적으로 **메모리 저장**(새로고침 시 재입력).
-- `Remember token`을 켠 경우에만 localStorage에 저장(`spice.authToken`, `spice.adminToken`).
+- 토큰은 기본적으로 **메모리 저장**(새로고침 시 재입력).
+- `Remember token`을 켠 경우에만 localStorage에 저장.
 - “위험 작업”은 별도의 `Admin mode` 토글로 명시적으로 활성화.
+- LocalStorage 키: `spice.adminToken`, `spice.rememberToken`, `spice.theme`
+- BFF 헤더: `X-Admin-Token` 또는 `Authorization: Bearer <token>`
 - 구현:
   - 상태/저장: `frontend/src/store/useAppStore.ts`
-  - 설정 UI: `frontend/src/components/layout/SettingsDialog.tsx`
-  - 인증 실패 재시도: `frontend/src/api/bff.ts` (`retryPendingAuthRequest`)
+  - 설정 UI: `frontend/src/AppShell.tsx`, `frontend/src/components/SettingsDialog.tsx`
 
 ## 3) Command Tracker 정책: 202 Accepted는 “작업”이다
 
@@ -28,9 +30,9 @@
 - 완료 의미를 2단계로 분리:
   - `WRITE_DONE` (커맨드 완료)
   - `VISIBLE_IN_SEARCH` (리드모델/검색에 반영 완료)
+- LocalStorage 키: `commandTracker.items`
 - 구현:
   - 상태 추적/폴링: `frontend/src/commands/useCommandTracker.ts`
-  - WS 구독(선택 command): `frontend/src/commands/CommandTrackerDrawer.tsx`
   - invalidate 중앙 테이블: `frontend/src/commands/commandInvalidationMap.ts`
 
 ## 4) Query 정책: 키/무효화 규칙을 중앙집중
@@ -53,4 +55,19 @@
 - 공통 분류: `AUTH`, `OCC_CONFLICT`, `VALIDATION`, `TEMPORARY`, `UNKNOWN`
 - 구현:
   - `frontend/src/errors/classifyError.ts`
-  - `frontend/src/components/ApiErrorCallout.tsx`
+
+## 7) 레이트리밋 정책: 제한적 자동 재시도
+
+- 429는 `Retry-After` 기반 카운트다운을 항상 표시합니다.
+- 자동 재시도는 **AI/Import/Connector만 1회** 허용합니다.
+- 나머지 요청은 자동 재시도 없이 사용자가 수동 재시도합니다.
+- 구현:
+  - `frontend/src/api/useRateLimitRetry.ts`
+  - 적용 화면: Graph Explorer(AI), Sheets Hub, Import Sheets/Excel, Schema Suggestion
+
+## 8) 브랜치 예외 정책: 읽기/쓰기/보호 규칙 명시
+
+- Instances 읽기 API는 branch를 받지 않거나 무시하므로 **Branch ignored** 배지 고정.
+- Import commit은 항상 `main`으로 기록되므로, main 이외 브랜치에서는 확인 체크 필수.
+- 보호 브랜치 정책은 Summary의 `policy.is_protected_branch`로 확인하고,
+  Ontology 적용/머지 Resolve는 `adminToken + adminMode`가 없으면 차단.

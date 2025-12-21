@@ -1,57 +1,48 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import {
   Button,
   Callout,
   Card,
-  Checkbox,
   FormGroup,
-  H5,
   HTMLSelect,
   InputGroup,
   Intent,
-  NumericInput,
+  Switch,
 } from '@blueprintjs/core'
 import {
   cleanupOldReplays,
   getSystemHealth,
-  replayInstanceState,
   recomputeProjection,
+  replayInstanceState,
 } from '../api/bff'
-import { PageHeader } from '../components/PageHeader'
-import { JsonView } from '../components/JsonView'
+import { useRequestContext } from '../api/useRequestContext'
+import { PageHeader } from '../components/layout/PageHeader'
+import { JsonViewer } from '../components/JsonViewer'
 import { toastApiError } from '../errors/toastApiError'
+import { navigateWithSearch } from '../state/pathname'
 import { useAppStore } from '../store/useAppStore'
 
 export const AdminPage = () => {
-  const context = useAppStore((state) => state.context)
-  const authToken = useAppStore((state) => state.authToken)
+  const requestContext = useRequestContext()
+  const language = useAppStore((state) => state.context.language)
   const adminToken = useAppStore((state) => state.adminToken)
 
   const [dbName, setDbName] = useState('')
   const [classId, setClassId] = useState('')
   const [instanceId, setInstanceId] = useState('')
-  const [storeResult, setStoreResult] = useState(true)
-  const [resultTtl, setResultTtl] = useState(3600)
-  const [replayResult, setReplayResult] = useState<unknown>(null)
 
-  const [projection, setProjection] = useState('instances')
+  const [projection, setProjection] = useState<'instances' | 'ontologies'>('instances')
   const [branch, setBranch] = useState('main')
   const [fromTs, setFromTs] = useState('')
   const [toTs, setToTs] = useState('')
   const [promote, setPromote] = useState(false)
   const [allowDelete, setAllowDelete] = useState(false)
-  const [maxEvents, setMaxEvents] = useState<number | null>(null)
-  const [recomputeResult, setRecomputeResult] = useState<unknown>(null)
+  const [maxEvents, setMaxEvents] = useState('')
 
-  const [cleanupHours, setCleanupHours] = useState(24)
-  const [cleanupResult, setCleanupResult] = useState<unknown>(null)
-  const [healthResult, setHealthResult] = useState<unknown>(null)
+  const [cleanupHours, setCleanupHours] = useState('24')
 
-  const requestContext = useMemo(
-    () => ({ language: context.language, authToken, adminToken }),
-    [adminToken, authToken, context.language],
-  )
+  const canRun = Boolean(adminToken)
 
   const replayMutation = useMutation({
     mutationFn: () =>
@@ -59,11 +50,9 @@ export const AdminPage = () => {
         db_name: dbName,
         class_id: classId,
         instance_id: instanceId,
-        store_result: storeResult,
-        result_ttl: resultTtl,
+        store_result: true,
       }),
-    onSuccess: (payload) => setReplayResult(payload),
-    onError: (error) => toastApiError(error, context.language),
+    onError: (error) => toastApiError(error, language),
   })
 
   const recomputeMutation = useMutation({
@@ -76,42 +65,34 @@ export const AdminPage = () => {
         to_ts: toTs || undefined,
         promote,
         allow_delete_base_index: allowDelete,
-        max_events: maxEvents || undefined,
+        max_events: maxEvents ? Number(maxEvents) : undefined,
       }),
-    onSuccess: (payload) => setRecomputeResult(payload),
-    onError: (error) => toastApiError(error, context.language),
+    onError: (error) => toastApiError(error, language),
   })
 
   const cleanupMutation = useMutation({
-    mutationFn: () => cleanupOldReplays(requestContext, cleanupHours),
-    onSuccess: (payload) => setCleanupResult(payload),
-    onError: (error) => toastApiError(error, context.language),
+    mutationFn: () => cleanupOldReplays(requestContext, { older_than_hours: Number(cleanupHours) || 24 }),
+    onError: (error) => toastApiError(error, language),
   })
 
   const healthMutation = useMutation({
     mutationFn: () => getSystemHealth(requestContext),
-    onSuccess: (payload) => setHealthResult(payload),
-    onError: (error) => toastApiError(error, context.language),
+    onError: (error) => toastApiError(error, language),
   })
 
   return (
     <div>
-      <PageHeader title="Admin" subtitle="운영자 전용 작업" />
-      {!adminToken ? (
-        <Callout intent={Intent.WARNING} title="Admin token required">
-          Admin 토큰을 설정해야 실행할 수 있습니다.
+      <PageHeader title="Admin Operations" subtitle="Admin token required." />
+      {!canRun ? (
+        <Callout intent={Intent.WARNING} style={{ marginBottom: 12 }}>
+          Admin token is missing. Open Settings and set a token to enable admin operations.
         </Callout>
       ) : null}
 
-      <Card elevation={1} className="section-card">
-        <div className="card-title">
-          <H5>Replay Instance State</H5>
-          <Button intent={Intent.PRIMARY} onClick={() => replayMutation.mutate()} disabled={!adminToken}>
-            Run
-          </Button>
-        </div>
-        <div className="form-grid">
-          <FormGroup label="DB">
+      <div className="page-grid two-col">
+        <Card className="card-stack">
+          <div className="card-title">Replay instance state</div>
+          <FormGroup label="Database">
             <InputGroup value={dbName} onChange={(event) => setDbName(event.currentTarget.value)} />
           </FormGroup>
           <FormGroup label="Class ID">
@@ -120,72 +101,114 @@ export const AdminPage = () => {
           <FormGroup label="Instance ID">
             <InputGroup value={instanceId} onChange={(event) => setInstanceId(event.currentTarget.value)} />
           </FormGroup>
-          <FormGroup label="Result TTL">
-            <NumericInput value={resultTtl} min={60} onValueChange={(value) => setResultTtl(value)} />
-          </FormGroup>
-        </div>
-        <Checkbox checked={storeResult} onChange={(event) => setStoreResult(event.currentTarget.checked)}>
-          Store result
-        </Checkbox>
-        <JsonView value={replayResult} />
-      </Card>
-
-      <Card elevation={1} className="section-card">
-        <div className="card-title">
-          <H5>Recompute Projection</H5>
-          <Button intent={Intent.PRIMARY} onClick={() => recomputeMutation.mutate()} disabled={!adminToken}>
-            Run
+          <Button
+            intent={Intent.PRIMARY}
+            onClick={() => replayMutation.mutate()}
+            disabled={!dbName || !classId || !instanceId || !canRun}
+            loading={replayMutation.isPending}
+          >
+            Replay
           </Button>
-        </div>
-        <div className="form-grid">
-          <FormGroup label="DB">
+          {replayMutation.data && (replayMutation.data as { task_id?: string }).task_id ? (
+            <Callout intent={Intent.PRIMARY}>
+              Task ID: {(replayMutation.data as { task_id?: string }).task_id}
+              <div style={{ marginTop: 6 }}>
+                <Button
+                  small
+                  onClick={() =>
+                    navigateWithSearch('/operations/tasks', {
+                      task_id: (replayMutation.data as { task_id?: string }).task_id ?? '',
+                    })
+                  }
+                >
+                  Open in Tasks
+                </Button>
+              </div>
+            </Callout>
+          ) : null}
+          <JsonViewer value={replayMutation.data} empty="Replay response will appear here." />
+        </Card>
+
+        <Card className="card-stack">
+          <div className="card-title">Recompute projection</div>
+          <FormGroup label="Database">
             <InputGroup value={dbName} onChange={(event) => setDbName(event.currentTarget.value)} />
           </FormGroup>
           <FormGroup label="Projection">
-            <HTMLSelect value={projection} onChange={(event) => setProjection(event.currentTarget.value)} options={['instances', 'ontologies']} />
+            <HTMLSelect
+              value={projection}
+              options={[
+                { label: 'instances', value: 'instances' },
+                { label: 'ontologies', value: 'ontologies' },
+              ]}
+              onChange={(event) => setProjection(event.currentTarget.value as 'instances' | 'ontologies')}
+            />
           </FormGroup>
           <FormGroup label="Branch">
             <InputGroup value={branch} onChange={(event) => setBranch(event.currentTarget.value)} />
           </FormGroup>
-          <FormGroup label="From">
-            <InputGroup value={fromTs} onChange={(event) => setFromTs(event.currentTarget.value)} placeholder="2024-01-01T00:00:00Z" />
+          <FormGroup label="From timestamp (ISO8601)">
+            <InputGroup value={fromTs} onChange={(event) => setFromTs(event.currentTarget.value)} />
           </FormGroup>
-          <FormGroup label="To">
-            <InputGroup value={toTs} onChange={(event) => setToTs(event.currentTarget.value)} placeholder="optional" />
+          <FormGroup label="To timestamp (optional)">
+            <InputGroup value={toTs} onChange={(event) => setToTs(event.currentTarget.value)} />
           </FormGroup>
-          <FormGroup label="Max events">
-            <NumericInput value={maxEvents ?? undefined} onValueChange={(value) => setMaxEvents(Number.isNaN(value) ? null : value)} />
+          <FormGroup label="Max events (optional)">
+            <InputGroup value={maxEvents} onChange={(event) => setMaxEvents(event.currentTarget.value)} />
           </FormGroup>
-        </div>
-        <Checkbox checked={promote} onChange={(event) => setPromote(event.currentTarget.checked)}>
-          Promote
-        </Checkbox>
-        <Checkbox checked={allowDelete} onChange={(event) => setAllowDelete(event.currentTarget.checked)}>
-          Allow delete base index
-        </Checkbox>
-        <JsonView value={recomputeResult} />
-      </Card>
+          <div className="form-row">
+            <Switch checked={promote} label="Promote index" onChange={(event) => setPromote(event.currentTarget.checked)} />
+            <Switch checked={allowDelete} label="Allow delete base index" onChange={(event) => setAllowDelete(event.currentTarget.checked)} />
+          </div>
+          <Button
+            intent={Intent.PRIMARY}
+            onClick={() => recomputeMutation.mutate()}
+            disabled={!dbName || !fromTs || !canRun}
+            loading={recomputeMutation.isPending}
+          >
+            Recompute
+          </Button>
+          {recomputeMutation.data && (recomputeMutation.data as { task_id?: string }).task_id ? (
+            <Callout intent={Intent.PRIMARY}>
+              Task ID: {(recomputeMutation.data as { task_id?: string }).task_id}
+              <div style={{ marginTop: 6 }}>
+                <Button
+                  small
+                  onClick={() =>
+                    navigateWithSearch('/operations/tasks', {
+                      task_id: (recomputeMutation.data as { task_id?: string }).task_id ?? '',
+                    })
+                  }
+                >
+                  Open in Tasks
+                </Button>
+              </div>
+            </Callout>
+          ) : null}
+          <JsonViewer value={recomputeMutation.data} empty="Recompute response will appear here." />
+        </Card>
+      </div>
 
-      <Card elevation={1} className="section-card">
-        <div className="card-title">
-          <H5>Cleanup Old Replays</H5>
-          <Button intent={Intent.DANGER} onClick={() => cleanupMutation.mutate()} disabled={!adminToken}>
+      <div className="page-grid two-col" style={{ marginTop: 16 }}>
+        <Card className="card-stack">
+          <div className="card-title">Cleanup old replay results</div>
+          <FormGroup label="Older than (hours)">
+            <InputGroup value={cleanupHours} onChange={(event) => setCleanupHours(event.currentTarget.value)} />
+          </FormGroup>
+          <Button intent={Intent.WARNING} onClick={() => cleanupMutation.mutate()} disabled={!canRun} loading={cleanupMutation.isPending}>
             Cleanup
           </Button>
-        </div>
-        <NumericInput value={cleanupHours} min={1} max={168} onValueChange={(value) => setCleanupHours(value)} />
-        <JsonView value={cleanupResult} />
-      </Card>
+          <JsonViewer value={cleanupMutation.data} empty="Cleanup response will appear here." />
+        </Card>
 
-      <Card elevation={1} className="section-card">
-        <div className="card-title">
-          <H5>System Health</H5>
-          <Button onClick={() => healthMutation.mutate()} disabled={!adminToken}>
-            Fetch
+        <Card className="card-stack">
+          <div className="card-title">System health</div>
+          <Button onClick={() => healthMutation.mutate()} disabled={!canRun} loading={healthMutation.isPending}>
+            Load health
           </Button>
-        </div>
-        <JsonView value={healthResult} />
-      </Card>
+          <JsonViewer value={healthMutation.data} empty="System health will appear here." />
+        </Card>
+      </div>
     </div>
   )
 }

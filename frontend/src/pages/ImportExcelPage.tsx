@@ -1,286 +1,366 @@
 import { useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
 import { useMutation } from '@tanstack/react-query'
 import {
   Button,
-  Card,
   Callout,
-  Checkbox,
-  FileInput,
+  Card,
   FormGroup,
-  H5,
   HTMLSelect,
-  HTMLTable,
   InputGroup,
   Intent,
-  NumericInput,
   TextArea,
 } from '@blueprintjs/core'
 import {
-  extractWriteCommandIds,
-  importFromExcelCommit,
-  importFromExcelDryRun,
+  commitImportFromExcel,
+  dryRunImportFromExcel,
   suggestMappingsFromExcel,
+  suggestSchemaFromExcel,
 } from '../api/bff'
-import { PageHeader } from '../components/PageHeader'
-import { JsonView } from '../components/JsonView'
-import { useOntologyRegistry } from '../hooks/useOntologyRegistry'
-import { useCooldown } from '../hooks/useCooldown'
-import { HttpError } from '../api/bff'
+import { useRateLimitRetry } from '../api/useRateLimitRetry'
+import { useRequestContext } from '../api/useRequestContext'
+import { PageHeader } from '../components/layout/PageHeader'
+import { JsonViewer } from '../components/JsonViewer'
+import { StepperBar } from '../components/StepperBar'
+import { showAppToast } from '../app/AppToaster'
+import { useCommandRegistration } from '../commands/useCommandRegistration'
+import { extractCommandId } from '../commands/extractCommandId'
 import { toastApiError } from '../errors/toastApiError'
+import { useOntologyRegistry } from '../query/useOntologyRegistry'
 import { useAppStore } from '../store/useAppStore'
-import { asArray, asRecord, getString, type UnknownRecord } from '../utils/typed'
 
-export const ImportExcelPage = () => {
-  const { db } = useParams()
-  const context = useAppStore((state) => state.context)
-  const authToken = useAppStore((state) => state.authToken)
-  const adminToken = useAppStore((state) => state.adminToken)
-  const trackCommands = useAppStore((state) => state.trackCommands)
+const parseJson = <T,>(raw: string) => {
+  const parsed = JSON.parse(raw)
+  return parsed as T
+}
 
-  const registry = useOntologyRegistry(db, context.branch)
+export const ImportExcelPage = ({ dbName }: { dbName: string }) => {
+  const requestContext = useRequestContext()
+  const registerCommand = useCommandRegistration()
+  const language = useAppStore((state) => state.context.language)
+  const branch = useAppStore((state) => state.context.branch)
+  const { cooldown: importCooldown, withRateLimitRetry } = useRateLimitRetry(1)
+  const registry = useOntologyRegistry(dbName, branch)
 
+  const [step, setStep] = useState(0)
   const [file, setFile] = useState<File | null>(null)
-  const [sheetName, setSheetName] = useState('')
   const [targetClassId, setTargetClassId] = useState('')
-  const [targetSchemaJson, setTargetSchemaJson] = useState('')
-  const [mappingsJson, setMappingsJson] = useState('')
+  const [sheetName, setSheetName] = useState('')
   const [tableId, setTableId] = useState('')
-  const [tableTop, setTableTop] = useState<number | null>(null)
-  const [tableLeft, setTableLeft] = useState<number | null>(null)
-  const [tableBottom, setTableBottom] = useState<number | null>(null)
-  const [tableRight, setTableRight] = useState<number | null>(null)
-  const [dryRunResult, setDryRunResult] = useState<unknown>(null)
-  const [commitResult, setCommitResult] = useState<unknown>(null)
+  const [tableTop, setTableTop] = useState('')
+  const [tableLeft, setTableLeft] = useState('')
+  const [tableBottom, setTableBottom] = useState('')
+  const [tableRight, setTableRight] = useState('')
+  const [targetSchemaJson, setTargetSchemaJson] = useState('[]')
+  const [mappingsJson, setMappingsJson] = useState('[]')
   const [confirmMain, setConfirmMain] = useState(false)
+  const [tableBBoxError, setTableBBoxError] = useState<string | null>(null)
 
-  const dryRunCooldown = useCooldown()
-  const commitCooldown = useCooldown()
-
-  const requestContext = useMemo(
-    () => ({ language: context.language, authToken, adminToken }),
-    [adminToken, authToken, context.language],
+  const classOptions = useMemo(
+    () => [{ label: 'Select class', value: '' }, ...registry.classes.map((item) => ({
+      label: item.label ? `${item.label} (${item.id})` : item.id,
+      value: item.id,
+    }))],
+    [registry.classes],
   )
 
-  const loadSchema = () => {
-    const props = registry.propertyLabelsByClass.get(targetClassId) ?? []
-    const schema = props.map((prop) => ({ name: prop.id, type: prop.type ?? 'xsd:string' }))
-    setTargetSchemaJson(JSON.stringify(schema, null, 2))
+  const parseBBoxNumber = (value: string) => {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
   }
 
-  const suggestMutation = useMutation({
-    mutationFn: async () => {
-      if (!db || !file || !targetClassId) {
-        throw new Error('Missing inputs')
+  const buildTableBBox = () => {
+    const values = [tableTop, tableLeft, tableBottom, tableRight]
+    if (values.every((value) => value.trim() === '')) {
+      setTableBBoxError(null)
+      return undefined
+    }
+    if (values.some((value) => value.trim() === '')) {
+      setTableBBoxError('Provide all table bbox values or leave them blank.')
+      return undefined
+    }
+    const parsed = values.map(parseBBoxNumber)
+    if (parsed.some((value) => value === null)) {
+      setTableBBoxError('Table bbox must be numeric values.')
+      return undefined
+    }
+    setTableBBoxError(null)
+    return {
+      top: parsed[0] ?? 0,
+      left: parsed[1] ?? 0,
+      bottom: parsed[2] ?? 0,
+      right: parsed[3] ?? 0,
+    }
+  }
+
+  const schemaMutation = useMutation({
+    mutationFn: () => {
+      if (!file) {
+        throw new Error('Upload a file first')
       }
-      return suggestMappingsFromExcel(requestContext, db, targetClassId, file, targetSchemaJson || undefined)
+      const tableBBox = buildTableBBox()
+      return withRateLimitRetry(() =>
+        suggestSchemaFromExcel(requestContext, dbName, file, {
+          sheet_name: sheetName || undefined,
+          table_id: tableId || undefined,
+          table_top: tableBBox?.top,
+          table_left: tableBBox?.left,
+          table_bottom: tableBBox?.bottom,
+          table_right: tableBBox?.right,
+        }),
+      )
+    },
+    onError: (error) => toastApiError(error, language),
+  })
+
+  const suggestMutation = useMutation({
+    mutationFn: () => {
+      if (!file) {
+        throw new Error('Upload a file first')
+      }
+      const targetSchema = parseJson<Array<Record<string, unknown>>>(targetSchemaJson)
+      const tableBBox = buildTableBBox()
+      return withRateLimitRetry(() =>
+        suggestMappingsFromExcel(
+          requestContext,
+          dbName,
+          {
+            target_class_id: targetClassId,
+            sheet_name: sheetName || undefined,
+            table_id: tableId || undefined,
+            table_top: tableBBox?.top,
+            table_left: tableBBox?.left,
+            table_bottom: tableBBox?.bottom,
+            table_right: tableBBox?.right,
+          },
+          file,
+          JSON.stringify(targetSchema),
+        ),
+      )
     },
     onSuccess: (result) => {
-      if (!result) {
-        return
-      }
-      const resultRecord = asRecord(result)
-      const mappings = asArray<unknown>(resultRecord.mappings ?? asRecord(resultRecord.data).mappings)
+      const mappings = (result as { mappings?: Array<Record<string, unknown>> }).mappings ?? []
       setMappingsJson(JSON.stringify(mappings, null, 2))
     },
-    onError: (error) => toastApiError(error, context.language),
+    onError: (error) => toastApiError(error, language),
   })
 
   const dryRunMutation = useMutation({
-    mutationFn: async () => {
-      if (!db || !file || !targetClassId || !mappingsJson) {
-        throw new Error('Missing inputs')
+    mutationFn: () => {
+      if (!file) {
+        throw new Error('Upload a file first')
       }
-      return importFromExcelDryRun(requestContext, db, {
-        file,
-        target_class_id: targetClassId,
-        target_schema_json: targetSchemaJson || undefined,
-        mappings_json: mappingsJson,
-        sheet_name: sheetName || undefined,
-        table_id: tableId || undefined,
-        table_top: tableTop ?? undefined,
-        table_left: tableLeft ?? undefined,
-        table_bottom: tableBottom ?? undefined,
-        table_right: tableRight ?? undefined,
-      })
+      const tableBBox = buildTableBBox()
+      return withRateLimitRetry(() =>
+        dryRunImportFromExcel(requestContext, dbName, {
+          file,
+          target_class_id: targetClassId,
+          target_schema_json: targetSchemaJson,
+          mappings_json: mappingsJson,
+          sheet_name: sheetName || undefined,
+          table_id: tableId || undefined,
+          table_top: tableBBox?.top,
+          table_left: tableBBox?.left,
+          table_bottom: tableBBox?.bottom,
+          table_right: tableBBox?.right,
+        }),
+      )
     },
-    onSuccess: (result) => setDryRunResult(result),
-    onError: (error) => {
-      if (error instanceof HttpError) {
-        dryRunCooldown.startCooldown(error.retryAfterSeconds)
-      }
-      toastApiError(error, context.language)
-    },
+    onError: (error) => toastApiError(error, language),
   })
 
   const commitMutation = useMutation({
-    mutationFn: async () => {
-      if (!db || !file || !targetClassId || !mappingsJson) {
-        throw new Error('Missing inputs')
+    mutationFn: () => {
+      if (!file) {
+        throw new Error('Upload a file first')
       }
-      return importFromExcelCommit(requestContext, db, {
-        file,
-        target_class_id: targetClassId,
-        target_schema_json: targetSchemaJson || undefined,
-        mappings_json: mappingsJson,
-        sheet_name: sheetName || undefined,
-        table_id: tableId || undefined,
-        table_top: tableTop ?? undefined,
-        table_left: tableLeft ?? undefined,
-        table_bottom: tableBottom ?? undefined,
-        table_right: tableRight ?? undefined,
+      const tableBBox = buildTableBBox()
+      return withRateLimitRetry(() =>
+        commitImportFromExcel(requestContext, dbName, {
+          file,
+          target_class_id: targetClassId,
+          target_schema_json: targetSchemaJson,
+          mappings_json: mappingsJson,
+          sheet_name: sheetName || undefined,
+          table_id: tableId || undefined,
+          table_top: tableBBox?.top,
+          table_left: tableBBox?.left,
+          table_bottom: tableBBox?.bottom,
+          table_right: tableBBox?.right,
+        }),
+      )
+    },
+    onSuccess: (payload) => {
+      const commands = (payload as { write?: { commands?: Array<Record<string, unknown>> } })?.write?.commands ?? []
+      commands.forEach((entry) => {
+        const command = entry.command as Record<string, unknown> | undefined
+        const commandId = extractCommandId(command ?? entry)
+        if (commandId) {
+          registerCommand({
+            commandId,
+            kind: 'IMPORT_EXCEL',
+            targetClassId,
+            title: `Import Excel: ${targetClassId}`,
+          })
+        }
       })
+      void showAppToast({ intent: Intent.SUCCESS, message: 'Import commit submitted.' })
     },
-    onSuccess: (result) => {
-      setCommitResult(result)
-      const ids = extractWriteCommandIds(result)
-      if (ids.length) {
-        trackCommands(ids.map((id) => ({ id, kind: 'IMPORT', title: 'Import from Excel', targetDbName: db ?? '' })))
-      }
-    },
-    onError: (error) => {
-      if (error instanceof HttpError) {
-        commitCooldown.startCooldown(error.retryAfterSeconds)
-      }
-      toastApiError(error, context.language)
-    },
+    onError: (error) => toastApiError(error, language),
   })
 
-  const commitCommands = useMemo(() => {
-    const resultRecord = asRecord(commitResult)
-    const write = asRecord(resultRecord.write ?? asRecord(asRecord(resultRecord.data).write))
-    return asArray<UnknownRecord>(write.commands)
-  }, [commitResult])
+  const isMainBranch = branch === 'main'
+  const canCommit = isMainBranch || confirmMain
+
+  const stepPanels = useMemo(
+    () => [
+      {
+        title: 'Prepare',
+        content: (
+          <Card className="card-stack">
+            <FormGroup label="Upload Excel">
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={(event) => setFile(event.currentTarget.files?.[0] ?? null)}
+              />
+            </FormGroup>
+            <FormGroup label="Sheet name (optional)">
+              <InputGroup value={sheetName} onChange={(event) => setSheetName(event.currentTarget.value)} />
+            </FormGroup>
+            <FormGroup label="Table ID (optional)">
+              <InputGroup value={tableId} onChange={(event) => setTableId(event.currentTarget.value)} />
+            </FormGroup>
+            <FormGroup label="Table bbox (optional)">
+              <div className="form-row">
+                <InputGroup placeholder="top" value={tableTop} onChange={(event) => setTableTop(event.currentTarget.value)} />
+                <InputGroup placeholder="left" value={tableLeft} onChange={(event) => setTableLeft(event.currentTarget.value)} />
+                <InputGroup placeholder="bottom" value={tableBottom} onChange={(event) => setTableBottom(event.currentTarget.value)} />
+                <InputGroup placeholder="right" value={tableRight} onChange={(event) => setTableRight(event.currentTarget.value)} />
+              </div>
+            </FormGroup>
+            <FormGroup label="Target class id">
+              <HTMLSelect
+                options={classOptions}
+                value={targetClassId}
+                onChange={(event) => setTargetClassId(event.currentTarget.value)}
+              />
+            </FormGroup>
+            <div className="form-row">
+              <Button onClick={() => schemaMutation.mutate()} disabled={!file || importCooldown > 0 || Boolean(tableBBoxError)} loading={schemaMutation.isPending}>
+                {importCooldown > 0 ? `Retry in ${importCooldown}s` : 'Suggest schema'}
+              </Button>
+            </div>
+            {tableBBoxError ? <Callout intent={Intent.WARNING}>{tableBBoxError}</Callout> : null}
+            <JsonViewer value={schemaMutation.data} empty="Run schema suggestion to see hints." />
+            <FormGroup label="Target schema (JSON array of {name,type})">
+              <TextArea value={targetSchemaJson} onChange={(event) => setTargetSchemaJson(event.currentTarget.value)} rows={8} />
+            </FormGroup>
+          </Card>
+        ),
+      },
+      {
+        title: 'Suggest',
+        content: (
+          <Card className="card-stack">
+            <Button
+              intent={Intent.PRIMARY}
+              onClick={() => suggestMutation.mutate()}
+              disabled={!file || !targetClassId || importCooldown > 0 || Boolean(tableBBoxError)}
+              loading={suggestMutation.isPending}
+            >
+              {importCooldown > 0 ? `Retry in ${importCooldown}s` : 'Suggest mappings'}
+            </Button>
+            <JsonViewer value={suggestMutation.data} empty="Run mapping suggestion." />
+            <FormGroup label="Mappings (JSON array)">
+              <TextArea value={mappingsJson} onChange={(event) => setMappingsJson(event.currentTarget.value)} rows={8} />
+            </FormGroup>
+          </Card>
+        ),
+      },
+      {
+        title: 'Dry-run',
+        content: (
+          <Card className="card-stack">
+            <Button
+              intent={Intent.PRIMARY}
+              onClick={() => dryRunMutation.mutate()}
+              disabled={!file || !targetClassId || importCooldown > 0 || Boolean(tableBBoxError)}
+              loading={dryRunMutation.isPending}
+            >
+              {importCooldown > 0 ? `Retry in ${importCooldown}s` : 'Run dry-run'}
+            </Button>
+            <JsonViewer value={dryRunMutation.data} empty="Dry-run results will appear here." />
+          </Card>
+        ),
+      },
+      {
+        title: 'Commit',
+        content: (
+          <Card className="card-stack">
+            {!isMainBranch ? (
+              <Callout intent={Intent.WARNING}>
+                Commit always writes to main. Confirm to continue.
+                <label style={{ display: 'block', marginTop: 8 }}>
+                  <input
+                    type="checkbox"
+                    checked={confirmMain}
+                    onChange={(event) => setConfirmMain(event.currentTarget.checked)}
+                  />{' '}
+                  I understand this will write to main.
+                </label>
+              </Callout>
+            ) : null}
+            <Button
+              intent={Intent.PRIMARY}
+              onClick={() => commitMutation.mutate()}
+              disabled={!file || !targetClassId || !canCommit || importCooldown > 0 || Boolean(tableBBoxError)}
+              loading={commitMutation.isPending}
+            >
+              {importCooldown > 0 ? `Retry in ${importCooldown}s` : 'Commit import'}
+            </Button>
+            <JsonViewer value={commitMutation.data} empty="Commit response will appear here." />
+          </Card>
+        ),
+      },
+    ],
+    [
+      file,
+      targetClassId,
+      sheetName,
+      tableId,
+      tableTop,
+      tableLeft,
+      tableBottom,
+      tableRight,
+      classOptions,
+      targetSchemaJson,
+      mappingsJson,
+      schemaMutation,
+      suggestMutation,
+      dryRunMutation,
+      commitMutation,
+      tableBBoxError,
+      confirmMain,
+      canCommit,
+      isMainBranch,
+    ],
+  )
+
+  const stepLabels = useMemo(() => stepPanels.map((panel) => panel.title), [stepPanels])
 
   return (
     <div>
-      <PageHeader title="Import: Excel" subtitle="엑셀 파일 기반 Dry-run/Commit" />
-
-      <Card elevation={1} className="section-card">
-        <div className="form-grid">
-          <FormGroup label="Excel file">
-            <FileInput
-              text={file ? file.name : 'Select file'}
-              onInputChange={(event) => {
-                const target = event.currentTarget as HTMLInputElement
-                setFile(target.files?.[0] ?? null)
-              }}
-            />
-          </FormGroup>
-          <FormGroup label="Sheet name">
-            <InputGroup value={sheetName} onChange={(event) => setSheetName(event.currentTarget.value)} />
-          </FormGroup>
-          <FormGroup label="Target class">
-            <HTMLSelect
-              value={targetClassId}
-              onChange={(event) => setTargetClassId(event.currentTarget.value)}
-              options={[{ label: 'Select class', value: '' }, ...registry.classOptions]}
-            />
-          </FormGroup>
-          <FormGroup label="Table ID">
-            <InputGroup value={tableId} onChange={(event) => setTableId(event.currentTarget.value)} />
-          </FormGroup>
-          <FormGroup label="Table bbox">
-            <div className="form-row">
-              <NumericInput placeholder="top" value={tableTop ?? undefined} onValueChange={(value) => setTableTop(Number.isNaN(value) ? null : value)} />
-              <NumericInput placeholder="left" value={tableLeft ?? undefined} onValueChange={(value) => setTableLeft(Number.isNaN(value) ? null : value)} />
-              <NumericInput placeholder="bottom" value={tableBottom ?? undefined} onValueChange={(value) => setTableBottom(Number.isNaN(value) ? null : value)} />
-              <NumericInput placeholder="right" value={tableRight ?? undefined} onValueChange={(value) => setTableRight(Number.isNaN(value) ? null : value)} />
-            </div>
-          </FormGroup>
-        </div>
-        <Button icon="manual" onClick={loadSchema} disabled={!targetClassId}>
-          Load Target Schema
+      <PageHeader title="Import (Excel)" subtitle={`Branch context: ${branch} (commit writes to main)`} />
+      <StepperBar steps={stepLabels} activeStep={step} onStepChange={(next) => setStep(next)} />
+      <div style={{ marginTop: 16 }}>{stepPanels[step]?.content}</div>
+      <div className="form-row" style={{ marginTop: 16 }}>
+        <Button onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0}>
+          Back
         </Button>
-      </Card>
-
-      <Card elevation={1} className="section-card">
-        <div className="card-title">
-          <H5>Mappings</H5>
-          <Button onClick={() => suggestMutation.mutate()} disabled={!file || !targetClassId}>
-            Suggest from Excel
-          </Button>
-        </div>
-        <TextArea
-          rows={10}
-          value={mappingsJson}
-          onChange={(event) => setMappingsJson(event.currentTarget.value)}
-          placeholder='[{"source_field":"A","target_field":"field"}]'
-        />
-      </Card>
-
-      <Card elevation={1} className="section-card">
-        <H5>Target Schema</H5>
-        <TextArea
-          rows={10}
-          value={targetSchemaJson}
-          onChange={(event) => setTargetSchemaJson(event.currentTarget.value)}
-          placeholder='[{"name":"field","type":"xsd:string"}]'
-        />
-      </Card>
-
-      <Card elevation={1} className="section-card">
-        <div className="card-title">
-          <H5>Dry-run</H5>
-          <Button
-            intent={Intent.PRIMARY}
-            onClick={() => dryRunMutation.mutate()}
-            loading={dryRunMutation.isPending}
-            disabled={!file || !targetClassId || !mappingsJson || dryRunCooldown.active}
-          >
-            Dry-run {dryRunCooldown.active ? `(${dryRunCooldown.remainingSeconds}s)` : ''}
-          </Button>
-        </div>
-        <JsonView value={dryRunResult} />
-      </Card>
-
-      <Card elevation={1} className="section-card">
-        <div className="card-title">
-          <H5>Commit</H5>
-          <Button
-            intent={Intent.DANGER}
-            onClick={() => commitMutation.mutate()}
-            loading={commitMutation.isPending}
-            disabled={!file || !targetClassId || !mappingsJson || commitCooldown.active || (context.branch !== 'main' && !confirmMain)}
-          >
-            Commit {commitCooldown.active ? `(${commitCooldown.remainingSeconds}s)` : ''}
-          </Button>
-        </div>
-        {context.branch !== 'main' ? (
-          <Callout intent={Intent.WARNING} title="Commit will write to main">
-            현재 브랜치({context.branch})와 무관하게 main에 반영됩니다.
-            <Checkbox checked={confirmMain} onChange={(event) => setConfirmMain(event.currentTarget.checked)}>
-              위 내용을 이해했습니다.
-            </Checkbox>
-          </Callout>
-        ) : null}
-        {commitCommands.length ? (
-          <HTMLTable striped className="full-width">
-            <thead>
-              <tr>
-                <th>Command ID</th>
-                <th>Status URL</th>
-              </tr>
-            </thead>
-            <tbody>
-              {commitCommands.map((command, index) => {
-                const nested = asRecord(command.command)
-                const commandId =
-                  getString(command.command_id) ?? getString(nested.command_id) ?? getString(nested.id) ?? '-'
-                const statusUrl =
-                  getString(command.status_url) ?? getString(nested.status_url) ?? '-'
-                return (
-                  <tr key={`${commandId}-${index}`}>
-                    <td>{commandId}</td>
-                    <td>{statusUrl}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </HTMLTable>
-        ) : null}
-        <JsonView value={commitResult} />
-      </Card>
+        <Button onClick={() => setStep(Math.min(stepPanels.length - 1, step + 1))} disabled={step === stepPanels.length - 1}>
+          Next
+        </Button>
+      </div>
     </div>
   )
 }

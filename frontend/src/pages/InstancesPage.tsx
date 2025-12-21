@@ -1,19 +1,20 @@
-import { useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useEffect, useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Button,
   Callout,
   Card,
+  Divider,
   Drawer,
-  H5,
+  FormGroup,
   HTMLSelect,
   HTMLTable,
   InputGroup,
   Intent,
-  NumericInput,
   Tab,
   Tabs,
+  Tag,
+  Text,
   TextArea,
 } from '@blueprintjs/core'
 import {
@@ -22,402 +23,648 @@ import {
   deleteInstance,
   getInstance,
   getSampleValues,
+  listDatabaseClasses,
   listInstances,
   updateInstance,
-  type CommandResult,
-  type InstanceListResponse,
 } from '../api/bff'
-import { ApiErrorCallout } from '../components/ApiErrorCallout'
-import { PageHeader } from '../components/PageHeader'
-import { JsonView } from '../components/JsonView'
-import { useOntologyRegistry } from '../hooks/useOntologyRegistry'
+import { useRequestContext } from '../api/useRequestContext'
+import { PageHeader } from '../components/layout/PageHeader'
+import { JsonViewer } from '../components/JsonViewer'
+import { showAppToast } from '../app/AppToaster'
+import { useCommandRegistration } from '../commands/useCommandRegistration'
+import { extractCommandId } from '../commands/extractCommandId'
 import { toastApiError } from '../errors/toastApiError'
 import { qk } from '../query/queryKeys'
+import { navigate, navigateWithSearch } from '../state/pathname'
 import { useAppStore } from '../store/useAppStore'
-import { extractOccActualSeq } from '../utils/occ'
-import { asArray, asRecord, getNumber, getString, type UnknownRecord } from '../utils/typed'
 
-const getInstanceId = (item: unknown) => {
-  const record = asRecord(item)
-  return (
-    getString(record.instance_id) ??
-    getString(record.id) ??
-    getString(record['@id']) ??
-    getString(record.uuid) ??
-    ''
-  )
+type ClassItem = Record<string, unknown>
+type InstanceItem = Record<string, unknown>
+
+const getInstanceId = (item: InstanceItem) =>
+  (item.instance_id as string | undefined) ||
+  (item.id as string | undefined) ||
+  (item['@id'] as string | undefined)
+
+const getExpectedSeq = (item: InstanceItem | null) => {
+  if (!item) return null
+  const version = item.version
+  if (typeof version === 'number' && Number.isFinite(version)) return version
+  const indexStatus = item.index_status as { event_sequence?: number } | undefined
+  if (indexStatus && typeof indexStatus.event_sequence === 'number') {
+    return indexStatus.event_sequence
+  }
+  return null
 }
 
-const getInstanceVersion = (item: unknown) => {
-  const record = asRecord(item)
-  return (
-    getNumber(record.version) ??
-    getNumber(record.expected_seq) ??
-    getNumber(record.seq) ??
-    getNumber(record.sequence) ??
-    null
-  )
+const formatTimestamp = (value: unknown) => {
+  if (typeof value !== 'string') return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.valueOf())) return value
+  return date.toLocaleString()
 }
 
-export const InstancesPage = () => {
-  const { db } = useParams()
-  const context = useAppStore((state) => state.context)
-  const authToken = useAppStore((state) => state.authToken)
-  const adminToken = useAppStore((state) => state.adminToken)
-  const trackCommand = useAppStore((state) => state.trackCommand)
+const getInstanceSummary = (item: InstanceItem) => {
+  const display = item.display as { label?: string; name?: string } | undefined
+  if (display?.label) return display.label
+  if (display?.name) return display.name
+  if (typeof item.label === 'string') return item.label
+  if (typeof item.name === 'string') return item.name
+  return ''
+}
 
-  const registry = useOntologyRegistry(db, context.branch)
+const coerceNumber = (value: unknown) =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null
+
+const extractActualSeq = (error: unknown) => {
+  if (!error || typeof error !== 'object') return null
+  const detail = (error as { detail?: unknown }).detail ?? error
+  if (!detail || typeof detail !== 'object') return null
+  const payload = detail as { detail?: { actual_seq?: number }; actual_seq?: number }
+  return coerceNumber(payload.detail?.actual_seq ?? payload.actual_seq)
+}
+
+const extractUnknownLabels = (error: unknown) => {
+  if (!error || typeof error !== 'object') return []
+  const detail = (error as { detail?: unknown }).detail ?? error
+  if (!detail || typeof detail !== 'object') return []
+  const payload = detail as { error?: string; labels?: unknown }
+  if (payload.error !== 'unknown_label_keys') return []
+  if (!Array.isArray(payload.labels)) return []
+  return payload.labels.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+}
+
+const parseJsonObject = (raw: string, label: string) => {
+  const parsed = JSON.parse(raw)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${label} must be a JSON object`)
+  }
+  return parsed as Record<string, unknown>
+}
+
+const parseJsonArray = (raw: string, label: string) => {
+  const parsed = JSON.parse(raw)
+  if (!Array.isArray(parsed)) {
+    throw new Error(`${label} must be a JSON array`)
+  }
+  return parsed as Array<Record<string, unknown>>
+}
+
+export const InstancesPage = ({ dbName }: { dbName: string }) => {
+  const queryClient = useQueryClient()
+  const requestContext = useRequestContext()
+  const language = useAppStore((state) => state.context.language)
+  const branch = useAppStore((state) => state.context.branch)
+  const registerCommand = useCommandRegistration()
 
   const [classId, setClassId] = useState('')
   const [search, setSearch] = useState('')
-  const [limit, setLimit] = useState(25)
-  const [offset, setOffset] = useState(0)
-  const [selectedInstance, setSelectedInstance] = useState<UnknownRecord | null>(null)
-  const [drawerTab, setDrawerTab] = useState('view')
+  const [limit, setLimit] = useState('100')
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editJson, setEditJson] = useState('')
-  const [createJson, setCreateJson] = useState('')
-  const [bulkJson, setBulkJson] = useState('')
-  const [actualSeqHint, setActualSeqHint] = useState<number | null>(null)
-  const [writeError, setWriteError] = useState<unknown>(null)
-  const [sampleValues, setSampleValues] = useState<unknown>(null)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState('view')
+  const [occRetry, setOccRetry] = useState<{ action: 'update' | 'delete'; actualSeq: number } | null>(null)
+  const [unknownLabels, setUnknownLabels] = useState<string[]>([])
+  const [createJson, setCreateJson] = useState('{}')
+  const [createMetadataJson, setCreateMetadataJson] = useState('{}')
+  const [bulkJson, setBulkJson] = useState('[]')
+  const [bulkMetadataJson, setBulkMetadataJson] = useState('{}')
+  const [createJsonError, setCreateJsonError] = useState<string | null>(null)
+  const [bulkJsonError, setBulkJsonError] = useState<string | null>(null)
+  const [createUnknownLabels, setCreateUnknownLabels] = useState<string[]>([])
+  const [bulkUnknownLabels, setBulkUnknownLabels] = useState<string[]>([])
 
-  const requestContext = useMemo(
-    () => ({ language: context.language, authToken, adminToken }),
-    [adminToken, authToken, context.language],
-  )
+  const classesQuery = useQuery({
+    queryKey: qk.classes(dbName, requestContext.language),
+    queryFn: () => listDatabaseClasses(requestContext, dbName),
+  })
 
-  const requireCommandResult = (result: CommandResult | null, label: string) => {
-    if (!result) {
-      throw new Error(`${label} failed`)
-    }
-    return result
-  }
-
-  const listQuery = useQuery<InstanceListResponse>({
-    queryKey: classId
-      ? qk.instances({ dbName: db ?? '', classId, limit, offset, search, language: context.language })
-      : ['bff', 'instances', 'empty'],
-    queryFn: () => listInstances(requestContext, db ?? '', classId, { limit, offset, search }),
-    enabled: Boolean(db && classId),
+  const instancesQuery = useQuery({
+    queryKey: qk.instances(dbName, classId, requestContext.language, { limit, search }),
+    queryFn: () =>
+      listInstances(requestContext, dbName, classId, {
+        limit: Number(limit) || 100,
+        offset: 0,
+        search: search || undefined,
+      }),
+    enabled: Boolean(classId),
   })
 
   const detailQuery = useQuery({
-    queryKey:
-      db && classId && selectedInstance
-        ? qk.instanceDetail({ dbName: db, classId, instanceId: getInstanceId(selectedInstance), language: context.language })
-        : ['bff', 'instance', 'empty'],
-    queryFn: () => getInstance(requestContext, db ?? '', classId, getInstanceId(selectedInstance)),
-    enabled: Boolean(db && classId && selectedInstance),
-    onSuccess: (data) => {
+    queryKey: selectedId ? qk.instance(dbName, classId, selectedId, requestContext.language) : ['instance', 'none'],
+    queryFn: () => getInstance(requestContext, dbName, classId, selectedId ?? ''),
+    enabled: Boolean(selectedId && classId),
+  })
+
+  const sampleQuery = useQuery({
+    queryKey: qk.sampleValues(dbName, classId, requestContext.language),
+    queryFn: () => getSampleValues(requestContext, dbName, classId),
+    enabled: Boolean(classId),
+  })
+
+  useEffect(() => {
+    if (detailQuery.data) {
+      const payload = detailQuery.data as { data?: InstanceItem }
+      const data = payload.data ?? payload
       setEditJson(JSON.stringify(data, null, 2))
-    },
-  })
+      setOccRetry(null)
+      setUnknownLabels([])
+      setActiveTab('view')
+    }
+  }, [detailQuery.data])
 
-  const createMutation = useMutation<CommandResult>({
-    mutationFn: async () => {
-      if (!db || !classId) {
-        throw new Error('Missing class')
-      }
-      const data = JSON.parse(createJson || '{}')
-      const result = await createInstance(requestContext, db, classId, context.branch, { data })
-      return requireCommandResult(result, 'Create instance')
-    },
-    onSuccess: (result) => {
-      setWriteError(null)
-      trackCommand({
-        id: result.command_id,
-        kind: 'INSTANCE_WRITE',
-        title: `Create ${classId}`,
-        target: { dbName: db ?? '' },
-        context: { project: db ?? null, branch: context.branch },
-        submittedAt: new Date().toISOString(),
-        writePhase: 'SUBMITTED',
-        indexPhase: 'UNKNOWN',
-      })
-      setCreateJson('')
-    },
-    onError: (error) => {
-      setWriteError(error)
-      toastApiError(error, context.language)
-    },
-  })
+  const selectedInstance = useMemo(() => {
+    if (!detailQuery.data) return null
+    const payload = detailQuery.data as { data?: InstanceItem }
+    return payload.data ?? payload
+  }, [detailQuery.data])
 
-  const bulkMutation = useMutation<CommandResult>({
-    mutationFn: async () => {
-      if (!db || !classId) {
-        throw new Error('Missing class')
-      }
-      const instances = JSON.parse(bulkJson || '[]')
-      const result = await bulkCreateInstances(requestContext, db, classId, context.branch, { instances })
-      return requireCommandResult(result, 'Bulk create instances')
-    },
-    onSuccess: (result) => {
-      setWriteError(null)
-      trackCommand({
-        id: result.command_id,
-        kind: 'INSTANCE_WRITE',
-        title: `Bulk create ${classId}`,
-        target: { dbName: db ?? '' },
-        context: { project: db ?? null, branch: context.branch },
-        submittedAt: new Date().toISOString(),
-        writePhase: 'SUBMITTED',
-        indexPhase: 'UNKNOWN',
-      })
-      setBulkJson('')
-    },
-    onError: (error) => {
-      setWriteError(error)
-      toastApiError(error, context.language)
-    },
-  })
-
-  const updateMutation = useMutation<CommandResult, unknown, { expectedSeqOverride?: number } | undefined>({
-    mutationFn: async (params?: { expectedSeqOverride?: number }) => {
-      if (!db || !classId || !selectedInstance) {
-        throw new Error('Missing instance')
-      }
-      const expectedSeq = params?.expectedSeqOverride ?? getInstanceVersion(selectedInstance) ?? actualSeqHint
-      if (typeof expectedSeq !== 'number') {
+  const updateMutation = useMutation({
+    mutationFn: async (vars?: { expectedSeqOverride?: number }) => {
+      if (!selectedId) throw new Error('Select an instance')
+      const parsed = JSON.parse(editJson)
+      const expectedSeq =
+        vars?.expectedSeqOverride ??
+        getExpectedSeq(
+          detailQuery.data
+            ? (detailQuery.data as { data?: InstanceItem }).data ?? (detailQuery.data as InstanceItem)
+            : null,
+        )
+      if (expectedSeq === null) {
         throw new Error('expected_seq missing')
       }
-      const data = JSON.parse(editJson || '{}')
-      const result = await updateInstance(requestContext, db, classId, getInstanceId(selectedInstance), context.branch, expectedSeq, {
-        data,
+      return updateInstance(requestContext, dbName, classId, selectedId, branch, expectedSeq, {
+        data: parsed,
+        metadata: {},
       })
-      return requireCommandResult(result, 'Update instance')
     },
-    onSuccess: (result) => {
-      setActualSeqHint(null)
-      trackCommand({
-        id: result.command_id,
-        kind: 'INSTANCE_WRITE',
-        title: `Update ${classId}`,
-        target: { dbName: db ?? '' },
-        context: { project: db ?? null, branch: context.branch },
-        submittedAt: new Date().toISOString(),
-        writePhase: 'SUBMITTED',
-        indexPhase: 'UNKNOWN',
-      })
+    onSuccess: (payload) => {
+      const commandId = payload.command_id
+      if (commandId) {
+        registerCommand({
+          commandId,
+          kind: 'UPDATE_INSTANCE',
+          targetClassId: classId,
+          targetInstanceId: selectedId ?? undefined,
+          title: `Update instance (${classId})`,
+        })
+      }
+      setOccRetry(null)
+      setUnknownLabels([])
+      void showAppToast({ intent: Intent.SUCCESS, message: 'Update submitted.' })
     },
     onError: (error) => {
-      const actual = extractOccActualSeq(error)
+      const actual = extractActualSeq(error)
       if (actual !== null) {
-        setActualSeqHint(actual)
+        setOccRetry({ action: 'update', actualSeq: actual })
       }
-      toastApiError(error, context.language)
+      setUnknownLabels(extractUnknownLabels(error))
+      toastApiError(error, language)
     },
   })
 
-  const deleteMutation = useMutation<CommandResult, unknown, { expectedSeqOverride?: number } | undefined>({
-    mutationFn: async (params?: { expectedSeqOverride?: number }) => {
-      if (!db || !classId || !selectedInstance) {
-        throw new Error('Missing instance')
-      }
-      const expectedSeq = params?.expectedSeqOverride ?? getInstanceVersion(selectedInstance) ?? actualSeqHint
-      if (typeof expectedSeq !== 'number') {
+  const deleteMutation = useMutation({
+    mutationFn: async (vars?: { expectedSeqOverride?: number }) => {
+      if (!selectedId) throw new Error('Select an instance')
+      const expectedSeq =
+        vars?.expectedSeqOverride ??
+        getExpectedSeq(
+          detailQuery.data
+            ? (detailQuery.data as { data?: InstanceItem }).data ?? (detailQuery.data as InstanceItem)
+            : null,
+        )
+      if (expectedSeq === null) {
         throw new Error('expected_seq missing')
       }
-      const result = await deleteInstance(requestContext, db, classId, getInstanceId(selectedInstance), context.branch, expectedSeq)
-      return requireCommandResult(result, 'Delete instance')
+      return deleteInstance(requestContext, dbName, classId, selectedId, branch, expectedSeq)
     },
-    onSuccess: (result) => {
-      setActualSeqHint(null)
-      trackCommand({
-        id: result.command_id,
-        kind: 'INSTANCE_WRITE',
-        title: `Delete ${classId}`,
-        target: { dbName: db ?? '' },
-        context: { project: db ?? null, branch: context.branch },
-        submittedAt: new Date().toISOString(),
-        writePhase: 'SUBMITTED',
-        indexPhase: 'UNKNOWN',
-      })
+    onSuccess: (payload) => {
+      const commandId = payload.command_id
+      if (commandId) {
+        registerCommand({
+          commandId,
+          kind: 'DELETE_INSTANCE',
+          targetClassId: classId,
+          targetInstanceId: selectedId ?? undefined,
+          title: `Delete instance (${classId})`,
+        })
+      }
+      setOccRetry(null)
+      setUnknownLabels([])
+      void showAppToast({ intent: Intent.WARNING, message: 'Delete submitted.' })
+      void queryClient.invalidateQueries({ queryKey: qk.instances(dbName, classId, requestContext.language, { limit, search }) })
+      setSelectedId(null)
+      setDrawerOpen(false)
     },
     onError: (error) => {
-      const actual = extractOccActualSeq(error)
+      const actual = extractActualSeq(error)
       if (actual !== null) {
-        setActualSeqHint(actual)
+        setOccRetry({ action: 'delete', actualSeq: actual })
       }
-      toastApiError(error, context.language)
+      toastApiError(error, language)
     },
   })
 
-  const sampleMutation = useMutation({
-    mutationFn: async () => {
-      if (!db || !classId) {
-        throw new Error('Missing class')
+  const createMutation = useMutation({
+    mutationFn: (payload: { data: Record<string, unknown>; metadata: Record<string, unknown> }) => {
+      if (!classId) {
+        throw new Error('Select a class first')
       }
-      return getSampleValues(requestContext, db, classId)
+      return createInstance(requestContext, dbName, classId, branch, payload)
     },
-    onSuccess: (result) => setSampleValues(result),
-    onError: (error) => toastApiError(error, context.language),
+    onSuccess: (payload) => {
+      const commandId = payload.command_id ?? extractCommandId(payload)
+      if (commandId) {
+        registerCommand({
+          commandId,
+          kind: 'CREATE_INSTANCE',
+          targetClassId: classId,
+          title: `Create instance (${classId})`,
+        })
+      }
+      setCreateUnknownLabels([])
+      void showAppToast({ intent: Intent.SUCCESS, message: 'Create submitted.' })
+    },
+    onError: (error) => {
+      setCreateUnknownLabels(extractUnknownLabels(error))
+      toastApiError(error, language)
+    },
   })
 
-  const instances = useMemo(
-    () => asArray<UnknownRecord>(listQuery.data?.instances ?? listQuery.data?.data?.instances),
-    [listQuery.data],
-  )
+  const bulkCreateMutation = useMutation({
+    mutationFn: (payload: { instances: Array<Record<string, unknown>>; metadata: Record<string, unknown> }) => {
+      if (!classId) {
+        throw new Error('Select a class first')
+      }
+      return bulkCreateInstances(requestContext, dbName, classId, branch, payload)
+    },
+    onSuccess: (payload) => {
+      const commandId = payload.command_id ?? extractCommandId(payload)
+      if (commandId) {
+        registerCommand({
+          commandId,
+          kind: 'BULK_CREATE_INSTANCE',
+          targetClassId: classId,
+          title: `Bulk create (${classId})`,
+        })
+      }
+      setBulkUnknownLabels([])
+      void showAppToast({ intent: Intent.SUCCESS, message: 'Bulk create submitted.' })
+    },
+    onError: (error) => {
+      setBulkUnknownLabels(extractUnknownLabels(error))
+      toastApiError(error, language)
+    },
+  })
 
-  const handleSelectInstance = (item: UnknownRecord) => {
-    setSelectedInstance(item)
-    setDrawerTab('view')
-    setActualSeqHint(null)
+  const handleCreate = () => {
+    setCreateJsonError(null)
+    try {
+      const data = parseJsonObject(createJson, 'Create payload')
+      const metadata = parseJsonObject(createMetadataJson, 'Metadata')
+      createMutation.mutate({ data, metadata })
+    } catch (error) {
+      setCreateJsonError(error instanceof Error ? error.message : 'Invalid JSON')
+    }
   }
+
+  const handleBulkCreate = () => {
+    setBulkJsonError(null)
+    try {
+      const instances = parseJsonArray(bulkJson, 'Instances payload')
+      const metadata = parseJsonObject(bulkMetadataJson, 'Metadata')
+      bulkCreateMutation.mutate({ instances, metadata })
+    } catch (error) {
+      setBulkJsonError(error instanceof Error ? error.message : 'Invalid JSON')
+    }
+  }
+
+  const classOptions = useMemo(() => {
+    const payload = classesQuery.data as { classes?: ClassItem[] } | undefined
+    const list = payload?.classes ?? []
+    return list.map((item) => {
+      const id = (item.id as string | undefined) || (item['@id'] as string | undefined) || ''
+      const label = (item.label as string | undefined) || id
+      return { label: label ? `${label} (${id})` : id, value: id }
+    })
+  }, [classesQuery.data])
+
+  const instances = useMemo(() => {
+    const payload = instancesQuery.data as { instances?: InstanceItem[] } | undefined
+    return payload?.instances ?? []
+  }, [instancesQuery.data])
 
   return (
     <div>
-      <PageHeader title="Instances" subtitle="Branch ignored. 빠른 인스턴스 확인용." />
-      <Callout intent={Intent.WARNING} title="Branch ignored">
-        Instances read API는 branch를 무시합니다. 검증은 Graph Explorer를 사용하세요.
+      <PageHeader title="Instances" subtitle="Read model (branch ignored). Use Graph Explorer for branch-aware checks." />
+      <Callout intent={Intent.WARNING} style={{ marginBottom: 12 }}>
+        Branch ignored for instance reads.
       </Callout>
 
-      {writeError ? (
-        <ApiErrorCallout
-          error={writeError}
-          language={context.language}
-          mappingsUrl={db ? `/db/${encodeURIComponent(db)}/mappings` : undefined}
-        />
-      ) : null}
-
-      <Card elevation={1} className="section-card">
-        <div className="form-row">
-          <HTMLSelect
-            value={classId}
-            onChange={(event) => setClassId(event.currentTarget.value)}
-            options={[{ label: 'Select class', value: '' }, ...registry.classOptions]}
-          />
-          <InputGroup placeholder="search" value={search} onChange={(event) => setSearch(event.currentTarget.value)} />
-          <NumericInput value={limit} min={1} max={1000} onValueChange={(value) => setLimit(value)} />
-          <NumericInput value={offset} min={0} onValueChange={(value) => setOffset(value)} />
-          <Button onClick={() => listQuery.refetch()} icon="refresh">
+      <div className="page-grid two-col">
+        <Card className="card-stack">
+          <FormGroup label="Class">
+            <HTMLSelect
+              options={[{ label: 'Select class', value: '' }, ...classOptions]}
+              value={classId}
+              onChange={(event) => setClassId(event.currentTarget.value)}
+            />
+          </FormGroup>
+          <FormGroup label="Search">
+            <InputGroup value={search} onChange={(event) => setSearch(event.currentTarget.value)} />
+          </FormGroup>
+          <FormGroup label="Limit">
+            <InputGroup value={limit} onChange={(event) => setLimit(event.currentTarget.value)} />
+          </FormGroup>
+          <Button onClick={() => void instancesQuery.refetch()} disabled={!classId} loading={instancesQuery.isFetching}>
             Refresh
           </Button>
-        </div>
-      </Card>
+          <Divider />
+          {instances.length === 0 ? (
+            <Text className="muted">No instances.</Text>
+          ) : (
+            <HTMLTable striped interactive className="command-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Version</th>
+                  <th>Event timestamp</th>
+                  <th>Summary</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {instances.map((item) => {
+                  const id = getInstanceId(item) ?? 'unknown'
+                  const version =
+                    typeof item.version === 'number'
+                      ? item.version
+                      : (item.index_status as { event_sequence?: number } | undefined)?.event_sequence
+                  const timestamp =
+                    formatTimestamp(item.event_timestamp) ||
+                    formatTimestamp(item.updated_at) ||
+                    formatTimestamp(item.created_at)
+                  const summary = getInstanceSummary(item)
+                  return (
+                    <tr key={id}>
+                      <td>{id}</td>
+                      <td>{version ?? ''}</td>
+                      <td>{timestamp}</td>
+                      <td>{summary}</td>
+                      <td>
+                        <Button
+                          small
+                          onClick={() => {
+                            setSelectedId(id)
+                            setDrawerOpen(true)
+                          }}
+                        >
+                          Open
+                        </Button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </HTMLTable>
+          )}
+          <Divider />
+          <div className="card-title">Write instances</div>
+          <div className="form-row">
+            <Tag minimal intent={Intent.WARNING}>Branch: {branch}</Tag>
+            {!classId ? <Text className="muted small">Select a class to enable writes.</Text> : null}
+          </div>
+          <Tabs id="instance-write-tabs">
+            <Tab
+              id="create"
+              title="Create"
+              panel={
+                <div className="card-stack">
+                  <FormGroup label="Create payload (JSON object, label keys)">
+                    <TextArea
+                      value={createJson}
+                      onChange={(event) => setCreateJson(event.currentTarget.value)}
+                      rows={6}
+                    />
+                  </FormGroup>
+                  <FormGroup label="Metadata (JSON object)">
+                    <TextArea
+                      value={createMetadataJson}
+                      onChange={(event) => setCreateMetadataJson(event.currentTarget.value)}
+                      rows={4}
+                    />
+                  </FormGroup>
+                  {createJsonError ? <Callout intent={Intent.DANGER}>{createJsonError}</Callout> : null}
+                  {createUnknownLabels.length ? (
+                    <Callout intent={Intent.WARNING}>
+                      Unknown labels: {createUnknownLabels.join(', ')}
+                      <div style={{ marginTop: 6 }}>
+                        <Button small onClick={() => navigate(`/db/${encodeURIComponent(dbName)}/mappings`)}>
+                          Open mappings
+                        </Button>
+                      </div>
+                    </Callout>
+                  ) : null}
+                  <Button
+                    intent={Intent.PRIMARY}
+                    onClick={handleCreate}
+                    disabled={!classId}
+                    loading={createMutation.isPending}
+                  >
+                    Create instance
+                  </Button>
+                </div>
+              }
+            />
+            <Tab
+              id="bulk"
+              title="Bulk create"
+              panel={
+                <div className="card-stack">
+                  <FormGroup label="Instances (JSON array of objects)">
+                    <TextArea
+                      value={bulkJson}
+                      onChange={(event) => setBulkJson(event.currentTarget.value)}
+                      rows={6}
+                    />
+                  </FormGroup>
+                  <FormGroup label="Metadata (JSON object)">
+                    <TextArea
+                      value={bulkMetadataJson}
+                      onChange={(event) => setBulkMetadataJson(event.currentTarget.value)}
+                      rows={4}
+                    />
+                  </FormGroup>
+                  {bulkJsonError ? <Callout intent={Intent.DANGER}>{bulkJsonError}</Callout> : null}
+                  {bulkUnknownLabels.length ? (
+                    <Callout intent={Intent.WARNING}>
+                      Unknown labels: {bulkUnknownLabels.join(', ')}
+                      <div style={{ marginTop: 6 }}>
+                        <Button small onClick={() => navigate(`/db/${encodeURIComponent(dbName)}/mappings`)}>
+                          Open mappings
+                        </Button>
+                      </div>
+                    </Callout>
+                  ) : null}
+                  <Button
+                    intent={Intent.PRIMARY}
+                    onClick={handleBulkCreate}
+                    disabled={!classId}
+                    loading={bulkCreateMutation.isPending}
+                  >
+                    Submit bulk create
+                  </Button>
+                </div>
+              }
+            />
+          </Tabs>
+          <Divider />
+          <JsonViewer value={sampleQuery.data} empty="Sample values will appear here." />
+        </Card>
 
-      <Card elevation={1} className="section-card">
-        <HTMLTable striped interactive className="full-width">
-          <thead>
-            <tr>
-              <th>Instance ID</th>
-              <th>Version</th>
-              <th>Timestamp</th>
-            </tr>
-          </thead>
-          <tbody>
-            {instances.map((item) => (
-              <tr key={getInstanceId(item)} onClick={() => handleSelectInstance(item)}>
-                <td>{getInstanceId(item)}</td>
-                <td>{getInstanceVersion(item) ?? '-'}</td>
-                <td>
-                  {getString(item.event_timestamp) ?? getString(item.updated_at) ?? '-'}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </HTMLTable>
-      </Card>
-
-      <Card elevation={1} className="section-card">
-        <div className="card-title">
-          <H5>Sample values</H5>
-          <Button onClick={() => sampleMutation.mutate()} disabled={!classId} loading={sampleMutation.isPending}>
-            Load sample
-          </Button>
-        </div>
-        <JsonView value={sampleValues} fallback="샘플 값을 확인하세요." />
-      </Card>
-
-      <Card elevation={1} className="section-card">
-        <div className="card-title">
-          <H5>Create instance</H5>
-          <Button intent={Intent.PRIMARY} onClick={() => createMutation.mutate()} disabled={!classId || !createJson}>
-            Create (202)
-          </Button>
-        </div>
-        <TextArea
-          rows={6}
-          value={createJson}
-          onChange={(event) => setCreateJson(event.currentTarget.value)}
-          placeholder='{"라벨": "값"}'
-        />
-      </Card>
-
-      <Card elevation={1} className="section-card">
-        <div className="card-title">
-          <H5>Bulk create</H5>
-          <Button intent={Intent.PRIMARY} onClick={() => bulkMutation.mutate()} disabled={!classId || !bulkJson}>
-            Bulk Create (202)
-          </Button>
-        </div>
-        <TextArea
-          rows={6}
-          value={bulkJson}
-          onChange={(event) => setBulkJson(event.currentTarget.value)}
-          placeholder='[{"라벨": "값"}]'
-        />
-      </Card>
+        <Card className="card-stack">
+          <div className="card-title">Detail</div>
+          {selectedId ? (
+            <>
+              <Text className="muted small">Instance: {selectedId}</Text>
+              <JsonViewer value={detailQuery.data} empty="No detail loaded." />
+              <Button
+                intent={Intent.PRIMARY}
+                onClick={() => setDrawerOpen(true)}
+                disabled={!selectedId}
+              >
+                Open drawer
+              </Button>
+            </>
+          ) : (
+            <Text className="muted">Select an instance.</Text>
+          )}
+        </Card>
+      </div>
 
       <Drawer
-        isOpen={Boolean(selectedInstance)}
-        onClose={() => {
-          setSelectedInstance(null)
-          setActualSeqHint(null)
-          setEditJson('')
-        }}
-        title={selectedInstance ? getInstanceId(selectedInstance) : 'Instance'}
+        isOpen={drawerOpen && Boolean(selectedId)}
+        onClose={() => setDrawerOpen(false)}
         position="right"
-        size="50%"
+        title={selectedId ?? 'Instance'}
+        className="command-drawer"
       >
-        <div className="drawer-body">
-          <Tabs id="instance-tabs" selectedTabId={drawerTab} onChange={(tabId) => setDrawerTab(tabId as string)}>
-            <Tab id="view" title="View" />
-            <Tab id="edit" title="Edit" />
-            <Tab id="audit" title="Audit" />
-            <Tab id="lineage" title="Lineage" />
-          </Tabs>
-          {drawerTab === 'view' ? <JsonView value={detailQuery.data} /> : null}
-          {drawerTab === 'edit' ? (
-            <div>
-              {actualSeqHint !== null ? (
-                <Callout intent={Intent.WARNING}>
-                  actual_seq: {actualSeqHint}
-                  <div className="button-row">
+        <div className="command-drawer-body">
+          <div className="form-row">
+            <Tag minimal intent={Intent.WARNING}>Branch ignored</Tag>
+            {selectedInstance ? (
+              <Tag minimal>
+                expected_seq {getExpectedSeq(selectedInstance) ?? 'n/a'}
+              </Tag>
+            ) : null}
+          </div>
+
+          <Tabs id="instance-tabs" selectedTabId={activeTab} onChange={(value) => setActiveTab(value as string)}>
+            <Tab
+              id="view"
+              title="View"
+              panel={<JsonViewer value={detailQuery.data} empty="No detail loaded." />}
+            />
+            <Tab
+              id="edit"
+              title="Edit"
+              panel={
+                <div className="card-stack">
+                  <FormGroup label="Edit payload (JSON)">
+                    <TextArea value={editJson} onChange={(event) => setEditJson(event.currentTarget.value)} rows={10} />
+                  </FormGroup>
+                  {unknownLabels.length ? (
+                    <Callout intent={Intent.WARNING}>
+                      Unknown labels: {unknownLabels.join(', ')}
+                      <div style={{ marginTop: 6 }}>
+                        <Button small onClick={() => navigate(`/db/${encodeURIComponent(dbName)}/mappings`)}>
+                          Open mappings
+                        </Button>
+                      </div>
+                    </Callout>
+                  ) : null}
+                  {occRetry ? (
+                    <Callout intent={Intent.WARNING}>
+                      OCC conflict. actual_seq = {occRetry.actualSeq}
+                      <div style={{ marginTop: 6 }}>
+                        <Button
+                          small
+                          onClick={() => {
+                            if (occRetry.action === 'update') {
+                              updateMutation.mutate({ expectedSeqOverride: occRetry.actualSeq })
+                            } else {
+                              deleteMutation.mutate({ expectedSeqOverride: occRetry.actualSeq })
+                            }
+                          }}
+                        >
+                          Retry with actual_seq
+                        </Button>
+                      </div>
+                    </Callout>
+                  ) : null}
+                  <div className="form-row">
                     <Button
-                      minimal
-                      icon="refresh"
-                      onClick={() => updateMutation.mutate({ expectedSeqOverride: actualSeqHint })}
+                      intent={Intent.PRIMARY}
+                      onClick={() => updateMutation.mutate(undefined)}
+                      disabled={!selectedId}
+                      loading={updateMutation.isPending}
                     >
-                      Use actual_seq and retry update
+                      Update
                     </Button>
                     <Button
-                      minimal
-                      icon="refresh"
                       intent={Intent.DANGER}
-                      onClick={() => deleteMutation.mutate({ expectedSeqOverride: actualSeqHint })}
+                      onClick={() => deleteMutation.mutate(undefined)}
+                      disabled={!selectedId}
+                      loading={deleteMutation.isPending}
                     >
-                      Use actual_seq and retry delete
+                      Delete
                     </Button>
                   </div>
-                </Callout>
-              ) : null}
-              <TextArea rows={10} value={editJson} onChange={(event) => setEditJson(event.currentTarget.value)} />
-              <div className="button-row">
-                <Button intent={Intent.PRIMARY} onClick={() => updateMutation.mutate(undefined)}>
-                  Update (202)
-                </Button>
-                <Button intent={Intent.DANGER} onClick={() => deleteMutation.mutate(undefined)}>
-                  Delete (202)
-                </Button>
-              </div>
-            </div>
-          ) : null}
-          {drawerTab === 'audit' ? (
-            <Link to={`/db/${encodeURIComponent(db ?? '')}/audit`}>Open Audit Logs</Link>
-          ) : null}
-          {drawerTab === 'lineage' ? (
-            <Link to={`/db/${encodeURIComponent(db ?? '')}/lineage`}>Open Lineage</Link>
-          ) : null}
+                </div>
+              }
+            />
+            <Tab
+              id="audit"
+              title="Audit Links"
+              panel={
+                <div className="card-stack">
+                  <Text className="muted">Open audit logs filtered for this instance.</Text>
+                  <Button
+                    onClick={() =>
+                      navigateWithSearch(`/db/${encodeURIComponent(dbName)}/audit`, {
+                        partition_key: `db:${dbName}`,
+                        resource_id: selectedId ?? '',
+                        resource_type: classId || undefined,
+                      })
+                    }
+                    disabled={!selectedId}
+                  >
+                    Open Audit Logs
+                  </Button>
+                </div>
+              }
+            />
+            <Tab
+              id="lineage"
+              title="Lineage Links"
+              panel={
+                <div className="card-stack">
+                  <Text className="muted">Open lineage graph with this instance id as root.</Text>
+                  <Button
+                    onClick={() =>
+                      navigateWithSearch(`/db/${encodeURIComponent(dbName)}/lineage`, {
+                        root: selectedId ?? '',
+                      })
+                    }
+                    disabled={!selectedId}
+                  >
+                    Open Lineage
+                  </Button>
+                </div>
+              }
+            />
+          </Tabs>
         </div>
       </Drawer>
     </div>

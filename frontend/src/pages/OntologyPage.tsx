@@ -1,17 +1,14 @@
-import { useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useEffect, useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Button,
   Callout,
   Card,
   FormGroup,
-  H5,
   HTMLSelect,
   InputGroup,
   Intent,
-  Tab,
-  Tabs,
+  Text,
   TextArea,
 } from '@blueprintjs/core'
 import {
@@ -20,682 +17,396 @@ import {
   getOntology,
   getOntologySchema,
   getSummary,
+  listOntology,
   updateOntology,
-  validateOntology,
+  validateOntologyCreate,
   validateOntologyUpdate,
 } from '../api/bff'
-import { PageHeader } from '../components/PageHeader'
-import { JsonView } from '../components/JsonView'
-import { useOntologyRegistry, type OntologyClass } from '../hooks/useOntologyRegistry'
+import { useRequestContext } from '../api/useRequestContext'
+import { DangerConfirmDialog } from '../components/DangerConfirmDialog'
+import { JsonViewer } from '../components/JsonViewer'
+import { PageHeader } from '../components/layout/PageHeader'
 import { showAppToast } from '../app/AppToaster'
+import { useCommandRegistration } from '../commands/useCommandRegistration'
+import { extractCommandId } from '../commands/extractCommandId'
 import { toastApiError } from '../errors/toastApiError'
 import { qk } from '../query/queryKeys'
 import { useAppStore } from '../store/useAppStore'
-import { formatLabel, type LocalizedText } from '../utils/labels'
-import { extractOccActualSeq } from '../utils/occ'
-import { asRecord, getBoolean, getNumber, getString } from '../utils/typed'
 
-type DraftProperty = {
-  name: string
-  type: string
-  label: string
-  required: boolean
-  primary_key: boolean
-}
+type OntologyItem = Record<string, unknown>
 
-type DraftRelationship = {
-  predicate: string
-  target: string
-  label: string
-  cardinality: string
-  inverse_predicate?: string
-  inverse_label?: string
-}
-
-type OntologyDraft = {
-  id: string
-  label: string
-  description?: string
-  parent_class?: string
-  abstract?: boolean
-  properties: DraftProperty[]
-  relationships: DraftRelationship[]
-}
-
-const buildDraftFromClass = (klass: OntologyClass, lang: string): OntologyDraft => ({
-  id: klass.id ?? '',
-  label: formatLabel(klass.label, lang, klass.id ?? ''),
-  description: formatLabel(klass.description, lang, ''),
-  parent_class: getString(asRecord(klass).parent_class) ?? undefined,
-  abstract: getBoolean(klass.abstract) ?? false,
-  properties:
-    klass.properties?.map((prop) => {
-      const propRecord = asRecord(prop)
-      return {
-        name: prop.name ?? '',
-        type: prop.type ?? 'xsd:string',
-        label: formatLabel(prop.label, lang, prop.name ?? ''),
-        required: Boolean(prop.required),
-        primary_key: Boolean(prop.primary_key ?? propRecord.primaryKey),
-      }
-    }) ?? [],
-  relationships:
-    klass.relationships?.map((rel) => {
-      const relRecord = asRecord(rel)
-      return {
-        predicate: rel.predicate ?? '',
-        target: rel.target ?? '',
-        label: formatLabel(rel.label, lang, rel.predicate ?? ''),
-        cardinality: rel.cardinality ?? '1:n',
-        inverse_predicate: getString(relRecord.inverse_predicate) ?? undefined,
-        inverse_label: formatLabel(relRecord.inverse_label as LocalizedText, lang, ''),
-      }
-    }) ?? [],
-})
-
-const emptyDraft = (): OntologyDraft => ({
-  id: '',
-  label: '',
+const buildNewOntologyDraft = (lang: string) => ({
+  label: lang === 'ko' ? '새 클래스' : 'NewClass',
   description: '',
-  parent_class: '',
-  abstract: false,
   properties: [],
   relationships: [],
+  metadata: {},
 })
 
-export const OntologyPage = () => {
-  const { db } = useParams()
-  const context = useAppStore((state) => state.context)
-  const authToken = useAppStore((state) => state.authToken)
-  const adminToken = useAppStore((state) => state.adminToken)
-  const trackCommand = useAppStore((state) => state.trackCommand)
+const sanitizeUpdatePayload = (payload: Record<string, unknown>) => {
+  const clone = { ...payload }
+  delete clone.id
+  delete clone.version
+  delete clone.created_at
+  delete clone.updated_at
+  return clone
+}
 
-  const requestContext = useMemo(
-    () => ({ language: context.language, authToken, adminToken }),
-    [adminToken, authToken, context.language],
-  )
+const coerceExpectedSeq = (value: unknown) =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null
+
+export const OntologyPage = ({ dbName }: { dbName: string }) => {
+  const queryClient = useQueryClient()
+  const requestContext = useRequestContext()
+  const language = useAppStore((state) => state.context.language)
+  const branch = useAppStore((state) => state.context.branch)
+  const adminToken = useAppStore((state) => state.adminToken)
+  const adminMode = useAppStore((state) => state.adminMode)
+  const registerCommand = useCommandRegistration()
+
+  const [selectedClass, setSelectedClass] = useState<string | null>(null)
+  const [draft, setDraft] = useState(() => JSON.stringify(buildNewOntologyDraft(language), null, 2))
+  const [draftError, setDraftError] = useState<string | null>(null)
+  const [validationResult, setValidationResult] = useState<unknown>(null)
+  const [confirmAction, setConfirmAction] = useState<'apply' | 'delete' | null>(null)
+  const [schemaFormat, setSchemaFormat] = useState<'json' | 'jsonld' | 'owl'>('json')
+
+  const listQuery = useQuery({
+    queryKey: qk.ontologyList(dbName, branch, requestContext.language),
+    queryFn: () => listOntology(requestContext, dbName, branch),
+  })
 
   const summaryQuery = useQuery({
-    queryKey: qk.summary({ dbName: db ?? null, branch: context.branch, language: context.language }),
-    queryFn: () => getSummary(requestContext, { dbName: db ?? null, branch: context.branch }),
-    enabled: Boolean(db),
+    queryKey: qk.summary({ dbName, branch, language: requestContext.language }),
+    queryFn: () => getSummary(requestContext, { dbName, branch }),
   })
-
-  const summaryRecord = asRecord(summaryQuery.data)
-  const policy = asRecord(asRecord(summaryRecord.data).policy)
-  const isProtected = getBoolean(policy.is_protected_branch) ?? false
-
-  const registry = useOntologyRegistry(db, context.branch)
-  const [selectedClassId, setSelectedClassId] = useState<string>('')
-  const [search, setSearch] = useState('')
-  const [draft, setDraft] = useState<OntologyDraft>(emptyDraft())
-  const [tab, setTab] = useState('properties')
-  const [validationResult, setValidationResult] = useState<unknown>(null)
-  const [schemaFormat, setSchemaFormat] = useState('json')
-  const [schemaResult, setSchemaResult] = useState<unknown>(null)
-  const [changeReason, setChangeReason] = useState('')
-  const [adminActor, setAdminActor] = useState('')
-  const [actualSeqHint, setActualSeqHint] = useState<number | null>(null)
-
-  const handleSelectClass = (classId: string) => {
-    setSelectedClassId(classId)
-    setDraft(emptyDraft())
-    setSchemaResult(null)
-    setValidationResult(null)
-    setActualSeqHint(null)
-  }
 
   const detailQuery = useQuery({
-    queryKey:
-      db && selectedClassId
-        ? qk.ontologyDetail({ dbName: db, classLabel: selectedClassId, branch: context.branch, language: context.language })
-        : ['bff', 'ontology-detail', 'empty'],
-    queryFn: () => getOntology(requestContext, db ?? '', selectedClassId, context.branch),
-    enabled: Boolean(db && selectedClassId),
-    onSuccess: (data) => {
-      setDraft(buildDraftFromClass(data as OntologyClass, context.language))
-      setSchemaResult(null)
-      setValidationResult(null)
-      setActualSeqHint(null)
-    },
+    queryKey: selectedClass
+      ? qk.ontology(dbName, selectedClass, branch, requestContext.language)
+      : ['ontology', 'none'],
+    queryFn: () => getOntology(requestContext, dbName, selectedClass ?? '', branch),
+    enabled: Boolean(selectedClass),
   })
 
-  const detailRecord = asRecord(detailQuery.data)
-  const expectedSeq = getNumber(detailRecord.version) ?? getNumber(detailRecord.expected_seq)
-
-  const buildPayload = (): unknown => ({
-    id: draft.id,
-    label: draft.label,
-    description: draft.description || undefined,
-    parent_class: draft.parent_class || undefined,
-    abstract: Boolean(draft.abstract),
-    properties: draft.properties.map((prop) => ({
-      name: prop.name,
-      type: prop.type,
-      label: prop.label,
-      required: Boolean(prop.required),
-      primary_key: Boolean(prop.primary_key),
-    })),
-    relationships: draft.relationships.map((rel) => ({
-      predicate: rel.predicate,
-      target: rel.target,
-      label: rel.label,
-      cardinality: rel.cardinality,
-      inverse_predicate: rel.inverse_predicate || undefined,
-      inverse_label: rel.inverse_label || undefined,
-    })),
+  const schemaQuery = useQuery({
+    queryKey: selectedClass
+      ? qk.ontologySchema(dbName, selectedClass, branch, schemaFormat, requestContext.language)
+      : ['ontology-schema', 'none'],
+    queryFn: () =>
+      getOntologySchema(requestContext, dbName, selectedClass ?? '', branch, schemaFormat),
+    enabled: false,
   })
 
-  const adminActorValue = adminActor.trim()
-  const extraHeaders = isProtected
-    ? {
-        'X-Change-Reason': changeReason.trim(),
-        ...(adminActorValue ? { 'X-Admin-Actor': adminActorValue } : {}),
-      }
-    : undefined
+  const isProtected = Boolean(
+    (summaryQuery.data as { data?: { policy?: { is_protected_branch?: boolean } } } | undefined)?.data
+      ?.policy?.is_protected_branch,
+  )
 
-  const canApplyProtected = !isProtected || (changeReason.trim() && adminToken)
+  useEffect(() => {
+    if (!selectedClass) {
+      const next = buildNewOntologyDraft(language)
+      setDraft(JSON.stringify(next, null, 2))
+      return
+    }
+    if (detailQuery.data) {
+      setDraft(JSON.stringify(detailQuery.data, null, 2))
+    }
+  }, [detailQuery.data, language, selectedClass])
 
-  const applyMutation = useMutation({
-    mutationFn: async (params?: { expectedSeqOverride?: number }) => {
-      const payload = buildPayload()
-      if (!db) {
-        throw new Error('Missing db')
-      }
-      if (selectedClassId) {
-        const seq = params?.expectedSeqOverride ?? (typeof expectedSeq === 'number' ? expectedSeq : actualSeqHint)
-        if (typeof seq !== 'number') {
-          throw new Error('expected_seq missing')
-        }
-        return updateOntology(requestContext, db, selectedClassId, context.branch, seq, payload, extraHeaders)
-      }
-      return createOntology(requestContext, db, context.branch, payload, extraHeaders)
-    },
-    onSuccess: (result) => {
-      if (!db) {
-        return
-      }
-      const commandId = getString(asRecord(result).commandId)
-      if (commandId) {
-        trackCommand({
-          id: commandId,
-          kind: 'ONTOLOGY_APPLY',
-          title: selectedClassId ? `Update ${selectedClassId}` : `Create ${draft.id}`,
-          target: { dbName: db },
-          context: { project: db, branch: context.branch },
-          submittedAt: new Date().toISOString(),
-          writePhase: 'SUBMITTED',
-          indexPhase: 'UNKNOWN',
-        })
-      }
-      void registry.refetch()
-      void showAppToast({ intent: Intent.SUCCESS, message: '온톨로지 적용 요청 완료' })
-    },
-    onError: (error) => {
-      const actualSeq = extractOccActualSeq(error)
-      if (actualSeq !== null) {
-        setActualSeqHint(actualSeq)
-      }
-      toastApiError(error, context.language)
-    },
-  })
+  const ontologies = useMemo(() => {
+    const payload = listQuery.data ?? {}
+    const list = (payload as { ontologies?: OntologyItem[]; data?: { ontologies?: OntologyItem[] } })
+    return list.ontologies ?? list.data?.ontologies ?? []
+  }, [listQuery.data])
 
-  const deleteMutation = useMutation({
-    mutationFn: async (params?: { expectedSeqOverride?: number }) => {
-      if (!db || !selectedClassId) {
-        throw new Error('Missing class')
-      }
-      const seq = params?.expectedSeqOverride ?? (typeof expectedSeq === 'number' ? expectedSeq : actualSeqHint)
-      if (typeof seq !== 'number') {
-        throw new Error('expected_seq missing')
-      }
-      return deleteOntology(requestContext, db, selectedClassId, context.branch, seq, extraHeaders)
-    },
-    onSuccess: (result) => {
-      if (!db) {
-        return
-      }
-      const commandId = getString(asRecord(result).commandId)
-      if (commandId) {
-        trackCommand({
-          id: commandId,
-          kind: 'ONTOLOGY_DELETE',
-          title: `Delete ${selectedClassId}`,
-          target: { dbName: db },
-          context: { project: db, branch: context.branch },
-          submittedAt: new Date().toISOString(),
-          writePhase: 'SUBMITTED',
-          indexPhase: 'UNKNOWN',
-        })
-      }
-      handleSelectClass('')
-      void registry.refetch()
-      void showAppToast({ intent: Intent.SUCCESS, message: '삭제 요청 전송 완료' })
-    },
-    onError: (error) => {
-      const actualSeq = extractOccActualSeq(error)
-      if (actualSeq !== null) {
-        setActualSeqHint(actualSeq)
-      }
-      toastApiError(error, context.language)
-    },
-  })
+  const selectedExpectedSeq = useMemo(() => {
+    if (!detailQuery.data || typeof detailQuery.data !== 'object') {
+      return null
+    }
+    return coerceExpectedSeq((detailQuery.data as { version?: number }).version)
+  }, [detailQuery.data])
 
   const validateMutation = useMutation({
     mutationFn: async () => {
-      const payload = buildPayload()
-      if (!db) {
-        throw new Error('Missing db')
+      if (!selectedClass) {
+        return validateOntologyCreate(requestContext, dbName, branch, JSON.parse(draft))
       }
-      if (selectedClassId) {
-        return validateOntologyUpdate(requestContext, db, selectedClassId, context.branch, payload)
-      }
-      return validateOntology(requestContext, db, context.branch, payload)
+      const payload = sanitizeUpdatePayload(JSON.parse(draft))
+      return validateOntologyUpdate(requestContext, dbName, selectedClass, branch, payload)
     },
     onSuccess: (result) => setValidationResult(result),
-    onError: (error) => toastApiError(error, context.language),
-  })
-
-  const schemaMutation = useMutation({
-    mutationFn: async () => {
-      if (!db || !selectedClassId) {
-        throw new Error('Missing class')
-      }
-      return getOntologySchema(requestContext, db, selectedClassId, context.branch, schemaFormat)
+    onError: (error) => {
+      setValidationResult(null)
+      toastApiError(error, language)
     },
-    onSuccess: (result) => setSchemaResult(result),
-    onError: (error) => toastApiError(error, context.language),
   })
 
-  const filteredClasses = useMemo(() => {
-    const term = search.trim().toLowerCase()
-    if (!term) {
-      return registry.classOptions
+  const applyMutation = useMutation({
+    mutationFn: async (reason?: string) => {
+      const parsed = JSON.parse(draft)
+      if (!selectedClass) {
+        return createOntology(requestContext, dbName, branch, parsed, reason ? { 'X-Change-Reason': reason } : undefined)
+      }
+      if (selectedExpectedSeq === null) {
+        throw new Error('expected_seq missing')
+      }
+      const payload = sanitizeUpdatePayload(parsed)
+      return updateOntology(
+        requestContext,
+        dbName,
+        selectedClass,
+        branch,
+        selectedExpectedSeq,
+        payload,
+        reason ? { 'X-Change-Reason': reason } : undefined,
+      )
+    },
+    onSuccess: (payload) => {
+      const commandId = extractCommandId(payload)
+      let targetClassId = selectedClass ?? undefined
+      if (!targetClassId) {
+        try {
+          const parsed = JSON.parse(draft) as { id?: string; '@id'?: string; label?: unknown }
+          targetClassId = String(parsed.id ?? parsed['@id'] ?? '').trim() || undefined
+        } catch {
+          targetClassId = undefined
+        }
+      }
+      if (commandId) {
+        registerCommand({
+          commandId,
+          kind: selectedClass ? 'UPDATE_ONTOLOGY' : 'CREATE_ONTOLOGY',
+          targetClassId,
+          title: selectedClass ? `Update ontology: ${selectedClass}` : 'Create ontology',
+        })
+      }
+      void showAppToast({ intent: Intent.SUCCESS, message: 'Ontology update submitted.' })
+      void queryClient.invalidateQueries({ queryKey: qk.ontologyList(dbName, branch, requestContext.language) })
+      if (selectedClass) {
+        void queryClient.invalidateQueries({
+          queryKey: qk.ontology(dbName, selectedClass, branch, requestContext.language),
+        })
+      }
+    },
+    onError: (error) => toastApiError(error, language),
+    onSettled: () => setConfirmAction(null),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: async (reason?: string) => {
+      if (!selectedClass || selectedExpectedSeq === null) {
+        throw new Error('Select a class first')
+      }
+      return deleteOntology(
+        requestContext,
+        dbName,
+        selectedClass,
+        branch,
+        selectedExpectedSeq,
+        reason ? { 'X-Change-Reason': reason } : undefined,
+      )
+    },
+    onSuccess: (payload) => {
+      const commandId = extractCommandId(payload)
+      if (commandId) {
+        registerCommand({
+          commandId,
+          kind: 'DELETE_ONTOLOGY',
+          targetClassId: selectedClass ?? undefined,
+          title: selectedClass ? `Delete ontology: ${selectedClass}` : 'Delete ontology',
+        })
+      }
+      void showAppToast({ intent: Intent.WARNING, message: 'Delete submitted.' })
+      void queryClient.invalidateQueries({ queryKey: qk.ontologyList(dbName, branch, requestContext.language) })
+      setSelectedClass(null)
+    },
+    onError: (error) => toastApiError(error, language),
+    onSettled: () => setConfirmAction(null),
+  })
+
+  const handleValidate = () => {
+    setDraftError(null)
+    try {
+      JSON.parse(draft)
+      validateMutation.mutate(undefined)
+    } catch (error) {
+      setDraftError('Invalid JSON')
     }
-    return registry.classOptions.filter(
-      (option) =>
-        option.label.toLowerCase().includes(term) || option.value.toLowerCase().includes(term),
-    )
-  }, [registry.classOptions, search])
+  }
+
+  const handleApply = () => {
+    setDraftError(null)
+    try {
+      JSON.parse(draft)
+    } catch {
+      setDraftError('Invalid JSON')
+      return
+    }
+    if (isProtected) {
+      setConfirmAction('apply')
+      return
+    }
+    applyMutation.mutate(undefined)
+  }
+
+  const handleDelete = () => {
+    if (!selectedClass) {
+      return
+    }
+    if (isProtected) {
+      setConfirmAction('delete')
+      return
+    }
+    deleteMutation.mutate(undefined)
+  }
 
   return (
     <div>
-      <PageHeader title="Ontology" subtitle="클래스, 속성, 관계를 정의합니다." />
+      <PageHeader title="Ontology" subtitle={`Branch: ${branch}`} />
+
       {isProtected ? (
-        <Callout intent={Intent.WARNING} title="Protected branch">
-          보호 브랜치에서 변경하려면 Admin token과 변경 사유가 필요합니다.
+        <Callout intent={Intent.WARNING} style={{ marginBottom: 12 }}>
+          Protected branch. Admin token + Admin mode required for apply/delete.
         </Callout>
       ) : null}
 
-      <div className="ontology-layout">
-        <Card elevation={1} className="section-card">
+      <div className="page-grid two-col">
+        <Card>
           <div className="card-title">
-            <H5>Classes</H5>
-            <Button minimal icon="add" onClick={() => handleSelectClass('')}>
+            <Text>Classes</Text>
+            <Button
+              small
+              icon="plus"
+              onClick={() => setSelectedClass(null)}
+            >
               New
             </Button>
           </div>
-          <InputGroup
-            placeholder="Search class"
-            value={search}
-            onChange={(event) => setSearch(event.currentTarget.value)}
-          />
-          <div className="list-scroll">
-            {filteredClasses.map((option) => (
-              <Button
-                key={option.value}
-                minimal
-                className={selectedClassId === option.value ? 'list-item active' : 'list-item'}
-                onClick={() => handleSelectClass(option.value)}
-              >
-                {option.label}
-              </Button>
-            ))}
-          </div>
+          {listQuery.isFetching ? <Text className="muted small">Loading...</Text> : null}
+          {ontologies.length === 0 ? (
+            <Text className="muted">No classes found.</Text>
+          ) : (
+            <div className="nav-list">
+              {ontologies.map((item) => {
+                const id = (item.id as string | undefined) || (item['@id'] as string | undefined)
+                const label = (item.label as string | undefined) || id || 'unknown'
+                const active = id && id === selectedClass
+                return (
+                  <button
+                    key={id ?? label}
+                    className={`nav-item ${active ? 'is-active' : ''}`}
+                    onClick={() => setSelectedClass(id ?? label)}
+                  >
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </Card>
 
-        <Card elevation={1} className="section-card">
-          <div className="card-title">
-            <H5>Editor</H5>
-            <div className="muted small">expected_seq: {expectedSeq ?? 'n/a'}</div>
-          </div>
-          <div className="form-grid">
-            <FormGroup label="Class ID">
-              <InputGroup
-                value={draft.id}
-                onChange={(event) => setDraft((prev) => ({ ...prev, id: event.currentTarget.value }))}
-              />
+        <div className="card-stack">
+          <Card>
+            <div className="card-title">
+              <Text>Editor</Text>
+              <div className="form-row">
+                <Button small icon="tick-circle" onClick={handleValidate} loading={validateMutation.isPending}>
+                  Validate
+                </Button>
+                <Button
+                  small
+                  intent={Intent.PRIMARY}
+                  icon="cloud-upload"
+                  onClick={handleApply}
+                  loading={applyMutation.isPending}
+                  disabled={isProtected && (!adminMode || !adminToken)}
+                >
+                  Apply
+                </Button>
+                <Button
+                  small
+                  intent={Intent.DANGER}
+                  icon="trash"
+                  onClick={handleDelete}
+                  loading={deleteMutation.isPending}
+                  disabled={!selectedClass || (isProtected && (!adminMode || !adminToken))}
+                >
+                  Delete
+                </Button>
+              </div>
+            </div>
+            <FormGroup label="Class ID (optional)">
+              <InputGroup value={selectedClass ?? ''} disabled placeholder="Auto-generated for new classes" />
             </FormGroup>
-            <FormGroup label="Label">
-              <InputGroup
-                value={draft.label}
-                onChange={(event) => setDraft((prev) => ({ ...prev, label: event.currentTarget.value }))}
-              />
-            </FormGroup>
-            <FormGroup label="Description">
+            <FormGroup label="JSON payload">
               <TextArea
-                value={draft.description ?? ''}
-                onChange={(event) => setDraft((prev) => ({ ...prev, description: event.currentTarget.value }))}
+                value={draft}
+                onChange={(event) => setDraft(event.currentTarget.value)}
+                rows={14}
               />
             </FormGroup>
-            <FormGroup label="Parent class">
-              <HTMLSelect
-                value={draft.parent_class ?? ''}
-                onChange={(event) => setDraft((prev) => ({ ...prev, parent_class: event.currentTarget.value }))}
-                options={[{ label: 'None', value: '' }, ...registry.classOptions.map((item) => ({ label: item.label, value: item.value }))]}
-              />
-            </FormGroup>
-            <FormGroup label="Abstract">
-              <HTMLSelect
-                value={draft.abstract ? 'true' : 'false'}
-                onChange={(event) =>
-                  setDraft((prev) => ({ ...prev, abstract: event.currentTarget.value === 'true' }))
-                }
-                options={[
-                  { label: 'false', value: 'false' },
-                  { label: 'true', value: 'true' },
-                ]}
-              />
-            </FormGroup>
-          </div>
+            {draftError ? <Callout intent={Intent.DANGER}>{draftError}</Callout> : null}
+          </Card>
 
-          <Tabs id="ontology-tabs" selectedTabId={tab} onChange={(value) => setTab(value as string)}>
-            <Tab id="properties" title="Properties" />
-            <Tab id="relationships" title="Relationships" />
-            <Tab id="validate" title="Validate" />
-            <Tab id="export" title="Export" />
-          </Tabs>
+          <Card>
+            <div className="card-title">Validation</div>
+            <JsonViewer value={validationResult} empty="Run validation to see results." />
+          </Card>
 
-          {tab === 'properties' ? (
-            <div className="table-editor">
-              <Button
-                minimal
-                icon="add"
-                onClick={() =>
-                  setDraft((prev) => ({
-                    ...prev,
-                    properties: [
-                      ...prev.properties,
-                      { name: '', type: 'xsd:string', label: '', required: false, primary_key: false },
-                    ],
-                  }))
-                }
-              >
-                Add property
-              </Button>
-              {draft.properties.map((prop, index) => (
-                <div key={`${prop.name}-${index}`} className="row-grid">
-                  <InputGroup
-                    placeholder="name"
-                    value={prop.name}
-                    onChange={(event) => {
-                      const value = event.currentTarget.value
-                      setDraft((prev) => {
-                        const next = [...prev.properties]
-                        next[index] = { ...next[index], name: value }
-                        return { ...prev, properties: next }
-                      })
-                    }}
-                  />
-                  <InputGroup
-                    placeholder="type"
-                    value={prop.type}
-                    onChange={(event) => {
-                      const value = event.currentTarget.value
-                      setDraft((prev) => {
-                        const next = [...prev.properties]
-                        next[index] = { ...next[index], type: value }
-                        return { ...prev, properties: next }
-                      })
-                    }}
-                  />
-                  <InputGroup
-                    placeholder="label"
-                    value={prop.label}
-                    onChange={(event) => {
-                      const value = event.currentTarget.value
-                      setDraft((prev) => {
-                        const next = [...prev.properties]
-                        next[index] = { ...next[index], label: value }
-                        return { ...prev, properties: next }
-                      })
-                    }}
-                  />
-                  <HTMLSelect
-                    value={prop.required ? 'true' : 'false'}
-                    onChange={(event) => {
-                      const value = event.currentTarget.value === 'true'
-                      setDraft((prev) => {
-                        const next = [...prev.properties]
-                        next[index] = { ...next[index], required: value }
-                        return { ...prev, properties: next }
-                      })
-                    }}
-                    options={[
-                      { label: 'required: false', value: 'false' },
-                      { label: 'required: true', value: 'true' },
-                    ]}
-                  />
-                  <HTMLSelect
-                    value={prop.primary_key ? 'true' : 'false'}
-                    onChange={(event) => {
-                      const value = event.currentTarget.value === 'true'
-                      setDraft((prev) => {
-                        const next = [...prev.properties]
-                        next[index] = { ...next[index], primary_key: value }
-                        return { ...prev, properties: next }
-                      })
-                    }}
-                    options={[
-                      { label: 'pk: false', value: 'false' },
-                      { label: 'pk: true', value: 'true' },
-                    ]}
-                  />
-                  <Button
-                    minimal
-                    icon="trash"
-                    intent={Intent.DANGER}
-                    onClick={() =>
-                      setDraft((prev) => ({
-                        ...prev,
-                        properties: prev.properties.filter((_, i) => i !== index),
-                      }))
-                    }
-                  />
-                </div>
-              ))}
-            </div>
-          ) : null}
-
-          {tab === 'relationships' ? (
-            <div className="table-editor">
-              <Button
-                minimal
-                icon="add"
-                onClick={() =>
-                  setDraft((prev) => ({
-                    ...prev,
-                    relationships: [
-                      ...prev.relationships,
-                      { predicate: '', target: '', label: '', cardinality: '1:n' },
-                    ],
-                  }))
-                }
-              >
-                Add relationship
-              </Button>
-              {draft.relationships.map((rel, index) => (
-                <div key={`${rel.predicate}-${index}`} className="row-grid">
-                  <InputGroup
-                    placeholder="predicate"
-                    value={rel.predicate}
-                    onChange={(event) => {
-                      const value = event.currentTarget.value
-                      setDraft((prev) => {
-                        const next = [...prev.relationships]
-                        next[index] = { ...next[index], predicate: value }
-                        return { ...prev, relationships: next }
-                      })
-                    }}
-                  />
-                  <InputGroup
-                    placeholder="target"
-                    value={rel.target}
-                    onChange={(event) => {
-                      const value = event.currentTarget.value
-                      setDraft((prev) => {
-                        const next = [...prev.relationships]
-                        next[index] = { ...next[index], target: value }
-                        return { ...prev, relationships: next }
-                      })
-                    }}
-                  />
-                  <InputGroup
-                    placeholder="label"
-                    value={rel.label}
-                    onChange={(event) => {
-                      const value = event.currentTarget.value
-                      setDraft((prev) => {
-                        const next = [...prev.relationships]
-                        next[index] = { ...next[index], label: value }
-                        return { ...prev, relationships: next }
-                      })
-                    }}
-                  />
-                  <HTMLSelect
-                    value={rel.cardinality}
-                    onChange={(event) => {
-                      const value = event.currentTarget.value
-                      setDraft((prev) => {
-                        const next = [...prev.relationships]
-                        next[index] = { ...next[index], cardinality: value }
-                        return { ...prev, relationships: next }
-                      })
-                    }}
-                    options={['1:1', '1:n', 'n:1', 'n:m']}
-                  />
-                  <Button
-                    minimal
-                    icon="trash"
-                    intent={Intent.DANGER}
-                    onClick={() =>
-                      setDraft((prev) => ({
-                        ...prev,
-                        relationships: prev.relationships.filter((_, i) => i !== index),
-                      }))
-                    }
-                  />
-                </div>
-              ))}
-            </div>
-          ) : null}
-
-          {tab === 'validate' ? (
-            <div>
-              <Button
-                icon="endorsed"
-                intent={Intent.PRIMARY}
-                onClick={() => validateMutation.mutate()}
-                loading={validateMutation.isPending}
-              >
-                Validate
-              </Button>
-              <JsonView value={validationResult} />
-            </div>
-          ) : null}
-
-          {tab === 'export' ? (
-            <div>
+          <Card>
+            <div className="card-title">
+              <Text>Schema export</Text>
               <div className="form-row">
                 <HTMLSelect
                   value={schemaFormat}
-                  onChange={(event) => setSchemaFormat(event.currentTarget.value)}
                   options={[
                     { label: 'json', value: 'json' },
                     { label: 'jsonld', value: 'jsonld' },
                     { label: 'owl', value: 'owl' },
                   ]}
+                  onChange={(event) => setSchemaFormat(event.currentTarget.value as typeof schemaFormat)}
                 />
                 <Button
                   icon="download"
-                  onClick={() => schemaMutation.mutate()}
-                  disabled={!selectedClassId}
-                  loading={schemaMutation.isPending}
+                  onClick={() => void schemaQuery.refetch()}
+                  disabled={!selectedClass}
                 >
-                  Export Schema
+                  Load schema
                 </Button>
               </div>
-              <JsonView value={schemaResult} />
             </div>
-          ) : null}
-
-          <div className="action-row">
-            {isProtected ? (
-              <div className="protected-form">
-                <FormGroup label="Change reason">
-                  <InputGroup value={changeReason} onChange={(event) => setChangeReason(event.currentTarget.value)} />
-                </FormGroup>
-                <FormGroup label="Admin actor (optional)">
-                  <InputGroup value={adminActor} onChange={(event) => setAdminActor(event.currentTarget.value)} />
-                </FormGroup>
-              </div>
-            ) : null}
-
-            {actualSeqHint !== null ? (
-              <Callout intent={Intent.WARNING} title="OCC Conflict">
-                최신 seq: {actualSeqHint} — 재시도 시 적용됩니다.
-                <div className="button-row">
-                  <Button
-                    minimal
-                    icon="refresh"
-                    onClick={() => applyMutation.mutate({ expectedSeqOverride: actualSeqHint })}
-                    disabled={!selectedClassId || !canApplyProtected}
-                  >
-                    Use actual_seq and retry apply
-                  </Button>
-                  <Button
-                    minimal
-                    icon="refresh"
-                    intent={Intent.DANGER}
-                    onClick={() => deleteMutation.mutate({ expectedSeqOverride: actualSeqHint })}
-                    disabled={!selectedClassId || !canApplyProtected}
-                  >
-                    Use actual_seq and retry delete
-                  </Button>
-                </div>
-              </Callout>
-            ) : null}
-
-            <div className="button-row">
-              <Button
-                intent={Intent.PRIMARY}
-                icon="floppy-disk"
-                onClick={() => applyMutation.mutate(undefined)}
-                loading={applyMutation.isPending}
-                disabled={!draft.id || !draft.label || !canApplyProtected}
-              >
-                Apply (202)
-              </Button>
-              <Button
-                intent={Intent.DANGER}
-                icon="trash"
-                onClick={() => deleteMutation.mutate(undefined)}
-                loading={deleteMutation.isPending}
-                disabled={!selectedClassId || !canApplyProtected}
-              >
-                Delete (202)
-              </Button>
-            </div>
-          </div>
-        </Card>
-
-        <Card elevation={1} className="section-card">
-          <div className="card-title">
-            <H5>Policy</H5>
-          </div>
-          <JsonView value={policy} />
-        </Card>
+            <JsonViewer value={schemaQuery.data} empty="Select a class to export schema." />
+          </Card>
+        </div>
       </div>
+
+      <DangerConfirmDialog
+        isOpen={Boolean(confirmAction)}
+        title={confirmAction === 'delete' ? 'Delete class' : 'Apply ontology changes'}
+        description={
+          confirmAction === 'delete'
+            ? 'This will delete the class on the protected branch.'
+            : 'This will apply changes on the protected branch.'
+        }
+        confirmLabel={confirmAction === 'delete' ? 'Delete' : 'Apply'}
+        cancelLabel="Cancel"
+        confirmTextToType={selectedClass ?? 'class'}
+        reasonLabel="Change reason"
+        reasonPlaceholder="Why are you making this change?"
+        typedLabel="Type class id to confirm"
+        typedPlaceholder={selectedClass ?? 'class'}
+        onCancel={() => setConfirmAction(null)}
+        onConfirm={({ reason }) => {
+          if (confirmAction === 'delete') {
+            deleteMutation.mutate(reason)
+          } else if (confirmAction === 'apply') {
+            applyMutation.mutate(reason)
+          }
+        }}
+        loading={applyMutation.isPending || deleteMutation.isPending}
+        footerHint="Protected branches require audit context."
+      />
     </div>
   )
 }

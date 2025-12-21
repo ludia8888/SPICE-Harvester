@@ -1,161 +1,123 @@
 import { useMemo, useState } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
 import { useMutation } from '@tanstack/react-query'
-import {
-  Button,
-  Card,
-  Callout,
-  H5,
-  InputGroup,
-  Tab,
-  Tabs,
-} from '@blueprintjs/core'
+import { Button, Card, Callout, FormGroup, InputGroup, Intent, Text } from '@blueprintjs/core'
 import { getLineageGraph, getLineageImpact, getLineageMetrics } from '../api/bff'
+import { useRequestContext } from '../api/useRequestContext'
 import { GraphCanvas } from '../components/GraphCanvas'
-import { PageHeader } from '../components/PageHeader'
-import { JsonView } from '../components/JsonView'
+import { PageHeader } from '../components/layout/PageHeader'
+import { JsonViewer } from '../components/JsonViewer'
 import { toastApiError } from '../errors/toastApiError'
 import { useAppStore } from '../store/useAppStore'
-import { asArray, asRecord, getString } from '../utils/typed'
 
-type LineageNode = { node_id: string; label?: string; node_type?: string }
+export const LineagePage = ({ dbName }: { dbName: string }) => {
+  const requestContext = useRequestContext()
+  const language = useAppStore((state) => state.context.language)
 
-type LineageEdge = { from_node_id: string; to_node_id: string; edge_type?: string }
-
-const buildLineageElements = (nodes: LineageNode[], edges: LineageEdge[]) => {
-  const nodeElements = nodes.map((node) => ({
-    data: {
-      id: node.node_id,
-      label: node.label ?? node.node_id,
-      raw: node,
-    },
-  }))
-  const edgeElements = edges.map((edge, index) => ({
-    data: {
-      id: `edge-${index}-${edge.from_node_id}-${edge.to_node_id}`,
-      source: edge.from_node_id,
-      target: edge.to_node_id,
-      label: edge.edge_type ?? '',
-      raw: edge,
-    },
-  }))
-  return [...nodeElements, ...edgeElements]
-}
-
-export const LineagePage = () => {
-  const { db } = useParams()
-  const [searchParams] = useSearchParams()
-  const context = useAppStore((state) => state.context)
-  const authToken = useAppStore((state) => state.authToken)
-  const adminToken = useAppStore((state) => state.adminToken)
-
-  const [root, setRoot] = useState(searchParams.get('root') ?? '')
-  const [tab, setTab] = useState('graph')
-  const [graphResult, setGraphResult] = useState<unknown>(null)
-  const [impactResult, setImpactResult] = useState<unknown>(null)
-  const [metricsResult, setMetricsResult] = useState<unknown>(null)
-  const [selectedNodeId, setSelectedNodeId] = useState('')
-
-  const requestContext = useMemo(
-    () => ({ language: context.language, authToken, adminToken }),
-    [adminToken, authToken, context.language],
-  )
+  const searchParams = useMemo(() => {
+    if (typeof window === 'undefined') {
+      return new URLSearchParams()
+    }
+    return new URL(window.location.href).searchParams
+  }, [])
+  const [root, setRoot] = useState(() => searchParams.get('root') ?? '')
 
   const graphMutation = useMutation({
-    mutationFn: () => getLineageGraph(requestContext, { root, db_name: db ?? '' }),
-    onSuccess: (payload) => setGraphResult(payload),
-    onError: (error) => toastApiError(error, context.language),
+    mutationFn: () => getLineageGraph(requestContext, { root, db_name: dbName }),
+    onError: (error) => toastApiError(error, language),
   })
 
   const impactMutation = useMutation({
-    mutationFn: () => getLineageImpact(requestContext, { root, db_name: db ?? '' }),
-    onSuccess: (payload) => setImpactResult(payload),
-    onError: (error) => toastApiError(error, context.language),
+    mutationFn: () => getLineageImpact(requestContext, { root, db_name: dbName }),
+    onError: (error) => toastApiError(error, language),
   })
 
   const metricsMutation = useMutation({
-    mutationFn: () => getLineageMetrics(requestContext, { db_name: db ?? '' }),
-    onSuccess: (payload) => setMetricsResult(payload),
-    onError: (error) => toastApiError(error, context.language),
+    mutationFn: () => getLineageMetrics(requestContext, { db_name: dbName, window_minutes: 60 }),
+    onError: (error) => toastApiError(error, language),
   })
 
-  const nodes = asArray<LineageNode>(asRecord(graphResult).nodes)
-  const edges = asArray<LineageEdge>(asRecord(graphResult).edges)
-  const elements = buildLineageElements(nodes, edges)
+  const graphPayload = graphMutation.data as { data?: { graph?: { nodes?: Array<Record<string, unknown>>; edges?: Array<Record<string, unknown>>; warnings?: string[] } } } | undefined
+  const graphData = graphPayload?.data?.graph
+  const graphWarnings = graphData?.warnings ?? []
+  const graphNodes = useMemo(
+    () =>
+      (graphData?.nodes ?? [])
+        .map((node) => {
+          const id = String(node.node_id ?? '')
+          if (!id) return null
+          const label = String(node.label ?? node.node_type ?? node.node_id ?? '')
+          return { id, label, raw: node }
+        })
+        .filter((item): item is { id: string; label: string; raw: Record<string, unknown> } => Boolean(item)),
+    [graphData?.nodes],
+  )
+
+  const graphEdges = useMemo(
+    () =>
+      (graphData?.edges ?? [])
+        .map((edge, index) => {
+          const source = String(edge.from_node_id ?? '')
+          const target = String(edge.to_node_id ?? '')
+          if (!source || !target) return null
+          const label = String(edge.edge_type ?? '')
+          return {
+            id: `${source}-${label || 'edge'}-${target}-${index}`,
+            source,
+            target,
+            label,
+            raw: edge,
+          }
+        })
+        .filter((item): item is { id: string; source: string; target: string; label: string; raw: Record<string, unknown> } => Boolean(item)),
+    [graphData?.edges],
+  )
 
   return (
     <div>
-      <PageHeader title="Lineage" subtitle="Root 기반 라인리지 그래프/영향 분석" />
+      <PageHeader title="Lineage" subtitle="Provenance graph, impact, and metrics." />
 
-      <Card elevation={1} className="section-card">
-        <div className="form-row">
-          <InputGroup value={root} onChange={(event) => setRoot(event.currentTarget.value)} placeholder="root id" />
-          <Button onClick={() => graphMutation.mutate()} disabled={!root}>
-            Load
-          </Button>
-          <Button
-            onClick={() => {
-              if (!selectedNodeId) {
-                return
-              }
-              setRoot(selectedNodeId)
-              graphMutation.mutate()
-            }}
-            disabled={!selectedNodeId}
-          >
-            Use Selected Graph Node
-          </Button>
-          <Button onClick={() => impactMutation.mutate()} disabled={!root}>
-            Impact
-          </Button>
-          <Button onClick={() => metricsMutation.mutate()}>
-            Metrics
-          </Button>
-        </div>
-      </Card>
-
-      {!root ? <Callout intent="primary">root를 입력하세요.</Callout> : null}
-
-      <Tabs id="lineage-tabs" selectedTabId={tab} onChange={(value) => setTab(value as string)}>
-        <Tab id="graph" title="Graph" />
-        <Tab id="impact" title="Impact" />
-        <Tab id="metrics" title="Metrics" />
-      </Tabs>
-
-      {tab === 'graph' ? (
-        <Card elevation={1} className="section-card">
-          {elements.length ? (
-            <GraphCanvas
-              elements={elements}
-              onSelect={(selection) => {
-                if (selection.kind === 'node') {
-                  const raw = asRecord(selection.data)
-                  const rawRecord = asRecord(raw.raw ?? raw)
-                  const nodeId =
-                    getString(rawRecord.node_id) ?? getString(rawRecord.id) ?? getString(raw.id)
-                  if (nodeId) {
-                    setSelectedNodeId(String(nodeId))
-                  }
-                }
-              }}
-            />
+      <div className="page-grid two-col">
+        <Card className="card-stack">
+          <FormGroup label="Root (event id or node id)">
+            <InputGroup value={root} onChange={(event) => setRoot(event.currentTarget.value)} />
+          </FormGroup>
+          <div className="form-row">
+            <Button intent={Intent.PRIMARY} onClick={() => graphMutation.mutate()} disabled={!root} loading={graphMutation.isPending}>
+              Load graph
+            </Button>
+            <Button onClick={() => impactMutation.mutate()} disabled={!root} loading={impactMutation.isPending}>
+              Impact
+            </Button>
+            <Button onClick={() => metricsMutation.mutate()} loading={metricsMutation.isPending}>
+              Metrics
+            </Button>
+          </div>
+          {graphWarnings.length ? (
+            <Callout intent={Intent.WARNING}>
+              {graphWarnings.map((warning, index) => (
+                <div key={`${warning}-${index}`}>{warning}</div>
+              ))}
+            </Callout>
+          ) : null}
+          {graphNodes.length === 0 ? (
+            <Text className="muted">Graph will appear here.</Text>
           ) : (
-            <JsonView value={graphResult} />
+            <GraphCanvas
+              nodes={graphNodes}
+              edges={graphEdges}
+              height={360}
+            />
           )}
+          <JsonViewer value={graphMutation.data} empty="Graph payload will appear here." />
         </Card>
-      ) : null}
-      {tab === 'impact' ? (
-        <Card elevation={1} className="section-card">
-          <H5>Impact</H5>
-          <JsonView value={impactResult} />
+
+        <Card className="card-stack">
+          <div className="card-title">Impact</div>
+          <JsonViewer value={impactMutation.data} empty="Impact results will appear here." />
+          <div className="card-title">Metrics</div>
+          <JsonViewer value={metricsMutation.data} empty="Metrics will appear here." />
         </Card>
-      ) : null}
-      {tab === 'metrics' ? (
-        <Card elevation={1} className="section-card">
-          <H5>Metrics</H5>
-          <JsonView value={metricsResult} />
-        </Card>
-      ) : null}
+      </div>
     </div>
   )
 }

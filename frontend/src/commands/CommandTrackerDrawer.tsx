@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import {
   Button,
   Callout,
@@ -12,8 +12,6 @@ import {
   Tag,
   Text,
 } from '@blueprintjs/core'
-import { API_BASE_URL } from '../api/config'
-import type { CommandResult } from '../api/bff'
 import { getCommandStatus, HttpError } from '../api/bff'
 import { qk } from '../query/queryKeys'
 import { useAppStore, type TrackedCommand } from '../store/useAppStore'
@@ -52,8 +50,6 @@ export type CommandDrawerCopy = {
 }
 
 type CommandTab = 'active' | 'completed' | 'failed' | 'expired'
-
-type LiveStatusUpdate = { id: string; status: CommandResult }
 
 const isCompleted = (command: TrackedCommand) =>
   command.writePhase === 'WRITE_DONE' && command.indexPhase === 'VISIBLE_IN_SEARCH'
@@ -103,30 +99,21 @@ export const CommandTrackerDrawer = ({
   onClose: () => void
   copy: CommandDrawerCopy
 }) => {
-  const queryClient = useQueryClient()
   const context = useAppStore((state) => state.context)
-  const authToken = useAppStore((state) => state.authToken)
   const adminToken = useAppStore((state) => state.adminToken)
   const commands = useAppStore((state) => state.commands)
   const trackCommand = useAppStore((state) => state.trackCommand)
   const removeCommand = useAppStore((state) => state.removeCommand)
-  const patchCommand = useAppStore((state) => state.patchCommand)
-  const commandDrawerTargetId = useAppStore((state) => state.commandDrawerTargetId)
-  const clearCommandDrawerTarget = useAppStore((state) => state.clearCommandDrawerTarget)
 
   const [tabId, setTabId] = useState<CommandTab>('active')
   const [inputValue, setInputValue] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [liveStatus, setLiveStatus] = useState<LiveStatusUpdate | null>(null)
-
-  const activeTabId = commandDrawerTargetId ? 'active' : tabId
-  const activeSelectedId = commandDrawerTargetId ?? selectedId
 
   useEffect(() => {
-    if (commandDrawerTargetId) {
-      clearCommandDrawerTarget()
+    if (selectedId && !commands[selectedId]) {
+      setSelectedId(null)
     }
-  }, [clearCommandDrawerTarget, commandDrawerTargetId])
+  }, [commands, selectedId])
 
   const commandList = useMemo(
     () => Object.values(commands).sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)),
@@ -134,7 +121,7 @@ export const CommandTrackerDrawer = ({
   )
 
   const filtered = useMemo(() => {
-    switch (activeTabId) {
+    switch (tabId) {
       case 'completed':
         return commandList.filter((command) => isCompleted(command))
       case 'failed':
@@ -144,67 +131,19 @@ export const CommandTrackerDrawer = ({
       default:
         return commandList.filter((command) => isActive(command))
     }
-  }, [activeTabId, commandList])
+  }, [commandList, tabId])
 
   const requestContext = useMemo(
-    () => ({ language: context.language, authToken, adminToken }),
-    [adminToken, authToken, context.language],
+    () => ({ language: context.language, adminToken }),
+    [adminToken, context.language],
   )
 
   const selectedQuery = useQuery({
-    queryKey: activeSelectedId ? qk.commandStatus(activeSelectedId, context.language) : ['command-status', 'none'],
-    queryFn: () => getCommandStatus(requestContext, activeSelectedId ?? ''),
-    enabled: Boolean(activeSelectedId && (adminToken || authToken) && isOpen),
+    queryKey: selectedId ? qk.commandStatus(selectedId, context.language) : ['command-status', 'none'],
+    queryFn: () => getCommandStatus(requestContext, selectedId ?? ''),
+    enabled: Boolean(selectedId && adminToken && isOpen),
     retry: false,
   })
-
-  useEffect(() => {
-    if (!isOpen || !activeSelectedId || !(authToken || adminToken)) {
-      return
-    }
-
-    const token = adminToken || authToken
-    const normalizedPath = `ws/commands/${encodeURIComponent(activeSelectedId)}?token=${encodeURIComponent(token)}`
-    const base = API_BASE_URL.replace(/\/+$/, '')
-    const url = base.startsWith('http')
-      ? new URL(`${base}/${normalizedPath}`)
-      : new URL(`${base}/${normalizedPath}`, window.location.origin)
-    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-
-    const socket = new WebSocket(url.toString())
-    socket.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data)
-        if (message?.type !== 'command_update') {
-          return
-        }
-        if (message.command_id && message.command_id !== activeSelectedId) {
-          return
-        }
-        const update = message.data ?? {}
-        if (update && typeof update === 'object') {
-          const cached = queryClient.getQueryData<CommandResult>(
-            qk.commandStatus(activeSelectedId, context.language),
-          )
-          const next = {
-            ...(cached ?? { command_id: activeSelectedId, status: 'PENDING' }),
-            ...update,
-          } as CommandResult
-          setLiveStatus({ id: activeSelectedId, status: next })
-          queryClient.setQueryData(qk.commandStatus(activeSelectedId, context.language), next)
-          if (typeof next.status === 'string') {
-            patchCommand(activeSelectedId, { status: next.status })
-          }
-        }
-      } catch {
-        return
-      }
-    }
-
-    return () => {
-      socket.close()
-    }
-  }, [activeSelectedId, adminToken, authToken, context.language, isOpen, patchCommand, queryClient])
 
   const handleAdd = () => {
     const trimmed = inputValue.trim()
@@ -233,9 +172,9 @@ export const CommandTrackerDrawer = ({
       .forEach((command) => removeCommand(command.id))
   }
 
-  const selectedCommand = activeSelectedId ? commands[activeSelectedId] : null
+  const selectedCommand = selectedId ? commands[selectedId] : null
   const selectedError = selectedQuery.error
-  const selectedStatus = liveStatus?.id === activeSelectedId ? liveStatus.status : selectedQuery.data
+  const selectedStatus = selectedQuery.data
   const statusTag = selectedCommand ? getStatusTag(selectedCommand) : null
 
   const detailContext =
@@ -278,7 +217,7 @@ export const CommandTrackerDrawer = ({
           </Button>
         </div>
 
-        <Tabs id="command-tabs" selectedTabId={activeTabId} onChange={(value) => setTabId(value as CommandTab)}>
+        <Tabs id="command-tabs" selectedTabId={tabId} onChange={(value) => setTabId(value as CommandTab)}>
           <Tab id="active" title={copy.tabs.active} />
           <Tab id="completed" title={copy.tabs.completed} />
           <Tab id="failed" title={copy.tabs.failed} />
@@ -301,18 +240,14 @@ export const CommandTrackerDrawer = ({
             <tbody>
               {filtered.map((command) => {
                 const tag = getStatusTag(command)
-                const isSelected = command.id === activeSelectedId
+                const isSelected = command.id === selectedId
                 return (
                   <tr
                     key={command.id}
                     className={isSelected ? 'command-row is-selected' : 'command-row'}
                     onClick={() => setSelectedId(command.id)}
                   >
-                    <td className="command-id">
-                      {command.id}
-                      {command.title ? <div className="command-meta">{command.title}</div> : null}
-                      {command.source ? <div className="command-meta">{command.source}</div> : null}
-                    </td>
+                    <td className="command-id">{command.id}</td>
                     <td>
                       <Tag minimal intent={tag.intent}>
                         {tag.label}
@@ -348,7 +283,7 @@ export const CommandTrackerDrawer = ({
           <div className="command-details-title">{copy.detailsTitle}</div>
           {!selectedCommand ? (
             <Text className="command-meta">{copy.detailsHint}</Text>
-          ) : !(adminToken || authToken) ? (
+          ) : !adminToken ? (
             <Text className="command-meta">{copy.detailsTokenHint}</Text>
           ) : selectedError instanceof HttpError && selectedError.status === 404 ? (
             <Text className="command-meta">{copy.tabs.expired}</Text>

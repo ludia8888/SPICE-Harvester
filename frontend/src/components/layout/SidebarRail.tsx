@@ -1,59 +1,45 @@
-import { NavLink } from 'react-router-dom'
-import { Button } from '@blueprintjs/core'
+import type { ReactElement } from 'react'
+import { Button, Popover, Position } from '@blueprintjs/core'
 import type { IconName } from '@blueprintjs/icons'
 
 export type RailItem = {
-  icon: IconName
+  icon: IconName | string
   label: string
   active?: boolean
   onClick?: () => void
-  to?: string
 }
 
 export type SidebarRailProps = {
   items: RailItem[]
-  onOpenSettings: () => void
+  settingsContent: ReactElement
   settingsLabel: string
   userLabel: string
 }
 
-export const SidebarRail = ({ items, onOpenSettings, settingsLabel, userLabel }: SidebarRailProps) => {
+export const SidebarRail = ({ items, settingsContent, settingsLabel, userLabel }: SidebarRailProps) => {
   return (
     <aside className="sidebar-rail">
       {items.map((item) => (
-        <span key={item.label}>
-          {item.to ? (
-            <NavLink to={item.to} className="rail-link" title={item.label}>
-              {({ isActive }) => (
-                <Button
-                  minimal
-                  icon={item.icon}
-                  className={`rail-button ${item.active || isActive ? 'is-active' : ''}`}
-                  aria-label={item.label}
-                />
-              )}
-            </NavLink>
-          ) : (
-            <Button
-              minimal
-              icon={item.icon}
-              className={`rail-button ${item.active ? 'is-active' : ''}`}
-              aria-label={item.label}
-              title={item.label}
-              onClick={item.onClick}
-            />
-          )}
-        </span>
+        <Button
+          key={item.label}
+          minimal
+          icon={item.icon as IconName}
+          className={`rail-button ${item.active ? 'is-active' : ''}`}
+          aria-label={item.label}
+          title={item.label}
+          onClick={item.onClick}
+        />
       ))}
       <div className="rail-spacer" />
-      <Button
-        minimal
-        icon="cog"
-        className="rail-button"
-        aria-label={settingsLabel}
-        title={settingsLabel}
-        onClick={onOpenSettings}
-      />
+      <Popover content={settingsContent} position={Position.RIGHT}>
+        <Button
+          minimal
+          icon="cog"
+          className="rail-button"
+          aria-label={settingsLabel}
+          title={settingsLabel}
+        />
+      </Popover>
       <Button
         minimal
         icon="user"
