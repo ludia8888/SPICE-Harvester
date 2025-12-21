@@ -53,6 +53,8 @@ export type CommandDrawerCopy = {
 
 type CommandTab = 'active' | 'completed' | 'failed' | 'expired'
 
+type LiveStatusUpdate = { id: string; status: CommandResult }
+
 const isCompleted = (command: TrackedCommand) =>
   command.writePhase === 'WRITE_DONE' && command.indexPhase === 'VISIBLE_IN_SEARCH'
 
@@ -115,26 +117,16 @@ export const CommandTrackerDrawer = ({
   const [tabId, setTabId] = useState<CommandTab>('active')
   const [inputValue, setInputValue] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [liveStatus, setLiveStatus] = useState<CommandResult | null>(null)
+  const [liveStatus, setLiveStatus] = useState<LiveStatusUpdate | null>(null)
+
+  const activeTabId = commandDrawerTargetId ? 'active' : tabId
+  const activeSelectedId = commandDrawerTargetId ?? selectedId
 
   useEffect(() => {
-    if (selectedId && !commands[selectedId]) {
-      setSelectedId(null)
+    if (commandDrawerTargetId) {
+      clearCommandDrawerTarget()
     }
-  }, [commands, selectedId])
-
-  useEffect(() => {
-    if (!commandDrawerTargetId) {
-      return
-    }
-    setSelectedId(commandDrawerTargetId)
-    setTabId('active')
-    clearCommandDrawerTarget()
   }, [clearCommandDrawerTarget, commandDrawerTargetId])
-
-  useEffect(() => {
-    setLiveStatus(null)
-  }, [selectedId])
 
   const commandList = useMemo(
     () => Object.values(commands).sort((a, b) => b.submittedAt.localeCompare(a.submittedAt)),
@@ -142,7 +134,7 @@ export const CommandTrackerDrawer = ({
   )
 
   const filtered = useMemo(() => {
-    switch (tabId) {
+    switch (activeTabId) {
       case 'completed':
         return commandList.filter((command) => isCompleted(command))
       case 'failed':
@@ -152,7 +144,7 @@ export const CommandTrackerDrawer = ({
       default:
         return commandList.filter((command) => isActive(command))
     }
-  }, [commandList, tabId])
+  }, [activeTabId, commandList])
 
   const requestContext = useMemo(
     () => ({ language: context.language, authToken, adminToken }),
@@ -160,19 +152,19 @@ export const CommandTrackerDrawer = ({
   )
 
   const selectedQuery = useQuery({
-    queryKey: selectedId ? qk.commandStatus(selectedId, context.language) : ['command-status', 'none'],
-    queryFn: () => getCommandStatus(requestContext, selectedId ?? ''),
-    enabled: Boolean(selectedId && (adminToken || authToken) && isOpen),
+    queryKey: activeSelectedId ? qk.commandStatus(activeSelectedId, context.language) : ['command-status', 'none'],
+    queryFn: () => getCommandStatus(requestContext, activeSelectedId ?? ''),
+    enabled: Boolean(activeSelectedId && (adminToken || authToken) && isOpen),
     retry: false,
   })
 
   useEffect(() => {
-    if (!isOpen || !selectedId || !(authToken || adminToken)) {
+    if (!isOpen || !activeSelectedId || !(authToken || adminToken)) {
       return
     }
 
     const token = adminToken || authToken
-    const normalizedPath = `ws/commands/${encodeURIComponent(selectedId)}?token=${encodeURIComponent(token)}`
+    const normalizedPath = `ws/commands/${encodeURIComponent(activeSelectedId)}?token=${encodeURIComponent(token)}`
     const base = API_BASE_URL.replace(/\/+$/, '')
     const url = base.startsWith('http')
       ? new URL(`${base}/${normalizedPath}`)
@@ -186,22 +178,22 @@ export const CommandTrackerDrawer = ({
         if (message?.type !== 'command_update') {
           return
         }
-        if (message.command_id && message.command_id !== selectedId) {
+        if (message.command_id && message.command_id !== activeSelectedId) {
           return
         }
         const update = message.data ?? {}
         if (update && typeof update === 'object') {
           const cached = queryClient.getQueryData<CommandResult>(
-            qk.commandStatus(selectedId, context.language),
+            qk.commandStatus(activeSelectedId, context.language),
           )
           const next = {
-            ...(cached ?? { command_id: selectedId, status: 'PENDING' }),
+            ...(cached ?? { command_id: activeSelectedId, status: 'PENDING' }),
             ...update,
           } as CommandResult
-          setLiveStatus(next)
-          queryClient.setQueryData(qk.commandStatus(selectedId, context.language), next)
+          setLiveStatus({ id: activeSelectedId, status: next })
+          queryClient.setQueryData(qk.commandStatus(activeSelectedId, context.language), next)
           if (typeof next.status === 'string') {
-            patchCommand(selectedId, { status: next.status })
+            patchCommand(activeSelectedId, { status: next.status })
           }
         }
       } catch {
@@ -212,7 +204,7 @@ export const CommandTrackerDrawer = ({
     return () => {
       socket.close()
     }
-  }, [adminToken, authToken, context.language, isOpen, patchCommand, queryClient, selectedId])
+  }, [activeSelectedId, adminToken, authToken, context.language, isOpen, patchCommand, queryClient])
 
   const handleAdd = () => {
     const trimmed = inputValue.trim()
@@ -241,9 +233,9 @@ export const CommandTrackerDrawer = ({
       .forEach((command) => removeCommand(command.id))
   }
 
-  const selectedCommand = selectedId ? commands[selectedId] : null
+  const selectedCommand = activeSelectedId ? commands[activeSelectedId] : null
   const selectedError = selectedQuery.error
-  const selectedStatus = liveStatus ?? selectedQuery.data
+  const selectedStatus = liveStatus?.id === activeSelectedId ? liveStatus.status : selectedQuery.data
   const statusTag = selectedCommand ? getStatusTag(selectedCommand) : null
 
   const detailContext =
@@ -286,7 +278,7 @@ export const CommandTrackerDrawer = ({
           </Button>
         </div>
 
-        <Tabs id="command-tabs" selectedTabId={tabId} onChange={(value) => setTabId(value as CommandTab)}>
+        <Tabs id="command-tabs" selectedTabId={activeTabId} onChange={(value) => setTabId(value as CommandTab)}>
           <Tab id="active" title={copy.tabs.active} />
           <Tab id="completed" title={copy.tabs.completed} />
           <Tab id="failed" title={copy.tabs.failed} />
@@ -309,7 +301,7 @@ export const CommandTrackerDrawer = ({
             <tbody>
               {filtered.map((command) => {
                 const tag = getStatusTag(command)
-                const isSelected = command.id === selectedId
+                const isSelected = command.id === activeSelectedId
                 return (
                   <tr
                     key={command.id}

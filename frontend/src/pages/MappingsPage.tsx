@@ -21,6 +21,7 @@ import { showAppToast } from '../app/AppToaster'
 import { toastApiError } from '../errors/toastApiError'
 import { qk } from '../query/queryKeys'
 import { useAppStore } from '../store/useAppStore'
+import { asArray, asRecord, getString, type UnknownRecord } from '../utils/typed'
 
 export const MappingsPage = () => {
   const { db } = useParams()
@@ -29,7 +30,7 @@ export const MappingsPage = () => {
   const adminToken = useAppStore((state) => state.adminToken)
 
   const [file, setFile] = useState<File | null>(null)
-  const [mappingData, setMappingData] = useState<any>(null)
+  const [mappingData, setMappingData] = useState<UnknownRecord | null>(null)
 
   const requestContext = useMemo(
     () => ({ language: context.language, authToken, adminToken }),
@@ -104,29 +105,54 @@ export const MappingsPage = () => {
     if (!mappingData) {
       return []
     }
-    const classes = (mappingData.classes ?? []).map((row: any) => ({
+    const data = asRecord(mappingData)
+    const classes = asArray<UnknownRecord>(data.classes).map((row) => ({
       kind: 'class',
-      label: row.label ?? row.label_ko ?? row.label_en ?? row.label_key ?? row.name ?? '-',
-      class_id: row.class_id ?? row.classId ?? row.class ?? '-',
+      label:
+        getString(row.label) ??
+        getString(row.label_ko) ??
+        getString(row.label_en) ??
+        getString(row.label_key) ??
+        getString(row.name) ??
+        '-',
+      class_id: getString(row.class_id) ?? getString(row.classId) ?? getString(row.class) ?? '-',
       property_id: '-',
       predicate: '-',
-      status: row.status ?? row.mapping_status ?? row.state ?? '-',
+      status: getString(row.status) ?? getString(row.mapping_status) ?? getString(row.state) ?? '-',
     }))
-    const props = (mappingData.properties ?? []).map((row: any) => ({
+    const props = asArray<UnknownRecord>(data.properties).map((row) => ({
       kind: 'property',
-      label: row.label ?? row.label_ko ?? row.label_en ?? row.label_key ?? row.name ?? '-',
-      class_id: row.class_id ?? row.classId ?? row.class ?? '-',
-      property_id: row.property_id ?? row.propertyId ?? row.property ?? '-',
+      label:
+        getString(row.label) ??
+        getString(row.label_ko) ??
+        getString(row.label_en) ??
+        getString(row.label_key) ??
+        getString(row.name) ??
+        '-',
+      class_id: getString(row.class_id) ?? getString(row.classId) ?? getString(row.class) ?? '-',
+      property_id:
+        getString(row.property_id) ?? getString(row.propertyId) ?? getString(row.property) ?? '-',
       predicate: '-',
-      status: row.status ?? row.mapping_status ?? row.state ?? '-',
+      status: getString(row.status) ?? getString(row.mapping_status) ?? getString(row.state) ?? '-',
     }))
-    const rels = (mappingData.relationships ?? []).map((row: any) => ({
+    const rels = asArray<UnknownRecord>(data.relationships).map((row) => ({
       kind: 'relationship',
-      label: row.label ?? row.label_ko ?? row.label_en ?? row.label_key ?? row.name ?? '-',
-      class_id: row.class_id ?? row.classId ?? row.class ?? row.source_class_id ?? '-',
+      label:
+        getString(row.label) ??
+        getString(row.label_ko) ??
+        getString(row.label_en) ??
+        getString(row.label_key) ??
+        getString(row.name) ??
+        '-',
+      class_id:
+        getString(row.class_id) ??
+        getString(row.classId) ??
+        getString(row.class) ??
+        getString(row.source_class_id) ??
+        '-',
       property_id: '-',
-      predicate: row.predicate ?? row.relationship_id ?? '-',
-      status: row.status ?? row.mapping_status ?? row.state ?? '-',
+      predicate: getString(row.predicate) ?? getString(row.relationship_id) ?? '-',
+      status: getString(row.status) ?? getString(row.mapping_status) ?? getString(row.state) ?? '-',
     }))
     return [...classes, ...props, ...rels]
   }, [mappingData])
@@ -188,7 +214,7 @@ export const MappingsPage = () => {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row: any, index: number) => (
+              {rows.map((row, index) => (
                 <tr key={`${row.label ?? row.property_id ?? row.class_id}-${index}`}>
                   <td>{row.kind}</td>
                   <td>{row.label ?? '-'}</td>

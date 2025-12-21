@@ -15,6 +15,7 @@ import { PageHeader } from '../components/PageHeader'
 import { JsonView } from '../components/JsonView'
 import { toastApiError } from '../errors/toastApiError'
 import { useAppStore } from '../store/useAppStore'
+import { asArray, asRecord, getString, type UnknownRecord } from '../utils/typed'
 
 export const AuditPage = () => {
   const { db } = useParams()
@@ -34,8 +35,8 @@ export const AuditPage = () => {
   const [commandId, setCommandId] = useState(searchParams.get('command_id') ?? '')
   const [eventId, setEventId] = useState('')
   const [search, setSearch] = useState('')
-  const [result, setResult] = useState<any>(null)
-  const [chainHead, setChainHead] = useState<any>(null)
+  const [result, setResult] = useState<unknown>(null)
+  const [chainHead, setChainHead] = useState<unknown>(null)
 
   const requestContext = useMemo(
     () => ({ language: context.language, authToken, adminToken }),
@@ -65,7 +66,8 @@ export const AuditPage = () => {
     onError: (error) => toastApiError(error, context.language),
   })
 
-  const logs = (result as any)?.data?.logs ?? (result as any)?.logs ?? []
+  const resultRecord = asRecord(result)
+  const logs = asArray<UnknownRecord>(asRecord(resultRecord.data).logs ?? resultRecord.logs)
 
   const resetFilters = () => {
     setSince('')
@@ -159,24 +161,33 @@ export const AuditPage = () => {
               </tr>
             </thead>
             <tbody>
-              {logs.map((log: any, index: number) => (
-                <tr key={log.event_id ?? index}>
-                  <td>{log.occurred_at ?? log.timestamp}</td>
-                  <td>{log.actor}</td>
-                  <td>{log.action}</td>
-                  <td>{log.status}</td>
-                  <td>{log.resource_type ?? log.resource_id}</td>
-                  <td>
-                    {log.command_id ? (
-                      <Button minimal onClick={() => openCommandTracker(String(log.command_id))}>
-                        {log.command_id}
-                      </Button>
-                    ) : (
-                      '-'
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {logs.map((log, index) => {
+                const eventId = getString(log.event_id) ?? String(index)
+                const occurredAt = getString(log.occurred_at) ?? getString(log.timestamp) ?? '-'
+                const actorValue = getString(log.actor) ?? '-'
+                const actionValue = getString(log.action) ?? '-'
+                const statusValue = getString(log.status) ?? '-'
+                const resourceValue = getString(log.resource_type) ?? getString(log.resource_id) ?? '-'
+                const cmdId = getString(log.command_id)
+                return (
+                  <tr key={eventId}>
+                    <td>{occurredAt}</td>
+                    <td>{actorValue}</td>
+                    <td>{actionValue}</td>
+                    <td>{statusValue}</td>
+                    <td>{resourceValue}</td>
+                    <td>
+                      {cmdId ? (
+                        <Button minimal onClick={() => openCommandTracker(cmdId)}>
+                          {cmdId}
+                        </Button>
+                      ) : (
+                        '-'
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </HTMLTable>
         ) : (

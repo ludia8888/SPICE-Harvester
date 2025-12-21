@@ -4,6 +4,7 @@ import type { Language } from '../types/app'
 import { HttpError } from '../api/bff'
 import { classifyError } from '../errors/classifyError'
 import { extractOccActualSeq } from '../utils/occ'
+import { asRecord } from '../utils/typed'
 
 const copy = {
   en: {
@@ -36,13 +37,18 @@ const extractUnknownLabels = (error: unknown): string[] | null => {
   if (!(error instanceof HttpError)) {
     return null
   }
-  const detail = error.detail as any
+  const detail = asRecord(error.detail)
+  const nestedDetail = asRecord(detail.detail)
   const labels =
-    detail?.labels ??
-    detail?.detail?.labels ??
-    (detail?.error === 'unknown_label_keys' ? detail?.labels : null) ??
-    (detail?.detail?.error === 'unknown_label_keys' ? detail?.detail?.labels : null)
-  return Array.isArray(labels) ? labels : null
+    detail.labels ??
+    nestedDetail.labels ??
+    (detail.error === 'unknown_label_keys' ? detail.labels : null) ??
+    (nestedDetail.error === 'unknown_label_keys' ? nestedDetail.labels : null)
+  if (!Array.isArray(labels)) {
+    return null
+  }
+  const normalized = labels.filter((label): label is string => typeof label === 'string')
+  return normalized.length ? normalized : null
 }
 
 export const ApiErrorCallout = ({

@@ -16,6 +16,7 @@ import { PageHeader } from '../components/PageHeader'
 import { JsonView } from '../components/JsonView'
 import { toastApiError } from '../errors/toastApiError'
 import { useAppStore } from '../store/useAppStore'
+import { asArray, asRecord, getString } from '../utils/typed'
 
 type LineageNode = { node_id: string; label?: string; node_type?: string }
 
@@ -50,9 +51,9 @@ export const LineagePage = () => {
 
   const [root, setRoot] = useState(searchParams.get('root') ?? '')
   const [tab, setTab] = useState('graph')
-  const [graphResult, setGraphResult] = useState<any>(null)
-  const [impactResult, setImpactResult] = useState<any>(null)
-  const [metricsResult, setMetricsResult] = useState<any>(null)
+  const [graphResult, setGraphResult] = useState<unknown>(null)
+  const [impactResult, setImpactResult] = useState<unknown>(null)
+  const [metricsResult, setMetricsResult] = useState<unknown>(null)
   const [selectedNodeId, setSelectedNodeId] = useState('')
 
   const requestContext = useMemo(
@@ -78,8 +79,8 @@ export const LineagePage = () => {
     onError: (error) => toastApiError(error, context.language),
   })
 
-  const nodes = (graphResult as any)?.nodes ?? []
-  const edges = (graphResult as any)?.edges ?? []
+  const nodes = asArray<LineageNode>(asRecord(graphResult).nodes)
+  const edges = asArray<LineageEdge>(asRecord(graphResult).edges)
   const elements = buildLineageElements(nodes, edges)
 
   return (
@@ -128,9 +129,10 @@ export const LineagePage = () => {
               elements={elements}
               onSelect={(selection) => {
                 if (selection.kind === 'node') {
-                  const raw = selection.data?.raw ?? selection.data
+                  const raw = asRecord(selection.data)
+                  const rawRecord = asRecord(raw.raw ?? raw)
                   const nodeId =
-                    (raw as any)?.node_id ?? (raw as any)?.id ?? (selection.data as any)?.id
+                    getString(rawRecord.node_id) ?? getString(rawRecord.id) ?? getString(raw.id)
                   if (nodeId) {
                     setSelectedNodeId(String(nodeId))
                   }

@@ -33,7 +33,7 @@ export const AdminPage = () => {
   const [instanceId, setInstanceId] = useState('')
   const [storeResult, setStoreResult] = useState(true)
   const [resultTtl, setResultTtl] = useState(3600)
-  const [replayResult, setReplayResult] = useState<any>(null)
+  const [replayResult, setReplayResult] = useState<unknown>(null)
 
   const [projection, setProjection] = useState('instances')
   const [branch, setBranch] = useState('main')
@@ -42,11 +42,11 @@ export const AdminPage = () => {
   const [promote, setPromote] = useState(false)
   const [allowDelete, setAllowDelete] = useState(false)
   const [maxEvents, setMaxEvents] = useState<number | null>(null)
-  const [recomputeResult, setRecomputeResult] = useState<any>(null)
+  const [recomputeResult, setRecomputeResult] = useState<unknown>(null)
 
   const [cleanupHours, setCleanupHours] = useState(24)
-  const [cleanupResult, setCleanupResult] = useState<any>(null)
-  const [healthResult, setHealthResult] = useState<any>(null)
+  const [cleanupResult, setCleanupResult] = useState<unknown>(null)
+  const [healthResult, setHealthResult] = useState<unknown>(null)
 
   const requestContext = useMemo(
     () => ({ language: context.language, authToken, adminToken }),

@@ -4,6 +4,7 @@ import type { IconName } from '@blueprintjs/icons'
 import { showAppToast } from '../app/AppToaster'
 import { toastApiError } from '../errors/toastApiError'
 import { useAppStore, type CommandKind } from '../store/useAppStore'
+import { asArray, asRecord, getString } from '../utils/typed'
 
 const extractCommandIds = (payload: unknown): string[] => {
   const ids = new Set<string>()
@@ -18,31 +19,29 @@ const extractCommandIds = (payload: unknown): string[] => {
     if (typeof value !== 'object') {
       return
     }
-    const obj = value as any
-    const direct = obj.commandId ?? obj.command_id ?? obj?.data?.command_id
-    if (typeof direct === 'string') {
+    const obj = asRecord(value)
+    const direct =
+      getString(obj.commandId) ??
+      getString(obj.command_id) ??
+      getString(asRecord(obj.data).command_id)
+    if (direct) {
       ids.add(direct)
     }
-    const write = obj.write ?? obj?.data?.write
-    const commands = write?.commands ?? obj.commands
-    if (Array.isArray(commands)) {
-      commands.forEach((command) => {
-        if (!command) {
-          return
-        }
-        if (typeof command.command_id === 'string') {
-          ids.add(command.command_id)
-          return
-        }
-        if (command.command && typeof command.command.command_id === 'string') {
-          ids.add(command.command.command_id)
-          return
-        }
-        if (command.command && typeof command.command.id === 'string') {
-          ids.add(command.command.id)
-        }
-      })
-    }
+    const write = asRecord(obj.write ?? asRecord(obj.data).write)
+    const commands = asArray<unknown>(write.commands ?? obj.commands)
+    commands.forEach((command) => {
+      const commandRecord = asRecord(command)
+      const commandId = getString(commandRecord.command_id)
+      if (commandId) {
+        ids.add(commandId)
+        return
+      }
+      const nested = asRecord(commandRecord.command)
+      const nestedId = getString(nested.command_id) ?? getString(nested.id)
+      if (nestedId) {
+        ids.add(nestedId)
+      }
+    })
   }
   visit(payload)
   return Array.from(ids)

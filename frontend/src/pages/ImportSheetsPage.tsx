@@ -32,10 +32,13 @@ import { useCooldown } from '../hooks/useCooldown'
 import { HttpError } from '../api/bff'
 import { toastApiError } from '../errors/toastApiError'
 import { useAppStore } from '../store/useAppStore'
+import { asArray, asRecord, getNumber, getString, type UnknownRecord } from '../utils/typed'
 
 type ImportMapping = { source_field: string; target_field: string; confidence?: number }
 
 type TargetField = { name: string; type: string }
+
+type TableCandidate = { id: string; bbox: UnknownRecord | null }
 
 export const ImportSheetsPage = () => {
   const { db } = useParams()
@@ -68,13 +71,13 @@ export const ImportSheetsPage = () => {
   const [targetClassId, setTargetClassId] = useState('')
   const [targetSchema, setTargetSchema] = useState<TargetField[]>([])
   const [mappings, setMappings] = useState<ImportMapping[]>([])
-  const [previewResult, setPreviewResult] = useState<any>(null)
-  const [gridResult, setGridResult] = useState<any>(null)
-  const [suggestResult, setSuggestResult] = useState<any>(null)
-  const [dryRunResult, setDryRunResult] = useState<any>(null)
-  const [commitResult, setCommitResult] = useState<any>(null)
+  const [previewResult, setPreviewResult] = useState<unknown>(null)
+  const [gridResult, setGridResult] = useState<unknown>(null)
+  const [suggestResult, setSuggestResult] = useState<unknown>(null)
+  const [dryRunResult, setDryRunResult] = useState<unknown>(null)
+  const [commitResult, setCommitResult] = useState<unknown>(null)
   const [confirmMain, setConfirmMain] = useState(false)
-  const [mappingMetaResult, setMappingMetaResult] = useState<any>(null)
+  const [mappingMetaResult, setMappingMetaResult] = useState<unknown>(null)
 
   const previewCooldown = useCooldown()
   const gridCooldown = useCooldown()
@@ -92,26 +95,30 @@ export const ImportSheetsPage = () => {
     return props.map((prop) => ({ name: prop.id, type: prop.type ?? 'xsd:string' }))
   }
 
-  const extractSchemaFromPayload = (payload: any): TargetField[] | null => {
-    if (!payload || typeof payload !== 'object') {
-      return null
-    }
+  const extractSchemaFromPayload = (payload: unknown): TargetField[] | null => {
+    const root = asRecord(payload)
+    const schema = asRecord(root.schema)
+    const data = asRecord(root.data)
+    const schemaData = asRecord(schema.data)
     const candidate =
-      payload.properties ??
-      payload.schema?.properties ??
-      payload.data?.properties ??
-      payload.schema?.data?.properties
+      root.properties ?? schema.properties ?? data.properties ?? schemaData.properties
     if (Array.isArray(candidate)) {
-      return candidate.map((prop: any) => ({
-        name: prop.name ?? prop.id ?? prop.property_id ?? '',
-        type: prop.type ?? prop.datatype ?? 'xsd:string',
-      }))
+      return candidate.map((prop) => {
+        const record = asRecord(prop)
+        return {
+          name: getString(record.name) ?? getString(record.id) ?? getString(record.property_id) ?? '',
+          type: getString(record.type) ?? getString(record.datatype) ?? 'xsd:string',
+        }
+      })
     }
     if (candidate && typeof candidate === 'object') {
-      return Object.entries(candidate).map(([name, value]) => ({
-        name,
-        type: (value as any)?.type ?? (value as any)?.datatype ?? 'xsd:string',
-      }))
+      return Object.entries(candidate).map(([name, value]) => {
+        const record = asRecord(value)
+        return {
+          name,
+          type: getString(record.type) ?? getString(record.datatype) ?? 'xsd:string',
+        }
+      })
     }
     return null
   }
@@ -152,35 +159,59 @@ export const ImportSheetsPage = () => {
   })
 
   const gridPreview = useMemo(() => {
-    const grid = (gridResult as any)?.grid
-    if (!Array.isArray(grid)) {
+    const grid = asArray<unknown[]>(asRecord(gridResult).grid)
+    if (!grid.length) {
       return []
     }
-    return grid.slice(0, 10).map((row: any[]) => row.slice(0, 10))
+    return grid.slice(0, 10).map((row) => asArray<unknown>(row).slice(0, 10))
   }, [gridResult])
 
-  const gridTables = useMemo(() => {
-    const direct = (gridResult as any)?.tables ?? (gridResult as any)?.table_candidates
+  const previewColumns = useMemo(
+    () =>
+      asArray<unknown>(asRecord(previewResult).columns).filter(
+        (col): col is string => typeof col === 'string',
+      ),
+    [previewResult],
+  )
+
+  const previewRows = useMemo(
+    () => asArray<unknown[]>(asRecord(previewResult).sample_rows),
+    [previewResult],
+  )
+
+  const gridTables = useMemo<TableCandidate[]>(() => {
+    const gridRecord = asRecord(gridResult)
+    const direct = gridRecord.tables ?? gridRecord.table_candidates
     const nested =
-      (gridResult as any)?.structure?.tables ??
-      (gridResult as any)?.data?.structure?.tables ??
-      (gridResult as any)?.data?.tables
+      asRecord(gridRecord.structure).tables ??
+      asRecord(asRecord(gridRecord.data).structure).tables ??
+      asRecord(gridRecord.data).tables
     const tables = Array.isArray(direct) ? direct : Array.isArray(nested) ? nested : []
-    return tables.map((table: any, index: number) => ({
-      id: table.table_id ?? table.id ?? table.tableId ?? `table-${index + 1}`,
-      bbox: table.bbox ?? table.bounding_box ?? table.table_bbox ?? table.tableBBox ?? null,
-    }))
+    return tables.map((table, index) => {
+      const record = asRecord(table)
+      const bbox = asRecord(
+        record.bbox ?? record.bounding_box ?? record.table_bbox ?? record.tableBBox,
+      )
+      return {
+        id:
+          getString(record.table_id) ??
+          getString(record.id) ??
+          getString(record.tableId) ??
+          `table-${index + 1}`,
+        bbox: Object.keys(bbox).length ? bbox : null,
+      }
+    })
   }, [gridResult])
 
-  const applyTableSelection = (table: { id?: string; bbox?: any }) => {
+  const applyTableSelection = (table: TableCandidate) => {
     if (table.id) {
       setTableId(table.id)
     }
     if (table.bbox) {
-      setBboxTop(typeof table.bbox.top === 'number' ? table.bbox.top : null)
-      setBboxLeft(typeof table.bbox.left === 'number' ? table.bbox.left : null)
-      setBboxBottom(typeof table.bbox.bottom === 'number' ? table.bbox.bottom : null)
-      setBboxRight(typeof table.bbox.right === 'number' ? table.bbox.right : null)
+      setBboxTop(getNumber(table.bbox.top) ?? null)
+      setBboxLeft(getNumber(table.bbox.left) ?? null)
+      setBboxBottom(getNumber(table.bbox.bottom) ?? null)
+      setBboxRight(getNumber(table.bbox.right) ?? null)
     }
   }
 
@@ -220,7 +251,9 @@ export const ImportSheetsPage = () => {
     mutationFn: () => suggestMappingsFromSheets(requestContext, db ?? '', bodyBase()),
     onSuccess: (result) => {
       setSuggestResult(result)
-      setMappings((result as any)?.mappings ?? [])
+      const resultRecord = asRecord(result)
+      const nextMappings = asArray<ImportMapping>(resultRecord.mappings ?? asRecord(resultRecord.data).mappings)
+      setMappings(nextMappings)
     },
     onError: (error) => {
       if (error instanceof HttpError) {
@@ -295,14 +328,14 @@ export const ImportSheetsPage = () => {
   })
 
   const dryRunErrors = useMemo(() => {
-    const errors = (dryRunResult as any)?.errors ?? (dryRunResult as any)?.data?.errors
-    return Array.isArray(errors) ? errors : []
+    const resultRecord = asRecord(dryRunResult)
+    return asArray<UnknownRecord>(resultRecord.errors ?? asRecord(resultRecord.data).errors)
   }, [dryRunResult])
 
   const commitCommands = useMemo(() => {
-    const write = (commitResult as any)?.write
-    const commands = write?.commands ?? (commitResult as any)?.data?.write?.commands ?? []
-    return Array.isArray(commands) ? commands : []
+    const resultRecord = asRecord(commitResult)
+    const write = asRecord(resultRecord.write ?? asRecord(asRecord(resultRecord.data).write))
+    return asArray<UnknownRecord>(write.commands)
   }, [commitResult])
 
   const hasTable =
@@ -382,19 +415,19 @@ export const ImportSheetsPage = () => {
               <div className="card-title">
                 <H5>Preview</H5>
               </div>
-              {previewResult?.columns?.length ? (
+              {previewColumns.length ? (
                 <HTMLTable striped className="full-width">
                   <thead>
                     <tr>
-                      {previewResult.columns.map((col: string) => (
+                      {previewColumns.map((col) => (
                         <th key={col}>{col}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {(previewResult.sample_rows ?? []).map((row: any[], index: number) => (
+                    {previewRows.map((row, index) => (
                       <tr key={`preview-${index}`}>
-                        {row.map((cell: any, idx: number) => (
+                        {asArray<unknown>(row).map((cell, idx) => (
                           <td key={idx}>{cell}</td>
                         ))}
                       </tr>
@@ -414,7 +447,7 @@ export const ImportSheetsPage = () => {
                   <tbody>
                     {gridPreview.map((row, rowIndex) => (
                       <tr key={`grid-${rowIndex}`}>
-                        {row.map((cell: any, colIndex: number) => (
+                        {row.map((cell, colIndex) => (
                           <td key={`grid-cell-${rowIndex}-${colIndex}`}>{cell ?? ''}</td>
                         ))}
                       </tr>
@@ -434,21 +467,28 @@ export const ImportSheetsPage = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {gridTables.map((table) => (
-                      <tr key={table.id}>
-                        <td>{table.id}</td>
-                        <td>
-                          {table.bbox
-                            ? `top:${table.bbox.top}, left:${table.bbox.left}, bottom:${table.bbox.bottom}, right:${table.bbox.right}`
-                            : '-'}
-                        </td>
-                        <td>
-                          <Button minimal onClick={() => applyTableSelection(table)}>
-                            Use table
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
+                    {gridTables.map((table) => {
+                      const bbox = table.bbox
+                      const top = bbox ? getNumber(bbox.top) : null
+                      const left = bbox ? getNumber(bbox.left) : null
+                      const bottom = bbox ? getNumber(bbox.bottom) : null
+                      const right = bbox ? getNumber(bbox.right) : null
+                      return (
+                        <tr key={table.id}>
+                          <td>{table.id}</td>
+                          <td>
+                            {bbox
+                              ? `top:${top ?? '-'}, left:${left ?? '-'}, bottom:${bottom ?? '-'}, right:${right ?? '-'}`
+                              : '-'}
+                          </td>
+                          <td>
+                            <Button minimal onClick={() => applyTableSelection(table)}>
+                              Use table
+                            </Button>
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </HTMLTable>
               ) : (
@@ -560,14 +600,20 @@ export const ImportSheetsPage = () => {
                 </tr>
               </thead>
               <tbody>
-                {dryRunErrors.map((error: any, index: number) => (
-                  <tr key={`error-${index}`}>
-                    <td>{error.row_index ?? '-'}</td>
-                    <td>{error.source_field ?? '-'}</td>
-                    <td>{error.target_field ?? '-'}</td>
-                    <td>{error.message ?? error.detail ?? '-'}</td>
-                  </tr>
-                ))}
+                {dryRunErrors.map((error, index) => {
+                  const rowIndex = getNumber(error.row_index)
+                  const sourceField = getString(error.source_field) ?? '-'
+                  const targetField = getString(error.target_field) ?? '-'
+                  const message = getString(error.message) ?? getString(error.detail) ?? '-'
+                  return (
+                    <tr key={`error-${index}`}>
+                      <td>{rowIndex ?? '-'}</td>
+                      <td>{sourceField}</td>
+                      <td>{targetField}</td>
+                      <td>{message}</td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </HTMLTable>
           ) : null}
@@ -629,12 +675,19 @@ export const ImportSheetsPage = () => {
                 </tr>
               </thead>
               <tbody>
-                {commitCommands.map((command: any, index: number) => (
-                  <tr key={`${command.command_id ?? command.command?.command_id ?? index}`}>
-                    <td>{command.command_id ?? command.command?.command_id ?? command.command?.id ?? '-'}</td>
-                    <td>{command.status_url ?? command.command?.status_url ?? '-'}</td>
-                  </tr>
-                ))}
+                {commitCommands.map((command, index) => {
+                  const nested = asRecord(command.command)
+                  const commandId =
+                    getString(command.command_id) ?? getString(nested.command_id) ?? getString(nested.id) ?? '-'
+                  const statusUrl =
+                    getString(command.status_url) ?? getString(nested.status_url) ?? '-'
+                  return (
+                    <tr key={`${commandId}-${index}`}>
+                      <td>{commandId}</td>
+                      <td>{statusUrl}</td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </HTMLTable>
           ) : null}

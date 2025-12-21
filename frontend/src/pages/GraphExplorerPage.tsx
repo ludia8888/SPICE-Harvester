@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation } from '@tanstack/react-query'
 import {
@@ -18,7 +18,7 @@ import {
 } from '@blueprintjs/core'
 import { aiQuery, aiTranslatePlan, graphPaths, graphQuery } from '../api/bff'
 import { HttpError } from '../api/bff'
-import { GraphCanvas } from '../components/GraphCanvas'
+import { GraphCanvas, type GraphCanvasSelect } from '../components/GraphCanvas'
 import { PageHeader } from '../components/PageHeader'
 import { JsonView } from '../components/JsonView'
 import { useOntologyRegistry } from '../hooks/useOntologyRegistry'
@@ -26,12 +26,25 @@ import { useCooldown } from '../hooks/useCooldown'
 import { toastApiError } from '../errors/toastApiError'
 import { useAppStore } from '../store/useAppStore'
 import { formatLabel } from '../utils/labels'
+import { asArray, asRecord, getBoolean, getNumber, getString, type UnknownRecord } from '../utils/typed'
 
 type Hop = { predicate: string; target_class: string }
 
-type GraphNode = { id: string; type?: string; data_status?: string; display?: any; data?: any }
+type GraphNode = {
+  id: string
+  type?: string
+  data_status?: string
+  display?: UnknownRecord
+  data?: UnknownRecord
+  [key: string]: unknown
+}
 
-type GraphEdge = { from_node: string; to_node: string; predicate: string }
+type GraphEdge = {
+  from_node: string
+  to_node: string
+  predicate: string
+  [key: string]: unknown
+}
 
 const downloadJson = (filename: string, data: unknown) => {
   const blob = new Blob([JSON.stringify(data ?? {}, null, 2)], { type: 'application/json' })
@@ -52,7 +65,7 @@ const buildElements = (
   const nodeElements = nodes.map((node) => ({
     data: {
       id: node.id,
-      label: node.display?.label ?? labelForClass(node.type ?? node.id) ?? node.id,
+      label: getString(asRecord(node.display).label) ?? labelForClass(node.type ?? node.id) ?? node.id,
       raw: node,
     },
     classes:
@@ -99,14 +112,14 @@ export const GraphExplorerPage = () => {
   const [includeProvenance, setIncludeProvenance] = useState(false)
   const [includeAudit, setIncludeAudit] = useState(false)
 
-  const [graphResult, setGraphResult] = useState<any>(null)
-  const [pathsResult, setPathsResult] = useState<any>(null)
-  const [selectedElement, setSelectedElement] = useState<any>(null)
+  const [graphResult, setGraphResult] = useState<unknown>(null)
+  const [pathsResult, setPathsResult] = useState<unknown>(null)
+  const [selectedElement, setSelectedElement] = useState<GraphCanvasSelect | null>(null)
   const [showResults, setShowResults] = useState(false)
 
   const [aiQuestion, setAiQuestion] = useState('')
-  const [aiPlan, setAiPlan] = useState<any>(null)
-  const [aiAnswer, setAiAnswer] = useState<any>(null)
+  const [aiPlan, setAiPlan] = useState<unknown>(null)
+  const [aiAnswer, setAiAnswer] = useState<unknown>(null)
   const aiCooldown = useCooldown()
 
   const requestContext = useMemo(
@@ -185,9 +198,14 @@ export const GraphExplorerPage = () => {
     },
   })
 
-  const labelForClass = (id: string) =>
-    formatLabel(registry.classMap.get(id)?.label, context.language, id)
-  const labelForPredicate = (id: string) => registry.predicateMap.get(id) ?? id
+  const labelForClass = useCallback(
+    (id: string) => formatLabel(registry.classMap.get(id)?.label, context.language, id),
+    [context.language, registry.classMap],
+  )
+  const labelForPredicate = useCallback(
+    (id: string) => registry.predicateMap.get(id) ?? id,
+    [registry.predicateMap],
+  )
 
   const classOptions = useMemo(
     () => [{ label: 'Select class', value: '' }, ...registry.classOptions.map((item) => ({
@@ -206,57 +224,72 @@ export const GraphExplorerPage = () => {
   }, [registry.predicateMap])
 
   const applyAiPlan = () => {
-    const plan = aiPlan?.plan?.graph_query ?? aiPlan?.plan?.graphQuery
+    const planRoot = asRecord(aiPlan)
+    const planContainer = asRecord(planRoot.plan)
+    const plan = (planContainer.graph_query ?? planContainer.graphQuery) as UnknownRecord | undefined
     if (!plan) {
       return
     }
-    setStartClassId(plan.start_class ?? plan.startClass ?? '')
-    setHops(plan.hops ?? [])
-    setLimit(plan.limit ?? limit)
-    setMaxNodes(plan.max_nodes ?? maxNodes)
-    setMaxEdges(plan.max_edges ?? maxEdges)
-    setIncludePaths(plan.include_paths ?? includePaths)
-    setIncludeProvenance(plan.include_provenance ?? includeProvenance)
-    setIncludeAudit(plan.include_audit ?? includeAudit)
-    setIncludeDocuments(plan.include_documents ?? includeDocuments)
-    setNoCycles(plan.no_cycles ?? noCycles)
+    setStartClassId(getString(plan.start_class) ?? getString(plan.startClass) ?? '')
+    setHops(asArray<Hop>(plan.hops))
+    setLimit(getNumber(plan.limit) ?? limit)
+    setMaxNodes(getNumber(plan.max_nodes) ?? maxNodes)
+    setMaxEdges(getNumber(plan.max_edges) ?? maxEdges)
+    setIncludePaths(getBoolean(plan.include_paths) ?? includePaths)
+    setIncludeProvenance(getBoolean(plan.include_provenance) ?? includeProvenance)
+    setIncludeAudit(getBoolean(plan.include_audit) ?? includeAudit)
+    setIncludeDocuments(getBoolean(plan.include_documents) ?? includeDocuments)
+    setNoCycles(getBoolean(plan.no_cycles) ?? noCycles)
   }
 
-  const handleSelect = (selection: any) => {
+  const handleSelect = (selection: GraphCanvasSelect) => {
     setSelectedElement(selection)
-    const raw = selection?.data?.raw ?? selection?.data ?? selection
+    const dataRecord = asRecord(selection.data)
+    const rawRecord = asRecord(dataRecord.raw ?? dataRecord)
+    const label = getString(dataRecord.label)
     const title =
-      selection?.kind === 'edge'
-        ? selection?.data?.label ?? raw?.predicate ?? 'Edge'
-        : selection?.data?.label ?? raw?.id ?? raw?.node_id ?? 'Node'
+      selection.kind === 'edge'
+        ? label ?? getString(rawRecord.predicate) ?? 'Edge'
+        : label ?? getString(rawRecord.id) ?? getString(rawRecord.node_id) ?? 'Node'
     const subtitle =
-      selection?.kind === 'edge'
-        ? `${raw?.from_node ?? raw?.from_node_id ?? ''} → ${raw?.to_node ?? raw?.to_node_id ?? ''}`.trim()
-        : raw?.type ?? raw?.node_type
+      selection.kind === 'edge'
+        ? `${getString(rawRecord.from_node) ?? getString(rawRecord.from_node_id) ?? ''} → ${getString(rawRecord.to_node) ?? getString(rawRecord.to_node_id) ?? ''}`.trim()
+        : getString(rawRecord.type) ?? getString(rawRecord.node_type)
+    const metadata = asRecord(rawRecord.metadata)
     const commandId =
-      raw?.command_id ?? raw?.commandId ?? raw?.metadata?.command_id ?? undefined
-    const nodeId = raw?.id ?? raw?.node_id ?? raw?.nodeId ?? undefined
+      getString(rawRecord.command_id) ?? getString(rawRecord.commandId) ?? getString(metadata.command_id)
+    const nodeId = getString(rawRecord.id) ?? getString(rawRecord.node_id) ?? getString(rawRecord.nodeId)
     setInspector({
       title,
       subtitle: subtitle || undefined,
-      data: raw,
+      data: rawRecord,
       kind: selection?.kind === 'edge' ? 'GraphEdge' : 'GraphNode',
-      auditCommandId: typeof commandId === 'string' ? commandId : undefined,
+      auditCommandId: commandId,
       lineageRootId: selection?.kind === 'node' && nodeId ? String(nodeId) : undefined,
     })
   }
 
-  const elements = useMemo(() => {
-    const nodes = (graphResult?.nodes ?? []) as GraphNode[]
-    const edges = (graphResult?.edges ?? []) as GraphEdge[]
-    return buildElements(nodes, edges, labelForClass, labelForPredicate)
-  }, [graphResult, labelForClass, labelForPredicate])
+  const graphNodes = useMemo(
+    () => asArray<GraphNode>(asRecord(graphResult).nodes),
+    [graphResult],
+  )
+  const graphEdges = useMemo(
+    () => asArray<GraphEdge>(asRecord(graphResult).edges),
+    [graphResult],
+  )
 
-  const selectedStatus = selectedElement?.data?.raw?.data_status
-  const selectedRaw = selectedElement?.data?.raw ?? selectedElement?.data
-  const selectedNodeId = selectedRaw?.id ?? selectedRaw?.node_id ?? selectedElement?.data?.id
+  const elements = useMemo(
+    () => buildElements(graphNodes, graphEdges, labelForClass, labelForPredicate),
+    [graphEdges, graphNodes, labelForClass, labelForPredicate],
+  )
+
+  const selectedData = asRecord(selectedElement?.data)
+  const selectedRaw = asRecord(selectedData.raw ?? selectedData)
+  const selectedStatus = getString(selectedRaw.data_status)
+  const selectedNodeId =
+    getString(selectedRaw.id) ?? getString(selectedRaw.node_id) ?? getString(selectedData.id)
   const selectedCommandId =
-    selectedRaw?.command_id ?? selectedRaw?.commandId ?? selectedRaw?.metadata?.command_id ?? null
+    getString(selectedRaw.command_id) ?? getString(selectedRaw.commandId) ?? getString(asRecord(selectedRaw.metadata).command_id) ?? null
 
   return (
     <div>
@@ -389,7 +422,7 @@ export const GraphExplorerPage = () => {
           <div className="card-title">
             <H5>Graph Canvas</H5>
           </div>
-          {graphResult?.nodes?.length ? (
+          {graphNodes.length ? (
             <GraphCanvas elements={elements} onSelect={handleSelect} />
           ) : (
             <Callout intent={Intent.PRIMARY}>Run a query to render the graph.</Callout>
@@ -441,16 +474,16 @@ export const GraphExplorerPage = () => {
             <Button
               minimal
               icon="export"
-              onClick={() => downloadJson(`graph-nodes-${db ?? 'db'}.json`, graphResult?.nodes ?? [])}
-              disabled={!graphResult?.nodes?.length}
+              onClick={() => downloadJson(`graph-nodes-${db ?? 'db'}.json`, graphNodes)}
+              disabled={!graphNodes.length}
             >
               Export Nodes
             </Button>
             <Button
               minimal
               icon="export"
-              onClick={() => downloadJson(`graph-edges-${db ?? 'db'}.json`, graphResult?.edges ?? [])}
-              disabled={!graphResult?.edges?.length}
+              onClick={() => downloadJson(`graph-edges-${db ?? 'db'}.json`, graphEdges)}
+              disabled={!graphEdges.length}
             >
               Export Edges
             </Button>
@@ -475,7 +508,7 @@ export const GraphExplorerPage = () => {
                 </tr>
               </thead>
               <tbody>
-                {(graphResult?.nodes ?? []).map((node: GraphNode) => (
+                {graphNodes.map((node) => (
                   <tr key={node.id}>
                     <td>{node.id}</td>
                     <td>{node.type ?? '-'}</td>
@@ -494,7 +527,7 @@ export const GraphExplorerPage = () => {
                 </tr>
               </thead>
               <tbody>
-                {(graphResult?.edges ?? []).map((edge: GraphEdge, index: number) => (
+                {graphEdges.map((edge, index) => (
                   <tr key={`${edge.from_node}-${edge.to_node}-${index}`}>
                     <td>{edge.from_node}</td>
                     <td>{edge.to_node}</td>

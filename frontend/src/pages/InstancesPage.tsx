@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
@@ -24,6 +24,8 @@ import {
   getSampleValues,
   listInstances,
   updateInstance,
+  type CommandResult,
+  type InstanceListResponse,
 } from '../api/bff'
 import { ApiErrorCallout } from '../components/ApiErrorCallout'
 import { PageHeader } from '../components/PageHeader'
@@ -33,12 +35,29 @@ import { toastApiError } from '../errors/toastApiError'
 import { qk } from '../query/queryKeys'
 import { useAppStore } from '../store/useAppStore'
 import { extractOccActualSeq } from '../utils/occ'
+import { asArray, asRecord, getNumber, getString, type UnknownRecord } from '../utils/typed'
 
-const getInstanceId = (item: any) =>
-  item?.instance_id ?? item?.id ?? item?.['@id'] ?? item?.uuid ?? ''
+const getInstanceId = (item: unknown) => {
+  const record = asRecord(item)
+  return (
+    getString(record.instance_id) ??
+    getString(record.id) ??
+    getString(record['@id']) ??
+    getString(record.uuid) ??
+    ''
+  )
+}
 
-const getInstanceVersion = (item: any) =>
-  item?.version ?? item?.expected_seq ?? item?.seq ?? item?.sequence ?? null
+const getInstanceVersion = (item: unknown) => {
+  const record = asRecord(item)
+  return (
+    getNumber(record.version) ??
+    getNumber(record.expected_seq) ??
+    getNumber(record.seq) ??
+    getNumber(record.sequence) ??
+    null
+  )
+}
 
 export const InstancesPage = () => {
   const { db } = useParams()
@@ -53,21 +72,21 @@ export const InstancesPage = () => {
   const [search, setSearch] = useState('')
   const [limit, setLimit] = useState(25)
   const [offset, setOffset] = useState(0)
-  const [selectedInstance, setSelectedInstance] = useState<any>(null)
+  const [selectedInstance, setSelectedInstance] = useState<UnknownRecord | null>(null)
   const [drawerTab, setDrawerTab] = useState('view')
   const [editJson, setEditJson] = useState('')
   const [createJson, setCreateJson] = useState('')
   const [bulkJson, setBulkJson] = useState('')
   const [actualSeqHint, setActualSeqHint] = useState<number | null>(null)
   const [writeError, setWriteError] = useState<unknown>(null)
-  const [sampleValues, setSampleValues] = useState<any>(null)
+  const [sampleValues, setSampleValues] = useState<unknown>(null)
 
   const requestContext = useMemo(
     () => ({ language: context.language, authToken, adminToken }),
     [adminToken, authToken, context.language],
   )
 
-  const listQuery = useQuery({
+  const listQuery = useQuery<InstanceListResponse>({
     queryKey: classId
       ? qk.instances({ dbName: db ?? '', classId, limit, offset, search, language: context.language })
       : ['bff', 'instances', 'empty'],
@@ -82,19 +101,12 @@ export const InstancesPage = () => {
         : ['bff', 'instance', 'empty'],
     queryFn: () => getInstance(requestContext, db ?? '', classId, getInstanceId(selectedInstance)),
     enabled: Boolean(db && classId && selectedInstance),
+    onSuccess: (data) => {
+      setEditJson(JSON.stringify(data, null, 2))
+    },
   })
 
-  useEffect(() => {
-    if (detailQuery.data) {
-      setEditJson(JSON.stringify(detailQuery.data, null, 2))
-    }
-  }, [detailQuery.data])
-
-  useEffect(() => {
-    setActualSeqHint(null)
-  }, [selectedInstance])
-
-  const createMutation = useMutation({
+  const createMutation = useMutation<CommandResult>({
     mutationFn: async () => {
       if (!db || !classId) {
         throw new Error('Missing class')
@@ -103,12 +115,9 @@ export const InstancesPage = () => {
       return createInstance(requestContext, db, classId, context.branch, { data })
     },
     onSuccess: (result) => {
-      if (!result) {
-        return
-      }
       setWriteError(null)
       trackCommand({
-        id: (result as any).command_id,
+        id: result.command_id,
         kind: 'INSTANCE_WRITE',
         title: `Create ${classId}`,
         target: { dbName: db ?? '' },
@@ -125,7 +134,7 @@ export const InstancesPage = () => {
     },
   })
 
-  const bulkMutation = useMutation({
+  const bulkMutation = useMutation<CommandResult>({
     mutationFn: async () => {
       if (!db || !classId) {
         throw new Error('Missing class')
@@ -134,12 +143,9 @@ export const InstancesPage = () => {
       return bulkCreateInstances(requestContext, db, classId, context.branch, { instances })
     },
     onSuccess: (result) => {
-      if (!result) {
-        return
-      }
       setWriteError(null)
       trackCommand({
-        id: (result as any).command_id,
+        id: result.command_id,
         kind: 'INSTANCE_WRITE',
         title: `Bulk create ${classId}`,
         target: { dbName: db ?? '' },
@@ -156,7 +162,7 @@ export const InstancesPage = () => {
     },
   })
 
-  const updateMutation = useMutation({
+  const updateMutation = useMutation<CommandResult, unknown, { expectedSeqOverride?: number } | undefined>({
     mutationFn: async (params?: { expectedSeqOverride?: number }) => {
       if (!db || !classId || !selectedInstance) {
         throw new Error('Missing instance')
@@ -171,12 +177,9 @@ export const InstancesPage = () => {
       })
     },
     onSuccess: (result) => {
-      if (!result) {
-        return
-      }
       setActualSeqHint(null)
       trackCommand({
-        id: (result as any).command_id,
+        id: result.command_id,
         kind: 'INSTANCE_WRITE',
         title: `Update ${classId}`,
         target: { dbName: db ?? '' },
@@ -195,7 +198,7 @@ export const InstancesPage = () => {
     },
   })
 
-  const deleteMutation = useMutation({
+  const deleteMutation = useMutation<CommandResult, unknown, { expectedSeqOverride?: number } | undefined>({
     mutationFn: async (params?: { expectedSeqOverride?: number }) => {
       if (!db || !classId || !selectedInstance) {
         throw new Error('Missing instance')
@@ -207,12 +210,9 @@ export const InstancesPage = () => {
       return deleteInstance(requestContext, db, classId, getInstanceId(selectedInstance), context.branch, expectedSeq)
     },
     onSuccess: (result) => {
-      if (!result) {
-        return
-      }
       setActualSeqHint(null)
       trackCommand({
-        id: (result as any).command_id,
+        id: result.command_id,
         kind: 'INSTANCE_WRITE',
         title: `Delete ${classId}`,
         target: { dbName: db ?? '' },
@@ -242,10 +242,16 @@ export const InstancesPage = () => {
     onError: (error) => toastApiError(error, context.language),
   })
 
-  const instances = useMemo(() => {
-    const payload = listQuery.data as any
-    return payload?.instances ?? payload?.data?.instances ?? []
-  }, [listQuery.data])
+  const instances = useMemo(
+    () => asArray<UnknownRecord>(listQuery.data?.instances ?? listQuery.data?.data?.instances),
+    [listQuery.data],
+  )
+
+  const handleSelectInstance = (item: UnknownRecord) => {
+    setSelectedInstance(item)
+    setDrawerTab('view')
+    setActualSeqHint(null)
+  }
 
   return (
     <div>
@@ -288,11 +294,13 @@ export const InstancesPage = () => {
             </tr>
           </thead>
           <tbody>
-            {instances.map((item: any) => (
-              <tr key={getInstanceId(item)} onClick={() => setSelectedInstance(item)}>
+            {instances.map((item) => (
+              <tr key={getInstanceId(item)} onClick={() => handleSelectInstance(item)}>
                 <td>{getInstanceId(item)}</td>
                 <td>{getInstanceVersion(item) ?? '-'}</td>
-                <td>{item?.event_timestamp ?? item?.updated_at ?? '-'}</td>
+                <td>
+                  {getString(item.event_timestamp) ?? getString(item.updated_at) ?? '-'}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -341,7 +349,11 @@ export const InstancesPage = () => {
 
       <Drawer
         isOpen={Boolean(selectedInstance)}
-        onClose={() => setSelectedInstance(null)}
+        onClose={() => {
+          setSelectedInstance(null)
+          setActualSeqHint(null)
+          setEditJson('')
+        }}
         title={selectedInstance ? getInstanceId(selectedInstance) : 'Instance'}
         position="right"
         size="50%"

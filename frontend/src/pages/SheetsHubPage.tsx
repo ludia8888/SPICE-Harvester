@@ -31,6 +31,9 @@ import { toastApiError } from '../errors/toastApiError'
 import { qk } from '../query/queryKeys'
 import { useAppStore } from '../store/useAppStore'
 
+type TableCandidate = { id: string; bbox: UnknownRecord | null }
+import { asArray, asRecord, getNumber, getString, type UnknownRecord } from '../utils/typed'
+
 export const SheetsHubPage = () => {
   const { db } = useParams()
   const context = useAppStore((state) => state.context)
@@ -46,9 +49,9 @@ export const SheetsHubPage = () => {
   const [worksheetName, setWorksheetName] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [previewLimit, setPreviewLimit] = useState(10)
-  const [gridResult, setGridResult] = useState<any>(null)
-  const [previewResult, setPreviewResult] = useState<any>(null)
-  const [registeredPreview, setRegisteredPreview] = useState<any>(null)
+  const [gridResult, setGridResult] = useState<unknown>(null)
+  const [previewResult, setPreviewResult] = useState<unknown>(null)
+  const [registeredPreview, setRegisteredPreview] = useState<unknown>(null)
   const [registerClassLabel, setRegisterClassLabel] = useState('')
   const [registerBranch, setRegisterBranch] = useState('main')
 
@@ -131,33 +134,59 @@ export const SheetsHubPage = () => {
     onError: (error) => toastApiError(error, context.language),
   })
 
-  const registeredSheets = useMemo(() => {
-    const payload = registeredQuery.data as any
-    return payload?.data?.sheets ?? payload?.data?.data?.sheets ?? []
-  }, [registeredQuery.data])
+  const registeredSheets = useMemo(
+    () =>
+      asArray<UnknownRecord>(
+        asRecord(asRecord(registeredQuery.data).data).sheets ??
+          asRecord(asRecord(asRecord(registeredQuery.data).data).data).sheets,
+      ),
+    [registeredQuery.data],
+  )
 
   const gridPreview = useMemo(() => {
-    const grid = (gridResult as any)?.grid
-    if (!Array.isArray(grid)) {
+    const grid = asArray<unknown[]>(asRecord(gridResult).grid)
+    if (!grid.length) {
       return []
     }
-    return grid.slice(0, 10).map((row: any[]) => row.slice(0, 10))
+    return grid.slice(0, 10).map((row) => asArray<unknown>(row).slice(0, 10))
   }, [gridResult])
 
-  const gridTables = useMemo(() => {
-    const direct = (gridResult as any)?.tables ?? (gridResult as any)?.table_candidates
+  const gridTables = useMemo<TableCandidate[]>(() => {
+    const gridRecord = asRecord(gridResult)
+    const direct = gridRecord.tables ?? gridRecord.table_candidates
     const nested =
-      (gridResult as any)?.structure?.tables ??
-      (gridResult as any)?.data?.structure?.tables ??
-      (gridResult as any)?.data?.tables
+      asRecord(gridRecord.structure).tables ??
+      asRecord(asRecord(gridRecord.data).structure).tables ??
+      asRecord(gridRecord.data).tables
     const tables = Array.isArray(direct) ? direct : Array.isArray(nested) ? nested : []
-    return tables.map((table: any, index: number) => ({
-      id: table.table_id ?? table.id ?? table.tableId ?? `table-${index + 1}`,
-      bbox: table.bbox ?? table.bounding_box ?? table.table_bbox ?? table.tableBBox ?? null,
-    }))
+    return tables.map((table, index) => {
+      const record = asRecord(table)
+      const bbox = asRecord(record.bbox ?? record.bounding_box ?? record.table_bbox ?? record.tableBBox)
+      return {
+        id:
+          getString(record.table_id) ??
+          getString(record.id) ??
+          getString(record.tableId) ??
+          `table-${index + 1}`,
+        bbox: Object.keys(bbox).length ? bbox : null,
+      }
+    })
   }, [gridResult])
 
-  const buildImportUrl = (table?: { id?: string; bbox?: any }) => {
+  const previewColumns = useMemo(
+    () =>
+      asArray<unknown>(asRecord(previewResult).columns).filter(
+        (col): col is string => typeof col === 'string',
+      ),
+    [previewResult],
+  )
+
+  const previewRows = useMemo(
+    () => asArray<unknown[]>(asRecord(previewResult).sample_rows),
+    [previewResult],
+  )
+
+  const buildImportUrl = (table?: TableCandidate) => {
     if (!db) {
       return '#'
     }
@@ -176,10 +205,14 @@ export const SheetsHubPage = () => {
     }
     if (table?.bbox) {
       const bbox = table.bbox
-      if (typeof bbox.top === 'number') params.set('bbox_top', String(bbox.top))
-      if (typeof bbox.left === 'number') params.set('bbox_left', String(bbox.left))
-      if (typeof bbox.bottom === 'number') params.set('bbox_bottom', String(bbox.bottom))
-      if (typeof bbox.right === 'number') params.set('bbox_right', String(bbox.right))
+      const top = getNumber(bbox.top)
+      const left = getNumber(bbox.left)
+      const bottom = getNumber(bbox.bottom)
+      const right = getNumber(bbox.right)
+      if (typeof top === 'number') params.set('bbox_top', String(top))
+      if (typeof left === 'number') params.set('bbox_left', String(left))
+      if (typeof bottom === 'number') params.set('bbox_bottom', String(bottom))
+      if (typeof right === 'number') params.set('bbox_right', String(right))
     }
     const query = params.toString()
     return `/db/${encodeURIComponent(db)}/data/import/sheets${query ? `?${query}` : ''}`
@@ -225,19 +258,19 @@ export const SheetsHubPage = () => {
               Preview {previewCooldown.active ? `(${previewCooldown.remainingSeconds}s)` : ''}
             </Button>
           </div>
-          {previewResult ? (
+          {previewColumns.length ? (
             <HTMLTable striped className="full-width">
               <thead>
                 <tr>
-                  {(previewResult as any)?.columns?.map((col: string) => (
+                  {previewColumns.map((col) => (
                     <th key={col}>{col}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {(previewResult as any)?.sample_rows?.map((row: any[], index: number) => (
+                {previewRows.map((row, index) => (
                   <tr key={index}>
-                    {row.map((cell, idx) => (
+                    {asArray<unknown>(row).map((cell, idx) => (
                       <td key={idx}>{cell}</td>
                     ))}
                   </tr>
@@ -290,7 +323,7 @@ export const SheetsHubPage = () => {
                     <td>{table.id}</td>
                     <td>
                       {table.bbox
-                        ? `top:${table.bbox.top}, left:${table.bbox.left}, bottom:${table.bbox.bottom}, right:${table.bbox.right}`
+                        ? `top:${getNumber(table.bbox.top) ?? '-'}, left:${getNumber(table.bbox.left) ?? '-'}, bottom:${getNumber(table.bbox.bottom) ?? '-'}, right:${getNumber(table.bbox.right) ?? '-'}`
                         : '-'}
                     </td>
                     <td>
@@ -352,22 +385,27 @@ export const SheetsHubPage = () => {
             </tr>
           </thead>
           <tbody>
-            {registeredSheets.map((sheet: any) => (
-              <tr key={sheet.sheet_id ?? sheet.sheetId}>
-                <td>{sheet.sheet_id ?? sheet.sheetId}</td>
-                <td>{sheet.worksheet_name ?? sheet.worksheet}</td>
-                <td>{sheet.database_name ?? '-'}</td>
-                <td>{sheet.branch ?? 'main'}</td>
+            {registeredSheets.map((sheet) => {
+              const sheetId = getString(sheet.sheet_id) ?? getString(sheet.sheetId) ?? ''
+              const worksheet = getString(sheet.worksheet_name) ?? getString(sheet.worksheet) ?? '-'
+              const database = getString(sheet.database_name) ?? '-'
+              const branch = getString(sheet.branch) ?? 'main'
+              return (
+                <tr key={sheetId}>
+                  <td>{sheetId}</td>
+                  <td>{worksheet}</td>
+                  <td>{database}</td>
+                  <td>{branch}</td>
                 <td>
-                  <Button minimal onClick={() => previewRegisteredMutation.mutate(sheet.sheet_id ?? sheet.sheetId)}>
+                  <Button minimal onClick={() => previewRegisteredMutation.mutate(sheetId)}>
                     Preview
                   </Button>
-                  <Button minimal intent={Intent.DANGER} onClick={() => deleteMutation.mutate(sheet.sheet_id ?? sheet.sheetId)}>
+                  <Button minimal intent={Intent.DANGER} onClick={() => deleteMutation.mutate(sheetId)}>
                     Remove
                   </Button>
                 </td>
               </tr>
-            ))}
+            )})}
           </tbody>
         </HTMLTable>
         <JsonView value={registeredPreview} fallback="등록된 시트 프리뷰를 확인하세요." />

@@ -11,7 +11,7 @@ import {
   NavbarHeading,
   Tag,
 } from '@blueprintjs/core'
-import { listBranches, listDatabases } from '../../api/bff'
+import { listBranches, listDatabases, type BranchListResponse } from '../../api/bff'
 import { qk } from '../../query/queryKeys'
 import { useAppStore } from '../../store/useAppStore'
 
@@ -34,19 +34,17 @@ export const ContextNavbar = ({ onOpenCommands }: { onOpenCommands: () => void }
     queryFn: () => listDatabases(requestContext),
   })
 
-  const branchesQuery = useQuery({
+  const branchesQuery = useQuery<BranchListResponse>({
     queryKey: context.project ? qk.branches(context.project, context.language) : ['bff', 'branches', 'empty'],
     queryFn: () => listBranches(requestContext, context.project ?? ''),
     enabled: Boolean(context.project),
   })
 
   const branchOptions = useMemo<string[]>(() => {
-    const list = Array.isArray((branchesQuery.data as any)?.branches)
-      ? (branchesQuery.data as any).branches
-      : []
-    const values: string[] = list
-      .map((branch: any) => branch?.name)
-      .filter((name: unknown): name is string => typeof name === 'string')
+    const list = branchesQuery.data?.branches ?? []
+    const values = list
+      .map((branch) => branch?.name)
+      .filter((name): name is string => typeof name === 'string')
     const normalized = new Set<string>(values)
     if (context.branch) {
       normalized.add(context.branch)

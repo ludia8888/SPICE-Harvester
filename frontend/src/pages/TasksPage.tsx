@@ -17,6 +17,7 @@ import { JsonView } from '../components/JsonView'
 import { toastApiError } from '../errors/toastApiError'
 import { qk } from '../query/queryKeys'
 import { useAppStore } from '../store/useAppStore'
+import { asArray, asRecord, getString, type UnknownRecord } from '../utils/typed'
 
 export const TasksPage = () => {
   const context = useAppStore((state) => state.context)
@@ -26,9 +27,9 @@ export const TasksPage = () => {
   const [status, setStatus] = useState('')
   const [taskType, setTaskType] = useState('')
   const [limit, setLimit] = useState(100)
-  const [selectedTask, setSelectedTask] = useState<any>(null)
-  const [taskResult, setTaskResult] = useState<any>(null)
-  const [metrics, setMetrics] = useState<any>(null)
+  const [selectedTask, setSelectedTask] = useState<unknown>(null)
+  const [taskResult, setTaskResult] = useState<unknown>(null)
+  const [metrics, setMetrics] = useState<unknown>(null)
 
   const requestContext = useMemo(
     () => ({ language: context.language, authToken, adminToken }),
@@ -63,7 +64,8 @@ export const TasksPage = () => {
     onError: (error) => toastApiError(error, context.language),
   })
 
-  const tasks = (listQuery.data as any)?.tasks ?? []
+  const listRecord = asRecord(listQuery.data)
+  const tasks = asArray<UnknownRecord>(listRecord.tasks ?? asRecord(listRecord.data).tasks)
 
   return (
     <div>
@@ -106,25 +108,27 @@ export const TasksPage = () => {
             </tr>
           </thead>
           <tbody>
-            {tasks.map((task: any) => (
-              <tr key={task.task_id}>
-                <td>{task.task_id}</td>
-                <td>{task.task_name}</td>
-                <td>{task.status}</td>
-                <td>{task.task_type}</td>
+            {tasks.map((task) => {
+              const taskId = getString(task.task_id) ?? ''
+              return (
+              <tr key={taskId}>
+                <td>{taskId}</td>
+                <td>{getString(task.task_name) ?? '-'}</td>
+                <td>{getString(task.status) ?? '-'}</td>
+                <td>{getString(task.task_type) ?? '-'}</td>
                 <td>
-                  <Button minimal onClick={() => detailMutation.mutate(task.task_id)}>
+                  <Button minimal onClick={() => detailMutation.mutate(taskId)}>
                     Details
                   </Button>
-                  <Button minimal onClick={() => resultMutation.mutate(task.task_id)}>
+                  <Button minimal onClick={() => resultMutation.mutate(taskId)}>
                     Result
                   </Button>
-                  <Button minimal intent={Intent.DANGER} onClick={() => cancelMutation.mutate(task.task_id)}>
+                  <Button minimal intent={Intent.DANGER} onClick={() => cancelMutation.mutate(taskId)}>
                     Cancel
                   </Button>
                 </td>
               </tr>
-            ))}
+            )})}
           </tbody>
         </HTMLTable>
       </Card>

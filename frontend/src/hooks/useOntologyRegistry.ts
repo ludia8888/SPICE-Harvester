@@ -4,6 +4,7 @@ import { listOntologies } from '../api/bff'
 import { qk } from '../query/queryKeys'
 import { useAppStore } from '../store/useAppStore'
 import { formatLabel, type LocalizedText } from '../utils/labels'
+import { asArray, asRecord } from '../utils/typed'
 
 type OntologyProperty = {
   name?: string
@@ -30,20 +31,18 @@ type OntologyClass = {
   [key: string]: unknown
 }
 
-const extractOntologies = (payload: any): OntologyClass[] => {
-  if (!payload || typeof payload !== 'object') {
-    return []
+const extractOntologies = (payload: unknown): OntologyClass[] => {
+  const root = asRecord(payload)
+  const data = asRecord(root.data)
+  const fromRoot = asArray<OntologyClass>(root.ontologies)
+  if (fromRoot.length) {
+    return fromRoot
   }
-  if (Array.isArray(payload.ontologies)) {
-    return payload.ontologies
+  const fromData = asArray<OntologyClass>(data.ontologies)
+  if (fromData.length) {
+    return fromData
   }
-  if (payload.data && Array.isArray(payload.data.ontologies)) {
-    return payload.data.ontologies
-  }
-  if (payload.data && Array.isArray(payload.data.classes)) {
-    return payload.data.classes
-  }
-  return []
+  return asArray<OntologyClass>(data.classes)
 }
 
 export const useOntologyRegistry = (dbName?: string | null, branch?: string) => {

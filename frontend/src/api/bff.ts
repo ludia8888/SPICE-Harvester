@@ -1,5 +1,6 @@
 import type { Language } from '../types/app'
 import { useAppStore, type SettingsDialogReason } from '../store/useAppStore'
+import { asArray, asRecord, getString } from '../utils/typed'
 import { API_BASE_URL } from './config'
 
 export class HttpError extends Error {
@@ -251,6 +252,21 @@ type DatabaseListResponse = {
   data?: { databases?: Array<{ name?: string }> }
 }
 
+export type BranchListResponse = {
+  branches?: Array<{ name?: string }>
+  count?: number
+}
+
+export type InstanceListResponse = {
+  class_id?: string
+  total?: number
+  limit?: number
+  offset?: number
+  search?: string | null
+  instances?: Array<Record<string, unknown>>
+  data?: { instances?: Array<Record<string, unknown>> }
+}
+
 type AcceptedContract = {
   data?: { command_id?: string }
   command_id?: string
@@ -278,29 +294,19 @@ export type CommandResult = {
 const extractCommandId = (payload: AcceptedContract | null) =>
   payload?.data?.command_id ?? payload?.command_id
 
-const extractBatchCommandIds = (payload: any): string[] => {
-  if (!payload || typeof payload !== 'object') {
-    return []
-  }
-  const write = (payload as { write?: { commands?: any[] } }).write
-  if (!write || !Array.isArray(write.commands)) {
-    return []
-  }
-  return write.commands
+const extractBatchCommandIds = (payload: unknown): string[] => {
+  const root = asRecord(payload)
+  const write = asRecord(root.write)
+  const commands = asArray<unknown>(write.commands ?? root.commands)
+  return commands
     .map((command) => {
-      if (!command) {
-        return null
+      const record = asRecord(command)
+      const direct = getString(record.command_id)
+      if (direct) {
+        return direct
       }
-      if (typeof command.command_id === 'string') {
-        return command.command_id
-      }
-      if (command.command && typeof command.command.command_id === 'string') {
-        return command.command.command_id
-      }
-      if (command.command && typeof command.command.id === 'string') {
-        return command.command.id
-      }
-      return null
+      const nested = asRecord(record.command)
+      return getString(nested.command_id) ?? getString(nested.id) ?? null
     })
     .filter((value): value is string => Boolean(value))
 }
@@ -405,8 +411,11 @@ export const getCommandStatus = async (
   return payload
 }
 
-export const listBranches = async (context: RequestContext, dbName: string) => {
-  const { payload } = await requestJson<{ branches?: Array<{ name?: string }>; count?: number }>(
+export const listBranches = async (
+  context: RequestContext,
+  dbName: string,
+): Promise<BranchListResponse> => {
+  const { payload } = await requestJson<BranchListResponse>(
     `databases/${encodeURIComponent(dbName)}/branches`,
     { method: 'GET' },
     context,
@@ -883,14 +892,14 @@ export const listInstances = async (
   dbName: string,
   classId: string,
   params: { limit?: number; offset?: number; search?: string },
-) => {
-  const { payload } = await requestJson<unknown>(
+): Promise<InstanceListResponse> => {
+  const { payload } = await requestJson<InstanceListResponse>(
     `database/${encodeURIComponent(dbName)}/class/${encodeURIComponent(classId)}/instances`,
     { method: 'GET' },
     context,
     params,
   )
-  return payload
+  return payload ?? {}
 }
 
 export const getInstance = async (context: RequestContext, dbName: string, classId: string, instanceId: string) => {

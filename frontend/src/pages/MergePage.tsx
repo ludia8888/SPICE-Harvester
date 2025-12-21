@@ -12,12 +12,13 @@ import {
   InputGroup,
   Intent,
 } from '@blueprintjs/core'
-import { getSummary, listBranches, resolveMerge, simulateMerge } from '../api/bff'
+import { getSummary, listBranches, resolveMerge, simulateMerge, type BranchListResponse } from '../api/bff'
 import { PageHeader } from '../components/PageHeader'
 import { JsonView } from '../components/JsonView'
 import { toastApiError } from '../errors/toastApiError'
 import { qk } from '../query/queryKeys'
 import { useAppStore } from '../store/useAppStore'
+import { asArray, asRecord, getBoolean } from '../utils/typed'
 
 const parseResolvedValue = (value: string) => {
   if (!value.trim()) {
@@ -39,7 +40,7 @@ export const MergePage = () => {
   const [sourceBranch, setSourceBranch] = useState('')
   const [targetBranch, setTargetBranch] = useState('main')
   const [resolutions, setResolutions] = useState<Array<{ path: string; resolution_type: string; resolved_value: string }>>([])
-  const [simulateResult, setSimulateResult] = useState<any>(null)
+  const [simulateResult, setSimulateResult] = useState<unknown>(null)
   const [changeReason, setChangeReason] = useState('')
   const [adminActor, setAdminActor] = useState('')
 
@@ -54,18 +55,27 @@ export const MergePage = () => {
     enabled: Boolean(db),
   })
 
-  const isProtected = Boolean((summaryQuery.data as any)?.data?.policy?.is_protected_branch)
+  const summaryRecord = asRecord(summaryQuery.data)
+  const policy = asRecord(asRecord(summaryRecord.data).policy)
+  const isProtected = getBoolean(policy.is_protected_branch) ?? false
 
-  const branchesQuery = useQuery({
+  const branchesQuery = useQuery<BranchListResponse>({
     queryKey: db ? qk.branches(db, context.language) : ['bff', 'branches', 'empty'],
     queryFn: () => listBranches(requestContext, db ?? ''),
     enabled: Boolean(db),
   })
 
-  const branches = useMemo(() => {
-    const payload = branchesQuery.data as any
-    return payload?.branches ?? []
-  }, [branchesQuery.data])
+  const branches = useMemo(
+    () => branchesQuery.data?.branches ?? [],
+    [branchesQuery.data],
+  )
+  const branchNames = useMemo(
+    () =>
+      branches
+        .map((branch) => (typeof branch === 'string' ? branch : branch?.name))
+        .filter((name): name is string => typeof name === 'string' && name.length > 0),
+    [branches],
+  )
 
   const simulateMutation = useMutation({
     mutationFn: () =>
@@ -108,7 +118,9 @@ export const MergePage = () => {
     onError: (error) => toastApiError(error, context.language),
   })
 
-  const conflicts = (simulateResult as any)?.data?.merge_preview?.conflicts ?? []
+  const conflicts = asArray<unknown>(
+    asRecord(asRecord(asRecord(simulateResult).data).merge_preview).conflicts,
+  )
 
   return (
     <div>
@@ -126,14 +138,14 @@ export const MergePage = () => {
             <HTMLSelect
               value={sourceBranch}
               onChange={(event) => setSourceBranch(event.currentTarget.value)}
-              options={[{ label: 'Select source', value: '' }, ...branches.map((b: any) => ({ label: b.name ?? b, value: b.name ?? b }))]}
+              options={[{ label: 'Select source', value: '' }, ...branchNames.map((name) => ({ label: name, value: name }))]}
             />
           </FormGroup>
           <FormGroup label="Target">
             <HTMLSelect
               value={targetBranch}
               onChange={(event) => setTargetBranch(event.currentTarget.value)}
-              options={[{ label: 'Select target', value: '' }, ...branches.map((b: any) => ({ label: b.name ?? b, value: b.name ?? b }))]}
+              options={[{ label: 'Select target', value: '' }, ...branchNames.map((name) => ({ label: name, value: name }))]}
             />
           </FormGroup>
           <Button intent={Intent.PRIMARY} onClick={() => simulateMutation.mutate()} disabled={!sourceBranch || !targetBranch}>

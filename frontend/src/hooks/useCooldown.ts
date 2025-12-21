@@ -2,13 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 
 export const useCooldown = () => {
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(null)
-  const [, setTick] = useState(0)
+  const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
     if (!cooldownUntil) {
       return
     }
-    const timer = window.setInterval(() => setTick((tick) => tick + 1), 1000)
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
   }, [cooldownUntil])
 
@@ -16,16 +16,18 @@ export const useCooldown = () => {
     if (!cooldownUntil) {
       return 0
     }
-    const remaining = Math.ceil((cooldownUntil - Date.now()) / 1000)
+    const remaining = Math.ceil((cooldownUntil - now) / 1000)
     return remaining > 0 ? remaining : 0
-  }, [cooldownUntil])
+  }, [cooldownUntil, now])
 
   const startCooldown = (seconds: number | undefined) => {
     if (!seconds || seconds <= 0) {
       setCooldownUntil(null)
       return
     }
-    setCooldownUntil(Date.now() + seconds * 1000)
+    const nowValue = Date.now()
+    setNow(nowValue)
+    setCooldownUntil(nowValue + seconds * 1000)
   }
 
   const active = remainingSeconds > 0

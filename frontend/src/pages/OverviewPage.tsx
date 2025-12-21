@@ -8,6 +8,7 @@ import { PageHeader } from '../components/PageHeader'
 import { JsonView } from '../components/JsonView'
 import { qk } from '../query/queryKeys'
 import { useAppStore } from '../store/useAppStore'
+import { asRecord, getBoolean } from '../utils/typed'
 
 export const OverviewPage = () => {
   const { db } = useParams()
@@ -26,8 +27,9 @@ export const OverviewPage = () => {
     enabled: Boolean(db),
   })
 
-  const policy = (summaryQuery.data as any)?.data?.policy
-  const isProtected = Boolean(policy?.is_protected_branch)
+  const summaryRecord = asRecord(summaryQuery.data)
+  const policy = asRecord(asRecord(summaryRecord.data).policy)
+  const isProtected = getBoolean(policy.is_protected_branch) ?? false
   const dbPrefix = db ? `/db/${encodeURIComponent(db)}` : ''
 
   return (

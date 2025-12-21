@@ -22,6 +22,7 @@ import { toastApiError } from '../errors/toastApiError'
 import { qk } from '../query/queryKeys'
 import { useAppStore } from '../store/useAppStore'
 import { formatLabel } from '../utils/labels'
+import { asArray, asRecord, getString, type UnknownRecord } from '../utils/typed'
 
 type FilterRow = { field: string; operator: string; value: string }
 
@@ -69,10 +70,10 @@ export const QueryBuilderPage = () => {
   const [selectFields, setSelectFields] = useState<string[]>([])
   const [orderBy, setOrderBy] = useState('')
   const [orderDirection, setOrderDirection] = useState('asc')
-  const [result, setResult] = useState<any>(null)
+  const [result, setResult] = useState<unknown>(null)
   const [lastError, setLastError] = useState<unknown>(null)
   const [rawQueryJson, setRawQueryJson] = useState('')
-  const [rawResult, setRawResult] = useState<any>(null)
+  const [rawResult, setRawResult] = useState<unknown>(null)
   const [rawError, setRawError] = useState<unknown>(null)
 
   const requestContext = useMemo(
@@ -127,21 +128,29 @@ export const QueryBuilderPage = () => {
   const propertyOptions = useMemo(() => {
     const item = registry.classMap.get(classId)
     const props = item?.properties ?? []
-    return props.map((prop: any) => ({
+    return props.map((prop) => ({
       id: prop.name ?? '',
-      label: String(prop.label?.ko ?? prop.label?.en ?? prop.name ?? ''),
+      label: formatLabel(prop.label, context.language, prop.name ?? ''),
     }))
-  }, [classId, registry.classMap])
+  }, [classId, context.language, registry.classMap])
 
   const operators = useMemo<string[]>(() => {
-    const data = builderQuery.data as any
-    if (!data?.operators) {
+    const data = asRecord(builderQuery.data)
+    const operatorMap = asRecord(data.operators)
+    if (!Object.keys(operatorMap).length) {
       return ['eq', 'ne', 'gt', 'ge', 'lt', 'le', 'like', 'in', 'not_in', 'is_null', 'is_not_null']
     }
-    const raw = (Object.values(data.operators).flat() as string[]).filter((value) => typeof value === 'string')
+    const raw = Object.values(operatorMap)
+      .flatMap((value) => asArray<unknown>(value))
+      .filter((value): value is string => typeof value === 'string')
     const mapped = raw.map((value) => mapOperator(value)).filter((value): value is string => Boolean(value))
     return mapped.length ? Array.from(new Set(mapped)) : ['eq', 'ne', 'gt', 'ge', 'lt', 'le', 'like', 'in', 'not_in', 'is_null', 'is_not_null']
   }, [builderQuery.data])
+
+  const resultRows = useMemo(
+    () => asArray<UnknownRecord>(asRecord(result).results),
+    [result],
+  )
 
   return (
     <div>
@@ -259,20 +268,20 @@ export const QueryBuilderPage = () => {
 
       <Card elevation={1} className="section-card">
         <H5>Results</H5>
-        {Array.isArray(result?.results) ? (
+        {resultRows.length ? (
           <HTMLTable striped interactive className="full-width">
             <thead>
               <tr>
-                {Object.keys(result.results[0] ?? {}).map((key) => (
+                {Object.keys(resultRows[0] ?? {}).map((key) => (
                   <th key={key}>{key}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {result.results.map((row: any, index: number) => (
+              {resultRows.map((row, index) => (
                 <tr key={index}>
-                  {Object.values(row).map((cell: any, idx: number) => (
-                    <td key={idx}>{String(cell)}</td>
+                  {Object.values(row).map((cell, idx) => (
+                    <td key={idx}>{getString(cell) ?? String(cell)}</td>
                   ))}
                 </tr>
               ))}

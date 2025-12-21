@@ -11,7 +11,7 @@ import {
   InputGroup,
   Intent,
 } from '@blueprintjs/core'
-import { createBranch, deleteBranch, listBranches } from '../api/bff'
+import { createBranch, deleteBranch, listBranches, type BranchListResponse } from '../api/bff'
 import { PageHeader } from '../components/PageHeader'
 import { showAppToast } from '../app/AppToaster'
 import { toastApiError } from '../errors/toastApiError'
@@ -33,7 +33,7 @@ export const BranchesPage = () => {
     [adminToken, authToken, context.language],
   )
 
-  const branchesQuery = useQuery({
+  const branchesQuery = useQuery<BranchListResponse>({
     queryKey: db ? qk.branches(db, context.language) : ['bff', 'branches', 'empty'],
     queryFn: () => listBranches(requestContext, db ?? ''),
     enabled: Boolean(db),
@@ -59,10 +59,11 @@ export const BranchesPage = () => {
     onError: (error) => toastApiError(error, context.language),
   })
 
-  const branches = useMemo(() => {
-    const payload = branchesQuery.data as any
-    const list = payload?.branches ?? payload?.data?.branches ?? []
-    return Array.isArray(list) ? list : []
+  const branchNames = useMemo(() => {
+    const branches = branchesQuery.data?.branches ?? []
+    return branches
+      .map((branch) => (typeof branch === 'string' ? branch : branch?.name))
+      .filter((name): name is string => typeof name === 'string' && name.length > 0)
   }, [branchesQuery.data])
 
   return (
@@ -81,7 +82,7 @@ export const BranchesPage = () => {
             <HTMLSelect
               value={fromBranch}
               onChange={(event) => setFromBranch(event.currentTarget.value)}
-              options={['main', ...branches.map((b: any) => b?.name || b)]}
+              options={['main', ...branchNames]}
             />
           </FormGroup>
           <Button
@@ -111,8 +112,7 @@ export const BranchesPage = () => {
             </tr>
           </thead>
           <tbody>
-            {branches.map((branch: any) => {
-              const name = branch?.name ?? branch
+            {branchNames.map((name) => {
               const isActive = name === context.branch
               return (
                 <tr key={name}>

@@ -1,4 +1,5 @@
 import CytoscapeComponent from 'react-cytoscapejs'
+import type { Core, ElementDefinition, EventObject, LayoutOptions, Stylesheet } from 'cytoscape'
 
 export type GraphCanvasSelect = {
   kind: 'node' | 'edge'
@@ -11,9 +12,9 @@ export const GraphCanvas = ({
   layout,
   className,
 }: {
-  elements: Array<Record<string, unknown>>
+  elements: ElementDefinition[]
   onSelect?: (selection: GraphCanvasSelect) => void
-  layout?: Record<string, unknown>
+  layout?: LayoutOptions
   className?: string
 }) => {
   return (
@@ -21,7 +22,8 @@ export const GraphCanvas = ({
       className={className ?? 'graph-canvas'}
       elements={elements}
       layout={layout ?? { name: 'cose', animate: false, padding: 20 }}
-      stylesheet={[
+      stylesheet={
+        [
         {
           selector: 'node',
           style: {
@@ -62,16 +64,17 @@ export const GraphCanvas = ({
           selector: '.status-missing',
           style: { 'background-color': '#c23030' },
         },
-      ]}
-      cy={(cy: any) => {
+      ] as Stylesheet[]
+      }
+      cy={(cy: Core) => {
         if (!onSelect) {
           return
         }
-        cy.on('tap', 'node', (event: any) => {
+        cy.on('tap', 'node', (event: EventObject) => {
           const data = event.target.data() as Record<string, unknown>
           onSelect({ kind: 'node', data })
         })
-        cy.on('tap', 'edge', (event: any) => {
+        cy.on('tap', 'edge', (event: EventObject) => {
           const data = event.target.data() as Record<string, unknown>
           onSelect({ kind: 'edge', data })
         })

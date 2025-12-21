@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
@@ -31,8 +31,9 @@ import { showAppToast } from '../app/AppToaster'
 import { toastApiError } from '../errors/toastApiError'
 import { qk } from '../query/queryKeys'
 import { useAppStore } from '../store/useAppStore'
-import { formatLabel } from '../utils/labels'
+import { formatLabel, type LocalizedText } from '../utils/labels'
 import { extractOccActualSeq } from '../utils/occ'
+import { asRecord, getBoolean, getNumber, getString } from '../utils/typed'
 
 type DraftProperty = {
   name: string
@@ -65,25 +66,31 @@ const buildDraftFromClass = (klass: OntologyClass, lang: string): OntologyDraft 
   id: klass.id ?? '',
   label: formatLabel(klass.label, lang, klass.id ?? ''),
   description: formatLabel(klass.description, lang, ''),
-  parent_class: (klass.parent_class as string) ?? undefined,
-  abstract: Boolean(klass.abstract),
+  parent_class: getString(asRecord(klass).parent_class) ?? undefined,
+  abstract: getBoolean(klass.abstract) ?? false,
   properties:
-    klass.properties?.map((prop) => ({
-      name: prop.name ?? '',
-      type: prop.type ?? 'xsd:string',
-      label: formatLabel(prop.label, lang, prop.name ?? ''),
-      required: Boolean(prop.required),
-      primary_key: Boolean((prop as any).primary_key || (prop as any).primaryKey),
-    })) ?? [],
+    klass.properties?.map((prop) => {
+      const propRecord = asRecord(prop)
+      return {
+        name: prop.name ?? '',
+        type: prop.type ?? 'xsd:string',
+        label: formatLabel(prop.label, lang, prop.name ?? ''),
+        required: Boolean(prop.required),
+        primary_key: Boolean(prop.primary_key ?? propRecord.primaryKey),
+      }
+    }) ?? [],
   relationships:
-    klass.relationships?.map((rel) => ({
-      predicate: rel.predicate ?? '',
-      target: rel.target ?? '',
-      label: formatLabel(rel.label, lang, rel.predicate ?? ''),
-      cardinality: rel.cardinality ?? '1:n',
-      inverse_predicate: (rel as any).inverse_predicate ?? undefined,
-      inverse_label: formatLabel((rel as any).inverse_label, lang, ''),
-    })) ?? [],
+    klass.relationships?.map((rel) => {
+      const relRecord = asRecord(rel)
+      return {
+        predicate: rel.predicate ?? '',
+        target: rel.target ?? '',
+        label: formatLabel(rel.label, lang, rel.predicate ?? ''),
+        cardinality: rel.cardinality ?? '1:n',
+        inverse_predicate: getString(relRecord.inverse_predicate) ?? undefined,
+        inverse_label: formatLabel(relRecord.inverse_label as LocalizedText, lang, ''),
+      }
+    }) ?? [],
 })
 
 const emptyDraft = (): OntologyDraft => ({
@@ -114,7 +121,9 @@ export const OntologyPage = () => {
     enabled: Boolean(db),
   })
 
-  const isProtected = Boolean((summaryQuery.data as any)?.data?.policy?.is_protected_branch)
+  const summaryRecord = asRecord(summaryQuery.data)
+  const policy = asRecord(asRecord(summaryRecord.data).policy)
+  const isProtected = getBoolean(policy.is_protected_branch) ?? false
 
   const registry = useOntologyRegistry(db, context.branch)
   const [selectedClassId, setSelectedClassId] = useState<string>('')
@@ -128,6 +137,14 @@ export const OntologyPage = () => {
   const [adminActor, setAdminActor] = useState('')
   const [actualSeqHint, setActualSeqHint] = useState<number | null>(null)
 
+  const handleSelectClass = (classId: string) => {
+    setSelectedClassId(classId)
+    setDraft(emptyDraft())
+    setSchemaResult(null)
+    setValidationResult(null)
+    setActualSeqHint(null)
+  }
+
   const detailQuery = useQuery({
     queryKey:
       db && selectedClassId
@@ -135,22 +152,19 @@ export const OntologyPage = () => {
         : ['bff', 'ontology-detail', 'empty'],
     queryFn: () => getOntology(requestContext, db ?? '', selectedClassId, context.branch),
     enabled: Boolean(db && selectedClassId),
-  })
-
-  useEffect(() => {
-    if (detailQuery.data && selectedClassId) {
-      setDraft(buildDraftFromClass(detailQuery.data as OntologyClass, context.language))
+    onSuccess: (data) => {
+      if (!selectedClassId) {
+        return
+      }
+      setDraft(buildDraftFromClass(data as OntologyClass, context.language))
       setSchemaResult(null)
       setValidationResult(null)
       setActualSeqHint(null)
-      return
-    }
-    if (!selectedClassId) {
-      setDraft(emptyDraft())
-    }
-  }, [context.language, detailQuery.data, selectedClassId])
+    },
+  })
 
-  const expectedSeq = (detailQuery.data as any)?.version ?? (detailQuery.data as any)?.expected_seq
+  const detailRecord = asRecord(detailQuery.data)
+  const expectedSeq = getNumber(detailRecord.version) ?? getNumber(detailRecord.expected_seq)
 
   const buildPayload = (): unknown => ({
     id: draft.id,
@@ -204,7 +218,7 @@ export const OntologyPage = () => {
       if (!db) {
         return
       }
-      const commandId = (result as any)?.commandId
+      const commandId = getString(asRecord(result).commandId)
       if (commandId) {
         trackCommand({
           id: commandId,
@@ -244,7 +258,7 @@ export const OntologyPage = () => {
       if (!db) {
         return
       }
-      const commandId = (result as any)?.commandId
+      const commandId = getString(asRecord(result).commandId)
       if (commandId) {
         trackCommand({
           id: commandId,
@@ -257,7 +271,7 @@ export const OntologyPage = () => {
           indexPhase: 'UNKNOWN',
         })
       }
-      setSelectedClassId('')
+      handleSelectClass('')
       void registry.refetch()
       void showAppToast({ intent: Intent.SUCCESS, message: '삭제 요청 전송 완료' })
     },
@@ -320,7 +334,7 @@ export const OntologyPage = () => {
         <Card elevation={1} className="section-card">
           <div className="card-title">
             <H5>Classes</H5>
-            <Button minimal icon="add" onClick={() => setSelectedClassId('')}>
+            <Button minimal icon="add" onClick={() => handleSelectClass('')}>
               New
             </Button>
           </div>
@@ -335,7 +349,7 @@ export const OntologyPage = () => {
                 key={option.value}
                 minimal
                 className={selectedClassId === option.value ? 'list-item active' : 'list-item'}
-                onClick={() => setSelectedClassId(option.value)}
+                onClick={() => handleSelectClass(option.value)}
               >
                 {option.label}
               </Button>
@@ -682,7 +696,7 @@ export const OntologyPage = () => {
           <div className="card-title">
             <H5>Policy</H5>
           </div>
-          <JsonView value={(summaryQuery.data as any)?.data?.policy} />
+          <JsonView value={policy} />
         </Card>
       </div>
     </div>

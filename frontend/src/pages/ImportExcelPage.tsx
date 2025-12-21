@@ -29,6 +29,7 @@ import { useCooldown } from '../hooks/useCooldown'
 import { HttpError } from '../api/bff'
 import { toastApiError } from '../errors/toastApiError'
 import { useAppStore } from '../store/useAppStore'
+import { asArray, asRecord, getString, type UnknownRecord } from '../utils/typed'
 
 export const ImportExcelPage = () => {
   const { db } = useParams()
@@ -49,8 +50,8 @@ export const ImportExcelPage = () => {
   const [tableLeft, setTableLeft] = useState<number | null>(null)
   const [tableBottom, setTableBottom] = useState<number | null>(null)
   const [tableRight, setTableRight] = useState<number | null>(null)
-  const [dryRunResult, setDryRunResult] = useState<any>(null)
-  const [commitResult, setCommitResult] = useState<any>(null)
+  const [dryRunResult, setDryRunResult] = useState<unknown>(null)
+  const [commitResult, setCommitResult] = useState<unknown>(null)
   const [confirmMain, setConfirmMain] = useState(false)
 
   const dryRunCooldown = useCooldown()
@@ -78,7 +79,8 @@ export const ImportExcelPage = () => {
       if (!result) {
         return
       }
-      const mappings = (result as any)?.mappings ?? []
+      const resultRecord = asRecord(result)
+      const mappings = asArray<unknown>(resultRecord.mappings ?? asRecord(resultRecord.data).mappings)
       setMappingsJson(JSON.stringify(mappings, null, 2))
     },
     onError: (error) => toastApiError(error, context.language),
@@ -145,9 +147,9 @@ export const ImportExcelPage = () => {
   })
 
   const commitCommands = useMemo(() => {
-    const write = (commitResult as any)?.write
-    const commands = write?.commands ?? (commitResult as any)?.data?.write?.commands ?? []
-    return Array.isArray(commands) ? commands : []
+    const resultRecord = asRecord(commitResult)
+    const write = asRecord(resultRecord.write ?? asRecord(asRecord(resultRecord.data).write))
+    return asArray<UnknownRecord>(write.commands)
   }, [commitResult])
 
   return (
@@ -261,12 +263,19 @@ export const ImportExcelPage = () => {
               </tr>
             </thead>
             <tbody>
-              {commitCommands.map((command: any, index: number) => (
-                <tr key={`${command.command_id ?? command.command?.command_id ?? index}`}>
-                  <td>{command.command_id ?? command.command?.command_id ?? command.command?.id ?? '-'}</td>
-                  <td>{command.status_url ?? command.command?.status_url ?? '-'}</td>
-                </tr>
-              ))}
+              {commitCommands.map((command, index) => {
+                const nested = asRecord(command.command)
+                const commandId =
+                  getString(command.command_id) ?? getString(nested.command_id) ?? getString(nested.id) ?? '-'
+                const statusUrl =
+                  getString(command.status_url) ?? getString(nested.status_url) ?? '-'
+                return (
+                  <tr key={`${commandId}-${index}`}>
+                    <td>{commandId}</td>
+                    <td>{statusUrl}</td>
+                  </tr>
+                )
+              })}
             </tbody>
           </HTMLTable>
         ) : null}

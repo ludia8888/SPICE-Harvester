@@ -1,32 +1,32 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Button, Callout, Card, H5, HTMLTable, Tab, Tabs, Tag, Text } from '@blueprintjs/core'
 import { useAppStore } from '../../store/useAppStore'
 import { JsonView } from '../JsonView'
+import { asRecord, getString } from '../../utils/typed'
+
+type InspectorTab = 'summary' | 'json' | 'audit' | 'lineage'
 
 export const InspectorPanel = () => {
   const inspector = useAppStore((state) => state.inspector)
   const clearInspector = useAppStore((state) => state.clearInspector)
   const context = useAppStore((state) => state.context)
-  const [tabId, setTabId] = useState('summary')
+  const [tabState, setTabState] = useState<{ key: string; tab: InspectorTab }>({ key: '', tab: 'summary' })
 
-  useEffect(() => {
-    setTabId('summary')
-  }, [inspector])
+  const inspectorKey = inspector?.title ?? 'empty'
+  const tabId = tabState.key === inspectorKey ? tabState.tab : 'summary'
 
-  const data = inspector?.data as any
+  const data = asRecord(inspector?.data)
+  const metadata = asRecord(data.metadata)
   const commandId =
     inspector?.auditCommandId ??
-    data?.command_id ??
-    data?.commandId ??
-    data?.metadata?.command_id ??
+    getString(data.command_id) ??
+    getString(data.commandId) ??
+    getString(metadata.command_id) ??
     null
-  const lineageRoot =
-    inspector?.lineageRootId ??
-    data?.node_id ??
-    data?.id ??
-    data?.instance_id ??
-    null
+  const lineageRootValue =
+    inspector?.lineageRootId ?? data.node_id ?? data.id ?? data.instance_id ?? null
+  const lineageRoot = lineageRootValue ? String(lineageRootValue) : null
 
   const summaryFields = useMemo(() => {
     if (!inspector) {
@@ -37,19 +37,14 @@ export const InspectorPanel = () => {
       fields.push({ label: 'Type', value: inspector.kind })
     }
     const id =
-      data?.id ??
-      data?.node_id ??
-      data?.instance_id ??
-      data?.command_id ??
-      data?.commandId ??
-      null
+      data.id ?? data.node_id ?? data.instance_id ?? data.command_id ?? data.commandId ?? null
     if (id) {
       fields.push({ label: 'ID', value: String(id) })
     }
-    if (data?.data_status) {
+    if (data.data_status) {
       fields.push({ label: 'Data status', value: <Tag minimal>{String(data.data_status)}</Tag> })
     }
-    if (data?.status) {
+    if (data.status) {
       fields.push({ label: 'Status', value: String(data.status) })
     }
     return fields
@@ -79,7 +74,11 @@ export const InspectorPanel = () => {
           <div className="inspector-body">
             <div className="inspector-title">{inspector.title}</div>
             {inspector.subtitle ? <div className="inspector-subtitle">{inspector.subtitle}</div> : null}
-            <Tabs id="inspector-tabs" selectedTabId={tabId} onChange={(value) => setTabId(value as string)}>
+            <Tabs
+              id="inspector-tabs"
+              selectedTabId={tabId}
+              onChange={(value) => setTabState({ key: inspectorKey, tab: value as InspectorTab })}
+            >
               <Tab id="summary" title="Summary" />
               <Tab id="json" title="JSON" />
               <Tab id="audit" title="Audit" />

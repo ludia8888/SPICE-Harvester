@@ -21,33 +21,33 @@ import { PageHeader } from '../components/PageHeader'
 import { JsonView } from '../components/JsonView'
 import { toastApiError } from '../errors/toastApiError'
 import { useAppStore } from '../store/useAppStore'
+import { asArray, asRecord, getNumber, getString, type UnknownRecord } from '../utils/typed'
 
-const extractSuggestedClasses = (payload: any): any[] => {
-  const suggestion = payload?.suggested_schema ?? payload?.schema_suggestion ?? payload
-  if (!suggestion) {
-    return []
-  }
+type TableCandidate = { id: string; bbox: UnknownRecord | null }
+
+const extractSuggestedClasses = (payload: unknown): UnknownRecord[] => {
+  const root = asRecord(payload)
+  const suggestion = root.suggested_schema ?? root.schema_suggestion ?? payload
   if (Array.isArray(suggestion)) {
-    return suggestion
+    return suggestion.map((item) => asRecord(item))
   }
-  if (Array.isArray(suggestion?.classes)) {
-    return suggestion.classes
+  const suggestionRecord = asRecord(suggestion)
+  const classes = asArray<UnknownRecord>(suggestionRecord.classes ?? suggestionRecord.ontologies)
+  if (classes.length) {
+    return classes
   }
-  if (Array.isArray(suggestion?.ontologies)) {
-    return suggestion.ontologies
-  }
-  if (suggestion?.class_id || suggestion?.id) {
-    return [suggestion]
+  if (suggestionRecord.class_id || suggestionRecord.id) {
+    return [suggestionRecord]
   }
   return []
 }
 
-const buildOntologyPayload = (klass: any) => ({
-  id: klass.id ?? klass.class_id ?? klass.name,
-  label: klass.label ?? klass.name ?? klass.id,
-  description: klass.description ?? undefined,
-  properties: klass.properties ?? [],
-  relationships: klass.relationships ?? [],
+const buildOntologyPayload = (klass: UnknownRecord) => ({
+  id: getString(klass.id) ?? getString(klass.class_id) ?? getString(klass.name),
+  label: getString(klass.label) ?? getString(klass.name) ?? getString(klass.id),
+  description: getString(klass.description) ?? undefined,
+  properties: asArray<UnknownRecord>(klass.properties),
+  relationships: asArray<UnknownRecord>(klass.relationships),
 })
 
 export const SchemaSuggestionPage = () => {
@@ -83,8 +83,8 @@ export const SchemaSuggestionPage = () => {
   const [className, setClassName] = useState('')
   const [columnsJson, setColumnsJson] = useState('')
   const [rowsJson, setRowsJson] = useState('')
-  const [gridResult, setGridResult] = useState<any>(null)
-  const [result, setResult] = useState<any>(null)
+  const [gridResult, setGridResult] = useState<unknown>(null)
+  const [result, setResult] = useState<unknown>(null)
   const [validationResult, setValidationResult] = useState<Record<string, unknown>>({})
 
   const suggestMutation = useMutation({
@@ -150,29 +150,38 @@ export const SchemaSuggestionPage = () => {
     onError: (error) => toastApiError(error, context.language),
   })
 
-  const gridTables = useMemo(() => {
-    const direct = (gridResult as any)?.tables ?? (gridResult as any)?.table_candidates
+  const gridTables = useMemo<TableCandidate[]>(() => {
+    const gridRecord = asRecord(gridResult)
+    const direct = gridRecord.tables ?? gridRecord.table_candidates
     const nested =
-      (gridResult as any)?.structure?.tables ??
-      (gridResult as any)?.data?.structure?.tables ??
-      (gridResult as any)?.data?.tables
+      asRecord(gridRecord.structure).tables ??
+      asRecord(asRecord(gridRecord.data).structure).tables ??
+      asRecord(gridRecord.data).tables
     const tables = Array.isArray(direct) ? direct : Array.isArray(nested) ? nested : []
-    return tables.map((table: any, index: number) => ({
-      id: table.table_id ?? table.id ?? table.tableId ?? `table-${index + 1}`,
-      bbox: table.bbox ?? table.bounding_box ?? table.table_bbox ?? table.tableBBox ?? null,
-    }))
+    return tables.map((table, index) => {
+      const record = asRecord(table)
+      const bbox = asRecord(record.bbox ?? record.bounding_box ?? record.table_bbox ?? record.tableBBox)
+      return {
+        id:
+          getString(record.table_id) ??
+          getString(record.id) ??
+          getString(record.tableId) ??
+          `table-${index + 1}`,
+        bbox: Object.keys(bbox).length ? bbox : null,
+      }
+    })
   }, [gridResult])
 
-  const applyTableSelection = (table: { id?: string; bbox?: any }) => {
+  const applyTableSelection = (table: TableCandidate) => {
     if (!table.id) {
       return
     }
     setTableId(table.id)
     if (table.bbox) {
-      setBboxTop(typeof table.bbox.top === 'number' ? table.bbox.top : null)
-      setBboxLeft(typeof table.bbox.left === 'number' ? table.bbox.left : null)
-      setBboxBottom(typeof table.bbox.bottom === 'number' ? table.bbox.bottom : null)
-      setBboxRight(typeof table.bbox.right === 'number' ? table.bbox.right : null)
+      setBboxTop(getNumber(table.bbox.top) ?? null)
+      setBboxLeft(getNumber(table.bbox.left) ?? null)
+      setBboxBottom(getNumber(table.bbox.bottom) ?? null)
+      setBboxRight(getNumber(table.bbox.right) ?? null)
     }
   }
 
@@ -265,7 +274,7 @@ export const SchemaSuggestionPage = () => {
                       <td>{table.id}</td>
                       <td>
                         {table.bbox
-                          ? `top:${table.bbox.top}, left:${table.bbox.left}, bottom:${table.bbox.bottom}, right:${table.bbox.right}`
+                          ? `top:${getNumber(table.bbox.top) ?? '-'}, left:${getNumber(table.bbox.left) ?? '-'}, bottom:${getNumber(table.bbox.bottom) ?? '-'}, right:${getNumber(table.bbox.right) ?? '-'}`
                           : '-'}
                       </td>
                       <td>
@@ -349,8 +358,8 @@ export const SchemaSuggestionPage = () => {
             {suggestedClasses.map((klass) => {
               const payload = buildOntologyPayload(klass)
               const key = payload.id ?? payload.label ?? 'class'
-              const properties = Array.isArray(payload.properties) ? payload.properties : []
-              const relationships = Array.isArray(payload.relationships) ? payload.relationships : []
+              const properties = payload.properties
+              const relationships = payload.relationships
               return (
                 <Card key={key} elevation={0} className="schema-card">
                   <div className="card-title">
@@ -368,11 +377,11 @@ export const SchemaSuggestionPage = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {properties.map((prop: any, index: number) => (
-                          <tr key={`${prop.name ?? prop.id ?? index}`}>
-                            <td>{prop.name ?? prop.id ?? prop.property_id ?? '-'}</td>
-                            <td>{prop.type ?? prop.datatype ?? '-'}</td>
-                            <td>{prop.required ? 'yes' : 'no'}</td>
+                        {properties.map((prop, index) => (
+                          <tr key={`${getString(prop.name) ?? getString(prop.id) ?? index}`}>
+                            <td>{getString(prop.name) ?? getString(prop.id) ?? getString(prop.property_id) ?? '-'}</td>
+                            <td>{getString(prop.type) ?? getString(prop.datatype) ?? '-'}</td>
+                            <td>{typeof prop.required === 'boolean' ? (prop.required ? 'yes' : 'no') : '-'}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -392,10 +401,10 @@ export const SchemaSuggestionPage = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {relationships.map((rel: any, index: number) => (
-                          <tr key={`${rel.predicate ?? rel.target ?? index}`}>
-                            <td>{rel.predicate ?? rel.name ?? '-'}</td>
-                            <td>{rel.target ?? rel.to ?? '-'}</td>
+                        {relationships.map((rel, index) => (
+                          <tr key={`${getString(rel.predicate) ?? getString(rel.target) ?? index}`}>
+                            <td>{getString(rel.predicate) ?? getString(rel.name) ?? '-'}</td>
+                            <td>{getString(rel.target) ?? getString(rel.to) ?? '-'}</td>
                           </tr>
                         ))}
                       </tbody>
