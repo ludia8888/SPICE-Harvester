@@ -20,6 +20,8 @@ const copy = {
     conflictBody: 'The resource has changed. Refresh and retry your action.',
     validationTitle: 'Invalid request',
     validationBody: 'Check your input and try again.',
+    rateLimitTitle: 'Rate limit hit',
+    rateLimitBody: 'Please wait a moment before retrying.',
     temporaryTitle: 'Service unavailable',
     temporaryBody: 'Backend is temporarily unavailable. Check the local stack and retry.',
     unknownTitle: 'Unexpected error',
@@ -35,13 +37,15 @@ const copy = {
     conflictBody: '최신 상태와 충돌했습니다. 새로고침 후 다시 시도하세요.',
     validationTitle: '요청이 올바르지 않습니다',
     validationBody: '입력값을 확인한 뒤 다시 시도하세요.',
+    rateLimitTitle: '레이트리밋에 걸렸습니다',
+    rateLimitBody: '잠시 후 다시 시도하세요.',
     temporaryTitle: '서비스를 사용할 수 없습니다',
     temporaryBody: '백엔드가 일시적으로 응답하지 않습니다. 로컬 스택 상태를 확인한 뒤 재시도하세요.',
     unknownTitle: '예기치 못한 오류',
     unknownBody: '문제가 발생했습니다. 콘솔/로그를 확인한 뒤 재시도하세요.',
     detailLabel: '상세',
   },
-} as const
+  } as const
 
 const coerceNumber = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : undefined)
 
@@ -112,6 +116,15 @@ export const toastApiError = (error: unknown, language: Language) => {
     body = c.validationBody
     intent = Intent.WARNING
     key = 'api-error:validation'
+  } else if (classified.kind === 'RATE_LIMIT') {
+    title = c.rateLimitTitle
+    if (error instanceof HttpError && typeof error.retryAfterSeconds === 'number') {
+      body = `${c.rateLimitBody} (${error.retryAfterSeconds}s)`
+    } else {
+      body = c.rateLimitBody
+    }
+    intent = Intent.WARNING
+    key = 'api-error:429'
   } else if (classified.kind === 'TEMPORARY') {
     title = c.temporaryTitle
     body = c.temporaryBody

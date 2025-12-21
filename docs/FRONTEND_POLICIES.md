@@ -5,7 +5,7 @@
 ## 1) 컨텍스트 정책: URL이 SSoT, Store는 캐시
 
 - 컨텍스트(세계관): `project(db_name)`, `branch`, `lang`
-- **SSoT**: URL query (`?project=...&branch=...&lang=...`)
+- **SSoT**: URL path + query (`/db/:db` + `?branch=...&lang=...`)
 - Zustand는 UI가 쓰기 쉬운 “캐시”이며, URL이 바뀌면 항상 Zustand가 따라갑니다.
 - 구현:
   - URL 파싱/구독: `frontend/src/state/urlContext.ts`
@@ -14,12 +14,13 @@
 
 ## 2) 인증 정책: 기본은 메모리, Remember me는 옵션
 
-- 토큰은 기본적으로 **메모리 저장**(새로고침 시 재입력).
-- `Remember token`을 켠 경우에만 localStorage에 저장.
+- `authToken`(Bearer)과 `adminToken`은 기본적으로 **메모리 저장**(새로고침 시 재입력).
+- `Remember token`을 켠 경우에만 localStorage에 저장(`spice.authToken`, `spice.adminToken`).
 - “위험 작업”은 별도의 `Admin mode` 토글로 명시적으로 활성화.
 - 구현:
   - 상태/저장: `frontend/src/store/useAppStore.ts`
-  - 설정 UI: `frontend/src/App.tsx`
+  - 설정 UI: `frontend/src/components/layout/SettingsDialog.tsx`
+  - 인증 실패 재시도: `frontend/src/api/bff.ts` (`retryPendingAuthRequest`)
 
 ## 3) Command Tracker 정책: 202 Accepted는 “작업”이다
 
@@ -29,6 +30,7 @@
   - `VISIBLE_IN_SEARCH` (리드모델/검색에 반영 완료)
 - 구현:
   - 상태 추적/폴링: `frontend/src/commands/useCommandTracker.ts`
+  - WS 구독(선택 command): `frontend/src/commands/CommandTrackerDrawer.tsx`
   - invalidate 중앙 테이블: `frontend/src/commands/commandInvalidationMap.ts`
 
 ## 4) Query 정책: 키/무효화 규칙을 중앙집중
@@ -51,4 +53,4 @@
 - 공통 분류: `AUTH`, `OCC_CONFLICT`, `VALIDATION`, `TEMPORARY`, `UNKNOWN`
 - 구현:
   - `frontend/src/errors/classifyError.ts`
-
+  - `frontend/src/components/ApiErrorCallout.tsx`

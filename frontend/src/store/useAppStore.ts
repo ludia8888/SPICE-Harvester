@@ -1,6 +1,14 @@
 import { create } from 'zustand'
 import { readUrlContext, subscribeUrlContext, writeUrlContext } from '../state/urlContext'
-import { DEFAULT_CONTEXT, DEFAULT_THEME, type AppContext, type Language, type Theme } from '../types/app'
+import {
+  DEFAULT_CONTEXT,
+  DEFAULT_RECENT_CONTEXT,
+  DEFAULT_THEME,
+  type AppContext,
+  type Language,
+  type RecentContext,
+  type Theme,
+} from '../types/app'
 
 const STORAGE_KEYS = {
   project: 'spice.project',
@@ -8,17 +16,34 @@ const STORAGE_KEYS = {
   language: 'spice.language',
   theme: 'spice.theme',
   rememberToken: 'spice.rememberToken',
+  authToken: 'spice.authToken',
   adminToken: 'spice.adminToken',
+  recentContext: 'spice.recentContext',
   commands: 'commandTracker.items',
 } as const
 
-export type CommandKind = 'CREATE_DATABASE' | 'DELETE_DATABASE' | 'UNKNOWN'
+export type CommandKind =
+  | 'CREATE_DATABASE'
+  | 'DELETE_DATABASE'
+  | 'CREATE_BRANCH'
+  | 'DELETE_BRANCH'
+  | 'ONTOLOGY_APPLY'
+  | 'ONTOLOGY_DELETE'
+  | 'INSTANCE_WRITE'
+  | 'IMPORT'
+  | 'MAPPINGS_IMPORT'
+  | 'MERGE_RESOLVE'
+  | 'ADMIN_TASK'
+  | 'UNKNOWN'
+
 export type WritePhase = 'SUBMITTED' | 'WRITE_DONE' | 'FAILED' | 'CANCELLED'
 export type IndexPhase = 'UNKNOWN' | 'INDEXING_PENDING' | 'VISIBLE_IN_SEARCH'
 
 export type TrackedCommand = {
   id: string
   kind: CommandKind
+  title?: string
+  source?: string
   target: {
     dbName: string
   }
@@ -28,28 +53,66 @@ export type TrackedCommand = {
   indexPhase: IndexPhase
   status?: string
   error?: string | null
-  title?: string
   expired?: boolean
+}
+
+export type InspectorState = {
+  title: string
+  subtitle?: string
+  data?: unknown
+  kind?: 'Class' | 'Instance' | 'GraphNode' | 'GraphEdge' | 'AuditItem' | 'Command'
+  auditCommandId?: string
+  lineageRootId?: string
+} | null
+
+export type SettingsDialogReason =
+  | 'TOKEN_MISSING'
+  | 'UNAUTHORIZED'
+  | 'FORBIDDEN'
+  | 'SERVICE_UNAVAILABLE'
+
+type TrackedCommandInput = {
+  id: string
+  kind?: CommandKind
+  title?: string
+  source?: string
+  targetDbName?: string
+  context?: Partial<Pick<AppContext, 'project' | 'branch'>>
 }
 
 type AppState = {
   context: AppContext
   theme: Theme
+  authToken: string
   adminToken: string
   rememberToken: boolean
   adminMode: boolean
   commands: Record<string, TrackedCommand>
+  inspector: InspectorState
+  settingsDialogOpen: boolean
+  settingsDialogReason: SettingsDialogReason | null
+  commandDrawerOpen: boolean
+  commandDrawerTargetId: string | null
   syncContextFromUrl: () => void
   setTheme: (theme: Theme) => void
   setProject: (project: string | null) => void
   setBranch: (branch: string) => void
   setLanguage: (language: Language) => void
+  setAuthToken: (token: string) => void
   setAdminToken: (token: string) => void
   setRememberToken: (remember: boolean) => void
   setAdminMode: (enabled: boolean) => void
   trackCommand: (command: TrackedCommand) => void
+  trackCommands: (commands: TrackedCommandInput[]) => void
   patchCommand: (commandId: string, patch: Partial<TrackedCommand>) => void
   removeCommand: (commandId: string) => void
+  setInspector: (inspector: InspectorState) => void
+  clearInspector: () => void
+  openSettingsDialog: (reason?: SettingsDialogReason) => void
+  closeSettingsDialog: () => void
+  openCommandDrawer: (commandId?: string) => void
+  closeCommandDrawer: () => void
+  clearCommandDrawerTarget: () => void
 }
 
 const safeLocalStorageGet = (key: string) => {
@@ -107,6 +170,8 @@ const normalizeCommand = (value: unknown): TrackedCommand | null => {
   return {
     id: item.id,
     kind: item.kind ?? 'UNKNOWN',
+    title: item.title,
+    source: item.source,
     target,
     context: { project: contextProject, branch: contextBranch },
     submittedAt:
@@ -115,7 +180,6 @@ const normalizeCommand = (value: unknown): TrackedCommand | null => {
     indexPhase: item.indexPhase ?? 'UNKNOWN',
     status: item.status,
     error: item.error ?? null,
-    title: item.title,
     expired: item.expired ?? false,
   }
 }
@@ -177,18 +241,71 @@ const readCachedProject = () => {
 const readRememberToken = () => {
   const raw = safeLocalStorageGet(STORAGE_KEYS.rememberToken)
   if (raw === null) {
-    return Boolean(safeLocalStorageGet(STORAGE_KEYS.adminToken))
+    return Boolean(
+      safeLocalStorageGet(STORAGE_KEYS.adminToken) || safeLocalStorageGet(STORAGE_KEYS.authToken),
+    )
   }
   return raw === 'true'
 }
 
+const readCachedAuthToken = () => safeLocalStorageGet(STORAGE_KEYS.authToken) ?? ''
+
 const readCachedAdminToken = () => safeLocalStorageGet(STORAGE_KEYS.adminToken) ?? ''
+
+const readCachedRecentContext = (): RecentContext => {
+  const raw = safeLocalStorageGet(STORAGE_KEYS.recentContext)
+  if (!raw) {
+    const project = readCachedProject()
+    const branch = readCachedBranch()
+    return {
+      lastDb: project,
+      lastBranchByDb: project && branch ? { [project]: branch } : {},
+    }
+  }
+  try {
+    const parsed = JSON.parse(raw) as Partial<RecentContext>
+    const lastDb = typeof parsed.lastDb === 'string' ? parsed.lastDb : null
+    const lastBranchByDb =
+      parsed.lastBranchByDb && typeof parsed.lastBranchByDb === 'object'
+        ? (parsed.lastBranchByDb as Record<string, string>)
+        : {}
+    return {
+      lastDb,
+      lastBranchByDb,
+    }
+  } catch {
+    return { ...DEFAULT_RECENT_CONTEXT }
+  }
+}
+
+const persistRecentContext = (recent: RecentContext) => {
+  safeLocalStorageSet(STORAGE_KEYS.recentContext, JSON.stringify(recent))
+}
+
+const hasExplicitBranchParam = () => {
+  if (typeof window === 'undefined') {
+    return false
+  }
+  try {
+    const url = new URL(window.location.href)
+    return url.searchParams.has('branch')
+  } catch {
+    return false
+  }
+}
 
 const getInitialContext = (): AppContext => {
   const url = readUrlContext()
+  const recent = readCachedRecentContext()
+  const project = url.project ?? recent.lastDb ?? readCachedProject()
+  const recentBranch = project ? recent.lastBranchByDb[project] : null
+  const branch = hasExplicitBranchParam()
+    ? url.branch
+    : recentBranch || readCachedBranch() || url.branch || DEFAULT_CONTEXT.branch
+
   return {
-    project: url.project ?? readCachedProject(),
-    branch: url.branch || readCachedBranch() || DEFAULT_CONTEXT.branch,
+    project,
+    branch: branch || DEFAULT_CONTEXT.branch,
     language: url.language || readCachedLanguage() || DEFAULT_CONTEXT.language,
   }
 }
@@ -205,9 +322,27 @@ const ensureUrlContext = (context: AppContext) => {
   writeUrlContext(context, 'replace')
 }
 
+const buildTrackedCommand = (input: TrackedCommandInput, context: AppContext): TrackedCommand => {
+  const project = input.context?.project ?? context.project
+  const branch = input.context?.branch ?? context.branch
+  return {
+    id: input.id,
+    kind: input.kind ?? 'UNKNOWN',
+    title: input.title,
+    source: input.source,
+    target: { dbName: input.targetDbName ?? project ?? '' },
+    context: { project, branch },
+    submittedAt: new Date().toISOString(),
+    writePhase: 'SUBMITTED',
+    indexPhase: 'UNKNOWN',
+  }
+}
+
 export const useAppStore = create<AppState>((set, get) => {
   const rememberToken = readRememberToken()
   const tokenFromEnv = import.meta.env.VITE_ADMIN_TOKEN ?? ''
+  const authTokenFromEnv = import.meta.env.VITE_AUTH_TOKEN ?? ''
+  const authToken = authTokenFromEnv || (rememberToken ? readCachedAuthToken() : '')
   const adminToken = tokenFromEnv || (rememberToken ? readCachedAdminToken() : '')
   const context = getInitialContext()
   const theme = readCachedTheme() ?? DEFAULT_THEME
@@ -215,10 +350,16 @@ export const useAppStore = create<AppState>((set, get) => {
   return {
     context,
     theme,
+    authToken,
     adminToken,
     rememberToken,
     adminMode: false,
     commands: readCachedCommands(),
+    inspector: null,
+    settingsDialogOpen: false,
+    settingsDialogReason: null,
+    commandDrawerOpen: false,
+    commandDrawerTargetId: null,
     syncContextFromUrl: () => {
       const next = getInitialContext()
       set({ context: next })
@@ -229,6 +370,17 @@ export const useAppStore = create<AppState>((set, get) => {
       } else {
         safeLocalStorageRemove(STORAGE_KEYS.project)
       }
+
+      const recent = readCachedRecentContext()
+      const updatedRecent: RecentContext = {
+        lastDb: next.project ?? recent.lastDb,
+        lastBranchByDb: { ...recent.lastBranchByDb },
+      }
+      if (next.project) {
+        updatedRecent.lastDb = next.project
+        updatedRecent.lastBranchByDb[next.project] = next.branch
+      }
+      persistRecentContext(updatedRecent)
       ensureUrlContext(next)
     },
     setTheme: (next) => {
@@ -236,7 +388,12 @@ export const useAppStore = create<AppState>((set, get) => {
       safeLocalStorageSet(STORAGE_KEYS.theme, next)
     },
     setProject: (project) => {
-      writeUrlContext({ project }, 'replace')
+      const recent = readCachedRecentContext()
+      const normalized = project?.trim() ? project.trim() : null
+      const nextBranch = normalized
+        ? recent.lastBranchByDb[normalized] ?? DEFAULT_CONTEXT.branch
+        : DEFAULT_CONTEXT.branch
+      writeUrlContext({ project: normalized, branch: nextBranch }, 'replace')
       get().syncContextFromUrl()
     },
     setBranch: (branch) => {
@@ -246,6 +403,13 @@ export const useAppStore = create<AppState>((set, get) => {
     setLanguage: (language) => {
       writeUrlContext({ language }, 'replace')
       get().syncContextFromUrl()
+    },
+    setAuthToken: (token) => {
+      const normalized = token.trim()
+      set({ authToken: normalized })
+      if (get().rememberToken) {
+        safeLocalStorageSet(STORAGE_KEYS.authToken, normalized)
+      }
     },
     setAdminToken: (token) => {
       const normalized = token.trim()
@@ -259,14 +423,29 @@ export const useAppStore = create<AppState>((set, get) => {
       safeLocalStorageSet(STORAGE_KEYS.rememberToken, remember ? 'true' : 'false')
       if (remember) {
         safeLocalStorageSet(STORAGE_KEYS.adminToken, get().adminToken)
+        safeLocalStorageSet(STORAGE_KEYS.authToken, get().authToken)
       } else {
         safeLocalStorageRemove(STORAGE_KEYS.adminToken)
+        safeLocalStorageRemove(STORAGE_KEYS.authToken)
       }
     },
     setAdminMode: (enabled) => set({ adminMode: enabled }),
     trackCommand: (command) =>
       set((state) => {
         const next = { ...state.commands, [command.id]: command }
+        persistCommands(next)
+        return { commands: next }
+      }),
+    trackCommands: (commands) =>
+      set((state) => {
+        if (!commands.length) {
+          return state
+        }
+        const next = { ...state.commands }
+        commands.forEach((command) => {
+          const built = buildTrackedCommand(command, state.context)
+          next[built.id] = built
+        })
         persistCommands(next)
         return { commands: next }
       }),
@@ -292,6 +471,15 @@ export const useAppStore = create<AppState>((set, get) => {
         persistCommands(next)
         return { commands: next }
       }),
+    setInspector: (inspector) => set({ inspector }),
+    clearInspector: () => set({ inspector: null }),
+    openSettingsDialog: (reason) =>
+      set({ settingsDialogOpen: true, settingsDialogReason: reason ?? null }),
+    closeSettingsDialog: () => set({ settingsDialogOpen: false, settingsDialogReason: null }),
+    openCommandDrawer: (commandId) =>
+      set({ commandDrawerOpen: true, commandDrawerTargetId: commandId ?? null }),
+    closeCommandDrawer: () => set({ commandDrawerOpen: false }),
+    clearCommandDrawerTarget: () => set({ commandDrawerTargetId: null }),
   }
 })
 

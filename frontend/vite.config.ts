@@ -23,5 +23,36 @@ export default defineConfig(({ mode }) => {
     preview: {
       proxy,
     },
+    build: {
+      chunkSizeWarningLimit: 900,
+      rollupOptions: {
+        output: {
+          manualChunks: (id) => {
+            if (!id.includes('node_modules')) {
+              return undefined
+            }
+            if (id.includes('react-cytoscapejs') || id.includes('cytoscape')) {
+              return 'cytoscape'
+            }
+            if (id.includes('@blueprintjs/icons')) {
+              return 'blueprint-icons'
+            }
+            if (id.includes('@blueprintjs')) {
+              return 'blueprint-core'
+            }
+            if (id.includes('@tanstack')) {
+              return 'tanstack'
+            }
+            if (id.includes('react-router')) {
+              return 'react-router'
+            }
+            if (id.includes('react')) {
+              return 'react-vendor'
+            }
+            return 'vendor'
+          },
+        },
+      },
+    },
   }
 })

@@ -7,10 +7,20 @@ export type AppContext = {
   language: Language
 }
 
+export type RecentContext = {
+  lastDb: string | null
+  lastBranchByDb: Record<string, string>
+}
+
 export const DEFAULT_CONTEXT: AppContext = {
   project: null,
   branch: 'main',
   language: 'ko',
+}
+
+export const DEFAULT_RECENT_CONTEXT: RecentContext = {
+  lastDb: null,
+  lastBranchByDb: {},
 }
 
 export const DEFAULT_THEME: Theme = 'light'

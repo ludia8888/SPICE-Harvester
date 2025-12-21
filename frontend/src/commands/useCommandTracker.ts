@@ -11,6 +11,7 @@ export const useCommandTracker = () => {
   const queryClient = useQueryClient()
 
   const context = useAppStore((state) => state.context)
+  const authToken = useAppStore((state) => state.authToken)
   const adminToken = useAppStore((state) => state.adminToken)
   const commands = useAppStore((state) => state.commands)
   const patchCommand = useAppStore((state) => state.patchCommand)
@@ -26,15 +27,15 @@ export const useCommandTracker = () => {
   )
 
   const requestContext = useMemo(
-    () => ({ language: context.language, adminToken }),
-    [adminToken, context.language],
+    () => ({ language: context.language, authToken, adminToken }),
+    [adminToken, authToken, context.language],
   )
 
   const statusQueries = useQueries({
     queries: pollingCommands.map((command) => ({
       queryKey: qk.commandStatus(command.id, context.language),
       queryFn: () => getCommandStatus(requestContext, command.id),
-      enabled: Boolean(adminToken),
+      enabled: Boolean(adminToken || authToken),
       refetchInterval: 1000,
       retry: false,
     })),
@@ -65,7 +66,11 @@ export const useCommandTracker = () => {
       }
 
       if (status === 'COMPLETED') {
-        patchCommand(command.id, { writePhase: 'WRITE_DONE', indexPhase: 'INDEXING_PENDING' })
+        const indexPhase =
+          command.kind === 'CREATE_DATABASE' || command.kind === 'DELETE_DATABASE'
+            ? 'INDEXING_PENDING'
+            : 'VISIBLE_IN_SEARCH'
+        patchCommand(command.id, { writePhase: 'WRITE_DONE', indexPhase })
       } else if (status === 'CANCELLED') {
         patchCommand(command.id, { writePhase: 'CANCELLED' })
       } else {
@@ -80,7 +85,11 @@ export const useCommandTracker = () => {
   const visibilityCandidates = useMemo(
     () =>
       trackedCommands.filter(
-        (cmd) => cmd.writePhase === 'WRITE_DONE' && cmd.indexPhase !== 'VISIBLE_IN_SEARCH' && !cmd.expired,
+        (cmd) =>
+          (cmd.kind === 'CREATE_DATABASE' || cmd.kind === 'DELETE_DATABASE') &&
+          cmd.writePhase === 'WRITE_DONE' &&
+          cmd.indexPhase !== 'VISIBLE_IN_SEARCH' &&
+          !cmd.expired,
       ),
     [trackedCommands],
   )
@@ -96,7 +105,7 @@ export const useCommandTracker = () => {
         const present = databases.includes(command.target.dbName)
         return command.kind === 'CREATE_DATABASE' ? present : !present
       },
-      enabled: Boolean(adminToken),
+      enabled: Boolean(adminToken || authToken),
       refetchInterval: 1500,
       retry: false,
     })),

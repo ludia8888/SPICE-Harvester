@@ -19,14 +19,28 @@ const normalizeOptionalString = (value: string | null): string | null => {
   return trimmed ? trimmed : null
 }
 
+const readProjectFromPath = (url: URL) => {
+  const segments = url.pathname.split('/').filter(Boolean)
+  if (segments[0] !== 'db' || !segments[1]) {
+    return null
+  }
+  try {
+    return decodeURIComponent(segments[1])
+  } catch {
+    return segments[1]
+  }
+}
+
 export const readUrlContext = (): AppContext => {
   if (typeof window === 'undefined') {
     return DEFAULT_CONTEXT
   }
 
   const url = new URL(window.location.href)
+  const projectFromPath = readProjectFromPath(url)
   const language = normalizeLanguage(url.searchParams.get(URL_CONTEXT_KEYS.language))
-  const project = normalizeOptionalString(url.searchParams.get(URL_CONTEXT_KEYS.project))
+  const project =
+    projectFromPath ?? normalizeOptionalString(url.searchParams.get(URL_CONTEXT_KEYS.project))
   const branch = normalizeOptionalString(url.searchParams.get(URL_CONTEXT_KEYS.branch))
 
   return {
@@ -122,4 +136,3 @@ export const subscribeUrlContext = (listener: () => void) => {
   window.addEventListener(URL_CHANGE_EVENT, wrapped)
   return () => window.removeEventListener(URL_CHANGE_EVENT, wrapped)
 }
-

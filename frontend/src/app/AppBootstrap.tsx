@@ -5,6 +5,7 @@ import { startUrlSync, useAppStore } from '../store/useAppStore'
 
 export const AppBootstrap = () => {
   const queryClient = useQueryClient()
+  const authToken = useAppStore((state) => state.authToken)
   const adminToken = useAppStore((state) => state.adminToken)
   const context = useAppStore((state) => state.context)
   const theme = useAppStore((state) => state.theme)
@@ -44,16 +45,19 @@ export const AppBootstrap = () => {
     void queryClient.cancelQueries()
   }, [context, queryClient])
 
-  const previousTokenRef = useRef(adminToken)
+  const previousTokenRef = useRef({ authToken, adminToken })
   useEffect(() => {
-    if (previousTokenRef.current === adminToken) {
+    if (
+      previousTokenRef.current.authToken === authToken &&
+      previousTokenRef.current.adminToken === adminToken
+    ) {
       return
     }
 
-    previousTokenRef.current = adminToken
+    previousTokenRef.current = { authToken, adminToken }
     void queryClient.cancelQueries()
     queryClient.clear()
-  }, [adminToken, queryClient])
+  }, [adminToken, authToken, queryClient])
 
   return null
 }

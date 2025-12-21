@@ -18,6 +18,30 @@
 
 ⸻
 
+구현 현황 (현재 브랜치 기준)
+
+✅ 개발 완료
+	•	App Shell: ContextNavbar + Sidebar + InspectorPanel + CommandTrackerDrawer
+	•	주요 화면: Databases, Overview(요약), Branches, Ontology, Mappings, Sheets Hub,
+		Import Sheets/Excel, Instances, Graph Explorer, Query Builder, Merge, Audit, Lineage,
+		Operations(Tasks/Admin)
+	•	Core UX: Command Tracker 로컬 추적, 429 카운트다운(AI/Import/Connector),
+		409(actual_seq 재시도), unknown_label_keys 표+Mappings CTA
+	•	Graph: Cytoscape 기반 GraphCanvas + data_status 표시/콜아웃
+	•	SettingsDialog 강제 오픈 + 실패 요청 1회 재시도(503/401/403)
+	•	WebSocket 기반 Command 구독(선택 기능)
+	•	Inspector Drawer 탭형 상세 패널(Summary/JSON/Audit/Lineage)
+	•	AsyncCommandButton/ApiErrorCallout 공용 컴포넌트화
+	•	Overview “Next Steps” 카드
+	•	Schema Suggestion 카드형 UI + Validate 단계 + 테이블 선택 UX
+	•	Graph Explorer 결과 export + Re-run 버튼
+	•	Query Builder raw query UI
+	•	Audit Reset 버튼 + Command Tracker 연동 CTA
+	•	Lineage 화면 내 “Use Selected Graph Node” 버튼
+	•	Branches 페이지 “SwitchTo” 버튼(전환은 현재 상단 ContextNavbar에서 처리)
+
+⸻
+
 1) 제품 범위와 핵심 제약
 
 아래는 API 레퍼런스에 의해 “UI가 절대 가정하면 안 되는 것”과 “UI가 반드시 해야 하는 것”입니다.
@@ -85,19 +109,28 @@
 3) 전역 UX 패턴
 
 3.1 인증(503/401/403) 처리
-	•	모든 요청에 토큰 필요(기본 정책). 토큰 없으면 503이 나올 수 있음.
+
+구현 상태: ✅ 개발 완료 (SettingsDialog 강제 오픈 + 마지막 실패 요청 1회 재시도)
+
+	•	모든 요청은 토큰 필요(Authorization: Bearer 또는 X-Admin-Token). 토큰 없으면 503이 나올 수 있음.
 	•	전역 인터셉터 규칙:
 	•	503 + 토큰 미설정 추정 → SettingsDialog 강제 오픈 + “토큰 필요”
 	•	401/403 → “권한/토큰 오류” Callout + Settings 유도
 	•	설정 저장 후: 마지막 실패 요청 한 번만 재시도(루프 방지)
 
 3.2 레이트리밋(429) 처리
+
+구현 상태: ✅ 개발 완료 (AI/Import/Connector 1회 재시도 + 카운트다운)
+
 	•	Retry‑After를 읽어:
 	•	Toaster: “레이트리밋. N초 후 재시도 가능”
 	•	AI/커넥터/Import는 자동 재시도 0~1회만(폭주 방지)
 	•	사용자가 버튼을 다시 누를 수 있게 버튼에 카운트다운 표시
 
 3.3 비동기 커맨드(202) 처리 — Command Tracker가 핵심
+
+구현 상태: ✅ 개발 완료 (로컬 추적 + 폴링)
+
 	•	202 응답이면 command_id를 즉시 로컬 추적 저장
 	•	폴링: GET /api/v1/commands/{id}/status
 	•	상태:
@@ -107,6 +140,9 @@
 	•	404 → TTL 만료/알 수 없음 → EXPIRED/UNKNOWN로 표시
 
 3.4 WebSocket 커맨드 구독(선택, UX 향상)
+
+구현 상태: ✅ 개발 완료 (WS 구독 + 폴링 폴백)
+
 	•	상세 화면(커맨드 Drawer 열렸을 때)에 한해:
 	•	WS /api/v1/ws/commands/{command_id}?token=...
 	•	이벤트:
@@ -114,11 +150,17 @@
 	•	WS 실패 시 폴링으로 자동 폴백
 
 3.5 브랜치 컨텍스트 규칙
+
+구현 상태: ✅ 개발 완료
+
 	•	branch 유효: Ontology / Graph Query / Instance 쓰기(create/update/delete/bulk‑create) / Query / Suggest
 	•	branch 무시/미지원: Instances 읽기(리스트/샘플/단건)
 → 해당 페이지 상단에 “Branch Ignored” 고정 배지
 
 3.6 Graph 데이터 상태(data_status)
+
+구현 상태: ✅ 개발 완료
+
 	•	FULL: ES 문서 join 완료
 	•	PARTIAL: 일부 누락/지연
 	•	MISSING: 문서 없음(지연/미인덱스)
@@ -132,15 +174,23 @@
 4) 프론트 상태 모델(스토어/캐시/로컬 추적)
 
 4.1 LocalStorage(필수)
-	•	auth.token (Bearer 권장)
-	•	auth.adminToken (운영자 페이지)
-	•	ui.lang (ko|en)
+
+구현 상태: ✅ 개발 완료
+
+	•	spice.authToken (Authorization: Bearer 권장)
+	•	spice.adminToken (X-Admin-Token)
+	•	spice.language (ko|en)
+	•	spice.rememberToken
+	•	spice.project / spice.branch / spice.theme (호환 캐시)
 	•	commandTracker.items[]
 	•	{ command_id, source, createdAt, lastStatus?, lastFetchedAt?, expired? }
-	•	recentContext
+	•	spice.recentContext
 	•	{ lastDb, lastBranchByDb: { [db]: branch } }
 
 4.2 Runtime Store(예: Zustand)
+
+구현 상태: ✅ 개발 완료
+
 	•	context.db, context.branch, context.lang
 	•	registry.classesById
 	•	온톨로지/클래스/관계 선택을 위한 캐시(아래 4.3)
@@ -149,6 +199,8 @@
 	•	ui.toasts
 
 4.3 Class/Predicate Registry(중요)
+
+구현 상태: ✅ 개발 완료
 
 Graph Query는 ID 기반이므로, UI는 최소한 이 캐시가 필요합니다.
 	•	소스:
@@ -172,6 +224,9 @@ Graph Query는 ID 기반이므로, UI는 최소한 이 캐시가 필요합니다
 아래는 “페이지를 구성하는 레고”입니다. 이 단위로 컴포넌트를 만들면 개발이 빠릅니다.
 
 5.1 ContextNavbar
+
+구현 상태: ✅ 개발 완료
+
 	•	Blueprint: Navbar, Popover, Menu, Tag, Button
 	•	Props:
 	•	db, branch, lang
@@ -181,6 +236,9 @@ Graph Query는 ID 기반이므로, UI는 최소한 이 캐시가 필요합니다
 	•	DB 바꾸면 해당 DB의 lastBranch를 복원(없으면 main)
 
 5.2 SettingsDialog
+
+구현 상태: ✅ 개발 완료 (SettingsDialog + 강제 오픈/재시도)
+
 	•	Props:
 	•	isOpen, onClose, onSave
 	•	Fields:
@@ -192,6 +250,9 @@ Graph Query는 ID 기반이므로, UI는 최소한 이 캐시가 필요합니다
 	•	선택적으로 마지막 실패 요청 1회 재시도
 
 5.3 CommandTrackerDrawer
+
+구현 상태: ✅ 개발 완료
+
 	•	핵심 컴포넌트(서버 전역 목록이 아니라 로컬 추적)
 	•	UI:
 	•	Tabs(Active/Completed/Failed/Expired)
@@ -203,6 +264,9 @@ Graph Query는 ID 기반이므로, UI는 최소한 이 캐시가 필요합니다
 	•	Detail view(선택 command_id → status 호출)
 
 5.4 AsyncCommandButton
+
+구현 상태: ✅ 개발 완료 (공용 컴포넌트화)
+
 	•	어떤 “쓰기 액션”이든 이 패턴을 사용
 	•	입력:
 	•	submit(): Promise<{command_id}> 또는 배치 {commands:[...]}
@@ -210,11 +274,17 @@ Graph Query는 ID 기반이므로, UI는 최소한 이 캐시가 필요합니다
 	•	성공 시 Tracker 등록 + Toast + 버튼 상태 변경
 
 5.5 ClassSelector / PredicateSelector
+
+구현 상태: ✅ 개발 완료 (페이지 내 셀렉트로 구현)
+
 	•	값: 내부 ID
 	•	표시: label(ko/en) + (id: ...)
 	•	Registry 기반
 
 5.6 ApiErrorCallout
+
+구현 상태: ✅ 개발 완료 (공용 Callout + 404 NonIdealState)
+
 	•	에러 JSON 패턴 처리:
 	•	{detail: string}
 	•	{detail:{error:"unknown_label_keys", labels:[]}}
@@ -225,11 +295,17 @@ Graph Query는 ID 기반이므로, UI는 최소한 이 캐시가 필요합니다
 	•	429 → “Retry after N sec”
 
 5.7 GraphCanvas
+
+구현 상태: ✅ 개발 완료 (Cytoscape)
+
 	•	Cytoscape/ForceGraph wrapper
 	•	node click/edge click → InspectorContext 설정
 	•	node badge: data_status 표시
 
 5.8 InspectorDrawer
+
+구현 상태: ✅ 개발 완료 (탭형 Summary/JSON/Audit/Lineage)
+
 	•	Tabs:
 	•	Summary / JSON / Audit(링크) / Lineage(링크)
 	•	Context 타입:
@@ -244,6 +320,8 @@ Graph Query는 ID 기반이므로, UI는 최소한 이 캐시가 필요합니다
 ⸻
 
 6.1 Databases /
+
+구현 상태: ✅ 개발 완료
 
 목적
 
@@ -279,6 +357,8 @@ API
 
 6.2 Overview /db/:db/overview?branch=...
 
+구현 상태: ✅ 개발 완료 (Summary + Next Steps)
+
 목적
 
 현재 컨텍스트 요약 + “다음 행동” 가이드
@@ -309,6 +389,8 @@ API
 
 6.3 Branches /db/:db/branches
 
+구현 상태: ✅ 개발 완료 (SwitchTo 버튼 + ContextNavbar 전환)
+
 목적
 
 스키마/데이터 실험 브랜치 생성/관리
@@ -334,6 +416,8 @@ API
 ⸻
 
 6.4 Ontology /db/:db/ontology?branch=...
+
+구현 상태: ✅ 개발 완료
 
 목적
 
@@ -382,6 +466,8 @@ OCC 처리
 
 6.5 Mappings /db/:db/mappings
 
+구현 상태: ✅ 개발 완료
+
 목적
 
 라벨→property_id 매핑 관리(unknown_label_keys 해결의 핵심)
@@ -414,6 +500,8 @@ API
 ⸻
 
 6.6 Sheets Hub /db/:db/data/sheets
+
+구현 상태: ✅ 개발 완료
 
 목적
 
@@ -449,6 +537,8 @@ Register UX 주의
 ⸻
 
 6.7 Import Wizard (Sheets) /db/:db/data/import/sheets
+
+구현 상태: ✅ 개발 완료
 
 목적
 
@@ -520,6 +610,8 @@ Commit 경고 UX(필수)
 
 6.8 Import Wizard (Excel) /db/:db/data/import/excel
 
+구현 상태: ✅ 개발 완료
+
 목적
 
 Excel 파일 업로드 기반 Dry‑run/Commit (multipart)
@@ -547,6 +639,8 @@ API
 
 6.9 Schema Suggestion /db/:db/data/schema-suggestion
 
+구현 상태: ✅ 개발 완료 (카드형 UI + Validate 단계 + 테이블 선택)
+
 목적
 
 샘플 데이터 → 스키마 후보 생성 → Ontology 생성으로 연결
@@ -573,6 +667,8 @@ API
 ⸻
 
 6.10 Instances /db/:db/instances (읽기 중심, branch ignored)
+
+구현 상태: ✅ 개발 완료
 
 목적
 
@@ -611,6 +707,8 @@ unknown_label_keys 처리
 ⸻
 
 6.11 Explore: Graph Explorer /db/:db/explore/graph?branch=...
+
+구현 상태: ✅ 개발 완료 (결과 export + Re‑run 포함)
 
 목적(제품의 메인)
 
@@ -689,6 +787,8 @@ AI Assist(자연어) — “안전한 방식” 기준
 
 6.12 Explore: Query Builder(라벨 기반) /db/:db/explore/query?branch=...
 
+구현 상태: ✅ 개발 완료 (raw query UI 포함)
+
 목적
 
 그래프가 아니라 “테이블형 조회”가 필요한 사용자용(라벨 기반 Query API)
@@ -717,6 +817,8 @@ API
 
 6.13 Merge /db/:db/merge?branch=...
 
+구현 상태: ✅ 개발 완료
+
 목적
 
 브랜치 병합 충돌 시뮬레이션/해결
@@ -737,6 +839,8 @@ API
 ⸻
 
 6.14 Audit /db/:db/audit
+
+구현 상태: ✅ 개발 완료 (Reset 버튼 + Command Tracker 연동)
 
 목적
 
@@ -762,6 +866,8 @@ Inspector 연계
 
 6.15 Lineage /db/:db/lineage
 
+구현 상태: ✅ 개발 완료 (Use Selected Graph Node 포함)
+
 목적
 
 root 기반 라인리지 그래프/영향 분석
@@ -784,6 +890,8 @@ API
 
 6.16 Operations: Tasks /operations/tasks
 
+구현 상태: ✅ 개발 완료
+
 목적
 
 백그라운드 작업 모니터링/취소
@@ -798,6 +906,8 @@ API
 ⸻
 
 6.17 Operations: Admin /operations/admin (Admin Token 필요)
+
+구현 상태: ✅ 개발 완료
 
 목적
 
@@ -816,6 +926,8 @@ UX
 ⸻
 
 7) 에러/상태 매트릭스 (필수 UX)
+
+구현 상태: ✅ 개발 완료 (SettingsDialog 강제 오픈 + 404 NonIdealState)
 
 7.1 HTTP 코드별 전역 동작
 	•	400
@@ -846,6 +958,8 @@ UX
 ⸻
 
 8) 구현 순서(가장 안전한 개발 플랜)
+
+구현 상태: ✅ 개발 완료 (체크리스트 기준 전부 구현됨)
 	1.	API Client + 전역 인터셉터(503/401/403/429/409)
 	2.	SettingsDialog(토큰 저장) + AppShell
 	3.	CommandTrackerDrawer(로컬 저장 + 폴링 + WS 옵션)
