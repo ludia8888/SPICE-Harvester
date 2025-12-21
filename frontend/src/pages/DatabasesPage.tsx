@@ -98,7 +98,7 @@ export const DatabasesPage = () => {
   return (
     <div>
       <PageHeader
-        title="Databases"
+        title="Projects"
         subtitle="Create, open, and manage projects backed by the BFF."
         actions={
           <Button
@@ -114,7 +114,7 @@ export const DatabasesPage = () => {
       <div className="card-stack">
         <Card>
           <div className="card-title">
-            <Text>Create database</Text>
+            <Text>Create project</Text>
           </div>
           <div className="form-row">
             <FormGroup label="Name" helperText="lowercase + numbers + '_' or '-'">
@@ -143,14 +143,14 @@ export const DatabasesPage = () => {
 
         <Card>
           <div className="card-title">
-            <Text>Databases</Text>
+            <Text>Projects</Text>
             {listQuery.isFetching ? <Text className="muted small">Loading...</Text> : null}
           </div>
           {listQuery.error ? (
-            <Callout intent={Intent.DANGER}>Failed to load databases.</Callout>
+            <Callout intent={Intent.DANGER}>Failed to load projects.</Callout>
           ) : null}
           {databases.length === 0 ? (
-            <Text className="muted">No databases yet.</Text>
+            <Text className="muted">No projects yet.</Text>
           ) : (
             <HTMLTable striped interactive className="command-table">
               <thead>
@@ -185,7 +185,7 @@ export const DatabasesPage = () => {
           )}
           {!adminMode ? (
             <Text className="muted small" style={{ marginTop: 8 }}>
-              Enable Admin mode to delete databases.
+              Enable Admin mode to delete projects.
             </Text>
           ) : null}
         </Card>
@@ -193,14 +193,14 @@ export const DatabasesPage = () => {
 
       <DangerConfirmDialog
         isOpen={Boolean(deleteTarget)}
-        title="Delete database"
-        description="This action permanently deletes the database and its data."
+        title="Delete project"
+        description="This action permanently deletes the project and its data."
         confirmLabel="Delete"
         cancelLabel="Cancel"
         confirmTextToType={deleteTarget?.dbName ?? ''}
         reasonLabel="Change reason"
-        reasonPlaceholder="Why are you deleting this database?"
-        typedLabel="Type database name to confirm"
+        reasonPlaceholder="Why are you deleting this project?"
+        typedLabel="Type project name to confirm"
         typedPlaceholder={deleteTarget?.dbName ?? ''}
         onCancel={() => setDeleteTarget(null)}
         onConfirm={({ reason }) => {

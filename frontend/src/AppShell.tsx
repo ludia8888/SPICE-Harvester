@@ -26,9 +26,9 @@ type Copy = (typeof copyByLang)[keyof typeof copyByLang]
 
 const copyByLang = {
   en: {
-    appTitle: 'SPICE Harvester',
+    appTitle: 'POLARIS',
     nav: {
-      databases: 'Databases',
+      databases: 'Projects',
       overview: 'Home',
       branches: 'Branches',
       ontology: 'Ontology',
@@ -121,7 +121,7 @@ const copyByLang = {
     },
   },
   ko: {
-    appTitle: 'SPICE Harvester',
+    appTitle: 'POLARIS',
     nav: {
       databases: '프로젝트',
       overview: '홈',
@@ -227,7 +227,7 @@ const getRailItems = (
   const items = [] as Array<{ icon: string; label: string; path: string; match?: string }>
 
   if (!project) {
-    items.push({ icon: 'database', label: copy.nav.databases, path: '/' })
+    items.push({ icon: 'folder-close', label: copy.nav.databases, path: '/' })
     items.push({ icon: 'timeline-events', label: copy.nav.tasks, path: '/operations/tasks', match: '/operations/tasks' })
     items.push({ icon: 'shield', label: copy.nav.admin, path: '/operations/admin', match: '/operations/admin' })
   } else {
@@ -281,14 +281,14 @@ const AppShell = () => {
       <Navbar className="top-nav">
         <NavbarGroup align={Alignment.LEFT}>
           <NavbarHeading>{copy.appTitle}</NavbarHeading>
-          <Tag minimal icon="database">
+          <Tag minimal icon="folder-close">
             {context.project ?? copy.nav.noProject}
           </Tag>
           <Tag minimal icon="git-branch">{context.branch}</Tag>
           {adminMode ? <Tag intent="warning">{copy.nav.adminMode}</Tag> : null}
         </NavbarGroup>
         <NavbarGroup align={Alignment.RIGHT}>
-          <Button minimal icon="database" onClick={() => navigate('/')} aria-label={copy.nav.databases}>
+          <Button minimal icon="folder-close" onClick={() => navigate('/')} aria-label={copy.nav.databases}>
             {copy.nav.databases}
           </Button>
           <Button minimal icon="history" onClick={() => setCommandOpen(true)} aria-label={copy.nav.commands}>
