@@ -13,6 +13,9 @@ dist-ssr
 .tsbuildinfo
 *.tsbuildinfo
 *.local
+test-results
+playwright-report
+playwright/.cache
 
 # Editor directories and files
 .vscode/*
