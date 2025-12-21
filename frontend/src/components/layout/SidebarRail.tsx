@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import { Button, Popover, Position } from '@blueprintjs/core'
+import { Icon, Popover, Position } from '@blueprintjs/core'
 import type { IconName } from '@blueprintjs/icons'
 
 export type RailItem = {
@@ -19,34 +19,35 @@ export type SidebarRailProps = {
 export const SidebarRail = ({ items, settingsContent, settingsLabel, userLabel }: SidebarRailProps) => {
   return (
     <aside className="sidebar-rail">
-      {items.map((item) => (
-        <Button
-          key={item.label}
-          minimal
-          icon={item.icon as IconName}
-          className={`rail-button ${item.active ? 'is-active' : ''}`}
-          aria-label={item.label}
-          title={item.label}
-          onClick={item.onClick}
-        />
-      ))}
+      <div className="rail-content">
+        {items.map((item) => (
+          <button
+            key={item.label}
+            className={`rail-item ${item.active ? 'is-active' : ''}`}
+            onClick={item.onClick}
+            title={item.label}
+          >
+            <Icon icon={item.icon as IconName} className="rail-icon" />
+            <span className="rail-label">{item.label}</span>
+          </button>
+        ))}
+      </div>
+
       <div className="rail-spacer" />
-      <Popover content={settingsContent} position={Position.RIGHT}>
-        <Button
-          minimal
-          icon="cog"
-          className="rail-button"
-          aria-label={settingsLabel}
-          title={settingsLabel}
-        />
-      </Popover>
-      <Button
-        minimal
-        icon="user"
-        className="rail-button"
-        aria-label={userLabel}
-        title={userLabel}
-      />
+
+      <div className="rail-footer">
+        <Popover content={settingsContent} position={Position.RIGHT}>
+          <button className="rail-item" title={settingsLabel}>
+            <Icon icon="cog" className="rail-icon" />
+            <span className="rail-label">{settingsLabel}</span>
+          </button>
+        </Popover>
+
+        <button className="rail-item" title={userLabel}>
+          <Icon icon="user" className="rail-icon" />
+          <span className="rail-label">{userLabel}</span>
+        </button>
+      </div>
     </aside>
   )
 }

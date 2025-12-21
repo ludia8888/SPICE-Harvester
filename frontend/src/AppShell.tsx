@@ -2,12 +2,10 @@ import { useMemo, useState } from 'react'
 import {
   Alignment,
   Button,
-  Card,
   Navbar,
   NavbarGroup,
   NavbarHeading,
   Tag,
-  Text,
 } from '@blueprintjs/core'
 import { SidebarRail } from './components/layout/SidebarRail'
 import { SettingsPopoverContent } from './components/layout/SettingsPopoverContent'
@@ -20,16 +18,9 @@ import { usePathname } from './state/usePathname'
 import { navigate } from './state/pathname'
 import './App.css'
 
-type NavItem = {
-  label: string
-  path: string
-  match?: string
-}
 
-type NavSection = {
-  title: string
-  items: NavItem[]
-}
+
+
 
 type Copy = (typeof copyByLang)[keyof typeof copyByLang]
 
@@ -38,11 +29,11 @@ const copyByLang = {
     appTitle: 'SPICE Harvester',
     nav: {
       databases: 'Databases',
-      overview: 'Overview',
+      overview: 'Home',
       branches: 'Branches',
       ontology: 'Ontology',
       mappings: 'Mappings',
-      sheets: 'Sheets',
+      sheets: 'Connectors',
       importSheets: 'Import Sheets',
       importExcel: 'Import Excel',
       schemaSuggestion: 'Schema Suggestion',
@@ -133,11 +124,11 @@ const copyByLang = {
     appTitle: 'SPICE Harvester',
     nav: {
       databases: '프로젝트',
-      overview: '요약',
+      overview: '홈',
       branches: '브랜치',
       ontology: '온톨로지',
       mappings: '매핑',
-      sheets: '시트',
+      sheets: '커넥터',
       importSheets: '시트 임포트',
       importExcel: '엑셀 임포트',
       schemaSuggestion: '스키마 제안',
@@ -226,60 +217,7 @@ const copyByLang = {
   },
 } as const
 
-const getNavSections = (project: string | null, copy: Copy) => {
-  if (!project) {
-    return [
-      {
-        title: copy.sections.navigation,
-        items: [
-          { label: copy.nav.databases, path: '/' },
-          { label: copy.nav.tasks, path: '/operations/tasks', match: '/operations/tasks' },
-          { label: copy.nav.admin, path: '/operations/admin', match: '/operations/admin' },
-        ],
-      },
-    ] as NavSection[]
-  }
 
-  const base = `/db/${encodeURIComponent(project)}`
-  return [
-    {
-      title: copy.sections.navigation,
-      items: [
-        { label: copy.nav.overview, path: `${base}/overview`, match: `${base}/overview` },
-        { label: copy.nav.branches, path: `${base}/branches`, match: `${base}/branches` },
-        { label: copy.nav.ontology, path: `${base}/ontology`, match: `${base}/ontology` },
-        { label: copy.nav.mappings, path: `${base}/mappings`, match: `${base}/mappings` },
-        { label: copy.nav.instances, path: `${base}/instances`, match: `${base}/instances` },
-        { label: copy.nav.merge, path: `${base}/merge`, match: `${base}/merge` },
-        { label: copy.nav.audit, path: `${base}/audit`, match: `${base}/audit` },
-        { label: copy.nav.lineage, path: `${base}/lineage`, match: `${base}/lineage` },
-      ],
-    },
-    {
-      title: copy.sections.data,
-      items: [
-        { label: copy.nav.sheets, path: `${base}/data/sheets`, match: `${base}/data/sheets` },
-        { label: copy.nav.importSheets, path: `${base}/data/import/sheets`, match: `${base}/data/import` },
-        { label: copy.nav.importExcel, path: `${base}/data/import/excel`, match: `${base}/data/import` },
-        { label: copy.nav.schemaSuggestion, path: `${base}/data/schema-suggestion`, match: `${base}/data/schema-suggestion` },
-      ],
-    },
-    {
-      title: copy.sections.explore,
-      items: [
-        { label: copy.nav.graph, path: `${base}/explore/graph`, match: `${base}/explore/graph` },
-        { label: copy.nav.query, path: `${base}/explore/query`, match: `${base}/explore/query` },
-      ],
-    },
-    {
-      title: copy.sections.ops,
-      items: [
-        { label: copy.nav.tasks, path: '/operations/tasks', match: '/operations/tasks' },
-        { label: copy.nav.admin, path: '/operations/admin', match: '/operations/admin' },
-      ],
-    },
-  ] as NavSection[]
-}
 
 const getRailItems = (
   project: string | null,
@@ -298,7 +236,7 @@ const getRailItems = (
     items.push({ icon: 'git-branch', label: copy.nav.branches, path: `${base}/branches`, match: `${base}/branches` })
     items.push({ icon: 'diagram-tree', label: copy.nav.ontology, path: `${base}/ontology`, match: `${base}/ontology` })
     items.push({ icon: 'flow-branch', label: copy.nav.mappings, path: `${base}/mappings`, match: `${base}/mappings` })
-    items.push({ icon: 'grid', label: copy.nav.sheets, path: `${base}/data/sheets`, match: `${base}/data/sheets` })
+    items.push({ icon: 'offline', label: copy.nav.sheets, path: `${base}/data/sheets`, match: `${base}/data/sheets` })
     items.push({ icon: 'database', label: copy.nav.instances, path: `${base}/instances`, match: `${base}/instances` })
     items.push({ icon: 'graph', label: copy.nav.graph, path: `${base}/explore/graph`, match: `${base}/explore/graph` })
     items.push({ icon: 'search', label: copy.nav.query, path: `${base}/explore/query`, match: `${base}/explore/query` })
@@ -331,7 +269,7 @@ const AppShell = () => {
 
   const language = context.language
   const copy = copyByLang[language]
-  const navSections = useMemo(() => getNavSections(context.project, copy), [context.project, copy])
+  // const navSections = useMemo(() => getNavSections(context.project, copy), [context.project, copy])
   const railItems = useMemo(
     () => getRailItems(context.project, pathname, copy),
     [context.project, pathname, copy],
@@ -374,54 +312,7 @@ const AppShell = () => {
           userLabel="User"
           settingsContent={<SettingsPopoverContent copy={copy.settings} />}
         />
-        <aside className="sidebar-panel">
-          <div className="nav-section">
-            <div className="sidebar-title">{copy.sections.context}</div>
-            <Card className="context-card" elevation={0}>
-              <div className="context-tags">
-                <Tag icon="database">{context.project ?? copy.nav.noProject}</Tag>
-                <Tag icon="git-branch">{context.branch}</Tag>
-                <Tag>{language.toUpperCase()}</Tag>
-              </div>
-              <Text className="muted small">/api/v1</Text>
-            </Card>
-          </div>
-          <div className="nav-section">
-            <div className="sidebar-title">{copy.sections.flow}</div>
-            <ul className="step-list">
-              {copy.steps.map((step) => (
-                <li key={step.id} className="step-item">
-                  <div className="step-index">{step.id}</div>
-                  <div>
-                    <div className="step-title">{step.title}</div>
-                    <div className="step-desc">{step.description}</div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-          {navSections.map((section) => (
-            <div className="nav-section" key={section.title}>
-              <div className="sidebar-title">{section.title}</div>
-              <div className="nav-list">
-                {section.items.map((item) => {
-                  const isActive = item.match
-                    ? pathname.startsWith(item.match)
-                    : pathname === item.path
-                  return (
-                    <button
-                      key={item.path}
-                      className={`nav-item ${isActive ? 'is-active' : ''}`}
-                      onClick={() => navigate(item.path)}
-                    >
-                      {item.label}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          ))}
-        </aside>
+
         <main className="main">
           <AppRouter />
         </main>
