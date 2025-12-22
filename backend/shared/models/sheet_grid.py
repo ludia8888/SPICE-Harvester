@@ -23,6 +23,7 @@ class GoogleSheetGridRequest(BaseModel):
         default=None, description="Optional worksheet title; falls back to gid/first sheet"
     )
     api_key: Optional[str] = Field(default=None, description="Optional per-request API key override")
+    connection_id: Optional[str] = Field(default=None, description="Optional OAuth connection id")
 
     max_rows: Optional[int] = Field(default=None, ge=1, le=50000)
     max_cols: Optional[int] = Field(default=None, ge=1, le=2000)

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -52,6 +52,7 @@ class GoogleSheetsService:
         *,
         worksheet_name: Optional[str] = None,
         api_key: Optional[str] = None,
+        access_token: Optional[str] = None,
     ) -> tuple[str, SheetMetadata, str, Optional[int], List[List[Any]]]:
         """
         Fetch raw values + metadata for a Google Sheet URL.
@@ -62,7 +63,7 @@ class GoogleSheetsService:
         sheet_id = extract_sheet_id(sheet_url)
         gid = extract_gid(sheet_url)
 
-        metadata = await self._get_sheet_metadata(sheet_id, api_key=api_key)
+        metadata = await self._get_sheet_metadata(sheet_id, api_key=api_key, access_token=access_token)
 
         worksheet_title = worksheet_name or "Sheet1"
         worksheet_sheet_id: Optional[int] = None
@@ -98,7 +99,12 @@ class GoogleSheetsService:
         else:
             worksheet_range = worksheet_title
 
-        values = await self._get_sheet_data(sheet_id, worksheet_range, api_key=api_key)
+        values = await self._get_sheet_data(
+            sheet_id,
+            worksheet_range,
+            api_key=api_key,
+            access_token=access_token,
+        )
         return sheet_id, metadata, worksheet_title, worksheet_sheet_id, values
 
     async def preview_sheet(
@@ -108,11 +114,13 @@ class GoogleSheetsService:
         worksheet_name: Optional[str] = None,
         limit: int = 10,
         api_key: Optional[str] = None,
+        access_token: Optional[str] = None,
     ) -> GoogleSheetPreviewResponse:
         sheet_id, metadata, worksheet_title, _, data = await self.fetch_sheet_values(
             sheet_url,
             worksheet_name=worksheet_name,
             api_key=api_key,
+            access_token=access_token,
         )
 
         columns, rows = normalize_sheet_data(data)
@@ -132,17 +140,80 @@ class GoogleSheetsService:
             total_columns=len(columns),
         )
 
-    async def _get_sheet_metadata(self, sheet_id: str, *, api_key: Optional[str] = None) -> SheetMetadata:
+    async def get_sheet_metadata(
+        self,
+        sheet_id: str,
+        *,
+        api_key: Optional[str] = None,
+        access_token: Optional[str] = None,
+    ) -> SheetMetadata:
+        return await self._get_sheet_metadata(sheet_id, api_key=api_key, access_token=access_token)
+
+    async def list_spreadsheets(
+        self,
+        *,
+        access_token: str,
+        query: Optional[str] = None,
+        page_size: int = 50,
+    ) -> List[Dict[str, Any]]:
+        if not access_token:
+            raise ValueError("access_token is required")
+        client = await self._get_client()
+        base_url = "https://www.googleapis.com/drive/v3/files"
+        size = max(1, min(int(page_size or 50), 200))
+        q = "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
+        if query:
+            safe = str(query).replace("'", "\\'")
+            q = f"{q} and name contains '{safe}'"
+        params = {
+            "q": q,
+            "pageSize": size,
+            "fields": "files(id,name,modifiedTime)",
+            "orderBy": "modifiedTime desc",
+            "supportsAllDrives": "true",
+            "includeItemsFromAllDrives": "true",
+        }
+        response = await client.get(
+            base_url,
+            params=params,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        response.raise_for_status()
+        data = response.json() or {}
+        files = data.get("files") or []
+        results: List[Dict[str, Any]] = []
+        for item in files:
+            if not isinstance(item, dict):
+                continue
+            results.append(
+                {
+                    "spreadsheet_id": item.get("id"),
+                    "name": item.get("name"),
+                    "modified_time": item.get("modifiedTime"),
+                }
+            )
+        return results
+
+    async def _get_sheet_metadata(
+        self,
+        sheet_id: str,
+        *,
+        api_key: Optional[str] = None,
+        access_token: Optional[str] = None,
+    ) -> SheetMetadata:
         client = await self._get_client()
         url = build_sheets_metadata_url(sheet_id)
 
         params = {}
         key = (api_key or self.api_key or "").strip()
-        if key:
+        headers = {}
+        if access_token:
+            headers["Authorization"] = f"Bearer {access_token}"
+        elif key:
             params["key"] = key
 
         try:
-            response = await client.get(url, params=params)
+            response = await client.get(url, params=params, headers=headers or None)
             response.raise_for_status()
 
             data = response.json()
@@ -163,7 +234,12 @@ class GoogleSheetsService:
             raise
 
     async def _get_sheet_data(
-        self, sheet_id: str, range_name: str = "Sheet1", *, api_key: Optional[str] = None
+        self,
+        sheet_id: str,
+        range_name: str = "Sheet1",
+        *,
+        api_key: Optional[str] = None,
+        access_token: Optional[str] = None,
     ) -> List[List[Any]]:
         client = await self._get_client()
         url = build_sheets_api_url(sheet_id, range_name)
@@ -174,11 +250,14 @@ class GoogleSheetsService:
             "dateTimeRenderOption": "FORMATTED_STRING",
         }
         key = (api_key or self.api_key or "").strip()
-        if key:
+        headers = {}
+        if access_token:
+            headers["Authorization"] = f"Bearer {access_token}"
+        elif key:
             params["key"] = key
 
         try:
-            response = await client.get(url, params=params)
+            response = await client.get(url, params=params, headers=headers or None)
             response.raise_for_status()
 
             data = response.json()
@@ -198,4 +277,3 @@ class GoogleSheetsService:
         if self._client:
             await self._client.aclose()
             self._client = None
-

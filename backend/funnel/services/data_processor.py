@@ -38,6 +38,7 @@ class FunnelDataProcessor:
         sheet_url: str,
         worksheet_name: Optional[str] = None,
         api_key: Optional[str] = None,
+        connection_id: Optional[str] = None,
         infer_types: bool = True,
         include_complex_types: bool = False,
     ) -> FunnelPreviewResponse:
@@ -56,7 +57,10 @@ class FunnelDataProcessor:
         """
         # 1. Google Sheets connector를 통해 데이터 가져오기
         preview_request = GoogleSheetPreviewRequest(
-            sheet_url=sheet_url, worksheet_name=worksheet_name, api_key=api_key
+            sheet_url=sheet_url,
+            worksheet_name=worksheet_name,
+            api_key=api_key,
+            connection_id=connection_id,
         )
 
         # Google Sheets service 호출 (실제로는 의존성 주입으로 처리)

@@ -11,7 +11,11 @@ from fastapi.responses import JSONResponse
 _TOKEN_ENV_KEYS = ("BFF_ADMIN_TOKEN", "BFF_WRITE_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN")
 _REQUIRE_ENV_KEY = "BFF_REQUIRE_AUTH"
 _ALLOW_DISABLE_ENV_KEYS = ("ALLOW_INSECURE_BFF_AUTH_DISABLE", "ALLOW_INSECURE_AUTH_DISABLE")
-_EXEMPT_PATHS_DEFAULT = ("/api/v1/health", "/api/v1/")
+_EXEMPT_PATHS_DEFAULT = (
+    "/api/v1/health",
+    "/api/v1/",
+    "/api/v1/data-connectors/google-sheets/oauth/callback",
+)
 logger = logging.getLogger(__name__)
 
 

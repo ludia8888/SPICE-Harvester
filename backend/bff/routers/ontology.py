@@ -53,6 +53,7 @@ class SchemaFromGoogleSheetsRequest(BaseModel):
     worksheet_name: Optional[str] = None
     class_name: Optional[str] = None
     api_key: Optional[str] = None
+    connection_id: Optional[str] = None
     table_id: Optional[str] = None
     table_bbox: Optional[BoundingBox] = None
 
@@ -72,6 +73,7 @@ class MappingFromGoogleSheetsRequest(BaseModel):
     sheet_url: str
     worksheet_name: Optional[str] = None
     api_key: Optional[str] = None
+    connection_id: Optional[str] = None
 
     target_class_id: str
     # OMS integration is optional; when disabled, clients should supply the target schema directly.
@@ -104,6 +106,8 @@ class ImportFromGoogleSheetsRequest(BaseModel):
     sheet_url: str
     worksheet_name: Optional[str] = None
     api_key: Optional[str] = None
+    connection_id: Optional[str] = None
+    connection_id: Optional[str] = None
 
     target_class_id: str
     target_schema: List[ImportTargetField] = Field(default_factory=list)
@@ -1623,6 +1627,7 @@ async def suggest_mappings_from_google_sheets(
                 sheet_url=request.sheet_url,
                 worksheet_name=request.worksheet_name,
                 api_key=request.api_key,
+                connection_id=request.connection_id,
                 table_id=request.table_id,
                 table_bbox=request.table_bbox.model_dump() if request.table_bbox is not None else None,
                 include_complex_types=True,
@@ -1975,6 +1980,7 @@ async def dry_run_import_from_google_sheets(
                 sheet_url=request.sheet_url,
                 worksheet_name=request.worksheet_name,
                 api_key=request.api_key,
+                connection_id=request.connection_id,
                 table_id=request.table_id,
                 table_bbox=request.table_bbox.model_dump() if request.table_bbox is not None else None,
                 include_complex_types=True,
@@ -2087,6 +2093,7 @@ async def commit_import_from_google_sheets(
                 sheet_url=request.sheet_url,
                 worksheet_name=request.worksheet_name,
                 api_key=request.api_key,
+                connection_id=request.connection_id,
                 table_id=request.table_id,
                 table_bbox=request.table_bbox.model_dump() if request.table_bbox is not None else None,
                 include_complex_types=True,
@@ -2705,6 +2712,7 @@ async def suggest_schema_from_google_sheets(
                 worksheet_name=request.worksheet_name,
                 class_name=request.class_name,
                 api_key=request.api_key,
+                connection_id=request.connection_id,
                 table_id=request.table_id,
                 table_bbox=request.table_bbox.model_dump() if request.table_bbox is not None else None,
             )

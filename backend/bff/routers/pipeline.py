@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 
 from shared.models.requests import ApiResponse
 from shared.models.event_envelope import EventEnvelope
@@ -63,6 +63,77 @@ def _normalize_location(location: str) -> str:
             detail="personal locations are not allowed",
         )
     return cleaned
+
+
+def _default_dataset_name(filename: str) -> str:
+    base = (filename or "").strip()
+    if not base:
+        return "excel_dataset"
+    if "." in base:
+        base = ".".join(base.split(".")[:-1]) or base
+    return base or "excel_dataset"
+
+
+def _normalize_table_bbox(
+    *,
+    table_top: Optional[int],
+    table_left: Optional[int],
+    table_bottom: Optional[int],
+    table_right: Optional[int],
+) -> Optional[Dict[str, int]]:
+    parts = [table_top, table_left, table_bottom, table_right]
+    if all(part is None for part in parts):
+        return None
+    if any(part is None for part in parts):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="table_top/table_left/table_bottom/table_right must be provided together",
+        )
+    return {
+        "top": int(table_top),
+        "left": int(table_left),
+        "bottom": int(table_bottom),
+        "right": int(table_right),
+    }
+
+
+def _build_schema_columns(columns: list[str], inferred_schema: list[Dict[str, Any]]) -> list[Dict[str, str]]:
+    inferred_map: Dict[str, str] = {}
+    for item in inferred_schema or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        inferred_map[name] = str(item.get("type") or item.get("data_type") or "String")
+
+    schema_columns: list[Dict[str, str]] = []
+    for col in columns:
+        col_name = str(col)
+        if not col_name:
+            continue
+        schema_columns.append({"name": col_name, "type": inferred_map.get(col_name, "String")})
+    return schema_columns
+
+
+def _columns_from_schema(schema_columns: list[Dict[str, str]]) -> list[Dict[str, str]]:
+    return [
+        {"name": str(col.get("name") or ""), "type": str(col.get("type") or "String")}
+        for col in schema_columns
+        if str(col.get("name") or "")
+    ]
+
+
+def _rows_from_preview(columns: list[str], sample_rows: list[list[Any]]) -> list[Dict[str, Any]]:
+    rows: list[Dict[str, Any]] = []
+    for row in sample_rows or []:
+        if not isinstance(row, list):
+            continue
+        payload: Dict[str, Any] = {}
+        for index, col in enumerate(columns):
+            payload[str(col)] = row[index] if index < len(row) else None
+        rows.append(payload)
+    return rows
 
 
 def _build_event(
@@ -610,4 +681,193 @@ async def create_dataset_version(
         raise
     except Exception as e:
         logger.error(f"Failed to create dataset version: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/datasets/excel-upload", response_model=ApiResponse)
+@trace_endpoint("upload_excel_dataset")
+async def upload_excel_dataset(
+    db_name: str = Query(..., description="Database name"),
+    file: UploadFile = File(...),
+    dataset_name: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    sheet_name: Optional[str] = Form(None),
+    table_id: Optional[str] = Form(None),
+    table_top: Optional[int] = Form(None),
+    table_left: Optional[int] = Form(None),
+    table_bottom: Optional[int] = Form(None),
+    table_right: Optional[int] = Form(None),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    storage_service: StorageServiceDep = Depends(),
+    lineage_store: LineageStoreDep = Depends(),
+) -> ApiResponse:
+    """
+    Excel 업로드 → preview/스키마 추론 → dataset registry 저장 + artifact 저장
+
+    Pipeline Builder 전용: raw 데이터를 canonical dataset으로 저장합니다.
+    """
+    try:
+        db_name = validate_db_name(db_name)
+        filename = file.filename or "upload.xlsx"
+        if not filename.lower().endswith((".xlsx", ".xlsm")):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only .xlsx/.xlsm files are supported",
+            )
+
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+
+        resolved_name = (dataset_name or "").strip() or _default_dataset_name(filename)
+        if not resolved_name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dataset_name is required")
+
+        bbox = _normalize_table_bbox(
+            table_top=table_top,
+            table_left=table_left,
+            table_bottom=table_bottom,
+            table_right=table_right,
+        )
+
+        from bff.services.funnel_client import FunnelClient
+
+        async with FunnelClient() as funnel_client:
+            result = await funnel_client.excel_to_structure_preview(
+                xlsx_bytes=content,
+                filename=filename,
+                sheet_name=sheet_name,
+                table_id=table_id,
+                table_bbox=bbox,
+                include_complex_types=True,
+            )
+
+        preview = result.get("preview") or {}
+        columns = [str(col) for col in (preview.get("columns") or []) if str(col)]
+        inferred_schema = preview.get("inferred_schema") or []
+        schema_columns = _build_schema_columns(columns, inferred_schema)
+        schema_json = {"columns": schema_columns}
+        sample_rows = _rows_from_preview(columns, preview.get("sample_data") or [])
+        total_rows = preview.get("total_rows")
+        row_count = int(total_rows) if isinstance(total_rows, int) else None
+        if row_count is None and sample_rows:
+            row_count = len(sample_rows)
+
+        dataset = await dataset_registry.get_dataset_by_name(db_name=db_name, name=resolved_name)
+        created_dataset = False
+        if not dataset:
+            dataset = await dataset_registry.create_dataset(
+                db_name=db_name,
+                name=resolved_name,
+                description=description.strip() if description else None,
+                source_type="excel_upload",
+                source_ref=filename,
+                schema_json=schema_json,
+            )
+            created_dataset = True
+
+        if created_dataset:
+            create_event = _build_event(
+                event_type="DATASET_CREATED",
+                aggregate_type="Dataset",
+                aggregate_id=dataset.dataset_id,
+                data={"dataset_id": dataset.dataset_id, "db_name": db_name, "name": resolved_name},
+                command_type="CREATE_DATASET",
+            )
+            try:
+                await event_store.connect()
+                await event_store.append_event(create_event)
+            except Exception as e:
+                logger.warning(f"Failed to append excel dataset create event: {e}")
+
+        artifact_bucket = os.getenv("DATASET_ARTIFACT_BUCKET") or os.getenv(
+            "PIPELINE_ARTIFACT_BUCKET", "pipeline-artifacts"
+        )
+        artifact_key = None
+        if storage_service:
+            safe_name = resolved_name.replace(" ", "_")
+            timestamp = _utcnow().strftime("%Y%m%dT%H%M%SZ")
+            object_key = f"datasets/{db_name}/{dataset.dataset_id}/{safe_name}/{timestamp}.xlsx"
+            await storage_service.create_bucket(artifact_bucket)
+            await storage_service.save_bytes(
+                artifact_bucket,
+                object_key,
+                content,
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                metadata={
+                    "db_name": db_name,
+                    "dataset_name": resolved_name,
+                    "source": "excel_upload",
+                },
+            )
+            artifact_key = build_s3_uri(artifact_bucket, object_key)
+
+        try:
+            version = await dataset_registry.add_version(
+                dataset_id=dataset.dataset_id,
+                artifact_key=artifact_key,
+                row_count=row_count,
+                sample_json={"columns": _columns_from_schema(schema_columns), "rows": sample_rows},
+                schema_json=schema_json,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+        event = _build_event(
+            event_type="DATASET_VERSION_CREATED",
+            aggregate_type="Dataset",
+            aggregate_id=dataset.dataset_id,
+            data={
+                "dataset_id": dataset.dataset_id,
+                "db_name": db_name,
+                "name": resolved_name,
+                "version": version.version,
+                "artifact_key": artifact_key,
+            },
+            command_type="INGEST_DATASET_SNAPSHOT",
+        )
+        try:
+            await event_store.connect()
+            await event_store.append_event(event)
+        except Exception as e:
+            logger.warning(f"Failed to append excel dataset event: {e}")
+
+        if lineage_store and artifact_key:
+            parsed = parse_s3_uri(artifact_key)
+            if parsed:
+                bucket, key = parsed
+                try:
+                    await lineage_store.record_link(
+                        from_node_id=lineage_store.node_event(str(event.event_id)),
+                        to_node_id=lineage_store.node_artifact("s3", bucket, key),
+                        edge_type="dataset_artifact_stored",
+                        occurred_at=_utcnow(),
+                        from_label="excel_upload",
+                        to_label=artifact_key,
+                        db_name=db_name,
+                        edge_metadata={
+                            "db_name": db_name,
+                            "dataset_id": dataset.dataset_id,
+                            "dataset_name": resolved_name,
+                            "bucket": bucket,
+                            "key": key,
+                            "source": "excel_upload",
+                        },
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to record excel dataset lineage: {e}")
+
+        return ApiResponse.success(
+            message="Excel dataset created",
+            data={
+                "dataset": dataset.__dict__,
+                "version": version.__dict__,
+                "preview": {"columns": _columns_from_schema(schema_columns), "rows": sample_rows},
+                "source": preview.get("source_metadata"),
+            },
+        ).to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to upload excel dataset: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

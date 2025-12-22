@@ -246,6 +246,10 @@ html[data-theme='light'] .sidebar-rail {
 
 .app-shell.no-top-nav .main {
   padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .page-header {

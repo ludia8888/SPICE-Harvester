@@ -6,6 +6,7 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
+from urllib.parse import urlencode
 
 import httpx
 
@@ -74,8 +75,7 @@ class GoogleOAuth2Client:
             "state": state,
         }
 
-        # URL encode parameters
-        param_str = "&".join([f"{k}={v}" for k, v in params.items()])
+        param_str = urlencode(params)
         return f"{self.AUTH_URL}?{param_str}"
 
     async def exchange_code_for_token(self, code: str) -> Dict[str, Any]:

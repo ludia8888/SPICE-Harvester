@@ -19,6 +19,9 @@ class GoogleSheetPreviewRequest(BaseModel):
         default=None, description="Optional worksheet title; falls back to gid/first sheet"
     )
     api_key: Optional[str] = Field(None, description="Google API key for authentication")
+    connection_id: Optional[str] = Field(
+        default=None, description="Optional OAuth connection id"
+    )
 
     @field_validator("sheet_url")
     @classmethod

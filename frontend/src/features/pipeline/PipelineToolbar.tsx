@@ -10,8 +10,6 @@ type ToolbarCopy = {
     parameters: string
     transform: string
     edit: string
-    zoomIn: string
-    zoomOut: string
 }
 
 type ToolbarProps = {
@@ -24,8 +22,6 @@ type ToolbarProps = {
     onParameters: () => void
     onTransform: () => void
     onEdit: () => void
-    onZoomIn: () => void
-    onZoomOut: () => void
 }
 
 export const PipelineToolbar = ({
@@ -38,8 +34,6 @@ export const PipelineToolbar = ({
     onParameters,
     onTransform,
     onEdit,
-    onZoomIn,
-    onZoomOut,
 }: ToolbarProps) => {
     return (
         <div className="pipeline-toolbar">
@@ -73,14 +67,6 @@ export const PipelineToolbar = ({
                 </button>
                 <button className="toolbar-btn" type="button" onClick={onEdit}>
                     <Icon icon="edit" size={14} /> {copy.edit}
-                </button>
-            </div>
-            <div className="toolbar-group">
-                <button className="toolbar-btn" type="button" onClick={onZoomIn}>
-                    <Icon icon="zoom-in" size={14} /> {copy.zoomIn}
-                </button>
-                <button className="toolbar-btn" type="button" onClick={onZoomOut}>
-                    <Icon icon="zoom-out" size={14} /> {copy.zoomOut}
                 </button>
             </div>
             <div className="toolbar-group toolbar-spacer" />

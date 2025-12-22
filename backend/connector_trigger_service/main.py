@@ -133,9 +133,33 @@ class ConnectorTriggerService:
             logger.warning(f"Skipping google_sheets source with missing sheet_url (source_id={source.source_id})")
             return
 
+        access_token = (cfg.get("access_token") or "").strip() or None
+        if not access_token:
+            refresh_token = (cfg.get("refresh_token") or "").strip() or None
+            if refresh_token:
+                from data_connector.google_sheets.auth import GoogleOAuth2Client
+
+                oauth_client = GoogleOAuth2Client()
+                if oauth_client.client_id and oauth_client.client_secret:
+                    refreshed = await oauth_client.refresh_access_token(refresh_token)
+                    access_token = (refreshed.get("access_token") or "").strip() or None
+                    cfg.update(
+                        {
+                            "access_token": refreshed.get("access_token"),
+                            "refresh_token": refreshed.get("refresh_token", refresh_token),
+                            "expires_at": refreshed.get("expires_at"),
+                        }
+                    )
+                    await self.registry.upsert_source(
+                        source_type=source.source_type,
+                        source_id=source.source_id,
+                        enabled=True,
+                        config_json=cfg,
+                    )
         sheet_id, _, resolved_ws, _, values = await self.sheets.fetch_sheet_values(
             sheet_url,
             worksheet_name=worksheet_name,
+            access_token=access_token,
         )
 
         if str(sheet_id) != str(source.source_id):
@@ -264,4 +288,3 @@ async def _main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(_main())
-

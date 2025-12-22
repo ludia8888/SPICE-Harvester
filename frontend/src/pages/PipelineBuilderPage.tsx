@@ -1,17 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Button,
-  Callout,
   Card,
   Dialog,
-  Divider,
   FileInput,
   FormGroup,
   HTMLSelect,
-  HTMLTable,
   InputGroup,
   Intent,
-  Switch,
   Tab,
   Tabs,
   Tag,
@@ -25,13 +21,13 @@ import {
   createPipeline,
   deployPipeline,
   getPipeline,
-  listRegisteredSheets,
-  previewRegisteredSheet,
-  startPipeliningSheet,
   listBranches,
   listDatasets,
+  listRegisteredSheets,
   listPipelines,
   previewPipeline,
+  startPipeliningSheet,
+  uploadExcelDataset,
   updatePipeline,
 } from '../api/bff'
 import { useRequestContext } from '../api/useRequestContext'
@@ -59,16 +55,7 @@ import '../features/pipeline/pipeline.css'
 
 type PipelineRecord = Record<string, unknown>
 type DatasetRecord = Record<string, unknown>
-type ConnectorPreview = {
-  sheetId?: string
-  sheetTitle?: string
-  worksheetTitle?: string
-  columns: string[]
-  rows: Array<Array<string | number | boolean | null>>
-  totalRows?: number
-  totalColumns?: number
-}
-
+type RegisteredSheetRecord = Record<string, unknown>
 const extractList = <T,>(payload: unknown, key: string): T[] => {
   if (!payload || typeof payload !== 'object') return []
   const data = payload as { data?: Record<string, unknown> }
@@ -177,40 +164,6 @@ const extractRows = (sample: unknown): PreviewRow[] => {
   return []
 }
 
-const extractConnectorPreview = (payload: unknown): ConnectorPreview | null => {
-  if (!payload || typeof payload !== 'object') return null
-  const data = (payload as { data?: Record<string, unknown> }).data ?? (payload as Record<string, unknown>)
-  if (!data || typeof data !== 'object') return null
-  const raw = data as Record<string, unknown>
-  const columns = Array.isArray(raw.columns) ? raw.columns.map((col) => String(col)) : []
-  const rows = Array.isArray(raw.sample_rows)
-    ? (raw.sample_rows as Array<Array<string | number | boolean | null>>)
-    : Array.isArray(raw.preview_data)
-      ? (raw.preview_data as Array<Array<string | number | boolean | null>>)
-      : []
-  return {
-    sheetId: raw.sheet_id ? String(raw.sheet_id) : undefined,
-    sheetTitle: raw.sheet_title ? String(raw.sheet_title) : undefined,
-    worksheetTitle: raw.worksheet_title ? String(raw.worksheet_title) : raw.worksheet_name ? String(raw.worksheet_name) : undefined,
-    columns,
-    rows,
-    totalRows: raw.total_rows ? Number(raw.total_rows) : rows.length,
-    totalColumns: raw.total_columns ? Number(raw.total_columns) : columns.length,
-  }
-}
-
-const buildRowsFromMatrix = (columns: string[], rows: unknown): PreviewRow[] => {
-  if (!Array.isArray(rows)) return []
-  return rows.map((row) => {
-    const cells = Array.isArray(row) ? row : []
-    const record: PreviewRow = {}
-    columns.forEach((key, index) => {
-      record[key] = cells[index] ?? ''
-    })
-    return record
-  })
-}
-
 const buildColumnsFromManual = (raw: string): Array<{ name: string; type: string }> =>
   raw
     .split(',')
@@ -250,65 +203,11 @@ const buildManualRows = (raw: string, columns: string[] = []): PreviewRow[] => {
   return rows
 }
 
-const detectCsvDelimiter = (content: string) => {
-  const firstLine = content.split(/\r?\n/).find((line) => line.trim()) ?? ''
-  if (firstLine.includes('\t')) return '\t'
-  if (firstLine.includes(';')) return ';'
-  if (firstLine.includes('|')) return '|'
-  return ','
-}
-
-const parseCsvLine = (line: string, delimiter: string) => {
-  const cells: string[] = []
-  let current = ''
-  let inQuotes = false
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index]
-    if (char === '"') {
-      const nextChar = line[index + 1]
-      if (inQuotes && nextChar === '"') {
-        current += '"'
-        index += 1
-      } else {
-        inQuotes = !inQuotes
-      }
-      continue
-    }
-    if (char === delimiter && !inQuotes) {
-      cells.push(current.trim())
-      current = ''
-      continue
-    }
-    current += char
-  }
-  cells.push(current.trim())
-  return cells
-}
-
-const parseCsvContent = (content: string, delimiter: string, hasHeader: boolean, maxRows = 200) => {
-  const lines = content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-  if (lines.length === 0) {
-    return { columns: [] as string[], rows: [] as PreviewRow[] }
-  }
-  const resolvedDelimiter = delimiter || ','
-  const headerCells = parseCsvLine(lines[0], resolvedDelimiter)
-  const columns = hasHeader
-    ? headerCells.map((cell, index) => cell || `column_${index + 1}`)
-    : headerCells.map((_, index) => `column_${index + 1}`)
-  const dataStart = hasHeader ? 1 : 0
-  const rows: PreviewRow[] = []
-  lines.slice(dataStart, dataStart + maxRows).forEach((line) => {
-    const cells = parseCsvLine(line, resolvedDelimiter)
-    const row: PreviewRow = {}
-    columns.forEach((key, index) => {
-      row[key] = cells[index] ?? ''
-    })
-    rows.push(row)
-  })
-  return { columns, rows }
+const buildDatasetNameFromFile = (fileName: string): string => {
+  const trimmed = fileName.trim()
+  if (!trimmed) return 'excel_dataset'
+  const base = trimmed.replace(/\.[^.]+$/, '')
+  return base || 'excel_dataset'
 }
 
 export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
@@ -319,6 +218,423 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
   const setBranch = useAppStore((state) => state.setBranch)
   const setCommandDrawerOpen = useAppStore((state) => state.setCommandDrawerOpen)
   const commands = useAppStore((state) => state.commands)
+
+  const uiCopy = useMemo(
+    () =>
+      language === 'ko'
+        ? {
+            header: {
+              file: '파일',
+              help: '도움말',
+              batch: '배치',
+              undo: '되돌리기',
+              redo: '다시 실행',
+              deploySettings: '배포 설정',
+              tabs: { edit: '편집', proposals: '제안', history: '기록' },
+              commands: '커맨드',
+              save: '저장',
+              deploy: '배포',
+              projectFallback: '프로젝트',
+              pipelineFallback: '파이프라인',
+              newPipeline: '새 파이프라인',
+              openPipeline: '파이프라인 열기',
+              saveMenu: '저장',
+              noPipelines: '파이프라인 없음',
+              noBranches: '브랜치 없음',
+            },
+            toolbar: {
+              tools: '도구',
+              select: '선택',
+              remove: '삭제',
+              layout: '정렬',
+              addDatasets: '데이터 추가',
+              parameters: '파라미터',
+              transform: '변환',
+              edit: '편집',
+            },
+            sidebar: {
+              folders: '폴더',
+              inputs: '입력',
+              transforms: '변환',
+              outputs: '출력',
+              addData: '데이터 추가',
+              details: '상세 정보',
+              nameLabel: '이름',
+              typeLabel: '유형',
+              operationLabel: '작업',
+              expressionLabel: '수식',
+              outputsTitle: '출력',
+              noOutputs: '출력 없음',
+              editNode: '노드 편집',
+              selectNode: '노드를 선택하세요.',
+            },
+            preview: {
+              title: '미리보기',
+              dataPreview: '데이터 미리보기',
+              noNodes: '노드 없음',
+              searchPlaceholder: (count: number) => `${count}개 컬럼 검색...`,
+              formatType: (type: string) => {
+                const normalized = type.toLowerCase()
+                if (normalized.includes('date') || normalized.includes('time')) return '날짜'
+                if (normalized.includes('bool')) return '불리언'
+                if (
+                  normalized.includes('int') ||
+                  normalized.includes('float') ||
+                  normalized.includes('double') ||
+                  normalized.includes('decimal') ||
+                  normalized.includes('number')
+                )
+                  return '숫자'
+                return '문자열'
+              },
+              showPreview: '미리보기 열기',
+            },
+            dialogs: {
+              warnings: {
+                selectTransform: '변환할 노드를 선택하세요.',
+                selectEdit: '편집할 노드를 선택하세요.',
+              },
+              pipeline: {
+                title: '새 파이프라인',
+                name: '파이프라인 이름',
+                location: '저장 위치',
+                description: '설명',
+                create: '생성',
+                cancel: '취소',
+              },
+              dataset: {
+                title: '데이터 추가',
+                tabs: {
+                  datasets: '데이터셋',
+                  excel: 'Excel 업로드',
+                  manual: '수동 입력',
+                },
+                callout: '추가 커넥터 관리는 데이터 연결에서 진행할 수 있습니다.',
+                openConnections: '커넥터 연결하기',
+                connectionsTitle: '연결된 커넥터',
+                noConnections: '등록된 커넥터가 없습니다.',
+                startPipelining: '파이프라인 시작',
+                search: '데이터셋 검색',
+                noDatasets: '데이터셋이 없습니다.',
+                columns: '컬럼',
+                manual: '수동 데이터셋 생성',
+                datasetName: '데이터셋 이름',
+                columnsPlaceholder: '컬럼 (쉼표로 구분)',
+                sampleRows: '샘플 행 (선택, CSV 라인)',
+                createDataset: '데이터셋 생성',
+                addToGraph: '그래프에 추가',
+                cancel: '취소',
+                excel: {
+                  title: 'Excel 업로드',
+                  helper: 'Excel 파일을 업로드해 canonical dataset으로 저장합니다.',
+                  file: 'Excel 파일',
+                  datasetName: '데이터셋 이름',
+                  sheetName: '시트 이름 (선택)',
+                  preview: '미리보기',
+                  previewEmpty: '파일을 업로드하면 미리보기가 표시됩니다.',
+                  upload: '업로드 및 그래프 추가',
+                  reset: '초기화',
+                  loading: '업로드 중...',
+                },
+              },
+              parameters: {
+                title: '파라미터',
+                add: '파라미터 추가',
+                namePlaceholder: '이름',
+                valuePlaceholder: '값',
+                cancel: '취소',
+                save: '저장',
+              },
+              transform: {
+                title: '변환 편집',
+                nodeName: '노드 이름',
+                operation: '작업',
+                expression: '수식',
+                cancel: '취소',
+                save: '저장',
+              },
+              join: {
+                title: '조인 생성',
+                leftDataset: '왼쪽 데이터셋',
+                rightDataset: '오른쪽 데이터셋',
+                joinType: '조인 유형',
+                selectNode: '노드 선택',
+                inner: '내부',
+                left: '왼쪽',
+                right: '오른쪽',
+                full: '전체',
+                cancel: '취소',
+                create: '조인 생성',
+              },
+              visualize: {
+                title: '시각화',
+                body: '미리보기 데이터가 로드되면 시각화를 사용할 수 있습니다.',
+                close: '닫기',
+              },
+              deploy: {
+                title: '파이프라인 배포',
+                outputDataset: '출력 데이터셋 이름',
+                rowCount: '행 수',
+                artifactKey: '아티팩트 키',
+                cancel: '취소',
+                deploy: '배포',
+              },
+              deploySettings: {
+                title: '배포 설정',
+                compute: '컴퓨트 티어',
+                memory: '메모리',
+                schedule: '스케줄',
+                engine: '엔진',
+                cancel: '취소',
+                save: '저장',
+              },
+              output: {
+                title: '출력 추가',
+                outputName: '출력 이름',
+                datasetName: '데이터셋 이름',
+                description: '설명',
+                cancel: '취소',
+                add: '출력 추가',
+              },
+              help: {
+                title: '파이프라인 빌더 도움말',
+                body: '데이터셋을 추가하고 그래프에서 변환을 만든 뒤 배포해 정제된 데이터셋을 생성합니다.',
+                close: '닫기',
+              },
+            },
+            toast: {
+              pipelineCreated: '파이프라인이 생성되었습니다.',
+              pipelineSaved: '파이프라인이 저장되었습니다.',
+              pipelineDeployed: '파이프라인이 배포되었습니다.',
+              datasetCreated: '데이터셋이 생성되었습니다.',
+              pipeliningStarted: '커넥터 데이터가 파이프라인에 추가되었습니다.',
+            },
+            labels: {
+              columnsSuffix: '컬럼',
+              join: '조인',
+              output: '출력',
+              outputDatasetFallback: 'output_dataset',
+              pipelineFallback: '파이프라인',
+            },
+            operations: {
+              filter: '필터',
+              compute: '계산',
+              join: '조인',
+            },
+            nodeTypes: {
+              input: '입력',
+              transform: '변환',
+              output: '출력',
+            },
+            canvas: {
+              join: '조인',
+              filter: '필터',
+              compute: '계산',
+              visualize: '시각화',
+              edit: '편집',
+            },
+          }
+        : {
+            header: {
+              file: 'File',
+              help: 'Help',
+              batch: 'Batch',
+              undo: 'Undo',
+              redo: 'Redo',
+              deploySettings: 'Deployment settings',
+              tabs: { edit: 'Edit', proposals: 'Proposals', history: 'History' },
+              commands: 'Commands',
+              save: 'Save',
+              deploy: 'Deploy',
+              projectFallback: 'Project',
+              pipelineFallback: 'Pipeline',
+              newPipeline: 'New pipeline',
+              openPipeline: 'Open pipeline',
+              saveMenu: 'Save',
+              noPipelines: 'No pipelines',
+              noBranches: 'No branches',
+            },
+            toolbar: {
+              tools: 'Tools',
+              select: 'Select',
+              remove: 'Remove',
+              layout: 'Layout',
+              addDatasets: 'Add datasets',
+              parameters: 'Parameters',
+              transform: 'Transform',
+              edit: 'Edit',
+            },
+            sidebar: {
+              folders: 'Folders',
+              inputs: 'Inputs',
+              transforms: 'Transforms',
+              outputs: 'Outputs',
+              addData: 'Add data',
+              details: 'Details',
+              nameLabel: 'Name',
+              typeLabel: 'Type',
+              operationLabel: 'Operation',
+              expressionLabel: 'Expression',
+              outputsTitle: 'Outputs',
+              noOutputs: 'No outputs defined yet.',
+              editNode: 'Edit node',
+              selectNode: 'Select a node to see details.',
+            },
+            preview: {
+              title: 'Preview',
+              dataPreview: 'Data preview',
+              noNodes: 'No nodes',
+              searchPlaceholder: (count: number) => `Search ${count} columns...`,
+              formatType: (type: string) => type,
+              showPreview: 'Show preview',
+            },
+            dialogs: {
+              warnings: {
+                selectTransform: 'Select a node to edit a transform.',
+                selectEdit: 'Select a node to edit.',
+              },
+              pipeline: {
+                title: 'New pipeline',
+                name: 'Pipeline name',
+                location: 'Location',
+                description: 'Description',
+                create: 'Create',
+                cancel: 'Cancel',
+              },
+              dataset: {
+                title: 'Add dataset',
+                tabs: {
+                  datasets: 'Datasets',
+                  excel: 'Excel upload',
+                  manual: 'Manual',
+                },
+                callout: 'Manage additional connectors in Data Connections.',
+                openConnections: 'Connect a connector',
+                connectionsTitle: 'Connected connectors',
+                noConnections: 'No registered connectors yet.',
+                startPipelining: 'Start pipelining',
+                search: 'Search datasets',
+                noDatasets: 'No datasets yet.',
+                columns: 'columns',
+                manual: 'Create manual dataset',
+                datasetName: 'Dataset name',
+                columnsPlaceholder: 'Columns (comma separated)',
+                sampleRows: 'Sample rows (optional, CSV lines)',
+                createDataset: 'Create dataset',
+                addToGraph: 'Add to graph',
+                cancel: 'Cancel',
+                excel: {
+                  title: 'Excel upload',
+                  helper: 'Upload an Excel file and save it as a canonical dataset.',
+                  file: 'Excel file',
+                  datasetName: 'Dataset name',
+                  sheetName: 'Sheet name (optional)',
+                  preview: 'Preview',
+                  previewEmpty: 'Upload a file to see a preview.',
+                  upload: 'Upload and add to graph',
+                  reset: 'Reset',
+                  loading: 'Uploading...',
+                },
+              },
+              parameters: {
+                title: 'Parameters',
+                add: 'Add parameter',
+                namePlaceholder: 'Name',
+                valuePlaceholder: 'Value',
+                cancel: 'Cancel',
+                save: 'Save',
+              },
+              transform: {
+                title: 'Edit transform',
+                nodeName: 'Node name',
+                operation: 'Operation',
+                expression: 'Expression',
+                cancel: 'Cancel',
+                save: 'Save',
+              },
+              join: {
+                title: 'Create join',
+                leftDataset: 'Left dataset',
+                rightDataset: 'Right dataset',
+                joinType: 'Join type',
+                selectNode: 'Select node',
+                inner: 'Inner',
+                left: 'Left',
+                right: 'Right',
+                full: 'Full',
+                cancel: 'Cancel',
+                create: 'Create join',
+              },
+              visualize: {
+                title: 'Visualize',
+                body: 'Visualization will be available once preview data is loaded.',
+                close: 'Close',
+              },
+              deploy: {
+                title: 'Deploy pipeline',
+                outputDataset: 'Output dataset name',
+                rowCount: 'Row count',
+                artifactKey: 'Artifact key',
+                cancel: 'Cancel',
+                deploy: 'Deploy',
+              },
+              deploySettings: {
+                title: 'Deployment settings',
+                compute: 'Compute tier',
+                memory: 'Memory',
+                schedule: 'Schedule',
+                engine: 'Engine',
+                cancel: 'Cancel',
+                save: 'Save',
+              },
+              output: {
+                title: 'Add output',
+                outputName: 'Output name',
+                datasetName: 'Dataset name',
+                description: 'Description',
+                cancel: 'Cancel',
+                add: 'Add output',
+              },
+              help: {
+                title: 'Pipeline Builder help',
+                body: 'Add datasets, build transforms on the graph, and deploy outputs to create canonical datasets.',
+                close: 'Close',
+              },
+            },
+            toast: {
+              pipelineCreated: 'Pipeline created.',
+              pipelineSaved: 'Pipeline saved.',
+              pipelineDeployed: 'Pipeline deployed.',
+              datasetCreated: 'Dataset created.',
+              pipeliningStarted: 'Connector dataset added to the pipeline.',
+            },
+            labels: {
+              columnsSuffix: 'columns',
+              join: 'Join',
+              output: 'Output',
+              outputDatasetFallback: 'output_dataset',
+              pipelineFallback: 'Pipeline',
+            },
+            operations: {
+              filter: 'Filter',
+              compute: 'Compute',
+              join: 'Join',
+            },
+            nodeTypes: {
+              input: 'Input',
+              transform: 'Transform',
+              output: 'Output',
+            },
+            canvas: {
+              join: 'Join',
+              filter: 'Filter',
+              compute: 'Compute',
+              visualize: 'Visualize',
+              edit: 'Edit',
+            },
+          },
+    [language],
+  )
 
   const [mode, setMode] = useState<PipelineMode>('edit')
   const [activeTool, setActiveTool] = useState<PipelineTool>('tools')
@@ -354,19 +670,15 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
 
   const [datasetSearch, setDatasetSearch] = useState('')
   const [selectedDatasetId, setSelectedDatasetId] = useState<string | null>(null)
-  const [datasetTab, setDatasetTab] = useState('connectors')
-  const [connectorSearch, setConnectorSearch] = useState('')
-  const [connectorPreview, setConnectorPreview] = useState<ConnectorPreview | null>(null)
-  const [csvFile, setCsvFile] = useState<File | null>(null)
-  const [csvContent, setCsvContent] = useState('')
-  const [csvHasHeader, setCsvHasHeader] = useState(true)
-  const [csvDelimiter, setCsvDelimiter] = useState(',')
-  const [csvDatasetName, setCsvDatasetName] = useState('')
-  const [csvPreview, setCsvPreview] = useState<{ columns: string[]; rows: PreviewRow[] } | null>(null)
-  const [csvParsing, setCsvParsing] = useState(false)
+  const [datasetTab, setDatasetTab] = useState('datasets')
   const [manualDatasetName, setManualDatasetName] = useState('')
   const [manualColumns, setManualColumns] = useState('')
   const [manualRows, setManualRows] = useState('')
+  const [pipeliningSheetId, setPipeliningSheetId] = useState<string | null>(null)
+  const [excelFile, setExcelFile] = useState<File | null>(null)
+  const [excelDatasetName, setExcelDatasetName] = useState('')
+  const [excelSheetName, setExcelSheetName] = useState('')
+  const [excelPreview, setExcelPreview] = useState<{ columns: PreviewColumn[]; rows: PreviewRow[] } | null>(null)
 
   const [parameterDrafts, setParameterDrafts] = useState<PipelineParameter[]>([])
   const [transformDraft, setTransformDraft] = useState({ title: '', operation: '', expression: '' })
@@ -395,14 +707,15 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
   const datasetsQuery = useQuery({
     queryKey: qk.datasets(dbName, requestContext.language),
     queryFn: () => listDatasets(requestContext, dbName),
-    enabled: datasetDialogOpen,
+    enabled: Boolean(dbName),
   })
 
-  const connectorsQuery = useQuery({
+  const registeredSheetsQuery = useQuery({
     queryKey: qk.registeredSheets(dbName, requestContext.language),
     queryFn: () => listRegisteredSheets(requestContext, dbName),
     enabled: datasetDialogOpen,
   })
+
 
   const pipelineQuery = useQuery({
     queryKey: qk.pipeline(pipelineId ?? 'pending', requestContext.language),
@@ -458,7 +771,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
       request: Record<string, unknown>
       sample?: { columns: Array<{ name: string; type: string }>; rows: PreviewRow[] }
       autoAdd?: boolean
-      source?: 'manual' | 'csv'
+      source?: 'manual'
     }) => createDataset(requestContext, payload.request),
     onSuccess: (payload, variables) => {
       void queryClient.invalidateQueries({ queryKey: qk.datasets(dbName, requestContext.language) })
@@ -482,44 +795,63 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
         setManualColumns('')
         setManualRows('')
       }
-      if (variables?.source === 'csv') {
-        setCsvFile(null)
-        setCsvContent('')
-        setCsvDatasetName('')
-        setCsvPreview(null)
+    },
+    onError: (error) => toastApiError(error, language),
+  })
+
+  const uploadExcelMutation = useMutation({
+    mutationFn: (payload: { file: File; datasetName: string; sheetName?: string }) =>
+      uploadExcelDataset(requestContext, dbName, {
+        file: payload.file,
+        datasetName: payload.datasetName,
+        sheetName: payload.sheetName || undefined,
+      }),
+    onSuccess: (payload) => {
+      const dataset = (payload as { data?: { dataset?: DatasetRecord } })?.data?.dataset
+      const preview = (payload as { data?: { preview?: { columns?: Array<Record<string, unknown>>; rows?: PreviewRow[] } } })
+        ?.data?.preview
+      if (dataset) {
+        handleAddDatasetNode(dataset)
       }
+      if (preview?.columns && preview?.rows) {
+        const normalizedColumns = preview.columns
+          .map((col) => {
+            const record = col as Record<string, unknown>
+            const key = String(record.key ?? record.name ?? '').trim()
+            if (!key) return null
+            return {
+              key,
+              type: String(record.type ?? 'String'),
+            }
+          })
+          .filter((col): col is PreviewColumn => Boolean(col))
+        setExcelPreview({ columns: normalizedColumns, rows: preview.rows })
+        setPreviewSample({ columns: normalizedColumns, rows: preview.rows })
+      }
+      void queryClient.invalidateQueries({ queryKey: qk.datasets(dbName, requestContext.language) })
+      void showAppToast({ intent: Intent.SUCCESS, message: uiCopy.toast.datasetCreated })
+      setExcelFile(null)
+      setExcelDatasetName('')
+      setExcelSheetName('')
     },
     onError: (error) => toastApiError(error, language),
   })
 
   const startPipeliningMutation = useMutation({
-    mutationFn: (payload: { sheetId: string; dbName: string; worksheetName?: string; apiKey?: string }) =>
+    mutationFn: (payload: { sheetId: string; worksheetName?: string }) =>
       startPipeliningSheet(requestContext, payload.sheetId, {
-        db_name: payload.dbName,
+        db_name: dbName,
         worksheet_name: payload.worksheetName,
-        api_key: payload.apiKey,
       }),
     onSuccess: (payload) => {
-      void queryClient.invalidateQueries({ queryKey: qk.datasets(dbName, requestContext.language) })
-      void showAppToast({ intent: Intent.SUCCESS, message: uiCopy.toast.connectorReady })
-      const dataset = (payload as { data?: { dataset?: Record<string, unknown> } })?.data?.dataset
+      const dataset = (payload as { data?: { dataset?: DatasetRecord } })?.data?.dataset
       if (dataset) {
         handleAddDatasetNode(dataset)
       }
+      void showAppToast({ intent: Intent.SUCCESS, message: uiCopy.toast.pipeliningStarted })
     },
     onError: (error) => toastApiError(error, language),
-  })
-
-  const previewRegisteredSheetMutation = useMutation({
-    mutationFn: (payload: { sheetId: string; worksheetName?: string }) =>
-      previewRegisteredSheet(requestContext, payload.sheetId, { worksheet_name: payload.worksheetName, limit: 25 }),
-    onSuccess: (payload) => {
-      const preview = extractConnectorPreview(payload)
-      if (preview) {
-        setConnectorPreview(preview)
-      }
-    },
-    onError: (error) => toastApiError(error, language),
+    onSettled: () => setPipeliningSheetId(null),
   })
 
   const pipelines = useMemo(() => extractList<PipelineRecord>(pipelinesQuery.data, 'pipelines'), [pipelinesQuery.data])
@@ -538,11 +870,10 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
       .filter(Boolean)
   }, [branchesQuery.data])
   const datasets = useMemo(() => extractList<DatasetRecord>(datasetsQuery.data, 'datasets'), [datasetsQuery.data])
-  const connectorSheets = useMemo(
-    () => extractList<Record<string, unknown>>(connectorsQuery.data, 'sheets'),
-    [connectorsQuery.data],
+  const registeredSheets = useMemo(
+    () => extractList<RegisteredSheetRecord>(registeredSheetsQuery.data, 'sheets'),
+    [registeredSheetsQuery.data],
   )
-
   useEffect(() => {
     if (!pipelinesQuery.data || pipelineId) return
     if (pipelines.length > 0) {
@@ -573,17 +904,13 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
 
   useEffect(() => {
     if (!datasetDialogOpen) return
-    setDatasetTab('connectors')
+    setDatasetTab('datasets')
     setSelectedDatasetId(null)
     setDatasetSearch('')
-    setConnectorSearch('')
-    setConnectorPreview(null)
-    setCsvFile(null)
-    setCsvContent('')
-    setCsvDatasetName('')
-    setCsvPreview(null)
-    setCsvDelimiter(',')
-    setCsvHasHeader(true)
+    setExcelFile(null)
+    setExcelDatasetName('')
+    setExcelSheetName('')
+    setExcelPreview(null)
   }, [datasetDialogOpen])
 
   useEffect(() => {
@@ -594,6 +921,17 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     if (!parametersOpen) return
     setParameterDrafts(definition.parameters)
   }, [parametersOpen, definition.parameters])
+
+  useEffect(() => {
+    if (!excelFile) {
+      setExcelPreview(null)
+      return
+    }
+    if (!excelDatasetName.trim()) {
+      setExcelDatasetName(buildDatasetNameFromFile(excelFile.name))
+    }
+    setExcelPreview(null)
+  }, [excelFile, excelDatasetName])
 
   useEffect(() => {
     if (!transformOpen) return
@@ -762,7 +1100,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
           .map((node, index) => ({ ...node, x, y: 80 + index * 140 }))
       return {
         ...current,
-        nodes: [...spaced(grouped.input, 80), ...spaced(grouped.transform, 400), ...spaced(grouped.output, 1300)],
+        nodes: [...spaced(grouped.input, 80), ...spaced(grouped.transform, 380), ...spaced(grouped.output, 920)],
       }
     })
   }
@@ -802,11 +1140,12 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
   const handleAddDatasetNode = (dataset: DatasetRecord) => {
     const datasetId = String(dataset.dataset_id ?? '')
     const columnCount = extractColumns(dataset.schema_json, language === 'ko' ? '문자열' : 'String').length
+    const nodeId = createId('node')
     updateDefinition((current) => {
       const inputs = current.nodes.filter((node) => node.type === 'input')
       const nextY = inputs.length > 0 ? Math.max(...inputs.map((node) => node.y)) + 140 : 80
       const node: PipelineNode = {
-        id: createId('node'),
+        id: nodeId,
         title: String(dataset.name ?? 'dataset'),
         type: 'input',
         icon: 'th',
@@ -818,80 +1157,13 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
       }
       return { ...current, nodes: [...current.nodes, node] }
     })
+    setSelectedNodeId(nodeId)
+    setPreviewNodeId(nodeId)
+    setInspectorOpen(true)
+    setPreviewCollapsed(false)
     setDatasetDialogOpen(false)
   }
 
-  const handleStartPipelining = (sheet: Record<string, unknown>) => {
-    const sheetId = String(sheet.sheet_id ?? '')
-    if (!sheetId) return
-    const worksheetName = String(sheet.worksheet_name ?? '') || undefined
-    startPipeliningMutation.mutate({ sheetId, dbName, worksheetName })
-  }
-
-  const handlePreviewConnector = (sheet: Record<string, unknown>) => {
-    const sheetId = String(sheet.sheet_id ?? '')
-    if (!sheetId) return
-    setConnectorPreview(null)
-    previewRegisteredSheetMutation.mutate({ sheetId, worksheetName: String(sheet.worksheet_name ?? '') || undefined })
-  }
-
-  const handleCsvFile = async (file: File | null) => {
-    setCsvFile(file)
-    setCsvPreview(null)
-    setCsvContent('')
-    if (!file) return
-    setCsvParsing(true)
-    try {
-      const content = await file.text()
-      setCsvContent(content)
-      const inferredDelimiter = detectCsvDelimiter(content)
-      setCsvDelimiter(inferredDelimiter)
-      const parsed = parseCsvContent(content, inferredDelimiter, csvHasHeader)
-      setCsvPreview(parsed)
-      if (!csvDatasetName.trim()) {
-        setCsvDatasetName(file.name.replace(/\.csv$/i, ''))
-      }
-    } catch (error) {
-      toastApiError(error, language)
-    } finally {
-      setCsvParsing(false)
-    }
-  }
-
-  const handleCsvPreview = async (): Promise<{ columns: string[]; rows: PreviewRow[] } | null> => {
-    if (!csvFile) return null
-    setCsvParsing(true)
-    try {
-      const content = csvContent || (await csvFile.text())
-      setCsvContent(content)
-      const parsed = parseCsvContent(content, csvDelimiter, csvHasHeader)
-      setCsvPreview(parsed)
-      return parsed
-    } catch (error) {
-      toastApiError(error, language)
-      return null
-    } finally {
-      setCsvParsing(false)
-    }
-  }
-
-  const handleCreateCsvDataset = async () => {
-    if (!csvFile || !csvDatasetName.trim()) return
-    const parsed = csvPreview ?? (await handleCsvPreview())
-    if (!parsed) return
-    const columns = parsed.columns.map((name) => ({ name, type: 'String' }))
-    createDatasetMutation.mutate({
-      request: {
-        db_name: dbName,
-        name: csvDatasetName.trim(),
-        source_type: 'csv_upload',
-        schema_json: { columns },
-      },
-      sample: { columns, rows: parsed.rows },
-      autoAdd: true,
-      source: 'csv',
-    })
-  }
 
   const handleSimpleTransform = (operation: string, icon: PipelineNode['icon']) => {
     if (!selectedNode) return
@@ -903,7 +1175,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
         title: `${source.title} · ${operation}`,
         type: 'transform',
         icon,
-        x: source.x + 320,
+        x: source.x + 260,
         y: source.y,
         subtitle: source.subtitle,
         status: 'success',
@@ -928,7 +1200,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
         title: uiCopy.labels.join,
         type: 'transform',
         icon: 'inner-join',
-        x: Math.max(leftNode.x, rightNode.x) + 320,
+        x: Math.max(leftNode.x, rightNode.x) + 260,
         y: Math.round((leftNode.y + rightNode.y) / 2),
         status: 'success',
         metadata: { operation: 'join', joinType },
@@ -965,7 +1237,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
 
   const handleDeploy = () => {
     if (!pipelineId) return
-      const outputDatasetName = deployDraft.datasetName || definition.outputs[0]?.datasetName || uiCopy.labels.outputDatasetFallback
+    const outputDatasetName = deployDraft.datasetName || definition.outputs[0]?.datasetName || uiCopy.labels.outputDatasetFallback
     const outputNodeId = definition.nodes.find((node) => node.type === 'output')?.id
     deployMutation.mutate({
       db_name: dbName,
@@ -1010,7 +1282,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
         title: outputName,
         type: 'output',
         icon: 'export',
-        x: 1300,
+        x: 920,
         y: nextY,
         subtitle: outputDataset,
         status: 'success',
@@ -1069,32 +1341,6 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     )
   }, [datasets, datasetSearch])
 
-  const connectorOptions = useMemo(() => {
-    const normalized = connectorSearch.trim().toLowerCase()
-    return connectorSheets.filter((sheet) => {
-      const sheetId = String(sheet.sheet_id ?? '').toLowerCase()
-      const worksheet = String(sheet.worksheet_name ?? '').toLowerCase()
-      return sheetId.includes(normalized) || worksheet.includes(normalized)
-    })
-  }, [connectorSheets, connectorSearch])
-
-  const connectorPreviewColumns = useMemo(() => connectorPreview?.columns ?? [], [connectorPreview])
-  const connectorPreviewRows = useMemo(
-    () => buildRowsFromMatrix(connectorPreview?.columns ?? [], connectorPreview?.rows ?? []),
-    [connectorPreview],
-  )
-
-  useEffect(() => {
-    if (!csvFile || !csvPreview || !csvContent) return
-    const parsed = parseCsvContent(csvContent, csvDelimiter, csvHasHeader)
-    const isSameColumns =
-      parsed.columns.length === csvPreview.columns.length &&
-      parsed.columns.every((value, index) => value === csvPreview.columns[index])
-    const isSameRowCount = parsed.rows.length === csvPreview.rows.length
-    if (isSameColumns && isSameRowCount) return
-    setCsvPreview(parsed)
-  }, [csvDelimiter, csvHasHeader, csvFile, csvPreview, csvContent])
-
   const nodeOptions = definition.nodes.map((node) => ({ id: node.id, title: node.title }))
   const canUndo = history.length > 0
   const canRedo = future.length > 0
@@ -1109,496 +1355,58 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     [commands],
   )
 
-  const uiCopy = useMemo(
-    () =>
-      language === 'ko'
-        ? {
-            header: {
-              file: '파일',
-              help: '도움말',
-              batch: '배치',
-              undo: '되돌리기',
-              redo: '다시 실행',
-              deploySettings: '배포 설정',
-              tabs: { edit: '편집', proposals: '제안', history: '기록' },
-              commands: '커맨드',
-              save: '저장',
-              deploy: '배포',
-              projectFallback: '프로젝트',
-              pipelineFallback: '파이프라인',
-              newPipeline: '새 파이프라인',
-              openPipeline: '파이프라인 열기',
-              saveMenu: '저장',
-              noPipelines: '파이프라인 없음',
-              noBranches: '브랜치 없음',
-            },
-            toolbar: {
-              tools: '도구',
-              select: '선택',
-              remove: '삭제',
-              layout: '정렬',
-              addDatasets: '데이터 추가',
-              parameters: '파라미터',
-              transform: '변환',
-              edit: '편집',
-              zoomIn: '확대',
-              zoomOut: '축소',
-            },
-            sidebar: {
-              folders: '폴더',
-              inputs: '입력',
-              transforms: '변환',
-              outputs: '출력',
-              addData: '데이터 추가',
-              details: '상세 정보',
-              nameLabel: '이름',
-              typeLabel: '유형',
-              operationLabel: '작업',
-              expressionLabel: '수식',
-              outputsTitle: '출력',
-              noOutputs: '출력 없음',
-              editNode: '노드 편집',
-              selectNode: '노드를 선택하세요.',
-            },
-            preview: {
-              title: '미리보기',
-              dataPreview: '데이터 미리보기',
-              noNodes: '노드 없음',
-              searchPlaceholder: (count: number) => `${count}개 컬럼 검색...`,
-              formatType: (type: string) => {
-                const normalized = type.toLowerCase()
-                if (normalized.includes('date') || normalized.includes('time')) return '날짜'
-                if (normalized.includes('bool')) return '불리언'
-                if (normalized.includes('int') || normalized.includes('float') || normalized.includes('double') || normalized.includes('decimal') || normalized.includes('number')) return '숫자'
-                return '문자열'
-              },
-              showPreview: '미리보기 열기',
-            },
-            dialogs: {
-              warnings: {
-                selectTransform: '변환할 노드를 선택하세요.',
-                selectEdit: '편집할 노드를 선택하세요.',
-              },
-              pipeline: {
-                title: '새 파이프라인',
-                name: '파이프라인 이름',
-                location: '저장 위치',
-                description: '설명',
-                create: '생성',
-                cancel: '취소',
-              },
-              dataset: {
-                title: '데이터 추가',
-                tabs: {
-                  connectors: '커넥터',
-                  datasets: '데이터셋',
-                  csv: 'CSV 업로드',
-                  manual: '수동 입력',
-                },
-                connectorTitle: 'Google Sheets 연결',
-                connectorPreview: '미리보기',
-                connectorSearch: '커넥터 검색',
-                connectorEmpty: '등록된 커넥터가 없습니다.',
-                connectorPreviewEmpty: '미리보기 데이터를 불러오세요.',
-                connectorPreviewTitle: '시트 미리보기',
-                connectorAddToGraph: '그래프에 추가',
-                csvTitle: 'CSV 업로드',
-                csvUpload: 'CSV 파일',
-                csvDatasetName: '데이터셋 이름',
-                csvHasHeader: '첫 줄을 컬럼으로 사용',
-                csvDelimiter: '구분자',
-                csvPreview: '미리보기',
-                csvCreate: '데이터셋 생성',
-                csvPreviewEmpty: 'CSV 파일을 업로드하면 미리보기가 표시됩니다.',
-                callout: '추가 커넥터 관리는 데이터 연결에서 진행할 수 있습니다.',
-                openConnections: '데이터 연결 열기',
-                startPipelining: '파이프라인 시작 (등록된 커넥터)',
-                noConnectors: '등록된 커넥터가 없습니다.',
-                search: '데이터셋 검색',
-                noDatasets: '데이터셋이 없습니다.',
-                columns: '컬럼',
-                manual: '수동 데이터셋 생성',
-                datasetName: '데이터셋 이름',
-                columnsPlaceholder: '컬럼 (쉼표로 구분)',
-                sampleRows: '샘플 행 (선택, CSV 라인)',
-                createDataset: '데이터셋 생성',
-                addToGraph: '그래프에 추가',
-                cancel: '취소',
-              },
-              parameters: {
-                title: '파라미터',
-                add: '파라미터 추가',
-                namePlaceholder: '이름',
-                valuePlaceholder: '값',
-                cancel: '취소',
-                save: '저장',
-              },
-              transform: {
-                title: '변환 편집',
-                nodeName: '노드 이름',
-                operation: '작업',
-                expression: '수식',
-                cancel: '취소',
-                save: '저장',
-              },
-              join: {
-                title: '조인 생성',
-                leftDataset: '왼쪽 데이터셋',
-                rightDataset: '오른쪽 데이터셋',
-                joinType: '조인 유형',
-                selectNode: '노드 선택',
-                inner: '내부',
-                left: '왼쪽',
-                right: '오른쪽',
-                full: '전체',
-                cancel: '취소',
-                create: '조인 생성',
-              },
-              visualize: {
-                title: '시각화',
-                body: '미리보기 데이터가 로드되면 시각화를 사용할 수 있습니다.',
-                close: '닫기',
-              },
-              deploy: {
-                title: '파이프라인 배포',
-                outputDataset: '출력 데이터셋 이름',
-                rowCount: '행 수',
-                artifactKey: '아티팩트 키',
-                cancel: '취소',
-                deploy: '배포',
-              },
-              deploySettings: {
-                title: '배포 설정',
-                compute: '컴퓨트 티어',
-                memory: '메모리',
-                schedule: '스케줄',
-                engine: '엔진',
-                cancel: '취소',
-                save: '저장',
-              },
-              output: {
-                title: '출력 추가',
-                outputName: '출력 이름',
-                datasetName: '데이터셋 이름',
-                description: '설명',
-                cancel: '취소',
-                add: '출력 추가',
-              },
-              help: {
-                title: '파이프라인 빌더 도움말',
-                body: '데이터셋을 추가하고 그래프에서 변환을 만든 뒤 배포해 정제된 데이터셋을 생성합니다.',
-                close: '닫기',
-              },
-            },
-            toast: {
-              pipelineCreated: '파이프라인이 생성되었습니다.',
-              pipelineSaved: '파이프라인이 저장되었습니다.',
-              pipelineDeployed: '파이프라인이 배포되었습니다.',
-              datasetCreated: '데이터셋이 생성되었습니다.',
-              connectorReady: '커넥터 데이터셋이 준비되었습니다.',
-            },
-            labels: {
-              columnsSuffix: '컬럼',
-              join: '조인',
-              output: '출력',
-              outputDatasetFallback: 'output_dataset',
-              pipelineFallback: '파이프라인',
-            },
-            operations: {
-              filter: '필터',
-              compute: '계산',
-              join: '조인',
-            },
-            nodeTypes: {
-              input: '입력',
-              transform: '변환',
-              output: '출력',
-            },
-            canvas: {
-              join: '조인',
-              filter: '필터',
-              compute: '계산',
-              visualize: '시각화',
-              edit: '편집',
-            },
-          }
-        : {
-            header: {
-              file: 'File',
-              help: 'Help',
-              batch: 'Batch',
-              undo: 'Undo',
-              redo: 'Redo',
-              deploySettings: 'Deployment settings',
-              tabs: { edit: 'Edit', proposals: 'Proposals', history: 'History' },
-              commands: 'Commands',
-              save: 'Save',
-              deploy: 'Deploy',
-              projectFallback: 'Project',
-              pipelineFallback: 'Pipeline',
-              newPipeline: 'New pipeline',
-              openPipeline: 'Open pipeline',
-              saveMenu: 'Save',
-              noPipelines: 'No pipelines',
-              noBranches: 'No branches',
-            },
-            toolbar: {
-              tools: 'Tools',
-              select: 'Select',
-              remove: 'Remove',
-              layout: 'Layout',
-              addDatasets: 'Add datasets',
-              parameters: 'Parameters',
-              transform: 'Transform',
-              edit: 'Edit',
-              zoomIn: 'Zoom in',
-              zoomOut: 'Zoom out',
-            },
-            sidebar: {
-              folders: 'Folders',
-              inputs: 'Inputs',
-              transforms: 'Transforms',
-              outputs: 'Outputs',
-              addData: 'Add data',
-              details: 'Details',
-              nameLabel: 'Name',
-              typeLabel: 'Type',
-              operationLabel: 'Operation',
-              expressionLabel: 'Expression',
-              outputsTitle: 'Outputs',
-              noOutputs: 'No outputs defined yet.',
-              editNode: 'Edit node',
-              selectNode: 'Select a node to see details.',
-            },
-            preview: {
-              title: 'Preview',
-              dataPreview: 'Data preview',
-              noNodes: 'No nodes',
-              searchPlaceholder: (count: number) => `Search ${count} columns...`,
-              formatType: (type: string) => type,
-              showPreview: 'Show preview',
-            },
-            dialogs: {
-              warnings: {
-                selectTransform: 'Select a node to edit a transform.',
-                selectEdit: 'Select a node to edit.',
-              },
-              pipeline: {
-                title: 'New pipeline',
-                name: 'Pipeline name',
-                location: 'Location',
-                description: 'Description',
-                create: 'Create',
-                cancel: 'Cancel',
-              },
-              dataset: {
-                title: 'Add dataset',
-                tabs: {
-                  connectors: 'Connectors',
-                  datasets: 'Datasets',
-                  csv: 'CSV upload',
-                  manual: 'Manual',
-                },
-                connectorTitle: 'Connect Google Sheets',
-                connectorPreview: 'Preview',
-                connectorSearch: 'Search connectors',
-                connectorEmpty: 'No registered connectors yet.',
-                connectorPreviewEmpty: 'Run a preview to see data here.',
-                connectorPreviewTitle: 'Sheet preview',
-                connectorAddToGraph: 'Add to graph',
-                csvTitle: 'Upload CSV',
-                csvUpload: 'CSV file',
-                csvDatasetName: 'Dataset name',
-                csvHasHeader: 'Use first row as header',
-                csvDelimiter: 'Delimiter',
-                csvPreview: 'Preview',
-                csvCreate: 'Create dataset',
-                csvPreviewEmpty: 'Upload a CSV file to see a preview.',
-                callout: 'Manage additional connectors in Data Connections.',
-                openConnections: 'Open data connections',
-                startPipelining: 'Start pipelining (registered connectors)',
-                noConnectors: 'No registered connectors yet.',
-                search: 'Search datasets',
-                noDatasets: 'No datasets yet.',
-                columns: 'columns',
-                manual: 'Create manual dataset',
-                datasetName: 'Dataset name',
-                columnsPlaceholder: 'Columns (comma separated)',
-                sampleRows: 'Sample rows (optional, CSV lines)',
-                createDataset: 'Create dataset',
-                addToGraph: 'Add to graph',
-                cancel: 'Cancel',
-              },
-              parameters: {
-                title: 'Parameters',
-                add: 'Add parameter',
-                namePlaceholder: 'Name',
-                valuePlaceholder: 'Value',
-                cancel: 'Cancel',
-                save: 'Save',
-              },
-              transform: {
-                title: 'Edit transform',
-                nodeName: 'Node name',
-                operation: 'Operation',
-                expression: 'Expression',
-                cancel: 'Cancel',
-                save: 'Save',
-              },
-              join: {
-                title: 'Create join',
-                leftDataset: 'Left dataset',
-                rightDataset: 'Right dataset',
-                joinType: 'Join type',
-                selectNode: 'Select node',
-                inner: 'Inner',
-                left: 'Left',
-                right: 'Right',
-                full: 'Full',
-                cancel: 'Cancel',
-                create: 'Create join',
-              },
-              visualize: {
-                title: 'Visualize',
-                body: 'Visualization will be available once preview data is loaded.',
-                close: 'Close',
-              },
-              deploy: {
-                title: 'Deploy pipeline',
-                outputDataset: 'Output dataset name',
-                rowCount: 'Row count',
-                artifactKey: 'Artifact key',
-                cancel: 'Cancel',
-                deploy: 'Deploy',
-              },
-              deploySettings: {
-                title: 'Deployment settings',
-                compute: 'Compute tier',
-                memory: 'Memory',
-                schedule: 'Schedule',
-                engine: 'Engine',
-                cancel: 'Cancel',
-                save: 'Save',
-              },
-              output: {
-                title: 'Add output',
-                outputName: 'Output name',
-                datasetName: 'Dataset name',
-                description: 'Description',
-                cancel: 'Cancel',
-                add: 'Add output',
-              },
-              help: {
-                title: 'Pipeline Builder help',
-                body: 'Add datasets, build transforms on the graph, and deploy outputs to create canonical datasets.',
-                close: 'Close',
-              },
-            },
-            toast: {
-              pipelineCreated: 'Pipeline created.',
-              pipelineSaved: 'Pipeline saved.',
-              pipelineDeployed: 'Pipeline deployed.',
-              datasetCreated: 'Dataset created.',
-              connectorReady: 'Connector dataset ready.',
-            },
-            labels: {
-              columnsSuffix: 'columns',
-              join: 'Join',
-              output: 'Output',
-              outputDatasetFallback: 'output_dataset',
-              pipelineFallback: 'Pipeline',
-            },
-            operations: {
-              filter: 'Filter',
-              compute: 'Compute',
-              join: 'Join',
-            },
-            nodeTypes: {
-              input: 'Input',
-              transform: 'Transform',
-              output: 'Output',
-            },
-            canvas: {
-              join: 'Join',
-              filter: 'Filter',
-              compute: 'Compute',
-              visualize: 'Visualize',
-              edit: 'Edit',
-            },
-          },
-    [language],
-  )
-
-  const connectorPanel = (
-    <div className="dataset-tab">
-      <div className="dataset-connector-panel">
-        <FormGroup label={uiCopy.dialogs.dataset.connectorSearch}>
-          <InputGroup value={connectorSearch} onChange={(event) => setConnectorSearch(event.currentTarget.value)} />
-        </FormGroup>
-        <div className="dialog-scroll">
-          {connectorOptions.length === 0 ? (
-            <Text className="muted">{uiCopy.dialogs.dataset.connectorEmpty}</Text>
-          ) : (
-            connectorOptions.map((sheet) => (
-              <Card key={String(sheet.sheet_id ?? '')} className="dataset-card">
-                <div className="dataset-card-header">
-                  <Text>{String(sheet.sheet_id ?? '')}</Text>
-                  <Tag minimal>{String(sheet.worksheet_name ?? uiCopy.dialogs.dataset.connectorTitle)}</Tag>
-                </div>
-                <Text className="muted">{String(sheet.sheet_url ?? '')}</Text>
-                <div className="dataset-card-actions">
-                  <Button minimal icon="eye-open" onClick={() => handlePreviewConnector(sheet)}>
-                    {uiCopy.dialogs.dataset.connectorPreview}
-                  </Button>
-                  <Button minimal icon="add" onClick={() => handleStartPipelining(sheet)}>
-                    {uiCopy.dialogs.dataset.connectorAddToGraph}
-                  </Button>
-                </div>
-              </Card>
-            ))
-          )}
-        </div>
-      </div>
-      <div className="dataset-preview-panel">
-        <div className="dataset-preview-header">
-          <Text>{uiCopy.dialogs.dataset.connectorPreviewTitle}</Text>
-          {connectorPreview ? (
-            <Text className="muted">
-              {connectorPreview.sheetTitle ?? connectorPreview.sheetId} · {connectorPreview.worksheetTitle ?? ''}
-            </Text>
-          ) : null}
-        </div>
-        {connectorPreviewColumns.length === 0 ? (
-          <Text className="muted">{uiCopy.dialogs.dataset.connectorPreviewEmpty}</Text>
-        ) : (
-          <HTMLTable compact striped className="dataset-preview-table">
-            <thead>
-              <tr>
-                {connectorPreviewColumns.map((column) => (
-                  <th key={column}>{column}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {connectorPreviewRows.map((row, index) => (
-                <tr key={`${index}-${connectorPreview?.sheetId ?? 'preview'}`}>
-                  {connectorPreviewColumns.map((column) => (
-                    <td key={`${index}-${column}`}>{row[column] ?? ''}</td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </HTMLTable>
-        )}
-      </div>
-    </div>
-  )
 
   const datasetsPanel = (
     <div className="dataset-tab">
       <FormGroup label={uiCopy.dialogs.dataset.search}>
         <InputGroup value={datasetSearch} onChange={(event) => setDatasetSearch(event.currentTarget.value)} />
       </FormGroup>
+      <div className="dataset-connector-section">
+        <Text className="dataset-connector-callout">{uiCopy.dialogs.dataset.callout}</Text>
+        <Button
+          className="dataset-connector-cta"
+          intent={Intent.PRIMARY}
+          icon="link"
+          rightIcon="arrow-right"
+          onClick={() => navigate(`/db/${encodeURIComponent(dbName)}/data/sheets`)}
+        >
+          {uiCopy.dialogs.dataset.openConnections}
+        </Button>
+        <div className="dataset-connector-list">
+          <Text className="dataset-connector-title">{uiCopy.dialogs.dataset.connectionsTitle}</Text>
+          {registeredSheets.length === 0 ? (
+            <Text className="muted">{uiCopy.dialogs.dataset.noConnections}</Text>
+          ) : (
+            registeredSheets.map((sheet) => {
+              const sheetId = String((sheet as Record<string, unknown>).sheet_id ?? '')
+              const sheetTitle = String((sheet as Record<string, unknown>).sheet_title ?? '')
+              const worksheet = String((sheet as Record<string, unknown>).worksheet_name ?? '')
+              const sheetUrl = String((sheet as Record<string, unknown>).sheet_url ?? '')
+              const label = sheetTitle || sheetUrl || worksheet || sheetId
+              return (
+                <div key={sheetId} className="dataset-connector-row">
+                  <div>
+                    <Text>{label}</Text>
+                    <Text className="muted">{sheetId}</Text>
+                  </div>
+                  <Button
+                    small
+                    intent={Intent.PRIMARY}
+                    disabled={!sheetId || pipeliningSheetId === sheetId || startPipeliningMutation.isPending}
+                    loading={pipeliningSheetId === sheetId && startPipeliningMutation.isPending}
+                    onClick={() => {
+                      setPipeliningSheetId(sheetId)
+                      startPipeliningMutation.mutate({ sheetId, worksheetName: worksheet || undefined })
+                    }}
+                  >
+                    {uiCopy.dialogs.dataset.startPipelining}
+                  </Button>
+                </div>
+              )
+            })
+          )}
+        </div>
+      </div>
       <div className="dialog-scroll">
         {datasetOptions.length === 0 ? (
           <Text className="muted">{uiCopy.dialogs.dataset.noDatasets}</Text>
@@ -1653,72 +1461,91 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     </div>
   )
 
-  const csvPanel = (
+  const excelPanel = (
     <div className="dataset-tab">
-      <FormGroup label={uiCopy.dialogs.dataset.csvUpload}>
+      <div className="dataset-preview-panel">
+        <Text className="dataset-section-title">{uiCopy.dialogs.dataset.excel.title}</Text>
+        <Text className="muted">{uiCopy.dialogs.dataset.excel.helper}</Text>
+      </div>
+      <FormGroup label={uiCopy.dialogs.dataset.excel.file}>
         <FileInput
-          text={csvFile?.name ?? uiCopy.dialogs.dataset.csvUpload}
-          inputProps={{ accept: '.csv' }}
-          onInputChange={(event) => handleCsvFile(event.currentTarget.files?.[0] ?? null)}
+          text={excelFile?.name ?? uiCopy.dialogs.dataset.excel.file}
+          inputProps={{ accept: '.xlsx,.xlsm' }}
+          onInputChange={(event) => setExcelFile(event.currentTarget.files?.[0] ?? null)}
         />
       </FormGroup>
-      <FormGroup label={uiCopy.dialogs.dataset.csvDatasetName}>
-        <InputGroup value={csvDatasetName} onChange={(event) => setCsvDatasetName(event.currentTarget.value)} />
+      <FormGroup label={uiCopy.dialogs.dataset.excel.datasetName}>
+        <InputGroup
+          value={excelDatasetName}
+          onChange={(event) => setExcelDatasetName(event.currentTarget.value)}
+        />
       </FormGroup>
-      <div className="csv-options">
-        <Switch checked={csvHasHeader} label={uiCopy.dialogs.dataset.csvHasHeader} onChange={() => setCsvHasHeader((current) => !current)} />
-        <FormGroup label={uiCopy.dialogs.dataset.csvDelimiter}>
-          <HTMLSelect value={csvDelimiter} onChange={(event) => setCsvDelimiter(event.currentTarget.value)}>
-            <option value=",">,</option>
-            <option value=";">;</option>
-            <option value="\t">Tab</option>
-            <option value="|">|</option>
-          </HTMLSelect>
-        </FormGroup>
-      </div>
-      <div className="connector-actions">
-        <Button icon="eye-open" onClick={() => void handleCsvPreview()} disabled={!csvFile || csvParsing} loading={csvParsing}>
-          {uiCopy.dialogs.dataset.csvPreview}
-        </Button>
+      <FormGroup label={uiCopy.dialogs.dataset.excel.sheetName}>
+        <InputGroup
+          value={excelSheetName}
+          onChange={(event) => setExcelSheetName(event.currentTarget.value)}
+        />
+      </FormGroup>
+      <div className="dataset-card-actions">
         <Button
           intent={Intent.PRIMARY}
-          icon="add"
-          onClick={() => void handleCreateCsvDataset()}
-          disabled={!csvFile || !csvDatasetName.trim() || createDatasetMutation.isPending}
-          loading={createDatasetMutation.isPending}
+          icon="upload"
+          onClick={() => {
+            if (!excelFile) return
+            uploadExcelMutation.mutate({
+              file: excelFile,
+              datasetName: excelDatasetName.trim() || buildDatasetNameFromFile(excelFile.name),
+              sheetName: excelSheetName.trim() || undefined,
+            })
+          }}
+          disabled={!excelFile || !excelDatasetName.trim() || uploadExcelMutation.isPending}
+          loading={uploadExcelMutation.isPending}
         >
-          {uiCopy.dialogs.dataset.csvCreate}
+          {uiCopy.dialogs.dataset.excel.upload}
+        </Button>
+        <Button
+          minimal
+          icon="refresh"
+          onClick={() => {
+            setExcelFile(null)
+            setExcelDatasetName('')
+            setExcelSheetName('')
+            setExcelPreview(null)
+          }}
+        >
+          {uiCopy.dialogs.dataset.excel.reset}
         </Button>
       </div>
       <div className="dataset-preview-panel">
         <div className="dataset-preview-header">
-          <Text>{uiCopy.dialogs.dataset.csvTitle}</Text>
+          <Text>{uiCopy.dialogs.dataset.excel.preview}</Text>
         </div>
-        {csvPreview?.columns?.length ? (
-          <HTMLTable compact striped className="dataset-preview-table">
-            <thead>
-              <tr>
-                {csvPreview.columns.map((column) => (
-                  <th key={column}>{column}</th>
+        {excelPreview?.columns?.length ? (
+          <div className="dataset-preview-table">
+            <div className="preview-sample-card">
+              <div className="preview-sample-row preview-sample-header">
+                {excelPreview.columns.map((column) => (
+                  <span key={column.key}>{column.key}</span>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {csvPreview.rows.map((row, index) => (
-                <tr key={`${index}-csv`}>
-                  {csvPreview.columns.map((column) => (
-                    <td key={`${index}-${column}`}>{row[column] ?? ''}</td>
+              </div>
+              {(excelPreview.rows ?? []).slice(0, 6).map((row, index) => (
+                <div key={index} className="preview-sample-row">
+                  {excelPreview.columns.map((column) => (
+                    <span key={column.key} title={String(row?.[column.key] ?? '')}>
+                      {String(row?.[column.key] ?? '')}
+                    </span>
                   ))}
-                </tr>
+                </div>
               ))}
-            </tbody>
-          </HTMLTable>
+            </div>
+          </div>
         ) : (
-          <Text className="muted">{uiCopy.dialogs.dataset.csvPreviewEmpty}</Text>
+          <Text className="muted">{uiCopy.dialogs.dataset.excel.previewEmpty}</Text>
         )}
       </div>
     </div>
   )
+
 
   return (
     <div className="pipeline-builder-container">
@@ -1786,8 +1613,6 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
           }
           setTransformOpen(true)
         }}
-        onZoomIn={() => setCanvasZoom((current) => Math.min(1.4, current + 0.1))}
-        onZoomOut={() => setCanvasZoom((current) => Math.max(0.6, current - 0.1))}
       />
 
       <div className={`pipeline-body ${inspectorOpen ? 'has-inspector' : 'no-inspector'}`}>
@@ -1798,7 +1623,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
               <Tag minimal icon="folder-close">{pipelineLocation}</Tag>
             </div>
           </div>
-          <Divider />
+          <div className="pipeline-divider" />
           <div className="pipeline-sidebar-section">
             <div className="pipeline-sidebar-title">{uiCopy.sidebar.inputs}</div>
             {definition.nodes.filter((node) => node.type === 'input').map((node) => (
@@ -1812,7 +1637,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
               </button>
             ))}
           </div>
-          <Divider />
+          <div className="pipeline-divider" />
           <div className="pipeline-sidebar-section">
             <div className="pipeline-sidebar-title">{uiCopy.sidebar.transforms}</div>
             {definition.nodes.filter((node) => node.type === 'transform').map((node) => (
@@ -1826,7 +1651,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
               </button>
             ))}
           </div>
-          <Divider />
+          <div className="pipeline-divider" />
           <div className="pipeline-sidebar-section">
             <div className="pipeline-sidebar-title">{uiCopy.sidebar.outputs}</div>
             {definition.nodes.filter((node) => node.type === 'output').map((node) => (
@@ -1843,6 +1668,11 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
         </aside>
 
         <div className="pipeline-canvas-area">
+          <div className="canvas-zoom-controls">
+            <Button icon="zoom-in" minimal onClick={() => setCanvasZoom((current) => Math.min(1.4, current + 0.1))} />
+            <Button icon="zoom-out" minimal onClick={() => setCanvasZoom((current) => Math.max(0.6, current - 0.1))} />
+            <Button icon="zoom-to-fit" minimal onClick={() => setCanvasZoom(1)} />
+          </div>
           <PipelineCanvas
             nodes={definition.nodes}
             edges={definition.edges}
@@ -1882,7 +1712,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
               <Text className="muted">{uiCopy.sidebar.selectNode}</Text>
             )}
           </div>
-          <Divider />
+          <div className="pipeline-divider" />
           <div className="pipeline-sidebar-section">
             <div className="pipeline-sidebar-title">{uiCopy.sidebar.outputsTitle}</div>
             {definition.outputs.length === 0 ? (
@@ -1967,16 +1797,9 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
 
       <Dialog isOpen={datasetDialogOpen} onClose={() => setDatasetDialogOpen(false)} title={uiCopy.dialogs.dataset.title}>
         <div className="dialog-body">
-          <Callout intent={Intent.PRIMARY} icon="database">
-            {uiCopy.dialogs.dataset.callout}
-            <Button minimal icon="link" onClick={() => navigate(`/db/${encodeURIComponent(dbName)}/data/sheets`)}>
-              {uiCopy.dialogs.dataset.openConnections}
-            </Button>
-          </Callout>
           <Tabs id="dataset-tabs" selectedTabId={datasetTab} onChange={(tabId) => setDatasetTab(String(tabId))}>
-            <Tab id="connectors" title={uiCopy.dialogs.dataset.tabs.connectors} panel={connectorPanel} />
             <Tab id="datasets" title={uiCopy.dialogs.dataset.tabs.datasets} panel={datasetsPanel} />
-            <Tab id="csv" title={uiCopy.dialogs.dataset.tabs.csv} panel={csvPanel} />
+            <Tab id="excel" title={uiCopy.dialogs.dataset.tabs.excel} panel={excelPanel} />
             <Tab id="manual" title={uiCopy.dialogs.dataset.tabs.manual} panel={manualPanel} />
           </Tabs>
         </div>

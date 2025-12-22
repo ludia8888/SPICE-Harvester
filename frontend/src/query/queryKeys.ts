@@ -17,6 +17,12 @@ export const qk = {
     ['bff', 'mappings', dbName, 'summary', { lang: language }] as const,
   registeredSheets: (dbName: string | null, language: Language) =>
     ['bff', 'sheets', 'registered', { db: dbName, lang: language }] as const,
+  googleSheetsConnections: (language: Language) =>
+    ['bff', 'sheets', 'connections', { lang: language }] as const,
+  googleSheetsSpreadsheets: (connectionId: string, language: Language, query?: string) =>
+    ['bff', 'sheets', 'spreadsheets', connectionId, { query: query ?? null, lang: language }] as const,
+  googleSheetsWorksheets: (connectionId: string, sheetId: string, language: Language) =>
+    ['bff', 'sheets', 'worksheets', connectionId, sheetId, { lang: language }] as const,
   pipelines: (dbName: string, language: Language) =>
     ['bff', 'pipelines', dbName, { lang: language }] as const,
   pipeline: (pipelineId: string, language: Language) =>

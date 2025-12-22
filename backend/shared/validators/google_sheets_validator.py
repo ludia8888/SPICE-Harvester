@@ -13,7 +13,7 @@ class GoogleSheetsValidator(BaseValidator):
     """Validator for Google Sheets URLs"""
 
     # Google Sheets URL pattern
-    GOOGLE_SHEETS_PATTERN = r"^https://docs\.google\.com/spreadsheets/d/([a-zA-Z0-9-_]+)"
+    GOOGLE_SHEETS_PATTERN = r"^https://docs\.google\.com/spreadsheets/(?:u/\d+/)?d/([a-zA-Z0-9-_]+)"
 
     def validate(
         self, value: Any, constraints: Optional[Dict[str, Any]] = None
@@ -27,6 +27,13 @@ class GoogleSheetsValidator(BaseValidator):
             return ValidationResult(
                 is_valid=False, message=f"Expected string, got {type(value).__name__}"
             )
+
+        value = value.strip()
+        value = re.sub(
+            r"(https://docs\.google\.com/spreadsheets)/u/\d+/",
+            r"\1/",
+            value,
+        )
 
         # Basic pattern matching
         match = re.match(self.GOOGLE_SHEETS_PATTERN, value)
@@ -84,6 +91,12 @@ class GoogleSheetsValidator(BaseValidator):
 
         # Strip whitespace
         value = value.strip()
+
+        value = re.sub(
+            r"(https://docs\.google\.com/spreadsheets)/u/\d+/",
+            r"\1/",
+            value,
+        )
 
         # Remove trailing slashes
         if value.endswith("/"):

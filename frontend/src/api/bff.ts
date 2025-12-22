@@ -527,7 +527,7 @@ export const clearMappings = async (context: RequestContext, dbName: string) => 
 
 export const previewGoogleSheet = async (
   context: RequestContext,
-  input: { sheet_url: string; worksheet_name?: string; api_key?: string },
+  input: { sheet_url: string; worksheet_name?: string; api_key?: string; connection_id?: string },
   limit = 10,
 ) => {
   const { payload } = await requestJson<ApiEnvelope>(
@@ -539,9 +539,68 @@ export const previewGoogleSheet = async (
   return payload ?? {}
 }
 
+export const startGoogleSheetsOAuth = async (
+  context: RequestContext,
+  input: { redirect_uri: string; label?: string; db_name?: string; branch?: string },
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    'data-connectors/google-sheets/oauth/start',
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const listGoogleSheetsConnections = async (context: RequestContext) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    'data-connectors/google-sheets/connections',
+    { method: 'GET' },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const deleteGoogleSheetsConnection = async (context: RequestContext, connectionId: string) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    `data-connectors/google-sheets/connections/${encodeURIComponent(connectionId)}`,
+    { method: 'DELETE' },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const listGoogleSheetsSpreadsheets = async (
+  context: RequestContext,
+  connectionId: string,
+  query?: string,
+  limit = 50,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    'data-connectors/google-sheets/drive/spreadsheets',
+    { method: 'GET' },
+    context,
+    { connection_id: connectionId, query, limit },
+  )
+  return payload ?? {}
+}
+
+export const listGoogleSheetsWorksheets = async (
+  context: RequestContext,
+  connectionId: string,
+  sheetId: string,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    `data-connectors/google-sheets/spreadsheets/${encodeURIComponent(sheetId)}/worksheets`,
+    { method: 'GET' },
+    context,
+    { connection_id: connectionId },
+  )
+  return payload ?? {}
+}
+
 export const gridGoogleSheet = async (
   context: RequestContext,
-  input: { sheet_url: string; worksheet_name?: string; api_key?: string; max_rows?: number; max_cols?: number; trim_trailing_empty?: boolean },
+  input: { sheet_url: string; worksheet_name?: string; api_key?: string; connection_id?: string; max_rows?: number; max_cols?: number; trim_trailing_empty?: boolean },
 ) => {
   const { payload } = await requestJson<ApiEnvelope>(
     'data-connectors/google-sheets/grid',
@@ -699,6 +758,57 @@ export const createDatasetVersion = async (
     `pipelines/datasets/${encodeURIComponent(datasetId)}/versions`,
     { method: 'POST', body: JSON.stringify(input) },
     context,
+  )
+  return payload ?? {}
+}
+
+export const uploadExcelDataset = async (
+  context: RequestContext,
+  dbName: string,
+  params: {
+    file: File
+    datasetName?: string
+    description?: string
+    sheetName?: string
+    tableId?: string
+    tableTop?: number
+    tableLeft?: number
+    tableBottom?: number
+    tableRight?: number
+  },
+) => {
+  const body = new FormData()
+  body.append('file', params.file)
+  if (params.datasetName) {
+    body.append('dataset_name', params.datasetName)
+  }
+  if (params.description) {
+    body.append('description', params.description)
+  }
+  if (params.sheetName) {
+    body.append('sheet_name', params.sheetName)
+  }
+  if (params.tableId) {
+    body.append('table_id', params.tableId)
+  }
+  if (params.tableTop !== undefined) {
+    body.append('table_top', String(params.tableTop))
+  }
+  if (params.tableLeft !== undefined) {
+    body.append('table_left', String(params.tableLeft))
+  }
+  if (params.tableBottom !== undefined) {
+    body.append('table_bottom', String(params.tableBottom))
+  }
+  if (params.tableRight !== undefined) {
+    body.append('table_right', String(params.tableRight))
+  }
+
+  const { payload } = await requestJson<ApiEnvelope>(
+    'pipelines/datasets/excel-upload',
+    { method: 'POST', body },
+    context,
+    { db_name: dbName },
   )
   return payload ?? {}
 }

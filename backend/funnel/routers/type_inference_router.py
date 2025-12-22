@@ -3,7 +3,7 @@
 타입 추론 및 스키마 제안 API 엔드포인트
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
@@ -230,6 +230,7 @@ async def analyze_google_sheets_structure(
                     "sheet_url": str(request.sheet_url),
                     "worksheet_name": request.worksheet_name,
                     "api_key": request.api_key,
+                    "connection_id": request.connection_id,
                     "max_rows": request.max_rows,
                     "max_cols": request.max_cols,
                     "trim_trailing_empty": request.trim_trailing_empty,
@@ -318,6 +319,7 @@ async def preview_google_sheets_with_inference(
     sheet_url: str,
     worksheet_name: str = None,
     api_key: str = None,
+    connection_id: Optional[str] = None,
     infer_types: bool = True,
     include_complex_types: bool = False,
     processor: FunnelDataProcessor = Depends(get_data_processor),
@@ -336,6 +338,7 @@ async def preview_google_sheets_with_inference(
             sheet_url=sheet_url,
             worksheet_name=worksheet_name,
             api_key=api_key,
+            connection_id=connection_id,
             infer_types=infer_types,
             include_complex_types=include_complex_types,
         )

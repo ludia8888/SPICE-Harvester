@@ -6,10 +6,13 @@ specifically for Google Sheets integration with the connector runtime.
 """
 
 import logging
-from datetime import timezone
-from typing import Any, Dict
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import RedirectResponse
 
 from data_connector.google_sheets.service import GoogleSheetsService
 from data_connector.google_sheets.models import (
@@ -26,10 +29,13 @@ from shared.services.sheet_grid_parser import SheetGridParseOptions, SheetGridPa
 from shared.services.connector_registry import ConnectorRegistry
 from shared.services.dataset_registry import DatasetRegistry
 from shared.dependencies.providers import LineageStoreDep
+from data_connector.google_sheets.auth import GoogleOAuth2Client
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Data Connectors"])
+
+_OAUTH_STATE_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 # Import the dependency functions from main
@@ -55,6 +61,270 @@ async def get_dataset_registry() -> DatasetRegistry:
     return await _get_dataset_registry()
 
 
+def _build_google_oauth_client() -> GoogleOAuth2Client:
+    return GoogleOAuth2Client()
+
+def _connector_oauth_enabled(oauth_client: GoogleOAuth2Client) -> bool:
+    return bool(oauth_client.client_id and oauth_client.client_secret and oauth_client.redirect_uri)
+
+def _append_query_param(url: str, key: str, value: str) -> str:
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query)
+    params[key] = [value]
+    return urlunparse(parsed._replace(query=urlencode(params, doseq=True)))
+
+
+async def _resolve_google_connection(
+    *,
+    connector_registry: ConnectorRegistry,
+    oauth_client: GoogleOAuth2Client,
+    connection_id: str,
+) -> tuple[Any, Optional[str]]:
+    connection_id = (connection_id or "").strip()
+    if not connection_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="connection_id is required")
+
+    source = await connector_registry.get_source(
+        source_type="google_sheets_connection",
+        source_id=connection_id,
+    )
+    if not source or not source.enabled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found")
+
+    config = source.config_json or {}
+    token = config.get("access_token")
+    expires_at = config.get("expires_at")
+    refresh_token = config.get("refresh_token")
+
+    if token and expires_at:
+        try:
+            expiry = datetime.fromisoformat(str(expires_at))
+        except ValueError:
+            expiry = None
+        if expiry and expiry > datetime.now(timezone.utc):
+            return source, str(token)
+
+    if refresh_token:
+        refreshed = await oauth_client.refresh_access_token(str(refresh_token))
+        config.update(
+            {
+                "access_token": refreshed.get("access_token"),
+                "expires_at": refreshed.get("expires_at"),
+                "refresh_token": refreshed.get("refresh_token", refresh_token),
+            }
+        )
+        await connector_registry.upsert_source(
+            source_type=source.source_type,
+            source_id=source.source_id,
+            enabled=True,
+            config_json=config,
+        )
+        token = config.get("access_token")
+
+    return source, str(token) if token else None
+
+
+@router.post(
+    "/data-connectors/google-sheets/oauth/start",
+    response_model=Dict[str, Any],
+    summary="Start Google Sheets OAuth flow",
+)
+@rate_limit(**RateLimitPresets.RELAXED)
+@trace_endpoint("google_sheets_oauth_start")
+async def start_google_sheets_oauth(
+    payload: Dict[str, Any],
+    http_request: Request,
+) -> Dict[str, Any]:
+    oauth_client = _build_google_oauth_client()
+    if not _connector_oauth_enabled(oauth_client):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google OAuth is not configured")
+    if not oauth_client.redirect_uri:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google OAuth redirect URI is missing")
+
+    sanitized = sanitize_input(payload or {})
+    state = uuid4().hex
+    redirect_uri = str(sanitized.get("redirect_uri") or "").strip()
+    label = str(sanitized.get("label") or "").strip() or None
+    db_name = str(sanitized.get("db_name") or "").strip() or None
+    requested_branch = str(sanitized.get("branch") or "").strip() or None
+
+    _OAUTH_STATE_CACHE[state] = {
+        "redirect_uri": redirect_uri,
+        "label": label,
+        "db_name": db_name,
+        "branch": requested_branch,
+    }
+
+    auth_url = oauth_client.get_authorization_url(state)
+    return ApiResponse.success(
+        message="OAuth flow started",
+        data={"authorization_url": auth_url, "state": state},
+    ).to_dict()
+
+
+@router.get(
+    "/data-connectors/google-sheets/oauth/callback",
+    summary="Google Sheets OAuth callback",
+)
+@rate_limit(**RateLimitPresets.RELAXED)
+@trace_endpoint("google_sheets_oauth_callback")
+async def google_sheets_oauth_callback(
+    request: Request,
+    code: str,
+    state: str,
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+) -> RedirectResponse:
+    oauth_client = _build_google_oauth_client()
+    if not _connector_oauth_enabled(oauth_client):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google OAuth is not configured")
+
+    state_payload = _OAUTH_STATE_CACHE.pop(state, None)
+    if state_payload is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OAuth state")
+
+    token_data = await oauth_client.exchange_code_for_token(code)
+    expires_at = token_data.get("expires_at")
+    connection_id = uuid4().hex
+
+    config = {
+        "provider": "google_sheets",
+        "access_token": token_data.get("access_token"),
+        "refresh_token": token_data.get("refresh_token"),
+        "expires_at": expires_at,
+        "label": state_payload.get("label"),
+        "db_name": state_payload.get("db_name"),
+        "branch": state_payload.get("branch"),
+    }
+    await connector_registry.upsert_source(
+        source_type="google_sheets_connection",
+        source_id=connection_id,
+        enabled=True,
+        config_json=config,
+    )
+
+    redirect_url = state_payload.get("redirect_uri") or "/"
+    redirect_url = _append_query_param(redirect_url, "connection_id", connection_id)
+    return RedirectResponse(url=redirect_url)
+
+
+@router.get(
+    "/data-connectors/google-sheets/connections",
+    response_model=Dict[str, Any],
+    summary="List Google Sheets connections",
+)
+@rate_limit(**RateLimitPresets.RELAXED)
+@trace_endpoint("list_google_sheets_connections")
+async def list_google_sheets_connections(
+    http_request: Request,
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+) -> Dict[str, Any]:
+    sources = await connector_registry.list_sources(source_type="google_sheets_connection", enabled=True, limit=200)
+    connections = []
+    for src in sources:
+        cfg = src.config_json or {}
+        connections.append(
+            {
+                "connection_id": src.source_id,
+                "label": cfg.get("label") or "Google Sheets",
+                "created_at": src.created_at.astimezone(timezone.utc).isoformat(),
+            }
+        )
+    return ApiResponse.success(message="Connections retrieved", data={"connections": connections}).to_dict()
+
+
+@router.delete(
+    "/data-connectors/google-sheets/connections/{connection_id}",
+    response_model=Dict[str, Any],
+    summary="Remove Google Sheets connection",
+)
+@rate_limit(**RateLimitPresets.RELAXED)
+@trace_endpoint("delete_google_sheets_connection")
+async def delete_google_sheets_connection(
+    connection_id: str,
+    http_request: Request,
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+) -> Dict[str, Any]:
+    updated = await connector_registry.set_source_enabled(
+        source_type="google_sheets_connection",
+        source_id=connection_id,
+        enabled=False,
+    )
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connection not found")
+    return ApiResponse.success(message="Connection removed", data={"connection_id": connection_id}).to_dict()
+
+
+@router.get(
+    "/data-connectors/google-sheets/drive/spreadsheets",
+    response_model=Dict[str, Any],
+    summary="List Google Sheets spreadsheets",
+)
+@rate_limit(**RateLimitPresets.RELAXED)
+@trace_endpoint("list_google_sheets_spreadsheets")
+async def list_google_sheets_spreadsheets(
+    http_request: Request,
+    connection_id: str,
+    query: Optional[str] = None,
+    limit: int = 50,
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+    google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service),
+) -> Dict[str, Any]:
+    oauth_client = _build_google_oauth_client()
+    _, access_token = await _resolve_google_connection(
+        connector_registry=connector_registry,
+        oauth_client=oauth_client,
+        connection_id=connection_id,
+    )
+    if not access_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Connection access token missing")
+
+    spreadsheets = await google_sheets_service.list_spreadsheets(
+        access_token=access_token,
+        query=query,
+        page_size=limit,
+    )
+    return ApiResponse.success(message="Spreadsheets retrieved", data={"spreadsheets": spreadsheets}).to_dict()
+
+
+@router.get(
+    "/data-connectors/google-sheets/spreadsheets/{sheet_id}/worksheets",
+    response_model=Dict[str, Any],
+    summary="List worksheets for a spreadsheet",
+)
+@rate_limit(**RateLimitPresets.RELAXED)
+@trace_endpoint("list_google_sheets_worksheets")
+async def list_google_sheets_worksheets(
+    sheet_id: str,
+    http_request: Request,
+    connection_id: str,
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+    google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service),
+) -> Dict[str, Any]:
+    oauth_client = _build_google_oauth_client()
+    _, access_token = await _resolve_google_connection(
+        connector_registry=connector_registry,
+        oauth_client=oauth_client,
+        connection_id=connection_id,
+    )
+    if not access_token:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Connection access token missing")
+
+    metadata = await google_sheets_service.get_sheet_metadata(
+        sheet_id,
+        access_token=access_token,
+    )
+    worksheets = []
+    for sheet in metadata.sheets or []:
+        props = sheet.get("properties", {}) if isinstance(sheet, dict) else {}
+        worksheets.append(
+            {
+                "worksheet_id": props.get("sheetId"),
+                "title": props.get("title"),
+            }
+        )
+    return ApiResponse.success(message="Worksheets retrieved", data={"worksheets": worksheets}).to_dict()
+
+
 @router.post(
     "/data-connectors/google-sheets/grid",
     response_model=SheetGrid,
@@ -67,12 +337,22 @@ async def extract_google_sheet_grid(
     request: GoogleSheetGridRequest,
     http_request: Request,
     google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service),
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
 ) -> SheetGrid:
     try:
+        access_token = None
+        if request.connection_id:
+            oauth_client = _build_google_oauth_client()
+            _, access_token = await _resolve_google_connection(
+                connector_registry=connector_registry,
+                oauth_client=oauth_client,
+                connection_id=str(request.connection_id),
+            )
         sheet_id, metadata, worksheet_title, worksheet_sheet_id, values = await google_sheets_service.fetch_sheet_values(
             str(request.sheet_url),
             worksheet_name=request.worksheet_name,
             api_key=request.api_key,
+            access_token=access_token,
         )
 
         merges = SheetGridParser.merged_cells_from_google_metadata(
@@ -121,13 +401,23 @@ async def preview_google_sheet_for_funnel(
     http_request: Request,
     limit: int = 10,
     google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service),
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
 ) -> GoogleSheetPreviewResponse:
     try:
+        access_token = None
+        if request.connection_id:
+            oauth_client = _build_google_oauth_client()
+            _, access_token = await _resolve_google_connection(
+                connector_registry=connector_registry,
+                oauth_client=oauth_client,
+                connection_id=str(request.connection_id),
+            )
         preview = await google_sheets_service.preview_sheet(
             str(request.sheet_url),
             worksheet_name=request.worksheet_name,
             limit=limit,
             api_key=request.api_key,
+            access_token=access_token,
         )
         return GoogleSheetPreviewResponse(
             sheet_id=preview.sheet_id,
@@ -192,6 +482,7 @@ async def register_google_sheet(
         auto_import = bool(sheet_data.get("auto_import", False))
         max_import_rows = sheet_data.get("max_import_rows")
         api_key = sheet_data.get("api_key")
+        connection_id = sheet_data.get("connection_id")
         try:
             max_import_rows = int(max_import_rows) if max_import_rows is not None else None
         except Exception:
@@ -207,11 +498,26 @@ async def register_google_sheet(
         logger.info(f"Registering Google Sheet: {sheet_url} (worksheet={worksheet_name}, interval={polling_interval}s)")
 
         # Validate + resolve sheet_id/worksheet name via connector I/O (no durable state here).
+        access_token = None
+        refresh_token = None
+        expires_at = None
+        if connection_id:
+            oauth_client = _build_google_oauth_client()
+            connection_source, access_token = await _resolve_google_connection(
+                connector_registry=connector_registry,
+                oauth_client=oauth_client,
+                connection_id=str(connection_id),
+            )
+            cfg = connection_source.config_json or {}
+            refresh_token = cfg.get("refresh_token")
+            expires_at = cfg.get("expires_at")
+
         preview = await google_sheets_service.preview_sheet(
             str(sheet_url),
             worksheet_name=worksheet_name,
             limit=25,
             api_key=api_key,
+            access_token=access_token,
         )
         sheet_id = preview.sheet_id
         resolved_worksheet = preview.worksheet_name
@@ -223,9 +529,14 @@ async def register_google_sheet(
             enabled=True,
             config_json={
                 "sheet_url": str(sheet_url),
+                "sheet_title": preview.sheet_title,
                 "worksheet_name": str(resolved_worksheet),
                 "polling_interval": int(polling_interval),
                 "max_import_rows": int(max_import_rows) if max_import_rows is not None else None,
+                "connection_id": str(connection_id) if connection_id else None,
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "expires_at": expires_at,
             },
         )
 
@@ -387,11 +698,24 @@ async def preview_google_sheet(
                 detail="Registered sheet is missing sheet_url",
             )
 
-        default_ws = (source.config_json or {}).get("worksheet_name")
+        config = source.config_json or {}
+        default_ws = config.get("worksheet_name")
+        access_token = config.get("access_token")
+        connection_id = config.get("connection_id")
+        if connection_id:
+            oauth_client = _build_google_oauth_client()
+            _, refreshed_token = await _resolve_google_connection(
+                connector_registry=connector_registry,
+                oauth_client=oauth_client,
+                connection_id=str(connection_id),
+            )
+            access_token = refreshed_token or access_token
+
         preview_result = await google_sheets_service.preview_sheet(
             sheet_url,
             worksheet_name=worksheet_name or default_ws,
             limit=limit,
+            access_token=access_token,
         )
 
         return ApiResponse.success(
@@ -448,10 +772,12 @@ async def list_registered_sheets(
                 continue
             state = await connector_registry.get_sync_state(source_type=src.source_type, source_id=src.source_id)
             cfg = src.config_json or {}
+            sheet_title = cfg.get("sheet_title")
             registered_sheets.append(
                 RegisteredSheet(
                     sheet_id=src.source_id,
                     sheet_url=str(cfg.get("sheet_url") or ""),
+                    sheet_title=str(sheet_title) if sheet_title else None,
                     worksheet_name=str(cfg.get("worksheet_name") or ""),
                     polling_interval=int(cfg.get("polling_interval") or 300),
                     database_name=(mapping.target_db_name if mapping else None),
@@ -524,13 +850,25 @@ async def start_pipelining_google_sheet(
         sheet_url = (source.config_json or {}).get("sheet_url")
         if not sheet_url:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Registered sheet missing URL")
-        default_ws = (source.config_json or {}).get("worksheet_name")
+        config = source.config_json or {}
+        default_ws = config.get("worksheet_name")
+        access_token = config.get("access_token")
+        connection_id = config.get("connection_id")
+        if connection_id:
+            oauth_client = _build_google_oauth_client()
+            _, refreshed_token = await _resolve_google_connection(
+                connector_registry=connector_registry,
+                oauth_client=oauth_client,
+                connection_id=str(connection_id),
+            )
+            access_token = refreshed_token or access_token
 
         preview = await google_sheets_service.preview_sheet(
             sheet_url,
             worksheet_name=worksheet_name or default_ws,
             limit=limit,
             api_key=api_key,
+            access_token=access_token,
         )
 
         source_ref = f"google_sheets:{sheet_id}"

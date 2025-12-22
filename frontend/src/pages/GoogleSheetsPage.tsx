@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
     Button,
     Card,
     Divider,
     FormGroup,
+    H5,
     HTMLTable,
     InputGroup,
     Intent,
@@ -13,11 +14,16 @@ import {
     Text,
 } from '@blueprintjs/core'
 import {
+    deleteGoogleSheetsConnection,
     gridGoogleSheet,
     listRegisteredSheets,
+    listGoogleSheetsConnections,
+    listGoogleSheetsSpreadsheets,
+    listGoogleSheetsWorksheets,
     previewGoogleSheet,
     previewRegisteredSheet,
     registerGoogleSheet,
+    startGoogleSheetsOAuth,
     unregisterSheet,
 } from '../api/bff'
 import { useRateLimitRetry } from '../api/useRateLimitRetry'
@@ -42,6 +48,21 @@ export const GoogleSheetsPage = ({ dbName }: { dbName: string }) => {
     const [worksheetName, setWorksheetName] = useState('')
     const [apiKey, setApiKey] = useState('')
     const [selectedSheet, setSelectedSheet] = useState<string>('')
+    const [connectionLabel, setConnectionLabel] = useState('')
+    const [selectedConnection, setSelectedConnection] = useState('')
+    const [sheetQuery, setSheetQuery] = useState('')
+    const [selectedSpreadsheet, setSelectedSpreadsheet] = useState('')
+    const [selectedWorksheet, setSelectedWorksheet] = useState('')
+
+    useEffect(() => {
+        const url = new URL(window.location.href)
+        const connectionId = url.searchParams.get('connection_id')
+        if (connectionId) {
+            setSelectedConnection(connectionId)
+            url.searchParams.delete('connection_id')
+            window.history.replaceState({}, '', url.toString())
+        }
+    }, [])
 
     const previewMutation = useMutation({
         mutationFn: () =>
@@ -50,6 +71,7 @@ export const GoogleSheetsPage = ({ dbName }: { dbName: string }) => {
                     sheet_url: sheetUrl,
                     worksheet_name: worksheetName || undefined,
                     api_key: apiKey || undefined,
+                    connection_id: selectedConnection || undefined,
                 }),
             ),
         onError: (error) => toastApiError(error, language),
@@ -62,6 +84,7 @@ export const GoogleSheetsPage = ({ dbName }: { dbName: string }) => {
                     sheet_url: sheetUrl,
                     worksheet_name: worksheetName || undefined,
                     api_key: apiKey || undefined,
+                    connection_id: selectedConnection || undefined,
                     max_rows: 60,
                     max_cols: 30,
                     trim_trailing_empty: true,
@@ -81,6 +104,7 @@ export const GoogleSheetsPage = ({ dbName }: { dbName: string }) => {
                     polling_interval: 300,
                     auto_import: false,
                     api_key: apiKey || undefined,
+                    connection_id: selectedConnection || undefined,
                 }),
             ),
         onSuccess: () => {
@@ -89,6 +113,57 @@ export const GoogleSheetsPage = ({ dbName }: { dbName: string }) => {
         },
         onError: (error) => toastApiError(error, language),
     })
+
+    const oauthMutation = useMutation({
+        mutationFn: () =>
+            withRateLimitRetry(() =>
+                startGoogleSheetsOAuth(requestContext, {
+                    redirect_uri: window.location.href.split('?')[0],
+                    label: connectionLabel || undefined,
+                    db_name: dbName,
+                    branch,
+                }),
+            ),
+        onSuccess: (payload) => {
+            const url = (payload as { data?: { authorization_url?: string } })?.data?.authorization_url
+            if (url) {
+                window.location.href = url
+            }
+        },
+        onError: (error) => toastApiError(error, language),
+    })
+
+    const connectionsQuery = useQuery({
+        queryKey: qk.googleSheetsConnections(requestContext.language),
+        queryFn: () => listGoogleSheetsConnections(requestContext),
+    })
+
+    const connections = useMemo(() => {
+        const payload = connectionsQuery.data as { data?: { connections?: RegisteredSheet[] } } | undefined
+        return payload?.data?.connections ?? []
+    }, [connectionsQuery.data])
+
+    const spreadsheetsQuery = useQuery({
+        queryKey: qk.googleSheetsSpreadsheets(selectedConnection, requestContext.language, sheetQuery),
+        queryFn: () => listGoogleSheetsSpreadsheets(requestContext, selectedConnection, sheetQuery || undefined, 50),
+        enabled: Boolean(selectedConnection),
+    })
+
+    const spreadsheets = useMemo(() => {
+        const payload = spreadsheetsQuery.data as { data?: { spreadsheets?: RegisteredSheet[] } } | undefined
+        return payload?.data?.spreadsheets ?? []
+    }, [spreadsheetsQuery.data])
+
+    const worksheetsQuery = useQuery({
+        queryKey: qk.googleSheetsWorksheets(selectedConnection, selectedSpreadsheet, requestContext.language),
+        queryFn: () => listGoogleSheetsWorksheets(requestContext, selectedConnection, selectedSpreadsheet),
+        enabled: Boolean(selectedConnection && selectedSpreadsheet),
+    })
+
+    const worksheets = useMemo(() => {
+        const payload = worksheetsQuery.data as { data?: { worksheets?: RegisteredSheet[] } } | undefined
+        return payload?.data?.worksheets ?? []
+    }, [worksheetsQuery.data])
 
     const registeredQuery = useQuery({
         queryKey: qk.registeredSheets(dbName, requestContext.language),
@@ -114,77 +189,292 @@ export const GoogleSheetsPage = ({ dbName }: { dbName: string }) => {
         onError: (error) => toastApiError(error, language),
     })
 
+    const deleteConnectionMutation = useMutation({
+        mutationFn: (connectionId: string) =>
+            withRateLimitRetry(() => deleteGoogleSheetsConnection(requestContext, connectionId)),
+        onSuccess: () => {
+            void showAppToast({ intent: Intent.SUCCESS, message: 'Connection removed.' })
+            void queryClient.invalidateQueries({ queryKey: qk.googleSheetsConnections(requestContext.language) })
+        },
+        onError: (error) => toastApiError(error, language),
+    })
+
+    const copy = language === 'ko'
+        ? {
+            title: 'Google Sheets',
+            subtitle: '연결을 관리하고 시트를 미리보기/등록합니다.',
+            connections: {
+                title: '연결',
+                description: '한 번 연결하면 파이프라인에서 반복 사용합니다.',
+                label: '연결 라벨',
+                connect: 'Google 계정 연결',
+                select: '연결 선택',
+                remove: '연결 제거',
+            },
+            selection: {
+                title: '스프레드시트 선택',
+                search: '검색',
+                searchPlaceholder: '시트 검색',
+                spreadsheet: '스프레드시트',
+                worksheet: '워크시트',
+                sheetUrl: 'Sheet URL',
+                worksheetOptional: '워크시트 (선택)',
+                apiKey: 'API 키 (선택)',
+                helper: '연결된 계정으로 스프레드시트를 탐색하거나 URL을 직접 붙여넣을 수 있습니다.',
+            },
+            tabs: {
+                preview: '미리보기',
+                grid: '그리드',
+                registered: '등록됨',
+            },
+            actions: {
+                preview: '미리보기',
+                grid: '그리드 감지',
+                register: '등록',
+                refresh: '목록 새로고침',
+                unregister: '등록 해제',
+            },
+            empty: {
+                preview: '미리보기를 실행하면 샘플이 표시됩니다.',
+                grid: '그리드 감지 결과를 확인하세요.',
+                registered: '등록된 시트가 없습니다.',
+                registeredPreview: '시트를 선택하면 미리보기가 표시됩니다.',
+            },
+            table: {
+                sheetId: 'Sheet ID',
+                worksheet: '워크시트',
+                db: 'DB',
+                branch: '브랜치',
+                actions: '작업',
+            },
+        }
+        : {
+            title: 'Google Sheets',
+            subtitle: 'Preview, detect grids, and manage registered sheets.',
+            connections: {
+                title: 'Connections',
+                description: 'Connect once, then reuse the connection for every pipeline step.',
+                label: 'Connection label',
+                connect: 'Connect Google account',
+                select: 'Select connection',
+                remove: 'Remove connection',
+            },
+            selection: {
+                title: 'Select spreadsheet',
+                search: 'Search',
+                searchPlaceholder: 'Search sheets',
+                spreadsheet: 'Spreadsheet',
+                worksheet: 'Worksheet',
+                sheetUrl: 'Sheet URL',
+                worksheetOptional: 'Worksheet (optional)',
+                apiKey: 'API key (optional)',
+                helper: 'Spreadsheet selection uses your connected Google account. You can also paste a sheet URL directly.',
+            },
+            tabs: {
+                preview: 'Preview',
+                grid: 'Grid',
+                registered: 'Registered',
+            },
+            actions: {
+                preview: 'Preview',
+                grid: 'Detect grid',
+                register: 'Register',
+                refresh: 'Refresh list',
+                unregister: 'Unregister',
+            },
+            empty: {
+                preview: 'Run preview to see sample rows.',
+                grid: 'Run grid detection to inspect merges.',
+                registered: 'No registered sheets.',
+                registeredPreview: 'Select a sheet to preview.',
+            },
+            table: {
+                sheetId: 'Sheet ID',
+                worksheet: 'Worksheet',
+                db: 'DB',
+                branch: 'Branch',
+                actions: 'Actions',
+            },
+        }
+
     return (
         <div>
-            <PageHeader title="Google Sheets" subtitle="Preview, detect grids, and manage registered sheets." />
+            <PageHeader title={copy.title} subtitle={copy.subtitle} />
 
             <Card style={{ marginBottom: 16 }}>
+                <H5 style={{ marginTop: 0 }}>{copy.connections.title}</H5>
+                <Text className="muted" style={{ marginBottom: 8 }}>
+                    {copy.connections.description}
+                </Text>
+                <div className="form-row" style={{ alignItems: 'flex-end' }}>
+                    <FormGroup label={copy.connections.label}>
+                        <InputGroup value={connectionLabel} onChange={(event) => setConnectionLabel(event.currentTarget.value)} />
+                    </FormGroup>
+                    <Button
+                        intent={Intent.PRIMARY}
+                        onClick={() => oauthMutation.mutate()}
+                        loading={oauthMutation.isPending}
+                    >
+                        {copy.connections.connect}
+                    </Button>
+                </div>
+                <Divider style={{ margin: '12px 0' }} />
                 <div className="form-row">
-                    <FormGroup label="Sheet URL">
+                    <FormGroup label={copy.connections.title}>
+                        <div className="bp5-select">
+                            <select
+                                value={selectedConnection}
+                                onChange={(event) => {
+                                    setSelectedConnection(event.currentTarget.value)
+                                    setSelectedSpreadsheet('')
+                                    setSelectedWorksheet('')
+                                }}
+                            >
+                                <option value="">{copy.connections.select}</option>
+                                {connections.map((connection) => (
+                                    <option key={String((connection as any).connection_id)} value={String((connection as any).connection_id)}>
+                                        {String((connection as any).label ?? 'Google Sheets')}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    </FormGroup>
+                    <Button
+                        intent={Intent.DANGER}
+                        disabled={!selectedConnection}
+                        onClick={() => deleteConnectionMutation.mutate(selectedConnection)}
+                    >
+                        {copy.connections.remove}
+                    </Button>
+                </div>
+            </Card>
+
+            <Card style={{ marginBottom: 16 }}>
+                <H5 style={{ marginTop: 0 }}>{copy.selection.title}</H5>
+                <div className="form-row">
+                    <FormGroup label={copy.selection.search}>
+                        <InputGroup
+                            value={sheetQuery}
+                            onChange={(event) => setSheetQuery(event.currentTarget.value)}
+                            placeholder={copy.selection.searchPlaceholder}
+                        />
+                    </FormGroup>
+                    <FormGroup label={copy.selection.spreadsheet}>
+                        <div className="bp5-select">
+                            <select
+                                value={selectedSpreadsheet}
+                                onChange={(event) => {
+                                    setSelectedSpreadsheet(event.currentTarget.value)
+                                    setSelectedWorksheet('')
+                                    const match = spreadsheets.find(
+                                        (item) => String((item as any).spreadsheet_id) === event.currentTarget.value,
+                                    ) as any
+                                    if (match?.spreadsheet_id) {
+                                        setSheetUrl(
+                                            `https://docs.google.com/spreadsheets/d/${match.spreadsheet_id}/edit`,
+                                        )
+                                    }
+                                }}
+                                disabled={!selectedConnection}
+                            >
+                                <option value="">{copy.selection.spreadsheet}</option>
+                                {spreadsheets.map((sheet) => (
+                                    <option key={String((sheet as any).spreadsheet_id)} value={String((sheet as any).spreadsheet_id)}>
+                                        {String((sheet as any).name ?? 'Untitled')}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    </FormGroup>
+                    <FormGroup label={copy.selection.worksheet}>
+                        <div className="bp5-select">
+                            <select
+                                value={selectedWorksheet}
+                                onChange={(event) => {
+                                    setSelectedWorksheet(event.currentTarget.value)
+                                    setWorksheetName(event.currentTarget.value)
+                                }}
+                                disabled={!selectedSpreadsheet}
+                            >
+                                <option value="">{copy.selection.worksheet}</option>
+                                {worksheets.map((sheet) => (
+                                    <option key={String((sheet as any).worksheet_id)} value={String((sheet as any).title)}>
+                                        {String((sheet as any).title)}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    </FormGroup>
+                </div>
+                <div className="form-row">
+                    <FormGroup label={copy.selection.sheetUrl}>
                         <InputGroup value={sheetUrl} onChange={(event) => setSheetUrl(event.currentTarget.value)} />
                     </FormGroup>
-                    <FormGroup label="Worksheet (optional)">
+                    <FormGroup label={copy.selection.worksheetOptional}>
                         <InputGroup value={worksheetName} onChange={(event) => setWorksheetName(event.currentTarget.value)} />
                     </FormGroup>
-                    <FormGroup label="API key (optional)">
+                    <FormGroup label={copy.selection.apiKey}>
                         <InputGroup value={apiKey} onChange={(event) => setApiKey(event.currentTarget.value)} />
                     </FormGroup>
                 </div>
+                <Text className="muted" style={{ marginTop: 6 }}>
+                    {copy.selection.helper}
+                </Text>
             </Card>
 
             <Tabs id="sheets-tabs" defaultSelectedTabId="preview">
                 <Tab
                     id="preview"
-                    title="Preview"
+                    title={copy.tabs.preview}
                     panel={
                         <Card className="card-stack">
                             <div className="form-row">
                                 <Button intent={Intent.PRIMARY} onClick={() => previewMutation.mutate()} disabled={!sheetUrl || connectorCooldown > 0} loading={previewMutation.isPending}>
-                                    {connectorCooldown > 0 ? `Retry in ${connectorCooldown}s` : 'Preview'}
+                                    {connectorCooldown > 0 ? `Retry in ${connectorCooldown}s` : copy.actions.preview}
                                 </Button>
                             </div>
-                            <JsonViewer value={previewMutation.data} empty="Run preview to see sample rows." />
+                            <JsonViewer value={previewMutation.data} empty={copy.empty.preview} />
                         </Card>
                     }
                 />
                 <Tab
                     id="grid"
-                    title="Grid"
+                    title={copy.tabs.grid}
                     panel={
                         <Card className="card-stack">
                             <div className="form-row">
                                 <Button intent={Intent.PRIMARY} onClick={() => gridMutation.mutate()} disabled={!sheetUrl || connectorCooldown > 0} loading={gridMutation.isPending}>
-                                    {connectorCooldown > 0 ? `Retry in ${connectorCooldown}s` : 'Detect grid'}
+                                    {connectorCooldown > 0 ? `Retry in ${connectorCooldown}s` : copy.actions.grid}
                                 </Button>
                             </div>
-                            <JsonViewer value={gridMutation.data} empty="Run grid detection to inspect merges." />
+                            <JsonViewer value={gridMutation.data} empty={copy.empty.grid} />
                         </Card>
                     }
                 />
                 <Tab
                     id="registered"
-                    title="Registered"
+                    title={copy.tabs.registered}
                     panel={
                         <Card className="card-stack">
                             <div className="form-row">
                                 <Button intent={Intent.PRIMARY} onClick={() => registerMutation.mutate()} disabled={!sheetUrl || connectorCooldown > 0} loading={registerMutation.isPending}>
-                                    {connectorCooldown > 0 ? `Retry in ${connectorCooldown}s` : 'Register'}
+                                    {connectorCooldown > 0 ? `Retry in ${connectorCooldown}s` : copy.actions.register}
                                 </Button>
                                 <Button onClick={() => void queryClient.invalidateQueries({ queryKey: qk.registeredSheets(dbName, requestContext.language) })}>
-                                    Refresh list
+                                    {copy.actions.refresh}
                                 </Button>
                             </div>
                             {registeredSheets.length === 0 ? (
-                                <Text className="muted">No registered sheets.</Text>
+                                <Text className="muted">{copy.empty.registered}</Text>
                             ) : (
                                 <HTMLTable striped interactive className="command-table">
                                     <thead>
                                         <tr>
-                                            <th>Sheet ID</th>
-                                            <th>Worksheet</th>
-                                            <th>DB</th>
-                                            <th>Branch</th>
-                                            <th>Actions</th>
+                                            <th>{copy.table.sheetId}</th>
+                                            <th>{copy.table.worksheet}</th>
+                                            <th>{copy.table.db}</th>
+                                            <th>{copy.table.branch}</th>
+                                            <th>{copy.table.actions}</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -198,10 +488,10 @@ export const GoogleSheetsPage = ({ dbName }: { dbName: string }) => {
                                                     <td>{String(sheet.branch ?? '')}</td>
                                                     <td>
                                                         <Button small onClick={() => { setSelectedSheet(sheetId); previewRegisteredMutation.mutate(); }} disabled={connectorCooldown > 0}>
-                                                            {connectorCooldown > 0 ? `Retry in ${connectorCooldown}s` : 'Preview'}
+                                                            {connectorCooldown > 0 ? `Retry in ${connectorCooldown}s` : copy.actions.preview}
                                                         </Button>
                                                         <Button small intent={Intent.DANGER} style={{ marginLeft: 8 }} onClick={() => unregisterMutation.mutate(sheetId)} disabled={connectorCooldown > 0}>
-                                                            {connectorCooldown > 0 ? `Retry in ${connectorCooldown}s` : 'Unregister'}
+                                                            {connectorCooldown > 0 ? `Retry in ${connectorCooldown}s` : copy.actions.unregister}
                                                         </Button>
                                                     </td>
                                                 </tr>
@@ -211,7 +501,7 @@ export const GoogleSheetsPage = ({ dbName }: { dbName: string }) => {
                                 </HTMLTable>
                             )}
                             <Divider />
-                            <JsonViewer value={previewRegisteredMutation.data} empty="Select a sheet to preview." />
+                            <JsonViewer value={previewRegisteredMutation.data} empty={copy.empty.registeredPreview} />
                         </Card>
                     }
                 />

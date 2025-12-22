@@ -96,6 +96,7 @@ class FunnelClient:
         sheet_url: str,
         worksheet_name: str = None,
         api_key: str = None,
+        connection_id: Optional[str] = None,
         infer_types: bool = True,
         include_complex_types: bool = False,
     ) -> Dict[str, Any]:
@@ -123,6 +124,8 @@ class FunnelClient:
                 params["worksheet_name"] = worksheet_name
             if api_key:
                 params["api_key"] = api_key
+            if connection_id:
+                params["connection_id"] = connection_id
 
             response = await self.client.post("/api/v1/funnel/preview/google-sheets", params=params)
             response.raise_for_status()
@@ -177,6 +180,7 @@ class FunnelClient:
         worksheet_name: str = None,
         class_name: str = None,
         api_key: str = None,
+        connection_id: Optional[str] = None,
         table_id: Optional[str] = None,
         table_bbox: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -199,6 +203,7 @@ class FunnelClient:
                     sheet_url=sheet_url,
                     worksheet_name=worksheet_name,
                     api_key=api_key,
+                    connection_id=connection_id,
                     include_complex_types=True,
                 )
                 table = self._select_requested_table(
@@ -237,6 +242,7 @@ class FunnelClient:
                 sheet_url=sheet_url,
                 worksheet_name=worksheet_name,
                 api_key=api_key,
+                connection_id=connection_id,
                 infer_types=True,
                 include_complex_types=True,
             )
@@ -266,6 +272,7 @@ class FunnelClient:
         sheet_url: str,
         worksheet_name: Optional[str] = None,
         api_key: Optional[str] = None,
+        connection_id: Optional[str] = None,
         table_id: Optional[str] = None,
         table_bbox: Optional[Dict[str, Any]] = None,
         include_complex_types: bool = True,
@@ -286,6 +293,7 @@ class FunnelClient:
             sheet_url=sheet_url,
             worksheet_name=worksheet_name,
             api_key=api_key,
+            connection_id=connection_id,
             include_complex_types=include_complex_types,
             max_tables=max_tables,
             max_rows=max_rows,
@@ -308,6 +316,7 @@ class FunnelClient:
         sheet_url: str,
         worksheet_name: Optional[str] = None,
         api_key: Optional[str] = None,
+        connection_id: Optional[str] = None,
         include_complex_types: bool = True,
         max_tables: int = 5,
         max_rows: Optional[int] = None,
@@ -322,6 +331,7 @@ class FunnelClient:
             "sheet_url": sheet_url,
             "worksheet_name": worksheet_name,
             "api_key": api_key,
+            "connection_id": connection_id,
             "include_complex_types": include_complex_types,
             "max_tables": max_tables,
             "max_rows": max_rows,

@@ -52,6 +52,7 @@ export const ImportSheetsPage = ({ dbName }: { dbName: string }) => {
   const [sheetUrl, setSheetUrl] = useState('')
   const [worksheetName, setWorksheetName] = useState('')
   const [apiKey, setApiKey] = useState('')
+  const [connectionId, setConnectionId] = useState('')
   const [tableId, setTableId] = useState('')
   const [tableTop, setTableTop] = useState('')
   const [tableLeft, setTableLeft] = useState('')
@@ -107,6 +108,7 @@ export const ImportSheetsPage = ({ dbName }: { dbName: string }) => {
           sheet_url: sheetUrl,
           worksheet_name: worksheetName || undefined,
           api_key: apiKey || undefined,
+          connection_id: connectionId || undefined,
         }),
       ),
     onError: (error) => toastApiError(error, language),
@@ -136,6 +138,7 @@ export const ImportSheetsPage = ({ dbName }: { dbName: string }) => {
           sheet_url: sheetUrl,
           worksheet_name: worksheetName || undefined,
           api_key: apiKey || undefined,
+          connection_id: connectionId || undefined,
           table_id: tableId || undefined,
           table_bbox: buildTableBBox(),
           target_class_id: targetClassId,
@@ -159,6 +162,7 @@ export const ImportSheetsPage = ({ dbName }: { dbName: string }) => {
           sheet_url: sheetUrl,
           worksheet_name: worksheetName || undefined,
           api_key: apiKey || undefined,
+          connection_id: connectionId || undefined,
           table_id: tableId || undefined,
           table_bbox: buildTableBBox(),
           target_class_id: targetClassId,
@@ -179,6 +183,7 @@ export const ImportSheetsPage = ({ dbName }: { dbName: string }) => {
           sheet_url: sheetUrl,
           worksheet_name: worksheetName || undefined,
           api_key: apiKey || undefined,
+          connection_id: connectionId || undefined,
           table_id: tableId || undefined,
           table_bbox: buildTableBBox(),
           target_class_id: targetClassId,

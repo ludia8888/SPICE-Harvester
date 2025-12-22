@@ -14,6 +14,7 @@ class RegisteredSheet(BaseModel):
 
     sheet_id: str
     sheet_url: str
+    sheet_title: Optional[str] = None
     worksheet_name: str
     polling_interval: int
     # Optional pipeline config (maps source → ontology; auto-import requires confirmed mapping)

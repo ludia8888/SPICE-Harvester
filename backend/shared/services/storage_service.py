@@ -158,6 +158,50 @@ class StorageService:
         )
         
         return checksum
+
+    async def save_bytes(
+        self,
+        bucket: str,
+        key: str,
+        data: bytes,
+        content_type: str = 'application/octet-stream',
+        metadata: Optional[Dict[str, str]] = None,
+    ) -> str:
+        """
+        Raw bytes를 S3에 저장하고 체크섬 반환
+
+        Args:
+            bucket: 버킷 이름
+            key: 객체 키 (경로)
+            data: 저장할 바이트 데이터
+            content_type: MIME 타입
+            metadata: 추가 메타데이터
+
+        Returns:
+            SHA256 체크섬
+        """
+        if not isinstance(data, (bytes, bytearray)):
+            raise ValueError("data must be bytes")
+
+        blob = bytes(data)
+        checksum = hashlib.sha256(blob).hexdigest()
+
+        object_metadata = metadata or {}
+        object_metadata.update({
+            'checksum': checksum,
+            'content-type': content_type,
+            'created-at': datetime.now(timezone.utc).isoformat(),
+        })
+
+        self.client.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=blob,
+            ContentType=content_type,
+            Metadata=object_metadata,
+        )
+
+        return checksum
         
     async def load_json(self, bucket: str, key: str) -> Dict[str, Any]:
         """
