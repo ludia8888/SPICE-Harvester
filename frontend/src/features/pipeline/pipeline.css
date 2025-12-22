@@ -842,6 +842,12 @@ html[data-theme='dark'] .pipeline-pill {
     font-size: 12px;
 }
 
+.csv-options {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
 
 .dialog-footer {
     padding: 12px 20px;

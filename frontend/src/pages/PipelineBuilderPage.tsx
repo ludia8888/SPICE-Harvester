@@ -5,11 +5,13 @@ import {
   Card,
   Dialog,
   Divider,
+  FileInput,
   FormGroup,
   HTMLSelect,
   HTMLTable,
   InputGroup,
   Intent,
+  Switch,
   Tab,
   Tabs,
   Tag,
@@ -248,6 +250,67 @@ const buildManualRows = (raw: string, columns: string[] = []): PreviewRow[] => {
   return rows
 }
 
+const detectCsvDelimiter = (content: string) => {
+  const firstLine = content.split(/\r?\n/).find((line) => line.trim()) ?? ''
+  if (firstLine.includes('\t')) return '\t'
+  if (firstLine.includes(';')) return ';'
+  if (firstLine.includes('|')) return '|'
+  return ','
+}
+
+const parseCsvLine = (line: string, delimiter: string) => {
+  const cells: string[] = []
+  let current = ''
+  let inQuotes = false
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index]
+    if (char === '"') {
+      const nextChar = line[index + 1]
+      if (inQuotes && nextChar === '"') {
+        current += '"'
+        index += 1
+      } else {
+        inQuotes = !inQuotes
+      }
+      continue
+    }
+    if (char === delimiter && !inQuotes) {
+      cells.push(current.trim())
+      current = ''
+      continue
+    }
+    current += char
+  }
+  cells.push(current.trim())
+  return cells
+}
+
+const parseCsvContent = (content: string, delimiter: string, hasHeader: boolean, maxRows = 200) => {
+  const lines = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+  if (lines.length === 0) {
+    return { columns: [] as string[], rows: [] as PreviewRow[] }
+  }
+  const resolvedDelimiter = delimiter || ','
+  const headerCells = parseCsvLine(lines[0], resolvedDelimiter)
+  const columns = hasHeader
+    ? headerCells.map((cell, index) => cell || `column_${index + 1}`)
+    : headerCells.map((_, index) => `column_${index + 1}`)
+  const dataStart = hasHeader ? 1 : 0
+  const rows: PreviewRow[] = []
+  lines.slice(dataStart, dataStart + maxRows).forEach((line) => {
+    const cells = parseCsvLine(line, resolvedDelimiter)
+    const row: PreviewRow = {}
+    columns.forEach((key, index) => {
+      row[key] = cells[index] ?? ''
+    })
+    rows.push(row)
+  })
+  return { columns, rows }
+}
+
 export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
   const requestContext = useRequestContext()
   const queryClient = useQueryClient()
@@ -294,6 +357,12 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
   const [datasetTab, setDatasetTab] = useState('connectors')
   const [connectorSearch, setConnectorSearch] = useState('')
   const [connectorPreview, setConnectorPreview] = useState<ConnectorPreview | null>(null)
+  const [csvFile, setCsvFile] = useState<File | null>(null)
+  const [csvHasHeader, setCsvHasHeader] = useState(true)
+  const [csvDelimiter, setCsvDelimiter] = useState(',')
+  const [csvDatasetName, setCsvDatasetName] = useState('')
+  const [csvPreview, setCsvPreview] = useState<{ columns: string[]; rows: PreviewRow[] } | null>(null)
+  const [csvParsing, setCsvParsing] = useState(false)
   const [manualDatasetName, setManualDatasetName] = useState('')
   const [manualColumns, setManualColumns] = useState('')
   const [manualRows, setManualRows] = useState('')
@@ -384,26 +453,39 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
   })
 
   const createDatasetMutation = useMutation({
-    mutationFn: (payload: Record<string, unknown>) => createDataset(requestContext, payload),
-    onSuccess: (payload) => {
+    mutationFn: (payload: {
+      request: Record<string, unknown>
+      sample?: { columns: Array<{ name: string; type: string }>; rows: PreviewRow[] }
+      autoAdd?: boolean
+      source?: 'manual' | 'csv'
+    }) => createDataset(requestContext, payload.request),
+    onSuccess: (payload, variables) => {
       void queryClient.invalidateQueries({ queryKey: qk.datasets(dbName, requestContext.language) })
       void showAppToast({ intent: Intent.SUCCESS, message: uiCopy.toast.datasetCreated })
       const dataset = (payload as { data?: { dataset?: Record<string, unknown> } })?.data?.dataset
       const datasetId = typeof dataset?.dataset_id === 'string' ? dataset.dataset_id : ''
-      if (datasetId) {
-        const columns = buildColumnsFromManual(manualColumns).map((col) => col.name)
-        const sampleRows = buildManualRows(manualRows, columns)
-        if (sampleRows.length > 0) {
-          void createDatasetVersion(requestContext, datasetId, {
-            sample_json: { rows: sampleRows },
-            schema_json: { columns: buildColumnsFromManual(manualColumns) },
-            row_count: sampleRows.length,
-          })
-        }
+      const sampleColumns = variables?.sample?.columns ?? []
+      const sampleRows = variables?.sample?.rows ?? []
+      if (datasetId && sampleRows.length > 0) {
+        void createDatasetVersion(requestContext, datasetId, {
+          sample_json: { columns: sampleColumns, rows: sampleRows },
+          schema_json: { columns: sampleColumns },
+          row_count: sampleRows.length,
+        })
       }
-      setManualDatasetName('')
-      setManualColumns('')
-      setManualRows('')
+      if (variables?.autoAdd && dataset) {
+        handleAddDatasetNode(dataset)
+      }
+      if (variables?.source === 'manual') {
+        setManualDatasetName('')
+        setManualColumns('')
+        setManualRows('')
+      }
+      if (variables?.source === 'csv') {
+        setCsvFile(null)
+        setCsvDatasetName('')
+        setCsvPreview(null)
+      }
     },
     onError: (error) => toastApiError(error, language),
   })
@@ -494,6 +576,11 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     setDatasetSearch('')
     setConnectorSearch('')
     setConnectorPreview(null)
+    setCsvFile(null)
+    setCsvDatasetName('')
+    setCsvPreview(null)
+    setCsvDelimiter(',')
+    setCsvHasHeader(true)
   }, [datasetDialogOpen])
 
   useEffect(() => {
@@ -745,6 +832,60 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     previewRegisteredSheetMutation.mutate({ sheetId, worksheetName: String(sheet.worksheet_name ?? '') || undefined })
   }
 
+  const handleCsvFile = async (file: File | null) => {
+    setCsvFile(file)
+    setCsvPreview(null)
+    if (!file) return
+    setCsvParsing(true)
+    try {
+      const content = await file.text()
+      const inferredDelimiter = detectCsvDelimiter(content)
+      setCsvDelimiter(inferredDelimiter)
+      const parsed = parseCsvContent(content, inferredDelimiter, csvHasHeader)
+      setCsvPreview(parsed)
+      if (!csvDatasetName.trim()) {
+        setCsvDatasetName(file.name.replace(/\.csv$/i, ''))
+      }
+    } catch (error) {
+      toastApiError(error, language)
+    } finally {
+      setCsvParsing(false)
+    }
+  }
+
+  const handleCsvPreview = async () => {
+    if (!csvFile) return
+    setCsvParsing(true)
+    try {
+      const content = await csvFile.text()
+      const parsed = parseCsvContent(content, csvDelimiter, csvHasHeader)
+      setCsvPreview(parsed)
+    } catch (error) {
+      toastApiError(error, language)
+    } finally {
+      setCsvParsing(false)
+    }
+  }
+
+  const handleCreateCsvDataset = async () => {
+    if (!csvFile || !csvDatasetName.trim()) return
+    if (!csvPreview) {
+      await handleCsvPreview()
+    }
+    const columns = (csvPreview?.columns ?? []).map((name) => ({ name, type: 'String' }))
+    createDatasetMutation.mutate({
+      request: {
+        db_name: dbName,
+        name: csvDatasetName.trim(),
+        source_type: 'csv_upload',
+        schema_json: { columns },
+      },
+      sample: { columns, rows: csvPreview?.rows ?? [] },
+      autoAdd: true,
+      source: 'csv',
+    })
+  }
+
   const handleSimpleTransform = (operation: string, icon: PipelineNode['icon']) => {
     if (!selectedNode) return
     updateDefinition((current) => {
@@ -878,11 +1019,18 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
   const handleCreateManualDataset = () => {
     if (!manualDatasetName.trim()) return
     const columns = buildColumnsFromManual(manualColumns)
+    const columnNames = columns.map((col) => col.name)
+    const sampleRows = buildManualRows(manualRows, columnNames)
     createDatasetMutation.mutate({
-      db_name: dbName,
-      name: manualDatasetName.trim(),
-      source_type: 'manual',
-      schema_json: { columns },
+      request: {
+        db_name: dbName,
+        name: manualDatasetName.trim(),
+        source_type: 'manual',
+        schema_json: { columns },
+      },
+      sample: { columns, rows: sampleRows },
+      autoAdd: true,
+      source: 'manual',
     })
   }
 
@@ -1026,6 +1174,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                 tabs: {
                   connectors: '커넥터',
                   datasets: '데이터셋',
+                  csv: 'CSV 업로드',
                   manual: '수동 입력',
                 },
                 connectorTitle: 'Google Sheets 연결',
@@ -1035,6 +1184,14 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                 connectorPreviewEmpty: '미리보기 데이터를 불러오세요.',
                 connectorPreviewTitle: '시트 미리보기',
                 connectorAddToGraph: '그래프에 추가',
+                csvTitle: 'CSV 업로드',
+                csvUpload: 'CSV 파일',
+                csvDatasetName: '데이터셋 이름',
+                csvHasHeader: '첫 줄을 컬럼으로 사용',
+                csvDelimiter: '구분자',
+                csvPreview: '미리보기',
+                csvCreate: '데이터셋 생성',
+                csvPreviewEmpty: 'CSV 파일을 업로드하면 미리보기가 표시됩니다.',
                 callout: '추가 커넥터 관리는 데이터 연결에서 진행할 수 있습니다.',
                 openConnections: '데이터 연결 열기',
                 startPipelining: '파이프라인 시작 (등록된 커넥터)',
@@ -1221,6 +1378,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                 tabs: {
                   connectors: 'Connectors',
                   datasets: 'Datasets',
+                  csv: 'CSV upload',
                   manual: 'Manual',
                 },
                 connectorTitle: 'Connect Google Sheets',
@@ -1230,6 +1388,14 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                 connectorPreviewEmpty: 'Run a preview to see data here.',
                 connectorPreviewTitle: 'Sheet preview',
                 connectorAddToGraph: 'Add to graph',
+                csvTitle: 'Upload CSV',
+                csvUpload: 'CSV file',
+                csvDatasetName: 'Dataset name',
+                csvHasHeader: 'Use first row as header',
+                csvDelimiter: 'Delimiter',
+                csvPreview: 'Preview',
+                csvCreate: 'Create dataset',
+                csvPreviewEmpty: 'Upload a CSV file to see a preview.',
                 callout: 'Manage additional connectors in Data Connections.',
                 openConnections: 'Open data connections',
                 startPipelining: 'Start pipelining (registered connectors)',
@@ -1466,6 +1632,73 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
           {uiCopy.dialogs.dataset.createDataset}
         </Button>
       </FormGroup>
+    </div>
+  )
+
+  const csvPanel = (
+    <div className="dataset-tab">
+      <FormGroup label={uiCopy.dialogs.dataset.csvUpload}>
+        <FileInput
+          text={csvFile?.name ?? uiCopy.dialogs.dataset.csvUpload}
+          inputProps={{ accept: '.csv' }}
+          onInputChange={(event) => handleCsvFile(event.currentTarget.files?.[0] ?? null)}
+        />
+      </FormGroup>
+      <FormGroup label={uiCopy.dialogs.dataset.csvDatasetName}>
+        <InputGroup value={csvDatasetName} onChange={(event) => setCsvDatasetName(event.currentTarget.value)} />
+      </FormGroup>
+      <div className="csv-options">
+        <Switch checked={csvHasHeader} label={uiCopy.dialogs.dataset.csvHasHeader} onChange={() => setCsvHasHeader((current) => !current)} />
+        <FormGroup label={uiCopy.dialogs.dataset.csvDelimiter}>
+          <HTMLSelect value={csvDelimiter} onChange={(event) => setCsvDelimiter(event.currentTarget.value)}>
+            <option value=",">,</option>
+            <option value=";">;</option>
+            <option value="\t">Tab</option>
+            <option value="|">|</option>
+          </HTMLSelect>
+        </FormGroup>
+      </div>
+      <div className="connector-actions">
+        <Button icon="eye-open" onClick={() => void handleCsvPreview()} disabled={!csvFile || csvParsing} loading={csvParsing}>
+          {uiCopy.dialogs.dataset.csvPreview}
+        </Button>
+        <Button
+          intent={Intent.PRIMARY}
+          icon="add"
+          onClick={() => void handleCreateCsvDataset()}
+          disabled={!csvFile || !csvDatasetName.trim() || createDatasetMutation.isPending}
+          loading={createDatasetMutation.isPending}
+        >
+          {uiCopy.dialogs.dataset.csvCreate}
+        </Button>
+      </div>
+      <div className="dataset-preview-panel">
+        <div className="dataset-preview-header">
+          <Text>{uiCopy.dialogs.dataset.csvTitle}</Text>
+        </div>
+        {csvPreview?.columns?.length ? (
+          <HTMLTable compact striped className="dataset-preview-table">
+            <thead>
+              <tr>
+                {csvPreview.columns.map((column) => (
+                  <th key={column}>{column}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {csvPreview.rows.map((row, index) => (
+                <tr key={`${index}-csv`}>
+                  {csvPreview.columns.map((column) => (
+                    <td key={`${index}-${column}`}>{row[column] ?? ''}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </HTMLTable>
+        ) : (
+          <Text className="muted">{uiCopy.dialogs.dataset.csvPreviewEmpty}</Text>
+        )}
+      </div>
     </div>
   )
 
@@ -1725,6 +1958,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
           <Tabs id="dataset-tabs" selectedTabId={datasetTab} onChange={(tabId) => setDatasetTab(String(tabId))}>
             <Tab id="connectors" title={uiCopy.dialogs.dataset.tabs.connectors} panel={connectorPanel} />
             <Tab id="datasets" title={uiCopy.dialogs.dataset.tabs.datasets} panel={datasetsPanel} />
+            <Tab id="csv" title={uiCopy.dialogs.dataset.tabs.csv} panel={csvPanel} />
             <Tab id="manual" title={uiCopy.dialogs.dataset.tabs.manual} panel={manualPanel} />
           </Tabs>
         </div>
