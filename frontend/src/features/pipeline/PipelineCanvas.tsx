@@ -43,6 +43,17 @@ export const PipelineCanvas = ({
     const nodeById = new Map(nodes.map((node) => [node.id, node]))
     const selectedNode = selectedNodeId ? nodeById.get(selectedNodeId) : undefined
 
+    const bounds = nodes.reduce(
+        (acc, node) => {
+            acc.maxX = Math.max(acc.maxX, node.x + NODE_WIDTH)
+            acc.maxY = Math.max(acc.maxY, node.y + NODE_HEIGHT)
+            return acc
+        },
+        { maxX: 0, maxY: 0 },
+    )
+    const canvasWidth = bounds.maxX ? bounds.maxX + 120 : 0
+    const canvasHeight = bounds.maxY ? bounds.maxY + 120 : 0
+
     const edgePaths = edges
         .map((edge) => {
             const fromNode = nodeById.get(edge.from)
@@ -68,7 +79,15 @@ export const PipelineCanvas = ({
     return (
         <div
             className="pipeline-canvas"
-            style={{ position: 'relative', minWidth: '1600px', minHeight: '720px', transform: `scale(${zoom})`, transformOrigin: 'top left' }}
+            style={{
+                position: 'relative',
+                minWidth: '100%',
+                minHeight: '100%',
+                width: canvasWidth ? `${canvasWidth}px` : '100%',
+                height: canvasHeight ? `${canvasHeight}px` : '100%',
+                transform: `scale(${zoom})`,
+                transformOrigin: 'top left',
+            }}
             onClick={() => onSelectNode?.(null)}
         >
             <svg className="pipeline-connections-layer">

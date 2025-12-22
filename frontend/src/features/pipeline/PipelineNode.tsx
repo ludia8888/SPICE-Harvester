@@ -1,5 +1,6 @@
 import type { MouseEvent } from 'react'
 import { Icon } from '@blueprintjs/core'
+import type { IconName } from '@blueprintjs/icons'
 import type { PipelineNode as PipelineNodeType } from './pipelineTypes'
 
 type NodeProps = {
@@ -26,7 +27,7 @@ export const PipelineNode = ({ node, selected, onSelect, onDoubleClick }: NodePr
             onDoubleClick={() => onDoubleClick?.(node.id)}
         >
             <div className="pipeline-node-header">
-                <Icon icon={node.icon} size={14} className="pipeline-node-icon" />
+                <Icon icon={node.icon as IconName} size={14} className="pipeline-node-icon" />
                 <div className="pipeline-node-title">{node.title}</div>
                 <span className={`pipeline-node-status ${statusClass}`}>●</span>
             </div>

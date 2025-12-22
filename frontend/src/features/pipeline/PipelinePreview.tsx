@@ -24,8 +24,6 @@ type PreviewProps = {
     rows: PreviewRow[]
     copy: PreviewCopy
     onSelectNode: (nodeId: string) => void
-    onZoomIn: () => void
-    onZoomOut: () => void
     onToggleFullscreen: () => void
     onCollapse: () => void
     fullscreen?: boolean
@@ -38,8 +36,6 @@ export const PipelinePreview = ({
     rows,
     copy,
     onSelectNode,
-    onZoomIn,
-    onZoomOut,
     onToggleFullscreen,
     onCollapse,
     fullscreen = false,
@@ -73,8 +69,6 @@ export const PipelinePreview = ({
                 </div>
                 <div className="preview-controls">
                     <Button icon={fullscreen ? 'minimize' : 'fullscreen'} small minimal onClick={onToggleFullscreen} />
-                    <Button icon="zoom-in" small minimal onClick={onZoomIn} />
-                    <Button icon="zoom-out" small minimal onClick={onZoomOut} />
                     <Button icon="chevron-down" small minimal onClick={onCollapse} />
                 </div>
             </div>

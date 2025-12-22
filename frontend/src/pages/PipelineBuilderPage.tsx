@@ -7,8 +7,11 @@ import {
   Divider,
   FormGroup,
   HTMLSelect,
+  HTMLTable,
   InputGroup,
   Intent,
+  Tab,
+  Tabs,
   Tag,
   Text,
   TextArea,
@@ -21,6 +24,9 @@ import {
   deployPipeline,
   getPipeline,
   listRegisteredSheets,
+  previewGoogleSheet,
+  previewRegisteredSheet,
+  registerGoogleSheet,
   startPipeliningSheet,
   listBranches,
   listDatasets,
@@ -53,6 +59,15 @@ import '../features/pipeline/pipeline.css'
 
 type PipelineRecord = Record<string, unknown>
 type DatasetRecord = Record<string, unknown>
+type ConnectorPreview = {
+  sheetId?: string
+  sheetTitle?: string
+  worksheetTitle?: string
+  columns: string[]
+  rows: Array<Array<string | number | boolean | null>>
+  totalRows?: number
+  totalColumns?: number
+}
 
 const extractList = <T,>(payload: unknown, key: string): T[] => {
   if (!payload || typeof payload !== 'object') return []
@@ -162,6 +177,40 @@ const extractRows = (sample: unknown): PreviewRow[] => {
   return []
 }
 
+const extractConnectorPreview = (payload: unknown): ConnectorPreview | null => {
+  if (!payload || typeof payload !== 'object') return null
+  const data = (payload as { data?: Record<string, unknown> }).data ?? (payload as Record<string, unknown>)
+  if (!data || typeof data !== 'object') return null
+  const raw = data as Record<string, unknown>
+  const columns = Array.isArray(raw.columns) ? raw.columns.map((col) => String(col)) : []
+  const rows = Array.isArray(raw.sample_rows)
+    ? (raw.sample_rows as Array<Array<string | number | boolean | null>>)
+    : Array.isArray(raw.preview_data)
+      ? (raw.preview_data as Array<Array<string | number | boolean | null>>)
+      : []
+  return {
+    sheetId: raw.sheet_id ? String(raw.sheet_id) : undefined,
+    sheetTitle: raw.sheet_title ? String(raw.sheet_title) : undefined,
+    worksheetTitle: raw.worksheet_title ? String(raw.worksheet_title) : raw.worksheet_name ? String(raw.worksheet_name) : undefined,
+    columns,
+    rows,
+    totalRows: raw.total_rows ? Number(raw.total_rows) : rows.length,
+    totalColumns: raw.total_columns ? Number(raw.total_columns) : columns.length,
+  }
+}
+
+const buildRowsFromMatrix = (columns: string[], rows: unknown): PreviewRow[] => {
+  if (!Array.isArray(rows)) return []
+  return rows.map((row) => {
+    const cells = Array.isArray(row) ? row : []
+    const record: PreviewRow = {}
+    columns.forEach((key, index) => {
+      record[key] = cells[index] ?? ''
+    })
+    return record
+  })
+}
+
 const buildColumnsFromManual = (raw: string): Array<{ name: string; type: string }> =>
   raw
     .split(',')
@@ -244,6 +293,12 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
 
   const [datasetSearch, setDatasetSearch] = useState('')
   const [selectedDatasetId, setSelectedDatasetId] = useState<string | null>(null)
+  const [datasetTab, setDatasetTab] = useState('connectors')
+  const [connectorSearch, setConnectorSearch] = useState('')
+  const [connectorSheetUrl, setConnectorSheetUrl] = useState('')
+  const [connectorWorksheetName, setConnectorWorksheetName] = useState('')
+  const [connectorApiKey, setConnectorApiKey] = useState('')
+  const [connectorPreview, setConnectorPreview] = useState<ConnectorPreview | null>(null)
   const [manualDatasetName, setManualDatasetName] = useState('')
   const [manualColumns, setManualColumns] = useState('')
   const [manualRows, setManualRows] = useState('')
@@ -359,8 +414,12 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
   })
 
   const startPipeliningMutation = useMutation({
-    mutationFn: (payload: { sheetId: string; dbName: string }) =>
-      startPipeliningSheet(requestContext, payload.sheetId, { db_name: payload.dbName }),
+    mutationFn: (payload: { sheetId: string; dbName: string; worksheetName?: string; apiKey?: string }) =>
+      startPipeliningSheet(requestContext, payload.sheetId, {
+        db_name: payload.dbName,
+        worksheet_name: payload.worksheetName,
+        api_key: payload.apiKey,
+      }),
     onSuccess: (payload) => {
       void queryClient.invalidateQueries({ queryKey: qk.datasets(dbName, requestContext.language) })
       void showAppToast({ intent: Intent.SUCCESS, message: uiCopy.toast.connectorReady })
@@ -368,6 +427,60 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
       if (dataset) {
         handleAddDatasetNode(dataset)
       }
+    },
+    onError: (error) => toastApiError(error, language),
+  })
+
+  const previewSheetMutation = useMutation({
+    mutationFn: (payload: { sheetUrl: string; worksheetName?: string; apiKey?: string }) =>
+      previewGoogleSheet(requestContext, {
+        sheet_url: payload.sheetUrl,
+        worksheet_name: payload.worksheetName || undefined,
+        api_key: payload.apiKey || undefined,
+      }),
+    onSuccess: (payload) => {
+      const preview = extractConnectorPreview(payload)
+      if (preview) {
+        setConnectorPreview(preview)
+      }
+    },
+    onError: (error) => toastApiError(error, language),
+  })
+
+  const previewRegisteredSheetMutation = useMutation({
+    mutationFn: (payload: { sheetId: string; worksheetName?: string }) =>
+      previewRegisteredSheet(requestContext, payload.sheetId, { worksheet_name: payload.worksheetName, limit: 25 }),
+    onSuccess: (payload) => {
+      const preview = extractConnectorPreview(payload)
+      if (preview) {
+        setConnectorPreview(preview)
+      }
+    },
+    onError: (error) => toastApiError(error, language),
+  })
+
+  const registerSheetMutation = useMutation({
+    mutationFn: (payload: { sheetUrl: string; worksheetName?: string; apiKey?: string }) =>
+      registerGoogleSheet(requestContext, {
+        sheet_url: payload.sheetUrl,
+        worksheet_name: payload.worksheetName || undefined,
+        database_name: dbName,
+        api_key: payload.apiKey || undefined,
+      }),
+    onSuccess: (payload) => {
+      void queryClient.invalidateQueries({ queryKey: qk.registeredSheets(dbName, requestContext.language) })
+      void queryClient.invalidateQueries({ queryKey: qk.datasets(dbName, requestContext.language) })
+      const preview = extractConnectorPreview(payload)
+      if (preview) {
+        setConnectorPreview(preview)
+      }
+      const dataset = (payload as { data?: { dataset?: Record<string, unknown> } })?.data?.dataset
+      if (dataset) {
+        handleAddDatasetNode(dataset)
+      }
+      void showAppToast({ intent: Intent.SUCCESS, message: uiCopy.toast.connectorReady })
+      setConnectorSheetUrl('')
+      setConnectorWorksheetName('')
     },
     onError: (error) => toastApiError(error, language),
   })
@@ -420,6 +533,15 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     setFuture([])
     setIsDirty(false)
   }, [pipelineQuery.data, pipelineId, pipelineLocation, isDirty])
+
+  useEffect(() => {
+    if (!datasetDialogOpen) return
+    setDatasetTab('connectors')
+    setSelectedDatasetId(null)
+    setDatasetSearch('')
+    setConnectorSearch('')
+    setConnectorPreview(null)
+  }, [datasetDialogOpen])
 
   useEffect(() => {
     setNewPipelineLocation(pipelineLocation)
@@ -659,7 +781,34 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
   const handleStartPipelining = (sheet: Record<string, unknown>) => {
     const sheetId = String(sheet.sheet_id ?? '')
     if (!sheetId) return
-    startPipeliningMutation.mutate({ sheetId, dbName })
+    const worksheetName = String(sheet.worksheet_name ?? '') || undefined
+    startPipeliningMutation.mutate({ sheetId, dbName, worksheetName })
+  }
+
+  const handlePreviewConnector = (sheet: Record<string, unknown>) => {
+    const sheetId = String(sheet.sheet_id ?? '')
+    if (!sheetId) return
+    setConnectorPreview(null)
+    previewRegisteredSheetMutation.mutate({ sheetId, worksheetName: String(sheet.worksheet_name ?? '') || undefined })
+  }
+
+  const handleConnectorPreview = () => {
+    if (!connectorSheetUrl.trim()) return
+    setConnectorPreview(null)
+    previewSheetMutation.mutate({
+      sheetUrl: connectorSheetUrl.trim(),
+      worksheetName: connectorWorksheetName.trim() || undefined,
+      apiKey: connectorApiKey.trim() || undefined,
+    })
+  }
+
+  const handleRegisterConnector = () => {
+    if (!connectorSheetUrl.trim()) return
+    registerSheetMutation.mutate({
+      sheetUrl: connectorSheetUrl.trim(),
+      worksheetName: connectorWorksheetName.trim() || undefined,
+      apiKey: connectorApiKey.trim() || undefined,
+    })
   }
 
   const handleSimpleTransform = (operation: string, icon: PipelineNode['icon']) => {
@@ -831,6 +980,21 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     )
   }, [datasets, datasetSearch])
 
+  const connectorOptions = useMemo(() => {
+    const normalized = connectorSearch.trim().toLowerCase()
+    return connectorSheets.filter((sheet) => {
+      const sheetId = String(sheet.sheet_id ?? '').toLowerCase()
+      const worksheet = String(sheet.worksheet_name ?? '').toLowerCase()
+      return sheetId.includes(normalized) || worksheet.includes(normalized)
+    })
+  }, [connectorSheets, connectorSearch])
+
+  const connectorPreviewColumns = useMemo(() => connectorPreview?.columns ?? [], [connectorPreview])
+  const connectorPreviewRows = useMemo(
+    () => buildRowsFromMatrix(connectorPreview?.columns ?? [], connectorPreview?.rows ?? []),
+    [connectorPreview],
+  )
+
   const nodeOptions = definition.nodes.map((node) => ({ id: node.id, title: node.title }))
   const canUndo = history.length > 0
   const canRedo = future.length > 0
@@ -877,6 +1041,8 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
               parameters: '파라미터',
               transform: '변환',
               edit: '편집',
+              zoomIn: '확대',
+              zoomOut: '축소',
             },
             sidebar: {
               folders: '폴더',
@@ -923,7 +1089,24 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
               },
               dataset: {
                 title: '데이터 추가',
-                callout: '커넥터가 필요하신가요? 먼저 데이터 연결에서 등록하세요.',
+                tabs: {
+                  connectors: '커넥터',
+                  datasets: '데이터셋',
+                  manual: '수동 입력',
+                },
+                connectorTitle: 'Google Sheets 연결',
+                connectorHint: 'Google Sheets URL을 입력하고 미리보기 후 파이프라인에 추가하세요.',
+                connectorUrl: '시트 URL',
+                connectorWorksheet: '워크시트 (선택)',
+                connectorApiKey: 'API 키 (선택)',
+                connectorPreview: '미리보기',
+                connectorRegister: '등록 & 추가',
+                connectorSearch: '커넥터 검색',
+                connectorEmpty: '등록된 커넥터가 없습니다.',
+                connectorPreviewEmpty: '미리보기 데이터를 불러오세요.',
+                connectorPreviewTitle: '시트 미리보기',
+                connectorAddToGraph: '그래프에 추가',
+                callout: '추가 커넥터 관리는 데이터 연결에서 진행할 수 있습니다.',
                 openConnections: '데이터 연결 열기',
                 startPipelining: '파이프라인 시작 (등록된 커넥터)',
                 noConnectors: '등록된 커넥터가 없습니다.',
@@ -1064,6 +1247,8 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
               parameters: 'Parameters',
               transform: 'Transform',
               edit: 'Edit',
+              zoomIn: 'Zoom in',
+              zoomOut: 'Zoom out',
             },
             sidebar: {
               folders: 'Folders',
@@ -1104,7 +1289,24 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
               },
               dataset: {
                 title: 'Add dataset',
-                callout: 'Need a connector? Register it in Data Connections first.',
+                tabs: {
+                  connectors: 'Connectors',
+                  datasets: 'Datasets',
+                  manual: 'Manual',
+                },
+                connectorTitle: 'Connect Google Sheets',
+                connectorHint: 'Paste a Google Sheets URL, preview it, and add it to the graph.',
+                connectorUrl: 'Sheet URL',
+                connectorWorksheet: 'Worksheet (optional)',
+                connectorApiKey: 'API key (optional)',
+                connectorPreview: 'Preview',
+                connectorRegister: 'Register & add',
+                connectorSearch: 'Search connectors',
+                connectorEmpty: 'No registered connectors yet.',
+                connectorPreviewEmpty: 'Run a preview to see data here.',
+                connectorPreviewTitle: 'Sheet preview',
+                connectorAddToGraph: 'Add to graph',
+                callout: 'Manage additional connectors in Data Connections.',
                 openConnections: 'Open data connections',
                 startPipelining: 'Start pipelining (registered connectors)',
                 noConnectors: 'No registered connectors yet.',
@@ -1219,6 +1421,170 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     [language],
   )
 
+  const connectorPanel = (
+    <div className="dataset-tab">
+      <div className="dataset-connector-grid">
+        <div className="dataset-connector-panel">
+          <Text className="muted">{uiCopy.dialogs.dataset.connectorHint}</Text>
+          <FormGroup label={uiCopy.dialogs.dataset.connectorUrl}>
+            <InputGroup
+              placeholder="https://docs.google.com/spreadsheets/d/..."
+              value={connectorSheetUrl}
+              onChange={(event) => setConnectorSheetUrl(event.currentTarget.value)}
+            />
+          </FormGroup>
+          <FormGroup label={uiCopy.dialogs.dataset.connectorWorksheet}>
+            <InputGroup
+              value={connectorWorksheetName}
+              onChange={(event) => setConnectorWorksheetName(event.currentTarget.value)}
+            />
+          </FormGroup>
+          <FormGroup label={uiCopy.dialogs.dataset.connectorApiKey}>
+            <InputGroup value={connectorApiKey} onChange={(event) => setConnectorApiKey(event.currentTarget.value)} />
+          </FormGroup>
+          <div className="connector-actions">
+            <Button
+              icon="eye-open"
+              onClick={handleConnectorPreview}
+              disabled={!connectorSheetUrl.trim() || previewSheetMutation.isPending}
+              loading={previewSheetMutation.isPending}
+            >
+              {uiCopy.dialogs.dataset.connectorPreview}
+            </Button>
+            <Button
+              intent={Intent.PRIMARY}
+              icon="confirm"
+              onClick={handleRegisterConnector}
+              disabled={!connectorSheetUrl.trim() || registerSheetMutation.isPending}
+              loading={registerSheetMutation.isPending}
+            >
+              {uiCopy.dialogs.dataset.connectorRegister}
+            </Button>
+          </div>
+        </div>
+        <div className="dataset-connector-panel">
+          <FormGroup label={uiCopy.dialogs.dataset.connectorSearch}>
+            <InputGroup value={connectorSearch} onChange={(event) => setConnectorSearch(event.currentTarget.value)} />
+          </FormGroup>
+          <div className="dialog-scroll">
+            {connectorOptions.length === 0 ? (
+              <Text className="muted">{uiCopy.dialogs.dataset.connectorEmpty}</Text>
+            ) : (
+              connectorOptions.map((sheet) => (
+                <Card key={String(sheet.sheet_id ?? '')} className="dataset-card">
+                  <div className="dataset-card-header">
+                    <Text>{String(sheet.sheet_id ?? '')}</Text>
+                    <Tag minimal>{String(sheet.worksheet_name ?? uiCopy.dialogs.dataset.connectorTitle)}</Tag>
+                  </div>
+                  <Text className="muted">{String(sheet.sheet_url ?? '')}</Text>
+                  <div className="dataset-card-actions">
+                    <Button minimal icon="eye-open" onClick={() => handlePreviewConnector(sheet)}>
+                      {uiCopy.dialogs.dataset.connectorPreview}
+                    </Button>
+                    <Button minimal icon="add" onClick={() => handleStartPipelining(sheet)}>
+                      {uiCopy.dialogs.dataset.connectorAddToGraph}
+                    </Button>
+                  </div>
+                </Card>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="dataset-preview-panel">
+        <div className="dataset-preview-header">
+          <Text>{uiCopy.dialogs.dataset.connectorPreviewTitle}</Text>
+          {connectorPreview ? (
+            <Text className="muted">
+              {connectorPreview.sheetTitle ?? connectorPreview.sheetId} · {connectorPreview.worksheetTitle ?? ''}
+            </Text>
+          ) : null}
+        </div>
+        {connectorPreviewColumns.length === 0 ? (
+          <Text className="muted">{uiCopy.dialogs.dataset.connectorPreviewEmpty}</Text>
+        ) : (
+          <HTMLTable compact striped className="dataset-preview-table">
+            <thead>
+              <tr>
+                {connectorPreviewColumns.map((column) => (
+                  <th key={column}>{column}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {connectorPreviewRows.map((row, index) => (
+                <tr key={`${index}-${connectorPreview?.sheetId ?? 'preview'}`}>
+                  {connectorPreviewColumns.map((column) => (
+                    <td key={`${index}-${column}`}>{row[column] ?? ''}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </HTMLTable>
+        )}
+      </div>
+    </div>
+  )
+
+  const datasetsPanel = (
+    <div className="dataset-tab">
+      <FormGroup label={uiCopy.dialogs.dataset.search}>
+        <InputGroup value={datasetSearch} onChange={(event) => setDatasetSearch(event.currentTarget.value)} />
+      </FormGroup>
+      <div className="dialog-scroll">
+        {datasetOptions.length === 0 ? (
+          <Text className="muted">{uiCopy.dialogs.dataset.noDatasets}</Text>
+        ) : (
+          datasetOptions.map((dataset) => {
+            const datasetId = String(dataset.dataset_id ?? '')
+            const columnCount = extractColumns(dataset.schema_json).length
+            return (
+              <Card
+                key={datasetId}
+                className={`dataset-card ${datasetId === selectedDatasetId ? 'is-selected' : ''}`}
+                onClick={() => setSelectedDatasetId(datasetId)}
+              >
+                <Text>{String(dataset.name ?? datasetId)}</Text>
+                <Text className="muted">{columnCount} {uiCopy.dialogs.dataset.columns}</Text>
+              </Card>
+            )
+          })
+        )}
+      </div>
+    </div>
+  )
+
+  const manualPanel = (
+    <div className="dataset-tab">
+      <FormGroup label={uiCopy.dialogs.dataset.manual}>
+        <InputGroup
+          placeholder={uiCopy.dialogs.dataset.datasetName}
+          value={manualDatasetName}
+          onChange={(event) => setManualDatasetName(event.currentTarget.value)}
+        />
+        <TextArea
+          placeholder={uiCopy.dialogs.dataset.columnsPlaceholder}
+          value={manualColumns}
+          onChange={(event) => setManualColumns(event.currentTarget.value)}
+        />
+        <TextArea
+          placeholder={uiCopy.dialogs.dataset.sampleRows}
+          value={manualRows}
+          onChange={(event) => setManualRows(event.currentTarget.value)}
+        />
+        <Button
+          icon="add"
+          minimal
+          onClick={handleCreateManualDataset}
+          disabled={!manualDatasetName.trim() || createDatasetMutation.isPending}
+          loading={createDatasetMutation.isPending}
+        >
+          {uiCopy.dialogs.dataset.createDataset}
+        </Button>
+      </FormGroup>
+    </div>
+  )
+
   return (
     <div className="pipeline-builder-container">
       <PipelineHeader
@@ -1285,6 +1651,8 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
           }
           setTransformOpen(true)
         }}
+        onZoomIn={() => setCanvasZoom((current) => Math.min(1.4, current + 0.1))}
+        onZoomOut={() => setCanvasZoom((current) => Math.max(0.6, current - 0.1))}
       />
 
       <div className={`pipeline-body ${inspectorOpen ? 'has-inspector' : 'no-inspector'}`}>
@@ -1308,7 +1676,6 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                 {node.title}
               </button>
             ))}
-            <Button icon="add" minimal small onClick={() => setDatasetDialogOpen(true)}>{uiCopy.sidebar.addData}</Button>
           </div>
           <Divider />
           <div className="pipeline-sidebar-section">
@@ -1418,8 +1785,6 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
           rows={previewRows}
           copy={uiCopy.preview}
           onSelectNode={(nodeId) => setPreviewNodeId(nodeId)}
-          onZoomIn={() => setCanvasZoom((current) => Math.min(1.4, current + 0.1))}
-          onZoomOut={() => setCanvasZoom((current) => Math.max(0.6, current - 0.1))}
           onToggleFullscreen={() => {
             setPreviewFullscreen((current) => !current)
           }}
@@ -1473,85 +1838,28 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
               {uiCopy.dialogs.dataset.openConnections}
             </Button>
           </Callout>
-          <FormGroup label={uiCopy.dialogs.dataset.startPipelining}>
-            <div className="dialog-scroll">
-              {connectorSheets.length === 0 ? (
-                <Text className="muted">{uiCopy.dialogs.dataset.noConnectors}</Text>
-              ) : (
-                connectorSheets.map((sheet) => (
-                  <Card
-                    key={String(sheet.sheet_id ?? '')}
-                    className="dataset-card"
-                    onClick={() => handleStartPipelining(sheet)}
-                  >
-                    <Text>{String(sheet.sheet_id ?? '')}</Text>
-                    <Text className="muted">{String(sheet.worksheet_name ?? '')}</Text>
-                  </Card>
-                ))
-              )}
-            </div>
-          </FormGroup>
-          <FormGroup label={uiCopy.dialogs.dataset.search}>
-            <InputGroup value={datasetSearch} onChange={(event) => setDatasetSearch(event.currentTarget.value)} />
-          </FormGroup>
-          <div className="dialog-scroll">
-            {datasetOptions.length === 0 ? (
-              <Text className="muted">{uiCopy.dialogs.dataset.noDatasets}</Text>
-            ) : (
-              datasetOptions.map((dataset) => {
-                const datasetId = String(dataset.dataset_id ?? '')
-                const columnCount = extractColumns(dataset.schema_json).length
-                return (
-                  <Card
-                    key={datasetId}
-                    className={`dataset-card ${datasetId === selectedDatasetId ? 'is-selected' : ''}`}
-                    onClick={() => setSelectedDatasetId(datasetId)}
-                  >
-                    <Text>{String(dataset.name ?? datasetId)}</Text>
-                    <Text className="muted">{columnCount} {uiCopy.dialogs.dataset.columns}</Text>
-                  </Card>
-                )
-              })
-            )}
-          </div>
-          <Divider />
-          <FormGroup label={uiCopy.dialogs.dataset.manual}>
-            <InputGroup placeholder={uiCopy.dialogs.dataset.datasetName} value={manualDatasetName} onChange={(event) => setManualDatasetName(event.currentTarget.value)} />
-            <TextArea
-              placeholder={uiCopy.dialogs.dataset.columnsPlaceholder}
-              value={manualColumns}
-              onChange={(event) => setManualColumns(event.currentTarget.value)}
-            />
-            <TextArea
-              placeholder={uiCopy.dialogs.dataset.sampleRows}
-              value={manualRows}
-              onChange={(event) => setManualRows(event.currentTarget.value)}
-            />
-            <Button
-              icon="add"
-              minimal
-              onClick={handleCreateManualDataset}
-              disabled={!manualDatasetName.trim() || createDatasetMutation.isPending}
-              loading={createDatasetMutation.isPending}
-            >
-              {uiCopy.dialogs.dataset.createDataset}
-            </Button>
-          </FormGroup>
+          <Tabs id="dataset-tabs" selectedTabId={datasetTab} onChange={(tabId) => setDatasetTab(String(tabId))}>
+            <Tab id="connectors" title={uiCopy.dialogs.dataset.tabs.connectors} panel={connectorPanel} />
+            <Tab id="datasets" title={uiCopy.dialogs.dataset.tabs.datasets} panel={datasetsPanel} />
+            <Tab id="manual" title={uiCopy.dialogs.dataset.tabs.manual} panel={manualPanel} />
+          </Tabs>
         </div>
         <div className="dialog-footer">
           <Button minimal onClick={() => setDatasetDialogOpen(false)}>{uiCopy.dialogs.dataset.cancel}</Button>
-          <Button
-            intent={Intent.PRIMARY}
-            onClick={() => {
-              const dataset = datasets.find((item) => String(item.dataset_id ?? '') === selectedDatasetId)
-              if (dataset) {
-                handleAddDatasetNode(dataset)
-              }
-            }}
-            disabled={!selectedDatasetId}
-          >
-            {uiCopy.dialogs.dataset.addToGraph}
-          </Button>
+          {datasetTab === 'datasets' ? (
+            <Button
+              intent={Intent.PRIMARY}
+              onClick={() => {
+                const dataset = datasets.find((item) => String(item.dataset_id ?? '') === selectedDatasetId)
+                if (dataset) {
+                  handleAddDatasetNode(dataset)
+                }
+              }}
+              disabled={!selectedDatasetId}
+            >
+              {uiCopy.dialogs.dataset.addToGraph}
+            </Button>
+          ) : null}
         </div>
       </Dialog>
 
