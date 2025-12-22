@@ -358,6 +358,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
   const [connectorSearch, setConnectorSearch] = useState('')
   const [connectorPreview, setConnectorPreview] = useState<ConnectorPreview | null>(null)
   const [csvFile, setCsvFile] = useState<File | null>(null)
+  const [csvContent, setCsvContent] = useState('')
   const [csvHasHeader, setCsvHasHeader] = useState(true)
   const [csvDelimiter, setCsvDelimiter] = useState(',')
   const [csvDatasetName, setCsvDatasetName] = useState('')
@@ -483,6 +484,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
       }
       if (variables?.source === 'csv') {
         setCsvFile(null)
+        setCsvContent('')
         setCsvDatasetName('')
         setCsvPreview(null)
       }
@@ -577,6 +579,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     setConnectorSearch('')
     setConnectorPreview(null)
     setCsvFile(null)
+    setCsvContent('')
     setCsvDatasetName('')
     setCsvPreview(null)
     setCsvDelimiter(',')
@@ -835,10 +838,12 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
   const handleCsvFile = async (file: File | null) => {
     setCsvFile(file)
     setCsvPreview(null)
+    setCsvContent('')
     if (!file) return
     setCsvParsing(true)
     try {
       const content = await file.text()
+      setCsvContent(content)
       const inferredDelimiter = detectCsvDelimiter(content)
       setCsvDelimiter(inferredDelimiter)
       const parsed = parseCsvContent(content, inferredDelimiter, csvHasHeader)
@@ -853,15 +858,18 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     }
   }
 
-  const handleCsvPreview = async () => {
-    if (!csvFile) return
+  const handleCsvPreview = async (): Promise<{ columns: string[]; rows: PreviewRow[] } | null> => {
+    if (!csvFile) return null
     setCsvParsing(true)
     try {
-      const content = await csvFile.text()
+      const content = csvContent || (await csvFile.text())
+      setCsvContent(content)
       const parsed = parseCsvContent(content, csvDelimiter, csvHasHeader)
       setCsvPreview(parsed)
+      return parsed
     } catch (error) {
       toastApiError(error, language)
+      return null
     } finally {
       setCsvParsing(false)
     }
@@ -869,10 +877,9 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
 
   const handleCreateCsvDataset = async () => {
     if (!csvFile || !csvDatasetName.trim()) return
-    if (!csvPreview) {
-      await handleCsvPreview()
-    }
-    const columns = (csvPreview?.columns ?? []).map((name) => ({ name, type: 'String' }))
+    const parsed = csvPreview ?? (await handleCsvPreview())
+    if (!parsed) return
+    const columns = parsed.columns.map((name) => ({ name, type: 'String' }))
     createDatasetMutation.mutate({
       request: {
         db_name: dbName,
@@ -880,7 +887,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
         source_type: 'csv_upload',
         schema_json: { columns },
       },
-      sample: { columns, rows: csvPreview?.rows ?? [] },
+      sample: { columns, rows: parsed.rows },
       autoAdd: true,
       source: 'csv',
     })
@@ -1076,6 +1083,17 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     () => buildRowsFromMatrix(connectorPreview?.columns ?? [], connectorPreview?.rows ?? []),
     [connectorPreview],
   )
+
+  useEffect(() => {
+    if (!csvFile || !csvPreview || !csvContent) return
+    const parsed = parseCsvContent(csvContent, csvDelimiter, csvHasHeader)
+    const isSameColumns =
+      parsed.columns.length === csvPreview.columns.length &&
+      parsed.columns.every((value, index) => value === csvPreview.columns[index])
+    const isSameRowCount = parsed.rows.length === csvPreview.rows.length
+    if (isSameColumns && isSameRowCount) return
+    setCsvPreview(parsed)
+  }, [csvDelimiter, csvHasHeader, csvFile, csvPreview, csvContent])
 
   const nodeOptions = definition.nodes.map((node) => ({ id: node.id, title: node.title }))
   const canUndo = history.length > 0
