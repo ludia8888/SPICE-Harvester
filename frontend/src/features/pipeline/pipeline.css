@@ -798,22 +798,10 @@ html[data-theme='dark'] .pipeline-pill {
     gap: 12px;
 }
 
-.dataset-connector-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-}
-
 .dataset-connector-panel {
     display: flex;
     flex-direction: column;
     gap: 10px;
-}
-
-.connector-actions {
-    display: flex;
-    gap: 8px;
-    align-items: center;
 }
 
 .dataset-card-header {
