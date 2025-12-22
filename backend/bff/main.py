@@ -49,6 +49,9 @@ from shared.dependencies.providers import (
 # Service factory import
 from shared.services.service_factory import BFF_SERVICE_INFO, create_fastapi_service, run_service
 from shared.services.connector_registry import ConnectorRegistry
+from shared.services.dataset_registry import DatasetRegistry
+from shared.services.pipeline_registry import PipelineRegistry
+from shared.services.pipeline_executor import PipelineExecutor
 
 # Shared models and utilities
 from shared.models.ontology import (
@@ -90,8 +93,9 @@ from bff.services.oms_client import OMSClient
 # Data connector imports
 from data_connector.google_sheets.service import GoogleSheetsService
 from bff.routers import (
-    database, health, mapping, merge_conflict, ontology, query, 
-    instances, instance_async, websocket, tasks, admin, data_connector, command_status, graph, lineage, audit, ai, summary
+    database, health, mapping, merge_conflict, ontology, query,
+    instances, instance_async, websocket, tasks, admin, data_connector,
+    command_status, graph, lineage, audit, ai, summary, pipeline
 )
 
 # Monitoring and observability routers
@@ -140,8 +144,17 @@ class BFFServiceContainer:
 
         # 6. Initialize Connector Registry (Postgres; Foundry-style durability)
         await self._initialize_connector_registry()
+
+        # 7. Initialize Dataset Registry (Postgres; pipeline artifacts)
+        await self._initialize_dataset_registry()
+
+        # 8. Initialize Pipeline Registry (Postgres; pipeline definitions)
+        await self._initialize_pipeline_registry()
+
+        # 9. Initialize Pipeline Executor (preview/build engine)
+        await self._initialize_pipeline_executor()
         
-        # 7. Initialize Google Sheets Service (connector library)
+        # 10. Initialize Google Sheets Service (connector library)
         await self._initialize_google_sheets_service()
         
         logger.info("BFF services initialized successfully")
@@ -239,6 +252,39 @@ class BFFServiceContainer:
         except Exception as e:
             logger.error(f"Failed to initialize ConnectorRegistry: {e}")
             # Continue without it; connector endpoints will 503.
+
+    async def _initialize_dataset_registry(self) -> None:
+        """Initialize Postgres-backed dataset registry."""
+        try:
+            logger.info("Initializing DatasetRegistry (Postgres)...")
+            registry = DatasetRegistry()
+            await registry.initialize()
+            self._bff_services["dataset_registry"] = registry
+            logger.info("DatasetRegistry initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize DatasetRegistry: {e}")
+
+    async def _initialize_pipeline_registry(self) -> None:
+        """Initialize Postgres-backed pipeline registry."""
+        try:
+            logger.info("Initializing PipelineRegistry (Postgres)...")
+            registry = PipelineRegistry()
+            await registry.initialize()
+            self._bff_services["pipeline_registry"] = registry
+            logger.info("PipelineRegistry initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize PipelineRegistry: {e}")
+
+    async def _initialize_pipeline_executor(self) -> None:
+        """Initialize pipeline executor (preview/build engine)."""
+        try:
+            logger.info("Initializing PipelineExecutor...")
+            dataset_registry = self.get_dataset_registry()
+            executor = PipelineExecutor(dataset_registry)
+            self._bff_services["pipeline_executor"] = executor
+            logger.info("PipelineExecutor initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize PipelineExecutor: {e}")
     
     async def _initialize_google_sheets_service(self) -> None:
         """Initialize Google Sheets service (connector library)"""
@@ -314,6 +360,23 @@ class BFFServiceContainer:
                 logger.info("ConnectorRegistry closed")
             except Exception as e:
                 logger.error(f"Error closing ConnectorRegistry: {e}")
+
+        if "dataset_registry" in self._bff_services:
+            try:
+                await self._bff_services["dataset_registry"].close()
+                logger.info("DatasetRegistry closed")
+            except Exception as e:
+                logger.error(f"Error closing DatasetRegistry: {e}")
+
+        if "pipeline_registry" in self._bff_services:
+            try:
+                await self._bff_services["pipeline_registry"].close()
+                logger.info("PipelineRegistry closed")
+            except Exception as e:
+                logger.error(f"Error closing PipelineRegistry: {e}")
+
+        if "pipeline_executor" in self._bff_services:
+            self._bff_services.pop("pipeline_executor", None)
         
         self._bff_services.clear()
         logger.info("BFF services shutdown completed")
@@ -341,6 +404,24 @@ class BFFServiceContainer:
         if "connector_registry" not in self._bff_services:
             raise RuntimeError("ConnectorRegistry not initialized")
         return self._bff_services["connector_registry"]
+
+    def get_dataset_registry(self) -> DatasetRegistry:
+        """Get dataset registry instance"""
+        if "dataset_registry" not in self._bff_services:
+            raise RuntimeError("DatasetRegistry not initialized")
+        return self._bff_services["dataset_registry"]
+
+    def get_pipeline_registry(self) -> PipelineRegistry:
+        """Get pipeline registry instance"""
+        if "pipeline_registry" not in self._bff_services:
+            raise RuntimeError("PipelineRegistry not initialized")
+        return self._bff_services["pipeline_registry"]
+
+    def get_pipeline_executor(self) -> PipelineExecutor:
+        """Get pipeline executor instance"""
+        if "pipeline_executor" not in self._bff_services:
+            raise RuntimeError("PipelineExecutor not initialized")
+        return self._bff_services["pipeline_executor"]
 
 
 # Global BFF service container (replaces global variables)
@@ -452,6 +533,36 @@ async def get_connector_registry() -> ConnectorRegistry:
     return _bff_container.get_connector_registry()
 
 
+async def get_dataset_registry() -> DatasetRegistry:
+    """Get DatasetRegistry from BFF container"""
+    if _bff_container is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="BFF services not initialized"
+        )
+    return _bff_container.get_dataset_registry()
+
+
+async def get_pipeline_registry() -> PipelineRegistry:
+    """Get PipelineRegistry from BFF container"""
+    if _bff_container is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="BFF services not initialized"
+        )
+    return _bff_container.get_pipeline_registry()
+
+
+async def get_pipeline_executor() -> PipelineExecutor:
+    """Get PipelineExecutor from BFF container"""
+    if _bff_container is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="BFF services not initialized"
+        )
+    return _bff_container.get_pipeline_executor()
+
+
 # Router registration (unchanged)
 app.include_router(database.router, prefix="/api/v1")
 app.include_router(ontology.router, prefix="/api/v1")
@@ -470,6 +581,7 @@ app.include_router(lineage.router, prefix="/api/v1")
 app.include_router(audit.router, prefix="/api/v1")
 app.include_router(ai.router, prefix="/api/v1")
 app.include_router(summary.router, prefix="/api/v1")
+app.include_router(pipeline.router, prefix="/api/v1")
 app.include_router(graph.router)  # Graph router has its own /api/v1 prefix
 
 # Monitoring and observability endpoints (modernized architecture)

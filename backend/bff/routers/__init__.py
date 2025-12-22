@@ -21,6 +21,7 @@ from . import lineage
 from . import audit
 from . import ai
 from . import summary
+from . import pipeline
 
 __all__ = [
     "database",
@@ -40,4 +41,5 @@ __all__ = [
     "audit",
     "ai",
     "summary",
+    "pipeline",
 ]

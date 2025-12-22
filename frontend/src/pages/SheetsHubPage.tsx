@@ -1,221 +1,131 @@
-import { useMemo, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  Button,
-  Card,
-  Divider,
-  FormGroup,
-  HTMLTable,
-  InputGroup,
-  Intent,
-  Tab,
-  Tabs,
-  Text,
-} from '@blueprintjs/core'
-import {
-  gridGoogleSheet,
-  listRegisteredSheets,
-  previewGoogleSheet,
-  previewRegisteredSheet,
-  registerGoogleSheet,
-  unregisterSheet,
-} from '../api/bff'
-import { useRateLimitRetry } from '../api/useRateLimitRetry'
-import { useRequestContext } from '../api/useRequestContext'
-import { JsonViewer } from '../components/JsonViewer'
+import { Card, H5, Icon, Text } from '@blueprintjs/core'
 import { PageHeader } from '../components/layout/PageHeader'
+import { navigate } from '../state/pathname'
 import { showAppToast } from '../app/AppToaster'
-import { toastApiError } from '../errors/toastApiError'
-import { qk } from '../query/queryKeys'
-import { useAppStore } from '../store/useAppStore'
+import { Intent } from '@blueprintjs/core'
 
-type RegisteredSheet = Record<string, unknown>
+type ConnectorOption = {
+  id: string
+  title: string
+  description: string
+  icon: string
+  path?: string
+  isMock?: boolean
+}
 
 export const SheetsHubPage = ({ dbName }: { dbName: string }) => {
-  const queryClient = useQueryClient()
-  const requestContext = useRequestContext()
-  const language = useAppStore((state) => state.context.language)
-  const branch = useAppStore((state) => state.context.branch)
-  const { cooldown: connectorCooldown, withRateLimitRetry } = useRateLimitRetry(1)
-
-  const [sheetUrl, setSheetUrl] = useState('')
-  const [worksheetName, setWorksheetName] = useState('')
-  const [apiKey, setApiKey] = useState('')
-  const [selectedSheet, setSelectedSheet] = useState<string>('')
-
-  const previewMutation = useMutation({
-    mutationFn: () =>
-      withRateLimitRetry(() =>
-        previewGoogleSheet(requestContext, {
-          sheet_url: sheetUrl,
-          worksheet_name: worksheetName || undefined,
-          api_key: apiKey || undefined,
-        }),
-      ),
-    onError: (error) => toastApiError(error, language),
-  })
-
-  const gridMutation = useMutation({
-    mutationFn: () =>
-      withRateLimitRetry(() =>
-        gridGoogleSheet(requestContext, {
-          sheet_url: sheetUrl,
-          worksheet_name: worksheetName || undefined,
-          api_key: apiKey || undefined,
-          max_rows: 60,
-          max_cols: 30,
-          trim_trailing_empty: true,
-        }),
-      ),
-    onError: (error) => toastApiError(error, language),
-  })
-
-  const registerMutation = useMutation({
-    mutationFn: () =>
-      withRateLimitRetry(() =>
-        registerGoogleSheet(requestContext, {
-          sheet_url: sheetUrl,
-          worksheet_name: worksheetName || undefined,
-          database_name: dbName,
-          branch,
-          polling_interval: 300,
-          auto_import: false,
-          api_key: apiKey || undefined,
-        }),
-      ),
-    onSuccess: () => {
-      void showAppToast({ intent: Intent.SUCCESS, message: 'Sheet registered.' })
-      void queryClient.invalidateQueries({ queryKey: qk.registeredSheets(dbName, requestContext.language) })
+  const connectors: ConnectorOption[] = [
+    {
+      id: 'google-sheets-live',
+      title: 'Google Sheets (Live)',
+      description: 'Connect and sync data directly from Google Sheets.',
+      icon: 'document',
+      path: `/db/${encodeURIComponent(dbName)}/data/sheets/google`,
     },
-    onError: (error) => toastApiError(error, language),
-  })
-
-  const registeredQuery = useQuery({
-    queryKey: qk.registeredSheets(dbName, requestContext.language),
-    queryFn: () => listRegisteredSheets(requestContext, dbName),
-  })
-
-  const registeredSheets = useMemo(() => {
-    const payload = registeredQuery.data as { data?: { sheets?: RegisteredSheet[] } } | undefined
-    return payload?.data?.sheets ?? []
-  }, [registeredQuery.data])
-
-  const previewRegisteredMutation = useMutation({
-    mutationFn: () => withRateLimitRetry(() => previewRegisteredSheet(requestContext, selectedSheet, { limit: 10 })),
-    onError: (error) => toastApiError(error, language),
-  })
-
-  const unregisterMutation = useMutation({
-    mutationFn: (sheetId: string) => withRateLimitRetry(() => unregisterSheet(requestContext, sheetId)),
-    onSuccess: () => {
-      void showAppToast({ intent: Intent.WARNING, message: 'Sheet unregistered.' })
-      void queryClient.invalidateQueries({ queryKey: qk.registeredSheets(dbName, requestContext.language) })
+    {
+      id: 'google-sheets-import',
+      title: 'Google Sheets (Import)',
+      description: 'One-time import from Google Sheets with schema mapping.',
+      icon: 'cloud-download',
+      path: `/db/${encodeURIComponent(dbName)}/data/import/sheets`,
     },
-    onError: (error) => toastApiError(error, language),
-  })
+    {
+      id: 'excel-import',
+      title: 'Excel Import',
+      description: 'Upload .xlsx files and map to ontology classes.',
+      icon: 'import',
+      path: `/db/${encodeURIComponent(dbName)}/data/import/excel`,
+    },
+    // Mocked Connectors
+    {
+      id: 'postgres',
+      title: 'PostgreSQL',
+      description: 'Connect to a remote PostgreSQL database.',
+      icon: 'database',
+      isMock: true,
+    },
+    {
+      id: 'snowflake',
+      title: 'Snowflake',
+      description: 'Import large datasets from Snowflake.',
+      icon: 'snowflake',
+      isMock: true,
+    },
+    {
+      id: 'salesforce',
+      title: 'Salesforce',
+      description: 'Sync CRM data entities.',
+      icon: 'cloud',
+      isMock: true,
+    },
+    {
+      id: 'rest-api',
+      title: 'REST API',
+      description: 'Generic JSON data ingestion source.',
+      icon: 'code',
+      isMock: true,
+    },
+  ]
+
+  const handleConnectorClick = (connector: ConnectorOption) => {
+    if (connector.isMock) {
+      void showAppToast({
+        intent: Intent.PRIMARY,
+        message: 'Coming Soon: This connector is under development.',
+        icon: 'build',
+      })
+    } else if (connector.path) {
+      navigate(connector.path)
+    }
+  }
 
   return (
     <div>
-      <PageHeader title="Google Sheets" subtitle="Preview, detect grids, and manage registered sheets." />
+      <PageHeader
+        title="Connectors"
+        subtitle="Select a source to ingest data into your project."
+      />
 
-      <Card style={{ marginBottom: 16 }}>
-        <div className="form-row">
-          <FormGroup label="Sheet URL">
-            <InputGroup value={sheetUrl} onChange={(event) => setSheetUrl(event.currentTarget.value)} />
-          </FormGroup>
-          <FormGroup label="Worksheet (optional)">
-            <InputGroup value={worksheetName} onChange={(event) => setWorksheetName(event.currentTarget.value)} />
-          </FormGroup>
-          <FormGroup label="API key (optional)">
-            <InputGroup value={apiKey} onChange={(event) => setApiKey(event.currentTarget.value)} />
-          </FormGroup>
-        </div>
-      </Card>
-
-      <Tabs id="sheets-tabs" defaultSelectedTabId="preview">
-        <Tab
-          id="preview"
-          title="Preview"
-          panel={
-            <Card className="card-stack">
-              <div className="form-row">
-                <Button intent={Intent.PRIMARY} onClick={() => previewMutation.mutate()} disabled={!sheetUrl || connectorCooldown > 0} loading={previewMutation.isPending}>
-                  {connectorCooldown > 0 ? `Retry in ${connectorCooldown}s` : 'Preview'}
-                </Button>
+      <div className="db-grid">
+        {connectors.map((connector) => (
+          <Card
+            key={connector.id}
+            interactive
+            onClick={() => handleConnectorClick(connector)}
+            className="connector-card"
+            style={{ display: 'flex', flexDirection: 'column', gap: '12px', minHeight: '160px' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+              <div
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '4px',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Icon icon={connector.icon as any} size={20} color={connector.isMock ? '#5C7080' : '#48AFF0'} />
               </div>
-              <JsonViewer value={previewMutation.data} empty="Run preview to see sample rows." />
-            </Card>
-          }
-        />
-        <Tab
-          id="grid"
-          title="Grid"
-          panel={
-            <Card className="card-stack">
-              <div className="form-row">
-                <Button intent={Intent.PRIMARY} onClick={() => gridMutation.mutate()} disabled={!sheetUrl || connectorCooldown > 0} loading={gridMutation.isPending}>
-                  {connectorCooldown > 0 ? `Retry in ${connectorCooldown}s` : 'Detect grid'}
-                </Button>
+              <H5 style={{ margin: 0, color: connector.isMock ? '#A7B6C2' : '#F5F8FA' }}>
+                {connector.title}
+              </H5>
+            </div>
+            <Text className={connector.isMock ? 'muted' : ''} style={{ fontSize: '0.85rem', lineHeight: '1.4' }}>
+              {connector.description}
+            </Text>
+            {connector.isMock && (
+              <div style={{ marginTop: 'auto', paddingTop: '12px' }}>
+                <Text style={{ fontSize: '0.75rem', color: '#5C7080', fontStyle: 'italic' }}>
+                  Coming Soon
+                </Text>
               </div>
-              <JsonViewer value={gridMutation.data} empty="Run grid detection to inspect merges." />
-            </Card>
-          }
-        />
-        <Tab
-          id="registered"
-          title="Registered"
-          panel={
-            <Card className="card-stack">
-              <div className="form-row">
-                <Button intent={Intent.PRIMARY} onClick={() => registerMutation.mutate()} disabled={!sheetUrl || connectorCooldown > 0} loading={registerMutation.isPending}>
-                  {connectorCooldown > 0 ? `Retry in ${connectorCooldown}s` : 'Register'}
-                </Button>
-                <Button onClick={() => void queryClient.invalidateQueries({ queryKey: qk.registeredSheets(dbName, requestContext.language) })}>
-                  Refresh list
-                </Button>
-              </div>
-              {registeredSheets.length === 0 ? (
-                <Text className="muted">No registered sheets.</Text>
-              ) : (
-                <HTMLTable striped interactive className="command-table">
-                  <thead>
-                    <tr>
-                      <th>Sheet ID</th>
-                      <th>Worksheet</th>
-                      <th>DB</th>
-                      <th>Branch</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {registeredSheets.map((sheet) => {
-                      const sheetId = String(sheet.sheet_id ?? '')
-                      return (
-                        <tr key={sheetId}>
-                          <td>{sheetId}</td>
-                          <td>{String(sheet.worksheet_name ?? '')}</td>
-                          <td>{String(sheet.database_name ?? '')}</td>
-                          <td>{String(sheet.branch ?? '')}</td>
-                          <td>
-                            <Button small onClick={() => { setSelectedSheet(sheetId); previewRegisteredMutation.mutate(); }} disabled={connectorCooldown > 0}>
-                              {connectorCooldown > 0 ? `Retry in ${connectorCooldown}s` : 'Preview'}
-                            </Button>
-                            <Button small intent={Intent.DANGER} style={{ marginLeft: 8 }} onClick={() => unregisterMutation.mutate(sheetId)} disabled={connectorCooldown > 0}>
-                              {connectorCooldown > 0 ? `Retry in ${connectorCooldown}s` : 'Unregister'}
-                            </Button>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </HTMLTable>
-              )}
-              <Divider />
-              <JsonViewer value={previewRegisteredMutation.data} empty="Select a sheet to preview." />
-            </Card>
-          }
-        />
-      </Tabs>
+            )}
+          </Card>
+        ))}
+      </div>
     </div>
   )
 }

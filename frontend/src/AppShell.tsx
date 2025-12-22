@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import {
   Alignment,
   Button,
@@ -31,7 +31,9 @@ const copyByLang = {
       databases: 'Projects',
       overview: 'Home',
       branches: 'Branches',
-      ontology: 'Ontology',
+      pipeline: 'Pipeline Builder',
+      ontology: 'Ontology Manager',
+      workshop: 'Workshop',
       mappings: 'Mappings',
       sheets: 'Connectors',
       importSheets: 'Import Sheets',
@@ -126,7 +128,9 @@ const copyByLang = {
       databases: '프로젝트',
       overview: '홈',
       branches: '브랜치',
-      ontology: '온톨로지',
+      pipeline: '파이프라인 빌더',
+      ontology: '온톨로지 매니저',
+      workshop: '워크숍',
       mappings: '매핑',
       sheets: '커넥터',
       importSheets: '시트 임포트',
@@ -233,13 +237,9 @@ const getRailItems = (
   } else {
     const base = `/db/${encodeURIComponent(project)}`
     items.push({ icon: 'home', label: copy.nav.overview, path: `${base}/overview`, match: `${base}/overview` })
-    items.push({ icon: 'git-branch', label: copy.nav.branches, path: `${base}/branches`, match: `${base}/branches` })
+    items.push({ icon: 'flow-branch', label: copy.nav.pipeline, path: `${base}/pipeline`, match: `${base}/pipeline` })
     items.push({ icon: 'diagram-tree', label: copy.nav.ontology, path: `${base}/ontology`, match: `${base}/ontology` })
-    items.push({ icon: 'flow-branch', label: copy.nav.mappings, path: `${base}/mappings`, match: `${base}/mappings` })
-    items.push({ icon: 'offline', label: copy.nav.sheets, path: `${base}/data/sheets`, match: `${base}/data/sheets` })
-    items.push({ icon: 'database', label: copy.nav.instances, path: `${base}/instances`, match: `${base}/instances` })
-    items.push({ icon: 'graph', label: copy.nav.graph, path: `${base}/explore/graph`, match: `${base}/explore/graph` })
-    items.push({ icon: 'search', label: copy.nav.query, path: `${base}/explore/query`, match: `${base}/explore/query` })
+    items.push({ icon: 'build', label: copy.nav.workshop, path: `${base}/workshop`, match: `${base}/workshop` })
   }
 
   return items.map((item) => ({
@@ -263,9 +263,8 @@ const AppShell = () => {
   const context = useAppStore((state) => state.context)
   const adminMode = useAppStore((state) => state.adminMode)
   const commands = useAppStore((state) => state.commands)
-  const setSettingsOpen = useAppStore((state) => state.setSettingsOpen)
-
-  const [commandOpen, setCommandOpen] = useState(false)
+  const commandDrawerOpen = useAppStore((state) => state.commandDrawerOpen)
+  const setCommandDrawerOpen = useAppStore((state) => state.setCommandDrawerOpen)
 
   const language = context.language
   const copy = copyByLang[language]
@@ -275,35 +274,35 @@ const AppShell = () => {
     [context.project, pathname, copy],
   )
   const activeCommandCount = useMemo(() => countActiveCommands(commands), [commands])
+  const hideGlobalHeader = pathname.includes('/pipeline')
 
   return (
-    <div className="app-shell">
-      <Navbar className="top-nav">
-        <NavbarGroup align={Alignment.LEFT}>
-          <NavbarHeading>{copy.appTitle}</NavbarHeading>
-          <Tag minimal icon="folder-close">
-            {context.project ?? copy.nav.noProject}
-          </Tag>
-          <Tag minimal icon="git-branch">{context.branch}</Tag>
-          {adminMode ? <Tag intent="warning">{copy.nav.adminMode}</Tag> : null}
-        </NavbarGroup>
-        <NavbarGroup align={Alignment.RIGHT}>
-          <Button minimal icon="folder-close" onClick={() => navigate('/')} aria-label={copy.nav.databases}>
-            {copy.nav.databases}
-          </Button>
-          <Button minimal icon="history" onClick={() => setCommandOpen(true)} aria-label={copy.nav.commands}>
-            {copy.nav.commands}
-            {activeCommandCount > 0 ? (
-              <Tag minimal round style={{ marginLeft: 6 }}>
-                {activeCommandCount}
-              </Tag>
-            ) : null}
-          </Button>
-          <Button minimal icon="cog" onClick={() => setSettingsOpen(true)} aria-label={copy.nav.settings}>
-            {copy.nav.settings}
-          </Button>
-        </NavbarGroup>
-      </Navbar>
+    <div className={`app-shell${hideGlobalHeader ? ' no-top-nav' : ''}`}>
+      {hideGlobalHeader ? null : (
+        <Navbar className="top-nav">
+          <NavbarGroup align={Alignment.LEFT}>
+            <NavbarHeading>{copy.appTitle}</NavbarHeading>
+            <Tag minimal icon="folder-close">
+              {context.project ?? copy.nav.noProject}
+            </Tag>
+            <Tag minimal icon="git-branch">{context.branch}</Tag>
+            {adminMode ? <Tag intent="warning">{copy.nav.adminMode}</Tag> : null}
+          </NavbarGroup>
+          <NavbarGroup align={Alignment.RIGHT}>
+            <Button minimal icon="folder-close" onClick={() => navigate('/')} aria-label={copy.nav.databases}>
+              {copy.nav.databases}
+            </Button>
+            <Button minimal icon="history" onClick={() => setCommandDrawerOpen(true)} aria-label={copy.nav.commands}>
+              {copy.nav.commands}
+              {activeCommandCount > 0 ? (
+                <Tag minimal round style={{ marginLeft: 6 }}>
+                  {activeCommandCount}
+                </Tag>
+              ) : null}
+            </Button>
+          </NavbarGroup>
+        </Navbar>
+      )}
 
       <div className="app-body">
         <SidebarRail
@@ -319,8 +318,8 @@ const AppShell = () => {
       </div>
 
       <CommandTrackerDrawer
-        isOpen={commandOpen}
-        onClose={() => setCommandOpen(false)}
+        isOpen={commandDrawerOpen}
+        onClose={() => setCommandDrawerOpen(false)}
         copy={copy.commandDrawer}
       />
       <SettingsDialog copy={copy.settings} />

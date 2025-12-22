@@ -133,6 +133,18 @@ async def create_database(request: DatabaseCreateRequest, oms: OMSClient = OMSCl
                 data={"name": request.name, "result": result, "mode": "direct"},
             ).to_dict(),
         )
+    except httpx.HTTPStatusError as e:
+        status_code = e.response.status_code
+        detail: Any
+        try:
+            detail = e.response.json()
+        except Exception:
+            detail = e.response.text or str(e)
+
+        if status_code == status.HTTP_409_CONFLICT:
+            if isinstance(detail, dict) and detail.get("detail") is not None:
+                detail = detail.get("detail")
+        raise HTTPException(status_code=status_code, detail=detail)
     except SecurityViolationError as e:
         # 보안 검증 실패는 400 Bad Request로 처리
         logger.warning(f"Security validation failed for database '{request.name}': {e}")

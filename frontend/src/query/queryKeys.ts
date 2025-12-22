@@ -17,6 +17,12 @@ export const qk = {
     ['bff', 'mappings', dbName, 'summary', { lang: language }] as const,
   registeredSheets: (dbName: string | null, language: Language) =>
     ['bff', 'sheets', 'registered', { db: dbName, lang: language }] as const,
+  pipelines: (dbName: string, language: Language) =>
+    ['bff', 'pipelines', dbName, { lang: language }] as const,
+  pipeline: (pipelineId: string, language: Language) =>
+    ['bff', 'pipelines', pipelineId, { lang: language }] as const,
+  datasets: (dbName: string, language: Language) =>
+    ['bff', 'pipelines', 'datasets', dbName, { lang: language }] as const,
   instances: (dbName: string, classId: string, language: Language, params: Record<string, unknown>) =>
     ['bff', 'instances', dbName, classId, { ...params, lang: language }] as const,
   instance: (dbName: string, classId: string, instanceId: string, language: Language) =>

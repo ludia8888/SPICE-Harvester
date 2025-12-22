@@ -6,12 +6,6 @@ import { navigate } from '../state/pathname'
 import { useAppStore } from '../store/useAppStore'
 import { classifyError } from './classifyError'
 
-type OccConflictDetail = {
-  detail?: { expected_seq?: number; actual_seq?: number }
-  expected_seq?: number
-  actual_seq?: number
-}
-
 const copy = {
   en: {
     authTitle: 'Authentication required',
@@ -20,6 +14,8 @@ const copy = {
     notFoundBody: 'The resource may have been deleted, or the URL context is wrong. Refresh and retry.',
     conflictTitle: 'Conflict (409)',
     conflictBody: 'The resource has changed. Refresh and retry your action.',
+    duplicateTitle: 'Already exists',
+    duplicateBody: 'A project with this name already exists or was used before. Choose a different name.',
     validationTitle: 'Invalid request',
     validationBody: 'Check your input and try again.',
     rateLimitTitle: 'Rate limited',
@@ -41,6 +37,8 @@ const copy = {
     notFoundBody: '리소스가 삭제되었거나 URL 컨텍스트(project/branch)가 올바르지 않을 수 있어요. 새로고침 후 재시도하세요.',
     conflictTitle: '충돌 (409)',
     conflictBody: '최신 상태와 충돌했습니다. 새로고침 후 다시 시도하세요.',
+    duplicateTitle: '이미 존재합니다',
+    duplicateBody: '이미 사용 중인 프로젝트 이름입니다. 다른 이름을 선택하세요.',
     validationTitle: '요청이 올바르지 않습니다',
     validationBody: '입력값을 확인한 뒤 다시 시도하세요.',
     rateLimitTitle: '레이트리밋',
@@ -59,17 +57,57 @@ const copy = {
 
 const coerceNumber = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : undefined)
 
+type OccConflictPayload = {
+  error?: unknown
+  expected_seq?: unknown
+  actual_seq?: unknown
+  detail?: unknown
+}
+
+const unwrapDetail = (detail: unknown) => {
+  let current = detail
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (!current || typeof current !== 'object') {
+      return current
+    }
+    const inner = (current as { detail?: unknown }).detail
+    if (inner === undefined || inner === null) {
+      return current
+    }
+    current = inner
+  }
+  return current
+}
+
+const extractOccConflict = (detail: unknown) => {
+  const unwrapped = unwrapDetail(detail)
+  if (!unwrapped || typeof unwrapped !== 'object') {
+    return null
+  }
+  const payload = unwrapped as OccConflictPayload
+  if (payload.error && payload.error !== 'optimistic_concurrency_conflict') {
+    return null
+  }
+  const expected = coerceNumber(payload.expected_seq)
+  const actual = coerceNumber(payload.actual_seq)
+  if (payload.error === 'optimistic_concurrency_conflict' && expected === undefined && actual === undefined) {
+    return { expected: undefined, actual: undefined }
+  }
+  if (expected === undefined && actual === undefined) {
+    return null
+  }
+  return { expected, actual }
+}
+
 const extractOccSuffix = (detail: unknown) => {
-  if (!detail || typeof detail !== 'object') {
+  const conflict = extractOccConflict(detail)
+  if (!conflict) {
     return ''
   }
-  const payload = detail as OccConflictDetail
-  const expected = coerceNumber(payload.detail?.expected_seq ?? payload.expected_seq)
-  const actual = coerceNumber(payload.detail?.actual_seq ?? payload.actual_seq)
-  if (expected === undefined || actual === undefined) {
+  if (conflict.expected === undefined || conflict.actual === undefined) {
     return ''
   }
-  return ` (expected ${expected}, actual ${actual})`
+  return ` (expected ${conflict.expected}, actual ${conflict.actual})`
 }
 
 const extractRateLimitSuffix = (error: HttpError) => {
@@ -83,11 +121,12 @@ const extractDetailText = (detail: unknown) => {
   if (!detail) {
     return ''
   }
-  if (typeof detail === 'string') {
-    return detail.trim()
+  const unwrapped = unwrapDetail(detail)
+  if (typeof unwrapped === 'string') {
+    return unwrapped.trim()
   }
-  if (typeof detail === 'object') {
-    const maybe = detail as { detail?: unknown; message?: unknown }
+  if (typeof unwrapped === 'object') {
+    const maybe = unwrapped as { detail?: unknown; message?: unknown }
     if (typeof maybe.detail === 'string') {
       return maybe.detail.trim()
     }
@@ -95,13 +134,13 @@ const extractDetailText = (detail: unknown) => {
       return maybe.message.trim()
     }
     try {
-      const json = JSON.stringify(detail)
+      const json = JSON.stringify(unwrapped)
       return json.length > 300 ? `${json.slice(0, 300)}…` : json
     } catch {
       return ''
     }
   }
-  return String(detail)
+  return String(unwrapped)
 }
 
 type UnknownLabelPayload = {
@@ -149,10 +188,18 @@ export const toastApiError = (error: unknown, language: Language) => {
     intent = Intent.WARNING
     key = 'api-error:404'
   } else if (classified.kind === 'OCC_CONFLICT') {
-    title = c.conflictTitle
-    body = `${c.conflictBody}${extractOccSuffix(classified.detail)}`
-    intent = Intent.WARNING
-    key = 'api-error:409'
+    const conflict = extractOccConflict(classified.detail)
+    if (conflict?.expected === 0) {
+      title = c.duplicateTitle
+      body = c.duplicateBody
+      intent = Intent.WARNING
+      key = 'api-error:duplicate'
+    } else {
+      title = c.conflictTitle
+      body = `${c.conflictBody}${extractOccSuffix(classified.detail)}`
+      intent = Intent.WARNING
+      key = 'api-error:409'
+    }
   } else if (classified.kind === 'VALIDATION') {
     title = c.validationTitle
     body = c.validationBody

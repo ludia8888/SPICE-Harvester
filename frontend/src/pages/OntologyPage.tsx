@@ -272,7 +272,10 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
 
   return (
     <div>
-      <PageHeader title="Ontology" subtitle={`Branch: ${branch}`} />
+      <PageHeader
+        title={language === 'ko' ? '온톨로지 매니저' : 'Ontology Manager'}
+        subtitle={`Branch: ${branch}`}
+      />
 
       {isProtected ? (
         <Callout intent={Intent.WARNING} style={{ marginBottom: 12 }}>
@@ -283,13 +286,13 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
       <div className="page-grid two-col">
         <Card>
           <div className="card-title">
-              <Text>Classes</Text>
+              <Text>{language === 'ko' ? '클래스' : 'Classes'}</Text>
               <Button
                 small
                 icon="plus"
                 onClick={() => resetDraftState(null)}
               >
-                New
+                {language === 'ko' ? '새 클래스' : 'New'}
               </Button>
             </div>
           {listQuery.isFetching ? <Text className="muted small">Loading...</Text> : null}
@@ -318,10 +321,10 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
         <div className="card-stack">
           <Card>
             <div className="card-title">
-              <Text>Editor</Text>
+              <Text>{language === 'ko' ? '에디터' : 'Editor'}</Text>
               <div className="form-row">
                 <Button small icon="tick-circle" onClick={handleValidate} loading={validateMutation.isPending}>
-                  Validate
+                  {language === 'ko' ? '검증' : 'Validate'}
                 </Button>
                 <Button
                   small
@@ -331,7 +334,7 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
                   loading={applyMutation.isPending}
                   disabled={isProtected && (!adminMode || !adminToken)}
                 >
-                  Apply
+                  {language === 'ko' ? '적용' : 'Apply'}
                 </Button>
                 <Button
                   small
@@ -341,7 +344,7 @@ export const OntologyPage = ({ dbName }: { dbName: string }) => {
                   loading={deleteMutation.isPending}
                   disabled={!selectedClass || (isProtected && (!adminMode || !adminToken))}
                 >
-                  Delete
+                  {language === 'ko' ? '삭제' : 'Delete'}
                 </Button>
               </div>
             </div>

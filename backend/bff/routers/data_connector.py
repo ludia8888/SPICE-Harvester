@@ -21,8 +21,11 @@ from shared.models.requests import ApiResponse
 from shared.models.sheet_grid import GoogleSheetGridRequest, SheetGrid
 from shared.middleware.rate_limiter import rate_limit, RateLimitPresets
 from shared.observability.tracing import trace_endpoint
+from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.services.sheet_grid_parser import SheetGridParseOptions, SheetGridParser
 from shared.services.connector_registry import ConnectorRegistry
+from shared.services.dataset_registry import DatasetRegistry
+from shared.dependencies.providers import LineageStoreDep
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +46,13 @@ async def get_connector_registry() -> ConnectorRegistry:
     from bff.main import get_connector_registry as _get_connector_registry
 
     return await _get_connector_registry()
+
+
+async def get_dataset_registry() -> DatasetRegistry:
+    """Import here to avoid circular dependency"""
+    from bff.main import get_dataset_registry as _get_dataset_registry
+
+    return await _get_dataset_registry()
 
 
 @router.post(
@@ -150,6 +160,8 @@ async def register_google_sheet(
     http_request: Request,
     google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    lineage_store: LineageStoreDep = Depends(),
 ) -> Dict[str, Any]:
     """
     Register a Google Sheet for data monitoring and automatic import.
@@ -195,11 +207,14 @@ async def register_google_sheet(
         logger.info(f"Registering Google Sheet: {sheet_url} (worksheet={worksheet_name}, interval={polling_interval}s)")
 
         # Validate + resolve sheet_id/worksheet name via connector I/O (no durable state here).
-        sheet_id, _, resolved_worksheet, _, _ = await google_sheets_service.fetch_sheet_values(
+        preview = await google_sheets_service.preview_sheet(
             str(sheet_url),
             worksheet_name=worksheet_name,
+            limit=25,
             api_key=api_key,
         )
+        sheet_id = preview.sheet_id
+        resolved_worksheet = preview.worksheet_name
 
         # Foundry policy: durable registry is Postgres (connector_sources + mappings).
         source = await connector_registry.upsert_source(
@@ -249,12 +264,67 @@ async def register_google_sheet(
             message=f"Successfully registered sheet {sheet_id} for monitoring",
             registered_sheet=registered_sheet,
         )
+
+        dataset_payload = None
+        if (database_name or "").strip():
+            db_name = validate_db_name(str(database_name))
+            source_ref = f"google_sheets:{sheet_id}"
+            existing_dataset = await dataset_registry.get_dataset_by_source_ref(
+                db_name=db_name,
+                source_type="connector",
+                source_ref=source_ref,
+            )
+            if existing_dataset:
+                dataset = existing_dataset
+            else:
+                dataset = await dataset_registry.create_dataset(
+                    db_name=db_name,
+                    name=f"gsheet_{sheet_id}",
+                    description=f"Google Sheets sync: {sheet_url}",
+                    source_type="connector",
+                    source_ref=source_ref,
+                    schema_json={"columns": [{"name": col, "type": "String"} for col in preview.columns]},
+                )
+
+            sample_rows = preview.sample_rows or []
+            if sample_rows:
+                await dataset_registry.add_version(
+                    dataset_id=dataset.dataset_id,
+                    artifact_key=None,
+                    row_count=len(sample_rows),
+                    sample_json={"columns": [{"name": col, "type": "String"} for col in preview.columns], "rows": sample_rows},
+                    schema_json={"columns": [{"name": col, "type": "String"} for col in preview.columns]},
+                )
+            dataset_payload = {
+                "dataset_id": dataset.dataset_id,
+                "name": dataset.name,
+                "db_name": dataset.db_name,
+            }
+            if lineage_store:
+                try:
+                    await lineage_store.record_link(
+                        from_node_id=lineage_store.node_artifact("connector", "google_sheets", str(sheet_id)),
+                        to_node_id=lineage_store.node_aggregate("Dataset", dataset.dataset_id),
+                        edge_type="connector_registered_dataset",
+                        db_name=db_name,
+                        edge_metadata={
+                            "db_name": db_name,
+                            "source_type": "google_sheets",
+                            "source_id": str(sheet_id),
+                            "dataset_id": dataset.dataset_id,
+                        },
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to record lineage for connector dataset: {e}")
         
         logger.info(f"Successfully registered Google Sheet: {registration_result.sheet_id} (postgres registry)")
         
         return ApiResponse.success(
             message="Google Sheet registered successfully",
-            data=registration_result.model_dump(mode="json"),
+            data={
+                **registration_result.model_dump(mode="json"),
+                "dataset": dataset_payload,
+            },
         ).to_dict()
         
     except HTTPException:
@@ -413,6 +483,121 @@ async def list_registered_sheets(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve sheets: {str(e)}"
         )
+
+
+@router.post(
+    "/data-connectors/google-sheets/{sheet_id}/start-pipelining",
+    response_model=Dict[str, Any],
+    summary="Start pipelining from a registered Google Sheet",
+    description="Materialize a dataset entry for a registered connector and return it for Pipeline Builder.",
+)
+@rate_limit(**RateLimitPresets.RELAXED)
+@trace_endpoint("start_pipelining_google_sheet")
+async def start_pipelining_google_sheet(
+    sheet_id: str,
+    payload: Dict[str, Any],
+    http_request: Request,
+    google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service),
+    connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    lineage_store: LineageStoreDep = Depends(),
+) -> Dict[str, Any]:
+    try:
+        sanitized = sanitize_input(payload or {})
+        db_name = str(sanitized.get("db_name") or "").strip()
+        worksheet_name = str(sanitized.get("worksheet_name") or "").strip() or None
+        api_key = sanitized.get("api_key")
+        limit = int(sanitized.get("limit") or 25)
+        limit = max(1, min(limit, 500))
+
+        source = await connector_registry.get_source(source_type="google_sheets", source_id=sheet_id)
+        if not source or not source.enabled:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sheet is not registered")
+
+        mapping = await connector_registry.get_mapping(source_type="google_sheets", source_id=sheet_id)
+        if not db_name and mapping and mapping.target_db_name:
+            db_name = str(mapping.target_db_name)
+        if not db_name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="db_name is required")
+        db_name = validate_db_name(db_name)
+
+        sheet_url = (source.config_json or {}).get("sheet_url")
+        if not sheet_url:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Registered sheet missing URL")
+        default_ws = (source.config_json or {}).get("worksheet_name")
+
+        preview = await google_sheets_service.preview_sheet(
+            sheet_url,
+            worksheet_name=worksheet_name or default_ws,
+            limit=limit,
+            api_key=api_key,
+        )
+
+        source_ref = f"google_sheets:{sheet_id}"
+        dataset = await dataset_registry.get_dataset_by_source_ref(
+            db_name=db_name,
+            source_type="connector",
+            source_ref=source_ref,
+        )
+        if not dataset:
+            dataset = await dataset_registry.create_dataset(
+                db_name=db_name,
+                name=f"gsheet_{sheet_id}",
+                description=f"Google Sheets sync: {sheet_url}",
+                source_type="connector",
+                source_ref=source_ref,
+                schema_json={"columns": [{"name": col, "type": "String"} for col in preview.columns]},
+            )
+
+        sample_rows = preview.sample_rows or []
+        if sample_rows:
+            await dataset_registry.add_version(
+                dataset_id=dataset.dataset_id,
+                artifact_key=None,
+                row_count=len(sample_rows),
+                sample_json={"columns": [{"name": col, "type": "String"} for col in preview.columns], "rows": sample_rows},
+                schema_json={"columns": [{"name": col, "type": "String"} for col in preview.columns]},
+            )
+
+        if lineage_store:
+            try:
+                await lineage_store.record_link(
+                    from_node_id=lineage_store.node_artifact("connector", "google_sheets", str(sheet_id)),
+                    to_node_id=lineage_store.node_aggregate("Dataset", dataset.dataset_id),
+                    edge_type="connector_start_pipelining",
+                    db_name=db_name,
+                    edge_metadata={
+                        "db_name": db_name,
+                        "source_type": "google_sheets",
+                        "source_id": str(sheet_id),
+                        "dataset_id": dataset.dataset_id,
+                    },
+                )
+            except Exception as e:
+                logger.warning(f"Failed to record start-pipelining lineage: {e}")
+
+        return ApiResponse.success(
+            message="Start pipelining completed",
+            data={
+                "dataset": {
+                    "dataset_id": dataset.dataset_id,
+                    "db_name": dataset.db_name,
+                    "name": dataset.name,
+                    "schema_json": {"columns": [{"name": col, "type": "String"} for col in preview.columns]},
+                    "source_type": dataset.source_type,
+                    "source_ref": dataset.source_ref,
+                },
+                "sample": {
+                    "columns": [{"name": col, "type": "String"} for col in preview.columns],
+                    "rows": sample_rows,
+                },
+            },
+        ).to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to start pipelining: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.delete(

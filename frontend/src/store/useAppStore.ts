@@ -60,6 +60,7 @@ type AppState = {
   rememberToken: boolean
   adminMode: boolean
   settingsOpen: boolean
+  commandDrawerOpen: boolean
   inspector: InspectorContext
   commands: Record<string, TrackedCommand>
   syncContextFromUrl: () => void
@@ -71,6 +72,7 @@ type AppState = {
   setRememberToken: (remember: boolean) => void
   setAdminMode: (enabled: boolean) => void
   setSettingsOpen: (open: boolean) => void
+  setCommandDrawerOpen: (open: boolean) => void
   setInspector: (context: InspectorContext) => void
   trackCommand: (command: TrackedCommand) => void
   patchCommand: (commandId: string, patch: Partial<TrackedCommand>) => void
@@ -248,6 +250,7 @@ export const useAppStore = create<AppState>((set, get) => {
     rememberToken,
     adminMode: false,
     settingsOpen: false,
+    commandDrawerOpen: false,
     inspector: null,
     commands: readCachedCommands(),
     syncContextFromUrl: () => {
@@ -296,6 +299,7 @@ export const useAppStore = create<AppState>((set, get) => {
     },
     setAdminMode: (enabled) => set({ adminMode: enabled }),
     setSettingsOpen: (open) => set({ settingsOpen: open }),
+    setCommandDrawerOpen: (open) => set({ commandDrawerOpen: open }),
     setInspector: (context) => set({ inspector: context }),
     trackCommand: (command) =>
       set((state) => {
@@ -308,9 +312,16 @@ export const useAppStore = create<AppState>((set, get) => {
         if (!state.commands[commandId]) {
           return state
         }
+        const current = state.commands[commandId]
+        const hasChanges = Object.entries(patch).some(([key, value]) =>
+          !Object.is(current[key as keyof TrackedCommand], value),
+        )
+        if (!hasChanges) {
+          return state
+        }
         const next = {
           ...state.commands,
-          [commandId]: { ...state.commands[commandId], ...patch },
+          [commandId]: { ...current, ...patch },
         }
         persistCommands(next)
         return { commands: next }

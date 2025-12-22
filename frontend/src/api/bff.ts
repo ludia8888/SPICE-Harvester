@@ -576,6 +576,133 @@ export const listRegisteredSheets = async (
   return payload ?? {}
 }
 
+export const startPipeliningSheet = async (
+  context: RequestContext,
+  sheetId: string,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    `data-connectors/google-sheets/${encodeURIComponent(sheetId)}/start-pipelining`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const listPipelines = async (
+  context: RequestContext,
+  dbName: string,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    'pipelines',
+    { method: 'GET' },
+    context,
+    { db_name: dbName },
+  )
+  return payload ?? {}
+}
+
+export const getPipeline = async (
+  context: RequestContext,
+  pipelineId: string,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    `pipelines/${encodeURIComponent(pipelineId)}`,
+    { method: 'GET' },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const createPipeline = async (
+  context: RequestContext,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    'pipelines',
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const updatePipeline = async (
+  context: RequestContext,
+  pipelineId: string,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    `pipelines/${encodeURIComponent(pipelineId)}`,
+    { method: 'PUT', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const previewPipeline = async (
+  context: RequestContext,
+  pipelineId: string,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    `pipelines/${encodeURIComponent(pipelineId)}/preview`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const deployPipeline = async (
+  context: RequestContext,
+  pipelineId: string,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    `pipelines/${encodeURIComponent(pipelineId)}/deploy`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const listDatasets = async (
+  context: RequestContext,
+  dbName: string,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    'pipelines/datasets',
+    { method: 'GET' },
+    context,
+    { db_name: dbName },
+  )
+  return payload ?? {}
+}
+
+export const createDataset = async (
+  context: RequestContext,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    'pipelines/datasets',
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const createDatasetVersion = async (
+  context: RequestContext,
+  datasetId: string,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    `pipelines/datasets/${encodeURIComponent(datasetId)}/versions`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? {}
+}
+
 export const previewRegisteredSheet = async (
   context: RequestContext,
   sheetId: string,

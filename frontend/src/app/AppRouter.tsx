@@ -6,8 +6,11 @@ import { DatabasesPage } from '../pages/DatabasesPage'
 import { OverviewPage } from '../pages/OverviewPage'
 import { BranchesPage } from '../pages/BranchesPage'
 import { OntologyPage } from '../pages/OntologyPage'
+import { WorkshopPage } from '../pages/WorkshopPage'
 import { MappingsPage } from '../pages/MappingsPage'
 import { SheetsHubPage } from '../pages/SheetsHubPage'
+import { GoogleSheetsPage } from '../pages/GoogleSheetsPage'
+import { PipelineBuilderPage } from '../pages/PipelineBuilderPage'
 import { ImportSheetsPage } from '../pages/ImportSheetsPage'
 import { ImportExcelPage } from '../pages/ImportExcelPage'
 import { SchemaSuggestionPage } from '../pages/SchemaSuggestionPage'
@@ -45,13 +48,19 @@ export const AppRouter = () => {
     const dbName = decodeURIComponent(segments[1])
     const section = segments[2] ?? 'overview'
     if (section === 'overview') {
-      return <OverviewPage dbName={dbName} />
+      return <OverviewPage />
     }
     if (section === 'branches') {
       return <BranchesPage dbName={dbName} />
     }
+    if (section === 'pipeline') {
+      return <PipelineBuilderPage dbName={dbName} />
+    }
     if (section === 'ontology') {
       return <OntologyPage dbName={dbName} />
+    }
+    if (section === 'workshop') {
+      return <WorkshopPage />
     }
     if (section === 'mappings') {
       return <MappingsPage dbName={dbName} />
@@ -59,7 +68,13 @@ export const AppRouter = () => {
     if (section === 'data') {
       const sub = segments[3] ?? 'sheets'
       if (sub === 'sheets') {
-        return <SheetsHubPage dbName={dbName} />
+        const type = segments[4] ?? 'hub'
+        if (type === 'hub') {
+          return <SheetsHubPage dbName={dbName} />
+        }
+        if (type === 'google') {
+          return <GoogleSheetsPage dbName={dbName} />
+        }
       }
       if (sub === 'import') {
         const kind = segments[4] ?? 'sheets'
