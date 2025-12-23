@@ -36,6 +36,18 @@ import { qk } from '../query/queryKeys'
 import { useAppStore } from '../store/useAppStore'
 
 type RegisteredSheet = Record<string, unknown>
+type GoogleSheetsConnection = {
+    connection_id?: string
+    label?: string
+}
+type GoogleSpreadsheet = {
+    spreadsheet_id?: string
+    name?: string
+}
+type GoogleWorksheet = {
+    worksheet_id?: string | number
+    title?: string
+}
 
 export const GoogleSheetsPage = ({ dbName }: { dbName: string }) => {
     const queryClient = useQueryClient()
@@ -57,11 +69,10 @@ export const GoogleSheetsPage = ({ dbName }: { dbName: string }) => {
     useEffect(() => {
         const url = new URL(window.location.href)
         const connectionId = url.searchParams.get('connection_id')
-        if (connectionId) {
-            setSelectedConnection(connectionId)
-            url.searchParams.delete('connection_id')
-            window.history.replaceState({}, '', url.toString())
-        }
+        if (!connectionId) return
+        url.searchParams.delete('connection_id')
+        window.history.replaceState({}, '', url.toString())
+        setTimeout(() => setSelectedConnection(connectionId), 0)
     }, [])
 
     const previewMutation = useMutation({
@@ -139,7 +150,7 @@ export const GoogleSheetsPage = ({ dbName }: { dbName: string }) => {
     })
 
     const connections = useMemo(() => {
-        const payload = connectionsQuery.data as { data?: { connections?: RegisteredSheet[] } } | undefined
+        const payload = connectionsQuery.data as { data?: { connections?: GoogleSheetsConnection[] } } | undefined
         return payload?.data?.connections ?? []
     }, [connectionsQuery.data])
 
@@ -150,7 +161,7 @@ export const GoogleSheetsPage = ({ dbName }: { dbName: string }) => {
     })
 
     const spreadsheets = useMemo(() => {
-        const payload = spreadsheetsQuery.data as { data?: { spreadsheets?: RegisteredSheet[] } } | undefined
+        const payload = spreadsheetsQuery.data as { data?: { spreadsheets?: GoogleSpreadsheet[] } } | undefined
         return payload?.data?.spreadsheets ?? []
     }, [spreadsheetsQuery.data])
 
@@ -161,7 +172,7 @@ export const GoogleSheetsPage = ({ dbName }: { dbName: string }) => {
     })
 
     const worksheets = useMemo(() => {
-        const payload = worksheetsQuery.data as { data?: { worksheets?: RegisteredSheet[] } } | undefined
+        const payload = worksheetsQuery.data as { data?: { worksheets?: GoogleWorksheet[] } } | undefined
         return payload?.data?.worksheets ?? []
     }, [worksheetsQuery.data])
 
@@ -332,8 +343,8 @@ export const GoogleSheetsPage = ({ dbName }: { dbName: string }) => {
                             >
                                 <option value="">{copy.connections.select}</option>
                                 {connections.map((connection) => (
-                                    <option key={String((connection as any).connection_id)} value={String((connection as any).connection_id)}>
-                                        {String((connection as any).label ?? 'Google Sheets')}
+                                    <option key={String(connection.connection_id ?? '')} value={String(connection.connection_id ?? '')}>
+                                        {String(connection.label ?? 'Google Sheets')}
                                     </option>
                                 ))}
                             </select>
@@ -367,8 +378,8 @@ export const GoogleSheetsPage = ({ dbName }: { dbName: string }) => {
                                     setSelectedSpreadsheet(event.currentTarget.value)
                                     setSelectedWorksheet('')
                                     const match = spreadsheets.find(
-                                        (item) => String((item as any).spreadsheet_id) === event.currentTarget.value,
-                                    ) as any
+                                        (item) => String(item.spreadsheet_id ?? '') === event.currentTarget.value,
+                                    )
                                     if (match?.spreadsheet_id) {
                                         setSheetUrl(
                                             `https://docs.google.com/spreadsheets/d/${match.spreadsheet_id}/edit`,
@@ -379,8 +390,8 @@ export const GoogleSheetsPage = ({ dbName }: { dbName: string }) => {
                             >
                                 <option value="">{copy.selection.spreadsheet}</option>
                                 {spreadsheets.map((sheet) => (
-                                    <option key={String((sheet as any).spreadsheet_id)} value={String((sheet as any).spreadsheet_id)}>
-                                        {String((sheet as any).name ?? 'Untitled')}
+                                    <option key={String(sheet.spreadsheet_id ?? '')} value={String(sheet.spreadsheet_id ?? '')}>
+                                        {String(sheet.name ?? 'Untitled')}
                                     </option>
                                 ))}
                             </select>
@@ -398,8 +409,8 @@ export const GoogleSheetsPage = ({ dbName }: { dbName: string }) => {
                             >
                                 <option value="">{copy.selection.worksheet}</option>
                                 {worksheets.map((sheet) => (
-                                    <option key={String((sheet as any).worksheet_id)} value={String((sheet as any).title)}>
-                                        {String((sheet as any).title)}
+                                    <option key={String(sheet.worksheet_id ?? '')} value={String(sheet.title ?? '')}>
+                                        {String(sheet.title ?? '')}
                                     </option>
                                 ))}
                             </select>

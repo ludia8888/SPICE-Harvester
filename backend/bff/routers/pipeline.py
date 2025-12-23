@@ -4,27 +4,31 @@ Pipeline Builder API (BFF)
 Provides CRUD for pipelines + preview/build entrypoints.
 """
 
-from __future__ import annotations
-
+import csv
+import io
 import logging
 import os
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+from urllib.parse import quote
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 
 from shared.models.requests import ApiResponse
 from shared.models.event_envelope import EventEnvelope
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.pipeline_registry import PipelineRegistry
 from shared.services.pipeline_executor import PipelineExecutor
+from shared.services.pipeline_job_queue import PipelineJobQueue
+from shared.models.pipeline_job import PipelineJob
 from shared.services.event_store import event_store
 from shared.dependencies.providers import StorageServiceDep, LineageStoreDep
 from shared.services.pipeline_artifact_store import PipelineArtifactStore
 from shared.utils.s3_uri import build_s3_uri, parse_s3_uri
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.observability.tracing import trace_endpoint
+from shared.config.app_config import AppConfig
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +51,10 @@ async def get_pipeline_executor() -> PipelineExecutor:
     from bff.main import get_pipeline_executor as _get_pipeline_executor
 
     return await _get_pipeline_executor()
+
+
+async def get_pipeline_job_queue() -> PipelineJobQueue:
+    return PipelineJobQueue()
 
 
 def _utcnow() -> datetime:
@@ -97,22 +105,51 @@ def _normalize_table_bbox(
     }
 
 
+def _normalize_inferred_type(type_value: Any) -> str:
+    if not type_value:
+        return "xsd:string"
+    raw = str(type_value).strip()
+    if not raw:
+        return "xsd:string"
+    if raw.startswith("xsd:"):
+        return raw
+    lowered = raw.lower()
+    if lowered == "money":
+        return "xsd:decimal"
+    if lowered in {"integer", "int"}:
+        return "xsd:integer"
+    if lowered in {"decimal", "number", "float", "double"}:
+        return "xsd:decimal"
+    if lowered in {"boolean", "bool"}:
+        return "xsd:boolean"
+    if lowered in {"datetime", "timestamp"}:
+        return "xsd:dateTime"
+    if lowered == "date":
+        return "xsd:dateTime"
+    return "xsd:string"
+
+
 def _build_schema_columns(columns: list[str], inferred_schema: list[Dict[str, Any]]) -> list[Dict[str, str]]:
     inferred_map: Dict[str, str] = {}
     for item in inferred_schema or []:
         if not isinstance(item, dict):
             continue
-        name = str(item.get("name") or "").strip()
+        name = str(item.get("name") or item.get("column_name") or "").strip()
         if not name:
             continue
-        inferred_map[name] = str(item.get("type") or item.get("data_type") or "String")
+        inferred_type = item.get("type") or item.get("data_type")
+        if not inferred_type:
+            inferred_payload = item.get("inferred_type")
+            if isinstance(inferred_payload, dict):
+                inferred_type = inferred_payload.get("type")
+        inferred_map[name] = _normalize_inferred_type(inferred_type)
 
     schema_columns: list[Dict[str, str]] = []
     for col in columns:
         col_name = str(col)
         if not col_name:
             continue
-        schema_columns.append({"name": col_name, "type": inferred_map.get(col_name, "String")})
+        schema_columns.append({"name": col_name, "type": inferred_map.get(col_name, "xsd:string")})
     return schema_columns
 
 
@@ -134,6 +171,48 @@ def _rows_from_preview(columns: list[str], sample_rows: list[list[Any]]) -> list
             payload[str(col)] = row[index] if index < len(row) else None
         rows.append(payload)
     return rows
+
+
+def _detect_csv_delimiter(sample: str) -> str:
+    candidates = [",", "\t", ";", "|"]
+    line = next((line for line in sample.splitlines() if line.strip()), "")
+    if not line:
+        return ","
+    scores = {delimiter: line.count(delimiter) for delimiter in candidates}
+    best = max(scores, key=scores.get)
+    return best if scores.get(best, 0) > 0 else ","
+
+
+def _parse_csv_content(
+    content: str,
+    *,
+    delimiter: str,
+    has_header: bool,
+    preview_limit: int = 200,
+) -> tuple[list[str], list[list[str]], int]:
+    reader = csv.reader(io.StringIO(content), delimiter=delimiter)
+    columns: list[str] = []
+    preview_rows: list[list[str]] = []
+    total_rows = 0
+
+    for row in reader:
+        if not row or all(str(cell).strip() == "" for cell in row):
+            continue
+        if not columns:
+            if has_header:
+                columns = [str(cell).strip() or f"column_{index + 1}" for index, cell in enumerate(row)]
+                continue
+            columns = [f"column_{index + 1}" for index in range(len(row))]
+        normalized = [str(cell).strip() for cell in row]
+        if len(normalized) < len(columns):
+            normalized.extend([""] * (len(columns) - len(normalized)))
+        elif len(normalized) > len(columns):
+            normalized = normalized[: len(columns)]
+        total_rows += 1
+        if len(preview_rows) < preview_limit:
+            preview_rows.append(normalized)
+
+    return columns, preview_rows, total_rows
 
 
 def _build_event(
@@ -173,11 +252,26 @@ def _build_event(
     )
 
 
+def _sanitize_s3_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    if not metadata:
+        return {}
+    sanitized: Dict[str, str] = {}
+    for key, value in metadata.items():
+        if value is None:
+            continue
+        raw = str(value)
+        try:
+            raw.encode("ascii")
+            sanitized[key] = raw
+        except UnicodeEncodeError:
+            sanitized[key] = quote(raw, safe="")
+    return sanitized
+
+
 @router.get("", response_model=ApiResponse)
 @trace_endpoint("list_pipelines")
 async def list_pipelines(
     db_name: str,
-    request: Request,
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
 ) -> ApiResponse:
     try:
@@ -194,11 +288,30 @@ async def list_pipelines(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@router.get("/datasets", response_model=ApiResponse)
+@trace_endpoint("list_datasets")
+async def list_datasets(
+    db_name: str,
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+) -> ApiResponse:
+    try:
+        db_name = validate_db_name(db_name)
+        datasets = await dataset_registry.list_datasets(db_name=db_name)
+        return ApiResponse.success(
+            message="Datasets fetched",
+            data={"datasets": datasets, "count": len(datasets)},
+        ).to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to list datasets: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
 @router.get("/{pipeline_id}", response_model=ApiResponse)
 @trace_endpoint("get_pipeline")
 async def get_pipeline(
     pipeline_id: str,
-    request: Request,
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
 ) -> ApiResponse:
     try:
@@ -227,7 +340,6 @@ async def get_pipeline(
 @trace_endpoint("create_pipeline")
 async def create_pipeline(
     payload: Dict[str, Any],
-    request: Request,
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
 ) -> ApiResponse:
     try:
@@ -270,6 +382,7 @@ async def create_pipeline(
             },
             command_type="CREATE_PIPELINE",
         )
+        event.metadata["kafka_topic"] = AppConfig.PIPELINE_EVENTS_TOPIC
         try:
             await event_store.connect()
             await event_store.append_event(event)
@@ -294,7 +407,6 @@ async def create_pipeline(
 async def update_pipeline(
     pipeline_id: str,
     payload: Dict[str, Any],
-    request: Request,
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
 ) -> ApiResponse:
     try:
@@ -327,6 +439,7 @@ async def update_pipeline(
             },
             command_type="UPDATE_PIPELINE",
         )
+        event.metadata["kafka_topic"] = AppConfig.PIPELINE_EVENTS_TOPIC
         try:
             await event_store.connect()
             await event_store.append_event(event)
@@ -355,7 +468,6 @@ async def update_pipeline(
 async def preview_pipeline(
     pipeline_id: str,
     payload: Dict[str, Any],
-    request: Request,
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
     pipeline_executor: PipelineExecutor = Depends(get_pipeline_executor),
 ) -> ApiResponse:
@@ -418,12 +530,10 @@ async def preview_pipeline(
 async def deploy_pipeline(
     pipeline_id: str,
     payload: Dict[str, Any],
-    request: Request,
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
-    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-    pipeline_executor: PipelineExecutor = Depends(get_pipeline_executor),
-    storage_service: StorageServiceDep = Depends(),
-    lineage_store: LineageStoreDep = Depends(),
+    pipeline_job_queue: PipelineJobQueue = Depends(get_pipeline_job_queue),
+    *,
+    lineage_store: LineageStoreDep,
 ) -> ApiResponse:
     try:
         sanitized = sanitize_input(payload)
@@ -432,84 +542,45 @@ async def deploy_pipeline(
         node_id = str(sanitized.get("node_id") or "").strip() or None
         dataset_name = str(output.get("dataset_name") or "").strip()
         db_name = str(output.get("db_name") or "").strip()
+        schedule_interval_seconds = None
+        schedule = sanitized.get("schedule") or output.get("schedule")
+        if isinstance(schedule, dict):
+            schedule_interval_seconds = schedule.get("interval_seconds")
+        elif isinstance(schedule, (int, float, str)):
+            try:
+                schedule_interval_seconds = int(schedule)
+            except (TypeError, ValueError):
+                schedule_interval_seconds = None
 
         if not definition_json:
             latest = await pipeline_registry.get_latest_version(pipeline_id=pipeline_id)
             definition_json = latest.definition_json if latest else {}
+        pipeline = None
         if not db_name:
             pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
             db_name = pipeline.db_name if pipeline else ""
         if not db_name:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="db_name is required")
-        if dataset_name:
-            db_name = validate_db_name(db_name)
+        db_name = validate_db_name(db_name)
 
-        table, deploy_meta = await pipeline_executor.deploy(
-            definition=definition_json,
+        job = PipelineJob(
+            job_id=uuid4().hex,
+            pipeline_id=pipeline_id,
             db_name=db_name,
+            pipeline_type=pipeline.pipeline_type if pipeline else "batch",
+            definition_json=definition_json or {},
             node_id=node_id,
-            dataset_name=dataset_name or "pipeline_output",
+            output_dataset_name=dataset_name or "pipeline_output",
+            mode="deploy",
+            schedule_interval_seconds=schedule_interval_seconds,
         )
-
-        artifact_bucket = os.getenv("PIPELINE_ARTIFACT_BUCKET", "pipeline-artifacts")
-        artifact_object_key: Optional[str] = None
-        artifact_uri: Optional[str] = None
-        if storage_service:
-            artifact_store = PipelineArtifactStore(storage_service, artifact_bucket)
-            artifact_uri = await artifact_store.save_table(
-                dataset_name=dataset_name or "pipeline_output",
-                columns=table.columns,
-                rows=table.rows,
-                db_name=db_name,
-                pipeline_id=pipeline_id,
-            )
-            deploy_meta["artifact_key"] = artifact_uri
-            parsed = parse_s3_uri(artifact_uri)
-            if parsed:
-                artifact_bucket, artifact_object_key = parsed
-
-        output_payload = {
-            "db_name": db_name,
-            "dataset_name": dataset_name or "pipeline_output",
-            "row_count": deploy_meta.get("row_count"),
-            "artifact_key": deploy_meta.get("artifact_key"),
-            "schema_json": {"columns": [{"name": name, "type": "String"} for name in table.columns]},
-            "sample_json": {"columns": [{"name": name, "type": "String"} for name in table.columns], "rows": table.rows},
-        }
-
-        dataset_id: Optional[str] = None
-        if dataset_name:
-            existing = await dataset_registry.get_dataset_by_name(db_name=db_name, name=dataset_name)
-            if not existing:
-                dataset = await dataset_registry.create_dataset(
-                    db_name=db_name,
-                    name=dataset_name,
-                    description=None,
-                    source_type="pipeline",
-                    source_ref=pipeline_id,
-                    schema_json=output_payload["schema_json"],
-                )
-                dataset_id = dataset.dataset_id
-            else:
-                dataset_id = existing.dataset_id
-
-        if dataset_id:
-            try:
-                await dataset_registry.add_version(
-                    dataset_id=dataset_id,
-                    artifact_key=str(deploy_meta.get("artifact_key") or "").strip() or None,
-                    row_count=int(deploy_meta.get("row_count") or 0) or None,
-                    sample_json=output_payload["sample_json"],
-                    schema_json=output_payload["schema_json"],
-                )
-            except ValueError as exc:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        await pipeline_job_queue.publish(job)
 
         latest_version = await pipeline_registry.get_latest_version(pipeline_id=pipeline_id)
         await pipeline_registry.record_build(
             pipeline_id=pipeline_id,
-            status="DEPLOYED",
-            output_json=output,
+            status="QUEUED",
+            output_json={"job_id": job.job_id, "output": output, "schedule": schedule_interval_seconds},
             deployed_version=latest_version.version if latest_version else None,
         )
 
@@ -517,38 +588,38 @@ async def deploy_pipeline(
             event_type="PIPELINE_DEPLOYED",
             aggregate_type="Pipeline",
             aggregate_id=pipeline_id,
-            data={"pipeline_id": pipeline_id, "output": output_payload},
+            data={"pipeline_id": pipeline_id, "job_id": job.job_id, "output": output},
             command_type="DEPLOY_PIPELINE",
         )
+        event.metadata["kafka_topic"] = AppConfig.PIPELINE_EVENTS_TOPIC
         try:
             await event_store.connect()
             await event_store.append_event(event)
         except Exception as e:
             logger.warning(f"Failed to append pipeline deploy event: {e}")
 
-        if lineage_store and artifact_object_key:
+        if lineage_store:
             await lineage_store.record_link(
                 from_node_id=lineage_store.node_event(str(event.event_id)),
-                to_node_id=lineage_store.node_artifact("s3", artifact_bucket, artifact_object_key),
-                edge_type="pipeline_output_stored",
+                to_node_id=lineage_store.node_aggregate("Pipeline", pipeline_id),
+                edge_type="pipeline_job_enqueued",
                 occurred_at=_utcnow(),
                 from_label="pipeline_deploy",
-                to_label=build_s3_uri(artifact_bucket, artifact_object_key),
+                to_label=job.job_id,
                 db_name=db_name,
                 edge_metadata={
                     "db_name": db_name,
-                    "bucket": artifact_bucket,
-                    "key": artifact_object_key,
-                    "dataset_name": dataset_name or "pipeline_output",
                     "pipeline_id": pipeline_id,
+                    "pipeline_version": latest_version.version if latest_version else None,
+                    "job_id": job.job_id,
                 },
             )
 
         return ApiResponse.success(
-            message="Pipeline deployed",
+            message="Pipeline deploy queued",
             data={
                 "pipeline_id": pipeline_id,
-                "output": output_payload,
+                "job_id": job.job_id,
                 "deployed_version": latest_version.version if latest_version else None,
             },
         ).to_dict()
@@ -559,32 +630,10 @@ async def deploy_pipeline(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.get("/datasets", response_model=ApiResponse)
-@trace_endpoint("list_datasets")
-async def list_datasets(
-    db_name: str,
-    request: Request,
-    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-) -> ApiResponse:
-    try:
-        db_name = validate_db_name(db_name)
-        datasets = await dataset_registry.list_datasets(db_name=db_name)
-        return ApiResponse.success(
-            message="Datasets fetched",
-            data={"datasets": datasets, "count": len(datasets)},
-        ).to_dict()
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to list datasets: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
-
-
 @router.post("/datasets", response_model=ApiResponse)
 @trace_endpoint("create_dataset")
 async def create_dataset(
     payload: Dict[str, Any],
-    request: Request,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
 ) -> ApiResponse:
     try:
@@ -614,6 +663,7 @@ async def create_dataset(
             data={"dataset_id": dataset.dataset_id, "db_name": db_name, "name": name},
             command_type="CREATE_DATASET",
         )
+        event.metadata["kafka_topic"] = AppConfig.PIPELINE_EVENTS_TOPIC
         try:
             await event_store.connect()
             await event_store.append_event(event)
@@ -636,7 +686,6 @@ async def create_dataset(
 async def create_dataset_version(
     dataset_id: str,
     payload: Dict[str, Any],
-    request: Request,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
 ) -> ApiResponse:
     try:
@@ -667,6 +716,7 @@ async def create_dataset_version(
             data={"dataset_id": dataset_id, "version": version.version},
             command_type="INGEST_DATASET_SNAPSHOT",
         )
+        event.metadata["kafka_topic"] = AppConfig.PIPELINE_EVENTS_TOPIC
         try:
             await event_store.connect()
             await event_store.append_event(event)
@@ -698,8 +748,9 @@ async def upload_excel_dataset(
     table_bottom: Optional[int] = Form(None),
     table_right: Optional[int] = Form(None),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-    storage_service: StorageServiceDep = Depends(),
-    lineage_store: LineageStoreDep = Depends(),
+    *,
+    storage_service: StorageServiceDep,
+    lineage_store: LineageStoreDep,
 ) -> ApiResponse:
     """
     Excel 업로드 → preview/스키마 추론 → dataset registry 저장 + artifact 저장
@@ -774,6 +825,7 @@ async def upload_excel_dataset(
                 data={"dataset_id": dataset.dataset_id, "db_name": db_name, "name": resolved_name},
                 command_type="CREATE_DATASET",
             )
+            create_event.metadata["kafka_topic"] = AppConfig.PIPELINE_EVENTS_TOPIC
             try:
                 await event_store.connect()
                 await event_store.append_event(create_event)
@@ -794,11 +846,13 @@ async def upload_excel_dataset(
                 object_key,
                 content,
                 content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                metadata={
-                    "db_name": db_name,
-                    "dataset_name": resolved_name,
-                    "source": "excel_upload",
-                },
+                metadata=_sanitize_s3_metadata(
+                    {
+                        "db_name": db_name,
+                        "dataset_name": resolved_name,
+                        "source": "excel_upload",
+                    }
+                ),
             )
             artifact_key = build_s3_uri(artifact_bucket, object_key)
 
@@ -826,6 +880,7 @@ async def upload_excel_dataset(
             },
             command_type="INGEST_DATASET_SNAPSHOT",
         )
+        event.metadata["kafka_topic"] = AppConfig.PIPELINE_EVENTS_TOPIC
         try:
             await event_store.connect()
             await event_store.append_event(event)
@@ -870,4 +925,198 @@ async def upload_excel_dataset(
         raise
     except Exception as e:
         logger.error(f"Failed to upload excel dataset: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/datasets/csv-upload", response_model=ApiResponse)
+@trace_endpoint("upload_csv_dataset")
+async def upload_csv_dataset(
+    db_name: str = Query(..., description="Database name"),
+    file: UploadFile = File(...),
+    dataset_name: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    delimiter: Optional[str] = Form(None),
+    has_header: bool = Form(True),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    *,
+    storage_service: StorageServiceDep,
+    lineage_store: LineageStoreDep,
+) -> ApiResponse:
+    """
+    CSV 업로드 → preview/타입 추론 → dataset registry 저장 + artifact 저장
+
+    Pipeline Builder 전용: raw 데이터를 canonical dataset으로 저장합니다.
+    """
+    try:
+        db_name = validate_db_name(db_name)
+        filename = file.filename or "upload.csv"
+        if not filename.lower().endswith(".csv"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only .csv files are supported")
+
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+
+        resolved_name = (dataset_name or "").strip() or _default_dataset_name(filename)
+        if not resolved_name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dataset_name is required")
+
+        decoded = content.decode("utf-8", errors="replace")
+        resolved_delimiter = delimiter or _detect_csv_delimiter(decoded)
+        columns, preview_rows, total_rows = _parse_csv_content(
+            decoded,
+            delimiter=resolved_delimiter,
+            has_header=has_header,
+        )
+        if not columns:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No columns detected")
+
+        inferred_schema: list[Dict[str, Any]] = []
+        try:
+            from bff.services.funnel_client import FunnelClient
+
+            async with FunnelClient() as funnel_client:
+                analysis = await funnel_client.analyze_dataset(
+                    {
+                        "data": preview_rows,
+                        "columns": columns,
+                        "sample_size": min(len(preview_rows), 500),
+                        "include_complex_types": True,
+                    }
+                )
+            inferred_schema = analysis.get("columns") or []
+        except Exception as exc:
+            logger.warning(f"CSV type inference failed: {exc}")
+
+        schema_columns = _build_schema_columns(columns, inferred_schema)
+        schema_json = {"columns": schema_columns}
+        sample_rows = _rows_from_preview(columns, preview_rows)
+        row_count = total_rows if total_rows > 0 else len(sample_rows)
+
+        dataset = await dataset_registry.get_dataset_by_name(db_name=db_name, name=resolved_name)
+        created_dataset = False
+        if not dataset:
+            dataset = await dataset_registry.create_dataset(
+                db_name=db_name,
+                name=resolved_name,
+                description=description.strip() if description else None,
+                source_type="csv_upload",
+                source_ref=filename,
+                schema_json=schema_json,
+            )
+            created_dataset = True
+
+        if created_dataset:
+            create_event = _build_event(
+                event_type="DATASET_CREATED",
+                aggregate_type="Dataset",
+                aggregate_id=dataset.dataset_id,
+                data={"dataset_id": dataset.dataset_id, "db_name": db_name, "name": resolved_name},
+                command_type="CREATE_DATASET",
+            )
+            create_event.metadata["kafka_topic"] = AppConfig.PIPELINE_EVENTS_TOPIC
+            try:
+                await event_store.connect()
+                await event_store.append_event(create_event)
+            except Exception as e:
+                logger.warning(f"Failed to append csv dataset create event: {e}")
+
+        artifact_bucket = os.getenv("DATASET_ARTIFACT_BUCKET") or os.getenv(
+            "PIPELINE_ARTIFACT_BUCKET", "pipeline-artifacts"
+        )
+        artifact_key = None
+        if storage_service:
+            safe_name = resolved_name.replace(" ", "_")
+            timestamp = _utcnow().strftime("%Y%m%dT%H%M%SZ")
+            object_key = f"datasets/{db_name}/{dataset.dataset_id}/{safe_name}/{timestamp}.csv"
+            await storage_service.create_bucket(artifact_bucket)
+            await storage_service.save_bytes(
+                artifact_bucket,
+                object_key,
+                content,
+                content_type="text/csv",
+                metadata=_sanitize_s3_metadata(
+                    {
+                        "db_name": db_name,
+                        "dataset_name": resolved_name,
+                        "source": "csv_upload",
+                    }
+                ),
+            )
+            artifact_key = build_s3_uri(artifact_bucket, object_key)
+
+        try:
+            version = await dataset_registry.add_version(
+                dataset_id=dataset.dataset_id,
+                artifact_key=artifact_key,
+                row_count=row_count,
+                sample_json={"columns": _columns_from_schema(schema_columns), "rows": sample_rows},
+                schema_json=schema_json,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+        event = _build_event(
+            event_type="DATASET_VERSION_CREATED",
+            aggregate_type="Dataset",
+            aggregate_id=dataset.dataset_id,
+            data={
+                "dataset_id": dataset.dataset_id,
+                "db_name": db_name,
+                "name": resolved_name,
+                "version": version.version,
+                "artifact_key": artifact_key,
+            },
+            command_type="INGEST_DATASET_SNAPSHOT",
+        )
+        event.metadata["kafka_topic"] = AppConfig.PIPELINE_EVENTS_TOPIC
+        try:
+            await event_store.connect()
+            await event_store.append_event(event)
+        except Exception as e:
+            logger.warning(f"Failed to append csv dataset event: {e}")
+
+        if lineage_store and artifact_key:
+            parsed = parse_s3_uri(artifact_key)
+            if parsed:
+                bucket, key = parsed
+                try:
+                    await lineage_store.record_link(
+                        from_node_id=lineage_store.node_event(str(event.event_id)),
+                        to_node_id=lineage_store.node_artifact("s3", bucket, key),
+                        edge_type="dataset_artifact_stored",
+                        occurred_at=_utcnow(),
+                        from_label="csv_upload",
+                        to_label=artifact_key,
+                        db_name=db_name,
+                        edge_metadata={
+                            "db_name": db_name,
+                            "dataset_id": dataset.dataset_id,
+                            "dataset_name": resolved_name,
+                            "bucket": bucket,
+                            "key": key,
+                            "source": "csv_upload",
+                        },
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to record csv dataset lineage: {e}")
+
+        return ApiResponse.success(
+            message="CSV dataset created",
+            data={
+                "dataset": dataset.__dict__,
+                "version": version.__dict__,
+                "preview": {"columns": _columns_from_schema(schema_columns), "rows": sample_rows},
+                "source": {
+                    "type": "csv",
+                    "filename": filename,
+                    "delimiter": resolved_delimiter,
+                    "has_header": has_header,
+                },
+            },
+        ).to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to upload csv dataset: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

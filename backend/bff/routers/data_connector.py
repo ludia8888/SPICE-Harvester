@@ -5,6 +5,8 @@ This router handles data connector registration and management,
 specifically for Google Sheets integration with the connector runtime.
 """
 
+import csv
+import io
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -28,7 +30,11 @@ from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.services.sheet_grid_parser import SheetGridParseOptions, SheetGridParser
 from shared.services.connector_registry import ConnectorRegistry
 from shared.services.dataset_registry import DatasetRegistry
-from shared.dependencies.providers import LineageStoreDep
+from shared.dependencies.providers import LineageStoreDep, StorageServiceDep
+from shared.utils.s3_uri import build_s3_uri
+from shared.config.app_config import AppConfig
+from shared.services.event_store import event_store
+from shared.models.event_envelope import EventEnvelope
 from data_connector.google_sheets.auth import GoogleOAuth2Client
 
 logger = logging.getLogger(__name__)
@@ -63,6 +69,43 @@ async def get_dataset_registry() -> DatasetRegistry:
 
 def _build_google_oauth_client() -> GoogleOAuth2Client:
     return GoogleOAuth2Client()
+
+
+def _build_event(
+    *,
+    event_type: str,
+    aggregate_type: str,
+    aggregate_id: str,
+    data: Dict[str, Any],
+    command_type: str,
+    actor: Optional[str] = None,
+) -> EventEnvelope:
+    command_payload = {
+        "command_id": str(uuid4()),
+        "command_type": command_type,
+        "aggregate_type": aggregate_type,
+        "aggregate_id": aggregate_id,
+        "payload": data,
+        "metadata": {},
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": actor,
+        "version": 1,
+    }
+    return EventEnvelope(
+        event_id=command_payload["command_id"],
+        event_type=event_type,
+        aggregate_type=aggregate_type,
+        aggregate_id=aggregate_id,
+        occurred_at=datetime.now(timezone.utc),
+        actor=actor,
+        data=command_payload,
+        metadata={
+            "kind": "command",
+            "command_type": command_type,
+            "command_version": 1,
+            "command_id": command_payload["command_id"],
+        },
+    )
 
 def _connector_oauth_enabled(oauth_client: GoogleOAuth2Client) -> bool:
     return bool(oauth_client.client_id and oauth_client.client_secret and oauth_client.redirect_uri)
@@ -451,7 +494,8 @@ async def register_google_sheet(
     google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-    lineage_store: LineageStoreDep = Depends(),
+    *,
+    lineage_store: LineageStoreDep,
 ) -> Dict[str, Any]:
     """
     Register a Google Sheet for data monitoring and automatic import.
@@ -826,7 +870,9 @@ async def start_pipelining_google_sheet(
     google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
-    lineage_store: LineageStoreDep = Depends(),
+    *,
+    storage_service: StorageServiceDep,
+    lineage_store: LineageStoreDep,
 ) -> Dict[str, Any]:
     try:
         sanitized = sanitize_input(payload or {})
@@ -863,15 +909,67 @@ async def start_pipelining_google_sheet(
             )
             access_token = refreshed_token or access_token
 
-        preview = await google_sheets_service.preview_sheet(
+        sheet_id_resolved, metadata, worksheet_title, _, values = await google_sheets_service.fetch_sheet_values(
             sheet_url,
             worksheet_name=worksheet_name or default_ws,
-            limit=limit,
             api_key=api_key,
             access_token=access_token,
         )
+        columns = []
+        rows: list[list[Any]] = []
+        try:
+            from data_connector.google_sheets.utils import normalize_sheet_data
 
-        source_ref = f"google_sheets:{sheet_id}"
+            columns, rows = normalize_sheet_data(values)
+        except Exception:
+            columns = []
+            rows = []
+
+        sample_rows = rows[: max(1, limit)] if rows else []
+        preview = {
+            "sheet_id": sheet_id_resolved,
+            "sheet_title": metadata.title,
+            "worksheet_name": worksheet_title,
+            "columns": columns,
+            "sample_rows": sample_rows,
+            "total_rows": len(rows),
+        }
+
+        inferred_schema: list[Dict[str, Any]] = []
+        try:
+            from bff.services.funnel_client import FunnelClient
+
+            async with FunnelClient() as funnel_client:
+                analysis = await funnel_client.analyze_dataset(
+                    {
+                        "data": sample_rows or [],
+                        "columns": columns or [],
+                        "sample_size": min(len(sample_rows or []), 500),
+                        "include_complex_types": True,
+                    }
+                )
+            inferred_schema = analysis.get("columns") or []
+        except Exception as exc:
+            logger.warning(f"Google Sheets type inference failed: {exc}")
+
+        schema_columns = []
+        for column in columns or []:
+            inferred_type = None
+            for item in inferred_schema:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("column_name") or item.get("name") or "").strip()
+                if name != column:
+                    continue
+                inferred_type = item.get("type") or item.get("data_type")
+                if not inferred_type:
+                    inferred_payload = item.get("inferred_type")
+                    if isinstance(inferred_payload, dict):
+                        inferred_type = inferred_payload.get("type")
+                break
+            schema_columns.append({"name": column, "type": inferred_type or "xsd:string"})
+
+        source_ref = f"google_sheets:{sheet_id_resolved}"
         dataset = await dataset_registry.get_dataset_by_source_ref(
             db_name=db_name,
             source_type="connector",
@@ -880,34 +978,90 @@ async def start_pipelining_google_sheet(
         if not dataset:
             dataset = await dataset_registry.create_dataset(
                 db_name=db_name,
-                name=f"gsheet_{sheet_id}",
+                name=f"gsheet_{sheet_id_resolved}",
                 description=f"Google Sheets sync: {sheet_url}",
                 source_type="connector",
                 source_ref=source_ref,
-                schema_json={"columns": [{"name": col, "type": "String"} for col in preview.columns]},
+                schema_json={"columns": schema_columns},
             )
 
-        sample_rows = preview.sample_rows or []
-        if sample_rows:
-            await dataset_registry.add_version(
-                dataset_id=dataset.dataset_id,
-                artifact_key=None,
-                row_count=len(sample_rows),
-                sample_json={"columns": [{"name": col, "type": "String"} for col in preview.columns], "rows": sample_rows},
-                schema_json={"columns": [{"name": col, "type": "String"} for col in preview.columns]},
+            create_event = _build_event(
+                event_type="DATASET_CREATED",
+                aggregate_type="Dataset",
+                aggregate_id=dataset.dataset_id,
+                data={"dataset_id": dataset.dataset_id, "db_name": db_name, "name": dataset.name},
+                command_type="CREATE_DATASET",
             )
+            create_event.metadata["kafka_topic"] = AppConfig.PIPELINE_EVENTS_TOPIC
+            try:
+                await event_store.connect()
+                await event_store.append_event(create_event)
+            except Exception as e:
+                logger.warning(f"Failed to append gsheet dataset create event: {e}")
+
+        artifact_bucket = os.getenv("DATASET_ARTIFACT_BUCKET") or os.getenv(
+            "PIPELINE_ARTIFACT_BUCKET", "pipeline-artifacts"
+        )
+        artifact_key = None
+        if storage_service:
+            safe_name = dataset.name.replace(" ", "_")
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            object_key = f"datasets/{db_name}/{dataset.dataset_id}/{safe_name}/{timestamp}.csv"
+            await storage_service.create_bucket(artifact_bucket)
+            csv_buffer = io.StringIO()
+            writer = csv.writer(csv_buffer)
+            if columns:
+                writer.writerow(columns)
+            for row in rows:
+                writer.writerow(row)
+            await storage_service.save_bytes(
+                artifact_bucket,
+                object_key,
+                csv_buffer.getvalue().encode("utf-8"),
+                content_type="text/csv",
+            )
+            artifact_key = build_s3_uri(artifact_bucket, object_key)
+
+        if rows:
+            version = await dataset_registry.add_version(
+                dataset_id=dataset.dataset_id,
+                artifact_key=artifact_key,
+                row_count=len(rows),
+                sample_json={"columns": schema_columns, "rows": sample_rows},
+                schema_json={"columns": schema_columns},
+            )
+
+            event = _build_event(
+                event_type="DATASET_VERSION_CREATED",
+                aggregate_type="Dataset",
+                aggregate_id=dataset.dataset_id,
+                data={
+                    "dataset_id": dataset.dataset_id,
+                    "db_name": db_name,
+                    "name": dataset.name,
+                    "version": version.version,
+                    "artifact_key": artifact_key,
+                },
+                command_type="INGEST_DATASET_SNAPSHOT",
+            )
+            event.metadata["kafka_topic"] = AppConfig.PIPELINE_EVENTS_TOPIC
+            try:
+                await event_store.connect()
+                await event_store.append_event(event)
+            except Exception as e:
+                logger.warning(f"Failed to append gsheet dataset version event: {e}")
 
         if lineage_store:
             try:
                 await lineage_store.record_link(
-                    from_node_id=lineage_store.node_artifact("connector", "google_sheets", str(sheet_id)),
+                    from_node_id=lineage_store.node_artifact("connector", "google_sheets", str(sheet_id_resolved)),
                     to_node_id=lineage_store.node_aggregate("Dataset", dataset.dataset_id),
                     edge_type="connector_start_pipelining",
                     db_name=db_name,
                     edge_metadata={
                         "db_name": db_name,
                         "source_type": "google_sheets",
-                        "source_id": str(sheet_id),
+                        "source_id": str(sheet_id_resolved),
                         "dataset_id": dataset.dataset_id,
                     },
                 )
@@ -921,12 +1075,12 @@ async def start_pipelining_google_sheet(
                     "dataset_id": dataset.dataset_id,
                     "db_name": dataset.db_name,
                     "name": dataset.name,
-                    "schema_json": {"columns": [{"name": col, "type": "String"} for col in preview.columns]},
+                    "schema_json": {"columns": schema_columns},
                     "source_type": dataset.source_type,
                     "source_ref": dataset.source_ref,
                 },
                 "sample": {
-                    "columns": [{"name": col, "type": "String"} for col in preview.columns],
+                    "columns": schema_columns,
                     "rows": sample_rows,
                 },
             },

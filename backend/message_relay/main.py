@@ -516,15 +516,54 @@ class EventPublisher:
 
                     # Determine topic routing (preferred: index entry / metadata.kafka_topic)
                     topic = idx_data.get("kafka_topic")
+                    env: Optional[EventEnvelope] = None
+                    raw_payload: Optional[Dict[str, Any]] = None
                     if not topic:
                         try:
                             env = EventEnvelope.model_validate_json(ev_bytes)
                             topic = env.metadata.get("kafka_topic") if isinstance(env.metadata, dict) else None
                         except Exception:
+                            env = None
                             topic = None
+                    if not topic:
+                        try:
+                            raw_payload = json.loads(ev_bytes.decode("utf-8"))
+                        except Exception:
+                            raw_payload = None
+
+                    aggregate_type = ""
+                    if env:
+                        aggregate_type = str(env.aggregate_type or "")
+                    elif raw_payload:
+                        data_payload = raw_payload.get("data") if isinstance(raw_payload.get("data"), dict) else None
+                        aggregate_type = str(
+                            raw_payload.get("aggregate_type")
+                            or raw_payload.get("aggregateType")
+                            or (data_payload.get("aggregate_type") if data_payload else "")
+                            or (data_payload.get("aggregateType") if data_payload else "")
+                        )
+                        metadata_payload = raw_payload.get("metadata") if isinstance(raw_payload.get("metadata"), dict) else None
+                        if data_payload and not metadata_payload:
+                            metadata_payload = data_payload.get("metadata") if isinstance(data_payload.get("metadata"), dict) else None
+                        if metadata_payload and not topic:
+                            topic = metadata_payload.get("kafka_topic")
+
+                    if not topic and aggregate_type:
+                        normalized_type = aggregate_type.lower()
+                        if normalized_type in {"dataset", "pipeline"}:
+                            topic = AppConfig.PIPELINE_EVENTS_TOPIC
+                        elif normalized_type == "instance":
+                            topic = AppConfig.INSTANCE_EVENTS_TOPIC
+                        elif normalized_type == "ontology":
+                            topic = AppConfig.ONTOLOGY_EVENTS_TOPIC
+                        elif normalized_type.startswith("connector"):
+                            topic = AppConfig.CONNECTOR_UPDATES_TOPIC
 
                     if not topic:
-                        raise RuntimeError(f"missing kafka_topic for {s3_key}")
+                        logger.warning("Skipping event without kafka_topic: %s", s3_key)
+                        if self._advance_checkpoint(checkpoint, ts_ms=ts_ms, idx_key=idx_key):
+                            checkpoint_dirty = True
+                        continue
 
                     key_bytes = (idx_data.get("aggregate_id") or idx_data.get("event_id") or "").encode("utf-8")
 

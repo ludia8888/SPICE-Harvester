@@ -52,7 +52,7 @@ export const ImportSheetsPage = ({ dbName }: { dbName: string }) => {
   const [sheetUrl, setSheetUrl] = useState('')
   const [worksheetName, setWorksheetName] = useState('')
   const [apiKey, setApiKey] = useState('')
-  const [connectionId, setConnectionId] = useState('')
+  const [connectionId] = useState('')
   const [tableId, setTableId] = useState('')
   const [tableTop, setTableTop] = useState('')
   const [tableLeft, setTableLeft] = useState('')

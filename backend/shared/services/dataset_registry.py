@@ -6,6 +6,7 @@ Stores dataset metadata + versions (artifact references + samples).
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from datetime import datetime
@@ -16,6 +17,36 @@ import asyncpg
 
 from shared.config.service_config import ServiceConfig
 from shared.utils.s3_uri import is_s3_uri
+
+
+def _normalize_json_payload(value: Any) -> str:
+    if value is None:
+        return "{}"
+    if isinstance(value, str):
+        return value
+    return json.dumps(value)
+
+
+def _coerce_json(value: Any) -> Dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                return parsed
+            return {"value": parsed}
+        except Exception:
+            return {"raw": value}
+    try:
+        return dict(value)
+    except Exception:
+        return {}
 
 
 @dataclass(frozen=True)
@@ -141,13 +172,14 @@ class DatasetRegistry:
 
         dataset_id = dataset_id or str(uuid4())
         schema_json = schema_json or {}
+        schema_payload = _normalize_json_payload(schema_json)
 
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""
                 INSERT INTO {self._schema}.datasets (
                     dataset_id, db_name, name, description, source_type, source_ref, schema_json
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
                 RETURNING dataset_id, db_name, name, description, source_type, source_ref,
                           schema_json, created_at, updated_at
                 """,
@@ -157,7 +189,7 @@ class DatasetRegistry:
                 description,
                 source_type,
                 source_ref,
-                schema_json,
+                schema_payload,
             )
             if not row:
                 raise RuntimeError("Failed to create dataset")
@@ -168,7 +200,7 @@ class DatasetRegistry:
                 description=row["description"],
                 source_type=str(row["source_type"]),
                 source_ref=row["source_ref"],
-                schema_json=dict(row["schema_json"] or {}),
+                schema_json=_coerce_json(row["schema_json"]),
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
@@ -208,13 +240,13 @@ class DatasetRegistry:
                     "description": row["description"],
                     "source_type": str(row["source_type"]),
                     "source_ref": row["source_ref"],
-                    "schema_json": dict(row["schema_json"] or {}),
+                    "schema_json": _coerce_json(row["schema_json"]),
                     "created_at": row["created_at"],
                     "updated_at": row["updated_at"],
                     "latest_version": row["latest_version"],
                     "artifact_key": row["artifact_key"],
                     "row_count": row["row_count"],
-                    "sample_json": dict(row["sample_json"] or {}),
+                    "sample_json": _coerce_json(row["sample_json"]),
                     "version_created_at": row["version_created_at"],
                 }
             )
@@ -242,7 +274,7 @@ class DatasetRegistry:
                 description=row["description"],
                 source_type=str(row["source_type"]),
                 source_ref=row["source_ref"],
-                schema_json=dict(row["schema_json"] or {}),
+                schema_json=_coerce_json(row["schema_json"]),
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
@@ -270,7 +302,7 @@ class DatasetRegistry:
                 description=row["description"],
                 source_type=str(row["source_type"]),
                 source_ref=row["source_ref"],
-                schema_json=dict(row["schema_json"] or {}),
+                schema_json=_coerce_json(row["schema_json"]),
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
@@ -305,7 +337,7 @@ class DatasetRegistry:
                 description=row["description"],
                 source_type=str(row["source_type"]),
                 source_ref=row["source_ref"],
-                schema_json=dict(row["schema_json"] or {}),
+                schema_json=_coerce_json(row["schema_json"]),
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
@@ -324,31 +356,35 @@ class DatasetRegistry:
             raise RuntimeError("DatasetRegistry not connected")
         version_id = version_id or str(uuid4())
         sample_json = sample_json or {}
+        sample_payload = _normalize_json_payload(sample_json)
         if artifact_key:
             artifact_key = artifact_key.strip()
             if artifact_key and not is_s3_uri(artifact_key):
                 raise ValueError("artifact_key must be an s3:// URI")
+        schema_payload = None
+        if schema_json is not None:
+            schema_payload = _normalize_json_payload(schema_json)
 
         async with self._pool.acquire() as conn:
             version = await conn.fetchval(
                 f"SELECT COALESCE(MAX(version), 0) + 1 FROM {self._schema}.dataset_versions WHERE dataset_id = $1",
                 dataset_id,
             )
-            if schema_json is not None:
+            if schema_payload is not None:
                 await conn.execute(
                     f"""
                     UPDATE {self._schema}.datasets
-                    SET schema_json = $2, updated_at = NOW()
+                    SET schema_json = $2::jsonb, updated_at = NOW()
                     WHERE dataset_id = $1
                     """,
                     dataset_id,
-                    schema_json,
+                    schema_payload,
                 )
             row = await conn.fetchrow(
                 f"""
                 INSERT INTO {self._schema}.dataset_versions (
                     version_id, dataset_id, version, artifact_key, row_count, sample_json
-                ) VALUES ($1, $2, $3, $4, $5, $6)
+                ) VALUES ($1, $2, $3, $4, $5, $6::jsonb)
                 RETURNING version_id, dataset_id, version, artifact_key, row_count, sample_json, created_at
                 """,
                 version_id,
@@ -356,7 +392,7 @@ class DatasetRegistry:
                 int(version),
                 artifact_key,
                 row_count,
-                sample_json,
+                sample_payload,
             )
             if not row:
                 raise RuntimeError("Failed to create dataset version")
@@ -366,7 +402,7 @@ class DatasetRegistry:
                 version=int(row["version"]),
                 artifact_key=row["artifact_key"],
                 row_count=row["row_count"],
-                sample_json=dict(row["sample_json"] or {}),
+                sample_json=_coerce_json(row["sample_json"]),
                 created_at=row["created_at"],
             )
 
@@ -392,6 +428,6 @@ class DatasetRegistry:
                 version=int(row["version"]),
                 artifact_key=row["artifact_key"],
                 row_count=row["row_count"],
-                sample_json=dict(row["sample_json"] or {}),
+                sample_json=_coerce_json(row["sample_json"]),
                 created_at=row["created_at"],
             )

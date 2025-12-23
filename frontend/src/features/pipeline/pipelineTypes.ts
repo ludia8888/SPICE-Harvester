@@ -10,6 +10,9 @@ export type PipelineNodeMetadata = {
   datasetId?: string
   operation?: string
   expression?: string
+  joinKey?: string
+  leftKey?: string
+  rightKey?: string
   joinType?: string
   description?: string
 }

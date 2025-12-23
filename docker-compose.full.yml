@@ -95,6 +95,15 @@ services:
       - bff
       - kafka
       - postgres
+
+  pipeline-worker:
+    extends:
+      file: backend/docker-compose.yml
+      service: pipeline-worker
+    depends_on:
+      - kafka
+      - postgres
+      - minio
       
   # Database services
   postgres:

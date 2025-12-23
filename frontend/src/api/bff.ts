@@ -813,6 +813,41 @@ export const uploadExcelDataset = async (
   return payload ?? {}
 }
 
+export const uploadCsvDataset = async (
+  context: RequestContext,
+  dbName: string,
+  params: {
+    file: File
+    datasetName?: string
+    description?: string
+    delimiter?: string
+    hasHeader?: boolean
+  },
+) => {
+  const body = new FormData()
+  body.append('file', params.file)
+  if (params.datasetName) {
+    body.append('dataset_name', params.datasetName)
+  }
+  if (params.description) {
+    body.append('description', params.description)
+  }
+  if (params.delimiter) {
+    body.append('delimiter', params.delimiter)
+  }
+  if (params.hasHeader !== undefined) {
+    body.append('has_header', String(params.hasHeader))
+  }
+
+  const { payload } = await requestJson<ApiEnvelope>(
+    'pipelines/datasets/csv-upload',
+    { method: 'POST', body },
+    context,
+    { db_name: dbName },
+  )
+  return payload ?? {}
+}
+
 export const previewRegisteredSheet = async (
   context: RequestContext,
   sheetId: string,

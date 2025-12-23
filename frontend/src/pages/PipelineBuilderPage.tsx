@@ -27,6 +27,7 @@ import {
   listPipelines,
   previewPipeline,
   startPipeliningSheet,
+  uploadCsvDataset,
   uploadExcelDataset,
   updatePipeline,
 } from '../api/bff'
@@ -163,6 +164,9 @@ const extractRows = (sample: unknown): PreviewRow[] => {
   }
   return []
 }
+
+const extractColumnNames = (schema: unknown, fallbackType: string) =>
+  extractColumns(schema, fallbackType).map((col) => col.key)
 
 const buildColumnsFromManual = (raw: string): Array<{ name: string; type: string }> =>
   raw
@@ -307,6 +311,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                 tabs: {
                   datasets: '데이터셋',
                   excel: 'Excel 업로드',
+                  csv: 'CSV 업로드',
                   manual: '수동 입력',
                 },
                 callout: '추가 커넥터 관리는 데이터 연결에서 진행할 수 있습니다.',
@@ -336,6 +341,18 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                   reset: '초기화',
                   loading: '업로드 중...',
                 },
+                csv: {
+                  title: 'CSV 업로드',
+                  helper: 'CSV 파일을 업로드해 canonical dataset으로 저장합니다.',
+                  file: 'CSV 파일',
+                  datasetName: '데이터셋 이름',
+                  delimiter: '구분자 (선택)',
+                  header: '첫 행을 헤더로 사용',
+                  preview: '미리보기',
+                  previewEmpty: '파일을 업로드하면 미리보기가 표시됩니다.',
+                  upload: '업로드 및 그래프 추가',
+                  reset: '초기화',
+                },
               },
               parameters: {
                 title: '파라미터',
@@ -357,8 +374,11 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                 title: '조인 생성',
                 leftDataset: '왼쪽 데이터셋',
                 rightDataset: '오른쪽 데이터셋',
+                leftKey: '왼쪽 키',
+                rightKey: '오른쪽 키',
                 joinType: '조인 유형',
                 selectNode: '노드 선택',
+                selectKey: '키 선택',
                 inner: '내부',
                 left: '왼쪽',
                 right: '오른쪽',
@@ -501,13 +521,14 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                 create: 'Create',
                 cancel: 'Cancel',
               },
-              dataset: {
-                title: 'Add dataset',
-                tabs: {
-                  datasets: 'Datasets',
-                  excel: 'Excel upload',
-                  manual: 'Manual',
-                },
+                dataset: {
+                  title: 'Add dataset',
+                  tabs: {
+                    datasets: 'Datasets',
+                    excel: 'Excel upload',
+                    csv: 'CSV upload',
+                    manual: 'Manual',
+                  },
                 callout: 'Manage additional connectors in Data Connections.',
                 openConnections: 'Connect a connector',
                 connectionsTitle: 'Connected connectors',
@@ -523,19 +544,31 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                 createDataset: 'Create dataset',
                 addToGraph: 'Add to graph',
                 cancel: 'Cancel',
-                excel: {
-                  title: 'Excel upload',
-                  helper: 'Upload an Excel file and save it as a canonical dataset.',
-                  file: 'Excel file',
-                  datasetName: 'Dataset name',
-                  sheetName: 'Sheet name (optional)',
-                  preview: 'Preview',
-                  previewEmpty: 'Upload a file to see a preview.',
-                  upload: 'Upload and add to graph',
-                  reset: 'Reset',
-                  loading: 'Uploading...',
+                  excel: {
+                    title: 'Excel upload',
+                    helper: 'Upload an Excel file and save it as a canonical dataset.',
+                    file: 'Excel file',
+                    datasetName: 'Dataset name',
+                    sheetName: 'Sheet name (optional)',
+                    preview: 'Preview',
+                    previewEmpty: 'Upload a file to see a preview.',
+                    upload: 'Upload and add to graph',
+                    reset: 'Reset',
+                    loading: 'Uploading...',
+                  },
+                  csv: {
+                    title: 'CSV upload',
+                    helper: 'Upload a CSV file and save it as a canonical dataset.',
+                    file: 'CSV file',
+                    datasetName: 'Dataset name',
+                    delimiter: 'Delimiter (optional)',
+                    header: 'Use first row as header',
+                    preview: 'Preview',
+                    previewEmpty: 'Upload a file to see a preview.',
+                    upload: 'Upload and add to graph',
+                    reset: 'Reset',
+                  },
                 },
-              },
               parameters: {
                 title: 'Parameters',
                 add: 'Add parameter',
@@ -556,8 +589,11 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                 title: 'Create join',
                 leftDataset: 'Left dataset',
                 rightDataset: 'Right dataset',
+                leftKey: 'Left key',
+                rightKey: 'Right key',
                 joinType: 'Join type',
                 selectNode: 'Select node',
+                selectKey: 'Select key',
                 inner: 'Inner',
                 left: 'Left',
                 right: 'Right',
@@ -679,12 +715,19 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
   const [excelDatasetName, setExcelDatasetName] = useState('')
   const [excelSheetName, setExcelSheetName] = useState('')
   const [excelPreview, setExcelPreview] = useState<{ columns: PreviewColumn[]; rows: PreviewRow[] } | null>(null)
+  const [csvFile, setCsvFile] = useState<File | null>(null)
+  const [csvDatasetName, setCsvDatasetName] = useState('')
+  const [csvDelimiter, setCsvDelimiter] = useState('')
+  const [csvHasHeader, setCsvHasHeader] = useState(true)
+  const [csvPreview, setCsvPreview] = useState<{ columns: PreviewColumn[]; rows: PreviewRow[] } | null>(null)
 
   const [parameterDrafts, setParameterDrafts] = useState<PipelineParameter[]>([])
   const [transformDraft, setTransformDraft] = useState({ title: '', operation: '', expression: '' })
   const [joinLeft, setJoinLeft] = useState('')
   const [joinRight, setJoinRight] = useState('')
   const [joinType, setJoinType] = useState('inner')
+  const [joinLeftKey, setJoinLeftKey] = useState('')
+  const [joinRightKey, setJoinRightKey] = useState('')
   const [outputDraft, setOutputDraft] = useState({ name: '', datasetName: '', description: '' })
   const [deployDraft, setDeployDraft] = useState({ datasetName: '', rowCount: '500', artifactKey: '' })
   const [deploySettings, setDeploySettings] = useState({ compute: 'Medium', memory: '4 GB', schedule: 'Manual', engine: 'Batch' })
@@ -837,6 +880,46 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     onError: (error) => toastApiError(error, language),
   })
 
+  const uploadCsvMutation = useMutation({
+    mutationFn: (payload: { file: File; datasetName: string; delimiter?: string; hasHeader: boolean }) =>
+      uploadCsvDataset(requestContext, dbName, {
+        file: payload.file,
+        datasetName: payload.datasetName,
+        delimiter: payload.delimiter || undefined,
+        hasHeader: payload.hasHeader,
+      }),
+    onSuccess: (payload) => {
+      const dataset = (payload as { data?: { dataset?: DatasetRecord } })?.data?.dataset
+      const preview = (payload as { data?: { preview?: { columns?: Array<Record<string, unknown>>; rows?: PreviewRow[] } } })
+        ?.data?.preview
+      if (dataset) {
+        handleAddDatasetNode(dataset)
+      }
+      if (preview?.columns && preview?.rows) {
+        const normalizedColumns = preview.columns
+          .map((col) => {
+            const record = col as Record<string, unknown>
+            const key = String(record.key ?? record.name ?? '').trim()
+            if (!key) return null
+            return {
+              key,
+              type: String(record.type ?? 'xsd:string'),
+            }
+          })
+          .filter((col): col is PreviewColumn => Boolean(col))
+        setCsvPreview({ columns: normalizedColumns, rows: preview.rows })
+        setPreviewSample({ columns: normalizedColumns, rows: preview.rows })
+      }
+      void queryClient.invalidateQueries({ queryKey: qk.datasets(dbName, requestContext.language) })
+      void showAppToast({ intent: Intent.SUCCESS, message: uiCopy.toast.datasetCreated })
+      setCsvFile(null)
+      setCsvDatasetName('')
+      setCsvDelimiter('')
+      setCsvHasHeader(true)
+    },
+    onError: (error) => toastApiError(error, language),
+  })
+
   const startPipeliningMutation = useMutation({
     mutationFn: (payload: { sheetId: string; worksheetName?: string }) =>
       startPipeliningSheet(requestContext, payload.sheetId, {
@@ -911,6 +994,11 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     setExcelDatasetName('')
     setExcelSheetName('')
     setExcelPreview(null)
+    setCsvFile(null)
+    setCsvDatasetName('')
+    setCsvDelimiter('')
+    setCsvHasHeader(true)
+    setCsvPreview(null)
   }, [datasetDialogOpen])
 
   useEffect(() => {
@@ -934,6 +1022,17 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
   }, [excelFile, excelDatasetName])
 
   useEffect(() => {
+    if (!csvFile) {
+      setCsvPreview(null)
+      return
+    }
+    if (!csvDatasetName.trim()) {
+      setCsvDatasetName(buildDatasetNameFromFile(csvFile.name))
+    }
+    setCsvPreview(null)
+  }, [csvFile, csvDatasetName])
+
+  useEffect(() => {
     if (!transformOpen) return
     const node = definition.nodes.find((item) => item.id === selectedNodeId)
     if (!node) return
@@ -949,6 +1048,8 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     setJoinLeft(selectedNodeId ?? '')
     setJoinRight('')
     setJoinType('inner')
+    setJoinLeftKey('')
+    setJoinRightKey('')
   }, [joinOpen, selectedNodeId])
 
   useEffect(() => {
@@ -1005,6 +1106,23 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     return []
   }, [previewNode, datasets, previewSample, language])
 
+  const getNodeColumnNames = (nodeId: string) => {
+    const node = definition.nodes.find((item) => item.id === nodeId)
+    if (!node) return [] as string[]
+    if (node.columns?.length) return node.columns
+    const datasetId = node.metadata?.datasetId
+    if (!datasetId) return [] as string[]
+    const dataset = datasets.find((item) => String(item.dataset_id ?? '') === String(datasetId))
+    if (!dataset) return [] as string[]
+    const schemaColumns = extractColumnNames(dataset.schema_json, language === 'ko' ? '문자열' : 'String')
+    if (schemaColumns.length) return schemaColumns
+    const sampleColumns = extractColumnNames(dataset.sample_json, language === 'ko' ? '문자열' : 'String')
+    if (sampleColumns.length) return sampleColumns
+    const latestColumns = extractColumnNames(dataset.latest_sample_json, language === 'ko' ? '문자열' : 'String')
+    if (latestColumns.length) return latestColumns
+    return []
+  }
+
   const previewRows = useMemo(() => {
     if (previewSample?.rows?.length) return previewSample.rows
     if (!previewNode) return []
@@ -1017,7 +1135,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
       if (latestRows.length) return latestRows
     }
     return []
-  }, [previewNode, datasets, previewSchema, previewSample])
+  }, [previewNode, datasets, previewSample])
 
   useEffect(() => {
     if (!pipelineId || !previewNode) return
@@ -1028,7 +1146,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
       node_id: previewNode.id,
       limit: 200,
     })
-  }, [pipelineId, previewNode?.id, definition, dbName, previewMutation.isPending])
+  }, [pipelineId, previewNode, definition, dbName, previewMutation])
 
   useEffect(() => {
     if (!previewMutation.data) return
@@ -1203,7 +1321,13 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
         x: Math.max(leftNode.x, rightNode.x) + 260,
         y: Math.round((leftNode.y + rightNode.y) / 2),
         status: 'success',
-        metadata: { operation: 'join', joinType },
+        metadata: {
+          operation: 'join',
+          joinType,
+          leftKey: joinLeftKey || undefined,
+          rightKey: joinRightKey || undefined,
+          joinKey: joinLeftKey && joinLeftKey === joinRightKey ? joinLeftKey : undefined,
+        },
       }
       return {
         ...current,
@@ -1235,10 +1359,25 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     setTransformOpen(false)
   }
 
+  const parseScheduleInterval = (schedule: string) => {
+    const normalized = schedule.trim().toLowerCase()
+    if (!normalized || normalized === 'manual') return null
+    const minuteMatch = normalized.match(/^(\d+)\s*m(in)?$/)
+    if (minuteMatch) return Number(minuteMatch[1]) * 60
+    const hourMatch = normalized.match(/^(\d+)\s*h(our)?s?$/)
+    if (hourMatch) return Number(hourMatch[1]) * 3600
+    const dayMatch = normalized.match(/^(\d+)\s*d(ay)?s?$/)
+    if (dayMatch) return Number(dayMatch[1]) * 86400
+    const numeric = Number(normalized)
+    if (Number.isFinite(numeric)) return numeric
+    return null
+  }
+
   const handleDeploy = () => {
     if (!pipelineId) return
     const outputDatasetName = deployDraft.datasetName || definition.outputs[0]?.datasetName || uiCopy.labels.outputDatasetFallback
     const outputNodeId = definition.nodes.find((node) => node.type === 'output')?.id
+    const scheduleInterval = parseScheduleInterval(deploySettings.schedule || '')
     deployMutation.mutate({
       db_name: dbName,
       definition_json: definition,
@@ -1247,6 +1386,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
         db_name: dbName,
         dataset_name: outputDatasetName,
       },
+      schedule: scheduleInterval ? { interval_seconds: scheduleInterval } : undefined,
     })
     setDeployOpen(false)
   }
@@ -1546,6 +1686,104 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     </div>
   )
 
+  const csvPanel = (
+    <div className="dataset-tab">
+      <div className="dataset-preview-panel">
+        <Text className="dataset-section-title">{uiCopy.dialogs.dataset.csv.title}</Text>
+        <Text className="muted">{uiCopy.dialogs.dataset.csv.helper}</Text>
+      </div>
+      <FormGroup label={uiCopy.dialogs.dataset.csv.file}>
+        <FileInput
+          text={csvFile?.name ?? uiCopy.dialogs.dataset.csv.file}
+          inputProps={{ accept: '.csv' }}
+          onInputChange={(event) => setCsvFile(event.currentTarget.files?.[0] ?? null)}
+        />
+      </FormGroup>
+      <FormGroup label={uiCopy.dialogs.dataset.csv.datasetName}>
+        <InputGroup
+          value={csvDatasetName}
+          onChange={(event) => setCsvDatasetName(event.currentTarget.value)}
+        />
+      </FormGroup>
+      <FormGroup label={uiCopy.dialogs.dataset.csv.delimiter}>
+        <InputGroup
+          value={csvDelimiter}
+          onChange={(event) => setCsvDelimiter(event.currentTarget.value)}
+        />
+      </FormGroup>
+      <FormGroup>
+        <label className="bp5-control bp5-switch">
+          <input
+            type="checkbox"
+            checked={csvHasHeader}
+            onChange={(event) => setCsvHasHeader(event.currentTarget.checked)}
+          />
+          <span className="bp5-control-indicator" />
+          {uiCopy.dialogs.dataset.csv.header}
+        </label>
+      </FormGroup>
+      <div className="dataset-card-actions">
+        <Button
+          intent={Intent.PRIMARY}
+          icon="upload"
+          onClick={() => {
+            if (!csvFile) return
+            uploadCsvMutation.mutate({
+              file: csvFile,
+              datasetName: csvDatasetName.trim() || buildDatasetNameFromFile(csvFile.name),
+              delimiter: csvDelimiter.trim() || undefined,
+              hasHeader: csvHasHeader,
+            })
+          }}
+          disabled={!csvFile || !csvDatasetName.trim() || uploadCsvMutation.isPending}
+          loading={uploadCsvMutation.isPending}
+        >
+          {uiCopy.dialogs.dataset.csv.upload}
+        </Button>
+        <Button
+          minimal
+          icon="refresh"
+          onClick={() => {
+            setCsvFile(null)
+            setCsvDatasetName('')
+            setCsvDelimiter('')
+            setCsvHasHeader(true)
+            setCsvPreview(null)
+          }}
+        >
+          {uiCopy.dialogs.dataset.csv.reset}
+        </Button>
+      </div>
+      <div className="dataset-preview-panel">
+        <div className="dataset-preview-header">
+          <Text>{uiCopy.dialogs.dataset.csv.preview}</Text>
+        </div>
+        {csvPreview?.columns?.length ? (
+          <div className="dataset-preview-table">
+            <div className="preview-sample-card">
+              <div className="preview-sample-row preview-sample-header">
+                {csvPreview.columns.map((column) => (
+                  <span key={column.key}>{column.key}</span>
+                ))}
+              </div>
+              {(csvPreview.rows ?? []).slice(0, 6).map((row, index) => (
+                <div key={index} className="preview-sample-row">
+                  {csvPreview.columns.map((column) => (
+                    <span key={column.key} title={String(row?.[column.key] ?? '')}>
+                      {String(row?.[column.key] ?? '')}
+                    </span>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <Text className="muted">{uiCopy.dialogs.dataset.csv.previewEmpty}</Text>
+        )}
+      </div>
+    </div>
+  )
+
 
   return (
     <div className="pipeline-builder-container">
@@ -1800,6 +2038,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
           <Tabs id="dataset-tabs" selectedTabId={datasetTab} onChange={(tabId) => setDatasetTab(String(tabId))}>
             <Tab id="datasets" title={uiCopy.dialogs.dataset.tabs.datasets} panel={datasetsPanel} />
             <Tab id="excel" title={uiCopy.dialogs.dataset.tabs.excel} panel={excelPanel} />
+            <Tab id="csv" title={uiCopy.dialogs.dataset.tabs.csv} panel={csvPanel} />
             <Tab id="manual" title={uiCopy.dialogs.dataset.tabs.manual} panel={manualPanel} />
           </Tabs>
         </div>
@@ -1892,11 +2131,35 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
               ))}
             </HTMLSelect>
           </FormGroup>
+          <FormGroup label={uiCopy.dialogs.join.leftKey}>
+            <HTMLSelect
+              value={joinLeftKey}
+              onChange={(event) => setJoinLeftKey(event.currentTarget.value)}
+              disabled={!joinLeft}
+            >
+              <option value="">{uiCopy.dialogs.join.selectKey}</option>
+              {getNodeColumnNames(joinLeft).map((col) => (
+                <option key={col} value={col}>{col}</option>
+              ))}
+            </HTMLSelect>
+          </FormGroup>
           <FormGroup label={uiCopy.dialogs.join.rightDataset}>
             <HTMLSelect value={joinRight} onChange={(event) => setJoinRight(event.currentTarget.value)}>
               <option value="">{uiCopy.dialogs.join.selectNode}</option>
               {definition.nodes.map((node) => (
                 <option key={node.id} value={node.id}>{node.title}</option>
+              ))}
+            </HTMLSelect>
+          </FormGroup>
+          <FormGroup label={uiCopy.dialogs.join.rightKey}>
+            <HTMLSelect
+              value={joinRightKey}
+              onChange={(event) => setJoinRightKey(event.currentTarget.value)}
+              disabled={!joinRight}
+            >
+              <option value="">{uiCopy.dialogs.join.selectKey}</option>
+              {getNodeColumnNames(joinRight).map((col) => (
+                <option key={col} value={col}>{col}</option>
               ))}
             </HTMLSelect>
           </FormGroup>
