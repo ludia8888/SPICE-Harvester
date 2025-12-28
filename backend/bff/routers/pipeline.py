@@ -3229,9 +3229,13 @@ async def upload_excel_dataset(
                 detail="Only .xlsx/.xlsm files are supported",
             )
 
-        content = await file.read()
-        if not content:
+        sample_bytes = await asyncio.to_thread(file.file.read, 65536)
+        if not sample_bytes:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+        try:
+            file.file.seek(0)
+        except Exception:
+            pass
 
         resolved_name = (dataset_name or "").strip() or _default_dataset_name(filename)
         if not resolved_name:
@@ -3247,8 +3251,8 @@ async def upload_excel_dataset(
         from bff.services.funnel_client import FunnelClient
 
         async with FunnelClient() as funnel_client:
-            result = await funnel_client.excel_to_structure_preview(
-                xlsx_bytes=content,
+            result, content_hash = await funnel_client.excel_to_structure_preview_stream(
+                fileobj=file.file,
                 filename=filename,
                 sheet_name=sheet_name,
                 table_id=table_id,
@@ -3286,7 +3290,6 @@ async def upload_excel_dataset(
                 branch=dataset_branch,
             )
             created_dataset = True
-        content_hash = hashlib.sha256(content).hexdigest()
         request_fingerprint = _build_ingest_request_fingerprint(
             {
                 "db_name": db_name,
@@ -3355,10 +3358,10 @@ async def upload_excel_dataset(
             prefix = _dataset_artifact_prefix(db_name=db_name, dataset_id=dataset.dataset_id, dataset_name=dataset.name)
             staging_prefix = _ingest_staging_prefix(prefix, ingest_request.ingest_request_id)
             object_key = f"{staging_prefix}/source.xlsx"
-            await lakefs_storage_service.save_bytes(
+            await lakefs_storage_service.save_fileobj(
                 repo,
                 f"{dataset_branch}/{object_key}",
-                content,
+                file.file,
                 content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 metadata=_sanitize_s3_metadata(
                     {
@@ -3368,6 +3371,7 @@ async def upload_excel_dataset(
                         "ingest_request_id": ingest_request.ingest_request_id,
                     }
                 ),
+                checksum=content_hash,
             )
             commit_id = await lakefs_client.commit(
                 repository=repo,

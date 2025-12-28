@@ -3,6 +3,8 @@ Funnel Service 클라이언트
 BFF에서 Funnel 마이크로서비스와 통신하기 위한 HTTP 클라이언트
 """
 
+import hashlib
+import io
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -387,6 +389,43 @@ class FunnelClient:
         )
         return {"preview": preview, "structure": structure, "table": table}
 
+    async def excel_to_structure_preview_stream(
+        self,
+        *,
+        fileobj: Any,
+        filename: str,
+        sheet_name: Optional[str] = None,
+        table_id: Optional[str] = None,
+        table_bbox: Optional[Dict[str, Any]] = None,
+        include_complex_types: bool = True,
+        max_tables: int = 5,
+        max_rows: Optional[int] = None,
+        max_cols: Optional[int] = None,
+        options: Optional[Dict[str, Any]] = None,
+    ) -> tuple[Dict[str, Any], str]:
+        """
+        Excel stream → (grid/merged_cells) → structure analysis → selected table preview.
+        """
+        structure, checksum = await self.analyze_excel_structure_stream(
+            fileobj=fileobj,
+            filename=filename,
+            sheet_name=sheet_name,
+            include_complex_types=include_complex_types,
+            max_tables=max_tables,
+            max_rows=max_rows,
+            max_cols=max_cols,
+            options=options,
+        )
+
+        table = self._select_requested_table(structure, table_id=table_id, table_bbox=table_bbox)
+        preview = self._structure_table_to_excel_preview(
+            structure=structure,
+            table=table,
+            file_name=filename,
+            sheet_name=sheet_name,
+        )
+        return {"preview": preview, "structure": structure, "table": table}, checksum
+
     async def analyze_excel_structure(
         self,
         *,
@@ -427,6 +466,82 @@ class FunnelClient:
         response.raise_for_status()
         return response.json()
 
+    async def analyze_excel_structure_stream(
+        self,
+        *,
+        fileobj: Any,
+        filename: str,
+        sheet_name: Optional[str] = None,
+        include_complex_types: bool = True,
+        max_tables: int = 5,
+        max_rows: Optional[int] = None,
+        max_cols: Optional[int] = None,
+        options: Optional[Dict[str, Any]] = None,
+    ) -> tuple[Dict[str, Any], str]:
+        """
+        Analyze sheet structure via Funnel (streaming Excel upload).
+        """
+        import json
+
+        if not hasattr(fileobj, "read") or not hasattr(fileobj, "seek"):
+            raise ValueError("fileobj must be a seekable file-like object")
+
+        params: Dict[str, Any] = {
+            "sheet_name": sheet_name,
+            "include_complex_types": include_complex_types,
+            "max_tables": max_tables,
+            "max_rows": max_rows,
+            "max_cols": max_cols,
+        }
+        if options is not None:
+            params["options_json"] = json.dumps(options, ensure_ascii=False)
+        params = {k: v for k, v in params.items() if v is not None}
+
+        hasher = hashlib.sha256()
+
+        class _HashingReader(io.RawIOBase):
+            def __init__(self, raw: Any, digest) -> None:
+                self._raw = raw
+                self._digest = digest
+
+            def read(self, size: int = -1) -> bytes:
+                chunk = self._raw.read(size)
+                if chunk:
+                    self._digest.update(chunk)
+                return chunk
+
+            def readable(self) -> bool:
+                return True
+
+            def seekable(self) -> bool:
+                return hasattr(self._raw, "seek")
+
+            def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+                return self._raw.seek(offset, whence)
+
+            def tell(self) -> int:
+                return self._raw.tell()
+
+            def close(self) -> None:
+                return None
+
+        fileobj.seek(0)
+        stream = _HashingReader(fileobj, hasher)
+        files = {
+            "file": (
+                filename,
+                stream,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        }
+
+        response = await self.client.post("/api/v1/funnel/structure/analyze/excel", params=params, files=files)
+        response.raise_for_status()
+        try:
+            fileobj.seek(0)
+        except Exception:
+            pass
+        return response.json(), hasher.hexdigest()
     @staticmethod
     def _select_primary_table(structure: Dict[str, Any]) -> Dict[str, Any]:
         """

@@ -245,6 +245,7 @@ services:
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
       - BFF_REQUIRE_AUTH=${BFF_REQUIRE_AUTH:-true}
+      - BFF_REQUIRE_DB_SCOPE=${BFF_REQUIRE_DB_SCOPE:-false}
       - ADMIN_TOKEN=${ADMIN_TOKEN:?ADMIN_TOKEN is required}
       # Event Store / Dataset artifacts (S3/MinIO)
       - MINIO_ENDPOINT_URL=http://spice-minio:9000
