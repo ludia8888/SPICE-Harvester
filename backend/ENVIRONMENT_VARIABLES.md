@@ -13,6 +13,19 @@ USE_HTTPS=false
 VERIFY_SSL=false
 ```
 
+## 1.1) Auth + scope guard
+
+```bash
+# BFF auth enforcement
+BFF_REQUIRE_AUTH=true
+
+# Optional per-project scope header enforcement (X-DB-Name / X-Project)
+BFF_REQUIRE_DB_SCOPE=false
+
+# Token used by BFF/OMS (or set BFF_ADMIN_TOKEN / OMS_CLIENT_TOKEN separately)
+ADMIN_TOKEN=change_me
+```
+
 ## 2) Core infra
 
 ### PostgreSQL (idempotency registry + seq allocator)

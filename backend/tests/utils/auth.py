@@ -22,7 +22,11 @@ def bff_auth_headers() -> Dict[str, str]:
             "ADMIN_API_KEY",
         )
     )
-    return {"X-Admin-Token": token}
+    headers = {"X-Admin-Token": token}
+    db_scope = (os.getenv("BFF_DB_SCOPE") or os.getenv("BFF_DB_NAME") or "").strip()
+    if db_scope:
+        headers["X-DB-Name"] = db_scope
+    return headers
 
 
 def oms_auth_headers() -> Dict[str, str]:
@@ -36,4 +40,3 @@ def oms_auth_headers() -> Dict[str, str]:
         )
     )
     return {"X-Admin-Token": token}
-

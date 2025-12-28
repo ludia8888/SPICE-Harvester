@@ -70,6 +70,7 @@ services:
       - FUNNEL_BASE_URL=${FUNNEL_BASE_URL:-https://funnel:8003}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - BFF_REQUIRE_AUTH=${BFF_REQUIRE_AUTH:-true}
+      - BFF_REQUIRE_DB_SCOPE=${BFF_REQUIRE_DB_SCOPE:-false}
       - ADMIN_TOKEN=${ADMIN_TOKEN:?ADMIN_TOKEN is required}
       - USE_HTTPS=${USE_HTTPS:-true}
       - SSL_CERT_PATH=/ssl/bff/server.crt
