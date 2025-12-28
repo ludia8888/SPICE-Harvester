@@ -333,6 +333,12 @@ class ObjectifyWorker:
         target_field_types = mapping_spec.target_field_types or {}
         if not target_field_types:
             target_field_types = await self._fetch_target_field_types(job)
+        else:
+            expected_id_key = f"{job.target_class_id.lower()}_id"
+            if expected_id_key not in target_field_types:
+                fetched_field_types = await self._fetch_target_field_types(job)
+                for key, dtype in fetched_field_types.items():
+                    target_field_types.setdefault(key, dtype)
 
         mappings = [
             FieldMapping(source_field=str(m.get("source_field") or ""), target_field=str(m.get("target_field") or ""))
@@ -468,12 +474,25 @@ class ObjectifyWorker:
                     )
                 )
 
+            instance_id_field = None
+            if pk_targets:
+                for target in pk_targets:
+                    if target in target_field_types:
+                        instance_id_field = target
+                        break
+            if not instance_id_field:
+                for candidate in (f"{job.target_class_id.lower()}_id", "id"):
+                    if candidate in target_field_types:
+                        instance_id_field = candidate
+                        break
+
             instances, instance_ids = self._ensure_instance_ids(
                 instances,
                 class_id=job.target_class_id,
                 stable_seed=job.dataset_version_id,
                 mapping_spec_version=job.mapping_spec_version,
                 row_keys=row_keys,
+                instance_id_field=instance_id_field,
             )
 
             for idx in range(0, len(instances), batch_size):
@@ -899,8 +918,9 @@ class ObjectifyWorker:
         stable_seed: str,
         mapping_spec_version: int,
         row_keys: Optional[List[str]] = None,
+        instance_id_field: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], List[str]]:
-        expected_key = f"{class_id.lower()}_id"
+        expected_key = instance_id_field or f"{class_id.lower()}_id"
         instance_ids: List[str] = []
         for idx, inst in enumerate(instances):
             if not isinstance(inst, dict):
@@ -1071,14 +1091,14 @@ class ObjectifyWorker:
             return
         payload = {
             "kind": "objectify_job_dlq",
-            "job": job.model_dump() if job else None,
+            "job": job.model_dump(mode="json") if job else None,
             "error": error,
             "attempt_count": int(attempt_count),
             "failed_at": datetime.now(timezone.utc).isoformat(),
             "raw_payload": raw_payload,
         }
         key = (job.job_id if job else "objectify-job").encode("utf-8")
-        value = json.dumps(payload, ensure_ascii=True).encode("utf-8")
+        value = json.dumps(payload, ensure_ascii=True, default=str).encode("utf-8")
         self.dlq_producer.produce(self.dlq_topic, key=key, value=value)
         self.dlq_producer.flush(10)
 

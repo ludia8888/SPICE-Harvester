@@ -269,11 +269,11 @@ def lint_ontology_create(
                     )
                 )
 
-    score = _compute_risk_score(errors, warnings, infos)
+    score = compute_risk_score(errors, warnings, infos)
     return LintReport(
         ok=len(errors) == 0,
         risk_score=score,
-        risk_level=_risk_level(score),
+        risk_level=risk_level(score),
         errors=errors,
         warnings=warnings,
         infos=infos,
@@ -369,11 +369,11 @@ def lint_ontology_update(
                 )
             )
 
-    score = _compute_risk_score(errors, warnings, infos)
+    score = compute_risk_score(errors, warnings, infos)
     return LintReport(
         ok=len(errors) == 0,
         risk_score=score,
-        risk_level=_risk_level(score),
+        risk_level=risk_level(score),
         errors=errors,
         warnings=warnings,
         infos=infos,
