@@ -20,6 +20,7 @@ from shared.security.input_sanitizer import (
     validate_branch_name,
     validate_db_name,
 )
+from shared.utils.commit_utils import coerce_commit_id
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,56 @@ def _rollback_enabled() -> bool:
     필요 시 명시적으로 ENABLE_OMS_ROLLBACK=true로 켤 수 있게만 둡니다.
     """
     return os.getenv("ENABLE_OMS_ROLLBACK", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+@router.get("/head")
+async def get_branch_head_commit(
+    db_name: str,
+    branch: str = Query("main", description="브랜치 이름 (default: main)"),
+    terminus: AsyncTerminusService = TerminusServiceDep,
+):
+    """
+    브랜치 HEAD 커밋 ID 조회
+
+    Foundry-style 운영 관점에서 "데이터/산출물 버전"과 "온톨로지 버전"의 정확 일치를
+    배포 게이트로 사용하기 위한 최소 API.
+    """
+    try:
+        db_name = validate_db_name(db_name)
+        branch = validate_branch_name(branch)
+
+        raw_branches = await terminus.version_control_service.list_branches(db_name)
+        if not isinstance(raw_branches, list):
+            raw_branches = []
+        for item in raw_branches:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("name") or "").strip() != branch:
+                continue
+            head_commit_id = coerce_commit_id(item.get("head"))
+            return ApiResponse.success(
+                message="브랜치 head 커밋을 조회했습니다",
+                data={"branch": branch, "head_commit_id": head_commit_id},
+            ).to_dict()
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"브랜치 '{branch}'을(를) 찾을 수 없습니다",
+        )
+    except SecurityViolationError as e:
+        logger.warning("Security violation in get_branch_head_commit: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="입력 데이터에 보안 위반이 감지되었습니다",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to get branch head commit: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"브랜치 head 커밋 조회 실패: {str(e)}",
+        )
 
 
 @router.post("/commit")

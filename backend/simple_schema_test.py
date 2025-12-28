@@ -6,201 +6,121 @@ Simpler approach: Use WOQL to add schema directly
 import asyncio
 import httpx
 import json
+import os
+import pytest
+import uuid
+
+OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhost:8000").rstrip("/")
+
+
+def _admin_headers() -> dict:
+    admin_token = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "test-token").strip()
+    return {"X-Admin-Token": admin_token}
 
 async def create_simple_schema(db_name: str):
-    """Create schema using WOQL AddTriple operations"""
-    
-    terminus_url = "http://localhost:6363"
-    auth = ("admin", "spice123!")
-    
-    print(f"Creating schema for {db_name} using WOQL...")
-    
-    async with httpx.AsyncClient() as client:
-        # Create Product class
-        woql_create_product = {
-            "@type": "And",
-            "and": [
-                {
-                    "@type": "AddTriple",
-                    "subject": "@schema:Product",
-                    "predicate": "rdf:type",
-                    "object": "owl:Class"
-                },
-                {
-                    "@type": "AddTriple",
-                    "subject": "@schema:Product",
-                    "predicate": "rdfs:label",
-                    "object": {"@value": "Product", "@language": "en"}
-                },
-                {
-                    "@type": "AddTriple",
-                    "subject": "@schema:Product",
-                    "predicate": "rdfs:comment",
-                    "object": {"@value": "Product with system fields", "@language": "en"}
-                }
-            ]
-        }
-        
-        response = await client.post(
-            f"{terminus_url}/api/woql/admin/{db_name}",
-            json={"query": woql_create_product},
-            auth=auth
-        )
-        
-        if response.status_code == 200:
-            print("   ✅ Product class created")
-        else:
-            print(f"   ❌ Failed to create Product class: {response.status_code}")
-            print(f"      {response.text[:200]}")
-        
-        # Create Client class
-        woql_create_client = {
-            "@type": "And",
-            "and": [
-                {
-                    "@type": "AddTriple",
-                    "subject": "@schema:Client",
-                    "predicate": "rdf:type",
-                    "object": "owl:Class"
-                },
-                {
-                    "@type": "AddTriple",
-                    "subject": "@schema:Client",
-                    "predicate": "rdfs:label",
-                    "object": {"@value": "Client", "@language": "en"}
-                }
-            ]
-        }
-        
-        response = await client.post(
-            f"{terminus_url}/api/woql/admin/{db_name}",
-            json={"query": woql_create_client},
-            auth=auth
-        )
-        
-        if response.status_code == 200:
-            print("   ✅ Client class created")
-        else:
-            print(f"   ❌ Failed to create Client class: {response.status_code}")
-        
-        # Add properties for Product
-        properties = [
-            ("product_id", "Product ID", "xsd:string"),
-            ("name", "Name", "xsd:string"),
-            ("unit_price", "Unit Price", "xsd:decimal"),
-            ("category", "Category", "xsd:string"),
-            ("client_id", "Client ID", "xsd:string"),
-            ("email", "Email", "xsd:string"),
-            ("es_doc_id", "ES Document ID", "xsd:string"),
-            ("s3_uri", "S3 URI", "xsd:string"),
-            ("instance_id", "Instance ID", "xsd:string"),
-            ("created_at", "Created At", "xsd:dateTime")
-        ]
-        
-        for prop_name, prop_label, prop_range in properties:
-            woql_add_property = {
-                "@type": "And",
-                "and": [
-                    {
-                        "@type": "AddTriple",
-                        "subject": f"@schema:{prop_name}",
-                        "predicate": "rdf:type",
-                        "object": "owl:DatatypeProperty"
-                    },
-                    {
-                        "@type": "AddTriple",
-                        "subject": f"@schema:{prop_name}",
-                        "predicate": "rdfs:label",
-                        "object": {"@value": prop_label, "@language": "en"}
-                    },
-                    {
-                        "@type": "AddTriple",
-                        "subject": f"@schema:{prop_name}",
-                        "predicate": "rdfs:range",
-                        "object": prop_range
-                    }
-                ]
-            }
-            
-            response = await client.post(
-                f"{terminus_url}/api/woql/admin/{db_name}",
-                json={"query": woql_add_property},
-                auth=auth
-            )
-            
-            if response.status_code == 200:
-                print(f"   ✅ Property {prop_name} created")
-            else:
-                print(f"   ⚠️ Property {prop_name} might already exist")
-        
-        # Add relationship owned_by
-        woql_add_relationship = {
-            "@type": "And",
-            "and": [
-                {
-                    "@type": "AddTriple",
-                    "subject": "@schema:owned_by",
-                    "predicate": "rdf:type",
-                    "object": "owl:ObjectProperty"
-                },
-                {
-                    "@type": "AddTriple",
-                    "subject": "@schema:owned_by",
-                    "predicate": "rdfs:label",
-                    "object": {"@value": "Owned By", "@language": "en"}
-                },
-                {
-                    "@type": "AddTriple",
-                    "subject": "@schema:owned_by",
-                    "predicate": "rdfs:domain",
-                    "object": "@schema:Product"
-                },
-                {
-                    "@type": "AddTriple",
-                    "subject": "@schema:owned_by",
-                    "predicate": "rdfs:range",
-                    "object": "@schema:Client"
-                }
-            ]
-        }
-        
-        response = await client.post(
-            f"{terminus_url}/api/woql/admin/{db_name}",
-            json={"query": woql_add_relationship},
-            auth=auth
-        )
-        
-        if response.status_code == 200:
-            print("   ✅ Relationship owned_by created")
-        else:
-            print(f"   ⚠️ Relationship owned_by might already exist")
+    """Create schema using OMS ontology endpoints."""
+    headers = _admin_headers()
+    print(f"Creating schema for {db_name} via OMS...")
 
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        db_response = await client.post(
+            f"{OMS_URL}/api/v1/database/create",
+            json={"name": db_name, "description": f"Test database for {db_name}"},
+            headers=headers,
+        )
+        if db_response.status_code in [200, 201, 202, 409]:
+            print(f"   ✅ Database ensured: {db_name}")
+        else:
+            print(f"   ❌ Failed to create database: {db_response.status_code}")
+            print(f"      {db_response.text[:200]}")
+
+        # Wait for database availability
+        for _ in range(20):
+            exists_resp = await client.get(
+                f"{OMS_URL}/api/v1/database/exists/{db_name}",
+                headers=headers,
+            )
+            if exists_resp.status_code == 200 and (exists_resp.json().get("data") or {}).get("exists"):
+                break
+            await asyncio.sleep(1)
+
+        client_ontology = {
+            "id": "Client",
+            "label": "Client",
+            "description": "Client entity",
+            "properties": [
+                {"name": "client_id", "type": "string", "label": "Client ID", "required": True},
+                {"name": "name", "type": "string", "label": "Name"},
+                {"name": "email", "type": "string", "label": "Email"},
+            ],
+        }
+        product_ontology = {
+            "id": "Product",
+            "label": "Product",
+            "description": "Product with system fields",
+            "properties": [
+                {"name": "product_id", "type": "string", "label": "Product ID", "required": True},
+                {"name": "name", "type": "string", "label": "Name"},
+                {"name": "unit_price", "type": "number", "label": "Unit Price"},
+                {"name": "category", "type": "string", "label": "Category"},
+                {"name": "es_doc_id", "type": "string", "label": "ES Document ID"},
+                {"name": "s3_uri", "type": "string", "label": "S3 URI"},
+                {"name": "instance_id", "type": "string", "label": "Instance ID"},
+                {"name": "created_at", "type": "datetime", "label": "Created At"},
+            ],
+            "relationships": [
+                {
+                    "predicate": "owned_by",
+                    "label": "Owned By",
+                    "target": "Client",
+                    "cardinality": "n:1",
+                }
+            ],
+        }
+
+        for ontology in (client_ontology, product_ontology):
+            response = await client.post(
+                f"{OMS_URL}/api/v1/database/{db_name}/ontology",
+                json=ontology,
+                headers=headers,
+            )
+            if response.status_code in [200, 201, 202, 409]:
+                print(f"   ✅ Ontology {ontology['id']} ensured")
+            else:
+                print(f"   ❌ Failed to create {ontology['id']}: {response.status_code}")
+                print(f"      {response.text[:200]}")
+                raise RuntimeError(f"Ontology creation failed: {ontology['id']}")
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_create_instance(db_name: str):
     """Test creating a lightweight instance"""
-    
-    terminus_url = "http://localhost:6363"
-    auth = ("admin", "spice123!")
+    terminus_url = os.getenv("TERMINUS_SERVER_URL", "http://localhost:6363")
+    headers = _admin_headers()
     
     print(f"\nTesting instance creation...")
     
+    await create_simple_schema(db_name)
+
     # Create a test Product instance
+    unique_id = f"TEST_{uuid.uuid4().hex[:6]}"
     instance_data = {
-        "@id": "Product/TEST_001",
+        "@id": f"Product/{unique_id}",
         "@type": "@schema:Product",
-        "product_id": "TEST_001",
+        "product_id": unique_id,
         "name": "Test Product",
-        "es_doc_id": "es_test_001",
-        "s3_uri": "s3://bucket/test_001.json",
-        "instance_id": "test_instance_001",
+        "es_doc_id": f"es_{unique_id}",
+        "s3_uri": f"s3://bucket/{unique_id}.json",
+        "instance_id": f"test_instance_{unique_id}",
         "created_at": "2025-08-13T18:00:00Z",
         "owned_by": "Client/CL_001"
     }
     
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            f"{terminus_url}/api/document/admin/{db_name}?graph_type=instance&author=test&message=Test+instance",
-            json=instance_data,
-            auth=auth
+            f"{OMS_URL}/api/v1/instances/{db_name}/async/Product/create",
+            json={"data": instance_data},
+            headers=headers,
         )
         
         if response.status_code in [200, 201]:
@@ -209,6 +129,13 @@ async def test_create_instance(db_name: str):
         else:
             print(f"   ❌ Failed to create instance: {response.status_code}")
             print(f"      {response.text[:500]}")
+
+        assert response.status_code in [200, 201, 202]
+
+
+@pytest.fixture
+def db_name() -> str:
+    return f"palantir_schema_test_{uuid.uuid4().hex[:8]}"
 
 async def main():
     """Main function"""

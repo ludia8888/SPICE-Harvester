@@ -6,9 +6,17 @@ Quick test to verify Event Sourcing is 100% working after field name fix
 import asyncio
 import aiohttp
 from datetime import datetime
+import os
+import pytest
 
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_event_sourcing_complete():
     """Test the complete Event Sourcing flow with the fixed field name"""
+    admin_token = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "").strip()
+    if not admin_token:
+        pytest.fail("ADMIN_TOKEN is required for integration tests")
+    headers = {"X-Admin-Token": admin_token}
     
     print("=" * 80)
     print("🚀 TESTING EVENT SOURCING 100% COMPLETION")
@@ -23,7 +31,8 @@ async def test_event_sourcing_complete():
         print(f"\n1️⃣ Creating database: {test_db}")
         async with session.post(
             "http://localhost:8000/api/v1/database/create",
-            json={"name": test_db, "description": "Test Event Sourcing 100%"}
+            json={"name": test_db, "description": "Test Event Sourcing 100%"},
+            headers=headers,
         ) as resp:
             result = await resp.json()
             print(f"   Database creation response: {resp.status}")
@@ -69,7 +78,8 @@ async def test_event_sourcing_complete():
         
         async with session.post(
             f"http://localhost:8000/api/v1/ontology/{test_db}/create",
-            json=ontology_data
+            json=ontology_data,
+            headers=headers,
         ) as resp:
             result = await resp.json()
             print(f"   Ontology creation response: {resp.status}")

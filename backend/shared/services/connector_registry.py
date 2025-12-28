@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
@@ -24,18 +24,8 @@ import asyncpg
 
 from shared.config.service_config import ServiceConfig
 from shared.models.event_envelope import EventEnvelope
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _coerce_json(value: Any) -> Dict[str, Any]:
-    if value is None:
-        return {}
-    if isinstance(value, dict):
-        return value
-    raise TypeError("config_json must be a dict")
+from shared.utils.json_utils import coerce_json_strict
+from shared.utils.time_utils import utcnow
 
 
 @dataclass(frozen=True)
@@ -250,7 +240,7 @@ class ConnectorRegistry:
         if not sid:
             raise ValueError("source_id is required")
 
-        config_json = _coerce_json(config_json)
+        config_json = coerce_json_strict(config_json)
 
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -493,7 +483,7 @@ class ConnectorRegistry:
             raise RuntimeError("ConnectorRegistry not connected")
         st = (source_type or "").strip()
         sid = (source_id or "").strip()
-        now = _utcnow()
+        now = utcnow()
         cursor_norm = (current_cursor or "").strip() or None
 
         async with self._pool.acquire() as conn:
@@ -591,7 +581,7 @@ class ConnectorRegistry:
         if not self._pool:
             raise RuntimeError("ConnectorRegistry not connected")
         lim = max(1, min(int(limit), 500))
-        now = _utcnow()
+        now = utcnow()
         async with self._pool.acquire() as conn:
             async with conn.transaction():
                 rows = await conn.fetch(
@@ -642,7 +632,7 @@ class ConnectorRegistry:
     async def mark_outbox_published(self, *, outbox_id: str) -> None:
         if not self._pool:
             raise RuntimeError("ConnectorRegistry not connected")
-        now = _utcnow()
+        now = utcnow()
         async with self._pool.acquire() as conn:
             await conn.execute(
                 f"""
@@ -687,7 +677,7 @@ class ConnectorRegistry:
             raise RuntimeError("ConnectorRegistry not connected")
         st = (source_type or "").strip()
         sid = (source_id or "").strip()
-        now = _utcnow()
+        now = utcnow()
         error_norm = (error or "").strip()[:4000] if error else None
         async with self._pool.acquire() as conn:
             async with conn.transaction():

@@ -21,7 +21,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Standard library imports
+import asyncio
 import json
+import os
 import logging
 from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
@@ -39,6 +41,8 @@ from shared.dependencies import (
     shutdown_container,
     register_core_services
 )
+from shared.services.dataset_ingest_outbox import run_dataset_ingest_outbox_worker
+from shared.services.lineage_store import LineageStore
 from shared.dependencies.providers import (
     StorageServiceDep,
     RedisServiceDep, 
@@ -52,6 +56,7 @@ from shared.services.connector_registry import ConnectorRegistry
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.pipeline_registry import PipelineRegistry
 from shared.services.pipeline_executor import PipelineExecutor
+from shared.services.objectify_registry import ObjectifyRegistry
 
 # Shared models and utilities
 from shared.models.ontology import (
@@ -95,7 +100,7 @@ from data_connector.google_sheets.service import GoogleSheetsService
 from bff.routers import (
     database, health, mapping, merge_conflict, ontology, query,
     instances, instance_async, websocket, tasks, admin, data_connector,
-    command_status, graph, lineage, audit, ai, summary, pipeline
+    command_status, graph, lineage, audit, ai, summary, pipeline, objectify
 )
 
 # Monitoring and observability routers
@@ -151,10 +156,13 @@ class BFFServiceContainer:
         # 8. Initialize Pipeline Registry (Postgres; pipeline definitions)
         await self._initialize_pipeline_registry()
 
-        # 9. Initialize Pipeline Executor (preview/build engine)
+        # 9. Initialize Objectify Registry (dataset -> ontology mapping)
+        await self._initialize_objectify_registry()
+
+        # 10. Initialize Pipeline Executor (preview/build engine)
         await self._initialize_pipeline_executor()
         
-        # 10. Initialize Google Sheets Service (connector library)
+        # 11. Initialize Google Sheets Service (connector library)
         await self._initialize_google_sheets_service()
         
         logger.info("BFF services initialized successfully")
@@ -275,12 +283,32 @@ class BFFServiceContainer:
         except Exception as e:
             logger.error(f"Failed to initialize PipelineRegistry: {e}")
 
+    async def _initialize_objectify_registry(self) -> None:
+        """Initialize Postgres-backed objectify registry."""
+        try:
+            logger.info("Initializing ObjectifyRegistry (Postgres)...")
+            registry = ObjectifyRegistry()
+            await registry.initialize()
+            self._bff_services["objectify_registry"] = registry
+            logger.info("ObjectifyRegistry initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize ObjectifyRegistry: {e}")
+
     async def _initialize_pipeline_executor(self) -> None:
         """Initialize pipeline executor (preview/build engine)."""
         try:
             logger.info("Initializing PipelineExecutor...")
             dataset_registry = self.get_dataset_registry()
-            executor = PipelineExecutor(dataset_registry)
+            storage_service = None
+            try:
+                from shared.services.storage_service import create_storage_service
+                from shared.config.settings import ApplicationSettings
+
+                settings = ApplicationSettings()
+                storage_service = create_storage_service(settings)
+            except Exception as exc:
+                logger.warning("Storage service unavailable for preview: %s", exc)
+            executor = PipelineExecutor(dataset_registry, storage_service=storage_service)
             self._bff_services["pipeline_executor"] = executor
             logger.info("PipelineExecutor initialized successfully")
         except Exception as e:
@@ -375,6 +403,13 @@ class BFFServiceContainer:
             except Exception as e:
                 logger.error(f"Error closing PipelineRegistry: {e}")
 
+        if "objectify_registry" in self._bff_services:
+            try:
+                await self._bff_services["objectify_registry"].close()
+                logger.info("ObjectifyRegistry closed")
+            except Exception as e:
+                logger.error(f"Error closing ObjectifyRegistry: {e}")
+
         if "pipeline_executor" in self._bff_services:
             self._bff_services.pop("pipeline_executor", None)
         
@@ -417,6 +452,12 @@ class BFFServiceContainer:
             raise RuntimeError("PipelineRegistry not initialized")
         return self._bff_services["pipeline_registry"]
 
+    def get_objectify_registry(self) -> ObjectifyRegistry:
+        """Get objectify registry instance"""
+        if "objectify_registry" not in self._bff_services:
+            raise RuntimeError("ObjectifyRegistry not initialized")
+        return self._bff_services["objectify_registry"]
+
     def get_pipeline_executor(self) -> PipelineExecutor:
         """Get pipeline executor instance"""
         if "pipeline_executor" not in self._bff_services:
@@ -440,6 +481,9 @@ async def lifespan(app: FastAPI):
     
     logger.info("BFF Service startup beginning...")
     
+    dataset_outbox_task: Optional[asyncio.Task] = None
+    dataset_outbox_stop: Optional[asyncio.Event] = None
+
     try:
         ensure_bff_auth_configured()
 
@@ -461,6 +505,22 @@ async def lifespan(app: FastAPI):
         if 'rate_limiter' in _bff_container._bff_services:
             app.state.rate_limiter = _bff_container._bff_services['rate_limiter']
 
+        enable_outbox = (os.getenv("ENABLE_DATASET_INGEST_OUTBOX_WORKER", "true") or "true").lower() != "false"
+        if enable_outbox:
+            dataset_outbox_stop = asyncio.Event()
+            dataset_registry = _bff_container.get_dataset_registry()
+            lineage_store = await container.get(LineageStore)
+            dataset_outbox_task = asyncio.create_task(
+                run_dataset_ingest_outbox_worker(
+                    dataset_registry=dataset_registry,
+                    lineage_store=lineage_store,
+                    poll_interval_seconds=int(os.getenv("DATASET_INGEST_OUTBOX_POLL_SECONDS", "5")),
+                    stop_event=dataset_outbox_stop,
+                )
+            )
+            app.state.dataset_ingest_outbox_task = dataset_outbox_task
+            app.state.dataset_ingest_outbox_stop = dataset_outbox_stop
+
         # 6. Middleware setup is handled during app creation (service_factory)
         logger.info("BFF Service startup completed successfully")
         
@@ -473,7 +533,15 @@ async def lifespan(app: FastAPI):
     finally:
         # Shutdown in reverse order
         logger.info("BFF Service shutdown beginning...")
-        
+
+        if dataset_outbox_stop is not None:
+            dataset_outbox_stop.set()
+        if dataset_outbox_task is not None:
+            try:
+                await dataset_outbox_task
+            except Exception as exc:
+                logger.warning("Dataset ingest outbox worker shutdown failed: %s", exc)
+
         if _bff_container:
             await _bff_container.shutdown_bff_services()
         
@@ -553,6 +621,12 @@ async def get_pipeline_registry() -> PipelineRegistry:
     return _bff_container.get_pipeline_registry()
 
 
+async def get_objectify_registry() -> ObjectifyRegistry:
+    if _bff_container is None:
+        raise RuntimeError("BFF container not initialized")
+    return _bff_container.get_objectify_registry()
+
+
 async def get_pipeline_executor() -> PipelineExecutor:
     """Get PipelineExecutor from BFF container"""
     if _bff_container is None:
@@ -582,6 +656,7 @@ app.include_router(audit.router, prefix="/api/v1")
 app.include_router(ai.router, prefix="/api/v1")
 app.include_router(summary.router, prefix="/api/v1")
 app.include_router(pipeline.router, prefix="/api/v1")
+app.include_router(objectify.router, prefix="/api/v1")
 app.include_router(graph.router)  # Graph router has its own /api/v1 prefix
 
 # Monitoring and observability endpoints (modernized architecture)

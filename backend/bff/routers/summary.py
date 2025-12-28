@@ -18,19 +18,9 @@ from bff.services.oms_client import OMSClient
 from shared.dependencies.providers import ElasticsearchServiceDep, RedisServiceDep
 from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import validate_branch_name, validate_db_name
+from shared.utils.branch_utils import get_protected_branches
 
 router = APIRouter(prefix="/summary", tags=["Summary"])
-
-_PROTECTED_BRANCHES_DEFAULT = {"main", "master", "production", "prod"}
-
-
-def _get_protected_branches() -> set[str]:
-    raw = (os.getenv("ONTOLOGY_PROTECTED_BRANCHES") or "").strip()
-    if not raw:
-        return set(_PROTECTED_BRANCHES_DEFAULT)
-    branches = {b.strip() for b in raw.split(",") if b.strip()}
-    return branches or set(_PROTECTED_BRANCHES_DEFAULT)
-
 
 @router.get("")
 async def get_summary(
@@ -50,7 +40,7 @@ async def get_summary(
     db_name = validate_db_name(db) if db else None
     branch_name = validate_branch_name(branch) if branch else None
 
-    protected_branches = _get_protected_branches()
+    protected_branches = get_protected_branches()
     is_protected_branch = bool(branch_name and branch_name in protected_branches)
 
     terminus_info: Optional[Dict[str, Any]] = None

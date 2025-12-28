@@ -5,48 +5,24 @@ Base TerminusDB Service
 
 import logging
 import json
+import os
 from typing import Any, Dict, Optional, Union
 import httpx
-from functools import wraps
 
 from shared.models.config import ConnectionConfig
 from shared.utils.terminus_branch import encode_branch_name
 from oms.exceptions import ConnectionError as TerminusConnectionError
+from oms.utils.terminus_retry import build_async_retry
 
 logger = logging.getLogger(__name__)
 
 
-def async_terminus_retry(max_retries: int = 3, delay: float = 1.0):
-    """비동기 재시도 데코레이터"""
-
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            import asyncio
-            
-            last_exception = None
-            for attempt in range(max_retries):
-                try:
-                    return await func(*args, **kwargs)
-                except (httpx.ConnectError, httpx.TimeoutException) as e:
-                    last_exception = e
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(delay * (attempt + 1))
-                        logger.warning(
-                            f"Retry {attempt + 1}/{max_retries} for {func.__name__}: {e}"
-                        )
-                    else:
-                        logger.error(f"Max retries reached for {func.__name__}: {e}")
-                except Exception as e:
-                    # 다른 예외는 즉시 발생
-                    raise
-
-            # 모든 재시도 실패
-            raise TerminusConnectionError(f"연결 실패 (재시도 {max_retries}회): {last_exception}")
-
-        return wrapper
-
-    return decorator
+async_terminus_retry = build_async_retry(
+    retry_exceptions=(httpx.ConnectError, httpx.TimeoutException),
+    backoff="linear",
+    logger=logger,
+    on_failure=lambda exc, retries: TerminusConnectionError(f"연결 실패 (재시도 {retries}회): {exc}"),
+)
 
 
 class BaseTerminusService:
@@ -92,12 +68,23 @@ class BaseTerminusService:
     async def _get_client(self) -> httpx.AsyncClient:
         """HTTP 클라이언트 가져오기 (lazy initialization)"""
         if not self._client:
-            # 타임아웃 설정
+            def _timeout_from_env(key: str, default: float) -> float:
+                raw = (os.getenv(key) or "").strip()
+                if not raw:
+                    return float(default)
+                try:
+                    return float(raw)
+                except ValueError:
+                    logger.warning("Invalid %s=%r; using default %.1fs", key, raw, default)
+                    return float(default)
+
+            # Timeout defaults are tuned for TerminusDB operations that can take longer than typical HTTP calls
+            # (e.g., database creation, schema migrations, large document writes).
             timeout = httpx.Timeout(
-                connect=10.0,  # 연결 타임아웃
-                read=30.0,     # 읽기 타임아웃
-                write=30.0,    # 쓰기 타임아웃
-                pool=5.0       # 연결 풀 타임아웃
+                connect=_timeout_from_env("TERMINUS_CONNECT_TIMEOUT_SECONDS", 10.0),
+                read=_timeout_from_env("TERMINUS_READ_TIMEOUT_SECONDS", 120.0),
+                write=_timeout_from_env("TERMINUS_WRITE_TIMEOUT_SECONDS", 120.0),
+                pool=_timeout_from_env("TERMINUS_POOL_TIMEOUT_SECONDS", 5.0),
             )
             
             # 재시도 설정

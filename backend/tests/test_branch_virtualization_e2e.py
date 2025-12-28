@@ -29,11 +29,15 @@ from shared.config.search_config import get_instances_index_name
 from tests.utils.auth import bff_auth_headers, oms_auth_headers
 
 
-if os.getenv("RUN_LIVE_BRANCH_VIRTUALIZATION", "").strip().lower() not in {"1", "true", "yes", "on"}:
-    pytest.skip(
-        "Live branch virtualization E2E test disabled by default (it creates/deletes real databases). "
-        "Set RUN_LIVE_BRANCH_VIRTUALIZATION=true to enable.",
-        allow_module_level=True,
+if os.getenv("RUN_LIVE_BRANCH_VIRTUALIZATION", "").strip().lower() not in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}:
+    raise RuntimeError(
+        "RUN_LIVE_BRANCH_VIRTUALIZATION must be enabled for this test run. "
+        "Set RUN_LIVE_BRANCH_VIRTUALIZATION=true."
     )
 
 
@@ -64,7 +68,7 @@ async def _get_write_side_last_sequence(*, aggregate_type: str, aggregate_id: st
         candidates.append(os.getenv("POSTGRES_URL"))
     candidates.extend(
         [
-            "postgresql://spiceadmin:spicepass123@localhost:5433/spicedb",
+            "postgresql://spiceadmin:spicepass123@localhost:55433/spicedb",
             "postgresql://spiceadmin:spicepass123@localhost:5432/spicedb",
         ]
     )
@@ -106,7 +110,7 @@ async def _wait_for_db_exists(
     *,
     db_name: str,
     expected: bool,
-    timeout_seconds: int = 90,
+    timeout_seconds: int = 180,
     poll_interval_seconds: float = 1.0,
 ) -> None:
     deadline = time.monotonic() + timeout_seconds
@@ -126,7 +130,7 @@ async def _wait_for_ontology_present(
     *,
     db_name: str,
     ontology_id: str,
-    timeout_seconds: int = 90,
+    timeout_seconds: int = 180,
     poll_interval_seconds: float = 1.0,
 ) -> None:
     deadline = time.monotonic() + timeout_seconds

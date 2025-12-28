@@ -6,6 +6,8 @@ S3 호환 객체 스토리지 연동 서비스
 import hashlib
 import json
 import os
+import asyncio
+from urllib.parse import urlparse
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -13,6 +15,7 @@ try:
     import boto3
     from botocore.client import BaseClient
     from botocore.exceptions import ClientError
+    from botocore.config import Config
     HAS_BOTO3 = True
 except ImportError:
     # boto3 not available - S3 storage will be disabled
@@ -70,6 +73,18 @@ class StorageService:
             raise ImportError("boto3 is required for S3 storage functionality. Install with: pip install boto3")
         
         self.endpoint_url = endpoint_url
+        host = urlparse(endpoint_url).hostname or ""
+        host = host.lower()
+        use_path_style = host in {
+            "localhost",
+            "127.0.0.1",
+            "0.0.0.0",
+            "minio",
+            "spice-minio",
+            "spice_minio",
+            "lakefs",
+        } or host.endswith(".localhost")
+        client_config = Config(s3={"addressing_style": "path"}) if use_path_style else None
         self.client: BaseClient = boto3.client(
             's3',
             endpoint_url=endpoint_url,
@@ -77,7 +92,8 @@ class StorageService:
             aws_secret_access_key=secret_key,
             region_name=region,
             use_ssl=use_ssl,
-            verify=False  # MinIO 로컬 개발 시 SSL 검증 비활성화
+            verify=False,  # MinIO 로컬 개발 시 SSL 검증 비활성화
+            config=client_config,
         )
         
     async def create_bucket(self, bucket_name: str) -> bool:
@@ -90,13 +106,16 @@ class StorageService:
         Returns:
             성공 여부
         """
-        try:
-            self.client.create_bucket(Bucket=bucket_name)
-            return True
-        except ClientError as e:
-            if e.response['Error']['Code'] == 'BucketAlreadyOwnedByYou':
+        def _create() -> bool:
+            try:
+                self.client.create_bucket(Bucket=bucket_name)
                 return True
-            raise
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'BucketAlreadyOwnedByYou':
+                    return True
+                raise
+
+        return await asyncio.to_thread(_create)
             
     async def bucket_exists(self, bucket_name: str) -> bool:
         """
@@ -108,11 +127,14 @@ class StorageService:
         Returns:
             존재 여부
         """
-        try:
-            self.client.head_bucket(Bucket=bucket_name)
-            return True
-        except ClientError:
-            return False
+        def _exists() -> bool:
+            try:
+                self.client.head_bucket(Bucket=bucket_name)
+                return True
+            except ClientError:
+                return False
+
+        return await asyncio.to_thread(_exists)
             
     async def save_json(
         self,
@@ -148,14 +170,16 @@ class StorageService:
             'created-at': datetime.now(timezone.utc).isoformat()
         })
         
-        # S3에 업로드
-        self.client.put_object(
-            Bucket=bucket,
-            Key=key,
-            Body=json_bytes,
-            ContentType='application/json',
-            Metadata=object_metadata
-        )
+        def _put() -> None:
+            self.client.put_object(
+                Bucket=bucket,
+                Key=key,
+                Body=json_bytes,
+                ContentType='application/json',
+                Metadata=object_metadata,
+            )
+
+        await asyncio.to_thread(_put)
         
         return checksum
 
@@ -193,13 +217,16 @@ class StorageService:
             'created-at': datetime.now(timezone.utc).isoformat(),
         })
 
-        self.client.put_object(
-            Bucket=bucket,
-            Key=key,
-            Body=blob,
-            ContentType=content_type,
-            Metadata=object_metadata,
-        )
+        def _put() -> None:
+            self.client.put_object(
+                Bucket=bucket,
+                Key=key,
+                Body=blob,
+                ContentType=content_type,
+                Metadata=object_metadata,
+            )
+
+        await asyncio.to_thread(_put)
 
         return checksum
         
@@ -215,9 +242,29 @@ class StorageService:
             JSON 데이터
         """
         try:
-            response = self.client.get_object(Bucket=bucket, Key=key)
-            json_data = response['Body'].read().decode('utf-8')
+            response = await asyncio.to_thread(self.client.get_object, Bucket=bucket, Key=key)
+            json_bytes = await asyncio.to_thread(response['Body'].read)
+            json_data = json_bytes.decode('utf-8')
             return json.loads(json_data)
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                raise FileNotFoundError(f"Object not found: {bucket}/{key}")
+            raise
+
+    async def load_bytes(self, bucket: str, key: str) -> bytes:
+        """
+        S3에서 Raw bytes 로드
+
+        Args:
+            bucket: 버킷 이름
+            key: 객체 키 (경로)
+
+        Returns:
+            bytes
+        """
+        try:
+            response = await asyncio.to_thread(self.client.get_object, Bucket=bucket, Key=key)
+            return await asyncio.to_thread(response['Body'].read)
         except ClientError as e:
             if e.response['Error']['Code'] == 'NoSuchKey':
                 raise FileNotFoundError(f"Object not found: {bucket}/{key}")
@@ -264,6 +311,48 @@ class StorageService:
             return True
         except ClientError:
             return False
+
+    async def delete_prefix(
+        self,
+        bucket: str,
+        prefix: str,
+    ) -> int:
+        """
+        Delete all objects under a prefix.
+
+        This is used to implement stable output paths where repeated builds overwrite
+        the same logical dataset path without leaving stale part files behind.
+        """
+        prefix = (prefix or "").lstrip("/")
+        if not prefix:
+            raise ValueError("prefix is required")
+        if not prefix.endswith("/"):
+            prefix = f"{prefix}/"
+
+        deleted = 0
+        continuation_token: Optional[str] = None
+        while True:
+            kwargs: Dict[str, Any] = {"Bucket": bucket, "Prefix": prefix, "MaxKeys": 1000}
+            if continuation_token:
+                kwargs["ContinuationToken"] = continuation_token
+
+            response = await asyncio.to_thread(self.client.list_objects_v2, **kwargs)
+            contents = response.get("Contents", []) or []
+            keys = [str(obj.get("Key") or "") for obj in contents if str(obj.get("Key") or "").startswith(prefix)]
+
+            if keys:
+                await asyncio.to_thread(
+                    self.client.delete_objects,
+                    Bucket=bucket,
+                    Delete={"Objects": [{"Key": key} for key in keys], "Quiet": True},
+                )
+                deleted += len(keys)
+
+            if not response.get("IsTruncated"):
+                break
+            continuation_token = response.get("NextContinuationToken")
+
+        return deleted
             
     async def list_objects(
         self,
@@ -283,10 +372,11 @@ class StorageService:
             객체 목록
         """
         try:
-            response = self.client.list_objects_v2(
+            response = await asyncio.to_thread(
+                self.client.list_objects_v2,
                 Bucket=bucket,
                 Prefix=prefix,
-                MaxKeys=max_keys
+                MaxKeys=max_keys,
             )
             return response.get('Contents', [])
         except ClientError:
@@ -308,7 +398,7 @@ class StorageService:
             메타데이터
         """
         try:
-            response = self.client.head_object(Bucket=bucket, Key=key)
+            response = await asyncio.to_thread(self.client.head_object, Bucket=bucket, Key=key)
             return {
                 'size': response.get('ContentLength'),
                 'last_modified': response.get('LastModified'),

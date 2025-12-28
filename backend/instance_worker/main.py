@@ -47,7 +47,7 @@ from shared.services.processed_event_registry import (
 from shared.services.lineage_store import LineageStore
 from shared.services.audit_log_store import AuditLogStore
 from shared.utils.chaos import maybe_crash
-from shared.utils.ontology_version import build_ontology_version, normalize_ontology_version
+from shared.utils.ontology_version import normalize_ontology_version, resolve_ontology_version
 
 # ULTRA CRITICAL: Import TerminusDB service
 from oms.services.async_terminus import AsyncTerminusService
@@ -500,43 +500,6 @@ class StrictPalantirInstanceWorker:
 
         return required
 
-    @staticmethod
-    def _coerce_commit_id(value: Any) -> Optional[str]:
-        if value is None:
-            return None
-        if isinstance(value, str):
-            return value.strip() or None
-        if isinstance(value, dict):
-            for key in ("commit", "commit_id", "identifier", "id", "@id", "head"):
-                candidate = value.get(key)
-                if candidate:
-                    return str(candidate).strip() or None
-        return str(value).strip() or None
-
-    async def _resolve_ontology_version(self, db_name: str, branch: str) -> Dict[str, str]:
-        """
-        Resolve the current ontology semantic contract version.
-
-        We stamp ref/commit into:
-        - command metadata (stored in S3 instance command logs)
-        - domain event metadata (so projections can inherit it)
-        - lineage/audit metadata (so ops can trace by semantic version)
-        """
-        commit: Optional[str] = None
-        if self.terminus_service:
-            try:
-                branches = await self.terminus_service.version_control_service.list_branches(db_name)
-                for item in branches or []:
-                    if not isinstance(item, dict):
-                        continue
-                    if item.get("name") == branch:
-                        commit = self._coerce_commit_id(item.get("head"))
-                        break
-            except Exception as e:
-                # Best-effort: stamping should not block S3 writes, but Terminus writes will retry anyway.
-                logger.debug(f"Failed to resolve ontology version (db={db_name}, branch={branch}): {e}")
-        return build_ontology_version(branch=branch, commit=commit)
-
     async def _apply_create_instance_side_effects(
         self,
         *,
@@ -841,7 +804,9 @@ class StrictPalantirInstanceWorker:
                 raise ValueError("class_id is required")
 
             # Stamp semantic contract version (ontology ref/commit) for reproducibility.
-            ontology_version = await self._resolve_ontology_version(db_name, branch)
+            ontology_version = await resolve_ontology_version(
+                self.terminus_service, db_name=db_name, branch=branch, logger=logger
+            )
             command_meta = command.get("metadata")
             if not isinstance(command_meta, dict):
                 command_meta = {}
@@ -1152,7 +1117,9 @@ class StrictPalantirInstanceWorker:
                 return
 
             # Stamp semantic contract version (ontology ref/commit) once for the whole bulk op.
-            ontology_version = await self._resolve_ontology_version(db_name, branch)
+            ontology_version = await resolve_ontology_version(
+                self.terminus_service, db_name=db_name, branch=branch, logger=logger
+            )
             command_meta = command.get("metadata")
             if not isinstance(command_meta, dict):
                 command_meta = {}
@@ -1261,7 +1228,9 @@ class StrictPalantirInstanceWorker:
             raise ValueError("class_id is required")
 
         # Stamp semantic contract version (ontology ref/commit) for reproducibility.
-        ontology_version = await self._resolve_ontology_version(db_name, branch)
+        ontology_version = await resolve_ontology_version(
+            self.terminus_service, db_name=db_name, branch=branch, logger=logger
+        )
         command_meta = command.get("metadata")
         if not isinstance(command_meta, dict):
             command_meta = {}
@@ -1721,7 +1690,9 @@ class StrictPalantirInstanceWorker:
             raise ValueError("class_id is required")
 
         # Stamp semantic contract version (ontology ref/commit) for reproducibility.
-        ontology_version = await self._resolve_ontology_version(db_name, branch)
+        ontology_version = await resolve_ontology_version(
+            self.terminus_service, db_name=db_name, branch=branch, logger=logger
+        )
         command_meta = command.get("metadata")
         if not isinstance(command_meta, dict):
             command_meta = {}

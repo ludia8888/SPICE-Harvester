@@ -28,6 +28,7 @@ class ServiceConfig:
     DEFAULT_BFF_PORT = 8002
     DEFAULT_FUNNEL_PORT = 8003
     DEFAULT_ELASTICSEARCH_PORT = 9200
+    DEFAULT_LAKEFS_PORT = 8000
 
     @staticmethod
     def get_oms_port() -> int:
@@ -221,7 +222,7 @@ class ServiceConfig:
         """Get MinIO/S3 endpoint URL."""
         if url := os.getenv("MINIO_ENDPOINT_URL"):
             return url
-        host = "minio" if ServiceConfig.is_docker_environment() else "127.0.0.1"
+        host = "spice-minio" if ServiceConfig.is_docker_environment() else "127.0.0.1"
         return f"http://{host}:9000"
     
     @staticmethod
@@ -233,6 +234,33 @@ class ServiceConfig:
     def get_minio_secret_key() -> str:
         """Get MinIO/S3 secret key."""
         return os.getenv("MINIO_SECRET_KEY", "minioadmin123")
+
+    @staticmethod
+    def get_lakefs_api_url() -> str:
+        """
+        Get lakeFS API base URL.
+
+        Notes:
+        - lakeFS commonly serves both the REST API and the S3 Gateway on the same port.
+        - This returns the base server URL (without /api/v1).
+        """
+        if base_url := os.getenv("LAKEFS_API_URL"):
+            return base_url.rstrip("/")
+        host = "lakefs" if ServiceConfig.is_docker_environment() else "127.0.0.1"
+        port = int(os.getenv("LAKEFS_API_PORT", str(ServiceConfig.DEFAULT_LAKEFS_PORT)))
+        protocol = "http"
+        return f"{protocol}://{host}:{port}"
+
+    @staticmethod
+    def get_lakefs_s3_endpoint() -> str:
+        """
+        Get lakeFS S3 Gateway endpoint URL.
+
+        By default, this matches the lakeFS API host/port unless overridden.
+        """
+        if url := os.getenv("LAKEFS_S3_ENDPOINT_URL"):
+            return url.rstrip("/")
+        return ServiceConfig.get_lakefs_api_url()
 
     @staticmethod
     def get_service_url(service_name: str) -> str:

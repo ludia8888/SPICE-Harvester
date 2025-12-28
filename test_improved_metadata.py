@@ -8,20 +8,26 @@
 """
 import requests
 import json
+import os
 
 BASE_URL = "http://localhost:8000/api/v1"
 DB_NAME = "spice_metadata_test"
+ADMIN_TOKEN = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "").strip()
+HEADERS = {"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}
+if not ADMIN_TOKEN:
+    raise RuntimeError("ADMIN_TOKEN is required for improved metadata tests")
 
 def setup_database():
     """테스트용 데이터베이스 생성"""
     try:
-        requests.delete(f"{BASE_URL}/database/{DB_NAME}")
+        requests.delete(f"{BASE_URL}/database/{DB_NAME}", headers=HEADERS)
     except:
         pass
     
     response = requests.post(
         f"{BASE_URL}/database/create",
-        json={"name": DB_NAME}
+        json={"name": DB_NAME},
+        headers=HEADERS,
     )
     print(f"데이터베이스 생성: {response.status_code}")
 
@@ -137,8 +143,9 @@ def test_full_metadata_support():
     # 클래스 생성
     for class_data, class_name in [(customer_data, "Customer"), (order_item_data, "OrderItem"), (order_data, "Order")]:
         response = requests.post(
-            f"{BASE_URL}/ontology/{DB_NAME}/create",
-            json=class_data
+            f"{BASE_URL}/database/{DB_NAME}/ontology",
+            json=class_data,
+            headers=HEADERS,
         )
         print(f"\n{class_name} 클래스 생성: {response.status_code}")
         if response.status_code != 200:
@@ -146,7 +153,7 @@ def test_full_metadata_support():
     
     # 2. 생성된 클래스 조회 및 검증
     print("\n=== Order 클래스 조회 및 검증 ===")
-    response = requests.get(f"{BASE_URL}/ontology/{DB_NAME}/Order")
+    response = requests.get(f"{BASE_URL}/database/{DB_NAME}/ontology/Order", headers=HEADERS)
     
     if response.status_code == 200:
         data = response.json()
@@ -260,13 +267,14 @@ def test_complex_types():
     }
     
     response = requests.post(
-        f"{BASE_URL}/ontology/{DB_NAME}/create",
-        json=complex_data
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
+        json=complex_data,
+        headers=HEADERS,
     )
     print(f"ComplexTypes 클래스 생성: {response.status_code}")
     
     # 조회 및 검증
-    response = requests.get(f"{BASE_URL}/ontology/{DB_NAME}/ComplexTypes")
+    response = requests.get(f"{BASE_URL}/database/{DB_NAME}/ontology/ComplexTypes", headers=HEADERS)
     if response.status_code == 200:
         data = response.json()
         if "data" in data:

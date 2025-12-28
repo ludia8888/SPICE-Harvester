@@ -30,10 +30,15 @@ from shared.models.events import EventType
 from shared.config.app_config import AppConfig
 from shared.models.event_envelope import EventEnvelope
 from shared.services.aggregate_sequence_allocator import OptimisticConcurrencyError
-from shared.security.input_sanitizer import validate_db_name
-from shared.utils.ontology_version import build_ontology_version, normalize_ontology_version
+from shared.utils.ontology_version import resolve_ontology_version
 from shared.utils.language import coerce_localized_text, get_accept_language, select_localized_text
-from shared.services.ontology_linter import OntologyLinterConfig, lint_ontology_create, lint_ontology_update
+from shared.services.ontology_linter import (
+    OntologyLinterConfig,
+    compute_risk_score,
+    lint_ontology_create,
+    lint_ontology_update,
+    risk_level,
+)
 from shared.models.ontology_lint import LintReport
 
 # OMS 서비스 import
@@ -62,54 +67,28 @@ from shared.security.input_sanitizer import (
     validate_db_name,
 )
 
-# shared utils import
-from shared.utils.jsonld import JSONToJSONLDConverter
 
 # Rate limiting import
 from shared.middleware.rate_limiter import rate_limit, RateLimitPresets
 from shared.config.rate_limit_config import RateLimitConfig, EndpointCategory
+from shared.security.auth_utils import extract_presented_token, get_expected_token
+from shared.utils.branch_utils import get_protected_branches
 
 logger = logging.getLogger(__name__)
 
 
-_PROTECTED_BRANCHES_DEFAULT = {"main", "master", "production", "prod"}
-
-
-def _get_protected_branches() -> set[str]:
-    raw = (os.getenv("ONTOLOGY_PROTECTED_BRANCHES") or "").strip()
-    if not raw:
-        return set(_PROTECTED_BRANCHES_DEFAULT)
-    branches = {b.strip() for b in raw.split(",") if b.strip()}
-    return branches or set(_PROTECTED_BRANCHES_DEFAULT)
-
-
 def _is_protected_branch(branch: str) -> bool:
-    return branch in _get_protected_branches()
+    return branch in get_protected_branches()
 
 
-def _get_configured_admin_token() -> Optional[str]:
-    for key in ("OMS_ADMIN_TOKEN", "BFF_ADMIN_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN"):
-        value = (os.getenv(key) or "").strip()
-        if value:
-            return value
-    return None
-
-
-def _extract_presented_admin_token(request: Request) -> Optional[str]:
-    raw = (request.headers.get("X-Admin-Token") or "").strip()
-    if raw:
-        return raw
-    auth = (request.headers.get("Authorization") or "").strip()
-    if auth.lower().startswith("bearer "):
-        return auth[7:].strip() or None
-    return None
+_ADMIN_TOKEN_ENV_KEYS = ("OMS_ADMIN_TOKEN", "BFF_ADMIN_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN")
 
 
 def _admin_authorized(request: Request) -> bool:
-    expected = _get_configured_admin_token()
+    expected = get_expected_token(_ADMIN_TOKEN_ENV_KEYS)
     if not expected:
         return False
-    presented = _extract_presented_admin_token(request)
+    presented = extract_presented_token(request.headers)
     if not presented:
         return False
     return hmac.compare_digest(presented, expected)
@@ -147,24 +126,6 @@ def _localized_to_string(value: Any, *, lang: str) -> Optional[str]:
     return candidate or None
 
 
-def _compute_risk_score(*, errors: int, warnings: int, infos: int) -> float:
-    score = 0.0
-    score += 30.0 * float(errors)
-    score += 10.0 * float(warnings)
-    score += 2.0 * float(infos)
-    return max(0.0, min(100.0, score))
-
-
-def _risk_level(score: float) -> str:
-    if score >= 75.0:
-        return "critical"
-    if score >= 50.0:
-        return "high"
-    if score >= 25.0:
-        return "medium"
-    return "low"
-
-
 def _merge_lint_reports(*reports: LintReport) -> LintReport:
     errors = []
     warnings = []
@@ -176,59 +137,15 @@ def _merge_lint_reports(*reports: LintReport) -> LintReport:
         warnings.extend(report.warnings or [])
         infos.extend(report.infos or [])
 
-    score = _compute_risk_score(errors=len(errors), warnings=len(warnings), infos=len(infos))
+    score = compute_risk_score(errors, warnings, infos)
     return LintReport(
         ok=len(errors) == 0,
         risk_score=score,
-        risk_level=_risk_level(score),
+        risk_level=risk_level(score),
         errors=errors,
         warnings=warnings,
         infos=infos,
     )
-
-
-def _coerce_commit_id(value: Any) -> Optional[str]:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value.strip() or None
-    if isinstance(value, dict):
-        for key in ("commit", "commit_id", "identifier", "id", "@id", "head"):
-            candidate = value.get(key)
-            if candidate:
-                return str(candidate).strip() or None
-    return str(value).strip() or None
-
-
-async def _resolve_ontology_version(terminus: AsyncTerminusService, *, db_name: str, branch: str) -> Dict[str, str]:
-    """
-    Best-effort ontology semantic contract stamp (ref + commit).
-
-    Used for command-side traceability (stored in S3/MinIO command events).
-    """
-    commit: Optional[str] = None
-    try:
-        branches = await terminus.version_control_service.list_branches(db_name)
-        for item in branches or []:
-            if isinstance(item, dict) and item.get("name") == branch:
-                commit = _coerce_commit_id(item.get("head"))
-                break
-    except Exception as e:
-        logger.debug(f"Failed to resolve ontology version (db={db_name}, branch={branch}): {e}")
-    return build_ontology_version(branch=branch, commit=commit)
-
-
-def _merge_ontology_stamp(existing: Any, resolved: Dict[str, str]) -> Dict[str, str]:
-    existing_norm = normalize_ontology_version(existing)
-    if not existing_norm:
-        return dict(resolved)
-
-    merged = dict(existing_norm)
-    if "ref" not in merged and resolved.get("ref"):
-        merged["ref"] = resolved["ref"]
-    if "commit" not in merged and resolved.get("commit"):
-        merged["commit"] = resolved["commit"]
-    return merged
 
 
 async def _ensure_database_exists(db_name: str, terminus: AsyncTerminusService):
@@ -328,7 +245,9 @@ async def create_ontology(
             )
 
         if enable_event_sourcing:
-            ontology_version = await _resolve_ontology_version(terminus, db_name=db_name, branch=branch)
+            ontology_version = await resolve_ontology_version(
+                terminus, db_name=db_name, branch=branch, logger=logger
+            )
             # Event Sourcing: append command-request event to S3/MinIO and return 202.
             command = OntologyCommand(
                 command_type=CommandType.CREATE_ONTOLOGY_CLASS,
@@ -866,7 +785,9 @@ async def update_ontology(
                 )
 
         if enable_event_sourcing:
-            ontology_version = await _resolve_ontology_version(terminus, db_name=db_name, branch=branch)
+            ontology_version = await resolve_ontology_version(
+                terminus, db_name=db_name, branch=branch, logger=logger
+            )
             actor = _extract_actor(request)
             change_reason = _extract_change_reason(request)
             # Event Sourcing: publish UPDATE command (actual write is async in worker)
@@ -1004,7 +925,9 @@ async def delete_ontology(
                 )
 
         if enable_event_sourcing:
-            ontology_version = await _resolve_ontology_version(terminus, db_name=db_name, branch=branch)
+            ontology_version = await resolve_ontology_version(
+                terminus, db_name=db_name, branch=branch, logger=logger
+            )
             actor = _extract_actor(request)
             change_reason = _extract_change_reason(request)
             command = OntologyCommand(
@@ -1267,7 +1190,9 @@ async def create_ontology_with_advanced_relationships(
             )
 
         if enable_event_sourcing:
-            ontology_version = await _resolve_ontology_version(terminus, db_name=db_name, branch=branch)
+            ontology_version = await resolve_ontology_version(
+                terminus, db_name=db_name, branch=branch, logger=logger
+            )
             command = OntologyCommand(
                 command_type=CommandType.CREATE_ONTOLOGY_CLASS,
                 aggregate_id=f"{db_name}:{branch}:{ontology_data.get('id')}",

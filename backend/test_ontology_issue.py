@@ -4,9 +4,17 @@
 import asyncio
 import aiohttp
 import json
+import os
 from datetime import datetime
+import pytest
 
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_ontology_creation():
+    admin_token = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "").strip()
+    if not admin_token:
+        pytest.fail("ADMIN_TOKEN is required for integration tests")
+    headers = {"X-Admin-Token": admin_token}
     print('🔍 Testing ontology creation...')
     
     test_db = f'test_ontology_{datetime.now().strftime("%H%M%S")}'
@@ -17,7 +25,8 @@ async def test_ontology_creation():
         try:
             resp = await session.post(
                 'http://localhost:8000/api/v1/database/create',
-                json={'name': test_db, 'description': 'Test'}
+                json={'name': test_db, 'description': 'Test'},
+                headers=headers,
             )
             print(f'  Database creation: {resp.status}')
             await asyncio.sleep(3)
@@ -41,10 +50,11 @@ async def test_ontology_creation():
             resp = await session.post(
                 f'http://localhost:8000/api/v1/database/{test_db}/ontology',
                 json=simple_ontology,
+                headers=headers,
                 timeout=aiohttp.ClientTimeout(total=10)
             )
             print(f'  Simple ontology creation: {resp.status}')
-            if resp.status != 200:
+            if resp.status not in (200, 201, 202):
                 text = await resp.text()
                 print(f'  Response: {text[:200]}')
         except asyncio.TimeoutError:
@@ -75,10 +85,11 @@ async def test_ontology_creation():
             resp = await session.post(
                 f'http://localhost:8000/api/v1/database/{test_db}/ontology',
                 json=complex_ontology,
+                headers=headers,
                 timeout=aiohttp.ClientTimeout(total=10)
             )
             print(f'  Complex ontology creation: {resp.status}')
-            if resp.status != 200:
+            if resp.status not in (200, 201, 202):
                 text = await resp.text()
                 print(f'  Response: {text[:200]}')
         except asyncio.TimeoutError:
@@ -89,7 +100,10 @@ async def test_ontology_creation():
         # 4. Clean up
         print(f'Cleaning up {test_db}...')
         try:
-            resp = await session.delete(f'http://localhost:8000/api/v1/database/{test_db}')
+            resp = await session.delete(
+                f'http://localhost:8000/api/v1/database/{test_db}',
+                headers=headers,
+            )
             print(f'  Cleanup: {resp.status}')
         except:
             pass

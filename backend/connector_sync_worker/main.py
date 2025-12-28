@@ -34,32 +34,15 @@ from shared.services.connector_registry import ConnectorRegistry
 from shared.services.lineage_store import LineageStore
 from shared.services.processed_event_registry import ClaimDecision, ProcessedEventRegistry
 from shared.services.sheet_import_service import FieldMapping, SheetImportService
+from shared.security.auth_utils import get_expected_token
+from shared.utils.env_utils import parse_int_env
 from shared.utils.import_type_normalization import normalize_import_target_type
+from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
 
-def _parse_int(name: str, default: int, *, min_value: int = 0, max_value: int = 1_000_000) -> int:
-    raw = (os.getenv(name) or "").strip()
-    if not raw:
-        return default
-    try:
-        value = int(raw)
-    except Exception:
-        return default
-    return max(min_value, min(max_value, value))
-
-
-def _get_bff_token() -> Optional[str]:
-    for key in ("BFF_ADMIN_TOKEN", "BFF_WRITE_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN"):
-        value = (os.getenv(key) or "").strip()
-        if value:
-            return value
-    return None
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+_BFF_TOKEN_ENV_KEYS = ("BFF_ADMIN_TOKEN", "BFF_WRITE_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN")
 
 
 class ConnectorSyncWorker:
@@ -73,9 +56,9 @@ class ConnectorSyncWorker:
         self.group_id = (os.getenv("CONNECTOR_SYNC_GROUP") or "connector-sync-worker-group").strip()
         self.handler = (os.getenv("CONNECTOR_SYNC_HANDLER") or "connector_sync_worker").strip()
 
-        self.max_retries = _parse_int("CONNECTOR_SYNC_MAX_RETRIES", 5, min_value=1, max_value=100)
-        self.backoff_base = _parse_int("CONNECTOR_SYNC_BACKOFF_BASE_SECONDS", 2, min_value=0, max_value=300)
-        self.backoff_max = _parse_int("CONNECTOR_SYNC_BACKOFF_MAX_SECONDS", 60, min_value=1, max_value=3600)
+        self.max_retries = parse_int_env("CONNECTOR_SYNC_MAX_RETRIES", 5, min_value=1, max_value=100)
+        self.backoff_base = parse_int_env("CONNECTOR_SYNC_BACKOFF_BASE_SECONDS", 2, min_value=0, max_value=300)
+        self.backoff_max = parse_int_env("CONNECTOR_SYNC_BACKOFF_MAX_SECONDS", 60, min_value=1, max_value=3600)
 
         self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kafka-consumer")
         self._producer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kafka-producer")
@@ -116,7 +99,7 @@ class ConnectorSyncWorker:
         self.sheets = GoogleSheetsService(api_key=api_key)
 
         # HTTP client to call BFF (auth is fail-closed in prod).
-        token = _get_bff_token()
+        token = get_expected_token(_BFF_TOKEN_ENV_KEYS)
         headers: Dict[str, str] = {}
         if token:
             headers["X-Admin-Token"] = token
@@ -187,7 +170,7 @@ class ConnectorSyncWorker:
     async def _heartbeat_loop(self, *, handler: str, event_id: str) -> None:
         if not self.processed:
             return
-        interval = _parse_int("PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS", 30, min_value=1, max_value=600)
+        interval = parse_int_env("PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS", 30, min_value=1, max_value=600)
         while True:
             await asyncio.sleep(interval)
             ok = await self.processed.heartbeat(handler=handler, event_id=event_id)
@@ -521,7 +504,7 @@ class ConnectorSyncWorker:
                             source_id=str((envelope.data or {}).get("source_id") or ""),
                             success=False,
                             error=err,
-                            next_retry_at=_utcnow() + timedelta(seconds=backoff_s),
+                            next_retry_at=utcnow() + timedelta(seconds=backoff_s),
                         )
                     except Exception:
                         pass

@@ -18,23 +18,11 @@ from shared.models.commands import CommandResult, CommandStatus
 from shared.services.command_status_service import CommandStatusService
 from shared.services.processed_event_registry import ProcessedEventRegistry
 from oms.services.event_store import EventStore
+from oms.utils.command_status_utils import map_registry_status
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/commands", tags=["Command Status"])
-
-
-def _map_registry_status(status_value: str) -> CommandStatus:
-    status_value = (status_value or "").lower()
-    if status_value == "processing":
-        return CommandStatus.PROCESSING
-    if status_value == "done":
-        return CommandStatus.COMPLETED
-    if status_value == "failed":
-        return CommandStatus.FAILED
-    if status_value == "skipped_stale":
-        return CommandStatus.FAILED
-    return CommandStatus.PENDING
 
 
 async def _fallback_from_registry(
@@ -55,7 +43,7 @@ async def _fallback_from_registry(
         return None, True
 
     status_value = str(record.get("status") or "")
-    parsed_status = _map_registry_status(status_value)
+    parsed_status = map_registry_status(status_value)
     error = record.get("last_error")
     if status_value == "skipped_stale" and not error:
         error = "stale_event"

@@ -31,12 +31,15 @@ export const AppRouter = () => {
   const setProject = useAppStore((state) => state.setProject)
 
   useEffect(() => {
-    if (segments[0] !== 'db' || !segments[1]) {
-      return
-    }
-    const dbName = decodeURIComponent(segments[1])
-    if (context.project !== dbName) {
-      setProject(dbName)
+    if (segments[0] === 'db' && segments[1]) {
+      const dbName = decodeURIComponent(segments[1])
+      if (context.project !== dbName) {
+        setProject(dbName)
+      }
+    } else {
+      if (context.project !== null) {
+        setProject(null)
+      }
     }
   }, [context.project, segments, setProject])
 

@@ -32,7 +32,9 @@ from shared.services.processed_event_registry import ProcessedEventRegistry
 from shared.services.redis_service import RedisService
 from shared.models.event_envelope import EventEnvelope
 from shared.services.aggregate_sequence_allocator import OptimisticConcurrencyError
-from shared.utils.ontology_version import build_ontology_version, normalize_ontology_version
+from shared.utils.ontology_version import resolve_ontology_version
+from oms.utils.command_status_utils import map_registry_status
+from oms.utils.ontology_stamp import merge_ontology_stamp
 from shared.security.input_sanitizer import (
     SecurityViolationError,
     sanitize_input,
@@ -45,19 +47,6 @@ from shared.security.input_sanitizer import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/instances/{db_name}/async", tags=["Async Instance Management"])
-
-
-def _map_registry_status(status_value: str) -> CommandStatus:
-    status_value = (status_value or "").lower()
-    if status_value == "processing":
-        return CommandStatus.PROCESSING
-    if status_value == "done":
-        return CommandStatus.COMPLETED
-    if status_value == "failed":
-        return CommandStatus.FAILED
-    if status_value == "skipped_stale":
-        return CommandStatus.FAILED
-    return CommandStatus.PENDING
 
 
 async def _fallback_from_registry(
@@ -78,7 +67,7 @@ async def _fallback_from_registry(
         return None
 
     status_value = str(record.get("status") or "")
-    parsed_status = _map_registry_status(status_value)
+    parsed_status = map_registry_status(status_value)
     error = record.get("last_error")
     if status_value == "skipped_stale" and not error:
         error = "stale_event"
@@ -98,51 +87,6 @@ async def _fallback_from_registry(
             "heartbeat_at": record.get("heartbeat_at"),
         },
     )
-
-
-def _coerce_commit_id(value: Any) -> Optional[str]:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value.strip() or None
-    if isinstance(value, dict):
-        for key in ("commit", "commit_id", "identifier", "id", "@id", "head"):
-            candidate = value.get(key)
-            if candidate:
-                return str(candidate).strip() or None
-    return str(value).strip() or None
-
-
-async def _resolve_ontology_version(terminus, *, db_name: str, branch: str) -> Dict[str, str]:
-    """
-    Best-effort ontology semantic contract stamp (ref + commit).
-
-    Command acceptance should not fail on temporary TerminusDB outages, so missing
-    commit is allowed; workers will still stamp domain events.
-    """
-    commit: Optional[str] = None
-    try:
-        branches = await terminus.version_control_service.list_branches(db_name)
-        for item in branches or []:
-            if isinstance(item, dict) and item.get("name") == branch:
-                commit = _coerce_commit_id(item.get("head"))
-                break
-    except Exception as e:
-        logger.debug(f"Failed to resolve ontology version (db={db_name}, branch={branch}): {e}")
-    return build_ontology_version(branch=branch, commit=commit)
-
-
-def _merge_ontology_stamp(existing: Any, resolved: Dict[str, str]) -> Dict[str, str]:
-    existing_norm = normalize_ontology_version(existing)
-    if not existing_norm:
-        return dict(resolved)
-
-    merged = dict(existing_norm)
-    if "ref" not in merged and resolved.get("ref"):
-        merged["ref"] = resolved["ref"]
-    if "commit" not in merged and resolved.get("commit"):
-        merged["commit"] = resolved["commit"]
-    return merged
 
 
 async def _append_command_event(command: InstanceCommand, *, event_store, topic: str, actor: Optional[str]) -> None:
@@ -222,9 +166,9 @@ async def create_instance_async(
         # CREATE_INSTANCE는 aggregate_id 정합성을 위해 instance_id를 포함해야 함
         instance_id = _derive_instance_id(class_id, sanitized_data)
 
-        ontology_version = _merge_ontology_stamp(
+        ontology_version = merge_ontology_stamp(
             (request.metadata or {}).get("ontology"),
-            await _resolve_ontology_version(terminus, db_name=db_name, branch=branch),
+            await resolve_ontology_version(terminus, db_name=db_name, branch=branch, logger=logger),
         )
         
         # Command 생성
@@ -338,9 +282,9 @@ async def update_instance_async(
         sanitized_data = sanitize_input(request.data)
         branch = validate_branch_name(branch)
 
-        ontology_version = _merge_ontology_stamp(
+        ontology_version = merge_ontology_stamp(
             (request.metadata or {}).get("ontology"),
-            await _resolve_ontology_version(terminus, db_name=db_name, branch=branch),
+            await resolve_ontology_version(terminus, db_name=db_name, branch=branch, logger=logger),
         )
         
         # Command 생성
@@ -451,7 +395,7 @@ async def delete_instance_async(
         validate_instance_id(instance_id)
         branch = validate_branch_name(branch)
 
-        ontology_version = await _resolve_ontology_version(terminus, db_name=db_name, branch=branch)
+        ontology_version = await resolve_ontology_version(terminus, db_name=db_name, branch=branch, logger=logger)
         
         # Command 생성
         command = InstanceCommand(
@@ -563,9 +507,9 @@ async def bulk_create_instances_async(
         branch = validate_branch_name(branch)
         sanitized_instances = [sanitize_input(instance) for instance in request.instances]
 
-        ontology_version = _merge_ontology_stamp(
+        ontology_version = merge_ontology_stamp(
             (request.metadata or {}).get("ontology"),
-            await _resolve_ontology_version(terminus, db_name=db_name, branch=branch),
+            await resolve_ontology_version(terminus, db_name=db_name, branch=branch, logger=logger),
         )
         
         # Command 생성
@@ -831,9 +775,9 @@ async def bulk_create_instances_with_tracking(
     branch = validate_branch_name(branch)
     sanitized_instances = [sanitize_input(instance) for instance in request.instances]
 
-    ontology_version = _merge_ontology_stamp(
+    ontology_version = merge_ontology_stamp(
         (request.metadata or {}).get("ontology"),
-        await _resolve_ontology_version(terminus, db_name=db_name, branch=branch),
+        await resolve_ontology_version(terminus, db_name=db_name, branch=branch, logger=logger),
     )
     
     # Add the actual bulk creation to background tasks

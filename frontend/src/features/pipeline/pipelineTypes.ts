@@ -6,14 +6,43 @@ export type PipelineNodeType = 'input' | 'transform' | 'output'
 
 export type PipelineNodeStatus = 'success' | 'warning' | 'error'
 
+export type PipelineSchemaCheck = {
+  column: string
+  rule: string
+  value?: string | number | boolean
+}
+
 export type PipelineNodeMetadata = {
   datasetId?: string
+  datasetName?: string
+  datasetBranch?: string
+  outputId?: string
+  outputName?: string
   operation?: string
   expression?: string
+  columns?: string[]
+  rename?: Record<string, string>
+  casts?: Array<{ column: string; type: string }>
+  groupBy?: string[]
+  aggregates?: Array<{ column: string; op: string; alias?: string }>
+  pivot?: {
+    index: string[]
+    columns: string
+    values: string
+    agg?: string
+  }
+  window?: {
+    partitionBy?: string[]
+    orderBy?: string[]
+    frame?: string
+  }
+  schemaChecks?: PipelineSchemaCheck[]
   joinKey?: string
   leftKey?: string
   rightKey?: string
   joinType?: string
+  allowCrossJoin?: boolean
+  unionMode?: string
   description?: string
 }
 
@@ -54,6 +83,29 @@ export type PipelineSettings = {
   memory?: string
   schedule?: string
   engine?: string
+  branch?: string
+  proposalStatus?: string
+  proposalTitle?: string
+  proposalDescription?: string
+  expectationsJson?: string
+  schemaContractJson?: string
+}
+
+export type PipelineExpectation = {
+  rule: string
+  column?: string
+  value?: string | number | boolean
+}
+
+export type PipelineSchemaContract = {
+  column: string
+  type?: string
+  required?: boolean
+}
+
+export type PipelineDependency = {
+  pipelineId: string
+  status?: string
 }
 
 export type PipelineDefinition = {
@@ -62,6 +114,9 @@ export type PipelineDefinition = {
   parameters: PipelineParameter[]
   outputs: PipelineOutput[]
   settings?: PipelineSettings
+  expectations?: PipelineExpectation[]
+  schemaContract?: PipelineSchemaContract[]
+  dependencies?: PipelineDependency[]
 }
 
 export type PreviewColumn = {
@@ -88,6 +143,9 @@ export const createDefaultDefinition = (): PipelineDefinition => {
     edges,
     parameters: [],
     outputs: [],
+    expectations: [],
+    schemaContract: [],
+    dependencies: [],
     settings: {
       compute: 'Medium',
       memory: '4 GB',

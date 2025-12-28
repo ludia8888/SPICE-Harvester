@@ -5,20 +5,26 @@
 """
 import requests
 import json
+import os
 
 BASE_URL = "http://localhost:8000/api/v1"
 DB_NAME = "spice_metadata_bypass_test"
+ADMIN_TOKEN = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "").strip()
+HEADERS = {"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}
+if not ADMIN_TOKEN:
+    raise RuntimeError("ADMIN_TOKEN is required for metadata bypass tests")
 
 def setup_database():
     """새로운 테스트용 데이터베이스 생성"""
     try:
-        requests.delete(f"{BASE_URL}/database/{DB_NAME}")
+        requests.delete(f"{BASE_URL}/database/{DB_NAME}", headers=HEADERS)
     except:
         pass
     
     response = requests.post(
         f"{BASE_URL}/database/create",
-        json={"name": DB_NAME}
+        json={"name": DB_NAME},
+        headers=HEADERS,
     )
     print(f"데이터베이스 생성: {response.status_code}")
     return response.status_code == 200
@@ -50,8 +56,9 @@ def test_simple_class_with_basic_metadata():
     
     print("테스트 클래스 생성 중...")
     response = requests.post(
-        f"{BASE_URL}/ontology/{DB_NAME}/create",
-        json=simple_class
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
+        json=simple_class,
+        headers=HEADERS,
     )
     
     print(f"클래스 생성 응답: {response.status_code}")
@@ -61,7 +68,7 @@ def test_simple_class_with_basic_metadata():
     
     # 생성된 클래스 조회
     print("생성된 클래스 조회 중...")
-    get_response = requests.get(f"{BASE_URL}/ontology/{DB_NAME}/SimpleTest")
+    get_response = requests.get(f"{BASE_URL}/database/{DB_NAME}/ontology/SimpleTest", headers=HEADERS)
     
     if get_response.status_code == 200:
         data = get_response.json()
@@ -140,8 +147,9 @@ def test_relationship_conversion():
     
     print("Category 클래스 생성...")
     response = requests.post(
-        f"{BASE_URL}/ontology/{DB_NAME}/create",
-        json=category_class
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
+        json=category_class,
+        headers=HEADERS,
     )
     print(f"Category 생성: {response.status_code}")
     
@@ -171,8 +179,9 @@ def test_relationship_conversion():
     
     print("Product 클래스 생성 (클래스 참조 포함)...")
     response = requests.post(
-        f"{BASE_URL}/ontology/{DB_NAME}/create",
-        json=product_class
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
+        json=product_class,
+        headers=HEADERS,
     )
     print(f"Product 생성: {response.status_code}")
     
@@ -182,7 +191,7 @@ def test_relationship_conversion():
     
     # 변환 결과 확인
     print("Product 클래스 조회하여 변환 결과 확인...")
-    get_response = requests.get(f"{BASE_URL}/ontology/{DB_NAME}/Product")
+    get_response = requests.get(f"{BASE_URL}/database/{DB_NAME}/ontology/Product", headers=HEADERS)
     
     if get_response.status_code == 200:
         data = get_response.json()

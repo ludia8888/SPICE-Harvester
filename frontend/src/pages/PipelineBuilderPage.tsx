@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Button,
   Card,
+  Checkbox,
   Dialog,
   FileInput,
   FormGroup,
@@ -16,19 +17,30 @@ import {
 } from '@blueprintjs/core'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  archivePipelineBranch,
+  approvePipelineProposal,
   createDataset,
   createDatasetVersion,
   createPipeline,
+  createPipelineBranch,
   deployPipeline,
   getPipeline,
-  listBranches,
+  getPipelinePreviewStatus,
   listDatasets,
+  listPipelineBranches,
+  listPipelineProposals,
   listRegisteredSheets,
   listPipelines,
+  listPipelineRuns,
   previewPipeline,
+  buildPipeline,
+  rejectPipelineProposal,
+  restorePipelineBranch,
   startPipeliningSheet,
+  submitPipelineProposal,
   uploadCsvDataset,
   uploadExcelDataset,
+  uploadMediaDataset,
   updatePipeline,
 } from '../api/bff'
 import { useRequestContext } from '../api/useRequestContext'
@@ -45,18 +57,25 @@ import {
   createDefaultDefinition,
   createId,
   type PipelineDefinition,
+  type PipelineDependency,
   type PipelineMode,
   type PipelineNode,
   type PipelineParameter,
   type PipelineTool,
   type PreviewColumn,
   type PreviewRow,
+  type PipelineExpectation,
+  type PipelineSchemaContract,
 } from '../features/pipeline/pipelineTypes'
 import '../features/pipeline/pipeline.css'
 
 type PipelineRecord = Record<string, unknown>
 type DatasetRecord = Record<string, unknown>
 type RegisteredSheetRecord = Record<string, unknown>
+type ProposalRecord = Record<string, unknown>
+type ExpectationItem = { id: string; rule: string; column: string; value: string }
+type SchemaContractItem = { id: string; column: string; type: string; required: boolean }
+type DependencyItem = { id: string; pipelineId: string; status: string }
 const extractList = <T,>(payload: unknown, key: string): T[] => {
   if (!payload || typeof payload !== 'object') return []
   const data = payload as { data?: Record<string, unknown> }
@@ -72,6 +91,56 @@ const extractPipeline = (payload: unknown): PipelineRecord | null => {
   const data = payload as { data?: { pipeline?: PipelineRecord } }
   return data.data?.pipeline ?? (payload as { pipeline?: PipelineRecord }).pipeline ?? null
 }
+
+const extractProposals = (payload: unknown): ProposalRecord[] => extractList<ProposalRecord>(payload, 'proposals')
+
+const isCronExpression = (input: string) => {
+  const parts = input.trim().split(/\s+/)
+  if (parts.length !== 5) return false
+  const fieldPattern = /^([*]|\d+|\d+-\d+|\*\/\d+|\d+-\d+\/\d+)(,([*]|\d+|\d+-\d+|\*\/\d+|\d+-\d+\/\d+))*$/
+  return parts.every((part) => fieldPattern.test(part))
+}
+
+const parseScheduleInput = (schedule: string) => {
+  const normalized = schedule.trim()
+  if (!normalized || normalized.toLowerCase() === 'manual') {
+    return { intervalSeconds: null, cron: null }
+  }
+  if (isCronExpression(normalized)) {
+    return { intervalSeconds: null, cron: normalized }
+  }
+  const minuteMatch = normalized.match(/^(\d+)\s*m(in)?$/i)
+  if (minuteMatch) return { intervalSeconds: Number(minuteMatch[1]) * 60, cron: null }
+  const hourMatch = normalized.match(/^(\d+)\s*h(our)?s?$/i)
+  if (hourMatch) return { intervalSeconds: Number(hourMatch[1]) * 3600, cron: null }
+  const dayMatch = normalized.match(/^(\d+)\s*d(ay)?s?$/i)
+  if (dayMatch) return { intervalSeconds: Number(dayMatch[1]) * 86400, cron: null }
+  const numeric = Number(normalized)
+  if (Number.isFinite(numeric)) return { intervalSeconds: numeric, cron: null }
+  return { intervalSeconds: null, cron: null }
+}
+
+const expectationDefaults = (): ExpectationItem => ({
+  id: createId('expectation'),
+  rule: 'row_count_min',
+  column: '',
+  value: '',
+})
+
+const schemaContractDefaults = (): SchemaContractItem => ({
+  id: createId('schema'),
+  column: '',
+  type: 'xsd:string',
+  required: true,
+})
+
+const dependencyDefaults = (): DependencyItem => ({
+  id: createId('dependency'),
+  pipelineId: '',
+  status: 'DEPLOYED',
+})
+
+type PipelineDefinitionView = 'graph' | 'pseudocode'
 
 const ensureDefinition = (raw: unknown): PipelineDefinition => {
   const fallback = createDefaultDefinition()
@@ -103,6 +172,10 @@ const ensureDefinition = (raw: unknown): PipelineDefinition => {
     .filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to))
   const parameters = Array.isArray(value.parameters) ? value.parameters : fallback.parameters
   const outputs = Array.isArray(value.outputs) ? value.outputs : fallback.outputs
+  const dependencies = Array.isArray(value.dependencies) ? value.dependencies : (fallback.dependencies ?? [])
+  const schemaContract = Array.isArray((value as { schemaContract?: unknown }).schemaContract)
+    ? ((value as { schemaContract?: PipelineSchemaContract[] }).schemaContract as PipelineSchemaContract[])
+    : []
   return {
     nodes: normalizedNodes,
     edges,
@@ -118,6 +191,18 @@ const ensureDefinition = (raw: unknown): PipelineDefinition => {
       description: output.description,
     })),
     settings: value.settings ?? fallback.settings,
+    expectations: Array.isArray(value.expectations) ? (value.expectations as PipelineExpectation[]) : [],
+    schemaContract,
+    dependencies: dependencies
+      .map((dep) => {
+        const record = dep as PipelineDependency & { pipeline_id?: string }
+        const pipelineId = record.pipelineId ?? record.pipeline_id ?? ''
+        return {
+          pipelineId,
+          status: record.status ?? 'DEPLOYED',
+        }
+      })
+      .filter((dep) => dep.pipelineId),
   }
 }
 
@@ -163,6 +248,35 @@ const extractRows = (sample: unknown): PreviewRow[] => {
     return raw.data.filter((row) => row && typeof row === 'object') as PreviewRow[]
   }
   return []
+}
+
+const extractNumber = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    const numeric = Number(value)
+    if (Number.isFinite(numeric)) return numeric
+  }
+  return null
+}
+
+const extractRowCount = (payload: unknown): number | null => {
+  if (!payload || typeof payload !== 'object') return null
+  const raw = payload as Record<string, unknown>
+  return extractNumber(raw.row_count ?? raw.rowCount)
+}
+
+const extractSampleRowCount = (payload: unknown): number | null => {
+  if (!payload || typeof payload !== 'object') return null
+  const raw = payload as Record<string, unknown>
+  return extractNumber(raw.sample_row_count ?? raw.sampleRowCount)
+}
+
+const extractColumnStats = (payload: unknown): Record<string, unknown> | null => {
+  if (!payload || typeof payload !== 'object') return null
+  const raw = payload as Record<string, unknown>
+  const stats = raw.column_stats ?? raw.columnStats
+  if (!stats || typeof stats !== 'object') return null
+  return stats as Record<string, unknown>
 }
 
 const extractColumnNames = (schema: unknown, fallbackType: string) =>
@@ -245,17 +359,25 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
               saveMenu: '저장',
               noPipelines: '파이프라인 없음',
               noBranches: '브랜치 없음',
+              createBranch: '브랜치 생성',
+              archiveBranch: '브랜치 보관',
+              restoreBranch: '브랜치 복원',
+              archivedLabel: '보관됨',
             },
-            toolbar: {
-              tools: '도구',
-              select: '선택',
-              remove: '삭제',
-              layout: '정렬',
-              addDatasets: '데이터 추가',
-              parameters: '파라미터',
-              transform: '변환',
-              edit: '편집',
-            },
+	            toolbar: {
+	              tools: '도구',
+	              select: '선택',
+	              remove: '삭제',
+	              layout: '정렬',
+	              focus: '포커스',
+	              showAll: '전체 보기',
+	              addDatasets: '데이터 추가',
+	              parameters: '파라미터',
+	              transform: '변환',
+	              edit: '편집',
+	              graphView: '그래프',
+	              pseudocodeView: '의사코드',
+	            },
             sidebar: {
               folders: '폴더',
               inputs: '입력',
@@ -275,6 +397,8 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
             preview: {
               title: '미리보기',
               dataPreview: '데이터 미리보기',
+              rowCountLabel: '전체 행',
+              sampleRowCountLabel: '샘플',
               noNodes: '노드 없음',
               searchPlaceholder: (count: number) => `${count}개 컬럼 검색...`,
               formatType: (type: string) => {
@@ -291,6 +415,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                   return '숫자'
                 return '문자열'
               },
+              validationTitle: '검증 경고',
               showPreview: '미리보기 열기',
             },
             dialogs: {
@@ -312,6 +437,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                   datasets: '데이터셋',
                   excel: 'Excel 업로드',
                   csv: 'CSV 업로드',
+                  media: '미디어 업로드',
                   manual: '수동 입력',
                 },
                 callout: '추가 커넥터 관리는 데이터 연결에서 진행할 수 있습니다.',
@@ -353,6 +479,16 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                   upload: '업로드 및 그래프 추가',
                   reset: '초기화',
                 },
+                media: {
+                  title: '미디어 업로드',
+                  helper: '이미지/문서 등 파일을 업로드해 media dataset으로 저장합니다.',
+                  file: '파일',
+                  datasetName: '데이터셋 이름',
+                  preview: '미리보기',
+                  previewEmpty: '파일을 선택하면 미리보기가 표시됩니다.',
+                  upload: '업로드 및 그래프 추가',
+                  reset: '초기화',
+                },
               },
               parameters: {
                 title: '파라미터',
@@ -366,26 +502,46 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                 title: '변환 편집',
                 nodeName: '노드 이름',
                 operation: '작업',
+                categories: {
+                  rowLevel: '행 단위',
+                  aggregation: '집계',
+                  generator: '생성기',
+                },
                 expression: '수식',
+                groupBy: '그룹 기준 컬럼',
+                aggregates: '집계 정의 (col:op as alias)',
+                pivotIndex: '피벗 인덱스',
+                pivotColumns: '피벗 컬럼',
+                pivotValues: '피벗 값',
+                pivotAgg: '피벗 집계',
+                windowPartition: '윈도우 파티션',
+                windowOrder: '윈도우 정렬',
+                columns: '컬럼 목록',
+                renameMap: '이름 변경 매핑 (JSON)',
+                castMap: '타입 변환 목록 (JSON)',
+                schemaChecks: '스키마 검증(JSON)',
                 cancel: '취소',
                 save: '저장',
               },
-              join: {
-                title: '조인 생성',
-                leftDataset: '왼쪽 데이터셋',
-                rightDataset: '오른쪽 데이터셋',
-                leftKey: '왼쪽 키',
-                rightKey: '오른쪽 키',
-                joinType: '조인 유형',
-                selectNode: '노드 선택',
-                selectKey: '키 선택',
-                inner: '내부',
-                left: '왼쪽',
-                right: '오른쪽',
-                full: '전체',
-                cancel: '취소',
-                create: '조인 생성',
-              },
+	              join: {
+	                title: '조인 생성',
+	                leftDataset: '왼쪽 데이터셋',
+	                rightDataset: '오른쪽 데이터셋',
+	                leftKey: '왼쪽 키',
+	                rightKey: '오른쪽 키',
+	                joinType: '조인 유형',
+	                selectNode: '노드 선택',
+	                selectKey: '키 선택',
+	                inner: '내부',
+	                left: '왼쪽',
+	                right: '오른쪽',
+	                full: '전체',
+	                cross: '크로스(위험)',
+	                allowCrossJoin: '키 없이 조인(크로스 조인) 허용',
+	                allowCrossJoinHelp: '키 없이 조인하면 결과가 폭증할 수 있습니다. 정말 필요한 경우에만 사용하세요.',
+	                cancel: '취소',
+	                create: '조인 생성',
+	              },
               visualize: {
                 title: '시각화',
                 body: '미리보기 데이터가 로드되면 시각화를 사용할 수 있습니다.',
@@ -394,8 +550,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
               deploy: {
                 title: '파이프라인 배포',
                 outputDataset: '출력 데이터셋 이름',
-                rowCount: '행 수',
-                artifactKey: '아티팩트 키',
+                helper: '배포는 먼저 Build(스테이징)로 아티팩트를 생성한 뒤, 동일 아티팩트를 승격(promote)합니다.',
                 cancel: '취소',
                 deploy: '배포',
               },
@@ -405,8 +560,36 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                 memory: '메모리',
                 schedule: '스케줄',
                 engine: '엔진',
+                branch: '브랜치',
+                replayOnDeploy: 'Breaking change 재처리(Replay) 허용',
+                replayOnDeployHelp:
+                  '스키마 breaking change(컬럼 삭제/타입 변경 등)가 감지되면 기본적으로 배포가 차단됩니다. 배포를 진행하려면 체크하세요.',
+                proposalStatus: '제안 상태',
+                proposalTitle: '제안 제목',
+                proposalDescription: '제안 설명',
+                expectations: '데이터 품질 기대치',
+                schemaContract: '스키마 계약',
+                dependencies: '실행 의존성',
+                dependencySelectPipeline: '파이프라인 선택',
+                dependencyStatusDeployed: 'DEPLOYED(배포됨) 이상',
+                dependencyStatusSuccess: 'SUCCESS(성공) 이상',
+                dependencyAdd: '의존성 추가',
+                dependenciesHelp: '의존 파이프라인이 지정 상태에 도달하고(그리고 최신이면) 자동 실행됩니다.',
+                expectationAdd: '기대치 추가',
+                expectationColumn: '컬럼',
+                expectationValue: '값',
+                schemaAdd: '스키마 컬럼 추가',
+                schemaColumn: '컬럼',
+                schemaRequired: '필수',
                 cancel: '취소',
                 save: '저장',
+              },
+              branch: {
+                title: '브랜치 생성',
+                name: '브랜치 이름',
+                helper: '현재 파이프라인 버전을 새 브랜치로 복사합니다.',
+                cancel: '취소',
+                create: '생성',
               },
               output: {
                 title: '출력 추가',
@@ -422,12 +605,37 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                 close: '닫기',
               },
             },
-            toast: {
-              pipelineCreated: '파이프라인이 생성되었습니다.',
-              pipelineSaved: '파이프라인이 저장되었습니다.',
-              pipelineDeployed: '파이프라인이 배포되었습니다.',
-              datasetCreated: '데이터셋이 생성되었습니다.',
-              pipeliningStarted: '커넥터 데이터가 파이프라인에 추가되었습니다.',
+		            toast: {
+		              pipelineCreated: '파이프라인이 생성되었습니다.',
+		              pipelineSaved: '파이프라인이 저장되었습니다.',
+		              pipelineDeployed: '파이프라인이 배포되었습니다.',
+		              datasetCreated: '데이터셋이 생성되었습니다.',
+		              pipeliningStarted: '커넥터 데이터가 파이프라인에 추가되었습니다.',
+              deployMissingOutput: '배포할 출력 노드를 추가하세요.',
+              deployPreflight: '배포 전 검증(Build) 실행 중…',
+              deployPromote: '스테이징 빌드 결과를 배포로 반영 중…',
+              deployPreflightFailed: '배포 전 검증(Build)이 실패했습니다.',
+              deployPreflightTimeout: '배포 전 검증(Build) 시간이 초과되었습니다.',
+              proposalSubmitted: '제안이 제출되었습니다.',
+              proposalApproved: '제안이 승인되었습니다.',
+              proposalRejected: '제안이 거절되었습니다.',
+              branchCreated: '브랜치가 생성되었습니다.',
+              branchArchived: '브랜치가 보관되었습니다.',
+              branchRestored: '브랜치가 복원되었습니다.',
+	              joinMissingKeys: '조인 키를 선택하세요. (또는 위험한 크로스 조인을 명시적으로 허용하세요.)',
+	              transformMissingExpression: '수식을 입력하세요.',
+              transformMissingPivot: '피벗 설정을 완성하세요.',
+              transformMissingAggregate: '집계 정의를 입력하세요.',
+              transformMissingWindow: '윈도우 정렬 컬럼을 입력하세요.',
+              transformMissingColumns: '대상 컬럼을 입력하세요.',
+              transformMissingRename: '이름 변경 매핑을 입력하세요.',
+              transformMissingCasts: '타입 변환 설정을 입력하세요.',
+              schemaChecksInvalid: '스키마 체크(JSON) 형식을 확인하세요.',
+              expectationsInvalid: '데이터 품질 기대치 설정을 확인하세요.',
+              schemaContractInvalid: '스키마 계약 항목을 확인하세요.',
+              dependenciesInvalid: '의존성(JSON) 형식을 확인하세요.',
+              dependenciesSelf: '자기 자신을 의존성으로 설정할 수 없습니다.',
+              scheduleInvalid: '스케줄 입력 형식을 확인하세요.',
             },
             labels: {
               columnsSuffix: '컬럼',
@@ -439,7 +647,19 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
             operations: {
               filter: '필터',
               compute: '계산',
+              explode: 'Explode',
               join: '조인',
+              groupBy: '그룹',
+              aggregate: '집계',
+              pivot: '피벗',
+              window: '윈도우',
+              select: '컬럼 선택',
+              drop: '컬럼 제거',
+              rename: '컬럼 이름 변경',
+              cast: '타입 변환',
+              dedupe: '중복 제거',
+              sort: '정렬',
+              union: '유니온',
             },
             nodeTypes: {
               input: '입력',
@@ -453,8 +673,31 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
               visualize: '시각화',
               edit: '편집',
             },
-          }
-        : {
+            proposals: {
+              title: '제안',
+              subtitle: '승인 전 변경사항을 검토하세요.',
+              create: '제안 만들기',
+              empty: '제안이 없습니다.',
+              approve: '승인',
+              reject: '거절',
+              createTitle: '제안 제출',
+              submit: '제안 제출',
+              fields: {
+                title: '제안 제목',
+                description: '제안 설명',
+              },
+            },
+	            history: {
+	              title: '기록',
+	              empty: '히스토리가 없습니다.',
+	              filterAll: '전체',
+	              filterSchedule: '스케줄',
+	              wholePipeline: '전체 파이프라인',
+	              scheduleReason: '사유',
+	              scheduleError: '오류',
+	            },
+	          }
+	        : {
             header: {
               file: 'File',
               help: 'Help',
@@ -473,17 +716,25 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
               saveMenu: 'Save',
               noPipelines: 'No pipelines',
               noBranches: 'No branches',
+              createBranch: 'Create branch',
+              archiveBranch: 'Archive branch',
+              restoreBranch: 'Restore branch',
+              archivedLabel: 'Archived',
             },
-            toolbar: {
-              tools: 'Tools',
-              select: 'Select',
-              remove: 'Remove',
-              layout: 'Layout',
-              addDatasets: 'Add datasets',
-              parameters: 'Parameters',
-              transform: 'Transform',
-              edit: 'Edit',
-            },
+	            toolbar: {
+	              tools: 'Tools',
+	              select: 'Select',
+	              remove: 'Remove',
+	              layout: 'Layout',
+	              focus: 'Focus',
+	              showAll: 'Show all',
+	              addDatasets: 'Add datasets',
+	              parameters: 'Parameters',
+	              transform: 'Transform',
+	              edit: 'Edit',
+	              graphView: 'Graph',
+	              pseudocodeView: 'Pseudocode',
+	            },
             sidebar: {
               folders: 'Folders',
               inputs: 'Inputs',
@@ -503,9 +754,12 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
             preview: {
               title: 'Preview',
               dataPreview: 'Data preview',
+              rowCountLabel: 'Rows',
+              sampleRowCountLabel: 'Sample',
               noNodes: 'No nodes',
               searchPlaceholder: (count: number) => `Search ${count} columns...`,
               formatType: (type: string) => type,
+              validationTitle: 'Validation alerts',
               showPreview: 'Show preview',
             },
             dialogs: {
@@ -527,6 +781,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                     datasets: 'Datasets',
                     excel: 'Excel upload',
                     csv: 'CSV upload',
+                    media: 'Media upload',
                     manual: 'Manual',
                   },
                 callout: 'Manage additional connectors in Data Connections.',
@@ -568,6 +823,16 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                     upload: 'Upload and add to graph',
                     reset: 'Reset',
                   },
+                  media: {
+                    title: 'Media upload',
+                    helper: 'Upload media files and save them as a media dataset.',
+                    file: 'Files',
+                    datasetName: 'Dataset name',
+                    preview: 'Preview',
+                    previewEmpty: 'Select files to see a preview.',
+                    upload: 'Upload and add to graph',
+                    reset: 'Reset',
+                  },
                 },
               parameters: {
                 title: 'Parameters',
@@ -581,26 +846,46 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                 title: 'Edit transform',
                 nodeName: 'Node name',
                 operation: 'Operation',
+                categories: {
+                  rowLevel: 'Row-level',
+                  aggregation: 'Aggregation',
+                  generator: 'Generator',
+                },
                 expression: 'Expression',
+                groupBy: 'Group by columns',
+                aggregates: 'Aggregations (col:op as alias)',
+                pivotIndex: 'Pivot index',
+                pivotColumns: 'Pivot columns',
+                pivotValues: 'Pivot values',
+                pivotAgg: 'Pivot agg',
+                windowPartition: 'Window partition',
+                windowOrder: 'Window order',
+                columns: 'Columns',
+                renameMap: 'Rename map (JSON)',
+                castMap: 'Cast list (JSON)',
+                schemaChecks: 'Schema checks (JSON)',
                 cancel: 'Cancel',
                 save: 'Save',
               },
-              join: {
-                title: 'Create join',
-                leftDataset: 'Left dataset',
-                rightDataset: 'Right dataset',
-                leftKey: 'Left key',
-                rightKey: 'Right key',
-                joinType: 'Join type',
-                selectNode: 'Select node',
-                selectKey: 'Select key',
-                inner: 'Inner',
-                left: 'Left',
-                right: 'Right',
-                full: 'Full',
-                cancel: 'Cancel',
-                create: 'Create join',
-              },
+	              join: {
+	                title: 'Create join',
+	                leftDataset: 'Left dataset',
+	                rightDataset: 'Right dataset',
+	                leftKey: 'Left key',
+	                rightKey: 'Right key',
+	                joinType: 'Join type',
+	                selectNode: 'Select node',
+	                selectKey: 'Select key',
+	                inner: 'Inner',
+	                left: 'Left',
+	                right: 'Right',
+	                full: 'Full',
+	                cross: 'Cross (dangerous)',
+	                allowCrossJoin: 'Allow keyless join (cross join)',
+	                allowCrossJoinHelp: 'Joins without keys can explode row counts. Use only when absolutely necessary.',
+	                cancel: 'Cancel',
+	                create: 'Create join',
+	              },
               visualize: {
                 title: 'Visualize',
                 body: 'Visualization will be available once preview data is loaded.',
@@ -609,8 +894,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
               deploy: {
                 title: 'Deploy pipeline',
                 outputDataset: 'Output dataset name',
-                rowCount: 'Row count',
-                artifactKey: 'Artifact key',
+                helper: 'Deploy runs a staged build first, then promotes the exact same artifact.',
                 cancel: 'Cancel',
                 deploy: 'Deploy',
               },
@@ -620,6 +904,27 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                 memory: 'Memory',
                 schedule: 'Schedule',
                 engine: 'Engine',
+                branch: 'Branch',
+                replayOnDeploy: 'Allow replay on deploy (breaking schema change)',
+                replayOnDeployHelp:
+                  'If a breaking schema change is detected (column removed/type changed), deploy is blocked unless you enable this.',
+                proposalStatus: 'Proposal status',
+                proposalTitle: 'Proposal title',
+                proposalDescription: 'Proposal description',
+                expectations: 'Data expectations',
+                schemaContract: 'Schema contract',
+                dependencies: 'Run dependencies',
+                dependencySelectPipeline: 'Select pipeline',
+                dependencyStatusDeployed: 'DEPLOYED or higher',
+                dependencyStatusSuccess: 'SUCCESS or higher',
+                dependencyAdd: 'Add dependency',
+                dependenciesHelp: 'Runs when dependencies reach the required status (and are newer).',
+                expectationAdd: 'Add expectation',
+                expectationColumn: 'Column',
+                expectationValue: 'Value',
+                schemaAdd: 'Add schema column',
+                schemaColumn: 'Column',
+                schemaRequired: 'Required',
                 cancel: 'Cancel',
                 save: 'Save',
               },
@@ -636,14 +941,46 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                 body: 'Add datasets, build transforms on the graph, and deploy outputs to create canonical datasets.',
                 close: 'Close',
               },
+              branch: {
+                title: 'Create branch',
+                name: 'Branch name',
+                helper: 'Copies the current pipeline version into a new branch.',
+                cancel: 'Cancel',
+                create: 'Create',
+              },
             },
-            toast: {
-              pipelineCreated: 'Pipeline created.',
-              pipelineSaved: 'Pipeline saved.',
-              pipelineDeployed: 'Pipeline deployed.',
-              datasetCreated: 'Dataset created.',
-              pipeliningStarted: 'Connector dataset added to the pipeline.',
-            },
+		            toast: {
+		              pipelineCreated: 'Pipeline created.',
+		              pipelineSaved: 'Pipeline saved.',
+		              pipelineDeployed: 'Pipeline deployed.',
+		              datasetCreated: 'Dataset created.',
+		              pipeliningStarted: 'Connector dataset added to the pipeline.',
+		              deployMissingOutput: 'Add an output node before deploying.',
+		              deployPreflight: 'Running preflight build…',
+		              deployPromote: 'Promoting staged build artifact to deploy…',
+		              deployPreflightFailed: 'Preflight build failed.',
+		              deployPreflightTimeout: 'Preflight build timed out.',
+	              proposalSubmitted: 'Proposal submitted.',
+	              proposalApproved: 'Proposal approved.',
+	              proposalRejected: 'Proposal rejected.',
+	              branchCreated: 'Branch created.',
+                branchArchived: 'Branch archived.',
+                branchRestored: 'Branch restored.',
+	              joinMissingKeys: 'Select join keys (or explicitly allow dangerous cross join).',
+	              transformMissingExpression: 'Add an expression to continue.',
+              transformMissingPivot: 'Complete pivot settings to continue.',
+              transformMissingAggregate: 'Add at least one aggregate.',
+              transformMissingWindow: 'Add window order columns to continue.',
+              transformMissingColumns: 'Add target columns.',
+              transformMissingRename: 'Provide rename mapping.',
+              transformMissingCasts: 'Provide cast definitions.',
+	              schemaChecksInvalid: 'Schema checks JSON is invalid.',
+	              expectationsInvalid: 'Review data expectation settings.',
+	              schemaContractInvalid: 'Review schema contract settings.',
+	              dependenciesInvalid: 'Dependencies JSON is invalid.',
+	              dependenciesSelf: 'A pipeline cannot depend on itself.',
+	              scheduleInvalid: 'Schedule input is invalid.',
+	            },
             labels: {
               columnsSuffix: 'columns',
               join: 'Join',
@@ -654,7 +991,19 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
             operations: {
               filter: 'Filter',
               compute: 'Compute',
+              explode: 'Explode',
               join: 'Join',
+              groupBy: 'Group by',
+              aggregate: 'Aggregate',
+              pivot: 'Pivot',
+              window: 'Window',
+              select: 'Select columns',
+              drop: 'Drop columns',
+              rename: 'Rename columns',
+              cast: 'Cast types',
+              dedupe: 'Remove duplicates',
+              sort: 'Sort',
+              union: 'Union',
             },
             nodeTypes: {
               input: 'Input',
@@ -668,29 +1017,116 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
               visualize: 'Visualize',
               edit: 'Edit',
             },
-          },
-    [language],
-  )
+            proposals: {
+              title: 'Proposals',
+              subtitle: 'Review changes before merging into production.',
+              create: 'Create proposal',
+              empty: 'No proposals yet.',
+              approve: 'Approve',
+              reject: 'Reject',
+              createTitle: 'Submit proposal',
+              submit: 'Submit proposal',
+              fields: {
+                title: 'Proposal title',
+                description: 'Proposal description',
+              },
+            },
+	            history: {
+	              title: 'History',
+	              empty: 'No history yet.',
+	              filterAll: 'All runs',
+	              filterSchedule: 'Schedule runs',
+	              wholePipeline: 'Entire pipeline',
+	              scheduleReason: 'Reason',
+	              scheduleError: 'Error',
+	            },
+	          },
+	    [language],
+	  )
 
-  const [mode, setMode] = useState<PipelineMode>('edit')
-  const [activeTool, setActiveTool] = useState<PipelineTool>('tools')
-  const [definition, setDefinition] = useState<PipelineDefinition>(() => createDefaultDefinition())
-  const [pipelineId, setPipelineId] = useState<string | null>(null)
-  const [pipelineName, setPipelineName] = useState('')
-  const [pipelineLocation, setPipelineLocation] = useState(`/projects/${dbName}/pipelines`)
+		  const [mode, setMode] = useState<PipelineMode>('edit')
+		  const [activeTool, setActiveTool] = useState<PipelineTool>('tools')
+		  const [definitionView, setDefinitionView] = useState<PipelineDefinitionView>('graph')
+		  const [historyFilter, setHistoryFilter] = useState<'all' | 'schedule'>('all')
+		  const [definition, setDefinition] = useState<PipelineDefinition>(() => createDefaultDefinition())
+	  const [pipelineId, setPipelineId] = useState<string | null>(null)
+	  const [pipelineName, setPipelineName] = useState('')
+	  const [pipelineLocation, setPipelineLocation] = useState(`/projects/${dbName}/pipelines`)
   const [history, setHistory] = useState<PipelineDefinition[]>([])
   const [future, setFuture] = useState<PipelineDefinition[]>([])
   const [isDirty, setIsDirty] = useState(false)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [previewNodeId, setPreviewNodeId] = useState<string | null>(null)
+  const [nodeSearch, setNodeSearch] = useState('')
+  const [focusNodeId, setFocusNodeId] = useState<string | null>(null)
   const [canvasZoom, setCanvasZoom] = useState(1)
   const [inspectorOpen, setInspectorOpen] = useState(false)
-  const [previewCollapsed, setPreviewCollapsed] = useState(false)
-  const [previewFullscreen, setPreviewFullscreen] = useState(false)
-  const [previewSample, setPreviewSample] = useState<{ columns: PreviewColumn[]; rows: PreviewRow[] } | null>(null)
+	  const [previewCollapsed, setPreviewCollapsed] = useState(false)
+	  const [previewFullscreen, setPreviewFullscreen] = useState(false)
+	  const [previewSample, setPreviewSample] = useState<{ columns: PreviewColumn[]; rows: PreviewRow[] } | null>(null)
 
-  const [pipelineDialogOpen, setPipelineDialogOpen] = useState(false)
-  const [datasetDialogOpen, setDatasetDialogOpen] = useState(false)
+	  const pseudocodeText = useMemo(() => {
+	    const nodesById = new Map(definition.nodes.map((node) => [node.id, node]))
+	    const outgoing = new Map<string, string[]>()
+	    const indegree = new Map<string, number>()
+
+	    definition.nodes.forEach((node) => indegree.set(node.id, 0))
+	    definition.edges.forEach((edge) => {
+	      if (!nodesById.has(edge.from) || !nodesById.has(edge.to)) return
+	      outgoing.set(edge.from, [...(outgoing.get(edge.from) ?? []), edge.to])
+	      indegree.set(edge.to, (indegree.get(edge.to) ?? 0) + 1)
+	    })
+
+	    const queue = Array.from(indegree.entries())
+	      .filter(([, count]) => count === 0)
+	      .map(([id]) => id)
+	      .sort()
+
+	    const ordered: string[] = []
+	    while (queue.length) {
+	      const current = queue.shift()
+	      if (!current) break
+	      ordered.push(current)
+	      for (const next of outgoing.get(current) ?? []) {
+	        const nextCount = (indegree.get(next) ?? 0) - 1
+	        indegree.set(next, nextCount)
+	        if (nextCount === 0) {
+	          queue.push(next)
+	          queue.sort()
+	        }
+	      }
+	    }
+
+	    const outputById = new Map(definition.outputs.map((output) => [output.id, output]))
+	    const lines = ordered.map((nodeId, index) => {
+	      const node = nodesById.get(nodeId)
+	      if (!node) return null
+
+	      if (node.type === 'input') {
+	        const datasetName = String(node.metadata?.datasetName ?? '').trim()
+	        const datasetId = String(node.metadata?.datasetId ?? '').trim()
+	        const datasetRef = datasetName || datasetId || '—'
+	        return `${index + 1}. input ${node.title}  (dataset: ${datasetRef})`
+	      }
+
+	      if (node.type === 'output') {
+	        const outputId = String(node.metadata?.outputId ?? '').trim()
+	        const outputDatasetName =
+	          (outputId && outputById.get(outputId)?.datasetName) || String(node.metadata?.datasetName ?? '').trim()
+	        return `${index + 1}. output ${node.title}  (dataset: ${outputDatasetName || '—'})`
+	      }
+
+	      const operation = String(node.metadata?.operation ?? '').trim()
+	      const expression = String(node.metadata?.expression ?? '').trim()
+	      const suffix = [operation && `op=${operation}`, expression && `expr=${expression}`].filter(Boolean).join(' ')
+	      return `${index + 1}. transform ${node.title}${suffix ? `  (${suffix})` : ''}`
+	    })
+
+	    return lines.filter(Boolean).join('\\n')
+	  }, [definition.edges, definition.nodes, definition.outputs])
+
+	  const [pipelineDialogOpen, setPipelineDialogOpen] = useState(false)
+	  const [datasetDialogOpen, setDatasetDialogOpen] = useState(false)
   const [parametersOpen, setParametersOpen] = useState(false)
   const [transformOpen, setTransformOpen] = useState(false)
   const [joinOpen, setJoinOpen] = useState(false)
@@ -699,6 +1135,13 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
   const [deploySettingsOpen, setDeploySettingsOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [outputOpen, setOutputOpen] = useState(false)
+  const [proposalDrawerOpen, setProposalDrawerOpen] = useState(false)
+  const [proposalDraft, setProposalDraft] = useState({ title: '', description: '' })
+  const [branchDialogOpen, setBranchDialogOpen] = useState(false)
+  const [branchDraft, setBranchDraft] = useState('')
+  const [expectationDrafts, setExpectationDrafts] = useState<ExpectationItem[]>([expectationDefaults()])
+  const [schemaContractDrafts, setSchemaContractDrafts] = useState<SchemaContractItem[]>([schemaContractDefaults()])
+  const [dependencyDrafts, setDependencyDrafts] = useState<DependencyItem[]>([])
 
   const [newPipelineName, setNewPipelineName] = useState('')
   const [newPipelineLocation, setNewPipelineLocation] = useState('')
@@ -720,36 +1163,75 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
   const [csvDelimiter, setCsvDelimiter] = useState('')
   const [csvHasHeader, setCsvHasHeader] = useState(true)
   const [csvPreview, setCsvPreview] = useState<{ columns: PreviewColumn[]; rows: PreviewRow[] } | null>(null)
+  const [mediaFiles, setMediaFiles] = useState<File[]>([])
+  const [mediaDatasetName, setMediaDatasetName] = useState('')
+  const [mediaPreview, setMediaPreview] = useState<{ columns: PreviewColumn[]; rows: PreviewRow[] } | null>(null)
 
   const [parameterDrafts, setParameterDrafts] = useState<PipelineParameter[]>([])
-  const [transformDraft, setTransformDraft] = useState({ title: '', operation: '', expression: '' })
+  const [transformDraft, setTransformDraft] = useState({
+    title: '',
+    operation: 'filter',
+    expression: '',
+    groupBy: '',
+    aggregates: '',
+    pivotIndex: '',
+    pivotColumns: '',
+    pivotValues: '',
+    pivotAgg: 'sum',
+    windowPartition: '',
+    windowOrder: '',
+    schemaChecksJson: '',
+    columns: '',
+    renameMap: '',
+    castMap: '',
+  })
   const [joinLeft, setJoinLeft] = useState('')
   const [joinRight, setJoinRight] = useState('')
   const [joinType, setJoinType] = useState('inner')
   const [joinLeftKey, setJoinLeftKey] = useState('')
   const [joinRightKey, setJoinRightKey] = useState('')
+  const [joinAllowCrossJoin, setJoinAllowCrossJoin] = useState(false)
   const [outputDraft, setOutputDraft] = useState({ name: '', datasetName: '', description: '' })
-  const [deployDraft, setDeployDraft] = useState({ datasetName: '', rowCount: '500', artifactKey: '' })
-  const [deploySettings, setDeploySettings] = useState({ compute: 'Medium', memory: '4 GB', schedule: 'Manual', engine: 'Batch' })
+  const [deployDraft, setDeployDraft] = useState({ datasetName: '' })
+  const [safeDeployPending, setSafeDeployPending] = useState(false)
+  const [deploySettings, setDeploySettings] = useState({
+    compute: 'Medium',
+    memory: '4 GB',
+    schedule: 'Manual',
+    engine: 'Batch',
+    branch,
+    replayOnDeploy: false,
+    proposalStatus: 'draft',
+    proposalTitle: '',
+    proposalDescription: '',
+    expectationsJson: '',
+    schemaContractJson: '[]',
+  })
 
   const autoPrompted = useRef(false)
   const loadedPipeline = useRef<string | null>(null)
 
   const pipelinesQuery = useQuery({
-    queryKey: qk.pipelines(dbName, requestContext.language),
-    queryFn: () => listPipelines(requestContext, dbName),
+    queryKey: qk.pipelines(dbName, requestContext.language, branch),
+    queryFn: () => listPipelines(requestContext, dbName, branch),
+    enabled: Boolean(dbName),
+  })
+
+  const proposalsQuery = useQuery({
+    queryKey: qk.pipelineProposals(dbName, requestContext.language, branch),
+    queryFn: () => listPipelineProposals(requestContext, dbName, branch),
     enabled: Boolean(dbName),
   })
 
   const branchesQuery = useQuery({
-    queryKey: qk.branches(dbName, requestContext.language),
-    queryFn: () => listBranches(requestContext, dbName),
+    queryKey: qk.pipelineBranches(dbName, requestContext.language),
+    queryFn: () => listPipelineBranches(requestContext, dbName),
     enabled: Boolean(dbName),
   })
 
   const datasetsQuery = useQuery({
-    queryKey: qk.datasets(dbName, requestContext.language),
-    queryFn: () => listDatasets(requestContext, dbName),
+    queryKey: qk.datasets(dbName, requestContext.language, branch),
+    queryFn: () => listDatasets(requestContext, dbName, branch),
     enabled: Boolean(dbName),
   })
 
@@ -761,9 +1243,39 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
 
 
   const pipelineQuery = useQuery({
-    queryKey: qk.pipeline(pipelineId ?? 'pending', requestContext.language),
-    queryFn: () => getPipeline(requestContext, pipelineId ?? ''),
+    queryKey: qk.pipeline(pipelineId ?? 'pending', requestContext.language, branch),
+    queryFn: () => getPipeline(requestContext, pipelineId ?? '', branch),
     enabled: Boolean(pipelineId),
+    refetchInterval: 2000,
+  })
+
+  const [previewJobId, setPreviewJobId] = useState<string | null>(null)
+
+  const previewNode = useMemo(() => {
+    const candidate = definition.nodes.find((node) => node.id === previewNodeId)
+    return candidate ?? definition.nodes[0] ?? null
+  }, [definition.nodes, previewNodeId])
+
+  const previewStatusQuery = useQuery({
+    queryKey: [
+      'bff',
+      'pipelines',
+      'preview',
+      pipelineId ?? 'pending',
+      previewNode?.id ?? null,
+      previewJobId ?? null,
+      { branch: branch ?? null, lang: requestContext.language },
+    ],
+    queryFn: () => getPipelinePreviewStatus(requestContext, pipelineId ?? '', previewNode?.id ?? undefined),
+    enabled: Boolean(pipelineId) && !previewCollapsed,
+    refetchInterval: previewCollapsed ? false : 4000,
+  })
+
+  const pipelineRunsQuery = useQuery({
+    queryKey: qk.pipelineRuns(pipelineId ?? 'pending', requestContext.language),
+    queryFn: () => listPipelineRuns(requestContext, pipelineId ?? '', 50),
+    enabled: Boolean(pipelineId) && mode === 'history',
+    refetchInterval: mode === 'history' ? 4000 : false,
   })
 
   const createPipelineMutation = useMutation({
@@ -779,8 +1291,60 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
       setFuture([])
       setIsDirty(false)
       setPipelineDialogOpen(false)
-      void queryClient.invalidateQueries({ queryKey: qk.pipelines(dbName, requestContext.language) })
+      void queryClient.invalidateQueries({ queryKey: qk.pipelines(dbName, requestContext.language, branch) })
+      void queryClient.invalidateQueries({ queryKey: qk.pipelineProposals(dbName, requestContext.language, branch) })
       void showAppToast({ intent: Intent.SUCCESS, message: uiCopy.toast.pipelineCreated })
+    },
+    onError: (error) => toastApiError(error, language),
+  })
+
+  const createBranchMutation = useMutation({
+    mutationFn: (branchName: string) => createPipelineBranch(requestContext, pipelineId ?? '', branchName),
+    onSuccess: (payload, branchName) => {
+      const created = (payload as { data?: { branch?: Record<string, unknown> } } | null | undefined)?.data?.branch
+      const createdPipelineId = created?.pipeline_id ?? created?.pipelineId
+      const createdBranch = String(created?.branch ?? created?.name ?? branchName).trim()
+      if (createdPipelineId) {
+        setPipelineId(String(createdPipelineId))
+      }
+      if (createdBranch) {
+        setBranch(createdBranch)
+      }
+      setBranchDialogOpen(false)
+      setBranchDraft('')
+      void queryClient.invalidateQueries({ queryKey: qk.pipelineBranches(dbName, requestContext.language) })
+      void showAppToast({ intent: Intent.SUCCESS, message: uiCopy.toast.branchCreated })
+    },
+    onError: (error) => toastApiError(error, language),
+  })
+
+  const branchArchived = useMemo(() => {
+    if (!branchesQuery.data) return false
+    if (!branch || branch === 'main') return false
+    const raw = extractList<Record<string, unknown>>(branchesQuery.data, 'branches')
+    const match = raw.find((item) => String(item.branch ?? item.name ?? item.branch_name ?? '').trim() === branch)
+    if (!match) return false
+    const archived = match.archived
+    if (typeof archived === 'boolean') return archived
+    if (typeof archived === 'string') return archived.toLowerCase() === 'true'
+    if (typeof archived === 'number') return archived > 0
+    return false
+  }, [branchesQuery.data, branch])
+
+  const archiveBranchMutation = useMutation({
+    mutationFn: () => archivePipelineBranch(requestContext, dbName, branch),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: qk.pipelineBranches(dbName, requestContext.language) })
+      void showAppToast({ intent: Intent.SUCCESS, message: uiCopy.toast.branchArchived })
+    },
+    onError: (error) => toastApiError(error, language),
+  })
+
+  const restoreBranchMutation = useMutation({
+    mutationFn: () => restorePipelineBranch(requestContext, dbName, branch),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: qk.pipelineBranches(dbName, requestContext.language) })
+      void showAppToast({ intent: Intent.SUCCESS, message: uiCopy.toast.branchRestored })
     },
     onError: (error) => toastApiError(error, language),
   })
@@ -789,7 +1353,9 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     mutationFn: (payload: Record<string, unknown>) => updatePipeline(requestContext, pipelineId ?? '', payload),
     onSuccess: () => {
       setIsDirty(false)
-      void queryClient.invalidateQueries({ queryKey: qk.pipeline(pipelineId ?? 'pending', requestContext.language) })
+      void queryClient.invalidateQueries({ queryKey: qk.pipeline(pipelineId ?? 'pending', requestContext.language, branch) })
+      void queryClient.invalidateQueries({ queryKey: qk.pipelines(dbName, requestContext.language, branch) })
+      void queryClient.invalidateQueries({ queryKey: qk.pipelineProposals(dbName, requestContext.language, branch) })
       void showAppToast({ intent: Intent.SUCCESS, message: uiCopy.toast.pipelineSaved })
     },
     onError: (error) => toastApiError(error, language),
@@ -797,13 +1363,56 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
 
   const previewMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) => previewPipeline(requestContext, pipelineId ?? '', payload),
+    onSuccess: (payload) => {
+      const jobId = (payload as { data?: { job_id?: string } })?.data?.job_id
+      if (typeof jobId === 'string') {
+        setPreviewJobId(jobId)
+      }
+    },
+    onError: (error) => toastApiError(error, language),
+  })
+
+  const submitProposalMutation = useMutation({
+    mutationFn: (payload: { title: string; description: string }) =>
+      submitPipelineProposal(requestContext, pipelineId ?? '', {
+        db_name: dbName,
+        title: payload.title,
+        description: payload.description,
+        branch,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qk.pipelineProposals(dbName, requestContext.language, branch) })
+      void showAppToast({ intent: Intent.SUCCESS, message: uiCopy.toast.proposalSubmitted })
+      setProposalDraft({ title: '', description: '' })
+      setProposalDrawerOpen(false)
+    },
+    onError: (error) => toastApiError(error, language),
+  })
+
+  const approveProposalMutation = useMutation({
+    mutationFn: (payload: { pipelineId: string; proposalId: string }) =>
+      approvePipelineProposal(requestContext, payload.pipelineId, payload.proposalId, undefined, 'main'),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qk.pipelineProposals(dbName, requestContext.language, branch) })
+      void showAppToast({ intent: Intent.SUCCESS, message: uiCopy.toast.proposalApproved })
+    },
+    onError: (error) => toastApiError(error, language),
+  })
+
+  const rejectProposalMutation = useMutation({
+    mutationFn: (payload: { pipelineId: string; proposalId: string }) =>
+      rejectPipelineProposal(requestContext, payload.pipelineId, payload.proposalId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qk.pipelineProposals(dbName, requestContext.language, branch) })
+      void showAppToast({ intent: Intent.SUCCESS, message: uiCopy.toast.proposalRejected })
+    },
     onError: (error) => toastApiError(error, language),
   })
 
   const deployMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) => deployPipeline(requestContext, pipelineId ?? '', payload),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: qk.datasets(dbName, requestContext.language) })
+      void queryClient.invalidateQueries({ queryKey: qk.datasets(dbName, requestContext.language, branch) })
       void showAppToast({ intent: Intent.SUCCESS, message: uiCopy.toast.pipelineDeployed })
     },
     onError: (error) => toastApiError(error, language),
@@ -817,7 +1426,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
       source?: 'manual'
     }) => createDataset(requestContext, payload.request),
     onSuccess: (payload, variables) => {
-      void queryClient.invalidateQueries({ queryKey: qk.datasets(dbName, requestContext.language) })
+      void queryClient.invalidateQueries({ queryKey: qk.datasets(dbName, requestContext.language, branch) })
       void showAppToast({ intent: Intent.SUCCESS, message: uiCopy.toast.datasetCreated })
       const dataset = (payload as { data?: { dataset?: Record<string, unknown> } })?.data?.dataset
       const datasetId = typeof dataset?.dataset_id === 'string' ? dataset.dataset_id : ''
@@ -848,6 +1457,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
         file: payload.file,
         datasetName: payload.datasetName,
         sheetName: payload.sheetName || undefined,
+        branch,
       }),
     onSuccess: (payload) => {
       const dataset = (payload as { data?: { dataset?: DatasetRecord } })?.data?.dataset
@@ -871,7 +1481,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
         setExcelPreview({ columns: normalizedColumns, rows: preview.rows })
         setPreviewSample({ columns: normalizedColumns, rows: preview.rows })
       }
-      void queryClient.invalidateQueries({ queryKey: qk.datasets(dbName, requestContext.language) })
+      void queryClient.invalidateQueries({ queryKey: qk.datasets(dbName, requestContext.language, branch) })
       void showAppToast({ intent: Intent.SUCCESS, message: uiCopy.toast.datasetCreated })
       setExcelFile(null)
       setExcelDatasetName('')
@@ -887,6 +1497,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
         datasetName: payload.datasetName,
         delimiter: payload.delimiter || undefined,
         hasHeader: payload.hasHeader,
+        branch,
       }),
     onSuccess: (payload) => {
       const dataset = (payload as { data?: { dataset?: DatasetRecord } })?.data?.dataset
@@ -910,12 +1521,50 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
         setCsvPreview({ columns: normalizedColumns, rows: preview.rows })
         setPreviewSample({ columns: normalizedColumns, rows: preview.rows })
       }
-      void queryClient.invalidateQueries({ queryKey: qk.datasets(dbName, requestContext.language) })
+      void queryClient.invalidateQueries({ queryKey: qk.datasets(dbName, requestContext.language, branch) })
       void showAppToast({ intent: Intent.SUCCESS, message: uiCopy.toast.datasetCreated })
       setCsvFile(null)
       setCsvDatasetName('')
       setCsvDelimiter('')
       setCsvHasHeader(true)
+    },
+    onError: (error) => toastApiError(error, language),
+  })
+
+  const uploadMediaMutation = useMutation({
+    mutationFn: (payload: { files: File[]; datasetName: string }) =>
+      uploadMediaDataset(requestContext, dbName, {
+        files: payload.files,
+        datasetName: payload.datasetName,
+        branch,
+      }),
+    onSuccess: (payload) => {
+      const dataset = (payload as { data?: { dataset?: DatasetRecord } })?.data?.dataset
+      const preview = (payload as { data?: { preview?: { columns?: Array<Record<string, unknown>>; rows?: PreviewRow[] } } })
+        ?.data?.preview
+      if (dataset) {
+        handleAddDatasetNode(dataset)
+      }
+      if (preview?.columns && preview?.rows) {
+        const normalizedColumns = preview.columns
+          .map((col) => {
+            const record = col as Record<string, unknown>
+            const key = String(record.key ?? record.name ?? '').trim()
+            if (!key) return null
+            return {
+              key,
+              type: String(record.type ?? 'xsd:string'),
+            }
+          })
+          .filter((col): col is PreviewColumn => Boolean(col))
+        setMediaPreview({ columns: normalizedColumns, rows: preview.rows })
+        setPreviewSample({ columns: normalizedColumns, rows: preview.rows })
+      }
+      void queryClient.invalidateQueries({ queryKey: qk.datasets(dbName, requestContext.language, branch) })
+      void showAppToast({ intent: Intent.SUCCESS, message: uiCopy.toast.datasetCreated })
+      setMediaFiles([])
+      setMediaDatasetName('')
+      setMediaPreview(null)
     },
     onError: (error) => toastApiError(error, language),
   })
@@ -938,6 +1587,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
   })
 
   const pipelines = useMemo(() => extractList<PipelineRecord>(pipelinesQuery.data, 'pipelines'), [pipelinesQuery.data])
+  const proposals = useMemo(() => extractProposals(proposalsQuery.data), [proposalsQuery.data])
   const pipelineOptions = useMemo(
     () =>
       pipelines.map((pipeline) => ({
@@ -948,28 +1598,37 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
   )
   const branches = useMemo(() => {
     const raw = extractList<Record<string, unknown>>(branchesQuery.data, 'branches')
-    return raw
-      .map((branchItem) => String(branchItem.name ?? branchItem.branch_name ?? branchItem.id ?? ''))
+    const names = raw
+      .map((branchItem) => String(branchItem.name ?? branchItem.branch ?? branchItem.branch_name ?? branchItem.id ?? ''))
       .filter(Boolean)
-  }, [branchesQuery.data])
+    const base = names.length ? names : [branch]
+    const extras = ['__create__']
+    return [...new Set([...base, ...extras])]
+  }, [branchesQuery.data, branch])
   const datasets = useMemo(() => extractList<DatasetRecord>(datasetsQuery.data, 'datasets'), [datasetsQuery.data])
   const registeredSheets = useMemo(
     () => extractList<RegisteredSheetRecord>(registeredSheetsQuery.data, 'sheets'),
     [registeredSheetsQuery.data],
   )
   useEffect(() => {
-    if (!pipelinesQuery.data || pipelineId) return
+    if (!pipelinesQuery.data) return
     if (pipelines.length > 0) {
       const first = pipelines[0]
+      if (pipelineId === String(first.pipeline_id ?? '')) return
       setPipelineId(String(first.pipeline_id ?? ''))
       setPipelineName(String(first.name ?? ''))
       setPipelineLocation(String(first.location ?? pipelineLocation))
       return
     }
+    if (pipelineId) {
+      setPipelineId(null)
+      setPipelineName('')
+    }
+    if (pipelinesQuery.isFetching) return
     if (autoPrompted.current) return
     autoPrompted.current = true
     setPipelineDialogOpen(true)
-  }, [pipelines, pipelinesQuery.data, pipelineId, pipelineLocation])
+  }, [pipelines, pipelinesQuery.data, pipelineId, pipelineLocation, pipelinesQuery.isFetching])
 
   useEffect(() => {
     if (!pipelineQuery.data || !pipelineId) return
@@ -1036,10 +1695,33 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     if (!transformOpen) return
     const node = definition.nodes.find((item) => item.id === selectedNodeId)
     if (!node) return
-    setTransformDraft({
-      title: node.title,
-      operation: node.metadata?.operation ?? '',
-      expression: node.metadata?.expression ?? '',
+    const aggregates = Array.isArray(node.metadata?.aggregates) ? node.metadata?.aggregates : []
+    const groupBy = Array.isArray(node.metadata?.groupBy) ? node.metadata?.groupBy : []
+    const pivot = node.metadata?.pivot as { index?: string[]; columns?: string; values?: string; agg?: string } | undefined
+    const windowMeta = node.metadata?.window as { partitionBy?: string[]; orderBy?: string[] } | undefined
+	    const schemaChecks = Array.isArray(node.metadata?.schemaChecks) ? node.metadata?.schemaChecks : []
+	    const operation = String(node.metadata?.operation ?? 'filter')
+	    setTransformDraft({
+	      title: node.title,
+	      operation,
+	      expression: node.metadata?.expression ?? '',
+	      columns: Array.isArray(node.metadata?.columns) ? node.metadata?.columns.join(', ') : '',
+	      renameMap: node.metadata?.rename ? JSON.stringify(node.metadata.rename, null, 2) : '',
+	      castMap: Array.isArray(node.metadata?.casts) ? JSON.stringify(node.metadata.casts, null, 2) : '',
+	      groupBy: groupBy.join(', '),
+	      aggregates: aggregates.map((agg) => {
+	        const col = String(agg?.column ?? '')
+	        const op = String(agg?.op ?? '')
+	        const alias = agg?.alias ? ` as ${String(agg.alias)}` : ''
+        return col && op ? `${col}:${op}${alias}` : ''
+      }).filter(Boolean).join('\n'),
+      pivotIndex: (pivot?.index ?? []).join(', '),
+      pivotColumns: pivot?.columns ?? '',
+      pivotValues: pivot?.values ?? '',
+      pivotAgg: pivot?.agg ?? 'sum',
+      windowPartition: (windowMeta?.partitionBy ?? []).join(', '),
+      windowOrder: (windowMeta?.orderBy ?? []).join(', '),
+      schemaChecksJson: schemaChecks.length ? JSON.stringify(schemaChecks, null, 2) : '',
     })
   }, [transformOpen, definition.nodes, selectedNodeId])
 
@@ -1050,6 +1732,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     setJoinType('inner')
     setJoinLeftKey('')
     setJoinRightKey('')
+    setJoinAllowCrossJoin(false)
   }, [joinOpen, selectedNodeId])
 
   useEffect(() => {
@@ -1064,18 +1747,85 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
       memory: definition.settings?.memory ?? current.memory,
       schedule: definition.settings?.schedule ?? current.schedule,
       engine: definition.settings?.engine ?? current.engine,
+      branch: definition.settings?.branch ?? branch,
+      replayOnDeploy: Boolean((definition.settings as Record<string, unknown> | undefined)?.replayOnDeploy ?? current.replayOnDeploy),
+      proposalStatus: definition.settings?.proposalStatus ?? current.proposalStatus,
+      proposalTitle: definition.settings?.proposalTitle ?? current.proposalTitle,
+      proposalDescription: definition.settings?.proposalDescription ?? current.proposalDescription,
+      expectationsJson: definition.settings?.expectationsJson ?? current.expectationsJson,
+      schemaContractJson: definition.settings?.schemaContractJson ?? current.schemaContractJson,
     }))
-  }, [deploySettingsOpen, definition.settings])
+    setExpectationDrafts(
+      definition.expectations?.length
+        ? definition.expectations.map((item) => ({
+            id: createId('expectation'),
+            rule: String(item?.rule ?? 'row_count_min'),
+            column: String(item?.column ?? ''),
+            value: item?.value != null ? String(item.value) : '',
+          }))
+        : [expectationDefaults()],
+    )
+    setSchemaContractDrafts(
+      definition.schemaContract?.length
+        ? definition.schemaContract.map((item) => ({
+            id: createId('schema'),
+            column: String(item?.column ?? ''),
+            type: String(item?.type ?? 'xsd:string'),
+            required: item?.required !== false,
+          }))
+        : [schemaContractDefaults()],
+    )
+    setDependencyDrafts(
+      definition.dependencies?.length
+        ? definition.dependencies.map((dep) => ({
+            id: createId('dependency'),
+            pipelineId: String(dep?.pipelineId ?? (dep as Record<string, unknown> | null | undefined)?.pipeline_id ?? ''),
+            status: String(dep?.status ?? 'DEPLOYED'),
+          }))
+        : [],
+    )
+  }, [
+    deploySettingsOpen,
+    definition.settings,
+    definition.dependencies,
+    definition.expectations,
+    definition.schemaContract,
+    branch,
+  ])
 
   const selectedNode = useMemo(
     () => definition.nodes.find((node) => node.id === selectedNodeId) ?? null,
     [definition.nodes, selectedNodeId],
   )
 
-  const previewNode = useMemo(() => {
-    const candidate = definition.nodes.find((node) => node.id === previewNodeId)
-    return candidate ?? definition.nodes[0] ?? null
-  }, [definition.nodes, previewNodeId])
+  const focusVisibleNodeIds = useMemo(() => {
+    if (!focusNodeId) return null
+    const visible = new Set<string>()
+    visible.add(focusNodeId)
+    for (const edge of definition.edges) {
+      if (edge.from === focusNodeId) visible.add(edge.to)
+      if (edge.to === focusNodeId) visible.add(edge.from)
+    }
+    return visible
+  }, [definition.edges, focusNodeId])
+
+  useEffect(() => {
+    if (!focusNodeId) return
+    const exists = definition.nodes.some((node) => node.id === focusNodeId)
+    if (!exists) setFocusNodeId(null)
+  }, [definition.nodes, focusNodeId])
+
+  const displayedNodes = useMemo(() => {
+    if (!focusVisibleNodeIds) return definition.nodes
+    return definition.nodes.filter((node) => focusVisibleNodeIds.has(node.id))
+  }, [definition.nodes, focusVisibleNodeIds])
+
+  const displayedEdges = useMemo(() => {
+    if (!focusVisibleNodeIds) return definition.edges
+    return definition.edges.filter((edge) => focusVisibleNodeIds.has(edge.from) && focusVisibleNodeIds.has(edge.to))
+  }, [definition.edges, focusVisibleNodeIds])
+
+  const nodeSearchTerm = useMemo(() => nodeSearch.trim().toLowerCase(), [nodeSearch])
 
   useEffect(() => {
     setPreviewSample(null)
@@ -1083,6 +1833,16 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
 
   const previewSchema = useMemo(() => {
     if (previewSample?.columns?.length) return previewSample.columns
+    const previewPayload = extractPipeline(previewStatusQuery.data)
+    const previewSamplePayload = previewPayload?.last_preview_sample as Record<string, unknown> | undefined
+    const previewJobFromServer = typeof previewPayload?.last_preview_job_id === 'string'
+      ? previewPayload?.last_preview_job_id
+      : null
+    const isLatestPreview = !previewJobId || !previewJobFromServer || previewJobFromServer === previewJobId
+    const previewColumns = isLatestPreview
+      ? extractColumns(previewSamplePayload, language === 'ko' ? '문자열' : 'String')
+      : []
+    if (previewColumns.length) return previewColumns
     if (!previewNode) return [] as PreviewColumn[]
     const datasetId = previewNode.metadata?.datasetId
     if (datasetId) {
@@ -1104,7 +1864,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
       }))
     }
     return []
-  }, [previewNode, datasets, previewSample, language])
+  }, [previewNode, datasets, previewSample, language, previewStatusQuery.data, previewJobId])
 
   const getNodeColumnNames = (nodeId: string) => {
     const node = definition.nodes.find((item) => item.id === nodeId)
@@ -1125,6 +1885,14 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
 
   const previewRows = useMemo(() => {
     if (previewSample?.rows?.length) return previewSample.rows
+    const previewPayload = extractPipeline(previewStatusQuery.data)
+    const previewSamplePayload = previewPayload?.last_preview_sample as Record<string, unknown> | undefined
+    const previewJobFromServer = typeof previewPayload?.last_preview_job_id === 'string'
+      ? previewPayload?.last_preview_job_id
+      : null
+    const isLatestPreview = !previewJobId || !previewJobFromServer || previewJobFromServer === previewJobId
+    const previewRowsSample = isLatestPreview ? extractRows(previewSamplePayload) : []
+    if (previewRowsSample.length) return previewRowsSample
     if (!previewNode) return []
     const datasetId = previewNode.metadata?.datasetId
     if (datasetId) {
@@ -1135,28 +1903,130 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
       if (latestRows.length) return latestRows
     }
     return []
-  }, [previewNode, datasets, previewSample])
+  }, [previewNode, datasets, previewSample, previewStatusQuery.data, previewJobId])
 
+	  const previewErrors = useMemo(() => {
+	    const previewPayload = extractPipeline(previewStatusQuery.data)
+	    const previewSamplePayload = previewPayload?.last_preview_sample as Record<string, unknown> | undefined
+	    const previewJobFromServer = typeof previewPayload?.last_preview_job_id === 'string'
+	      ? previewPayload?.last_preview_job_id
+	      : null
+	    const isLatestPreview = !previewJobId || !previewJobFromServer || previewJobFromServer === previewJobId
+	    if (!isLatestPreview) return []
+	    const errors = Array.isArray(previewSamplePayload?.errors) ? (previewSamplePayload?.errors as string[]) : []
+	    const expectations = Array.isArray(previewSamplePayload?.expectations)
+	      ? (previewSamplePayload?.expectations as string[])
+	      : []
+	    return [...errors, ...expectations].filter(Boolean)
+	  }, [previewStatusQuery.data, previewJobId])
+
+	  const previewMeta = useMemo(() => {
+	    const previewPayload = extractPipeline(previewStatusQuery.data)
+	    const previewSamplePayload = previewPayload?.last_preview_sample as Record<string, unknown> | undefined
+	    const previewJobFromServer = typeof previewPayload?.last_preview_job_id === 'string'
+	      ? previewPayload?.last_preview_job_id
+	      : null
+	    const isLatestPreview = !previewJobId || !previewJobFromServer || previewJobFromServer === previewJobId
+	    if (isLatestPreview) {
+	      const rowCount = extractRowCount(previewSamplePayload)
+	      const sampleRowCount = extractSampleRowCount(previewSamplePayload)
+	      const columnStats = extractColumnStats(previewSamplePayload)
+	      if (rowCount !== null || sampleRowCount !== null || columnStats) {
+	        const rows = previewSamplePayload ? (previewSamplePayload as { rows?: unknown }).rows : undefined
+	        const fallbackSampleCount = Array.isArray(rows) ? rows.length : null
+	        return { rowCount, sampleRowCount: sampleRowCount ?? fallbackSampleCount, columnStats }
+	      }
+	    }
+
+	    if (!previewNode) return { rowCount: null, sampleRowCount: null, columnStats: null }
+	    const datasetId = previewNode.metadata?.datasetId
+	    if (!datasetId) return { rowCount: null, sampleRowCount: null, columnStats: null }
+	    const dataset = datasets.find((item) => String(item.dataset_id ?? '') === datasetId)
+	    const latestSample = dataset?.latest_sample_json
+	    const baseSample = dataset?.sample_json
+	    const rowCount = extractRowCount(latestSample) ?? extractRowCount(baseSample)
+	    const sampleRowCount =
+	      extractSampleRowCount(latestSample) ??
+	      extractSampleRowCount(baseSample) ??
+	      (latestSample ? extractRows(latestSample).length : null) ??
+	      (baseSample ? extractRows(baseSample).length : null)
+	    const columnStats = extractColumnStats(latestSample) ?? extractColumnStats(baseSample)
+	    return { rowCount, sampleRowCount, columnStats }
+	  }, [previewStatusQuery.data, previewJobId, previewNode, datasets])
+
+	  const proposalSummary = useMemo(() => {
+	    const items = proposals.filter((proposal) => proposal.status !== 'approved' && proposal.status !== 'rejected')
+	    return items
+	  }, [proposals])
+
+	  const pipelineRuns = useMemo(() => extractList<Record<string, unknown>>(pipelineRunsQuery.data, 'runs'), [pipelineRunsQuery.data])
+	  const filteredPipelineRuns = useMemo(() => {
+	    if (historyFilter === 'schedule') {
+	      return pipelineRuns.filter((run) => String(run.mode ?? '').toLowerCase() === 'schedule')
+	    }
+	    return pipelineRuns
+	  }, [pipelineRuns, historyFilter])
+
+  const previewDebounceRef = useRef<number | null>(null)
   useEffect(() => {
     if (!pipelineId || !previewNode) return
+    if (safeDeployPending) return
     if (previewMutation.isPending) return
-    previewMutation.mutate({
-      db_name: dbName,
-      definition_json: definition,
-      node_id: previewNode.id,
-      limit: 200,
-    })
-  }, [pipelineId, previewNode, definition, dbName, previewMutation])
+    if (mode !== 'edit') return
+    if (previewCollapsed) return
+    if (previewDebounceRef.current) {
+      window.clearTimeout(previewDebounceRef.current)
+    }
+    previewDebounceRef.current = window.setTimeout(() => {
+      previewMutation.mutate({
+        db_name: dbName,
+        definition_json: definition,
+        expectations: definition.expectations,
+        schema_contract: definition.schemaContract,
+        node_id: previewNode.id,
+        limit: 200,
+        branch,
+      })
+    }, 700)
+    return () => {
+      if (previewDebounceRef.current) {
+        window.clearTimeout(previewDebounceRef.current)
+        previewDebounceRef.current = null
+      }
+    }
+  }, [pipelineId, previewNode, definition, dbName, previewMutation, branch, mode, previewCollapsed, safeDeployPending])
 
   useEffect(() => {
     if (!previewMutation.data) return
     const sample = (previewMutation.data as { data?: { sample?: Record<string, unknown> } })?.data?.sample
     if (!sample || typeof sample !== 'object') return
-    setPreviewSample({
-      columns: extractColumns(sample),
-      rows: extractRows(sample),
-    })
+    if ((sample as { queued?: boolean }).queued) {
+      setPreviewSample(null)
+      return
+    }
+    const columns = extractColumns(sample)
+    const rows = extractRows(sample)
+    if (columns.length || rows.length) {
+      setPreviewSample({ columns, rows })
+      return
+    }
+    setPreviewSample(null)
   }, [previewMutation.data])
+
+  useEffect(() => {
+    setPreviewJobId(null)
+  }, [previewNode?.id])
+
+  useEffect(() => {
+    const previewPayload = extractPipeline(previewStatusQuery.data)
+    const previewJobFromServer = typeof previewPayload?.last_preview_job_id === 'string'
+      ? previewPayload?.last_preview_job_id
+      : null
+    if (previewJobFromServer && previewJobFromServer === previewJobId) return
+    if (previewJobFromServer) {
+      setPreviewSample(null)
+    }
+  }, [previewStatusQuery.data, previewJobId])
 
   useEffect(() => {
     if (!previewFullscreen) return
@@ -1201,7 +2071,6 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     setSelectedNodeId(nodeId)
     setPreviewNodeId(nodeId)
     setInspectorOpen(true)
-    setPreviewCollapsed(false)
   }
 
   const handleLayout = () => {
@@ -1225,11 +2094,29 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
 
   const handleSave = () => {
     if (!pipelineId) return
+    const { dependencies, ...definitionPayload } = definition
+    const scheduleInput = (deploySettings.schedule || '').trim()
+    const schedulePayload = parseScheduleInput(scheduleInput)
+    const scheduleIsManual = !scheduleInput || scheduleInput.toLowerCase() === 'manual'
+    const scheduleHasInterval = typeof schedulePayload.intervalSeconds === 'number' && schedulePayload.intervalSeconds > 0
+    const scheduleHasCron = Boolean(schedulePayload.cron)
+    if (!scheduleIsManual && !scheduleHasInterval && !scheduleHasCron) {
+      void showAppToast({ intent: Intent.WARNING, message: uiCopy.toast.scheduleInvalid })
+      return
+    }
     updatePipelineMutation.mutate({
       name: pipelineName,
       location: pipelineLocation,
       pipeline_type: 'batch',
-      definition_json: definition,
+      definition_json: definitionPayload,
+      dependencies,
+      proposal_status: deploySettings.proposalStatus || undefined,
+      proposal_title: deploySettings.proposalTitle || undefined,
+      proposal_description: deploySettings.proposalDescription || undefined,
+      schedule:
+        schedulePayload.intervalSeconds || schedulePayload.cron
+          ? { interval_seconds: schedulePayload.intervalSeconds ?? undefined, cron: schedulePayload.cron ?? undefined }
+          : undefined,
     })
   }
 
@@ -1257,6 +2144,8 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
 
   const handleAddDatasetNode = (dataset: DatasetRecord) => {
     const datasetId = String(dataset.dataset_id ?? '')
+    const datasetBranch = String(dataset.branch ?? branch ?? 'main')
+    const datasetName = String(dataset.name ?? '')
     const columnCount = extractColumns(dataset.schema_json, language === 'ko' ? '문자열' : 'String').length
     const nodeId = createId('node')
     updateDefinition((current) => {
@@ -1271,14 +2160,13 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
         y: nextY,
         subtitle: columnCount ? `${columnCount} ${uiCopy.labels.columnsSuffix}` : undefined,
         status: 'success',
-        metadata: { datasetId },
+        metadata: { datasetId, datasetBranch, datasetName },
       }
       return { ...current, nodes: [...current.nodes, node] }
     })
     setSelectedNodeId(nodeId)
     setPreviewNodeId(nodeId)
     setInspectorOpen(true)
-    setPreviewCollapsed(false)
     setDatasetDialogOpen(false)
   }
 
@@ -1309,6 +2197,12 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
 
   const handleJoin = () => {
     if (!joinLeft || !joinRight) return
+    const hasKeys = Boolean(joinLeftKey && joinRightKey)
+    if (!joinAllowCrossJoin && !hasKeys) {
+      void showAppToast({ intent: Intent.WARNING, message: uiCopy.toast.joinMissingKeys })
+      return
+    }
+    const resolvedJoinType = joinAllowCrossJoin ? 'cross' : joinType
     updateDefinition((current) => {
       const leftNode = current.nodes.find((node) => node.id === joinLeft)
       const rightNode = current.nodes.find((node) => node.id === joinRight)
@@ -1323,10 +2217,11 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
         status: 'success',
         metadata: {
           operation: 'join',
-          joinType,
-          leftKey: joinLeftKey || undefined,
-          rightKey: joinRightKey || undefined,
-          joinKey: joinLeftKey && joinLeftKey === joinRightKey ? joinLeftKey : undefined,
+          joinType: resolvedJoinType,
+          allowCrossJoin: joinAllowCrossJoin || undefined,
+          leftKey: joinAllowCrossJoin ? undefined : (joinLeftKey || undefined),
+          rightKey: joinAllowCrossJoin ? undefined : (joinRightKey || undefined),
+          joinKey: !joinAllowCrossJoin && joinLeftKey && joinLeftKey === joinRightKey ? joinLeftKey : undefined,
         },
       }
       return {
@@ -1344,6 +2239,120 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
 
   const handleTransformSave = () => {
     if (!selectedNode) return
+    const operation = transformDraft.operation.trim()
+    if (!operation) return
+    if (operation === 'filter' && !transformDraft.expression.trim()) {
+      void showAppToast({ intent: Intent.WARNING, message: uiCopy.toast.transformMissingExpression })
+      return
+    }
+    if (operation === 'compute' && !transformDraft.expression.trim()) {
+      void showAppToast({ intent: Intent.WARNING, message: uiCopy.toast.transformMissingExpression })
+      return
+    }
+    const metadata: PipelineNode['metadata'] = {
+      ...selectedNode.metadata,
+      operation,
+      expression: transformDraft.expression.trim() || undefined,
+    }
+    if (operation === 'groupBy' || operation === 'aggregate') {
+      metadata.groupBy = transformDraft.groupBy
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+      metadata.aggregates = transformDraft.aggregates
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => {
+          const [left, aliasPart] = line.split(/\s+as\s+/i)
+          const [column, op] = (left ?? '').split(':').map((part) => part.trim())
+          return {
+            column,
+            op,
+            alias: aliasPart?.trim() || undefined,
+          }
+        })
+        .filter((item) => item.column && item.op)
+      if (!metadata.aggregates?.length) {
+        void showAppToast({ intent: Intent.WARNING, message: uiCopy.toast.transformMissingAggregate })
+        return
+      }
+    }
+    if (operation === 'pivot') {
+      metadata.pivot = {
+        index: transformDraft.pivotIndex.split(',').map((item) => item.trim()).filter(Boolean),
+        columns: transformDraft.pivotColumns.trim(),
+        values: transformDraft.pivotValues.trim(),
+        agg: transformDraft.pivotAgg.trim() || 'sum',
+      }
+    }
+    if (operation === 'window') {
+      metadata.window = {
+        partitionBy: transformDraft.windowPartition.split(',').map((item) => item.trim()).filter(Boolean),
+        orderBy: transformDraft.windowOrder.split(',').map((item) => item.trim()).filter(Boolean),
+      }
+      if (!metadata.window.orderBy?.length) {
+        void showAppToast({ intent: Intent.WARNING, message: uiCopy.toast.transformMissingWindow })
+        return
+      }
+    }
+    if (['select', 'drop', 'sort', 'dedupe', 'explode'].includes(operation)) {
+      metadata.columns = transformDraft.columns
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+      if (!metadata.columns.length) {
+        void showAppToast({ intent: Intent.WARNING, message: uiCopy.toast.transformMissingColumns })
+        return
+      }
+    }
+    if (operation === 'rename') {
+      try {
+        const parsed = JSON.parse(transformDraft.renameMap || '{}')
+        if (parsed && typeof parsed === 'object') {
+          metadata.rename = parsed as Record<string, string>
+        }
+      } catch {
+        // ignore
+      }
+      if (!metadata.rename || Object.keys(metadata.rename).length === 0) {
+        void showAppToast({ intent: Intent.WARNING, message: uiCopy.toast.transformMissingRename })
+        return
+      }
+    }
+    if (operation === 'cast') {
+      try {
+        const parsed = JSON.parse(transformDraft.castMap || '[]')
+        if (Array.isArray(parsed)) {
+          metadata.casts = parsed as Array<{ column: string; type: string }>
+        }
+      } catch {
+        // ignore
+      }
+      if (!metadata.casts?.length) {
+        void showAppToast({ intent: Intent.WARNING, message: uiCopy.toast.transformMissingCasts })
+        return
+      }
+    }
+    if (transformDraft.schemaChecksJson.trim()) {
+      try {
+        const parsed = JSON.parse(transformDraft.schemaChecksJson)
+        if (!Array.isArray(parsed)) {
+          void showAppToast({ intent: Intent.WARNING, message: uiCopy.toast.schemaChecksInvalid })
+          return
+        }
+        metadata.schemaChecks = parsed
+      } catch {
+        void showAppToast({ intent: Intent.WARNING, message: uiCopy.toast.schemaChecksInvalid })
+        return
+      }
+    }
+    if (operation === 'pivot') {
+      if (!metadata.pivot?.columns || !metadata.pivot?.values || !metadata.pivot?.index?.length) {
+        void showAppToast({ intent: Intent.WARNING, message: uiCopy.toast.transformMissingPivot })
+        return
+      }
+    }
     updateDefinition((current) => ({
       ...current,
       nodes: current.nodes.map((node) =>
@@ -1351,7 +2360,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
           ? {
               ...node,
               title: transformDraft.title || node.title,
-              metadata: { ...node.metadata, operation: transformDraft.operation, expression: transformDraft.expression },
+              metadata,
             }
           : node,
       ),
@@ -1359,36 +2368,101 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     setTransformOpen(false)
   }
 
-  const parseScheduleInterval = (schedule: string) => {
-    const normalized = schedule.trim().toLowerCase()
-    if (!normalized || normalized === 'manual') return null
-    const minuteMatch = normalized.match(/^(\d+)\s*m(in)?$/)
-    if (minuteMatch) return Number(minuteMatch[1]) * 60
-    const hourMatch = normalized.match(/^(\d+)\s*h(our)?s?$/)
-    if (hourMatch) return Number(hourMatch[1]) * 3600
-    const dayMatch = normalized.match(/^(\d+)\s*d(ay)?s?$/)
-    if (dayMatch) return Number(dayMatch[1]) * 86400
-    const numeric = Number(normalized)
-    if (Number.isFinite(numeric)) return numeric
-    return null
-  }
-
   const handleDeploy = () => {
     if (!pipelineId) return
-    const outputDatasetName = deployDraft.datasetName || definition.outputs[0]?.datasetName || uiCopy.labels.outputDatasetFallback
+    if (safeDeployPending) return
+
+    const { dependencies, ...definitionPayload } = definition
+    const outputDatasetName =
+      deployDraft.datasetName || definition.outputs[0]?.datasetName || uiCopy.labels.outputDatasetFallback
     const outputNodeId = definition.nodes.find((node) => node.type === 'output')?.id
-    const scheduleInterval = parseScheduleInterval(deploySettings.schedule || '')
-    deployMutation.mutate({
-      db_name: dbName,
-      definition_json: definition,
-      node_id: outputNodeId,
-      output: {
-        db_name: dbName,
-        dataset_name: outputDatasetName,
-      },
-      schedule: scheduleInterval ? { interval_seconds: scheduleInterval } : undefined,
-    })
-    setDeployOpen(false)
+    if (!outputNodeId) {
+      void showAppToast({ intent: Intent.WARNING, message: uiCopy.toast.deployMissingOutput })
+      return
+    }
+
+    const scheduleInput = (deploySettings.schedule || '').trim()
+    const schedulePayload = parseScheduleInput(scheduleInput)
+    const scheduleIsManual = !scheduleInput || scheduleInput.toLowerCase() === 'manual'
+    const scheduleHasInterval = typeof schedulePayload.intervalSeconds === 'number' && schedulePayload.intervalSeconds > 0
+    const scheduleHasCron = Boolean(schedulePayload.cron)
+    if (!scheduleIsManual && !scheduleHasInterval && !scheduleHasCron) {
+      void showAppToast({ intent: Intent.WARNING, message: uiCopy.toast.scheduleInvalid })
+      return
+    }
+
+    const deployBranch = deploySettings.branch || branch
+
+    const runSafeDeploy = async () => {
+      setSafeDeployPending(true)
+      try {
+        void showAppToast({ intent: Intent.PRIMARY, message: uiCopy.toast.deployPreflight })
+
+        const buildResponse = await buildPipeline(requestContext, pipelineId, {
+          db_name: dbName,
+          definition_json: definitionPayload,
+          expectations: definition.expectations,
+          schema_contract: definition.schemaContract,
+          node_id: outputNodeId,
+          limit: 200,
+          branch: deployBranch,
+        })
+        const buildJobId = (buildResponse as { data?: { job_id?: string } })?.data?.job_id
+        if (!buildJobId) {
+          throw new Error(uiCopy.toast.deployPreflightFailed)
+        }
+
+        const startedAt = Date.now()
+        const timeoutMs = 10 * 60 * 1000
+        while (true) {
+          const runsResponse = await listPipelineRuns(requestContext, pipelineId, 100)
+          const runs = extractList<Record<string, unknown>>(runsResponse, 'runs')
+          const run = runs.find((item) => String(item.job_id ?? '') === buildJobId)
+          const status = String(run?.status ?? '').toUpperCase()
+          if (status === 'SUCCESS') break
+          if (status === 'FAILED') {
+            throw new Error(uiCopy.toast.deployPreflightFailed)
+          }
+          if (Date.now() - startedAt > timeoutMs) {
+            throw new Error(uiCopy.toast.deployPreflightTimeout)
+          }
+          await new Promise((resolve) => setTimeout(resolve, 2000))
+        }
+
+        void showAppToast({ intent: Intent.PRIMARY, message: uiCopy.toast.deployPromote })
+        await deployMutation.mutateAsync({
+          db_name: dbName,
+          definition_json: definitionPayload,
+          dependencies,
+          expectations: definition.expectations,
+          schema_contract: definition.schemaContract,
+          node_id: outputNodeId,
+          outputs: definition.outputs,
+          output: {
+            db_name: dbName,
+            dataset_name: outputDatasetName,
+          },
+          branch: deployBranch,
+          proposal_status: deploySettings.proposalStatus || undefined,
+          proposal_title: deploySettings.proposalTitle || undefined,
+          proposal_description: deploySettings.proposalDescription || undefined,
+          schedule:
+            schedulePayload.intervalSeconds || schedulePayload.cron
+              ? { interval_seconds: schedulePayload.intervalSeconds ?? undefined, cron: schedulePayload.cron ?? undefined }
+              : undefined,
+          replay: deploySettings.replayOnDeploy || undefined,
+          promote_build: true,
+          build_job_id: buildJobId,
+        })
+        setDeployOpen(false)
+      } catch (error) {
+        toastApiError(error, language)
+      } finally {
+        setSafeDeployPending(false)
+      }
+    }
+
+    void runSafeDeploy()
   }
 
   const handleSaveParameters = () => {
@@ -1397,8 +2471,68 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
   }
 
   const handleSaveSettings = () => {
-    updateDefinition((current) => ({ ...current, settings: { ...current.settings, ...deploySettings } }))
-    setDeploySettingsOpen(false)
+    let hasError = false
+    updateDefinition((current) => {
+      if (expectationDrafts.some((item) => !item.rule.trim())) {
+        void showAppToast({ intent: Intent.WARNING, message: uiCopy.toast.expectationsInvalid })
+        hasError = true
+        return current
+      }
+      if (schemaContractDrafts.some((item) => !item.column.trim())) {
+        void showAppToast({ intent: Intent.WARNING, message: uiCopy.toast.schemaContractInvalid })
+        hasError = true
+        return current
+      }
+      let expectations: PipelineExpectation[] | undefined = expectationDrafts
+        .map((item) => ({
+          rule: item.rule.trim(),
+          column: item.column.trim() || undefined,
+          value: item.value.trim() || undefined,
+        }))
+        .filter((item) => item.rule)
+      if (!expectations.length) {
+        expectations = undefined
+      }
+      let schemaContract: PipelineSchemaContract[] | undefined = schemaContractDrafts
+        .map((item) => ({
+          column: item.column.trim(),
+          type: item.type.trim() || undefined,
+          required: item.required,
+        }))
+        .filter((item) => item.column)
+      if (!schemaContract.length) {
+        schemaContract = undefined
+      }
+      const selfPipelineId = pipelineId ?? ''
+      const dependencyMap = new Map<string, PipelineDependency>()
+      for (const dep of dependencyDrafts) {
+        const depPipelineId = (dep.pipelineId ?? '').trim()
+        if (!depPipelineId) continue
+        if (selfPipelineId && depPipelineId === selfPipelineId) {
+          void showAppToast({ intent: Intent.WARNING, message: uiCopy.toast.dependenciesSelf })
+          hasError = true
+          return current
+        }
+        dependencyMap.set(depPipelineId, {
+          pipelineId: depPipelineId,
+          status: (dep.status ?? 'DEPLOYED').toUpperCase(),
+        })
+      }
+      const dependencies = dependencyMap.size ? Array.from(dependencyMap.values()) : undefined
+      const nextSettings = { ...current.settings, ...deploySettings }
+      nextSettings.expectationsJson = expectations ? JSON.stringify(expectations, null, 2) : ''
+      nextSettings.schemaContractJson = schemaContract ? JSON.stringify(schemaContract, null, 2) : ''
+      return {
+        ...current,
+        settings: nextSettings,
+        expectations,
+        schemaContract,
+        dependencies,
+      }
+    })
+    if (!hasError) {
+      setDeploySettingsOpen(false)
+    }
   }
 
   const handleAddOutput = () => {
@@ -1426,6 +2560,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
         y: nextY,
         subtitle: outputDataset,
         status: 'success',
+        metadata: { outputId, datasetName: outputDataset, outputName },
       }
       const edges = selectedNode
         ? [...current.edges, { id: createId('edge'), from: selectedNode.id, to: outputNode.id }]
@@ -1446,6 +2581,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
         name: manualDatasetName.trim(),
         source_type: 'manual',
         schema_json: { columns },
+        branch,
       },
       sample: { columns, rows: sampleRows },
       autoAdd: true,
@@ -1616,6 +2752,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
       </FormGroup>
       <FormGroup label={uiCopy.dialogs.dataset.excel.datasetName}>
         <InputGroup
+          placeholder={uiCopy.dialogs.dataset.excel.datasetName}
           value={excelDatasetName}
           onChange={(event) => setExcelDatasetName(event.currentTarget.value)}
         />
@@ -1701,12 +2838,14 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
       </FormGroup>
       <FormGroup label={uiCopy.dialogs.dataset.csv.datasetName}>
         <InputGroup
+          placeholder={uiCopy.dialogs.dataset.csv.datasetName}
           value={csvDatasetName}
           onChange={(event) => setCsvDatasetName(event.currentTarget.value)}
         />
       </FormGroup>
       <FormGroup label={uiCopy.dialogs.dataset.csv.delimiter}>
         <InputGroup
+          placeholder={uiCopy.dialogs.dataset.csv.delimiter}
           value={csvDelimiter}
           onChange={(event) => setCsvDelimiter(event.currentTarget.value)}
         />
@@ -1784,6 +2923,91 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
     </div>
   )
 
+  const mediaPanel = (
+    <div className="dataset-tab">
+      <div className="dataset-preview-panel">
+        <Text className="dataset-section-title">{uiCopy.dialogs.dataset.media.title}</Text>
+        <Text className="muted">{uiCopy.dialogs.dataset.media.helper}</Text>
+      </div>
+      <FormGroup label={uiCopy.dialogs.dataset.media.file}>
+        <FileInput
+          text={
+            mediaFiles.length
+              ? `${mediaFiles.length} ${language === 'ko' ? '개 파일' : 'files'}`
+              : uiCopy.dialogs.dataset.media.file
+          }
+          inputProps={{ multiple: true }}
+          onInputChange={(event) => {
+            const files = Array.from(event.currentTarget.files ?? [])
+            setMediaFiles(files)
+          }}
+        />
+      </FormGroup>
+      <FormGroup label={uiCopy.dialogs.dataset.media.datasetName}>
+        <InputGroup
+          placeholder={uiCopy.dialogs.dataset.media.datasetName}
+          value={mediaDatasetName}
+          onChange={(event) => setMediaDatasetName(event.currentTarget.value)}
+        />
+      </FormGroup>
+      <div className="dataset-card-actions">
+        <Button
+          intent={Intent.PRIMARY}
+          icon="upload"
+          onClick={() => {
+            if (!mediaFiles.length) return
+            uploadMediaMutation.mutate({
+              files: mediaFiles,
+              datasetName: mediaDatasetName.trim(),
+            })
+          }}
+          disabled={!mediaFiles.length || !mediaDatasetName.trim() || uploadMediaMutation.isPending}
+          loading={uploadMediaMutation.isPending}
+        >
+          {uiCopy.dialogs.dataset.media.upload}
+        </Button>
+        <Button
+          minimal
+          icon="refresh"
+          onClick={() => {
+            setMediaFiles([])
+            setMediaDatasetName('')
+            setMediaPreview(null)
+          }}
+        >
+          {uiCopy.dialogs.dataset.media.reset}
+        </Button>
+      </div>
+      <div className="dataset-preview-panel">
+        <div className="dataset-preview-header">
+          <Text>{uiCopy.dialogs.dataset.media.preview}</Text>
+        </div>
+        {mediaPreview?.columns?.length ? (
+          <div className="dataset-preview-table">
+            <div className="preview-sample-card">
+              <div className="preview-sample-row preview-sample-header">
+                {mediaPreview.columns.map((column) => (
+                  <span key={column.key}>{column.key}</span>
+                ))}
+              </div>
+              {(mediaPreview.rows ?? []).slice(0, 6).map((row, index) => (
+                <div key={index} className="preview-sample-row">
+                  {mediaPreview.columns.map((column) => (
+                    <span key={column.key} title={String(row?.[column.key] ?? '')}>
+                      {String(row?.[column.key] ?? '')}
+                    </span>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <Text className="muted">{uiCopy.dialogs.dataset.media.previewEmpty}</Text>
+        )}
+      </div>
+    </div>
+  )
+
 
   return (
     <div className="pipeline-builder-container">
@@ -1794,6 +3018,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
         mode={mode}
         branch={branch}
         branches={branches}
+        branchArchived={branchArchived}
         activeCommandCount={activeCommandCount}
         copy={uiCopy.header}
         canUndo={canUndo}
@@ -1802,7 +3027,13 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
         onModeChange={setMode}
         onUndo={handleUndo}
         onRedo={handleRedo}
-        onBranchSelect={setBranch}
+        onBranchSelect={(name) => {
+          if (name === '__create__') {
+            setBranchDialogOpen(true)
+            return
+          }
+          setBranch(name)
+        }}
         onPipelineSelect={(id) => {
           setPipelineId(id)
           setPipelineName('')
@@ -1810,24 +3041,39 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
         }}
         onSave={handleSave}
         onDeploy={() => {
-          setDeployDraft({
-            datasetName: definition.outputs[0]?.datasetName ?? '',
-            rowCount: '500',
-            artifactKey: '',
-          })
+          setDeployDraft({ datasetName: definition.outputs[0]?.datasetName ?? '' })
           setDeployOpen(true)
         }}
         onOpenDeploySettings={() => setDeploySettingsOpen(true)}
         onOpenHelp={() => setHelpOpen(true)}
         onCreatePipeline={() => setPipelineDialogOpen(true)}
         onOpenCommandDrawer={() => setCommandDrawerOpen(true)}
+        onArchiveBranch={() => {
+          if (!branch || branch === 'main') return
+          if (archiveBranchMutation.isPending || restoreBranchMutation.isPending) return
+          void archiveBranchMutation.mutateAsync()
+        }}
+        onRestoreBranch={() => {
+          if (!branch || branch === 'main') return
+          if (archiveBranchMutation.isPending || restoreBranchMutation.isPending) return
+          void restoreBranchMutation.mutateAsync()
+        }}
       />
 
-      <PipelineToolbar
-        activeTool={activeTool}
-        copy={uiCopy.toolbar}
-        onToolChange={setActiveTool}
-        onLayout={handleLayout}
+	      <PipelineToolbar
+	        activeTool={activeTool}
+	        view={definitionView}
+	        copy={uiCopy.toolbar}
+	        onToolChange={setActiveTool}
+	        onViewChange={setDefinitionView}
+	        onLayout={handleLayout}
+        onFocus={() => {
+          if (!selectedNodeId) return
+          setFocusNodeId(selectedNodeId)
+        }}
+        onShowAll={() => setFocusNodeId(null)}
+        canFocus={Boolean(selectedNodeId)}
+        focusActive={Boolean(focusNodeId)}
         onRemove={() => {
           if (selectedNodeId) {
             removeNode(selectedNodeId)
@@ -1844,6 +3090,34 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
           }
           setTransformOpen(true)
         }}
+        onAddGroupBy={() => {
+          if (!selectedNodeId) {
+            void showAppToast({ intent: Intent.WARNING, message: uiCopy.dialogs.warnings.selectTransform })
+            return
+          }
+          handleSimpleTransform('groupBy', 'grouped-bar-chart')
+        }}
+        onAddAggregate={() => {
+          if (!selectedNodeId) {
+            void showAppToast({ intent: Intent.WARNING, message: uiCopy.dialogs.warnings.selectTransform })
+            return
+          }
+          handleSimpleTransform('aggregate', 'chart')
+        }}
+        onAddPivot={() => {
+          if (!selectedNodeId) {
+            void showAppToast({ intent: Intent.WARNING, message: uiCopy.dialogs.warnings.selectTransform })
+            return
+          }
+          handleSimpleTransform('pivot', 'pivot')
+        }}
+        onAddWindow={() => {
+          if (!selectedNodeId) {
+            void showAppToast({ intent: Intent.WARNING, message: uiCopy.dialogs.warnings.selectTransform })
+            return
+          }
+          handleSimpleTransform('window', 'timeline-line-chart')
+        }}
         onEdit={() => {
           if (!selectedNodeId) {
             void showAppToast({ intent: Intent.WARNING, message: uiCopy.dialogs.warnings.selectEdit })
@@ -1853,6 +3127,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
         }}
       />
 
+      {mode === 'edit' ? (
       <div className={`pipeline-body ${inspectorOpen ? 'has-inspector' : 'no-inspector'}`}>
         <aside className="pipeline-sidebar pipeline-sidebar-left">
           <div className="pipeline-sidebar-section">
@@ -1863,8 +3138,35 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
           </div>
           <div className="pipeline-divider" />
           <div className="pipeline-sidebar-section">
+            <FormGroup
+              label={language === 'ko' ? '노드 검색' : 'Search nodes'}
+              labelFor="pipeline-node-search"
+            >
+              <InputGroup
+                id="pipeline-node-search"
+                leftIcon="search"
+                placeholder={language === 'ko' ? '노드 이름 검색...' : 'Search node names...'}
+                value={nodeSearch}
+                onChange={(event) => {
+                  const value = event.currentTarget.value
+                  setNodeSearch(value)
+                }}
+              />
+            </FormGroup>
+            {focusNodeId ? (
+              <Tag minimal icon="eye-open">
+                {(language === 'ko' ? '포커스 모드' : 'Focus mode') +
+                  `: ${displayedNodes.length}/${definition.nodes.length}`}
+              </Tag>
+            ) : null}
+          </div>
+          <div className="pipeline-divider" />
+          <div className="pipeline-sidebar-section">
             <div className="pipeline-sidebar-title">{uiCopy.sidebar.inputs}</div>
-            {definition.nodes.filter((node) => node.type === 'input').map((node) => (
+            {displayedNodes
+              .filter((node) => node.type === 'input')
+              .filter((node) => !nodeSearchTerm || node.title.toLowerCase().includes(nodeSearchTerm))
+              .map((node) => (
               <button
                 key={node.id}
                 type="button"
@@ -1878,7 +3180,10 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
           <div className="pipeline-divider" />
           <div className="pipeline-sidebar-section">
             <div className="pipeline-sidebar-title">{uiCopy.sidebar.transforms}</div>
-            {definition.nodes.filter((node) => node.type === 'transform').map((node) => (
+            {displayedNodes
+              .filter((node) => node.type === 'transform')
+              .filter((node) => !nodeSearchTerm || node.title.toLowerCase().includes(nodeSearchTerm))
+              .map((node) => (
               <button
                 key={node.id}
                 type="button"
@@ -1892,7 +3197,10 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
           <div className="pipeline-divider" />
           <div className="pipeline-sidebar-section">
             <div className="pipeline-sidebar-title">{uiCopy.sidebar.outputs}</div>
-            {definition.nodes.filter((node) => node.type === 'output').map((node) => (
+            {displayedNodes
+              .filter((node) => node.type === 'output')
+              .filter((node) => !nodeSearchTerm || node.title.toLowerCase().includes(nodeSearchTerm))
+              .map((node) => (
               <button
                 key={node.id}
                 type="button"
@@ -1905,22 +3213,30 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
           </div>
         </aside>
 
-        <div className="pipeline-canvas-area">
-          <div className="canvas-zoom-controls">
-            <Button icon="zoom-in" minimal onClick={() => setCanvasZoom((current) => Math.min(1.4, current + 0.1))} />
-            <Button icon="zoom-out" minimal onClick={() => setCanvasZoom((current) => Math.max(0.6, current - 0.1))} />
-            <Button icon="zoom-to-fit" minimal onClick={() => setCanvasZoom(1)} />
-          </div>
-          <PipelineCanvas
-            nodes={definition.nodes}
-            edges={definition.edges}
-            selectedNodeId={selectedNodeId}
-            copy={uiCopy.canvas}
-            zoom={canvasZoom}
-            onSelectNode={handleSelectNode}
-            onNodeAction={(action) => handleNodeAction(action)}
-          />
-        </div>
+	        <div className="pipeline-canvas-area">
+	          {definitionView === 'graph' ? (
+	            <>
+	              <div className="canvas-zoom-controls">
+	                <Button icon="zoom-in" minimal onClick={() => setCanvasZoom((current) => Math.min(1.4, current + 0.1))} />
+	                <Button icon="zoom-out" minimal onClick={() => setCanvasZoom((current) => Math.max(0.6, current - 0.1))} />
+	                <Button icon="zoom-to-fit" minimal onClick={() => setCanvasZoom(1)} />
+	              </div>
+	              <PipelineCanvas
+	                nodes={displayedNodes}
+	                edges={displayedEdges}
+	                selectedNodeId={selectedNodeId}
+	                copy={uiCopy.canvas}
+	                zoom={canvasZoom}
+	                onSelectNode={handleSelectNode}
+	                onNodeAction={(action) => handleNodeAction(action)}
+	              />
+	            </>
+	          ) : (
+	            <div className="pipeline-pseudocode-view" data-testid="pipeline-pseudocode">
+	              <pre>{pseudocodeText}</pre>
+	            </div>
+	          )}
+	        </div>
 
         <aside className={`pipeline-sidebar pipeline-sidebar-right ${inspectorOpen ? 'is-open' : 'is-collapsed'}`}>
           <div className="pipeline-sidebar-section">
@@ -1967,6 +3283,117 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
           </div>
         </aside>
       </div>
+      ) : (
+        <div className="pipeline-body pipeline-mode-panel">
+          <div className="pipeline-mode-panel-content">
+            <h2>{mode === 'proposals' ? uiCopy.proposals.title : uiCopy.history.title}</h2>
+            {mode === 'proposals' ? (
+              <>
+                <p className="muted">{uiCopy.proposals.subtitle}</p>
+                <Button intent={Intent.PRIMARY} icon="git-pull" onClick={() => setProposalDrawerOpen(true)}>
+                  {uiCopy.proposals.create}
+                </Button>
+                <div className="proposal-list">
+                  {proposalSummary.length === 0 ? (
+                    <Text className="muted">{uiCopy.proposals.empty}</Text>
+                  ) : (
+                    proposalSummary.map((proposal) => (
+                      <Card key={String(proposal.proposal_id ?? proposal.id ?? '')} className="proposal-card">
+                        <div className="proposal-card-header">
+                          <Text>{String(proposal.title ?? proposal.proposal_title ?? '')}</Text>
+                          <Tag minimal>{String(proposal.status ?? '')}</Tag>
+                        </div>
+                        <Text className="muted">{String(proposal.description ?? proposal.proposal_description ?? '')}</Text>
+                        <div className="proposal-card-actions">
+                          <Button
+                            small
+                            intent={Intent.SUCCESS}
+                            onClick={() =>
+                              approveProposalMutation.mutate({
+                                pipelineId: String(proposal.pipeline_id ?? pipelineId ?? ''),
+                                proposalId: String(proposal.proposal_id ?? proposal.id ?? ''),
+                              })
+                            }
+                          >
+                            {uiCopy.proposals.approve}
+                          </Button>
+                          <Button
+                            small
+                            intent={Intent.DANGER}
+                            onClick={() =>
+                              rejectProposalMutation.mutate({
+                                pipelineId: String(proposal.pipeline_id ?? pipelineId ?? ''),
+                                proposalId: String(proposal.proposal_id ?? proposal.id ?? ''),
+                              })
+                            }
+                          >
+                            {uiCopy.proposals.reject}
+                          </Button>
+                        </div>
+                      </Card>
+                    ))
+                  )}
+                </div>
+              </>
+	            ) : (
+	              <div className="pipeline-history-list">
+	                <div className="pipeline-history-toolbar">
+	                  <HTMLSelect value={historyFilter} onChange={(event) => setHistoryFilter(event.currentTarget.value as 'all' | 'schedule')}>
+	                    <option value="all">{uiCopy.history.filterAll}</option>
+	                    <option value="schedule">{uiCopy.history.filterSchedule}</option>
+	                  </HTMLSelect>
+	                </div>
+	                {filteredPipelineRuns.length === 0 ? (
+	                  <Text className="muted">{uiCopy.history.empty}</Text>
+	                ) : (
+	                  filteredPipelineRuns.map((run) => {
+	                    const statusValue = String(run.status ?? '').toUpperCase()
+	                    const modeValue = String(run.mode ?? '').toUpperCase()
+	                    const outputJson =
+	                      run.output_json && typeof run.output_json === 'object'
+	                        ? (run.output_json as Record<string, unknown>)
+	                        : null
+	                    const reason = outputJson && typeof outputJson.reason === 'string' ? outputJson.reason : null
+	                    const error = outputJson && typeof outputJson.error === 'string' ? outputJson.error : null
+	                    const detail = outputJson && typeof outputJson.detail === 'string' ? outputJson.detail : null
+	                    const scheduleNote = reason
+	                      ? `${uiCopy.history.scheduleReason}: ${reason}${detail ? ` — ${detail}` : ''}`
+	                      : error
+	                      ? `${uiCopy.history.scheduleError}: ${error}${detail ? ` — ${detail}` : ''}`
+	                      : detail
+	                      ? detail
+	                      : null
+	                    const tagText = statusValue === 'IGNORED' && reason ? `${statusValue} · ${reason}` : statusValue
+	                    const tagIntent =
+	                      statusValue === 'FAILED'
+	                        ? Intent.DANGER
+	                        : statusValue === 'IGNORED'
+	                        ? Intent.WARNING
+	                        : statusValue === 'QUEUED'
+	                        ? Intent.PRIMARY
+	                        : Intent.SUCCESS
+	                    return (
+	                    <Card key={String(run.run_id ?? run.job_id ?? '')} className="pipeline-history-card">
+	                      <div className="pipeline-history-header">
+	                        <Text>{modeValue}</Text>
+	                        <Tag minimal intent={tagIntent}>
+	                          {tagText}
+	                        </Tag>
+	                      </div>
+	                      <Text className="muted">{String(run.job_id ?? '')}</Text>
+	                      <Text className="muted">
+	                        {run.node_id ? `Node ${String(run.node_id)}` : uiCopy.history.wholePipeline}
+	                      </Text>
+	                      {scheduleNote ? <Text className="muted">{scheduleNote}</Text> : null}
+	                    </Card>
+	                    )
+	                  })
+	                )}
+	              </div>
+	            )}
+          </div>
+        </div>
+      )}
 
       {previewCollapsed ? (
         <div className="preview-collapsed">
@@ -1981,34 +3408,49 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
           </Button>
         </div>
       ) : (
-        <PipelinePreview
-          nodes={nodeOptions}
-          selectedNodeId={previewNode?.id ?? null}
-          columns={previewSchema}
-          rows={previewRows}
-          copy={uiCopy.preview}
-          onSelectNode={(nodeId) => setPreviewNodeId(nodeId)}
-          onToggleFullscreen={() => {
-            setPreviewFullscreen((current) => !current)
-          }}
-          onCollapse={() => {
-            setPreviewCollapsed(true)
-            setPreviewFullscreen(false)
-          }}
-          fullscreen={previewFullscreen}
-        />
+        <>
+	          <PipelinePreview
+	            nodes={nodeOptions}
+	            selectedNodeId={previewNode?.id ?? null}
+	            columns={previewSchema}
+	            rows={previewRows}
+	            rowCount={previewMeta.rowCount}
+	            sampleRowCount={previewMeta.sampleRowCount}
+	            columnStats={previewMeta.columnStats}
+	            copy={uiCopy.preview}
+	            onSelectNode={(nodeId) => setPreviewNodeId(nodeId)}
+	            onToggleFullscreen={() => {
+	              setPreviewFullscreen((current) => !current)
+	            }}
+            onCollapse={() => {
+              setPreviewCollapsed(true)
+              setPreviewFullscreen(false)
+            }}
+            fullscreen={previewFullscreen}
+          />
+          {previewErrors.length ? (
+            <div className="preview-errors">
+              <Tag minimal intent={Intent.WARNING}>{uiCopy.preview.validationTitle}</Tag>
+              <ul>
+                {previewErrors.map((error) => (
+                  <li key={error}>{error}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </>
       )}
 
       <Dialog isOpen={pipelineDialogOpen} onClose={() => setPipelineDialogOpen(false)} title={uiCopy.dialogs.pipeline.title}>
         <div className="dialog-body">
-          <FormGroup label={uiCopy.dialogs.pipeline.name}>
-            <InputGroup value={newPipelineName} onChange={(event) => setNewPipelineName(event.currentTarget.value)} />
+          <FormGroup label={uiCopy.dialogs.pipeline.name} labelFor="pipeline-create-name">
+            <InputGroup id="pipeline-create-name" value={newPipelineName} onChange={(event) => setNewPipelineName(event.currentTarget.value)} />
           </FormGroup>
-          <FormGroup label={uiCopy.dialogs.pipeline.location}>
-            <InputGroup value={newPipelineLocation} onChange={(event) => setNewPipelineLocation(event.currentTarget.value)} />
+          <FormGroup label={uiCopy.dialogs.pipeline.location} labelFor="pipeline-create-location">
+            <InputGroup id="pipeline-create-location" value={newPipelineLocation} onChange={(event) => setNewPipelineLocation(event.currentTarget.value)} />
           </FormGroup>
-          <FormGroup label={uiCopy.dialogs.pipeline.description}>
-            <TextArea value={newPipelineDescription} onChange={(event) => setNewPipelineDescription(event.currentTarget.value)} />
+          <FormGroup label={uiCopy.dialogs.pipeline.description} labelFor="pipeline-create-description">
+            <TextArea id="pipeline-create-description" value={newPipelineDescription} onChange={(event) => setNewPipelineDescription(event.currentTarget.value)} />
           </FormGroup>
         </div>
         <div className="dialog-footer">
@@ -2023,6 +3465,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
                 location: newPipelineLocation.trim(),
                 description: newPipelineDescription.trim() || undefined,
                 definition_json: definition,
+                branch,
               })
             }
             disabled={!newPipelineName.trim() || !newPipelineLocation.trim()}
@@ -2039,6 +3482,7 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
             <Tab id="datasets" title={uiCopy.dialogs.dataset.tabs.datasets} panel={datasetsPanel} />
             <Tab id="excel" title={uiCopy.dialogs.dataset.tabs.excel} panel={excelPanel} />
             <Tab id="csv" title={uiCopy.dialogs.dataset.tabs.csv} panel={csvPanel} />
+            <Tab id="media" title={uiCopy.dialogs.dataset.tabs.media} panel={mediaPanel} />
             <Tab id="manual" title={uiCopy.dialogs.dataset.tabs.manual} panel={manualPanel} />
           </Tabs>
         </div>
@@ -2058,6 +3502,60 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
               {uiCopy.dialogs.dataset.addToGraph}
             </Button>
           ) : null}
+        </div>
+      </Dialog>
+
+      <Dialog isOpen={proposalDrawerOpen} onClose={() => setProposalDrawerOpen(false)} title={uiCopy.proposals.createTitle}>
+        <div className="dialog-body">
+          <FormGroup label={uiCopy.proposals.fields.title}>
+            <InputGroup
+              value={proposalDraft.title}
+              onChange={(event) => {
+                const value = event.currentTarget.value
+                setProposalDraft((prev) => ({ ...prev, title: value }))
+              }}
+            />
+          </FormGroup>
+          <FormGroup label={uiCopy.proposals.fields.description}>
+            <TextArea
+              value={proposalDraft.description}
+              onChange={(event) => {
+                const value = event.currentTarget.value
+                setProposalDraft((prev) => ({ ...prev, description: value }))
+              }}
+            />
+          </FormGroup>
+        </div>
+        <div className="dialog-footer">
+          <Button minimal onClick={() => setProposalDrawerOpen(false)}>{uiCopy.dialogs.pipeline.cancel}</Button>
+          <Button
+            intent={Intent.PRIMARY}
+            disabled={!proposalDraft.title.trim() || !pipelineId}
+            loading={submitProposalMutation.isPending}
+            onClick={() => submitProposalMutation.mutate({ title: proposalDraft.title.trim(), description: proposalDraft.description.trim() })}
+          >
+            {uiCopy.proposals.submit}
+          </Button>
+        </div>
+      </Dialog>
+
+      <Dialog isOpen={branchDialogOpen} onClose={() => setBranchDialogOpen(false)} title={uiCopy.dialogs.branch.title}>
+        <div className="dialog-body">
+          <FormGroup label={uiCopy.dialogs.branch.name}>
+            <InputGroup value={branchDraft} onChange={(event) => setBranchDraft(event.currentTarget.value)} />
+          </FormGroup>
+          <Text className="muted">{uiCopy.dialogs.branch.helper}</Text>
+        </div>
+        <div className="dialog-footer">
+          <Button minimal onClick={() => setBranchDialogOpen(false)}>{uiCopy.dialogs.branch.cancel}</Button>
+          <Button
+            intent={Intent.PRIMARY}
+            disabled={!branchDraft.trim() || !pipelineId}
+            loading={createBranchMutation.isPending}
+            onClick={() => branchDraft.trim() && createBranchMutation.mutate(branchDraft)}
+          >
+            {uiCopy.dialogs.branch.create}
+          </Button>
         </div>
       </Dialog>
 
@@ -2105,14 +3603,186 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
 
       <Dialog isOpen={transformOpen} onClose={() => setTransformOpen(false)} title={uiCopy.dialogs.transform.title}>
         <div className="dialog-body">
-          <FormGroup label={uiCopy.dialogs.transform.nodeName}>
-            <InputGroup value={transformDraft.title} onChange={(event) => setTransformDraft((prev) => ({ ...prev, title: event.currentTarget.value }))} />
+          <FormGroup label={uiCopy.dialogs.transform.nodeName} labelFor="pipeline-transform-node-name">
+            <InputGroup
+              id="pipeline-transform-node-name"
+              value={transformDraft.title}
+              onChange={(event) => {
+                const value = event.currentTarget.value
+                setTransformDraft((prev) => ({ ...prev, title: value }))
+              }}
+            />
           </FormGroup>
-          <FormGroup label={uiCopy.dialogs.transform.operation}>
-            <InputGroup value={transformDraft.operation} onChange={(event) => setTransformDraft((prev) => ({ ...prev, operation: event.currentTarget.value }))} />
+          <FormGroup label={uiCopy.dialogs.transform.operation} labelFor="pipeline-transform-operation">
+            <HTMLSelect
+              id="pipeline-transform-operation"
+              value={transformDraft.operation}
+              onChange={(event) => {
+                const value = event.currentTarget.value
+                setTransformDraft((prev) => ({ ...prev, operation: value }))
+              }}
+            >
+              <optgroup label={uiCopy.dialogs.transform.categories.rowLevel}>
+                <option value="filter">{uiCopy.operations.filter}</option>
+                <option value="compute">{uiCopy.operations.compute}</option>
+                <option value="select">{uiCopy.operations.select}</option>
+                <option value="drop">{uiCopy.operations.drop}</option>
+                <option value="rename">{uiCopy.operations.rename}</option>
+                <option value="cast">{uiCopy.operations.cast}</option>
+                <option value="dedupe">{uiCopy.operations.dedupe}</option>
+                <option value="sort">{uiCopy.operations.sort}</option>
+                <option value="union">{uiCopy.operations.union}</option>
+              </optgroup>
+              <optgroup label={uiCopy.dialogs.transform.categories.aggregation}>
+                <option value="groupBy">{uiCopy.operations.groupBy}</option>
+                <option value="aggregate">{uiCopy.operations.aggregate}</option>
+                <option value="pivot">{uiCopy.operations.pivot}</option>
+              </optgroup>
+              <optgroup label={uiCopy.dialogs.transform.categories.generator}>
+                <option value="explode">{uiCopy.operations.explode}</option>
+                <option value="window">{uiCopy.operations.window}</option>
+              </optgroup>
+            </HTMLSelect>
           </FormGroup>
-          <FormGroup label={uiCopy.dialogs.transform.expression}>
-            <TextArea value={transformDraft.expression} onChange={(event) => setTransformDraft((prev) => ({ ...prev, expression: event.currentTarget.value }))} />
+          <FormGroup label={uiCopy.dialogs.transform.expression} labelFor="pipeline-transform-expression">
+            <TextArea
+              id="pipeline-transform-expression"
+              value={transformDraft.expression}
+              onChange={(event) => {
+                const value = event.currentTarget.value
+                setTransformDraft((prev) => ({ ...prev, expression: value }))
+              }}
+            />
+          </FormGroup>
+          {(transformDraft.operation === 'groupBy' || transformDraft.operation === 'aggregate') ? (
+            <>
+              <FormGroup label={uiCopy.dialogs.transform.groupBy}>
+                <InputGroup
+                  value={transformDraft.groupBy}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value
+                    setTransformDraft((prev) => ({ ...prev, groupBy: value }))
+                  }}
+                />
+              </FormGroup>
+              <FormGroup label={uiCopy.dialogs.transform.aggregates}>
+                <TextArea
+                  value={transformDraft.aggregates}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value
+                    setTransformDraft((prev) => ({ ...prev, aggregates: value }))
+                  }}
+                />
+              </FormGroup>
+            </>
+          ) : null}
+          {transformDraft.operation === 'pivot' ? (
+            <>
+              <FormGroup label={uiCopy.dialogs.transform.pivotIndex}>
+                <InputGroup
+                  value={transformDraft.pivotIndex}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value
+                    setTransformDraft((prev) => ({ ...prev, pivotIndex: value }))
+                  }}
+                />
+              </FormGroup>
+              <FormGroup label={uiCopy.dialogs.transform.pivotColumns}>
+                <InputGroup
+                  value={transformDraft.pivotColumns}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value
+                    setTransformDraft((prev) => ({ ...prev, pivotColumns: value }))
+                  }}
+                />
+              </FormGroup>
+              <FormGroup label={uiCopy.dialogs.transform.pivotValues}>
+                <InputGroup
+                  value={transformDraft.pivotValues}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value
+                    setTransformDraft((prev) => ({ ...prev, pivotValues: value }))
+                  }}
+                />
+              </FormGroup>
+              <FormGroup label={uiCopy.dialogs.transform.pivotAgg}>
+                <InputGroup
+                  value={transformDraft.pivotAgg}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value
+                    setTransformDraft((prev) => ({ ...prev, pivotAgg: value }))
+                  }}
+                />
+              </FormGroup>
+            </>
+          ) : null}
+          {transformDraft.operation === 'window' ? (
+            <>
+              <FormGroup label={uiCopy.dialogs.transform.windowPartition}>
+                <InputGroup
+                  value={transformDraft.windowPartition}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value
+                    setTransformDraft((prev) => ({ ...prev, windowPartition: value }))
+                  }}
+                />
+              </FormGroup>
+              <FormGroup label={uiCopy.dialogs.transform.windowOrder}>
+                <InputGroup
+                  value={transformDraft.windowOrder}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value
+                    setTransformDraft((prev) => ({ ...prev, windowOrder: value }))
+                  }}
+                />
+              </FormGroup>
+            </>
+          ) : null}
+          {['select', 'drop', 'sort', 'dedupe', 'explode'].includes(transformDraft.operation) ? (
+            <FormGroup label={uiCopy.dialogs.transform.columns}>
+              <InputGroup
+                value={transformDraft.columns}
+                onChange={(event) => {
+                  const value = event.currentTarget.value
+                  setTransformDraft((prev) => ({ ...prev, columns: value }))
+                }}
+                placeholder="col_a, col_b"
+              />
+            </FormGroup>
+          ) : null}
+          {transformDraft.operation === 'rename' ? (
+            <FormGroup label={uiCopy.dialogs.transform.renameMap}>
+              <TextArea
+                value={transformDraft.renameMap}
+                onChange={(event) => {
+                  const value = event.currentTarget.value
+                  setTransformDraft((prev) => ({ ...prev, renameMap: value }))
+                }}
+                placeholder='{"old_name": "new_name"}'
+              />
+            </FormGroup>
+          ) : null}
+          {transformDraft.operation === 'cast' ? (
+            <FormGroup label={uiCopy.dialogs.transform.castMap}>
+              <TextArea
+                value={transformDraft.castMap}
+                onChange={(event) => {
+                  const value = event.currentTarget.value
+                  setTransformDraft((prev) => ({ ...prev, castMap: value }))
+                }}
+                placeholder='[{"column": "amount", "type": "xsd:decimal"}]'
+              />
+            </FormGroup>
+          ) : null}
+          <FormGroup label={uiCopy.dialogs.transform.schemaChecks}>
+            <TextArea
+              value={transformDraft.schemaChecksJson}
+              onChange={(event) => {
+                const value = event.currentTarget.value
+                setTransformDraft((prev) => ({ ...prev, schemaChecksJson: value }))
+              }}
+              placeholder='[{"column":"id","rule":"not_null"}]'
+            />
           </FormGroup>
         </div>
         <div className="dialog-footer">
@@ -2123,19 +3793,20 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
 
       <Dialog isOpen={joinOpen} onClose={() => setJoinOpen(false)} title={uiCopy.dialogs.join.title}>
         <div className="dialog-body">
-          <FormGroup label={uiCopy.dialogs.join.leftDataset}>
-            <HTMLSelect value={joinLeft} onChange={(event) => setJoinLeft(event.currentTarget.value)}>
+          <FormGroup label={uiCopy.dialogs.join.leftDataset} labelFor="pipeline-join-left-dataset">
+            <HTMLSelect id="pipeline-join-left-dataset" value={joinLeft} onChange={(event) => setJoinLeft(event.currentTarget.value)}>
               <option value="">{uiCopy.dialogs.join.selectNode}</option>
               {definition.nodes.map((node) => (
                 <option key={node.id} value={node.id}>{node.title}</option>
               ))}
             </HTMLSelect>
           </FormGroup>
-          <FormGroup label={uiCopy.dialogs.join.leftKey}>
+          <FormGroup label={uiCopy.dialogs.join.leftKey} labelFor="pipeline-join-left-key">
             <HTMLSelect
+              id="pipeline-join-left-key"
               value={joinLeftKey}
               onChange={(event) => setJoinLeftKey(event.currentTarget.value)}
-              disabled={!joinLeft}
+              disabled={!joinLeft || joinAllowCrossJoin}
             >
               <option value="">{uiCopy.dialogs.join.selectKey}</option>
               {getNodeColumnNames(joinLeft).map((col) => (
@@ -2143,19 +3814,20 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
               ))}
             </HTMLSelect>
           </FormGroup>
-          <FormGroup label={uiCopy.dialogs.join.rightDataset}>
-            <HTMLSelect value={joinRight} onChange={(event) => setJoinRight(event.currentTarget.value)}>
+          <FormGroup label={uiCopy.dialogs.join.rightDataset} labelFor="pipeline-join-right-dataset">
+            <HTMLSelect id="pipeline-join-right-dataset" value={joinRight} onChange={(event) => setJoinRight(event.currentTarget.value)}>
               <option value="">{uiCopy.dialogs.join.selectNode}</option>
               {definition.nodes.map((node) => (
                 <option key={node.id} value={node.id}>{node.title}</option>
               ))}
             </HTMLSelect>
           </FormGroup>
-          <FormGroup label={uiCopy.dialogs.join.rightKey}>
+          <FormGroup label={uiCopy.dialogs.join.rightKey} labelFor="pipeline-join-right-key">
             <HTMLSelect
+              id="pipeline-join-right-key"
               value={joinRightKey}
               onChange={(event) => setJoinRightKey(event.currentTarget.value)}
-              disabled={!joinRight}
+              disabled={!joinRight || joinAllowCrossJoin}
             >
               <option value="">{uiCopy.dialogs.join.selectKey}</option>
               {getNodeColumnNames(joinRight).map((col) => (
@@ -2163,18 +3835,43 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
               ))}
             </HTMLSelect>
           </FormGroup>
-          <FormGroup label={uiCopy.dialogs.join.joinType}>
-            <HTMLSelect value={joinType} onChange={(event) => setJoinType(event.currentTarget.value)}>
+          <FormGroup label={uiCopy.dialogs.join.joinType} labelFor="pipeline-join-type">
+            <HTMLSelect id="pipeline-join-type" value={joinType} onChange={(event) => setJoinType(event.currentTarget.value)} disabled={joinAllowCrossJoin}>
               <option value="inner">{uiCopy.dialogs.join.inner}</option>
               <option value="left">{uiCopy.dialogs.join.left}</option>
               <option value="right">{uiCopy.dialogs.join.right}</option>
               <option value="full">{uiCopy.dialogs.join.full}</option>
+              {joinAllowCrossJoin ? <option value="cross">{uiCopy.dialogs.join.cross}</option> : null}
             </HTMLSelect>
+          </FormGroup>
+          <FormGroup>
+            <Checkbox
+              checked={joinAllowCrossJoin}
+              label={uiCopy.dialogs.join.allowCrossJoin}
+              onChange={(event) => {
+                const checked = event.currentTarget.checked
+                setJoinAllowCrossJoin(checked)
+                if (checked) {
+                  setJoinType('cross')
+                  setJoinLeftKey('')
+                  setJoinRightKey('')
+                } else if (joinType === 'cross') {
+                  setJoinType('inner')
+                }
+              }}
+            />
+            <Text className="muted">{uiCopy.dialogs.join.allowCrossJoinHelp}</Text>
           </FormGroup>
         </div>
         <div className="dialog-footer">
           <Button minimal onClick={() => setJoinOpen(false)}>{uiCopy.dialogs.join.cancel}</Button>
-          <Button intent={Intent.PRIMARY} onClick={handleJoin} disabled={!joinLeft || !joinRight}>{uiCopy.dialogs.join.create}</Button>
+          <Button
+            intent={Intent.PRIMARY}
+            onClick={handleJoin}
+            disabled={!joinLeft || !joinRight || (!joinAllowCrossJoin && (!joinLeftKey || !joinRightKey))}
+          >
+            {uiCopy.dialogs.join.create}
+          </Button>
         </div>
       </Dialog>
 
@@ -2190,34 +3887,282 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
       <Dialog isOpen={deployOpen} onClose={() => setDeployOpen(false)} title={uiCopy.dialogs.deploy.title}>
         <div className="dialog-body">
           <FormGroup label={uiCopy.dialogs.deploy.outputDataset}>
-            <InputGroup value={deployDraft.datasetName} onChange={(event) => setDeployDraft((prev) => ({ ...prev, datasetName: event.currentTarget.value }))} />
+            <InputGroup
+              value={deployDraft.datasetName}
+              onChange={(event) => {
+                const value = event.currentTarget.value
+                setDeployDraft((prev) => ({ ...prev, datasetName: value }))
+              }}
+            />
           </FormGroup>
-          <FormGroup label={uiCopy.dialogs.deploy.rowCount}>
-            <InputGroup value={deployDraft.rowCount} onChange={(event) => setDeployDraft((prev) => ({ ...prev, rowCount: event.currentTarget.value }))} />
-          </FormGroup>
-          <FormGroup label={uiCopy.dialogs.deploy.artifactKey}>
-            <InputGroup value={deployDraft.artifactKey} onChange={(event) => setDeployDraft((prev) => ({ ...prev, artifactKey: event.currentTarget.value }))} />
-          </FormGroup>
+          <Text className="muted">{uiCopy.dialogs.deploy.helper}</Text>
         </div>
         <div className="dialog-footer">
           <Button minimal onClick={() => setDeployOpen(false)}>{uiCopy.dialogs.deploy.cancel}</Button>
-          <Button intent={Intent.PRIMARY} onClick={handleDeploy} loading={deployMutation.isPending}>{uiCopy.dialogs.deploy.deploy}</Button>
+          <Button intent={Intent.PRIMARY} onClick={handleDeploy} loading={deployMutation.isPending || safeDeployPending}>{uiCopy.dialogs.deploy.deploy}</Button>
         </div>
       </Dialog>
 
       <Dialog isOpen={deploySettingsOpen} onClose={() => setDeploySettingsOpen(false)} title={uiCopy.dialogs.deploySettings.title}>
         <div className="dialog-body">
           <FormGroup label={uiCopy.dialogs.deploySettings.compute}>
-            <InputGroup value={deploySettings.compute} onChange={(event) => setDeploySettings((prev) => ({ ...prev, compute: event.currentTarget.value }))} />
+            <InputGroup
+              value={deploySettings.compute}
+              onChange={(event) => {
+                const value = event.currentTarget.value
+                setDeploySettings((prev) => ({ ...prev, compute: value }))
+              }}
+            />
           </FormGroup>
           <FormGroup label={uiCopy.dialogs.deploySettings.memory}>
-            <InputGroup value={deploySettings.memory} onChange={(event) => setDeploySettings((prev) => ({ ...prev, memory: event.currentTarget.value }))} />
+            <InputGroup
+              value={deploySettings.memory}
+              onChange={(event) => {
+                const value = event.currentTarget.value
+                setDeploySettings((prev) => ({ ...prev, memory: value }))
+              }}
+            />
           </FormGroup>
           <FormGroup label={uiCopy.dialogs.deploySettings.schedule}>
-            <InputGroup value={deploySettings.schedule} onChange={(event) => setDeploySettings((prev) => ({ ...prev, schedule: event.currentTarget.value }))} />
+            <InputGroup
+              value={deploySettings.schedule}
+              onChange={(event) => {
+                const value = event.currentTarget.value
+                setDeploySettings((prev) => ({ ...prev, schedule: value }))
+              }}
+            />
           </FormGroup>
           <FormGroup label={uiCopy.dialogs.deploySettings.engine}>
-            <InputGroup value={deploySettings.engine} onChange={(event) => setDeploySettings((prev) => ({ ...prev, engine: event.currentTarget.value }))} />
+            <InputGroup
+              value={deploySettings.engine}
+              onChange={(event) => {
+                const value = event.currentTarget.value
+                setDeploySettings((prev) => ({ ...prev, engine: value }))
+              }}
+            />
+          </FormGroup>
+          <FormGroup label={uiCopy.dialogs.deploySettings.expectations}>
+            <div className="dialog-scroll">
+              {expectationDrafts.map((item) => (
+                <div key={item.id} className="expectation-row">
+                  <HTMLSelect
+                    value={item.rule}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value
+                      setExpectationDrafts((current) =>
+                        current.map((row) => (row.id === item.id ? { ...row, rule: value } : row)),
+                      )
+                    }}
+                  >
+                    <option value="row_count_min">row_count_min</option>
+                    <option value="row_count_max">row_count_max</option>
+                    <option value="not_null">not_null</option>
+                    <option value="non_empty">non_empty</option>
+                    <option value="unique">unique</option>
+                    <option value="min">min</option>
+                    <option value="max">max</option>
+                    <option value="regex">regex</option>
+                    <option value="in_set">in_set</option>
+                  </HTMLSelect>
+                  <InputGroup
+                    placeholder={uiCopy.dialogs.deploySettings.expectationColumn}
+                    value={item.column}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value
+                      setExpectationDrafts((current) =>
+                        current.map((row) => (row.id === item.id ? { ...row, column: value } : row)),
+                      )
+                    }}
+                  />
+                  <InputGroup
+                    placeholder={uiCopy.dialogs.deploySettings.expectationValue}
+                    value={item.value}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value
+                      setExpectationDrafts((current) =>
+                        current.map((row) => (row.id === item.id ? { ...row, value } : row)),
+                      )
+                    }}
+                  />
+                  <Button
+                    icon="trash"
+                    minimal
+                    intent={Intent.DANGER}
+                    onClick={() =>
+                      setExpectationDrafts((current) => current.filter((row) => row.id !== item.id))
+                    }
+                  />
+                </div>
+              ))}
+            </div>
+            <Button
+              icon="add"
+              minimal
+              onClick={() => setExpectationDrafts((current) => [...current, expectationDefaults()])}
+            >
+              {uiCopy.dialogs.deploySettings.expectationAdd}
+            </Button>
+          </FormGroup>
+          <FormGroup label={uiCopy.dialogs.deploySettings.schemaContract}>
+            <div className="dialog-scroll">
+              {schemaContractDrafts.map((item) => (
+                <div key={item.id} className="expectation-row">
+                  <InputGroup
+                    placeholder={uiCopy.dialogs.deploySettings.schemaColumn}
+                    value={item.column}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value
+                      setSchemaContractDrafts((current) =>
+                        current.map((row) => (row.id === item.id ? { ...row, column: value } : row)),
+                      )
+                    }}
+                  />
+                  <HTMLSelect
+                    value={item.type}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value
+                      setSchemaContractDrafts((current) =>
+                        current.map((row) => (row.id === item.id ? { ...row, type: value } : row)),
+                      )
+                    }}
+                  >
+                    <option value="xsd:string">xsd:string</option>
+                    <option value="xsd:integer">xsd:integer</option>
+                    <option value="xsd:decimal">xsd:decimal</option>
+                    <option value="xsd:boolean">xsd:boolean</option>
+                    <option value="xsd:dateTime">xsd:dateTime</option>
+                  </HTMLSelect>
+                  <label className="schema-toggle">
+                    <input
+                      type="checkbox"
+                      checked={item.required}
+                      onChange={(event) => {
+                        const value = event.currentTarget.checked
+                        setSchemaContractDrafts((current) =>
+                          current.map((row) => (row.id === item.id ? { ...row, required: value } : row)),
+                        )
+                      }}
+                    />
+                    {uiCopy.dialogs.deploySettings.schemaRequired}
+                  </label>
+                  <Button
+                    icon="trash"
+                    minimal
+                    intent={Intent.DANGER}
+                    onClick={() =>
+                      setSchemaContractDrafts((current) => current.filter((row) => row.id !== item.id))
+                    }
+                  />
+                </div>
+              ))}
+            </div>
+            <Button
+              icon="add"
+              minimal
+              onClick={() => setSchemaContractDrafts((current) => [...current, schemaContractDefaults()])}
+            >
+              {uiCopy.dialogs.deploySettings.schemaAdd}
+            </Button>
+          </FormGroup>
+          <FormGroup>
+            <Checkbox
+              checked={deploySettings.replayOnDeploy}
+              onChange={(event) => {
+                const checked = event.currentTarget.checked
+                setDeploySettings((prev) => ({ ...prev, replayOnDeploy: checked }))
+              }}
+            >
+              {uiCopy.dialogs.deploySettings.replayOnDeploy}
+            </Checkbox>
+            <Text className="muted">{uiCopy.dialogs.deploySettings.replayOnDeployHelp}</Text>
+          </FormGroup>
+          <FormGroup label={uiCopy.dialogs.deploySettings.dependencies}>
+            <div className="dialog-scroll">
+              {dependencyDrafts.map((item) => (
+                <div key={item.id} className="expectation-row">
+                  <HTMLSelect
+                    value={item.pipelineId}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value
+                      setDependencyDrafts((current) =>
+                        current.map((row) => (row.id === item.id ? { ...row, pipelineId: value } : row)),
+                      )
+                    }}
+                  >
+                    <option value="">{uiCopy.dialogs.deploySettings.dependencySelectPipeline}</option>
+                    {pipelines
+                      .filter((record) => String(record.pipeline_id ?? '') && String(record.pipeline_id ?? '') !== String(pipelineId ?? ''))
+                      .map((record) => {
+                        const id = String(record.pipeline_id ?? '')
+                        const name = String(record.name ?? id)
+                        return (
+                          <option key={id} value={id}>
+                            {name}
+                          </option>
+                        )
+                      })}
+                  </HTMLSelect>
+                  <HTMLSelect
+                    value={item.status}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value
+                      setDependencyDrafts((current) =>
+                        current.map((row) => (row.id === item.id ? { ...row, status: value } : row)),
+                      )
+                    }}
+                  >
+                    <option value="DEPLOYED">{uiCopy.dialogs.deploySettings.dependencyStatusDeployed}</option>
+                    <option value="SUCCESS">{uiCopy.dialogs.deploySettings.dependencyStatusSuccess}</option>
+                  </HTMLSelect>
+                  <Button
+                    icon="trash"
+                    minimal
+                    intent={Intent.DANGER}
+                    onClick={() => setDependencyDrafts((current) => current.filter((row) => row.id !== item.id))}
+                  />
+                </div>
+              ))}
+            </div>
+            <Button icon="add" minimal onClick={() => setDependencyDrafts((current) => [...current, dependencyDefaults()])}>
+              {uiCopy.dialogs.deploySettings.dependencyAdd}
+            </Button>
+            <Text className="muted">{uiCopy.dialogs.deploySettings.dependenciesHelp}</Text>
+          </FormGroup>
+          <FormGroup label={uiCopy.dialogs.deploySettings.branch}>
+            <InputGroup
+              value={deploySettings.branch}
+              onChange={(event) => {
+                const value = event.currentTarget.value
+                setDeploySettings((prev) => ({ ...prev, branch: value }))
+              }}
+            />
+          </FormGroup>
+          <FormGroup label={uiCopy.dialogs.deploySettings.proposalStatus}>
+            <InputGroup
+              value={deploySettings.proposalStatus}
+              onChange={(event) => {
+                const value = event.currentTarget.value
+                setDeploySettings((prev) => ({ ...prev, proposalStatus: value }))
+              }}
+            />
+          </FormGroup>
+          <FormGroup label={uiCopy.dialogs.deploySettings.proposalTitle}>
+            <InputGroup
+              value={deploySettings.proposalTitle}
+              onChange={(event) => {
+                const value = event.currentTarget.value
+                setDeploySettings((prev) => ({ ...prev, proposalTitle: value }))
+              }}
+            />
+          </FormGroup>
+          <FormGroup label={uiCopy.dialogs.deploySettings.proposalDescription}>
+            <TextArea
+              value={deploySettings.proposalDescription}
+              onChange={(event) => {
+                const value = event.currentTarget.value
+                setDeploySettings((prev) => ({ ...prev, proposalDescription: value }))
+              }}
+            />
           </FormGroup>
         </div>
         <div className="dialog-footer">
@@ -2228,14 +4173,35 @@ export const PipelineBuilderPage = ({ dbName }: { dbName: string }) => {
 
       <Dialog isOpen={outputOpen} onClose={() => setOutputOpen(false)} title={uiCopy.dialogs.output.title}>
         <div className="dialog-body">
-          <FormGroup label={uiCopy.dialogs.output.outputName}>
-            <InputGroup value={outputDraft.name} onChange={(event) => setOutputDraft((prev) => ({ ...prev, name: event.currentTarget.value }))} />
+          <FormGroup label={uiCopy.dialogs.output.outputName} labelFor="pipeline-output-name">
+            <InputGroup
+              id="pipeline-output-name"
+              value={outputDraft.name}
+              onChange={(event) => {
+                const value = event.currentTarget.value
+                setOutputDraft((prev) => ({ ...prev, name: value }))
+              }}
+            />
           </FormGroup>
-          <FormGroup label={uiCopy.dialogs.output.datasetName}>
-            <InputGroup value={outputDraft.datasetName} onChange={(event) => setOutputDraft((prev) => ({ ...prev, datasetName: event.currentTarget.value }))} />
+          <FormGroup label={uiCopy.dialogs.output.datasetName} labelFor="pipeline-output-dataset-name">
+            <InputGroup
+              id="pipeline-output-dataset-name"
+              value={outputDraft.datasetName}
+              onChange={(event) => {
+                const value = event.currentTarget.value
+                setOutputDraft((prev) => ({ ...prev, datasetName: value }))
+              }}
+            />
           </FormGroup>
-          <FormGroup label={uiCopy.dialogs.output.description}>
-            <TextArea value={outputDraft.description} onChange={(event) => setOutputDraft((prev) => ({ ...prev, description: event.currentTarget.value }))} />
+          <FormGroup label={uiCopy.dialogs.output.description} labelFor="pipeline-output-description">
+            <TextArea
+              id="pipeline-output-description"
+              value={outputDraft.description}
+              onChange={(event) => {
+                const value = event.currentTarget.value
+                setOutputDraft((prev) => ({ ...prev, description: value }))
+              }}
+            />
           </FormGroup>
         </div>
         <div className="dialog-footer">

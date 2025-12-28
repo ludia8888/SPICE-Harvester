@@ -8,7 +8,6 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
-from functools import wraps
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -20,6 +19,7 @@ from oms.exceptions import (
     OntologyNotFoundError,
     OntologyValidationError,
 )
+from oms.utils.terminus_retry import build_async_retry
 
 # Import utils modules
 from oms.utils.circular_reference_detector import CircularReferenceDetector
@@ -96,30 +96,12 @@ OntologyValidationError = OntologyValidationError
 DatabaseError = ConnectionError
 
 
-def async_terminus_retry(max_retries: int = 3, delay: float = 1.0):
-    """TerminusDB 작업에 대한 재시도 데코레이터"""
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            last_exception = None
-            for attempt in range(max_retries):
-                try:
-                    return await func(*args, **kwargs)
-                except (httpx.ConnectError, httpx.TimeoutException, ConnectionError) as e:
-                    last_exception = e
-                    if attempt < max_retries - 1:
-                        wait_time = delay * (2 ** attempt)
-                        logger.warning(
-                            f"Connection error on attempt {attempt + 1}/{max_retries} for {func.__name__}: {e}. "
-                            f"Retrying in {wait_time} seconds..."
-                        )
-                        await asyncio.sleep(wait_time)
-                    else:
-                        logger.error(f"Max retries reached for {func.__name__}: {e}")
-            
-            raise ConnectionError(f"Failed after {max_retries} attempts: {last_exception}")
-        return wrapper
-    return decorator
+async_terminus_retry = build_async_retry(
+    retry_exceptions=(httpx.ConnectError, httpx.TimeoutException, ConnectionError),
+    backoff="exponential",
+    logger=logger,
+    on_failure=lambda exc, retries: ConnectionError(f"Failed after {retries} attempts: {exc}"),
+)
 
 
 class AsyncTerminusService:

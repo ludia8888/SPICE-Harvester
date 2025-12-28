@@ -266,6 +266,19 @@ class OMSClient:
             logger.error(f"버전 히스토리 조회 실패 ({db_name}): {e}")
             raise
 
+    async def get_version_head(self, db_name: str, *, branch: str = "main") -> Dict[str, Any]:
+        """브랜치 head 커밋 ID 조회 (Foundry-style deploy gate)."""
+        try:
+            response = await self.client.get(
+                f"/api/v1/version/{db_name}/head",
+                params={"branch": branch},
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"브랜치 head 커밋 조회 실패 ({db_name}, branch={branch}): {e}")
+            raise
+
     async def update_ontology(
         self,
         db_name: str,

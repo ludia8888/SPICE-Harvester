@@ -26,7 +26,7 @@ FUNNEL_URL = (os.getenv("FUNNEL_BASE_URL") or os.getenv("FUNNEL_URL") or "http:/
 
 # Test configuration
 TERMINUS_URL = (os.getenv("TERMINUS_SERVER_URL") or "http://localhost:6363").rstrip("/")
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+REDIS_URL = os.getenv("REDIS_URL", "redis://:spicepass123@localhost:6380/0")
 def _get_postgres_url_candidates() -> list[str]:
     """Return Postgres DSN candidates (env override first, then common local ports)."""
     env_url = (os.getenv("POSTGRES_URL") or "").strip()
@@ -34,16 +34,16 @@ def _get_postgres_url_candidates() -> list[str]:
         return [env_url]
     return [
         # docker-compose host port default
-        "postgresql://spiceadmin:spicepass123@localhost:5433/spicedb",
+        "postgresql://spiceadmin:spicepass123@localhost:55433/spicedb",
         # common local Postgres port
         "postgresql://spiceadmin:spicepass123@localhost:5432/spicedb",
     ]
-MINIO_URL = os.getenv("MINIO_ENDPOINT_URL", "http://localhost:9000")
+MINIO_URL = os.getenv("MINIO_ENDPOINT_URL", "http://localhost:9002")
 ELASTICSEARCH_URL = os.getenv(
     "ELASTICSEARCH_URL",
-    f"http://{os.getenv('ELASTICSEARCH_HOST', 'localhost')}:{os.getenv('ELASTICSEARCH_PORT', '9200')}",
+    f"http://{os.getenv('ELASTICSEARCH_HOST', 'localhost')}:{os.getenv('ELASTICSEARCH_PORT', '9201')}",
 )
-KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:39092")
 
 BFF_HEADERS = bff_auth_headers()
 OMS_HEADERS = oms_auth_headers()
@@ -95,7 +95,7 @@ async def _get_write_side_last_sequence(*, aggregate_type: str, aggregate_id: st
 
     if conn is None:
         if not explicit_postgres_url:
-            pytest.skip(
+            raise RuntimeError(
                 "Postgres DSN not provided for OCC/sequence checks. "
                 "Set POSTGRES_URL to run tests that require expected_seq."
             )
@@ -399,6 +399,7 @@ class TestCoreOntologyManagement:
                 session,
                 index_name=index_name,
                 doc_id="I18nProduct",
+                timeout_seconds=180,
             )
             source = es_doc.get("_source") or {}
 
@@ -601,7 +602,7 @@ class TestEventSourcingInfrastructure:
         except ClientError as e:
             code = (e.response or {}).get("Error", {}).get("Code")
             if not (explicit_minio_access_key and explicit_minio_secret_key):
-                pytest.skip(
+                raise RuntimeError(
                     "MinIO credentials not provided for direct check. "
                     "Set MINIO_ACCESS_KEY/MINIO_SECRET_KEY to run this test."
                 )
@@ -645,7 +646,7 @@ class TestEventSourcingInfrastructure:
 
         if conn is None:
             if not explicit_postgres_url:
-                pytest.skip(
+                raise RuntimeError(
                     "Postgres DSN not provided for direct registry check. "
                     "Set POSTGRES_URL to run this test."
                 )

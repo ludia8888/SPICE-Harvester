@@ -384,6 +384,7 @@ class OntologyService(BaseTerminusService):
             "@comment": description_display,
             "@label_i18n": label_i18n,
             "@comment_i18n": description_i18n,
+            "cardinality": cardinality,
         }
 
         if rel.inverse_predicate:
@@ -552,6 +553,14 @@ class OntologyService(BaseTerminusService):
                         if isinstance(raw_rel_comment, str) and not raw_rel_comment.strip():
                             raw_rel_comment = None
 
+                        rel_cardinality = rel_doc.get("cardinality")
+                        is_set = value.get("@type") == "Set"
+                        if not rel_cardinality:
+                            rel_cardinality = "n:m" if is_set else "n:1"
+                        elif not is_set and (rel_cardinality.endswith(":n") or rel_cardinality.endswith(":m")):
+                            # Schema says single (Optional/@class) but metadata claimed a multi-cardinality.
+                            # Prefer schema structure to avoid accidental list coercion.
+                            rel_cardinality = "n:1"
                         rel = Relationship(
                             predicate=key,
                             target=class_type,
@@ -561,7 +570,7 @@ class OntologyService(BaseTerminusService):
                                 else rel_doc.get("@label", key)
                             ),
                             description=raw_rel_comment,
-                            cardinality="n:m" if value.get("@type") == "Set" else "1:n",
+                            cardinality=rel_cardinality,
                             inverse_predicate=rel_doc.get("inverse_predicate"),
                             inverse_label=(
                                 inverse_label_i18n

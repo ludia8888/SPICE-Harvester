@@ -4,9 +4,10 @@ import {
   Button,
   Navbar,
   NavbarGroup,
-  NavbarHeading,
+  Breadcrumbs,
   Tag,
 } from '@blueprintjs/core'
+import type { IconName } from '@blueprintjs/icons'
 import { SidebarRail } from './components/layout/SidebarRail'
 import { SettingsPopoverContent } from './components/layout/SettingsPopoverContent'
 import { SettingsDialog } from './components/SettingsDialog'
@@ -53,6 +54,7 @@ const copyByLang = {
       branch: 'Branch',
       adminMode: 'Admin mode',
       noProject: 'No project selected',
+      dataConnection: 'Data Connection',
     },
     sections: {
       context: 'Context',
@@ -150,6 +152,7 @@ const copyByLang = {
       branch: '브랜치',
       adminMode: '관리자 모드',
       noProject: '선택된 프로젝트 없음',
+      dataConnection: '데이터 연동',
     },
     sections: {
       context: '컨텍스트',
@@ -237,6 +240,8 @@ const getRailItems = (
   } else {
     const base = `/db/${encodeURIComponent(project)}`
     items.push({ icon: 'home', label: copy.nav.overview, path: `${base}/overview`, match: `${base}/overview` })
+    items.push({ icon: 'folder-close', label: copy.nav.databases, path: '/' })
+    items.push({ icon: 'database', label: copy.nav.dataConnection, path: `${base}/data/sheets`, match: `${base}/data` })
     items.push({ icon: 'flow-branch', label: copy.nav.pipeline, path: `${base}/pipeline`, match: `${base}/pipeline` })
     items.push({ icon: 'diagram-tree', label: copy.nav.ontology, path: `${base}/ontology`, match: `${base}/ontology` })
     items.push({ icon: 'build', label: copy.nav.workshop, path: `${base}/workshop`, match: `${base}/workshop` })
@@ -280,18 +285,40 @@ const AppShell = () => {
     <div className={`app-shell${hideGlobalHeader ? ' no-top-nav' : ''}`}>
       {hideGlobalHeader ? null : (
         <Navbar className="top-nav">
-          <NavbarGroup align={Alignment.LEFT}>
-            <NavbarHeading>{copy.appTitle}</NavbarHeading>
-            <Tag minimal icon="folder-close">
-              {context.project ?? copy.nav.noProject}
-            </Tag>
-            <Tag minimal icon="git-branch">{context.branch}</Tag>
-            {adminMode ? <Tag intent="warning">{copy.nav.adminMode}</Tag> : null}
+          <NavbarGroup align={Alignment.LEFT} className="breadcrumb-nav-group">
+            <Button
+              minimal
+              icon="folder-close"
+              className="nav-home-icon"
+              onClick={() => navigate('/')}
+            />
+            <div className="nav-divider" />
+
+            <Breadcrumbs
+              items={[
+                {
+                  icon: 'folder-close' as IconName,
+                  text: copy.nav.databases,
+                  onClick: () => navigate('/')
+                },
+                ...(context.project ? [{
+                  icon: 'folder-close' as IconName,
+                  text: context.project,
+                  // If we are deep in a project, this could link to project root, but for now just text or no-op if current
+                  // user usually expects clickable.
+                  onClick: () => navigate(`/db/${encodeURIComponent(context.project!)}/overview`)
+                }] : [])
+              ]}
+
+            />{/* Keeping Admin Mode warning if needed, but maybe less prominent or to the right? 
+                User format suggests clean breadcrumbs. Let's keep admin mode but ensure it doesn't break flow.
+                Maybe just separate it.
+            */}
+            {adminMode ? <Tag intent="warning" style={{ marginLeft: 20 }}>{copy.nav.adminMode}</Tag> : null}
+
           </NavbarGroup>
           <NavbarGroup align={Alignment.RIGHT}>
-            <Button minimal icon="folder-close" onClick={() => navigate('/')} aria-label={copy.nav.databases}>
-              {copy.nav.databases}
-            </Button>
+
             <Button minimal icon="history" onClick={() => setCommandDrawerOpen(true)} aria-label={copy.nav.commands}>
               {copy.nav.commands}
               {activeCommandCount > 0 ? (

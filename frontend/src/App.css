@@ -484,3 +484,110 @@ h5 {
     grid-template-columns: 1fr;
   }
 }
+
+/* --- Project File Explorer --- */
+.project-explorer-container {
+  padding: 20px;
+  height: 100%;
+}
+
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 24px;
+  padding: 10px;
+}
+
+.project-file-icon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100px;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+  user-select: none;
+}
+
+.project-file-icon:hover,
+.project-file-icon:focus {
+  background-color: var(--surface-hover);
+}
+
+.project-file-icon:focus {
+  outline: 2px solid var(--accent);
+}
+
+.icon-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.folder-icon {
+  /* Blueprint icon override if needed, but size prop handles it */
+}
+
+.filename-container {
+  text-align: center;
+  width: 100%;
+  overflow: hidden;
+}
+
+.filename {
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  word-wrap: break-word;
+  /* Allows long names to wrap */
+  line-height: 1.2;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  /* Limit to 2 lines */
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.new-project-item .folder-icon {
+  color: var(--text-muted) !important;
+  /* Distinct color for 'New' */
+  opacity: 0.7;
+}
+
+.new-project-item .filename {
+  color: var(--text-muted);
+}
+
+/* --- Breadcrumb Top Nav --- */
+.breadcrumb-nav-group {
+  display: flex;
+  align-items: center;
+}
+
+.nav-home-icon {
+  color: var(--text-muted) !important;
+}
+
+.nav-divider {
+  width: 1px;
+  height: 16px;
+  background-color: var(--border);
+  margin: 0 12px;
+}
+
+.bp6-breadcrumbs>li::after {
+  /* Blueprint divider override if needed, but default is usually fine / or > */
+  /* Reference image uses > */
+}
+
+.bp6-breadcrumb {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.bp6-breadcrumb-current {
+  color: var(--text-primary);
+  font-weight: 500;
+}

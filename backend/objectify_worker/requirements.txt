@@ -1,0 +1,6 @@
+# Objectify Worker Service Dependencies
+#
+# All core dependencies are managed in shared/pyproject.toml
+# (confluent-kafka, asyncpg, pydantic, httpx, boto3, etc.)
+
+-e ../shared

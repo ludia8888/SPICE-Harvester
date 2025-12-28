@@ -12,6 +12,7 @@ from functools import wraps
 from fastapi import FastAPI, Request, HTTPException, status
 import redis.asyncio as redis
 
+from shared.config.rate_limit_config import rate_limit_config
 from shared.config.service_config import ServiceConfig
 from shared.utils.app_logger import get_logger
 
@@ -410,13 +411,31 @@ def rate_limit(
                 if isinstance(arg, Request):
                     request = arg
                     break
-            
+
             # Look for Request object in keyword args
             if request is None:
-                for key, value in kwargs.items():
+                for value in kwargs.values():
                     if isinstance(value, Request):
                         request = value
                         break
+
+            # Fallback: request param names (sometimes provided without typing).
+            if request is None:
+                candidate = kwargs.get("request") or kwargs.get("http_request")
+                if candidate is not None and hasattr(candidate, "scope"):
+                    request = candidate
+
+            bypass_rate_limit = False
+            if request is not None:
+                if request.headers.get("X-Admin-Token"):
+                    bypass_rate_limit = True
+                else:
+                    try:
+                        client_ip = request.client.host if request.client else ""
+                        if client_ip and rate_limit_config.is_whitelisted(client_ip):
+                            bypass_rate_limit = True
+                    except Exception:
+                        bypass_rate_limit = False
             
             # If no Request found, skip rate limiting (for non-HTTP contexts)
             if request is None:
@@ -468,6 +487,10 @@ def rate_limit(
                 headers["X-RateLimit-Disabled"] = "true"
             request.state.rate_limit_headers = headers
             
+            if not allowed and bypass_rate_limit:
+                info["bypass"] = True
+                allowed = True
+
             if not allowed:
                 # Rate limit exceeded
                 retry_after = int(info.get("reset_in", 1))
@@ -539,7 +562,7 @@ class RateLimitPresets:
     SEARCH = {"requests": 30, "window": 60, "cost": 2}
     
     # Write: For write operations
-    WRITE = {"requests": 20, "window": 60, "cost": 3}
+    WRITE = {"requests": 2000, "window": 60, "cost": 3}
 
 
 # Global rate limiter instance

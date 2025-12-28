@@ -5,6 +5,7 @@ Version Control Service for TerminusDB
 
 import asyncio
 import logging
+import os
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 from shared.utils.terminus_branch import decode_branch_name, encode_branch_name
@@ -62,6 +63,21 @@ class VersionControlService(BaseTerminusService):
             "BranchAlreadyExists" in message
             or "api:BranchAlreadyExists" in message
             or "already exists" in message.lower()
+        )
+
+    @staticmethod
+    def _is_transient_request_handler_error(exc: Exception) -> bool:
+        """
+        TerminusDB occasionally returns a 500 "Unexpected failure in request handler" right after DB creation.
+
+        In practice this is a race in Terminus' internal initialization and usually resolves quickly.
+        We treat it as transient to avoid leaking 5xx responses to callers on fresh DBs.
+        """
+        message = str(exc)
+        return (
+            "Unexpected failure in request handler" in message
+            or "TerminusDB API error: 500" in message
+            or "TerminusDB API error: 503" in message
         )
     
     async def list_branches(self, db_name: str) -> List[Dict[str, Any]]:
@@ -293,37 +309,56 @@ class VersionControlService(BaseTerminusService):
         Returns:
             커밋 목록
         """
-        try:
-            await self.db_service.ensure_db_exists(db_name)
+        await self.db_service.ensure_db_exists(db_name)
 
-            encoded_branch = self._encode_branch_name(branch_name)
-            endpoint = f"/api/log/{self.connection_info.account}/{db_name}/local/branch/{encoded_branch}"
-            params = {
-                "limit": limit,
-                "offset": offset
-            }
-            
-            result = await self._make_request("GET", endpoint, params=params)
-            
-            commits = []
-            
-            # 응답 파싱
-            if isinstance(result, list):
-                for commit_info in result:
-                    commits.append(self._parse_commit_info(commit_info))
-            elif isinstance(result, dict):
-                if "@graph" in result:
-                    for commit_info in result["@graph"]:
+        encoded_branch = self._encode_branch_name(branch_name)
+        endpoint = f"/api/log/{self.connection_info.account}/{db_name}/local/branch/{encoded_branch}"
+        params = {
+            "limit": limit,
+            "offset": offset
+        }
+
+        max_attempts = int(os.getenv("TERMINUS_COMMITS_RETRY_ATTEMPTS", "5") or "5")
+        base_delay = float(os.getenv("TERMINUS_COMMITS_RETRY_DELAY_SECONDS", "0.4") or "0.4")
+
+        last_error: Optional[Exception] = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                result = await self._make_request("GET", endpoint, params=params)
+
+                commits: list[dict[str, Any]] = []
+
+                # 응답 파싱
+                if isinstance(result, list):
+                    for commit_info in result:
                         commits.append(self._parse_commit_info(commit_info))
-                elif "commits" in result:
-                    for commit_info in result["commits"]:
-                        commits.append(self._parse_commit_info(commit_info))
-            
-            return commits
-            
-        except Exception as e:
-            logger.error(f"Failed to get commits: {e}")
-            raise DatabaseError(f"커밋 이력 조회 실패: {e}")
+                elif isinstance(result, dict):
+                    if "@graph" in result:
+                        for commit_info in result["@graph"]:
+                            commits.append(self._parse_commit_info(commit_info))
+                    elif "commits" in result:
+                        for commit_info in result["commits"]:
+                            commits.append(self._parse_commit_info(commit_info))
+
+                return commits
+            except Exception as e:
+                last_error = e
+                # Empty history is acceptable if the branch/ref is not ready yet on a freshly created DB.
+                if self._is_origin_branch_missing_error(e):
+                    await asyncio.sleep(base_delay * attempt)
+                    continue
+                if self._is_transient_request_handler_error(e):
+                    await asyncio.sleep(base_delay * attempt)
+                    continue
+                if "404" in str(e) or "not found" in str(e).lower():
+                    return []
+                break
+
+        logger.error(f"Failed to get commits after retries: {last_error}")
+        # Fail-open for history endpoint callers; avoid returning 5xx on brand-new DBs.
+        if last_error and self._is_transient_request_handler_error(last_error):
+            return []
+        raise DatabaseError(f"커밋 이력 조회 실패: {last_error}")
     
     async def create_commit(
         self,

@@ -22,8 +22,10 @@ from collections import OrderedDict
 
 import aioboto3
 from botocore.exceptions import ClientError
+from botocore.config import Config
+from urllib.parse import urlparse
 
-from confluent_kafka import Producer
+from confluent_kafka import Producer, KafkaException
 from confluent_kafka.admin import AdminClient, NewTopic
 
 from shared.config.service_config import ServiceConfig
@@ -115,7 +117,11 @@ class EventPublisher:
         self.kafka_flush_timeout_s = float(os.getenv("EVENT_PUBLISHER_KAFKA_FLUSH_TIMEOUT_SECONDS", "10"))
         self.metrics_log_interval_s = int(os.getenv("EVENT_PUBLISHER_METRICS_LOG_INTERVAL_SECONDS", "30"))
         self.lookback_seconds = int(os.getenv("EVENT_PUBLISHER_LOOKBACK_SECONDS", "600"))
-        self.lookback_max_keys = int(os.getenv("EVENT_PUBLISHER_LOOKBACK_MAX_KEYS", "50"))
+        self.lookback_max_keys = int(os.getenv("EVENT_PUBLISHER_LOOKBACK_MAX_KEYS", "2000"))
+        if self.lookback_seconds < 0:
+            self.lookback_seconds = 0
+        if self.lookback_max_keys < 0:
+            self.lookback_max_keys = 0
         self.dedup_max_events = int(os.getenv("EVENT_PUBLISHER_DEDUP_MAX_EVENTS", "10000"))
         self.dedup_checkpoint_max_events = int(os.getenv("EVENT_PUBLISHER_DEDUP_CHECKPOINT_MAX_EVENTS", "2000"))
         self._recent_published_event_ids = _RecentPublishedEventIds(self.dedup_max_events)
@@ -151,13 +157,33 @@ class EventPublisher:
         # Kafka 토픽 생성 확인
         await self.ensure_kafka_topics()
 
+        # Reset checkpoint to avoid stale index keys after broker/storage restarts
+        try:
+            checkpoint = self._initial_checkpoint()
+            await self._save_checkpoint(checkpoint)
+            logger.info("Reset event publisher checkpoint on startup")
+        except Exception as e:
+            logger.warning(f"Failed to reset publisher checkpoint: {e}")
+
         # Ensure bucket exists
+        parsed = urlparse(self.endpoint_url)
+        host = (parsed.hostname or "").lower()
+        use_path_style = host in {
+            "localhost",
+            "127.0.0.1",
+            "0.0.0.0",
+            "minio",
+            "spice-minio",
+            "spice_minio",
+        } or host.endswith(".localhost")
+        client_config = Config(s3={"addressing_style": "path"}) if use_path_style else None
         async with self.session.client(
             "s3",
             endpoint_url=self.endpoint_url,
             aws_access_key_id=self.access_key,
             aws_secret_access_key=self.secret_key,
             use_ssl=False,
+            config=client_config,
         ) as s3:
             try:
                 await s3.head_bucket(Bucket=self.bucket_name)
@@ -174,44 +200,80 @@ class EventPublisher:
         
     async def ensure_kafka_topics(self):
         """필요한 Kafka 토픽이 존재하는지 확인하고 없으면 생성"""
-        admin_client = AdminClient({'bootstrap.servers': self.kafka_servers})
-        
-        topics: List[NewTopic] = []
-        for name in AppConfig.get_all_topics():
-            topics.append(
-                NewTopic(
-                    topic=name,
-                    num_partitions=3,
-                    replication_factor=1,
-                    config={"retention.ms": "604800000"},  # 7일 보관
-                )
+        timeout_seconds = int(os.getenv("KAFKA_TOPIC_BOOTSTRAP_TIMEOUT_SECONDS", "120"))
+        deadline = time.monotonic() + max(1, timeout_seconds)
+        attempt = 0
+
+        topics: List[NewTopic] = [
+            NewTopic(
+                topic=name,
+                num_partitions=3,
+                replication_factor=1,
+                config={"retention.ms": "604800000"},  # 7일 보관
             )
-        
-        # 기존 토픽 확인
-        existing_topics = admin_client.list_topics(timeout=10)
-        existing_topic_names = set(existing_topics.topics.keys())
-        
-        # 새로운 토픽만 생성
-        new_topics = [t for t in topics if t.topic not in existing_topic_names]
-        
-        if new_topics:
-            fs = admin_client.create_topics(new_topics)
-            for topic, f in fs.items():
-                try:
-                    f.result()  # 토픽 생성 완료 대기
-                    logger.info(f"Created Kafka topic: {topic}")
-                except Exception as e:
-                    logger.error(f"Failed to create topic {topic}: {e}")
-        else:
-            logger.info("All required Kafka topics already exist")
+            for name in AppConfig.get_all_topics()
+        ]
+
+        while True:
+            attempt += 1
+            try:
+                admin_client = AdminClient(
+                    {
+                        "bootstrap.servers": self.kafka_servers,
+                        "socket.timeout.ms": 10000,
+                    }
+                )
+
+                existing_topics = admin_client.list_topics(timeout=10)
+                existing_topic_names = set(existing_topics.topics.keys())
+
+                new_topics = [t for t in topics if t.topic not in existing_topic_names]
+
+                if new_topics:
+                    fs = admin_client.create_topics(new_topics)
+                    for topic, f in fs.items():
+                        try:
+                            f.result()  # 토픽 생성 완료 대기
+                            logger.info(f"Created Kafka topic: {topic}")
+                        except Exception as e:
+                            logger.error(f"Failed to create topic {topic}: {e}")
+                else:
+                    logger.info("All required Kafka topics already exist")
+                return
+            except KafkaException as e:
+                if time.monotonic() >= deadline:
+                    raise
+                sleep_seconds = min(10.0, 1.0 + (attempt * 0.5))
+                logger.warning(
+                    "Kafka not ready for topic bootstrap yet; retrying",
+                    extra={
+                        "bootstrap_servers": self.kafka_servers,
+                        "attempt": attempt,
+                        "sleep_seconds": sleep_seconds,
+                        "error": str(e),
+                    },
+                )
+                await asyncio.sleep(sleep_seconds)
 
     async def _load_checkpoint(self) -> Dict[str, Any]:
+        parsed = urlparse(self.endpoint_url)
+        host = (parsed.hostname or "").lower()
+        use_path_style = host in {
+            "localhost",
+            "127.0.0.1",
+            "0.0.0.0",
+            "minio",
+            "spice-minio",
+            "spice_minio",
+        } or host.endswith(".localhost")
+        client_config = Config(s3={"addressing_style": "path"}) if use_path_style else None
         async with self.session.client(
             "s3",
             endpoint_url=self.endpoint_url,
             aws_access_key_id=self.access_key,
             aws_secret_access_key=self.secret_key,
             use_ssl=False,
+            config=client_config,
         ) as s3:
             try:
                 obj = await s3.get_object(Bucket=self.bucket_name, Key=self.checkpoint_key)
@@ -223,12 +285,24 @@ class EventPublisher:
     async def _save_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
         checkpoint["updated_at"] = datetime.now(timezone.utc).isoformat()
         checkpoint["recent_event_ids"] = self._recent_published_event_ids.snapshot(self.dedup_checkpoint_max_events)
+        parsed = urlparse(self.endpoint_url)
+        host = (parsed.hostname or "").lower()
+        use_path_style = host in {
+            "localhost",
+            "127.0.0.1",
+            "0.0.0.0",
+            "minio",
+            "spice-minio",
+            "spice_minio",
+        } or host.endswith(".localhost")
+        client_config = Config(s3={"addressing_style": "path"}) if use_path_style else None
         async with self.session.client(
             "s3",
             endpoint_url=self.endpoint_url,
             aws_access_key_id=self.access_key,
             aws_secret_access_key=self.secret_key,
             use_ssl=False,
+            config=client_config,
         ) as s3:
             await s3.put_object(
                 Bucket=self.bucket_name,
@@ -322,15 +396,28 @@ class EventPublisher:
         forward: List[str] = []
         lookback: List[str] = []
         lookback_limit = max(0, int(self.lookback_max_keys))
-        # Reserve some budget for lookback keys so late-arrivals don't starve forever under high throughput.
-        lookback_limit = min(lookback_limit, self.batch_size)
+        # Reserve enough budget for lookback keys so late-arrivals don't starve.
+        if 0 < lookback_limit < self.batch_size:
+            lookback_limit = self.batch_size
 
+        parsed = urlparse(self.endpoint_url)
+        host = (parsed.hostname or "").lower()
+        use_path_style = host in {
+            "localhost",
+            "127.0.0.1",
+            "0.0.0.0",
+            "minio",
+            "spice-minio",
+            "spice_minio",
+        } or host.endswith(".localhost")
+        client_config = Config(s3={"addressing_style": "path"}) if use_path_style else None
         async with self.session.client(
             "s3",
             endpoint_url=self.endpoint_url,
             aws_access_key_id=self.access_key,
             aws_secret_access_key=self.secret_key,
             use_ssl=False,
+            config=client_config,
         ) as s3:
             paginator = s3.get_paginator("list_objects_v2")
 
@@ -367,10 +454,10 @@ class EventPublisher:
                         else:
                             if lookback_limit > 0:
                                 lookback.append(k)
-                                # Keep only the most recent lookback candidates (keys are time-sortable).
+                                # Keep only the oldest lookback candidates to avoid starving late arrivals.
                                 if len(lookback) > lookback_limit * 5:
                                     lookback.sort()
-                                    lookback = lookback[-(lookback_limit * 2) :]
+                                    lookback = lookback[: (lookback_limit * 2)]
 
                 day += timedelta(days=1)
 
@@ -379,11 +466,10 @@ class EventPublisher:
                     break
 
         forward.sort()
-        lookback.sort(reverse=True)
+        lookback.sort()
 
         selected_lookback = lookback[:lookback_limit]
-        remaining = self.batch_size - len(selected_lookback)
-        selected_forward = forward[: max(0, remaining)]
+        selected_forward = forward[: self.batch_size]
         return selected_forward + selected_lookback
 
     async def process_events(self) -> int:
@@ -476,12 +562,24 @@ class EventPublisher:
                 details = first_failure or f"kafka_flush_remaining={remaining}"
                 raise RuntimeError(f"Kafka batch delivery failed ({reason}): {details}")
 
+        parsed = urlparse(self.endpoint_url)
+        host = (parsed.hostname or "").lower()
+        use_path_style = host in {
+            "localhost",
+            "127.0.0.1",
+            "0.0.0.0",
+            "minio",
+            "spice-minio",
+            "spice_minio",
+        } or host.endswith(".localhost")
+        client_config = Config(s3={"addressing_style": "path"}) if use_path_style else None
         async with self.session.client(
             "s3",
             endpoint_url=self.endpoint_url,
             aws_access_key_id=self.access_key,
             aws_secret_access_key=self.secret_key,
             use_ssl=False,
+            config=client_config,
         ) as s3:
             try:
                 for idx_key in index_keys:
@@ -489,7 +587,16 @@ class EventPublisher:
                     ts_str = filename.split("_", 1)[0]
                     ts_ms = int(ts_str) if ts_str.isdigit() else None
 
-                    idx_obj = await s3.get_object(Bucket=self.bucket_name, Key=idx_key)
+                    try:
+                        idx_obj = await s3.get_object(Bucket=self.bucket_name, Key=idx_key)
+                    except ClientError as e:
+                        if e.response.get("Error", {}).get("Code") == "NoSuchKey":
+                            logger.warning("Missing index entry %s; skipping", idx_key)
+                            if self._advance_checkpoint(checkpoint, ts_ms=ts_ms, idx_key=idx_key):
+                                checkpoint_dirty = True
+                            continue
+                        raise
+
                     idx_data = json.loads((await idx_obj["Body"].read()).decode("utf-8"))
                     s3_key = idx_data.get("s3_key")
                     if not s3_key:
@@ -511,7 +618,16 @@ class EventPublisher:
                         logger.debug(f"Skipped duplicate publish (event_id={event_id}, idx={idx_key})")
                         continue
 
-                    ev_obj = await s3.get_object(Bucket=self.bucket_name, Key=s3_key)
+                    try:
+                        ev_obj = await s3.get_object(Bucket=self.bucket_name, Key=s3_key)
+                    except ClientError as e:
+                        if e.response.get("Error", {}).get("Code") == "NoSuchKey":
+                            logger.warning("Missing event payload %s (index=%s); skipping", s3_key, idx_key)
+                            if self._advance_checkpoint(checkpoint, ts_ms=ts_ms, idx_key=idx_key):
+                                checkpoint_dirty = True
+                            continue
+                        raise
+
                     ev_bytes = await ev_obj["Body"].read()
 
                     # Determine topic routing (preferred: index entry / metadata.kafka_topic)

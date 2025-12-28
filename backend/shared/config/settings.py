@@ -310,6 +310,20 @@ class StorageSettings(BaseSettings):
         default="minioadmin123",
         description="MinIO/S3 secret key"
     )
+
+    # lakeFS (S3 gateway + REST auth shares credentials)
+    lakefs_s3_endpoint_url: Optional[str] = Field(
+        default=None,
+        description="lakeFS S3 gateway endpoint URL (e.g. http://localhost:8000)",
+    )
+    lakefs_access_key_id: Optional[str] = Field(
+        default=None,
+        description="lakeFS access key id",
+    )
+    lakefs_secret_access_key: Optional[str] = Field(
+        default=None,
+        description="lakeFS secret access key",
+    )
     
     # S3 Buckets
     instance_bucket: str = Field(

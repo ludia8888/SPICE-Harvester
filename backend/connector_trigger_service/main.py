@@ -26,23 +26,10 @@ from data_connector.google_sheets.service import GoogleSheetsService
 from data_connector.google_sheets.utils import calculate_data_hash
 from shared.config.service_config import ServiceConfig
 from shared.services.connector_registry import ConnectorRegistry, ConnectorSource
+from shared.utils.env_utils import parse_int_env
+from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
-
-
-def _parse_int(name: str, default: int, *, min_value: int = 1, max_value: int = 10_000) -> int:
-    raw = (os.getenv(name) or "").strip()
-    if not raw:
-        return default
-    try:
-        v = int(raw)
-    except Exception:
-        return default
-    return max(min_value, min(max_value, v))
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 class ConnectorTriggerService:
@@ -50,9 +37,9 @@ class ConnectorTriggerService:
         self.running = False
         self.topic = (os.getenv("CONNECTOR_UPDATES_TOPIC") or "connector-updates").strip() or "connector-updates"
         self.source_type = (os.getenv("CONNECTOR_TRIGGER_SOURCE_TYPE") or "google_sheets").strip() or "google_sheets"
-        self.tick_seconds = _parse_int("CONNECTOR_TRIGGER_TICK_SECONDS", 5, min_value=1, max_value=3600)
-        self.poll_concurrency = _parse_int("CONNECTOR_TRIGGER_POLL_CONCURRENCY", 5, min_value=1, max_value=100)
-        self.outbox_batch = _parse_int("CONNECTOR_TRIGGER_OUTBOX_BATCH", 50, min_value=1, max_value=500)
+        self.tick_seconds = parse_int_env("CONNECTOR_TRIGGER_TICK_SECONDS", 5, min_value=1, max_value=3600)
+        self.poll_concurrency = parse_int_env("CONNECTOR_TRIGGER_POLL_CONCURRENCY", 5, min_value=1, max_value=100)
+        self.outbox_batch = parse_int_env("CONNECTOR_TRIGGER_OUTBOX_BATCH", 50, min_value=1, max_value=500)
 
         self._producer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kafka-producer")
         self.registry: Optional[ConnectorRegistry] = None
@@ -118,7 +105,7 @@ class ConnectorTriggerService:
         state = await self.registry.get_sync_state(source_type=source.source_type, source_id=source.source_id)
         if not state or not state.last_polled_at:
             return True
-        elapsed = (_utcnow() - state.last_polled_at).total_seconds()
+        elapsed = (utcnow() - state.last_polled_at).total_seconds()
         return elapsed >= max(1, interval)
 
     async def _poll_google_sheets(self, source: ConnectorSource) -> None:

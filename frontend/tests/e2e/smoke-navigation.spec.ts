@@ -22,7 +22,7 @@ test('core routes load', async ({ page }) => {
     ['/db/demo/branches?branch=main&lang=en', 'Branches'],
     ['/db/demo/ontology?branch=main&lang=en', 'Ontology'],
     ['/db/demo/mappings?branch=main&lang=en', 'Mappings'],
-    ['/db/demo/data/sheets?branch=main&lang=en', 'Google Sheets'],
+    ['/db/demo/data/sheets?branch=main&lang=en', 'Connectors'],
     ['/db/demo/data/import/sheets?branch=main&lang=en', 'Import (Google Sheets)'],
     ['/db/demo/data/import/excel?branch=main&lang=en', 'Import (Excel)'],
     ['/db/demo/data/schema-suggestion?branch=main&lang=en', 'Schema Suggestion'],

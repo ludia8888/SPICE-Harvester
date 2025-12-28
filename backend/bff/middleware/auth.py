@@ -3,11 +3,20 @@ from __future__ import annotations
 import hmac
 import logging
 import os
-from typing import Iterable, Optional
+from typing import Optional
 
 from fastapi import FastAPI, Request, WebSocket, status
 from fastapi.responses import JSONResponse
 
+from shared.security.auth_utils import (
+    auth_disable_allowed,
+    auth_required,
+    extract_presented_token,
+    get_exempt_paths,
+    get_expected_token,
+    is_exempt_path,
+    parse_bool,
+)
 _TOKEN_ENV_KEYS = ("BFF_ADMIN_TOKEN", "BFF_WRITE_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN")
 _REQUIRE_ENV_KEY = "BFF_REQUIRE_AUTH"
 _ALLOW_DISABLE_ENV_KEYS = ("ALLOW_INSECURE_BFF_AUTH_DISABLE", "ALLOW_INSECURE_AUTH_DISABLE")
@@ -19,73 +28,21 @@ _EXEMPT_PATHS_DEFAULT = (
 logger = logging.getLogger(__name__)
 
 
-def _parse_bool(raw: str) -> Optional[bool]:
-    value = (raw or "").strip().lower()
-    if value in {"true", "1", "yes", "on"}:
-        return True
-    if value in {"false", "0", "no", "off"}:
-        return False
-    return None
-
-
-def _get_expected_token() -> Optional[str]:
-    for key in _TOKEN_ENV_KEYS:
-        value = (os.getenv(key) or "").strip()
-        if value:
-            return value
-    return None
-
-
-def _auth_required() -> bool:
-    parsed = _parse_bool(os.getenv(_REQUIRE_ENV_KEY, ""))
-    if parsed is not None:
-        return parsed
-    if os.getenv("PYTEST_CURRENT_TEST"):
-        return False
-    if _get_expected_token():
-        return True
-    # Fail-closed: require auth by default in all environments.
-    return True
-
-
-def _extract_presented_token(headers: dict) -> Optional[str]:
-    raw = (headers.get("X-Admin-Token") or "").strip()
-    if raw:
-        return raw
-    auth = (headers.get("Authorization") or "").strip()
-    if auth.lower().startswith("bearer "):
-        return auth[7:].strip() or None
-    return None
-
-
-def _auth_disable_allowed() -> bool:
-    for key in _ALLOW_DISABLE_ENV_KEYS:
-        if _parse_bool(os.getenv(key, "")) is True:
-            return True
-    return False
-
-
-def _get_exempt_paths() -> set[str]:
-    raw = (os.getenv("BFF_AUTH_EXEMPT_PATHS") or "").strip()
-    if not raw:
-        return set(_EXEMPT_PATHS_DEFAULT)
-    return {path.strip() for path in raw.split(",") if path.strip()}
-
-
-def _is_exempt_path(path: str, *, exempt_paths: Iterable[str]) -> bool:
-    return path in set(exempt_paths)
-
-
 def ensure_bff_auth_configured() -> None:
-    parsed = _parse_bool(os.getenv(_REQUIRE_ENV_KEY, ""))
-    if parsed is False and not _auth_disable_allowed():
+    parsed = parse_bool(os.getenv(_REQUIRE_ENV_KEY, ""))
+    if parsed is False and not auth_disable_allowed(_ALLOW_DISABLE_ENV_KEYS):
         raise RuntimeError(
             "BFF auth explicitly disabled without approval. "
             "Set ALLOW_INSECURE_BFF_AUTH_DISABLE=true (or ALLOW_INSECURE_AUTH_DISABLE=true)."
         )
-    if not _auth_required():
+    if not auth_required(
+        _REQUIRE_ENV_KEY,
+        token_env_keys=_TOKEN_ENV_KEYS,
+        default_required=True,
+        allow_pytest=True,
+    ):
         return
-    if not _get_expected_token():
+    if not get_expected_token(_TOKEN_ENV_KEYS):
         raise RuntimeError(
             "BFF auth is required but no token is configured. "
             "Set BFF_ADMIN_TOKEN (or BFF_WRITE_TOKEN/ADMIN_API_KEY/ADMIN_TOKEN)."
@@ -95,21 +52,26 @@ def ensure_bff_auth_configured() -> None:
 def install_bff_auth_middleware(app: FastAPI) -> None:
     @app.middleware("http")
     async def _bff_auth_middleware(request: Request, call_next):
-        if not _auth_required():
+        if not auth_required(
+            _REQUIRE_ENV_KEY,
+            token_env_keys=_TOKEN_ENV_KEYS,
+            default_required=True,
+            allow_pytest=True,
+        ):
             return await call_next(request)
 
-        exempt_paths = _get_exempt_paths()
-        if _is_exempt_path(request.url.path, exempt_paths=exempt_paths):
+        exempt_paths = get_exempt_paths("BFF_AUTH_EXEMPT_PATHS", defaults=_EXEMPT_PATHS_DEFAULT)
+        if is_exempt_path(request.url.path, exempt_paths=exempt_paths):
             return await call_next(request)
 
-        expected = _get_expected_token()
+        expected = get_expected_token(_TOKEN_ENV_KEYS)
         if not expected:
             return JSONResponse(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 content={"detail": "BFF auth required but no token configured"},
             )
 
-        presented = _extract_presented_token(request.headers)
+        presented = extract_presented_token(request.headers)
         if not presented:
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -127,10 +89,15 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
 
 
 async def enforce_bff_websocket_auth(websocket: WebSocket, token: Optional[str]) -> bool:
-    if not _auth_required():
+    if not auth_required(
+        _REQUIRE_ENV_KEY,
+        token_env_keys=_TOKEN_ENV_KEYS,
+        default_required=True,
+        allow_pytest=True,
+    ):
         return True
 
-    expected = _get_expected_token()
+    expected = get_expected_token(_TOKEN_ENV_KEYS)
     if not expected:
         await websocket.close(code=1011, reason="BFF auth required but no token configured")
         return False
@@ -141,7 +108,7 @@ async def enforce_bff_websocket_auth(websocket: WebSocket, token: Optional[str])
     except Exception:
         query_token = None
 
-    presented = token or query_token or _extract_presented_token(websocket.headers)
+    presented = token or query_token or extract_presented_token(websocket.headers)
     if not presented:
         has_query = bool(token or query_token)
         has_header = (

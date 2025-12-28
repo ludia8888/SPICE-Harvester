@@ -9,6 +9,7 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: spice-foundry-postgres
+    command: ["postgres", "-c", "max_connections=200"]
     environment:
       - POSTGRES_USER=spiceadmin
       - POSTGRES_PASSWORD=spicepass123
@@ -137,6 +138,101 @@ services:
       start_period: 30s
     restart: unless-stopped
     networks:
+      spice_network:
+        aliases:
+          - spice-minio
+          - spice_minio
+
+  # lakeFS (data versioning + S3 gateway)
+  lakefs:
+    image: treeverse/lakefs:latest
+    container_name: spice-foundry-lakefs
+    depends_on:
+      - postgres
+      - minio
+    environment:
+      # Server
+      - LAKEFS_LISTEN_ADDRESS=0.0.0.0:8000
+      # Auth bootstrap (deterministic for local/dev)
+      - LAKEFS_AUTH_ENCRYPT_SECRET_KEY=${LAKEFS_AUTH_ENCRYPT_SECRET_KEY:-notsecretnotsecretnotsecretnotse}
+      - LAKEFS_INSTALLATION_USER_NAME=${LAKEFS_INSTALLATION_USER_NAME:-spice-admin}
+      - LAKEFS_INSTALLATION_ACCESS_KEY_ID=${LAKEFS_INSTALLATION_ACCESS_KEY_ID:-spice-lakefs-admin}
+      - LAKEFS_INSTALLATION_SECRET_ACCESS_KEY=${LAKEFS_INSTALLATION_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
+      # Metadata DB
+      - LAKEFS_DATABASE_TYPE=postgres
+      - LAKEFS_DATABASE_POSTGRES_CONNECTION_STRING=postgres://spiceadmin:spicepass123@postgres:5432/spicedb?sslmode=disable
+      # Blockstore (MinIO S3)
+      - LAKEFS_BLOCKSTORE_TYPE=s3
+      - LAKEFS_BLOCKSTORE_S3_ENDPOINT=http://minio:9000
+      - LAKEFS_BLOCKSTORE_S3_FORCE_PATH_STYLE=true
+      - LAKEFS_BLOCKSTORE_S3_REGION=us-east-1
+      - LAKEFS_BLOCKSTORE_S3_CREDENTIALS_ACCESS_KEY_ID=minioadmin
+      - LAKEFS_BLOCKSTORE_S3_CREDENTIALS_SECRET_ACCESS_KEY=minioadmin123
+    ports:
+      - "${LAKEFS_PORT_HOST:-48080}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8000/healthcheck >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - spice_network
+
+  # MinIO init (create buckets required by lakeFS and app services)
+  minio-init:
+    image: minio/mc:latest
+    container_name: spice-foundry-minio-init
+    depends_on:
+      - minio
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        until /usr/bin/mc alias set local http://minio:9000 minioadmin minioadmin123 2>/dev/null; do sleep 1; done
+        /usr/bin/mc mb -p local/lakefs || true
+        /usr/bin/mc mb -p local/spice-event-store || true
+        /usr/bin/mc mb -p local/instance-events || true
+        /usr/bin/mc mb -p local/dataset-artifacts || true
+        exit 0
+    restart: "no"
+    networks:
+      - spice_network
+
+  # lakeFS init (create required repositories)
+  lakefs-init:
+    image: curlimages/curl:8.5.0
+    container_name: spice-foundry-lakefs-init
+    depends_on:
+      - lakefs
+      - minio-init
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        echo "Waiting for lakeFS..."
+        until curl -fsS http://lakefs:8000/healthcheck >/dev/null 2>&1; do sleep 1; done
+        echo "Ensuring repositories..."
+        auth_user="$${LAKEFS_INSTALLATION_ACCESS_KEY_ID:-spice-lakefs-admin}"
+        auth_pass="$${LAKEFS_INSTALLATION_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}"
+        create_repo() {
+          name="$1"
+          ns="$2"
+          code="$$(curl -sS -o /dev/null -w '%{http_code}' -u "$$auth_user:$$auth_pass" -X POST http://lakefs:8000/api/v1/repositories \
+            -H 'Content-Type: application/json' \
+            -d "{\"name\":\"$$name\",\"storage_namespace\":\"$$ns\",\"default_branch\":\"main\"}")"
+          if [ "$$code" != "201" ] && [ "$$code" != "409" ]; then
+            echo "Failed to create repo $$name (http=$$code)"
+            exit 1
+          fi
+        }
+        create_repo "pipeline-artifacts" "s3://lakefs/pipeline-artifacts"
+        create_repo "raw-datasets" "s3://lakefs/raw-datasets"
+        echo "lakeFS repositories ready."
+        exit 0
+    restart: "no"
+    networks:
       - spice_network
 
 volumes:
@@ -148,8 +244,10 @@ volumes:
     driver: local
   minio-data:
     driver: local
+  lakefs-data:
+    driver: local
 
 networks:
   spice_network:
-    name: spice_network
+    name: ${SPICE_NETWORK_NAME:-spice_network}
     driver: bridge

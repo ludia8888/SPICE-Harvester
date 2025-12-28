@@ -40,9 +40,9 @@ class WOQLQuery(BaseModel):
 async def get_elasticsearch() -> AsyncIterator[AsyncElasticsearch]:
     """Get Elasticsearch client"""
     settings = ApplicationSettings()
-    es_url = f"http://{settings.elasticsearch_host}:{settings.elasticsearch_port}"
-    es_username = (settings.elasticsearch_username or "").strip()
-    es_password = settings.elasticsearch_password or ""
+    es_url = f"http://{settings.database.elasticsearch_host}:{settings.database.elasticsearch_port}"
+    es_username = (settings.database.elasticsearch_username or "").strip()
+    es_password = settings.database.elasticsearch_password or ""
 
     es_kwargs = {
         "hosts": [es_url],
@@ -137,7 +137,9 @@ async def execute_simple_query(
         logger.info(f"Executing ES query on index {index_name}: {es_query}")
         result = await es_client.search(
             index=index_name,
-            body=es_query
+            body=es_query,
+            ignore_unavailable=True,
+            allow_no_indices=True,
         )
         logger.info(f"ES query result: {result.get('hits', {}).get('total', {})}")
         

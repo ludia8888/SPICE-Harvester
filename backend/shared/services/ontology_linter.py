@@ -119,8 +119,10 @@ def _issue(
     )
 
 
-def _compute_risk_score(
-    errors: Sequence[LintIssue], warnings: Sequence[LintIssue], infos: Sequence[LintIssue]
+def compute_risk_score(
+    errors: Sequence[LintIssue],
+    warnings: Sequence[LintIssue],
+    infos: Sequence[LintIssue],
 ) -> float:
     score = 0.0
     score += 30.0 * len(errors)
@@ -129,7 +131,7 @@ def _compute_risk_score(
     return max(0.0, min(100.0, score))
 
 
-def _risk_level(score: float) -> str:
+def risk_level(score: float) -> str:
     if score >= 75.0:
         return "critical"
     if score >= 50.0:

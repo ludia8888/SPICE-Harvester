@@ -4,18 +4,27 @@
 """
 import requests
 import json
+import os
 
 BASE_URL = "http://localhost:8000/api/v1"
 DB_NAME = "english_only_test"
+ADMIN_TOKEN = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "").strip()
+HEADERS = {"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}
+if not ADMIN_TOKEN:
+    raise RuntimeError("ADMIN_TOKEN is required for english-only tests")
 
 def setup():
     """Setup test database"""
     try:
-        requests.delete(f"{BASE_URL}/database/{DB_NAME}")
+        requests.delete(f"{BASE_URL}/database/{DB_NAME}", headers=HEADERS)
     except:
         pass
     
-    response = requests.post(f"{BASE_URL}/database/create", json={"name": DB_NAME})
+    response = requests.post(
+        f"{BASE_URL}/database/create",
+        json={"name": DB_NAME},
+        headers=HEADERS,
+    )
     print(f"Database creation: {response.status_code}")
     return response.status_code == 200
 
@@ -39,7 +48,11 @@ def test_english_labels():
     }
     
     print("Creating Category class...")
-    response = requests.post(f"{BASE_URL}/ontology/{DB_NAME}/create", json=category_data)
+    response = requests.post(
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
+        json=category_data,
+        headers=HEADERS,
+    )
     print(f"Category creation: {response.status_code}")
     if response.status_code != 200:
         print(f"Category error: {response.text}")
@@ -72,7 +85,11 @@ def test_english_labels():
     }
     
     print("Creating Product class with property conversion...")
-    response = requests.post(f"{BASE_URL}/ontology/{DB_NAME}/create", json=product_data)
+    response = requests.post(
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
+        json=product_data,
+        headers=HEADERS,
+    )
     print(f"Product creation: {response.status_code}")
     
     if response.status_code != 200:
@@ -81,7 +98,7 @@ def test_english_labels():
     
     # Retrieve and check
     print("Retrieving Product class...")
-    response = requests.get(f"{BASE_URL}/ontology/{DB_NAME}/Product")
+    response = requests.get(f"{BASE_URL}/database/{DB_NAME}/ontology/Product", headers=HEADERS)
     
     if response.status_code == 200:
         data = response.json()
@@ -177,11 +194,19 @@ def test_explicit_relationships():
     }
     
     print("Creating Customer class...")
-    response = requests.post(f"{BASE_URL}/ontology/{DB_NAME}/create", json=customer_data)
+    response = requests.post(
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
+        json=customer_data,
+        headers=HEADERS,
+    )
     print(f"Customer creation: {response.status_code}")
     
     print("Creating Order class with explicit relationship...")
-    response = requests.post(f"{BASE_URL}/ontology/{DB_NAME}/create", json=order_data)
+    response = requests.post(
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
+        json=order_data,
+        headers=HEADERS,
+    )
     print(f"Order creation: {response.status_code}")
     
     if response.status_code != 200:
@@ -189,7 +214,7 @@ def test_explicit_relationships():
         return False
     
     # Check Order
-    response = requests.get(f"{BASE_URL}/ontology/{DB_NAME}/Order")
+    response = requests.get(f"{BASE_URL}/database/{DB_NAME}/ontology/Order", headers=HEADERS)
     if response.status_code == 200:
         data = response.json()
         order = data.get("data", data)

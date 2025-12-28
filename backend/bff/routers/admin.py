@@ -12,7 +12,7 @@ import json
 import hmac
 import logging
 import os
-from typing import Dict, Any, Optional, Literal
+from typing import Any, Dict, Literal, Optional
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
@@ -41,25 +41,12 @@ from shared.models.background_task import TaskStatus
 from shared.security.input_sanitizer import validate_branch_name, validate_db_name
 from shared.middleware.rate_limiter import rate_limit, RateLimitPresets
 from shared.utils.ontology_version import split_ref_commit
+from shared.services.pipeline_registry import PipelineRegistry
+from shared.security.auth_utils import extract_presented_token, get_expected_token
 
 logger = logging.getLogger(__name__)
 
-def _get_configured_admin_token() -> Optional[str]:
-    for key in ("BFF_ADMIN_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN"):
-        value = (os.getenv(key) or "").strip()
-        if value:
-            return value
-    return None
-
-
-def _extract_presented_admin_token(request: Request) -> Optional[str]:
-    raw = (request.headers.get("X-Admin-Token") or "").strip()
-    if raw:
-        return raw
-    auth = (request.headers.get("Authorization") or "").strip()
-    if auth.lower().startswith("bearer "):
-        return auth[7:].strip() or None
-    return None
+_ADMIN_TOKEN_ENV_KEYS = ("BFF_ADMIN_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN")
 
 
 async def require_admin(request: Request) -> None:
@@ -70,14 +57,14 @@ async def require_admin(request: Request) -> None:
     - Requires a shared secret token in `X-Admin-Token` or `Authorization: Bearer ...`.
     - If token is not configured, admin endpoints are effectively disabled.
     """
-    expected = _get_configured_admin_token()
+    expected = get_expected_token(_ADMIN_TOKEN_ENV_KEYS)
     if not expected:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin endpoints are disabled (set BFF_ADMIN_TOKEN to enable)",
         )
 
-    presented = _extract_presented_admin_token(request)
+    presented = extract_presented_token(request.headers)
     if not presented or not hmac.compare_digest(presented, expected):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin authorization failed")
 
@@ -141,6 +128,15 @@ class RecomputeProjectionResponse(BaseModel):
     status_url: str = Field(..., description="URL to check task status")
 
 
+class LakeFSCredentialsUpsertRequest(BaseModel):
+    """Upsert request for lakeFS credentials stored in Postgres (encrypted)."""
+
+    principal_type: Literal["user", "service"] = Field(..., description="Principal type (user|service)")
+    principal_id: str = Field(..., description="User ID or service name")
+    access_key_id: str = Field(..., description="lakeFS access key id")
+    secret_access_key: str = Field(..., description="lakeFS secret access key")
+
+
 # Dependency injection
 async def get_task_manager(
     container: ServiceContainer = Depends(get_container)
@@ -165,6 +161,12 @@ async def get_redis_service(
     if not container.has(RedisService):
         container.register_singleton(RedisService, create_redis_service)
     return await container.get(RedisService)
+
+
+async def get_pipeline_registry() -> PipelineRegistry:
+    from bff.main import get_pipeline_registry as _get_pipeline_registry
+
+    return await _get_pipeline_registry()
 
 
 # API Endpoints
@@ -1212,3 +1214,30 @@ async def get_system_health(
             }
         }
     }
+
+
+@router.get("/lakefs/credentials")
+async def list_lakefs_credentials(
+    registry: PipelineRegistry = Depends(get_pipeline_registry),
+) -> Dict[str, Any]:
+    """List configured lakeFS principals (metadata only; secrets are never returned)."""
+    items = await registry.list_lakefs_credentials()
+    return {"status": "success", "data": {"credentials": items, "count": len(items)}}
+
+
+@router.post("/lakefs/credentials")
+async def upsert_lakefs_credentials(
+    payload: LakeFSCredentialsUpsertRequest,
+    request: Request,
+    registry: PipelineRegistry = Depends(get_pipeline_registry),
+) -> Dict[str, Any]:
+    """Upsert lakeFS credentials for a user/service principal (admin-only)."""
+    actor = getattr(request.state, "admin_actor", None)
+    await registry.upsert_lakefs_credentials(
+        principal_type=payload.principal_type,
+        principal_id=payload.principal_id,
+        access_key_id=payload.access_key_id,
+        secret_access_key=payload.secret_access_key,
+        created_by=str(actor) if actor else None,
+    )
+    return {"status": "success", "data": {"principal_type": payload.principal_type, "principal_id": payload.principal_id}}

@@ -9,6 +9,7 @@ import csv
 import json
 import os
 from typing import List, Dict, Any
+import pytest
 
 # 테스트 시나리오 1: 고객 데이터 -> 기존 Person 온톨로지 매핑
 def create_test_scenario_1():
@@ -43,7 +44,8 @@ def create_test_scenario_1():
     
     # 샘플 데이터
     sample_data = []
-    with open('customers.csv', 'r', encoding='utf-8') as f:
+    data_dir = os.path.dirname(__file__)
+    with open(os.path.join(data_dir, 'customers.csv'), 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         for row in reader:
             sample_data.append(row)
@@ -99,7 +101,8 @@ def create_test_scenario_2():
     
     # 샘플 데이터
     sample_data = []
-    with open('products.csv', 'r', encoding='utf-8') as f:
+    data_dir = os.path.dirname(__file__)
+    with open(os.path.join(data_dir, 'products.csv'), 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         for row in reader:
             sample_data.append(row)
@@ -122,7 +125,11 @@ def create_test_scenario_2():
         "target_sample_data": target_sample_data,
     }
 
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_mapping_engine():
+    admin_token = (os.getenv("ADMIN_TOKEN") or os.getenv("BFF_ADMIN_TOKEN") or "test-token").strip()
+    headers = {"X-Admin-Token": admin_token}
     """매핑 엔진 테스트"""
     import httpx
     
@@ -147,7 +154,8 @@ async def test_mapping_engine():
                 json={
                     "name": "test_mapping_db",
                     "description": "Test database for mapping validation"
-                }
+                },
+                headers=headers,
             )
             
             if db_response.status_code not in [200, 409]:  # 409는 이미 존재
@@ -160,7 +168,8 @@ async def test_mapping_engine():
                     "source_schema": scenario["source_schema"],
                     "target_schema": scenario["target_schema"],
                     "sample_data": scenario["sample_data"][:5],  # 샘플 5개만
-                }
+                },
+                headers=headers,
             )
             
             if response.status_code == 200:
@@ -188,7 +197,10 @@ async def test_mapping_engine():
                 print(f"\n❌ 매핑 제안 실패: {response.status_code}")
                 print(response.text)
 
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_full_workflow():
+    admin_token = (os.getenv("ADMIN_TOKEN") or os.getenv("BFF_ADMIN_TOKEN") or "test-token").strip()
     """전체 워크플로우 테스트"""
     print("\n" + "="*80)
     print("SPICE HARVESTER 전체 워크플로우 테스트")
@@ -202,7 +214,8 @@ async def test_full_workflow():
     print("-"*40)
     
     # CSV 데이터 읽기
-    with open('customers.csv', 'r', encoding='utf-8') as f:
+    data_dir = os.path.dirname(__file__)
+    with open(os.path.join(data_dir, 'customers.csv'), 'r', encoding='utf-8') as f:
         reader = csv.reader(f)
         headers = next(reader)
         rows = [row for row in reader]
@@ -232,8 +245,4 @@ async def test_full_workflow():
         print(f"  - {col}: {dtype}")
 
 if __name__ == "__main__":
-    # 테스트 데이터 디렉토리로 이동
-    os.chdir('/Users/isihyeon/Desktop/SPICE HARVESTER/test_data')
-    
-    # 비동기 함수 실행
     asyncio.run(test_full_workflow())

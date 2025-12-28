@@ -301,6 +301,49 @@ export const listBranches = async (context: RequestContext, dbName: string) => {
   return payload ?? { branches: [], count: 0 }
 }
 
+export const listPipelineBranches = async (context: RequestContext, dbName: string) => {
+  const { payload } = await requestJson<{ branches?: unknown[]; count?: number }>(
+    'pipelines/branches',
+    { method: 'GET' },
+    context,
+    { db_name: dbName },
+  )
+  return payload ?? { branches: [], count: 0 }
+}
+
+export const archivePipelineBranch = async (context: RequestContext, dbName: string, branch: string) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    `pipelines/branches/${encodeURIComponent(branch)}/archive`,
+    { method: 'POST' },
+    context,
+    { db_name: dbName },
+  )
+  return payload ?? {}
+}
+
+export const restorePipelineBranch = async (context: RequestContext, dbName: string, branch: string) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    `pipelines/branches/${encodeURIComponent(branch)}/restore`,
+    { method: 'POST' },
+    context,
+    { db_name: dbName },
+  )
+  return payload ?? {}
+}
+
+export const createPipelineBranch = async (
+  context: RequestContext,
+  pipelineId: string,
+  branch: string,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    `pipelines/${encodeURIComponent(pipelineId)}/branches`,
+    { method: 'POST', body: JSON.stringify({ branch }) },
+    context,
+  )
+  return payload ?? {}
+}
+
 export const createBranch = async (
   context: RequestContext,
   dbName: string,
@@ -651,12 +694,31 @@ export const startPipeliningSheet = async (
 export const listPipelines = async (
   context: RequestContext,
   dbName: string,
+  branch?: string,
 ) => {
+  const params: Record<string, string> = { db_name: dbName }
+  if (branch) params.branch = branch
   const { payload } = await requestJson<ApiEnvelope>(
     'pipelines',
     { method: 'GET' },
     context,
-    { db_name: dbName },
+    params,
+  )
+  return payload ?? {}
+}
+
+export const listPipelineProposals = async (
+  context: RequestContext,
+  dbName: string,
+  branch?: string,
+) => {
+  const params: Record<string, string> = { db_name: dbName }
+  if (branch) params.branch = branch
+  const { payload } = await requestJson<ApiEnvelope>(
+    'pipelines/proposals',
+    { method: 'GET' },
+    context,
+    params,
   )
   return payload ?? {}
 }
@@ -664,11 +726,15 @@ export const listPipelines = async (
 export const getPipeline = async (
   context: RequestContext,
   pipelineId: string,
+  branch?: string,
 ) => {
+  const params: Record<string, string> = {}
+  if (branch) params.branch = branch
   const { payload } = await requestJson<ApiEnvelope>(
     `pipelines/${encodeURIComponent(pipelineId)}`,
     { method: 'GET' },
     context,
+    params,
   )
   return payload ?? {}
 }
@@ -698,6 +764,48 @@ export const updatePipeline = async (
   return payload ?? {}
 }
 
+export const submitPipelineProposal = async (
+  context: RequestContext,
+  pipelineId: string,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    `pipelines/${encodeURIComponent(pipelineId)}/proposals`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const approvePipelineProposal = async (
+  context: RequestContext,
+  pipelineId: string,
+  proposalId: string,
+  reviewComment?: string,
+  mergeInto?: string,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    `pipelines/${encodeURIComponent(pipelineId)}/proposals/approve`,
+    { method: 'POST', body: JSON.stringify({ proposal_id: proposalId, review_comment: reviewComment, merge_into: mergeInto }) },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const rejectPipelineProposal = async (
+  context: RequestContext,
+  pipelineId: string,
+  proposalId: string,
+  reviewComment?: string,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    `pipelines/${encodeURIComponent(pipelineId)}/proposals/reject`,
+    { method: 'POST', body: JSON.stringify({ proposal_id: proposalId, review_comment: reviewComment }) },
+    context,
+  )
+  return payload ?? {}
+}
+
 export const previewPipeline = async (
   context: RequestContext,
   pipelineId: string,
@@ -707,6 +815,47 @@ export const previewPipeline = async (
     `pipelines/${encodeURIComponent(pipelineId)}/preview`,
     { method: 'POST', body: JSON.stringify(input) },
     context,
+  )
+  return payload ?? {}
+}
+
+export const buildPipeline = async (
+  context: RequestContext,
+  pipelineId: string,
+  input: Record<string, unknown>,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    `pipelines/${encodeURIComponent(pipelineId)}/build`,
+    { method: 'POST', body: JSON.stringify(input) },
+    context,
+  )
+  return payload ?? {}
+}
+
+export const getPipelinePreviewStatus = async (
+  context: RequestContext,
+  pipelineId: string,
+  previewNodeId?: string,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    `pipelines/${encodeURIComponent(pipelineId)}`,
+    { method: 'GET' },
+    context,
+    previewNodeId ? { preview_node_id: previewNodeId } : undefined,
+  )
+  return payload ?? {}
+}
+
+export const listPipelineRuns = async (
+  context: RequestContext,
+  pipelineId: string,
+  limit = 50,
+) => {
+  const { payload } = await requestJson<ApiEnvelope>(
+    `pipelines/${encodeURIComponent(pipelineId)}/runs`,
+    { method: 'GET' },
+    context,
+    { limit: String(limit) },
   )
   return payload ?? {}
 }
@@ -727,12 +876,13 @@ export const deployPipeline = async (
 export const listDatasets = async (
   context: RequestContext,
   dbName: string,
+  branch?: string,
 ) => {
   const { payload } = await requestJson<ApiEnvelope>(
     'pipelines/datasets',
     { method: 'GET' },
     context,
-    { db_name: dbName },
+    { db_name: dbName, branch },
   )
   return payload ?? {}
 }
@@ -775,6 +925,7 @@ export const uploadExcelDataset = async (
     tableLeft?: number
     tableBottom?: number
     tableRight?: number
+    branch?: string
   },
 ) => {
   const body = new FormData()
@@ -808,7 +959,7 @@ export const uploadExcelDataset = async (
     'pipelines/datasets/excel-upload',
     { method: 'POST', body },
     context,
-    { db_name: dbName },
+    { db_name: dbName, branch: params.branch },
   )
   return payload ?? {}
 }
@@ -822,6 +973,7 @@ export const uploadCsvDataset = async (
     description?: string
     delimiter?: string
     hasHeader?: boolean
+    branch?: string
   },
 ) => {
   const body = new FormData()
@@ -843,7 +995,35 @@ export const uploadCsvDataset = async (
     'pipelines/datasets/csv-upload',
     { method: 'POST', body },
     context,
-    { db_name: dbName },
+    { db_name: dbName, branch: params.branch },
+  )
+  return payload ?? {}
+}
+
+export const uploadMediaDataset = async (
+  context: RequestContext,
+  dbName: string,
+  params: {
+    files: File[]
+    datasetName?: string
+    description?: string
+    branch?: string
+  },
+) => {
+  const body = new FormData()
+  params.files.forEach((file) => body.append('files', file))
+  if (params.datasetName) {
+    body.append('dataset_name', params.datasetName)
+  }
+  if (params.description) {
+    body.append('description', params.description)
+  }
+
+  const { payload } = await requestJson<ApiEnvelope>(
+    'pipelines/datasets/media-upload',
+    { method: 'POST', body },
+    context,
+    { db_name: dbName, branch: params.branch },
   )
   return payload ?? {}
 }

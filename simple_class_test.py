@@ -2,9 +2,14 @@
 """간단한 클래스 생성 테스트"""
 import requests
 import json
+import os
 
 BASE_URL = "http://localhost:8000/api/v1"
 DB_NAME = "spice_test_ontology"
+ADMIN_TOKEN = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "").strip()
+HEADERS = {"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}
+if not ADMIN_TOKEN:
+    raise RuntimeError("ADMIN_TOKEN is required for simple class tests")
 
 def test_simple_class():
     """가장 간단한 클래스 생성 테스트"""
@@ -19,7 +24,11 @@ def test_simple_class():
     
     print(f"전송 데이터:\n{json.dumps(simple_data, indent=2, ensure_ascii=False)}")
     
-    response = requests.post(f"{BASE_URL}/ontology/{DB_NAME}/create", json=simple_data)
+    response = requests.post(
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
+        json=simple_data,
+        headers=HEADERS,
+    )
     print(f"응답 상태: {response.status_code}")
     print(f"응답 내용: {response.text}\n")
     
@@ -40,7 +49,11 @@ def test_simple_class():
     
     print(f"전송 데이터:\n{json.dumps(string_data, indent=2, ensure_ascii=False)}")
     
-    response = requests.post(f"{BASE_URL}/ontology/{DB_NAME}/create", json=string_data)
+    response = requests.post(
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
+        json=string_data,
+        headers=HEADERS,
+    )
     print(f"응답 상태: {response.status_code}")
     print(f"응답 내용: {response.text}\n")
     
@@ -61,7 +74,11 @@ def test_simple_class():
     
     print(f"전송 데이터:\n{json.dumps(integer_data, indent=2, ensure_ascii=False)}")
     
-    response = requests.post(f"{BASE_URL}/ontology/{DB_NAME}/create", json=integer_data)
+    response = requests.post(
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
+        json=integer_data,
+        headers=HEADERS,
+    )
     print(f"응답 상태: {response.status_code}")
     print(f"응답 내용: {response.text}\n")
 
@@ -85,7 +102,11 @@ def test_each_property_type():
     }
     
     print(f"DATE 타입 테스트:")
-    response = requests.post(f"{BASE_URL}/ontology/{DB_NAME}/create", json=date_data)
+    response = requests.post(
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
+        json=date_data,
+        headers=HEADERS,
+    )
     print(f"상태: {response.status_code}, 응답: {response.text[:200]}...\n")
     
     # MONEY만 테스트
@@ -104,7 +125,11 @@ def test_each_property_type():
     }
     
     print(f"MONEY 타입 테스트:")
-    response = requests.post(f"{BASE_URL}/ontology/{DB_NAME}/create", json=money_data)
+    response = requests.post(
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
+        json=money_data,
+        headers=HEADERS,
+    )
     print(f"상태: {response.status_code}, 응답: {response.text[:200]}...\n")
 
 if __name__ == "__main__":
@@ -112,10 +137,14 @@ if __name__ == "__main__":
     
     # 데이터베이스 확인
     try:
-        response = requests.get(f"{BASE_URL}/database/exists/{DB_NAME}")
+        response = requests.get(f"{BASE_URL}/database/exists/{DB_NAME}", headers=HEADERS)
         if not response.json().get("exists"):
             print(f"데이터베이스 '{DB_NAME}' 생성 중...")
-            requests.post(f"{BASE_URL}/database/create", json={"db_name": DB_NAME})
+            requests.post(
+                f"{BASE_URL}/database/create",
+                json={"db_name": DB_NAME},
+                headers=HEADERS,
+            )
     except:
         pass
     

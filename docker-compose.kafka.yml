@@ -39,7 +39,8 @@ services:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:${KAFKA_PORT_HOST:-9092}
+      # Use 127.0.0.1 instead of localhost to avoid IPv6 (::1) bootstrap issues on some hosts/CI runners.
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://127.0.0.1:${KAFKA_PORT_HOST:-39092}
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
@@ -50,7 +51,7 @@ services:
       KAFKA_LOG4J_ROOT_LOGLEVEL: WARN
       KAFKA_LOG4J_LOGGERS: "kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO"
     ports:
-      - "${KAFKA_PORT_HOST:-9092}:9092"
+      - "${KAFKA_PORT_HOST:-39092}:9092"
       - "${KAFKA_PORT_INTERNAL_HOST:-29092}:29092"
     volumes:
       - kafka-data:/var/lib/kafka/data
@@ -89,5 +90,5 @@ volumes:
 
 networks:
   spice_network:
-    name: spice_network
+    name: ${SPICE_NETWORK_NAME:-spice_network}
     driver: bridge

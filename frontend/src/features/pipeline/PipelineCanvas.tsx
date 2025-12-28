@@ -104,20 +104,66 @@ export const PipelineCanvas = ({
             ))}
 
             {selectedNode && actionBarPosition ? (
-                <div className="node-action-bar" style={actionBarPosition}>
-                    <button type="button" className="node-action-btn" aria-label={copy.join} onClick={() => onNodeAction?.('join', selectedNode.id)}>
+                <div
+                    className="node-action-bar"
+                    style={actionBarPosition}
+                    onClick={(event) => {
+                        event.stopPropagation()
+                    }}
+                >
+                    <button
+                        type="button"
+                        className="node-action-btn"
+                        aria-label={copy.join}
+                        onClick={(event) => {
+                            event.stopPropagation()
+                            onNodeAction?.('join', selectedNode.id)
+                        }}
+                    >
                         <Icon icon="inner-join" size={12} />
                     </button>
-                    <button type="button" className="node-action-btn" aria-label={copy.filter} onClick={() => onNodeAction?.('filter', selectedNode.id)}>
+                    <button
+                        type="button"
+                        className="node-action-btn"
+                        aria-label={copy.filter}
+                        onClick={(event) => {
+                            event.stopPropagation()
+                            onNodeAction?.('filter', selectedNode.id)
+                        }}
+                    >
                         <Icon icon="filter" size={12} />
                     </button>
-                    <button type="button" className="node-action-btn" aria-label={copy.compute} onClick={() => onNodeAction?.('compute', selectedNode.id)}>
+                    <button
+                        type="button"
+                        className="node-action-btn"
+                        aria-label={copy.compute}
+                        onClick={(event) => {
+                            event.stopPropagation()
+                            onNodeAction?.('compute', selectedNode.id)
+                        }}
+                    >
                         <Icon icon="function" size={12} />
                     </button>
-                    <button type="button" className="node-action-btn" aria-label={copy.visualize} onClick={() => onNodeAction?.('visualize', selectedNode.id)}>
+                    <button
+                        type="button"
+                        className="node-action-btn"
+                        aria-label={copy.visualize}
+                        onClick={(event) => {
+                            event.stopPropagation()
+                            onNodeAction?.('visualize', selectedNode.id)
+                        }}
+                    >
                         <Icon icon="timeline-events" size={12} />
                     </button>
-                    <button type="button" className="node-action-btn" aria-label={copy.edit} onClick={() => onNodeAction?.('edit', selectedNode.id)}>
+                    <button
+                        type="button"
+                        className="node-action-btn"
+                        aria-label={copy.edit}
+                        onClick={(event) => {
+                            event.stopPropagation()
+                            onNodeAction?.('edit', selectedNode.id)
+                        }}
+                    >
                         <Icon icon="edit" size={12} />
                     </button>
                 </div>

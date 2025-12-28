@@ -90,6 +90,7 @@ export const SheetsHubPage = ({ dbName }: { dbName: string }) => {
   const requestContext = useRequestContext()
   const queryClient = useQueryClient()
   const language = useAppStore((state) => state.context.language)
+  const branch = useAppStore((state) => state.context.branch)
   const [csvDialogOpen, setCsvDialogOpen] = useState(false)
   const [csvFile, setCsvFile] = useState<File | null>(null)
   const [csvContent, setCsvContent] = useState('')
@@ -261,6 +262,7 @@ export const SheetsHubPage = ({ dbName }: { dbName: string }) => {
         name: csvDatasetName.trim(),
         source_type: 'csv_upload',
         schema_json: { columns },
+        branch,
       })
       const dataset = (payload as { data?: { dataset?: Record<string, unknown> } })?.data?.dataset
       const datasetId = typeof dataset?.dataset_id === 'string' ? dataset.dataset_id : ''
@@ -271,7 +273,7 @@ export const SheetsHubPage = ({ dbName }: { dbName: string }) => {
           row_count: parsed.rows.length,
         })
       }
-      void queryClient.invalidateQueries({ queryKey: qk.datasets(dbName, requestContext.language) })
+      void queryClient.invalidateQueries({ queryKey: qk.datasets(dbName, requestContext.language, branch) })
       void showAppToast({ intent: Intent.SUCCESS, message: copy.csvDialog.toast })
       setCsvDialogOpen(false)
       setCsvFile(null)

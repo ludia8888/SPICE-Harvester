@@ -9,12 +9,18 @@ import json
 
 import aiohttp
 import time
+import pytest
+import os
 
-async def run_lightweight_architecture():
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_lightweight_architecture():
     print("🔥 TESTING LIGHTWEIGHT NODES ARCHITECTURE")
     print("=" * 70)
     
-    async with aiohttp.ClientSession() as session:
+    admin_token = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "test-token").strip()
+    headers = {"X-Admin-Token": admin_token}
+    async with aiohttp.ClientSession(headers=headers) as session:
         db_name = f"lightweight_test_{int(time.time())}"
         
         # 1. Create database
@@ -23,7 +29,7 @@ async def run_lightweight_architecture():
             'http://localhost:8000/api/v1/database/create',
             json={'name': db_name, 'description': 'Lightweight nodes test'}
         ) as resp:
-            if resp.status == 202:
+            if resp.status in (200, 201, 202):
                 print(f"   ✅ Database created: {db_name}")
             
         await asyncio.sleep(3)
@@ -122,10 +128,13 @@ async def run_lightweight_architecture():
                 }
             }
             
+            terminus_user = os.getenv("TERMINUS_USER", "admin")
+            terminus_key = os.getenv("TERMINUS_KEY", "admin")
+            terminus_account = os.getenv("TERMINUS_ACCOUNT", terminus_user)
             response = await client.post(
-                f"http://localhost:6363/api/woql/admin/{db_name}",
+                f"http://localhost:6363/api/woql/{terminus_account}/{db_name}",
                 json=woql_query,
-                auth=("admin", "spice123!")
+                auth=(terminus_user, terminus_key),
             )
             
             if response.status_code == 200:
@@ -144,9 +153,8 @@ async def run_lightweight_architecture():
         async with session.post(
             f'http://localhost:9200/{index_name}/_search',
             json={'query': {'match_all': {}}, 'size': 10},
-            auth=aiohttp.BasicAuth('elastic', 'spice123!')
         ) as resp:
-            if resp.status == 200:
+            if resp.status in (200, 201, 202):
                 result = await resp.json()
                 hits = result.get('hits', {}).get('hits', [])
                 print(f"   📊 Elasticsearch documents: {len(hits)}")
@@ -158,6 +166,10 @@ async def run_lightweight_architecture():
                     print(f"      • {doc.get('class_id')}/{doc.get('instance_id')}")
                     print(f"        - terminus_id: {'✅' if has_terminus_id else '❌'}")
                     print(f"        - domain data: {'✅' if has_data else '❌'}")
+            else:
+                text = await resp.text()
+                print(f"   ❌ Elasticsearch query failed: {resp.status}")
+                print(f"      {text[:200]}")
                     
         # 6. TEST Federation query
         print("\n6️⃣ Testing Federation query...")
@@ -170,7 +182,7 @@ async def run_lightweight_architecture():
                 'limit': 10
             }
         ) as resp:
-            if resp.status == 200:
+            if resp.status in (200, 201, 202):
                 result = await resp.json()
                 count = result.get('count', 0)
                 docs = result.get('documents', [])
@@ -206,4 +218,4 @@ async def run_lightweight_architecture():
 
 if __name__ == "__main__":
     print("\n🚀 Starting lightweight nodes architecture test...")
-    asyncio.run(run_lightweight_architecture())
+    asyncio.run(test_lightweight_architecture())

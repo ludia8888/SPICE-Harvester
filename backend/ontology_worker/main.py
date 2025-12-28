@@ -44,7 +44,7 @@ from shared.services.processed_event_registry import (
 from shared.services.lineage_store import LineageStore
 from shared.services.audit_log_store import AuditLogStore
 from shared.security.input_sanitizer import validate_branch_name
-from shared.utils.ontology_version import build_ontology_version
+from shared.utils.ontology_version import resolve_ontology_version
 
 # Observability imports
 from shared.observability.tracing import get_tracing_service, trace_endpoint
@@ -83,37 +83,21 @@ class OntologyWorker:
         self.metrics_collector = None
         self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ontology-worker-kafka")
 
-    @staticmethod
-    def _coerce_commit_id(value: Any) -> Optional[str]:
-        if value is None:
-            return None
-        if isinstance(value, str):
-            return value.strip() or None
-        if isinstance(value, dict):
-            for key in ("commit", "commit_id", "identifier", "id", "@id", "head"):
-                candidate = value.get(key)
-                if candidate:
-                    return str(candidate).strip() or None
-        return str(value).strip() or None
-
-    async def _resolve_ontology_version(self, db_name: str, branch: str) -> Dict[str, str]:
-        """
-        Resolve the current ontology semantic contract version (ref + commit).
-
-        This stamp is attached to:
-        - Terminus side-effects (lineage/audit)
-        - Domain events (so projections inherit it)
-        """
-        commit: Optional[str] = None
-        if self.terminus_service:
-            branches = await self.terminus_service.version_control_service.list_branches(db_name)
-            for item in branches or []:
-                if not isinstance(item, dict):
-                    continue
-                if item.get("name") == branch:
-                    commit = self._coerce_commit_id(item.get("head"))
-                    break
-        return build_ontology_version(branch=branch, commit=commit)
+    async def _wait_for_database_exists(self, *, db_name: str, expected: bool, timeout_seconds: int = 20) -> None:
+        if not self.terminus_service:
+            return
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + float(timeout_seconds)
+        poll = float(os.getenv("ONTOLOGY_WORKER_DB_READY_POLL_SECONDS", "0.5"))
+        last = None
+        while loop.time() < deadline:
+            last = await self.terminus_service.database_exists(db_name)
+            if bool(last) is bool(expected):
+                return
+            await asyncio.sleep(poll)
+        raise RuntimeError(
+            f"Database '{db_name}' existence check timed out (expected={expected}, last_exists={last})"
+        )
 
     async def _heartbeat_loop(self, *, handler: str, event_id: str) -> None:
         if not self.processed_event_registry:
@@ -356,7 +340,9 @@ class OntologyWorker:
                     raise
 
             class_id = payload.get("class_id")
-            ontology_version = await self._resolve_ontology_version(db_name, branch)
+            ontology_version = await resolve_ontology_version(
+                self.terminus_service, db_name=db_name, branch=branch, logger=logger
+            )
             if command_id and class_id and self.lineage_store:
                 try:
                     await self.lineage_store.record_link(
@@ -512,7 +498,9 @@ class OntologyWorker:
                             pass
                     raise
 
-            ontology_version = await self._resolve_ontology_version(db_name, branch)
+            ontology_version = await resolve_ontology_version(
+                self.terminus_service, db_name=db_name, branch=branch, logger=logger
+            )
             if command_id and class_id and self.lineage_store:
                 try:
                     await self.lineage_store.record_link(
@@ -636,7 +624,9 @@ class OntologyWorker:
                 logger.info(f"Ontology '{class_id}' already deleted; treating delete as idempotent success")
                 already_missing = True
 
-            ontology_version = await self._resolve_ontology_version(db_name, branch)
+            ontology_version = await resolve_ontology_version(
+                self.terminus_service, db_name=db_name, branch=branch, logger=logger
+            )
 
             if command_id and class_id and self.lineage_store:
                 try:
@@ -722,6 +712,9 @@ class OntologyWorker:
         db_name = payload.get('database_name')  # Fixed: was 'name', should be 'database_name'
         command_id = command_data.get('command_id')
         
+        if not db_name:
+            raise ValueError("database_name is required")
+
         logger.info(f"Creating database: {db_name}")
         
         try:
@@ -735,6 +728,10 @@ class OntologyWorker:
                 if not exists:
                     raise Exception(f"Failed to create database '{db_name}'")
                 logger.info(f"Database '{db_name}' already exists; treating create as idempotent success")
+
+            # TerminusDB can be briefly eventually-consistent right after creation; ensure it is visible
+            # before marking the async command COMPLETED.
+            await self._wait_for_database_exists(db_name=db_name, expected=True)
             
             # 성공 이벤트 생성
             event = DatabaseEvent(
@@ -773,6 +770,9 @@ class OntologyWorker:
         db_name = payload.get('database_name')  # Fixed: was 'name', should be 'database_name'
         command_id = command_data.get('command_id')
         
+        if not db_name:
+            raise ValueError("database_name is required")
+
         logger.info(f"Deleting database: {db_name}")
         
         try:
@@ -783,6 +783,8 @@ class OntologyWorker:
                 if exists:
                     raise Exception(f"Failed to delete database '{db_name}'")
                 logger.info(f"Database '{db_name}' already deleted; treating delete as idempotent success")
+
+            await self._wait_for_database_exists(db_name=db_name, expected=False)
             
             # 성공 이벤트 생성
             event = DatabaseEvent(
@@ -923,14 +925,14 @@ class OntologyWorker:
                     except Exception as e:
                         logger.error(f"Failed to parse EventEnvelope JSON: {e}")
                         # Poison pill: commit to avoid infinite retry loop.
-                        await self._consumer_call(self.consumer.commit, asynchronous=False)
+                        await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
                         continue
 
                     kind = envelope.metadata.get("kind") if isinstance(envelope.metadata, dict) else None
                     if kind != "command":
                         logger.error(f"Unexpected envelope kind for command topic: {kind}")
                         # Poison pill: commit to avoid infinite retry loop.
-                        await self._consumer_call(self.consumer.commit, asynchronous=False)
+                        await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
                         continue
 
                     command_data = dict(envelope.data or {})
@@ -960,7 +962,7 @@ class OntologyWorker:
                                 f"Skipping {claim.decision.value} command event_id={registry_event_id} "
                                 f"(aggregate_id={registry_aggregate_id}, seq={registry_sequence})"
                             )
-                            await self._consumer_call(self.consumer.commit, asynchronous=False)
+                            await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
                             continue
                         if claim.decision == ClaimDecision.IN_PROGRESS:
                             logger.info(
@@ -996,7 +998,7 @@ class OntologyWorker:
                             )
                         
                         # 처리 성공 시 오프셋 커밋
-                        await self._consumer_call(self.consumer.commit, asynchronous=False)
+                        await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
                     finally:
                         if heartbeat_task:
                             heartbeat_task.cancel()
@@ -1006,7 +1008,7 @@ class OntologyWorker:
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse message: {e}")
                     # 파싱 실패해도 오프셋은 커밋 (무한 루프 방지)
-                    await self._consumer_call(self.consumer.commit, asynchronous=False)
+                    await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
                 except Exception as e:
                     logger.error(f"Error processing command: {e}")
                     if registry_claimed and self.processed_event_registry and registry_event_id:

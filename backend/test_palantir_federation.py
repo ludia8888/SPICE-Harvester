@@ -13,12 +13,20 @@ import json
 import time
 
 import aiohttp
+import pytest
+import os
 
-async def run_palantir_federation():
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_palantir_federation():
     print("🔥 TESTING PALANTIR-STYLE FEDERATION")
     print("=" * 70)
     
-    async with aiohttp.ClientSession() as session:
+    admin_token = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "").strip()
+    if not admin_token:
+        raise RuntimeError("ADMIN_TOKEN is required for palantir federation test")
+    headers = {"X-Admin-Token": admin_token}
+    async with aiohttp.ClientSession(headers=headers) as session:
         # Test database name
         db_name = f"palantir_test_{int(time.time())}"
         
@@ -28,7 +36,7 @@ async def run_palantir_federation():
             'http://localhost:8000/api/v1/database/create',
             json={'name': db_name, 'description': 'Palantir Federation Test'}
         ) as resp:
-            if resp.status == 202:
+            if resp.status in (200, 201, 202):
                 print("   ✅ Database creation accepted")
             else:
                 print(f"   ❌ Failed: {resp.status}")
@@ -61,7 +69,7 @@ async def run_palantir_federation():
             f'http://localhost:8000/api/v1/database/{db_name}/ontology',
             json=ontology_data
         ) as resp:
-            if resp.status == 202:
+            if resp.status in (200, 201, 202):
                 print("   ✅ Ontology creation accepted (no system fields)")
             else:
                 text = await resp.text()
@@ -83,7 +91,7 @@ async def run_palantir_federation():
             f'http://localhost:8000/api/v1/instances/{db_name}/async/Product/create',
             json=product_data
         ) as resp:
-            if resp.status == 202:
+            if resp.status in (200, 201, 202):
                 result = await resp.json()
                 command_id = result.get('command_id')
                 print(f"   ✅ Instance creation accepted: {command_id}")
@@ -99,7 +107,7 @@ async def run_palantir_federation():
         async with session.get(
             f'http://localhost:8000/api/v1/database/{db_name}/ontology'
         ) as resp:
-            if resp.status == 200:
+            if resp.status in (200, 201, 202):
                 result = await resp.json()
                 ontologies = result.get('data', [])
                 
@@ -130,9 +138,8 @@ async def run_palantir_federation():
                 'query': {'match_all': {}},
                 'size': 1
             },
-            auth=aiohttp.BasicAuth('elastic', 'spice123!')
         ) as resp:
-            if resp.status == 200:
+            if resp.status in (200, 201, 202):
                 result = await resp.json()
                 hits = result.get('hits', {}).get('hits', [])
                 
@@ -166,7 +173,7 @@ async def run_palantir_federation():
             f'http://localhost:8002/api/v1/graph-query/{db_name}/simple',
             json=federation_query
         ) as resp:
-            if resp.status == 200:
+            if resp.status in (200, 201, 202):
                 result = await resp.json()
                 nodes = result.get('data', {}).get('nodes', [])
                 
@@ -200,4 +207,4 @@ async def run_palantir_federation():
 
 if __name__ == "__main__":
     print("\n🚀 Running Palantir Federation test...")
-    asyncio.run(run_palantir_federation())
+    asyncio.run(test_palantir_federation())

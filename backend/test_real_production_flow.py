@@ -12,28 +12,33 @@ import time
 from datetime import datetime, timezone
 from uuid import uuid4
 import subprocess
+import pytest
 
 # REAL production configuration
 PRODUCTION_ENV = {
     "DOCKER_CONTAINER": "false",
-    "MINIO_ENDPOINT_URL": "http://localhost:9000",
-    "MINIO_ACCESS_KEY": "admin",
-    "MINIO_SECRET_KEY": "spice123!",
+    "MINIO_ENDPOINT_URL": "http://localhost:9002",
+    "MINIO_ACCESS_KEY": "minioadmin",
+    "MINIO_SECRET_KEY": "minioadmin123",
     "POSTGRES_HOST": "localhost",
-    "POSTGRES_PORT": "5432",  # CORRECT PORT
+    "POSTGRES_PORT": "55433",  # CORRECT PORT
     "POSTGRES_USER": "spiceadmin",
     "POSTGRES_PASSWORD": "spicepass123",
     "POSTGRES_DB": "spicedb",
     "ELASTICSEARCH_HOST": "localhost",
     "ELASTICSEARCH_PORT": "9200",
-    "ELASTICSEARCH_USER": "elastic",
-    "ELASTICSEARCH_PASSWORD": "spice123!",
-    "KAFKA_BOOTSTRAP_SERVERS": "localhost:9092",
+    "ELASTICSEARCH_USER": "",
+    "ELASTICSEARCH_PASSWORD": "",
+    "KAFKA_BOOTSTRAP_SERVERS": "localhost:39092",
     "REDIS_HOST": "localhost",
-    "REDIS_PORT": "6379",
-    "REDIS_PASSWORD": "spice123!",
+    "REDIS_PORT": "6380",
+    "REDIS_PASSWORD": "spicepass123",
     "TERMINUS_SERVER_URL": "http://localhost:6363",
 }
+
+
+ADMIN_TOKEN = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "test-token").strip()
+HEADERS = {"X-Admin-Token": ADMIN_TOKEN}
 
 
 class ProductionFlowTest:
@@ -57,7 +62,7 @@ class ProductionFlowTest:
             import asyncpg
             conn = await asyncpg.connect(
                 host="localhost",
-                port=5432,
+                port=55433,
                 user="spiceadmin",
                 password="spicepass123",
                 database="spicedb"
@@ -75,9 +80,9 @@ class ProductionFlowTest:
             session = aioboto3.Session()
             async with session.client(
                 's3',
-                endpoint_url='http://localhost:9000',
-                aws_access_key_id='admin',
-                aws_secret_access_key='spice123!'
+                endpoint_url='http://localhost:9002',
+                aws_access_key_id='minioadmin',
+                aws_secret_access_key='minioadmin123'
             ) as s3:
                 await s3.list_buckets()
                 checks.append(("MinIO/S3", True, "Connected"))
@@ -87,11 +92,9 @@ class ProductionFlowTest:
         
         # 3. Elasticsearch
         try:
-            async with aiohttp.ClientSession() as session:
-                auth = aiohttp.BasicAuth('elastic', 'spice123!')
+            async with aiohttp.ClientSession(headers=HEADERS) as session:
                 async with session.get(
                     'http://localhost:9200/_cluster/health',
-                    auth=auth
                 ) as resp:
                     data = await resp.json()
                     status = data.get('status', 'unknown')
@@ -103,19 +106,38 @@ class ProductionFlowTest:
         # 4. Kafka
         try:
             result = subprocess.run(
-                ["kafka-topics", "--bootstrap-server", "localhost:9092", "--list"],
-                capture_output=True, text=True, timeout=5
+                ["kafka-topics", "--bootstrap-server", "localhost:39092", "--list"],
+                capture_output=True, text=True, timeout=15
             )
-            topics = result.stdout.strip().split('\n')
+            topics = [line for line in result.stdout.strip().split('\n') if line]
             checks.append(("Kafka", result.returncode == 0, f"{len(topics)} topics"))
         except Exception as e:
-            checks.append(("Kafka", False, str(e)))
-            self.errors.append(f"Kafka: {e}")
+            # Fallback to in-container broker when localhost tooling isn't reachable.
+            try:
+                docker_result = subprocess.run(
+                    [
+                        "docker",
+                        "exec",
+                        "spice_kafka",
+                        "kafka-topics",
+                        "--bootstrap-server",
+                        "kafka:29092",
+                        "--list",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+                topics = [line for line in docker_result.stdout.strip().split('\n') if line]
+                checks.append(("Kafka", docker_result.returncode == 0, f"{len(topics)} topics"))
+            except Exception as docker_err:
+                checks.append(("Kafka", False, str(docker_err)))
+                self.errors.append(f"Kafka: {docker_err}")
         
         # 5. Redis
         try:
             import redis
-            r = redis.Redis(host='localhost', port=6379, password='spice123!', decode_responses=True)
+            r = redis.Redis(host='localhost', port=6380, password='spicepass123', decode_responses=True)
             r.ping()
             checks.append(("Redis", True, "Connected"))
         except Exception as e:
@@ -124,7 +146,7 @@ class ProductionFlowTest:
         
         # 6. TerminusDB
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(headers=HEADERS) as session:
                 async with session.get('http://localhost:6363/api/info') as resp:
                     if resp.status == 200:
                         checks.append(("TerminusDB", True, "Connected"))
@@ -151,7 +173,7 @@ class ProductionFlowTest:
         
         db_name = f"test_db_{self.test_id}"
         
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=HEADERS) as session:
             # Create database
             async with session.post(
                 'http://localhost:8000/api/v1/database/create',
@@ -164,7 +186,7 @@ class ProductionFlowTest:
                 print(f"  Database creation: {resp.status}")
                 print(f"  Response: {json.dumps(result, indent=2)}")
                 
-                if resp.status == 202:  # Async accepted
+                if resp.status in [200, 201, 202]:  # Async accepted
                     command_id = result.get('data', {}).get('command_id')
                     print(f"  ✅ Command ID: {command_id}")
                     self.results["db_creation"] = True
@@ -207,7 +229,7 @@ class ProductionFlowTest:
             ]
         }
         
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=HEADERS) as session:
             async with session.post(
                 f'http://localhost:8000/api/v1/database/{db_name}/ontology',
                 json=ontology_data
@@ -238,7 +260,7 @@ class ProductionFlowTest:
             }
         }
         
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=HEADERS) as session:
             async with session.post(
                 f'http://localhost:8000/api/v1/instances/{db_name}/async/{class_id}/create',
                 json=instance_data
@@ -246,7 +268,7 @@ class ProductionFlowTest:
                 result = await resp.json()
                 print(f"  Instance creation: {resp.status}")
                 
-                if resp.status == 202:  # Async accepted
+                if resp.status in [200, 201, 202]:  # Async accepted
                     command_id = result.get('command_id')
                     print(f"  ✅ Command ID: {command_id}")
                     self.results["instance_creation"] = True
@@ -272,9 +294,9 @@ class ProductionFlowTest:
         
         async with session.client(
             's3',
-            endpoint_url='http://localhost:9000',
-            aws_access_key_id='admin',
-            aws_secret_access_key='spice123!'
+            endpoint_url='http://localhost:9002',
+            aws_access_key_id='minioadmin',
+            aws_secret_access_key='minioadmin123'
         ) as s3:
             # List all events
             response = await s3.list_objects_v2(
@@ -307,7 +329,7 @@ class ProductionFlowTest:
         import asyncpg
         conn = await asyncpg.connect(
             host="localhost",
-            port=5432,
+            port=55433,
             user="spiceadmin",
             password="spicepass123",
             database="spicedb"
@@ -342,29 +364,76 @@ class ProductionFlowTest:
         print("7️⃣ VERIFYING KAFKA MESSAGES")
         print("="*80)
         
-        # Check Kafka consumer groups
-        result = subprocess.run(
-            ["kafka-consumer-groups", "--bootstrap-server", "localhost:9092", "--list"],
-            capture_output=True, text=True
-        )
-        
-        groups = result.stdout.strip().split('\n')
+        # Check Kafka consumer groups (fallback to in-container if localhost not reachable)
+        try:
+            result = subprocess.run(
+                ["kafka-consumer-groups", "--bootstrap-server", "localhost:39092", "--list"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            groups = [g for g in result.stdout.strip().split('\n') if g]
+        except Exception:
+            result = subprocess.run(
+                [
+                    "docker",
+                    "exec",
+                    "spice_kafka",
+                    "kafka-consumer-groups",
+                    "--bootstrap-server",
+                    "kafka:29092",
+                    "--list",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            groups = [g for g in result.stdout.strip().split('\n') if g]
+
         print(f"  Consumer groups: {len(groups)}")
-        
+
         # Check lag for instance worker
         for group in groups:
             if 'instance' in group.lower():
-                lag_result = subprocess.run(
-                    ["kafka-consumer-groups", "--bootstrap-server", "localhost:9092",
-                     "--group", group, "--describe"],
-                    capture_output=True, text=True
-                )
+                try:
+                    lag_result = subprocess.run(
+                        [
+                            "kafka-consumer-groups",
+                            "--bootstrap-server",
+                            "localhost:39092",
+                            "--group",
+                            group,
+                            "--describe",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=15,
+                    )
+                    lines = lag_result.stdout.strip().split('\n')
+                except Exception:
+                    lag_result = subprocess.run(
+                        [
+                            "docker",
+                            "exec",
+                            "spice_kafka",
+                            "kafka-consumer-groups",
+                            "--bootstrap-server",
+                            "kafka:29092",
+                            "--group",
+                            group,
+                            "--describe",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=15,
+                    )
+                    lines = lag_result.stdout.strip().split('\n')
+
                 print(f"  Group {group}:")
-                lines = lag_result.stdout.strip().split('\n')
                 for line in lines[1:4]:  # Show first few lines
                     if line.strip():
                         print(f"    {line}")
-        
+
         self.results["kafka_flow"] = True
     
     async def run_complete_test(self):
@@ -443,6 +512,15 @@ class ProductionFlowTest:
             import traceback
             traceback.print_exc()
             return False
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_real_production_flow():
+    os.environ.update(PRODUCTION_ENV)
+    tester = ProductionFlowTest()
+    success = await tester.run_complete_test()
+    assert success
 
 
 async def main():

@@ -22,6 +22,7 @@ from . import audit
 from . import ai
 from . import summary
 from . import pipeline
+from . import objectify
 
 __all__ = [
     "database",
@@ -42,4 +43,5 @@ __all__ = [
     "ai",
     "summary",
     "pipeline",
+    "objectify",
 ]

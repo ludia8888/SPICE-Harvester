@@ -8,10 +8,13 @@ import sys
 import os
 import asyncio
 import json
+import pytest
 from datetime import datetime
 
 sys.path.append(os.path.join(os.path.dirname(__file__), 'backend'))
 
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_version_management():
     """TerminusDB 버전 관리 기능 전체 테스트"""
     print("🔥 THINK ULTRA! TerminusDB 버전 관리 테스트")
@@ -22,11 +25,15 @@ async def test_version_management():
     from shared.models.config import ConnectionConfig
     
     # Set up connection config for local TerminusDB
+    terminus_url = os.getenv("TERMINUS_SERVER_URL", "http://localhost:6363")
+    terminus_user = os.getenv("TERMINUS_USER", "admin")
+    terminus_key = os.getenv("TERMINUS_KEY", "admin")
+    terminus_account = os.getenv("TERMINUS_ACCOUNT", "admin")
     connection_config = ConnectionConfig(
-        server_url="http://localhost:6363",
-        user="admin",
-        key="admin123",
-        account="admin"
+        server_url=terminus_url,
+        user=terminus_user,
+        key=terminus_key,
+        account=terminus_account,
     )
     service = AsyncTerminusService(connection_config)
     test_db = f"version_test_{int(datetime.now().timestamp())}"
@@ -258,6 +265,8 @@ async def test_version_management():
         except Exception as cleanup_error:
             print(f"⚠️ Cleanup error (non-critical): {cleanup_error}")
 
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_advanced_version_features():
     """고급 버전 관리 기능 테스트"""
     print("\n🔥 고급 버전 관리 기능 테스트")
@@ -267,11 +276,15 @@ async def test_advanced_version_features():
     from shared.models.config import ConnectionConfig
     
     # Set up connection config for local TerminusDB
+    terminus_url = os.getenv("TERMINUS_SERVER_URL", "http://localhost:6363")
+    terminus_user = os.getenv("TERMINUS_USER", "admin")
+    terminus_key = os.getenv("TERMINUS_KEY", "admin")
+    terminus_account = os.getenv("TERMINUS_ACCOUNT", "admin")
     connection_config = ConnectionConfig(
-        server_url="http://localhost:6363",
-        user="admin",
-        key="admin123",
-        account="admin"
+        server_url=terminus_url,
+        user=terminus_user,
+        key=terminus_key,
+        account=terminus_account,
     )
     service = AsyncTerminusService(connection_config)
     test_db = f"advanced_version_test_{int(datetime.now().timestamp())}"

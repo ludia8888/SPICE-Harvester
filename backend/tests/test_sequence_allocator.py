@@ -21,7 +21,7 @@ def _get_postgres_url_candidates() -> list[str]:
     if env_url:
         return [env_url]
     return [
-        "postgresql://spiceadmin:spicepass123@localhost:5433/spicedb",
+        "postgresql://spiceadmin:spicepass123@localhost:55433/spicedb",
         "postgresql://spiceadmin:spicepass123@localhost:5432/spicedb",
     ]
 
@@ -45,7 +45,7 @@ async def _make_allocator(*, dsn: str, schema: str) -> AggregateSequenceAllocato
         f"(candidates={_get_postgres_url_candidates()!r}): {last_error}"
     )
     if os.getenv("SKIP_POSTGRES_TESTS", "").lower() in ("true", "1", "yes", "on"):
-        pytest.skip(msg)
+        raise RuntimeError(msg)
     pytest.fail(msg)
 
 

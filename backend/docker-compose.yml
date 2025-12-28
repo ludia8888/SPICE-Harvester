@@ -15,7 +15,11 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./database/init:/docker-entrypoint-initdb.d
     networks:
-      - spice_network
+      spice_network:
+        aliases:
+          - spice-minio
+          - spice_minio
+          - minio
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-spiceadmin} -d ${POSTGRES_DB:-spicedb}"]
       interval: 30s
@@ -50,7 +54,7 @@ services:
       - xpack.security.http.ssl.enabled=false
       - xpack.security.transport.ssl.enabled=false
       - bootstrap.memory_lock=true
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - "ES_JAVA_OPTS=-Xms256m -Xmx256m"
       - http.host=0.0.0.0
     ulimits:
       memlock:
@@ -75,19 +79,23 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # Use 127.0.0.1 instead of localhost to avoid IPv6 (::1) bootstrap issues on some hosts/CI runners.
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://127.0.0.1:${KAFKA_PORT_HOST:-39092}
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
     ports:
-      - "${KAFKA_PORT_HOST:-9092}:9092"
+      - "${KAFKA_PORT_HOST:-39092}:9092"
     depends_on:
       - zookeeper
     networks:
       - spice_network
     healthcheck:
-      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "kafka:29092", "--list"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -122,7 +130,9 @@ services:
     volumes:
       - minio_data:/data
     networks:
-      - spice_network
+      spice_network:
+        aliases:
+          - spice-minio
     command: server /data --console-address ":9001"
     healthcheck:
       # MinIO image doesn't ship with curl; use bash TCP check.
@@ -183,7 +193,7 @@ services:
       - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_USERNAME:-}
       - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-}
       # Event Store (S3/MinIO)
-      - MINIO_ENDPOINT_URL=http://minio:9000
+      - MINIO_ENDPOINT_URL=http://spice-minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
       - EVENT_STORE_BUCKET=${EVENT_STORE_BUCKET:-spice-event-store}
@@ -231,14 +241,23 @@ services:
       - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-}
       - KAFKA_HOST=kafka
       - KAFKA_PORT=29092
+      - OBJECTIFY_JOBS_TOPIC=${OBJECTIFY_JOBS_TOPIC:-objectify-jobs}
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
       - BFF_REQUIRE_AUTH=${BFF_REQUIRE_AUTH:-true}
       - ADMIN_TOKEN=${ADMIN_TOKEN:?ADMIN_TOKEN is required}
       # Event Store / Dataset artifacts (S3/MinIO)
-      - MINIO_ENDPOINT_URL=http://minio:9000
+      - MINIO_ENDPOINT_URL=http://spice-minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
+      # lakeFS (versioned storage + S3 gateway)
+      - LAKEFS_API_URL=http://lakefs:8000
+      - LAKEFS_S3_ENDPOINT_URL=http://lakefs:8000
+      - LAKEFS_ARTIFACTS_REPOSITORY=${LAKEFS_ARTIFACTS_REPOSITORY:-pipeline-artifacts}
+      - LAKEFS_RAW_REPOSITORY=${LAKEFS_RAW_REPOSITORY:-raw-datasets}
+      - LAKEFS_CREDENTIALS_SOURCE=${LAKEFS_CREDENTIALS_SOURCE:-db}
+      - LAKEFS_CREDENTIALS_ENCRYPTION_KEY=${LAKEFS_CREDENTIALS_ENCRYPTION_KEY:-WCgHDn1AOcBzLOuW2zM8kSTFocoQmT07kkgHCFc8qtM=}
+      - LAKEFS_SERVICE_PRINCIPAL=bff
     ports:
       - "8002:8002"
     depends_on:
@@ -328,18 +347,89 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
       - POSTGRES_DB=${POSTGRES_DB:-spicedb}
-      - MINIO_ENDPOINT_URL=http://minio:9000
+      - MINIO_ENDPOINT_URL=http://spice-minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
+      - LAKEFS_API_URL=http://lakefs:8000
+      - LAKEFS_S3_ENDPOINT_URL=http://lakefs:8000
+      - LAKEFS_ARTIFACTS_REPOSITORY=${LAKEFS_ARTIFACTS_REPOSITORY:-pipeline-artifacts}
+      - LAKEFS_RAW_REPOSITORY=${LAKEFS_RAW_REPOSITORY:-raw-datasets}
+      - LAKEFS_CREDENTIALS_SOURCE=${LAKEFS_CREDENTIALS_SOURCE:-db}
+      - LAKEFS_CREDENTIALS_ENCRYPTION_KEY=${LAKEFS_CREDENTIALS_ENCRYPTION_KEY:-WCgHDn1AOcBzLOuW2zM8kSTFocoQmT07kkgHCFc8qtM=}
+      - LAKEFS_SERVICE_PRINCIPAL=pipeline-worker
       - BFF_BASE_URL=http://bff:8002
       - ADMIN_TOKEN=${ADMIN_TOKEN:?ADMIN_TOKEN is required}
+      - LOG_LEVEL=INFO
+      - DOCKER_CONTAINER=true
+      - PIPELINE_JOBS_TOPIC=pipeline-jobs
+      - OBJECTIFY_JOBS_TOPIC=${OBJECTIFY_JOBS_TOPIC:-objectify-jobs}
+    depends_on:
+      - kafka
+      - postgres
+      - minio
+    networks:
+      - spice_network
+    restart: unless-stopped
+
+  # Pipeline Scheduler (cron-style)
+  pipeline-scheduler:
+    build:
+      context: .
+      dockerfile: ./pipeline_scheduler/Dockerfile
+    container_name: spice_pipeline_scheduler
+    environment:
+      - KAFKA_HOST=kafka
+      - KAFKA_PORT=29092
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
+      - POSTGRES_DB=${POSTGRES_DB:-spicedb}
+      - LAKEFS_API_URL=http://lakefs:8000
+      - LAKEFS_S3_ENDPOINT_URL=http://lakefs:8000
+      - LAKEFS_ARTIFACTS_REPOSITORY=${LAKEFS_ARTIFACTS_REPOSITORY:-pipeline-artifacts}
+      - LAKEFS_RAW_REPOSITORY=${LAKEFS_RAW_REPOSITORY:-raw-datasets}
+      - LAKEFS_CREDENTIALS_SOURCE=${LAKEFS_CREDENTIALS_SOURCE:-db}
+      - LAKEFS_CREDENTIALS_ENCRYPTION_KEY=${LAKEFS_CREDENTIALS_ENCRYPTION_KEY:-WCgHDn1AOcBzLOuW2zM8kSTFocoQmT07kkgHCFc8qtM=}
+      - LAKEFS_SERVICE_PRINCIPAL=pipeline-scheduler
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
       - PIPELINE_JOBS_TOPIC=pipeline-jobs
     depends_on:
       - kafka
       - postgres
-      - minio
+    networks:
+      - spice_network
+    restart: unless-stopped
+
+  # Objectify Worker (Dataset -> Ontology instances)
+  objectify-worker:
+    build:
+      context: .
+      dockerfile: ./objectify_worker/Dockerfile
+    container_name: spice_objectify_worker
+    environment:
+      - KAFKA_HOST=kafka
+      - KAFKA_PORT=29092
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
+      - POSTGRES_DB=${POSTGRES_DB:-spicedb}
+      - OMS_BASE_URL=http://oms:8000
+      - LAKEFS_S3_ENDPOINT_URL=http://lakefs:8000
+      - LAKEFS_ACCESS_KEY_ID=${LAKEFS_ACCESS_KEY_ID:-spice-lakefs-admin}
+      - LAKEFS_SECRET_ACCESS_KEY=${LAKEFS_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
+      - OBJECTIFY_JOBS_TOPIC=${OBJECTIFY_JOBS_TOPIC:-objectify-jobs}
+      - OBJECTIFY_JOBS_GROUP=${OBJECTIFY_JOBS_GROUP:-objectify-worker-group}
+      - LOG_LEVEL=INFO
+      - DOCKER_CONTAINER=true
+      - ADMIN_TOKEN=${ADMIN_TOKEN:?ADMIN_TOKEN is required}
+    depends_on:
+      - kafka
+      - postgres
+      - lakefs
+      - oms
     networks:
       - spice_network
     restart: unless-stopped
@@ -376,12 +466,14 @@ services:
     environment:
       - KAFKA_HOST=kafka
       - KAFKA_PORT=29092
-      - MINIO_ENDPOINT_URL=http://minio:9000
+      - MINIO_ENDPOINT_URL=http://spice-minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
       - EVENT_STORE_BUCKET=${EVENT_STORE_BUCKET:-spice-event-store}
       - EVENT_PUBLISHER_BATCH_SIZE=${EVENT_PUBLISHER_BATCH_SIZE:-200}
-      - EVENT_PUBLISHER_POLL_INTERVAL=${EVENT_PUBLISHER_POLL_INTERVAL:-3}
+      - EVENT_PUBLISHER_POLL_INTERVAL=${EVENT_PUBLISHER_POLL_INTERVAL:-1}
+      - EVENT_PUBLISHER_LOOKBACK_SECONDS=${EVENT_PUBLISHER_LOOKBACK_SECONDS:-0}
+      - EVENT_PUBLISHER_LOOKBACK_MAX_KEYS=${EVENT_PUBLISHER_LOOKBACK_MAX_KEYS:-0}
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
     depends_on:
@@ -446,7 +538,7 @@ services:
       - ELASTICSEARCH_PORT=9200
       - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_USERNAME:-}
       - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-}
-      - MINIO_ENDPOINT_URL=http://minio:9000
+      - MINIO_ENDPOINT_URL=http://spice-minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
       - INSTANCE_BUCKET=instance-events
@@ -509,6 +601,31 @@ services:
       - spice_network
     restart: unless-stopped
 
+  # Search Projection Worker (optional instance indexing)
+  search-projection-worker:
+    build:
+      context: .
+      dockerfile: ./search_projection_worker/Dockerfile
+    container_name: spice_search_projection_worker
+    environment:
+      - KAFKA_HOST=kafka
+      - KAFKA_PORT=29092
+      - ELASTICSEARCH_HOST=elasticsearch
+      - ELASTICSEARCH_PORT=9200
+      - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_USERNAME:-}
+      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-}
+      - ENABLE_SEARCH_PROJECTION=${ENABLE_SEARCH_PROJECTION:-false}
+      - SEARCH_INDEX=${SEARCH_INDEX:-objects}
+      - INSTANCE_EVENTS_TOPIC=${INSTANCE_EVENTS_TOPIC:-instance_events}
+      - LOG_LEVEL=INFO
+      - DOCKER_CONTAINER=true
+    depends_on:
+      - kafka
+      - elasticsearch
+    networks:
+      - spice_network
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
@@ -519,5 +636,5 @@ volumes:
 
 networks:
   spice_network:
-    name: spice_network
+    name: ${SPICE_NETWORK_NAME:-spice_network}
     driver: bridge

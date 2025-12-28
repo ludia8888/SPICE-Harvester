@@ -99,9 +99,10 @@ def test_single_service_need():
     
     # 실제 서비스 초기화 시뮬레이션
     service = ElasticsearchService(
-        hosts=["localhost:9200"],
+        host="localhost",
+        port=9200,
         username="elastic",
-        password="test"
+        password="test",
     )
     return service
 

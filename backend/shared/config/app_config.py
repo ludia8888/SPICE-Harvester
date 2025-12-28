@@ -25,6 +25,7 @@ class AppConfig:
     CONNECTOR_UPDATES_TOPIC = "connector-updates"
     CONNECTOR_UPDATES_DLQ_TOPIC = "connector-updates-dlq"
     PIPELINE_JOBS_TOPIC = os.getenv("PIPELINE_JOBS_TOPIC", "pipeline-jobs")
+    PIPELINE_JOBS_DLQ_TOPIC = os.getenv("PIPELINE_JOBS_DLQ_TOPIC", "pipeline-jobs-dlq")
     PIPELINE_EVENTS_TOPIC = os.getenv("PIPELINE_EVENTS_TOPIC", "pipeline-events")
     
     # Command Topics (used by workers to consume commands)
@@ -214,6 +215,7 @@ class AppConfig:
             cls.CONNECTOR_UPDATES_TOPIC,
             cls.CONNECTOR_UPDATES_DLQ_TOPIC,
             cls.PIPELINE_JOBS_TOPIC,
+            cls.PIPELINE_JOBS_DLQ_TOPIC,
             cls.PIPELINE_EVENTS_TOPIC,
             cls.INSTANCE_COMMANDS_TOPIC,
             cls.ONTOLOGY_COMMANDS_TOPIC,

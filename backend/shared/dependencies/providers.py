@@ -17,6 +17,7 @@ from fastapi import Depends
 
 # Import service classes and factories - all dependencies are now explicit in pyproject.toml
 from shared.services.storage_service import StorageService, create_storage_service
+from shared.services.lakefs_storage_service import LakeFSStorageService, create_lakefs_storage_service
 from shared.services.redis_service import RedisService, create_redis_service
 from shared.services.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
 from shared.services.lineage_store import LineageStore, create_lineage_store
@@ -60,6 +61,20 @@ async def get_storage_service(
         container.register_singleton(StorageService, create_storage_service)
     
     return await container.get(StorageService)
+
+
+async def get_lakefs_storage_service(
+    container: ServiceContainer = Depends(get_container),
+) -> LakeFSStorageService:
+    """
+    FastAPI dependency to get LakeFSStorageService instance (S3 gateway via lakeFS).
+
+    This is separate from the default StorageService (MinIO) because lakeFS repositories
+    are not managed via S3 CreateBucket and require different endpoint/credentials.
+    """
+    if not container.has(LakeFSStorageService):
+        container.register_singleton(LakeFSStorageService, create_lakefs_storage_service)
+    return await container.get(LakeFSStorageService)
 
 
 async def get_redis_service(
@@ -127,6 +142,7 @@ async def get_llm_gateway(
 
 # Type annotations for cleaner dependency injection - storage is now always available
 StorageServiceDep = Annotated[StorageService, Depends(get_storage_service)]
+LakeFSStorageServiceDep = Annotated[LakeFSStorageService, Depends(get_lakefs_storage_service)]
 
 RedisServiceDep = Annotated[RedisService, Depends(get_redis_service)]
 ElasticsearchServiceDep = Annotated[ElasticsearchService, Depends(get_elasticsearch_service)]

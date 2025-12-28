@@ -15,6 +15,30 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from shared.services.dataset_registry import DatasetRegistry
+from shared.services.pipeline_registry import PipelineRegistry
+from shared.services.pipeline_profiler import compute_column_stats
+from shared.services.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes, topological_sort
+from shared.services.pipeline_parameter_utils import apply_parameters, normalize_parameters
+from shared.services.storage_service import StorageService
+from shared.services.pipeline_udf_runtime import compile_row_udf
+from shared.services.pipeline_schema_utils import (
+    normalize_expectations,
+    normalize_number,
+    normalize_schema_checks,
+    normalize_schema_contract,
+    normalize_schema_type,
+    normalize_value_list,
+)
+from shared.services.pipeline_transform_spec import (
+    normalize_operation,
+    normalize_union_mode,
+    resolve_join_spec,
+)
+from shared.utils.s3_uri import parse_s3_uri
+
+
+class PipelineExpectationError(ValueError):
+    pass
 
 
 @dataclass
@@ -53,9 +77,17 @@ class PipelineArtifactStore:
 
 
 class PipelineExecutor:
-    def __init__(self, dataset_registry: DatasetRegistry, artifact_store: Optional[PipelineArtifactStore] = None) -> None:
+    def __init__(
+        self,
+        dataset_registry: DatasetRegistry,
+        pipeline_registry: Optional[PipelineRegistry] = None,
+        artifact_store: Optional[PipelineArtifactStore] = None,
+        storage_service: Optional[StorageService] = None,
+    ) -> None:
         self._dataset_registry = dataset_registry
+        self._pipeline_registry = pipeline_registry
         self._artifact_store = artifact_store
+        self._storage_service = storage_service
 
     async def preview(
         self,
@@ -64,8 +96,9 @@ class PipelineExecutor:
         db_name: str,
         node_id: Optional[str] = None,
         limit: Optional[int] = None,
+        input_overrides: Optional[Dict[str, PipelineTable]] = None,
     ) -> Dict[str, Any]:
-        result = await self.run(definition=definition, db_name=db_name)
+        result = await self.run(definition=definition, db_name=db_name, input_overrides=input_overrides)
         table = self._select_table(result, node_id)
         return self._table_to_sample(table, limit=limit)
 
@@ -77,8 +110,9 @@ class PipelineExecutor:
         node_id: Optional[str] = None,
         dataset_name: Optional[str] = None,
         store_local: bool = False,
+        input_overrides: Optional[Dict[str, PipelineTable]] = None,
     ) -> Tuple[PipelineTable, Dict[str, Any]]:
-        result = await self.run(definition=definition, db_name=db_name)
+        result = await self.run(definition=definition, db_name=db_name, input_overrides=input_overrides)
         table = self._select_table(result, node_id)
         meta: Dict[str, Any] = {"row_count": len(table.rows)}
         if store_local and self._artifact_store:
@@ -88,15 +122,24 @@ class PipelineExecutor:
             )
         return table, meta
 
-    async def run(self, *, definition: Dict[str, Any], db_name: str) -> PipelineRunResult:
-        nodes = _normalize_nodes(definition.get("nodes"))
-        edges = _normalize_edges(definition.get("edges"))
-        order = _topological_sort(nodes, edges)
-        parameters = _normalize_parameters(definition.get("parameters"))
+    async def run(
+        self,
+        *,
+        definition: Dict[str, Any],
+        db_name: str,
+        input_overrides: Optional[Dict[str, PipelineTable]] = None,
+    ) -> PipelineRunResult:
+        nodes = normalize_nodes(definition.get("nodes"))
+        edges = normalize_edges(definition.get("edges"))
+        order = topological_sort(nodes, edges, include_unordered=True)
+        parameters = normalize_parameters(definition.get("parameters"))
+        preview_meta = definition.get("__preview_meta__") or {}
+        preview_branch = preview_meta.get("branch")
 
         tables: Dict[str, PipelineTable] = {}
-        incoming_map = _build_incoming(edges)
+        incoming_map = build_incoming(edges)
 
+        schema_errors: Dict[str, List[str]] = {}
         for node_id in order:
             node = nodes[node_id]
             incoming_tables = [tables[src] for src in incoming_map.get(node_id, []) if src in tables]
@@ -104,33 +147,88 @@ class PipelineExecutor:
             metadata = node.get("metadata") or {}
 
             if node_type == "input":
-                table = await self._load_input(node, db_name)
+                if input_overrides and node_id in input_overrides:
+                    table = input_overrides[node_id]
+                else:
+                    table = await self._load_input(node, db_name, preview_branch)
             elif node_type == "output":
                 table = incoming_tables[0] if incoming_tables else PipelineTable([], [])
             else:
-                table = self._apply_transform(metadata, incoming_tables, parameters)
+                table = await self._apply_transform(metadata, incoming_tables, parameters)
+
+            check_errors = _validate_schema_checks(table, metadata.get("schemaChecks") or [])
+            if check_errors:
+                schema_errors[node_id] = check_errors
 
             tables[node_id] = table
 
+        if schema_errors:
+            raise ValueError(f"Schema checks failed: {schema_errors}")
+
         output_nodes = [node_id for node_id, node in nodes.items() if node.get("type") == "output"]
+        output_table = self._select_table(PipelineRunResult(tables=tables, output_nodes=output_nodes), None)
+
+        contract_errors = _validate_schema_contract(output_table, definition.get("schemaContract") or definition.get("schema_contract"))
+        if contract_errors:
+            raise PipelineExpectationError(f"Schema contract failed: {contract_errors}")
+
+        expectation_errors = _validate_expectations(output_table, definition.get("expectations") or [])
+        if expectation_errors:
+            raise PipelineExpectationError(f"Expectations failed: {expectation_errors}")
         return PipelineRunResult(tables=tables, output_nodes=output_nodes)
 
-    async def _load_input(self, node: Dict[str, Any], db_name: str) -> PipelineTable:
+    async def _load_input(
+        self,
+        node: Dict[str, Any],
+        db_name: str,
+        branch: Optional[str] = None,
+    ) -> PipelineTable:
         metadata = node.get("metadata") or {}
         dataset_id = metadata.get("datasetId")
+        dataset_name = metadata.get("datasetName")
         dataset = None
+        version = None
+        requested_branch = str(metadata.get("datasetBranch") or branch or "main")
+
+        fallback_raw = os.getenv("PIPELINE_FALLBACK_BRANCHES", "main")
+        fallback_candidates = [b.strip() for b in fallback_raw.split(",") if b.strip()]
+        if "main" not in fallback_candidates:
+            fallback_candidates.append("main")
+        candidates: list[str] = []
+        for candidate in [requested_branch, *fallback_candidates]:
+            if candidate and candidate not in candidates:
+                candidates.append(candidate)
+
         if dataset_id:
             dataset = await self._dataset_registry.get_dataset(dataset_id=str(dataset_id))
-        if not dataset and metadata.get("datasetName"):
-            dataset = await self._dataset_registry.get_dataset_by_name(
-                db_name=db_name, name=str(metadata.get("datasetName"))
-            )
+            if dataset:
+                version = await self._dataset_registry.get_latest_version(dataset_id=dataset.dataset_id)
+
+        if (not dataset or not version) and dataset_name:
+            dataset = None
+            version = None
+            for candidate_branch in candidates:
+                found = await self._dataset_registry.get_dataset_by_name(
+                    db_name=db_name,
+                    name=str(dataset_name),
+                    branch=candidate_branch,
+                )
+                if not found:
+                    continue
+                found_version = await self._dataset_registry.get_latest_version(dataset_id=found.dataset_id)
+                if not found_version:
+                    continue
+                dataset = found
+                version = found_version
+                break
+
         columns = _extract_schema_columns(dataset.schema_json if dataset else {})
         rows: List[Dict[str, Any]] = []
         if dataset:
-            version = await self._dataset_registry.get_latest_version(dataset_id=dataset.dataset_id)
             if version:
-                rows = _extract_sample_rows(version.sample_json)
+                rows = await self._load_rows_from_artifact(version.artifact_key) if version.artifact_key else []
+                if not rows:
+                    rows = _extract_sample_rows(version.sample_json)
                 if not columns:
                     columns = _extract_schema_columns(version.sample_json)
         if not columns:
@@ -139,7 +237,50 @@ class PipelineExecutor:
             rows = _build_sample_rows(columns, 8)
         return PipelineTable(columns=columns, rows=rows)
 
-    def _apply_transform(
+    async def _load_rows_from_artifact(self, artifact_key: Optional[str]) -> List[Dict[str, Any]]:
+        if not artifact_key:
+            return []
+        parsed = parse_s3_uri(artifact_key)
+        if not parsed or not self._storage_service:
+            return []
+        bucket, key = parsed
+        try:
+            raw_bytes = await self._storage_service.load_bytes(bucket, key)
+        except Exception:
+            return []
+        extension = os.path.splitext(key)[1].lower()
+        if extension == ".csv":
+            return _parse_csv_bytes(raw_bytes)
+        if extension in {".xlsx", ".xlsm"}:
+            return _parse_excel_bytes(raw_bytes)
+        if extension == ".json":
+            return _parse_json_bytes(raw_bytes)
+        prefix = key.rstrip("/")
+        if not prefix:
+            return []
+        prefix = f"{prefix}/"
+        try:
+            objects = await self._storage_service.list_objects(bucket, prefix=prefix)
+        except Exception:
+            return []
+        keys = [obj.get("Key") for obj in objects or [] if obj.get("Key")]
+        for candidate in keys:
+            ext = os.path.splitext(candidate)[1].lower()
+            if ext not in {".json", ".csv", ".xlsx", ".xlsm"}:
+                continue
+            try:
+                candidate_bytes = await self._storage_service.load_bytes(bucket, candidate)
+            except Exception:
+                continue
+            if ext == ".csv":
+                return _parse_csv_bytes(candidate_bytes)
+            if ext in {".xlsx", ".xlsm"}:
+                return _parse_excel_bytes(candidate_bytes)
+            if ext == ".json":
+                return _parse_json_bytes(candidate_bytes)
+        return []
+
+    async def _apply_transform(
         self,
         metadata: Dict[str, Any],
         inputs: List[PipelineTable],
@@ -147,26 +288,114 @@ class PipelineExecutor:
     ) -> PipelineTable:
         if not inputs:
             return PipelineTable([], [])
-        operation = str(metadata.get("operation") or "")
-        if operation == "join" or len(inputs) >= 2:
+        operation = normalize_operation(metadata.get("operation"))
+        if not operation and len(inputs) >= 2:
+            raise ValueError("transform has multiple inputs but no operation")
+        if operation == "join" and len(inputs) >= 2:
+            join_spec = resolve_join_spec(metadata)
             return _join_tables(
                 inputs[0],
                 inputs[1],
-                join_type=metadata.get("joinType"),
-                left_key=metadata.get("leftKey"),
-                right_key=metadata.get("rightKey"),
-                join_key=metadata.get("joinKey"),
+                join_type=join_spec.join_type,
+                left_key=join_spec.left_key,
+                right_key=join_spec.right_key,
+                allow_cross_join=join_spec.allow_cross_join,
             )
         if operation == "filter":
             return _filter_table(inputs[0], str(metadata.get("expression") or ""), parameters)
         if operation == "compute":
             return _compute_table(inputs[0], str(metadata.get("expression") or ""), parameters)
+        if operation == "explode":
+            columns = metadata.get("columns") or []
+            if columns:
+                return _explode_table(inputs[0], str(columns[0]))
+        if operation == "select":
+            columns = metadata.get("columns") or []
+            if columns:
+                return _select_columns(inputs[0], columns)
+        if operation == "drop":
+            columns = metadata.get("columns") or []
+            if columns:
+                return _drop_columns(inputs[0], columns)
+        if operation == "rename":
+            rename_map = metadata.get("rename") or {}
+            if rename_map:
+                return _rename_columns(inputs[0], rename_map)
+        if operation == "cast":
+            casts = metadata.get("casts") or []
+            if casts:
+                return _cast_columns(inputs[0], casts)
+        if operation == "udf":
+            return await self._apply_udf_transform(inputs[0], metadata)
+        if operation == "dedupe":
+            subset = metadata.get("columns") or []
+            return _dedupe_table(inputs[0], subset)
+        if operation == "sort":
+            columns = metadata.get("columns") or []
+            if columns:
+                return _sort_table(inputs[0], columns)
+        if operation == "union" and len(inputs) >= 2:
+            union_mode = normalize_union_mode(metadata)
+            return _union_tables(inputs[0], inputs[1], union_mode=union_mode)
+        if operation in {"groupBy", "aggregate"}:
+            return _group_by_table(inputs[0], metadata.get("groupBy") or [], metadata.get("aggregates") or [])
+        if operation == "pivot":
+            return _pivot_table(inputs[0], metadata.get("pivot") or {})
+        if operation == "window":
+            return _window_table(inputs[0], metadata.get("window") or {})
         return inputs[0]
 
+    async def _apply_udf_transform(self, table: PipelineTable, metadata: Dict[str, Any]) -> PipelineTable:
+        udf_code = (metadata.get("udfCode") or metadata.get("udf_code") or "").strip() or None
+        udf_id = (metadata.get("udfId") or metadata.get("udf_id") or "").strip() or None
+        udf_version = metadata.get("udfVersion") or metadata.get("udf_version")
+
+        if not udf_code and udf_id:
+            if not self._pipeline_registry:
+                raise ValueError("udf requires pipeline_registry to resolve udfId")
+            resolved_version: Optional[int] = None
+            if udf_version is not None and str(udf_version).strip():
+                try:
+                    resolved_version = int(udf_version)
+                except Exception as exc:
+                    raise ValueError(f"Invalid udfVersion: {udf_version}") from exc
+            if resolved_version is None:
+                latest = await self._pipeline_registry.get_udf_latest_version(udf_id=udf_id)
+                if not latest:
+                    raise ValueError("udf not found")
+                udf_code = latest.code
+            else:
+                version_row = await self._pipeline_registry.get_udf_version(udf_id=udf_id, version=resolved_version)
+                if not version_row:
+                    raise ValueError("udf version not found")
+                udf_code = version_row.code
+
+        if not udf_code:
+            raise ValueError("udf missing code (udfCode or udfId)")
+
+        fn = compile_row_udf(udf_code)
+        out_rows: List[Dict[str, Any]] = []
+        for row in table.rows:
+            out_rows.append(fn(dict(row)))
+
+        columns: List[str] = list(table.columns)
+        seen = set(columns)
+        for row in out_rows:
+            for key in row.keys():
+                if key not in seen:
+                    seen.add(key)
+                    columns.append(key)
+        return PipelineTable(columns=columns, rows=out_rows)
+
     def _table_to_sample(self, table: PipelineTable, *, limit: Optional[int]) -> Dict[str, Any]:
+        inferred = _infer_column_types(table)
+        columns = [{"name": name, "type": inferred.get(name, "xsd:string")} for name in table.columns]
+        rows = table.limited_rows(limit or 200)
         return {
-            "columns": [{"name": name, "type": "String"} for name in table.columns],
-            "rows": table.limited_rows(limit or 200),
+            "row_count": len(table.rows),
+            "columns": columns,
+            "rows": rows,
+            "column_stats": compute_column_stats(rows=rows, columns=columns),
         }
 
     def _select_table(self, result: PipelineRunResult, node_id: Optional[str]) -> PipelineTable:
@@ -177,69 +406,6 @@ class PipelineExecutor:
         if result.tables:
             return list(result.tables.values())[-1]
         return PipelineTable([], [])
-
-
-def _normalize_nodes(nodes_raw: Any) -> Dict[str, Dict[str, Any]]:
-    output: Dict[str, Dict[str, Any]] = {}
-    if not isinstance(nodes_raw, list):
-        return output
-    for node in nodes_raw:
-        if not isinstance(node, dict):
-            continue
-        node_id = str(node.get("id") or "")
-        if not node_id:
-            continue
-        output[node_id] = node
-    return output
-
-
-def _normalize_edges(edges_raw: Any) -> List[Dict[str, str]]:
-    edges: List[Dict[str, str]] = []
-    if not isinstance(edges_raw, list):
-        return edges
-    for edge in edges_raw:
-        if not isinstance(edge, dict):
-            continue
-        src = str(edge.get("from") or "")
-        dst = str(edge.get("to") or "")
-        if not src or not dst:
-            continue
-        edges.append({"from": src, "to": dst})
-    return edges
-
-
-def _topological_sort(nodes: Dict[str, Dict[str, Any]], edges: List[Dict[str, str]]) -> List[str]:
-    in_degree = {node_id: 0 for node_id in nodes.keys()}
-    outgoing: Dict[str, List[str]] = {node_id: [] for node_id in nodes.keys()}
-    for edge in edges:
-        src = edge["from"]
-        dst = edge["to"]
-        if src not in nodes or dst not in nodes:
-            continue
-        outgoing[src].append(dst)
-        in_degree[dst] = in_degree.get(dst, 0) + 1
-
-    queue = [node_id for node_id, count in in_degree.items() if count == 0]
-    order: List[str] = []
-    while queue:
-        node_id = queue.pop(0)
-        order.append(node_id)
-        for nxt in outgoing.get(node_id, []):
-            in_degree[nxt] -= 1
-            if in_degree[nxt] == 0:
-                queue.append(nxt)
-    # Fallback to any nodes not in order (cycle)
-    for node_id in nodes.keys():
-        if node_id not in order:
-            order.append(node_id)
-    return order
-
-
-def _build_incoming(edges: List[Dict[str, str]]) -> Dict[str, List[str]]:
-    incoming: Dict[str, List[str]] = {}
-    for edge in edges:
-        incoming.setdefault(edge["to"], []).append(edge["from"])
-    return incoming
 
 
 def _extract_schema_columns(schema: Any) -> List[str]:
@@ -299,6 +465,255 @@ def _build_sample_rows(columns: List[str], count: int) -> List[Dict[str, Any]]:
     return output
 
 
+def _group_by_table(
+    table: PipelineTable,
+    group_by: List[str],
+    aggregates: List[Dict[str, Any]],
+) -> PipelineTable:
+    if not aggregates:
+        return table
+    specs = []
+    for agg in aggregates:
+        column = str(agg.get("column") or "").strip()
+        op = str(agg.get("op") or "").lower().strip()
+        if not column or not op:
+            continue
+        alias = str(agg.get("alias") or f"{op}_{column}")
+        specs.append({"column": column, "op": op, "alias": alias})
+    if not specs:
+        return table
+
+    grouped: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+    for row in table.rows:
+        key = tuple(row.get(col) for col in group_by) if group_by else ("__all__",)
+        state = grouped.setdefault(key, {spec["alias"]: {"op": spec["op"], "sum": 0, "count": 0, "min": None, "max": None} for spec in specs})
+        for spec in specs:
+            value = row.get(spec["column"])
+            agg_state = state[spec["alias"]]
+            if spec["op"] == "count":
+                if value is not None:
+                    agg_state["count"] += 1
+            elif spec["op"] == "sum":
+                if value is not None:
+                    agg_state["sum"] += float(value)
+            elif spec["op"] == "avg":
+                if value is not None:
+                    agg_state["sum"] += float(value)
+                    agg_state["count"] += 1
+            elif spec["op"] == "min":
+                if value is not None:
+                    agg_state["min"] = value if agg_state["min"] is None else min(agg_state["min"], value)
+            elif spec["op"] == "max":
+                if value is not None:
+                    agg_state["max"] = value if agg_state["max"] is None else max(agg_state["max"], value)
+
+    rows: List[Dict[str, Any]] = []
+    for key, state in grouped.items():
+        row: Dict[str, Any] = {}
+        if group_by:
+            for idx, col in enumerate(group_by):
+                row[col] = key[idx]
+        for alias, agg_state in state.items():
+            op = agg_state["op"]
+            if op == "count":
+                row[alias] = agg_state["count"]
+            elif op == "sum":
+                row[alias] = agg_state["sum"]
+            elif op == "avg":
+                row[alias] = agg_state["sum"] / agg_state["count"] if agg_state["count"] else None
+            elif op == "min":
+                row[alias] = agg_state["min"]
+            elif op == "max":
+                row[alias] = agg_state["max"]
+        rows.append(row)
+
+    output_columns = list(group_by) + [spec["alias"] for spec in specs]
+    return PipelineTable(columns=output_columns, rows=rows)
+
+
+def _pivot_table(table: PipelineTable, pivot_meta: Dict[str, Any]) -> PipelineTable:
+    index_cols = pivot_meta.get("index") or []
+    pivot_col = pivot_meta.get("columns")
+    value_col = pivot_meta.get("values")
+    agg = str(pivot_meta.get("agg") or "sum").lower()
+    if not index_cols or not pivot_col or not value_col:
+        return table
+    result: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+    pivot_values: set[Any] = set()
+    for row in table.rows:
+        key = tuple(row.get(col) for col in index_cols)
+        pivot_key = row.get(pivot_col)
+        value = row.get(value_col)
+        if pivot_key is None:
+            continue
+        pivot_values.add(pivot_key)
+        bucket = result.setdefault(key, {"__count__": {}, "__sum__": {}})
+        counts = bucket["__count__"]
+        sums = bucket["__sum__"]
+        counts[pivot_key] = counts.get(pivot_key, 0) + 1
+        if value is not None:
+            sums[pivot_key] = sums.get(pivot_key, 0) + float(value)
+
+    columns = list(index_cols) + [str(val) for val in sorted(pivot_values, key=lambda x: str(x))]
+    rows: List[Dict[str, Any]] = []
+    for key, bucket in result.items():
+        row: Dict[str, Any] = {}
+        for idx, col in enumerate(index_cols):
+            row[col] = key[idx]
+        counts = bucket["__count__"]
+        sums = bucket["__sum__"]
+        for pivot_key in pivot_values:
+            if agg == "count":
+                row[str(pivot_key)] = counts.get(pivot_key, 0)
+            elif agg == "avg":
+                count = counts.get(pivot_key, 0)
+                row[str(pivot_key)] = sums.get(pivot_key, 0) / count if count else None
+            else:
+                row[str(pivot_key)] = sums.get(pivot_key, 0)
+        rows.append(row)
+    return PipelineTable(columns=columns, rows=rows)
+
+
+def _window_table(table: PipelineTable, window_meta: Dict[str, Any]) -> PipelineTable:
+    partition_by = window_meta.get("partitionBy") or []
+    order_by = window_meta.get("orderBy") or []
+    if not order_by:
+        return table
+    grouped: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = {}
+    for row in table.rows:
+        key = tuple(row.get(col) for col in partition_by) if partition_by else ("__all__",)
+        grouped.setdefault(key, []).append(row)
+    rows: List[Dict[str, Any]] = []
+    for key, bucket in grouped.items():
+        bucket_sorted = sorted(bucket, key=lambda r: tuple(r.get(col) for col in order_by))
+        for idx, row in enumerate(bucket_sorted, start=1):
+            next_row = dict(row)
+            next_row["row_number"] = idx
+            rows.append(next_row)
+    columns = list(table.columns)
+    if "row_number" not in columns:
+        columns.append("row_number")
+    return PipelineTable(columns=columns, rows=rows)
+
+
+def _select_columns(table: PipelineTable, columns: List[str]) -> PipelineTable:
+    cols = [col for col in columns if col in table.columns]
+    rows = [{col: row.get(col) for col in cols} for row in table.rows]
+    return PipelineTable(columns=cols, rows=rows)
+
+
+def _drop_columns(table: PipelineTable, columns: List[str]) -> PipelineTable:
+    drop = set(columns)
+    cols = [col for col in table.columns if col not in drop]
+    rows = [{col: row.get(col) for col in cols} for row in table.rows]
+    return PipelineTable(columns=cols, rows=rows)
+
+
+def _rename_columns(table: PipelineTable, rename_map: Dict[str, Any]) -> PipelineTable:
+    mapping = {str(k): str(v) for k, v in rename_map.items() if k}
+    cols = [mapping.get(col, col) for col in table.columns]
+    rows: List[Dict[str, Any]] = []
+    for row in table.rows:
+        new_row: Dict[str, Any] = {}
+        for col in table.columns:
+            new_row[mapping.get(col, col)] = row.get(col)
+        rows.append(new_row)
+    return PipelineTable(columns=cols, rows=rows)
+
+
+def _cast_columns(table: PipelineTable, casts: List[Dict[str, Any]]) -> PipelineTable:
+    def cast_value(value: Any, target: str) -> Any:
+        if value is None:
+            return None
+        if target in {"xsd:integer", "integer", "int"}:
+            try:
+                return int(value)
+            except Exception:
+                return value
+        if target in {"xsd:decimal", "decimal", "float", "double", "number"}:
+            try:
+                return float(value)
+            except Exception:
+                return value
+        if target in {"xsd:boolean", "bool", "boolean"}:
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                return value.strip().lower() in {"true", "1", "yes", "y"}
+        return value
+
+    cast_map = {str(item.get("column")): str(item.get("type")) for item in casts if item.get("column") and item.get("type")}
+    if not cast_map:
+        return table
+    rows: List[Dict[str, Any]] = []
+    for row in table.rows:
+        new_row = dict(row)
+        for column, target in cast_map.items():
+            if column in new_row:
+                new_row[column] = cast_value(new_row[column], target)
+        rows.append(new_row)
+    return PipelineTable(columns=table.columns, rows=rows)
+
+
+def _dedupe_table(table: PipelineTable, columns: List[str]) -> PipelineTable:
+    seen = set()
+    rows: List[Dict[str, Any]] = []
+    keys = columns if columns else table.columns
+    for row in table.rows:
+        key = tuple(row.get(col) for col in keys)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(row)
+    return PipelineTable(columns=table.columns, rows=rows)
+
+
+def _sort_table(table: PipelineTable, columns: List[str]) -> PipelineTable:
+    cols = [col for col in columns if col in table.columns]
+    if not cols:
+        return table
+    rows = sorted(table.rows, key=lambda row: tuple(row.get(col) for col in cols))
+    return PipelineTable(columns=table.columns, rows=rows)
+
+
+def _union_tables(left: PipelineTable, right: PipelineTable, *, union_mode: str = "strict") -> PipelineTable:
+    mode = (union_mode or "strict").strip().lower()
+    left_set = set(left.columns)
+    right_set = set(right.columns)
+
+    if mode == "strict":
+        if left_set != right_set:
+            missing_left = sorted(right_set - left_set)
+            missing_right = sorted(left_set - right_set)
+            raise ValueError(
+                "union schema mismatch (strict): "
+                f"missing_in_left={missing_left} missing_in_right={missing_right}"
+            )
+        columns = list(left.columns)
+        rows = [{col: row.get(col) for col in columns} for row in left.rows] + [
+            {col: row.get(col) for col in columns} for row in right.rows
+        ]
+        return PipelineTable(columns=columns, rows=rows)
+
+    if mode == "common_only":
+        common = [col for col in left.columns if col in right_set]
+        if not common:
+            raise ValueError("union has no common columns")
+        rows = [{col: row.get(col) for col in common} for row in left.rows] + [
+            {col: row.get(col) for col in common} for row in right.rows
+        ]
+        return PipelineTable(columns=common, rows=rows)
+
+    if mode in {"pad_missing_nulls", "pad"}:
+        columns = list(left.columns) + [col for col in right.columns if col not in left_set]
+        rows = [{col: row.get(col) for col in columns} for row in left.rows] + [
+            {col: row.get(col) for col in columns} for row in right.rows
+        ]
+        return PipelineTable(columns=columns, rows=rows)
+
+    raise ValueError(f"Invalid unionMode: {union_mode}")
+
+
 def _join_tables(
     left: PipelineTable,
     right: PipelineTable,
@@ -306,23 +721,23 @@ def _join_tables(
     left_key: Optional[str] = None,
     right_key: Optional[str] = None,
     join_key: Optional[str] = None,
+    allow_cross_join: bool = False,
 ) -> PipelineTable:
     join_type = (join_type or "inner").lower()
     candidate_key = join_key or left_key
     left_join = candidate_key
     right_join = right_key or candidate_key
     if not left_join or not right_join:
-        common = [col for col in left.columns if col in right.columns]
-        if common:
-            left_join = common[0]
-            right_join = common[0]
-    right_columns = []
-    for col in right.columns:
-        if col in left.columns:
-            right_columns.append(f"right_{col}")
+        if allow_cross_join:
+            if join_type != "cross":
+                raise ValueError("join allowCrossJoin requires joinType='cross'")
         else:
-            right_columns.append(col)
-    columns = left.columns + right_columns
+            raise ValueError("join requires leftKey/rightKey (or joinKey)")
+    right_column_map: List[Tuple[str, str]] = []
+    for col in right.columns:
+        mapped = f"right_{col}" if col in left.columns else col
+        right_column_map.append((col, mapped))
+    columns = left.columns + [mapped for _, mapped in right_column_map]
 
     rows: List[Dict[str, Any]] = []
     if left_join and right_join:
@@ -335,48 +750,41 @@ def _join_tables(
             matches = right_index.get(key) or []
             if matches:
                 for idx, match in matches:
-                    rows.append(_merge_rows(row, match, right_columns))
+                    rows.append(_merge_rows(row, match, right_column_map))
                     matched_right.add(idx)
             elif join_type in {"left", "full"}:
-                rows.append(_merge_rows(row, None, right_columns))
+                rows.append(_merge_rows(row, None, right_column_map))
         if join_type in {"right", "full"}:
             for idx, row in enumerate(right.rows):
                 if idx not in matched_right:
-                    rows.append(_merge_rows(None, row, right_columns))
+                    rows.append(_merge_rows(None, row, right_column_map))
         return PipelineTable(columns=columns, rows=rows)
 
-    max_len = max(len(left.rows), len(right.rows))
-    for idx in range(max_len):
-        left_row = left.rows[idx] if idx < len(left.rows) else None
-        right_row = right.rows[idx] if idx < len(right.rows) else None
-        if left_row is None and right_row is None:
-            continue
-        if left_row is None and join_type in {"right", "full"}:
-            rows.append(_merge_rows(None, right_row, right_columns))
-            continue
-        if right_row is None and join_type in {"left", "full"}:
-            rows.append(_merge_rows(left_row, None, right_columns))
-            continue
-        if left_row and right_row:
-            rows.append(_merge_rows(left_row, right_row, right_columns))
+    for left_row in left.rows:
+        for right_row in right.rows:
+            rows.append(_merge_rows(left_row, right_row, right_column_map))
     return PipelineTable(columns=columns, rows=rows)
 
 
-def _merge_rows(left: Optional[Dict[str, Any]], right: Optional[Dict[str, Any]], right_columns: List[str]) -> Dict[str, Any]:
+def _merge_rows(
+    left: Optional[Dict[str, Any]],
+    right: Optional[Dict[str, Any]],
+    right_column_map: List[Tuple[str, str]],
+) -> Dict[str, Any]:
     output: Dict[str, Any] = {}
     if left:
         output.update(left)
     if right:
-        for col, mapped in zip(right.keys(), right_columns):
+        for col, mapped in right_column_map:
             output[mapped] = right.get(col)
     else:
-        for mapped in right_columns:
+        for _, mapped in right_column_map:
             output[mapped] = None
     return output
 
 
 def _filter_table(table: PipelineTable, expression: str, parameters: Dict[str, Any]) -> PipelineTable:
-    expression = _apply_parameters((expression or "").strip(), parameters)
+    expression = apply_parameters((expression or "").strip(), parameters)
     if not expression:
         return table
     parsed = _parse_filter(expression, parameters)
@@ -397,6 +805,10 @@ def _parse_filter(expression: str, parameters: Dict[str, Any]) -> Optional[Tuple
         if op in expression:
             left, right = expression.split(op, 1)
             right_literal = right.strip()
+            if right_literal.startswith("$"):
+                param_name = right_literal[1:]
+                if param_name in parameters:
+                    return left.strip(), op, parameters[param_name]
             if right_literal in parameters:
                 return left.strip(), op, parameters[right_literal]
             return left.strip(), op, _parse_literal(right_literal)
@@ -428,7 +840,7 @@ def _compare(left: Any, op: str, right: Any) -> bool:
 
 
 def _compute_table(table: PipelineTable, expression: str, parameters: Dict[str, Any]) -> PipelineTable:
-    expression = _apply_parameters((expression or "").strip(), parameters)
+    expression = apply_parameters((expression or "").strip(), parameters)
     if not expression:
         return table
     target, expr = _parse_assignment(expression)
@@ -444,6 +856,29 @@ def _compute_table(table: PipelineTable, expression: str, parameters: Dict[str, 
     return PipelineTable(columns=columns, rows=rows)
 
 
+def _explode_table(table: PipelineTable, column: str) -> PipelineTable:
+    column = (column or "").strip()
+    if not column:
+        raise ValueError("explode requires a target column")
+    if column not in table.columns:
+        raise ValueError(f"explode missing column: {column}")
+
+    rows: list[dict[str, Any]] = []
+    for row in table.rows:
+        value = row.get(column)
+        if value is None:
+            continue
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                next_row = dict(row)
+                next_row[column] = item
+                rows.append(next_row)
+            continue
+        raise ValueError(f"explode expects array/list values for column '{column}'")
+
+    return PipelineTable(columns=table.columns, rows=rows)
+
+
 def _parse_assignment(expression: str) -> Tuple[str, str]:
     if "=" in expression:
         left, right = expression.split("=", 1)
@@ -455,6 +890,8 @@ def _safe_eval(expression: str, row: Dict[str, Any], parameters: Dict[str, Any])
     expression = expression.strip()
     if not expression:
         return None
+    if expression.startswith("$"):
+        return parameters.get(expression[1:])
     variables = {**parameters, **row}
     if expression in variables:
         return variables.get(expression)
@@ -512,38 +949,6 @@ def _eval_ast(node: ast.AST, variables: Dict[str, Any]) -> Any:
     return None
 
 
-def _normalize_parameters(parameters_raw: Any) -> Dict[str, Any]:
-    if not isinstance(parameters_raw, list):
-        return {}
-    output: Dict[str, Any] = {}
-    for param in parameters_raw:
-        if not isinstance(param, dict):
-            continue
-        name = str(param.get("name") or "").strip()
-        if not name:
-            continue
-        value = param.get("value")
-        output[name] = value
-    return output
-
-
-def _apply_parameters(expression: str, parameters: Dict[str, Any]) -> str:
-    if not parameters:
-        return expression
-    output = expression
-    for name, value in parameters.items():
-        token = f"${name}"
-        if token in output:
-            replacement = value
-            if isinstance(value, str) and not value.isnumeric() and not value.startswith("'"):
-                replacement = f"'{value}'"
-            output = output.replace(token, str(replacement))
-        brace_token = f"{{{{{name}}}}}"
-        if brace_token in output:
-            output = output.replace(brace_token, str(value))
-    return output
-
-
 def _parse_literal(raw: str) -> Any:
     if not raw:
         return raw
@@ -555,3 +960,272 @@ def _parse_literal(raw: str) -> Any:
         return int(raw)
     except Exception:
         return raw
+
+
+def _parse_csv_bytes(raw_bytes: bytes) -> List[Dict[str, Any]]:
+    try:
+        text = raw_bytes.decode("utf-8", errors="replace")
+    except Exception:
+        return []
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return []
+    delimiter = ","
+    sample = lines[0]
+    if "\t" in sample:
+        delimiter = "\t"
+    elif ";" in sample:
+        delimiter = ";"
+    header = [cell.strip() or f"column_{idx + 1}" for idx, cell in enumerate(sample.split(delimiter))]
+    rows: List[Dict[str, Any]] = []
+    for line in lines[1:201]:
+        cells = line.split(delimiter)
+        row: Dict[str, Any] = {}
+        for idx, key in enumerate(header):
+            row[key] = cells[idx].strip() if idx < len(cells) else ""
+        rows.append(row)
+    return rows
+
+
+def _parse_excel_bytes(raw_bytes: bytes) -> List[Dict[str, Any]]:
+    try:
+        import pandas as pd
+        from io import BytesIO
+
+        frame = pd.read_excel(BytesIO(raw_bytes))
+        return frame.fillna("").to_dict(orient="records")[:200]
+    except Exception:
+        return []
+
+
+def _parse_json_bytes(raw_bytes: bytes) -> List[Dict[str, Any]]:
+    try:
+        payload = json.loads(raw_bytes.decode("utf-8"))
+    except Exception:
+        text = raw_bytes.decode("utf-8", errors="replace")
+        rows: List[Dict[str, Any]] = []
+        for line in text.splitlines():
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(item, dict):
+                rows.append(item)
+            if len(rows) >= 200:
+                break
+        return rows
+    if isinstance(payload, dict):
+        rows = payload.get("rows") or payload.get("data")
+        if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+            return rows[:200]
+        if isinstance(rows, list) and rows and isinstance(rows[0], list):
+            columns = _extract_schema_columns(payload)
+            output = []
+            for row in rows[:200]:
+                output.append({columns[idx] if idx < len(columns) else f"col_{idx}": value for idx, value in enumerate(row)})
+            return output
+    if isinstance(payload, list) and payload and isinstance(payload[0], dict):
+        return payload[:200]
+    return []
+
+
+def _infer_column_types(table: PipelineTable) -> Dict[str, str]:
+    inferred: Dict[str, str] = {}
+    for col in table.columns:
+        values = [row.get(col) for row in table.rows if row.get(col) is not None]
+        sample = values[:50]
+        inferred[col] = _infer_type_from_values(sample)
+    return inferred
+
+
+def _infer_type_from_values(values: List[Any]) -> str:
+    if not values:
+        return "xsd:string"
+    def is_bool(value: Any) -> bool:
+        if isinstance(value, bool):
+            return True
+        if isinstance(value, str):
+            return value.strip().lower() in {"true", "false"}
+        return False
+
+    def is_int(value: Any) -> bool:
+        if isinstance(value, bool):
+            return False
+        if isinstance(value, int):
+            return True
+        if isinstance(value, str):
+            try:
+                int(value.strip())
+                return True
+            except Exception:
+                return False
+        return False
+
+    def is_decimal(value: Any) -> bool:
+        if isinstance(value, bool):
+            return False
+        if isinstance(value, float):
+            return True
+        if isinstance(value, str):
+            try:
+                float(value.strip())
+                return True
+            except Exception:
+                return False
+        return False
+
+    def is_datetime(value: Any) -> bool:
+        if isinstance(value, datetime):
+            return True
+        if isinstance(value, str):
+            try:
+                datetime.fromisoformat(value.replace("Z", "+00:00"))
+                return True
+            except Exception:
+                return False
+        return False
+
+    if all(is_bool(value) for value in values):
+        return "xsd:boolean"
+    if all(is_int(value) for value in values):
+        return "xsd:integer"
+    if all(is_decimal(value) for value in values):
+        return "xsd:decimal"
+    if all(is_datetime(value) for value in values):
+        return "xsd:dateTime"
+    return "xsd:string"
+
+
+def _validate_schema_checks(table: PipelineTable, checks: List[Dict[str, Any]]) -> List[str]:
+    specs = normalize_schema_checks(checks)
+    if not specs:
+        return []
+    columns = set(table.columns)
+    inferred = _infer_column_types(table)
+    errors: List[str] = []
+
+    for check in specs:
+        rule = check.rule
+        column = check.column
+        value = check.value
+        if rule in {"required", "exists"}:
+            if column not in columns:
+                errors.append(f"missing column {column}")
+        if rule in {"type", "dtype"}:
+            expected = normalize_schema_type(value)
+            if column not in columns:
+                errors.append(f"missing column {column}")
+            elif expected:
+                actual = normalize_schema_type(inferred.get(column))
+                if actual and actual != expected:
+                    errors.append(f"{column} type {actual} != {expected}")
+        if rule in {"not_null", "non_null"}:
+            if column not in columns:
+                errors.append(f"missing column {column}")
+            elif any(row.get(column) in (None, "") for row in table.rows):
+                errors.append(f"{column} has nulls")
+        if rule == "min":
+            threshold = normalize_number(value)
+            if threshold is not None:
+                values = [normalize_number(row.get(column)) for row in table.rows]
+                values = [value for value in values if value is not None]
+                if values and min(values) < threshold:
+                    errors.append(f"{column} min < {threshold}")
+        if rule == "max":
+            threshold = normalize_number(value)
+            if threshold is not None:
+                values = [normalize_number(row.get(column)) for row in table.rows]
+                values = [value for value in values if value is not None]
+                if values and max(values) > threshold:
+                    errors.append(f"{column} max > {threshold}")
+        if rule == "regex":
+            pattern = str(value or "").strip()
+            if pattern:
+                try:
+                    import re
+                    regex = re.compile(pattern)
+                    if any(not regex.search(str(row.get(column) or "")) for row in table.rows):
+                        errors.append(f"{column} regex mismatch")
+                except re.error:
+                    errors.append(f"{column} regex invalid")
+    return errors
+
+
+def _validate_expectations(table: PipelineTable, expectations: Iterable[Dict[str, Any]]) -> List[str]:
+    errors: List[str] = []
+    specs = normalize_expectations(list(expectations))
+    if not specs:
+        return errors
+
+    total_count = len(table.rows)
+
+    for exp in specs:
+        rule = exp.rule
+        column = exp.column
+        value = exp.value
+        if rule == "row_count_min" and value is not None:
+            if total_count < int(value):
+                errors.append(f"row_count_min failed: {value}")
+        if rule == "row_count_max" and value is not None:
+            if total_count > int(value):
+                errors.append(f"row_count_max failed: {value}")
+        if rule in {"not_null", "non_null"} and column:
+            if any(row.get(column) in (None, "") for row in table.rows):
+                errors.append(f"not_null failed: {column}")
+        if rule == "non_empty" and column:
+            if any(str(row.get(column) or "").strip() == "" for row in table.rows):
+                errors.append(f"non_empty failed: {column}")
+        if rule == "unique" and column:
+            values = [row.get(column) for row in table.rows]
+            if len(set(values)) != len(values):
+                errors.append(f"unique failed: {column}")
+        if rule in {"min", "max"} and column:
+            threshold = normalize_number(value)
+            if threshold is None:
+                continue
+            numbers = [normalize_number(row.get(column)) for row in table.rows]
+            numbers = [num for num in numbers if num is not None]
+            if not numbers:
+                continue
+            if rule == "min" and min(numbers) < threshold:
+                errors.append(f"min failed: {column} < {threshold}")
+            if rule == "max" and max(numbers) > threshold:
+                errors.append(f"max failed: {column} > {threshold}")
+        if rule == "regex" and column and value:
+            pattern = str(value)
+            try:
+                import re
+                regex = re.compile(pattern)
+                if any(not regex.search(str(row.get(column) or "")) for row in table.rows):
+                    errors.append(f"regex failed: {column}")
+            except re.error:
+                errors.append(f"regex invalid: {pattern}")
+        if rule == "in_set" and column:
+            allowed = normalize_value_list(value)
+            if allowed:
+                if any(row.get(column) not in allowed for row in table.rows):
+                    errors.append(f"in_set failed: {column}")
+    return errors
+
+
+def _validate_schema_contract(table: PipelineTable, contract: Any) -> List[str]:
+    specs = normalize_schema_contract(contract)
+    if not specs:
+        return []
+    errors: List[str] = []
+    column_set = set(table.columns)
+    inferred = _infer_column_types(table)
+
+    for item in specs:
+        column = item.column
+        if column not in column_set:
+            if item.required:
+                errors.append(f"schema contract missing column: {column}")
+            continue
+        if item.expected_type:
+            actual = normalize_schema_type(inferred.get(column))
+            if actual and actual != item.expected_type:
+                errors.append(f"schema contract type mismatch: {column} {actual} != {item.expected_type}")
+    return errors

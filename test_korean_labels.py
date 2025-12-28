@@ -4,18 +4,27 @@ Focused test for Korean label preservation
 """
 import requests
 import json
+import os
 
 BASE_URL = "http://localhost:8000/api/v1"
 DB_NAME = "korean_label_test"
+ADMIN_TOKEN = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "").strip()
+HEADERS = {"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}
+if not ADMIN_TOKEN:
+    raise RuntimeError("ADMIN_TOKEN is required for korean label tests")
 
 def setup():
     """Setup test database"""
     try:
-        requests.delete(f"{BASE_URL}/database/{DB_NAME}")
+        requests.delete(f"{BASE_URL}/database/{DB_NAME}", headers=HEADERS)
     except:
         pass
     
-    response = requests.post(f"{BASE_URL}/database/create", json={"name": DB_NAME})
+    response = requests.post(
+        f"{BASE_URL}/database/create",
+        json={"name": DB_NAME},
+        headers=HEADERS,
+    )
     print(f"Database creation: {response.status_code}")
     return response.status_code == 200
 
@@ -39,7 +48,11 @@ def test_relationship_labels():
     }
     
     print("Creating Category class...")
-    response = requests.post(f"{BASE_URL}/ontology/{DB_NAME}/create", json=category_data)
+    response = requests.post(
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
+        json=category_data,
+        headers=HEADERS,
+    )
     print(f"Category creation: {response.status_code}")
     if response.status_code != 200:
         print(f"Category error: {response.text}")
@@ -70,7 +83,11 @@ def test_relationship_labels():
     }
     
     print("Creating Product class with explicit relationship...")
-    response = requests.post(f"{BASE_URL}/ontology/{DB_NAME}/create", json=product_data)
+    response = requests.post(
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
+        json=product_data,
+        headers=HEADERS,
+    )
     print(f"Product creation: {response.status_code}")
     
     if response.status_code != 200:
@@ -79,7 +96,7 @@ def test_relationship_labels():
     
     # Retrieve and check
     print("Retrieving Product class...")
-    response = requests.get(f"{BASE_URL}/ontology/{DB_NAME}/Product")
+    response = requests.get(f"{BASE_URL}/database/{DB_NAME}/ontology/Product", headers=HEADERS)
     
     if response.status_code == 200:
         data = response.json()

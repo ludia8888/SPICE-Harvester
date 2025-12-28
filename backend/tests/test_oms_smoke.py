@@ -28,10 +28,9 @@ from tests.utils.auth import oms_auth_headers
 
 
 if os.getenv("RUN_LIVE_OMS_SMOKE", "").strip().lower() not in {"1", "true", "yes", "on"}:
-    pytest.skip(
-        "Live OMS smoke test disabled by default (it creates/deletes real databases). "
-        "Set RUN_LIVE_OMS_SMOKE=true to enable.",
-        allow_module_level=True,
+    raise RuntimeError(
+        "RUN_LIVE_OMS_SMOKE must be enabled for this test run. "
+        "Set RUN_LIVE_OMS_SMOKE=true."
     )
 
 
@@ -73,7 +72,7 @@ async def _get_write_side_last_sequence(*, aggregate_type: str, aggregate_id: st
         candidates.append(os.getenv("POSTGRES_URL"))
     candidates.extend(
         [
-            "postgresql://spiceadmin:spicepass123@localhost:5433/spicedb",
+            "postgresql://spiceadmin:spicepass123@localhost:55433/spicedb",
             "postgresql://spiceadmin:spicepass123@localhost:5432/spicedb",
         ]
     )

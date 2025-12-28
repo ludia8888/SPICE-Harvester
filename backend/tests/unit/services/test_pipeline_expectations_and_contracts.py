@@ -1,0 +1,38 @@
+import pytest
+
+from shared.services.pipeline_executor import PipelineTable, _validate_expectations, _validate_schema_contract
+
+
+@pytest.mark.unit
+def test_expectations_unique_detects_duplicate_primary_key() -> None:
+    table = PipelineTable(columns=["id", "value"], rows=[{"id": 1, "value": "a"}, {"id": 1, "value": "b"}])
+    errors = _validate_expectations(table, [{"rule": "unique", "column": "id"}])
+
+    assert errors == ["unique failed: id"]
+
+
+@pytest.mark.unit
+def test_expectations_row_count_bounds() -> None:
+    table = PipelineTable(columns=["id"], rows=[{"id": 1}, {"id": 2}])
+
+    errors = _validate_expectations(table, [{"rule": "row_count_min", "value": 3}])
+    assert errors == ["row_count_min failed: 3"]
+
+    errors = _validate_expectations(table, [{"rule": "row_count_max", "value": 1}])
+    assert errors == ["row_count_max failed: 1"]
+
+
+@pytest.mark.unit
+def test_schema_contract_missing_required_column_is_reported() -> None:
+    table = PipelineTable(columns=["id"], rows=[{"id": 1}])
+    errors = _validate_schema_contract(table, [{"column": "missing_col", "type": "xsd:string", "required": True}])
+
+    assert errors == ["schema contract missing column: missing_col"]
+
+
+@pytest.mark.unit
+def test_schema_contract_type_mismatch_is_reported() -> None:
+    table = PipelineTable(columns=["amount"], rows=[{"amount": 1}, {"amount": 2}])
+    errors = _validate_schema_contract(table, [{"column": "amount", "type": "xsd:string"}])
+
+    assert errors == ["schema contract type mismatch: amount xsd:integer != xsd:string"]

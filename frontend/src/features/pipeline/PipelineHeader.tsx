@@ -1,4 +1,4 @@
-import { Button, Icon, Menu, MenuItem, Popover, Tag } from '@blueprintjs/core'
+import { Button, Icon, Menu, MenuDivider, MenuItem, Popover, Tag } from '@blueprintjs/core'
 import type { PipelineMode } from './pipelineTypes'
 
 type HeaderCopy = {
@@ -23,6 +23,10 @@ type HeaderCopy = {
     saveMenu: string
     noPipelines: string
     noBranches: string
+    createBranch: string
+    archiveBranch: string
+    restoreBranch: string
+    archivedLabel: string
 }
 
 type HeaderProps = {
@@ -32,6 +36,7 @@ type HeaderProps = {
     mode: PipelineMode
     branch: string
     branches: string[]
+    branchArchived: boolean
     canUndo: boolean
     canRedo: boolean
     isDirty: boolean
@@ -48,6 +53,8 @@ type HeaderProps = {
     onOpenHelp: () => void
     onCreatePipeline: () => void
     onOpenCommandDrawer: () => void
+    onArchiveBranch: () => void
+    onRestoreBranch: () => void
 }
 
 export const PipelineHeader = ({
@@ -57,6 +64,7 @@ export const PipelineHeader = ({
     mode,
     branch,
     branches,
+    branchArchived,
     activeCommandCount,
     copy,
     canUndo,
@@ -73,6 +81,8 @@ export const PipelineHeader = ({
     onOpenHelp,
     onCreatePipeline,
     onOpenCommandDrawer,
+    onArchiveBranch,
+    onRestoreBranch,
 }: HeaderProps) => {
     const projectLabel = dbName || copy.projectFallback
     const pipelineLabel = pipelineName || copy.pipelineFallback
@@ -99,9 +109,24 @@ export const PipelineHeader = ({
                 <MenuItem disabled text={copy.noBranches} />
             ) : (
                 branches.map((name) => (
-                    <MenuItem key={name} text={name} onClick={() => onBranchSelect(name)} />
+                    <MenuItem
+                        key={name}
+                        text={name === '__create__' ? copy.createBranch : name}
+                        icon={name === '__create__' ? 'add' : undefined}
+                        onClick={() => onBranchSelect(name)}
+                    />
                 ))
             )}
+            {branch !== 'main' ? (
+                <>
+                    <MenuDivider />
+                    <MenuItem
+                        icon={branchArchived ? 'refresh' : 'archive'}
+                        text={branchArchived ? copy.restoreBranch : copy.archiveBranch}
+                        onClick={branchArchived ? onRestoreBranch : onArchiveBranch}
+                    />
+                </>
+            ) : null}
         </Menu>
     )
 
@@ -165,21 +190,32 @@ export const PipelineHeader = ({
                         <button className="pipeline-pill" type="button">
                             <Icon icon="git-branch" size={12} />
                             <span>{branch}</span>
+                            {branchArchived ? (
+                                <Tag minimal intent="warning" style={{ marginLeft: 6 }}>
+                                    {copy.archivedLabel}
+                                </Tag>
+                            ) : null}
                             <Icon icon="caret-down" size={12} />
                         </button>
                     </Popover>
-                    <button className="pipeline-action-btn" type="button" onClick={onSave}>
+                    <button className="pipeline-action-btn" type="button" onClick={onSave} disabled={branchArchived}>
                         <span className={`pipeline-save-status ${isDirty ? 'is-dirty' : 'is-saved'}`} />
                         {copy.save}
                     </button>
                 </div>
                 <div className="pipeline-deliver">
                     <div className="pipeline-deliver-actions">
-                        <button className="pipeline-action-btn primary" type="button" onClick={onDeploy}>
+                        <button className="pipeline-action-btn primary" type="button" onClick={onDeploy} disabled={branchArchived}>
                             {copy.deploy}
                             <Icon icon="caret-down" size={12} />
                         </button>
-                        <button className="pipeline-icon-btn" type="button" aria-label={copy.deploySettings} onClick={onOpenDeploySettings}>
+                        <button
+                            className="pipeline-icon-btn"
+                            type="button"
+                            aria-label={copy.deploySettings}
+                            onClick={onOpenDeploySettings}
+                            disabled={branchArchived}
+                        >
                             <Icon icon="cog" size={12} />
                         </button>
                     </div>

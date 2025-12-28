@@ -8,7 +8,10 @@ reproduce past decisions under the semantic contract that was used at the time.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, Optional, Tuple
+
+from shared.utils.commit_utils import coerce_commit_id
 
 
 def normalize_ontology_version(value: Any) -> Optional[Dict[str, str]]:
@@ -74,3 +77,29 @@ def split_ref_commit(value: Any) -> Tuple[Optional[str], Optional[str]]:
         return None, None
     return ont.get("ref"), ont.get("commit")
 
+
+async def resolve_ontology_version(
+    terminus: Any,
+    *,
+    db_name: str,
+    branch: str,
+    logger: Optional[logging.Logger] = None,
+) -> Dict[str, str]:
+    """
+    Best-effort ontology semantic contract stamp (ref + commit).
+
+    terminus is expected to expose version_control_service.list_branches(db_name).
+    """
+    commit: Optional[str] = None
+    if not terminus:
+        return build_ontology_version(branch=branch, commit=None)
+    try:
+        branches = await terminus.version_control_service.list_branches(db_name)
+        for item in branches or []:
+            if isinstance(item, dict) and item.get("name") == branch:
+                commit = coerce_commit_id(item.get("head"))
+                break
+    except Exception as exc:
+        if logger:
+            logger.debug(f"Failed to resolve ontology version (db={db_name}, branch={branch}): {exc}")
+    return build_ontology_version(branch=branch, commit=commit)

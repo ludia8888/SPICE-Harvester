@@ -23,12 +23,18 @@ export const qk = {
     ['bff', 'sheets', 'spreadsheets', connectionId, { query: query ?? null, lang: language }] as const,
   googleSheetsWorksheets: (connectionId: string, sheetId: string, language: Language) =>
     ['bff', 'sheets', 'worksheets', connectionId, sheetId, { lang: language }] as const,
-  pipelines: (dbName: string, language: Language) =>
-    ['bff', 'pipelines', dbName, { lang: language }] as const,
-  pipeline: (pipelineId: string, language: Language) =>
-    ['bff', 'pipelines', pipelineId, { lang: language }] as const,
-  datasets: (dbName: string, language: Language) =>
-    ['bff', 'pipelines', 'datasets', dbName, { lang: language }] as const,
+  pipelines: (dbName: string, language: Language, branch?: string) =>
+    ['bff', 'pipelines', dbName, { branch: branch ?? null, lang: language }] as const,
+  pipelineProposals: (dbName: string, language: Language, branch?: string) =>
+    ['bff', 'pipelines', 'proposals', dbName, { branch: branch ?? null, lang: language }] as const,
+  pipelineBranches: (dbName: string, language: Language) =>
+    ['bff', 'pipelines', 'branches', dbName, { lang: language }] as const,
+  pipeline: (pipelineId: string, language: Language, branch?: string | null) =>
+    ['bff', 'pipelines', pipelineId, { branch: branch ?? null, lang: language }] as const,
+  pipelineRuns: (pipelineId: string, language: Language, limit?: number) =>
+    ['bff', 'pipelines', pipelineId, 'runs', { limit: limit ?? 50, lang: language }] as const,
+  datasets: (dbName: string, language: Language, branch?: string | null) =>
+    ['bff', 'pipelines', 'datasets', dbName, { branch: branch ?? null, lang: language }] as const,
   instances: (dbName: string, classId: string, language: Language, params: Record<string, unknown>) =>
     ['bff', 'instances', dbName, classId, { ...params, lang: language }] as const,
   instance: (dbName: string, classId: string, instanceId: string, language: Language) =>

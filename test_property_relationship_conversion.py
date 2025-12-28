@@ -5,22 +5,28 @@ Property → Relationship 자동 변환 및 ObjectProperty 저장 확인
 """
 import requests
 import json
+import os
 
 BASE_URL = "http://localhost:8000/api/v1"
 DB_NAME = "spice_relationship_test"
+ADMIN_TOKEN = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "").strip()
+HEADERS = {"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}
+if not ADMIN_TOKEN:
+    raise RuntimeError("ADMIN_TOKEN is required for relationship conversion tests")
 
 def setup_database():
     """테스트용 데이터베이스 생성"""
     # 기존 DB 삭제
     try:
-        requests.delete(f"{BASE_URL}/database/{DB_NAME}")
+        requests.delete(f"{BASE_URL}/database/{DB_NAME}", headers=HEADERS)
     except:
         pass
     
     # 새 DB 생성
     response = requests.post(
         f"{BASE_URL}/database/create",
-        json={"name": DB_NAME}
+        json={"name": DB_NAME},
+        headers=HEADERS,
     )
     print(f"데이터베이스 생성: {response.status_code}")
 
@@ -49,8 +55,9 @@ def test_property_to_relationship_conversion():
     }
     
     response = requests.post(
-        f"{BASE_URL}/ontology/{DB_NAME}/create",
-        json=customer_data
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
+        json=customer_data,
+        headers=HEADERS,
     )
     print(f"\nCustomer 클래스 생성: {response.status_code}")
     if response.status_code != 200:
@@ -77,8 +84,9 @@ def test_property_to_relationship_conversion():
     }
     
     response = requests.post(
-        f"{BASE_URL}/ontology/{DB_NAME}/create",
-        json=product_data
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
+        json=product_data,
+        headers=HEADERS,
     )
     print(f"Product 클래스 생성: {response.status_code}")
     
@@ -98,8 +106,9 @@ def test_property_to_relationship_conversion():
     }
     
     response = requests.post(
-        f"{BASE_URL}/ontology/{DB_NAME}/create",
-        json=status_data
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
+        json=status_data,
+        headers=HEADERS,
     )
     print(f"OrderStatus 클래스 생성: {response.status_code}")
     
@@ -124,8 +133,9 @@ def test_property_to_relationship_conversion():
     }
     
     response = requests.post(
-        f"{BASE_URL}/ontology/{DB_NAME}/create",
-        json=department_data
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
+        json=department_data,
+        headers=HEADERS,
     )
     print(f"Department 클래스 생성: {response.status_code}")
     
@@ -155,7 +165,7 @@ def test_property_to_relationship_conversion():
     }
     
     response = requests.post(
-        f"{BASE_URL}/ontology/{DB_NAME}/create",
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
         json=project_data
     )
     print(f"Project 클래스 생성: {response.status_code}")
@@ -206,8 +216,9 @@ def test_property_to_relationship_conversion():
     print(f"\n전송 데이터:\n{json.dumps(order_data, indent=2, ensure_ascii=False)}")
     
     response = requests.post(
-        f"{BASE_URL}/ontology/{DB_NAME}/create",
-        json=order_data
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
+        json=order_data,
+        headers=HEADERS,
     )
     
     print(f"\nOrderWithRelations 클래스 생성: {response.status_code}")
@@ -233,7 +244,7 @@ def test_class_validation():
     print("\n\n=== 클래스 스키마 검증 ===")
     
     # OrderWithRelations 클래스 조회
-    response = requests.get(f"{BASE_URL}/ontology/{DB_NAME}/OrderWithRelations")
+    response = requests.get(f"{BASE_URL}/database/{DB_NAME}/ontology/OrderWithRelations", headers=HEADERS)
     if response.status_code == 200:
         data = response.json()
         print(f"\nOrderWithRelations 클래스 조회 성공")
@@ -311,8 +322,9 @@ def test_mixed_approach():
     }
     
     response = requests.post(
-        f"{BASE_URL}/ontology/{DB_NAME}/create",
-        json=employee_data
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
+        json=employee_data,
+        headers=HEADERS,
     )
     
     print(f"\nEmployee 클래스 생성: {response.status_code}")
@@ -339,8 +351,9 @@ def test_query_with_relationships():
     }
     
     response = requests.post(
-        f"{BASE_URL}/ontology/{DB_NAME}/query",
-        json=query
+        f"{BASE_URL}/database/{DB_NAME}/ontology/query",
+        json=query,
+        headers=HEADERS,
     )
     
     if response.status_code == 200:

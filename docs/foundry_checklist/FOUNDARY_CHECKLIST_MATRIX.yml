@@ -1,0 +1,1083 @@
+- id: CL-001
+  priority: P0
+  original_text: "•\t☐ 그래프 캔버스에서 파이프라인을 작성할 수 있다 (입력→변환→출력의 노드 연결)."
+  description: 'Korean requirement: 그래프 캔버스에서 파이프라인을 작성할 수 있다 (입력→변환→출력의 노드 연결).'
+  verification:
+    type: e2e
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/foundry_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-live.spec.ts
+    tests:
+      - frontend/tests/e2e/pipeline-builder-live.spec.ts
+    artifacts:
+      - docs/foundry_checklist/evidence/e2e_test.log
+      - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png
+      - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/e2e_test.log
+    - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png
+    - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip
+- id: CL-002
+  priority: P0
+  original_text: "•\t☐ 폼(설정 패널)에서 변환 파라미터를 구성할 수 있다."
+  description: 'Korean requirement: 폼(설정 패널)에서 변환 파라미터를 구성할 수 있다.'
+  verification:
+    type: e2e
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/foundry_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-live.spec.ts
+    tests:
+      - frontend/tests/e2e/pipeline-builder-live.spec.ts
+    artifacts:
+      - docs/foundry_checklist/evidence/e2e_test.log
+      - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png
+      - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/e2e_test.log
+    - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png
+    - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip
+- id: CL-003
+  priority: P0
+  original_text: "•\t☐ 작성 중 즉시 피드백(실시간 검증) 제공: 예) 조인 키 후보, 컬럼 캐스팅 제안."
+  description: 'Korean requirement: 작성 중 즉시 피드백(실시간 검증) 제공: 예) 조인 키 후보, 컬럼 캐스팅 제안.'
+  verification:
+    type: e2e
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/foundry_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-live.spec.ts
+    tests:
+      - frontend/tests/e2e/pipeline-builder-live.spec.ts
+    artifacts:
+      - docs/foundry_checklist/evidence/e2e_test.log
+      - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png
+      - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/e2e_test.log
+    - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png
+    - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip
+- id: CL-004
+  priority: P0
+  original_text: "•\t☐ 대규모 파이프라인에서도 편집/탐색이 유지된다(관리 기능 포함)."
+  description: 'Korean requirement: 대규모 파이프라인에서도 편집/탐색이 유지된다(관리 기능 포함).'
+  verification:
+    type: e2e
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/foundry_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-large-graph.spec.ts 2>&1 | tee ../docs/foundry_checklist/evidence/e2e_large_graph.log
+    tests:
+      - frontend/tests/e2e/pipeline-builder-large-graph.spec.ts
+    artifacts:
+      - docs/foundry_checklist/evidence/e2e_large_graph.log
+      - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-large-f46a1-eline-via-search-focus-mode/test-finished-1.png
+      - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-large-f46a1-eline-via-search-focus-mode/trace.zip
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/e2e_large_graph.log
+    - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-large-f46a1-eline-via-search-focus-mode/test-finished-1.png
+    - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-large-f46a1-eline-via-search-focus-mode/trace.zip
+- id: CL-005
+  priority: P0
+  original_text: "•\t☐ 스키마(컬럼 타입) 추론/전파가 변환 노드를 통과하며 유지된다."
+  description: 'Korean requirement: 스키마(컬럼 타입) 추론/전파가 변환 노드를 통과하며 유지된다.'
+  verification:
+    type: unit
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - pytest -q backend/tests/unit/services/test_pipeline_executor_preview.py 2>&1 | tee docs/foundry_checklist/evidence/backend_cl005_test.log
+    tests:
+      - backend/tests/unit/services/test_pipeline_executor_preview.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_cl005_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_cl005_test.log
+- id: CL-006
+  priority: P0
+  original_text: "•\t☐ 타입 불일치 연산을 즉시 차단/경고한다(작성 단계)."
+  description: 'Korean requirement: 타입 불일치 연산을 즉시 차단/경고한다(작성 단계).'
+  verification:
+    type: integration
+    commands:
+      - PYTHONPATH=backend ADMIN_TOKEN=test-token pytest -q backend/tests/test_pipeline_type_mismatch_guard_e2e.py 2>&1 | tee docs/foundry_checklist/evidence/backend_cl006_test.log
+    tests:
+      - backend/tests/test_pipeline_type_mismatch_guard_e2e.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_cl006_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_cl006_test.log
+- id: CL-007
+  priority: P0
+  original_text: "•\t☐ 함수 카테고리(행 단위/집계/생성기) 수준의 표현식 체계가 있다."
+  description: 'Korean requirement: 함수 카테고리(행 단위/집계/생성기) 수준의 표현식 체계가 있다.'
+  verification:
+    type: unit
+    commands:
+      - PYTHONPATH=backend pytest -q backend/tests/unit/services/test_pipeline_executor_function_categories.py 2>&1 | tee docs/foundry_checklist/evidence/backend_cl007_test.log
+    tests:
+      - backend/tests/unit/services/test_pipeline_executor_function_categories.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_cl007_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_cl007_test.log
+- id: CL-008
+  priority: P0
+  original_text: "•\t☑ Join 변환 제공(최소 inner/left/right/full 중 일부라도 명확)."
+  description: 'Korean requirement: Join 변환 제공(최소 inner/left/right/full 중 일부라도 명확).'
+  verification:
+    type: unit
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - pytest -q backend/tests/unit/services/test_pipeline_executor_transform_safety.py
+    tests:
+      - backend/tests/unit/services/test_pipeline_executor_transform_safety.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_test.log
+- id: CL-009
+  priority: P0
+  original_text: "•\t☑ Union 변환 제공 + 스키마 동일성 강제."
+  description: 'Korean requirement: Union 변환 제공 + 스키마 동일성 강제.'
+  verification:
+    type: unit
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - pytest -q backend/tests/unit/services/test_pipeline_executor_transform_safety.py
+    tests:
+      - backend/tests/unit/services/test_pipeline_executor_transform_safety.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_test.log
+- id: CL-010
+  priority: P0
+  original_text: "•\t☐ 변환 표현을 두 가지 방식으로 보기 제공(예: 보드 렌더링 vs 의사코드 렌더링)."
+  description: 'Korean requirement: 변환 표현을 두 가지 방식으로 보기 제공(예: 보드 렌더링 vs 의사코드 렌더링).'
+  verification:
+    type: e2e
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/foundry_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-live.spec.ts
+    tests:
+      - frontend/tests/e2e/pipeline-builder-live.spec.ts
+    artifacts:
+      - docs/foundry_checklist/evidence/e2e_test.log
+      - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png
+      - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/e2e_test.log
+    - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png
+    - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip
+- id: CL-011
+  priority: P0
+  original_text: "•\t☐ 커스텀 로직 확장: UDF(사용자 정의 함수)로 “필요 시 코드 실행”이 가능하고 버전 업그레이드가 가능."
+  description: 'Korean requirement: 커스텀 로직 확장: UDF(사용자 정의 함수)로 “필요 시 코드 실행”이 가능하고 버전 업그레이드가 가능.'
+  verification:
+    type: integration
+    commands:
+      - pytest -q backend/tests/unit/services/test_pipeline_udf_versioning.py
+    tests:
+      - backend/tests/unit/services/test_pipeline_udf_versioning.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_cl011_test_before.log
+      - docs/foundry_checklist/evidence/backend_cl011_test_after.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_cl011_test_before.log
+    - docs/foundry_checklist/evidence/backend_cl011_test_after.log
+- id: CL-012
+  priority: P0
+  original_text: "•\t☐ 구조화 데이터 입력: 스키마(컬럼 메타데이터) 기반 테이블 입력."
+  description: 'Korean requirement: 구조화 데이터 입력: 스키마(컬럼 메타데이터) 기반 테이블 입력.'
+  verification:
+    type: e2e
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/foundry_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-live.spec.ts -g "csv upload input"
+    tests:
+      - frontend/tests/e2e/pipeline-builder-live.spec.ts
+    artifacts:
+      - docs/foundry_checklist/evidence/e2e_test.log
+      - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/test-finished-1.png
+      - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/trace.zip
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/e2e_test.log
+    - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/test-finished-1.png
+    - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/trace.zip
+- id: CL-013
+  priority: P0
+  original_text: "•\t☐ 반구조화 입력(스키마 없음) + 파싱 변환이 있다."
+  description: 'Korean requirement: 반구조화 입력(스키마 없음) + 파싱 변환이 있다.'
+  verification:
+    type: e2e
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/foundry_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-live.spec.ts -g "csv upload input"
+    tests:
+      - frontend/tests/e2e/pipeline-builder-live.spec.ts
+    artifacts:
+      - docs/foundry_checklist/evidence/e2e_test.log
+      - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/test-finished-1.png
+      - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/trace.zip
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/e2e_test.log
+    - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/test-finished-1.png
+    - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/trace.zip
+- id: CL-014
+  priority: P0
+  original_text: "•\t☐ **비구조화 입력(문서/미디어 등)**을 파이프라인에서 취급할 수 있다(최소 “미디어 출력”/“미디어 변환” 흐름)."
+  description: 'Korean requirement: **비구조화 입력(문서/미디어 등)**을 파이프라인에서 취급할 수 있다(최소 “미디어 출력”/“미디어 변환” 흐름).'
+  verification:
+    type: e2e
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/foundry_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-live.spec.ts -g "media upload input"
+    tests:
+      - frontend/tests/e2e/pipeline-builder-live.spec.ts
+    artifacts:
+      - docs/foundry_checklist/evidence/e2e_test.log
+      - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--f7b7a-ructured-dataset-references/test-finished-1.png
+      - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--f7b7a-ructured-dataset-references/trace.zip
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/e2e_test.log
+    - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--f7b7a-ructured-dataset-references/test-finished-1.png
+    - docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--f7b7a-ructured-dataset-references/trace.zip
+- id: CL-015
+  priority: P0
+  original_text: "•\t☐ Batch Snapshot 모드: 전체 입력을 재계산하며 출력이 전체 교체."
+  description: 'Korean requirement: Batch Snapshot 모드: 전체 입력을 재계산하며 출력이 전체 교체.'
+  verification:
+    type: integration
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - PYTHONPATH=backend ADMIN_TOKEN=test-token BFF_ADMIN_TOKEN=test-token KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:39092 pytest -q backend/tests/test_pipeline_execution_semantics_e2e.py 2>&1 | tee docs/foundry_checklist/evidence/backend_cl015016_test.log
+    tests:
+      - backend/tests/test_pipeline_execution_semantics_e2e.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_cl015016_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_cl015016_test.log
+- id: CL-016
+  priority: P0
+  original_text: "•\t☐ Batch Incremental 모드: “마지막 빌드 이후 추가된 데이터만” 처리."
+  description: 'Korean requirement: Batch Incremental 모드: “마지막 빌드 이후 추가된 데이터만” 처리.'
+  verification:
+    type: integration
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - PYTHONPATH=backend ADMIN_TOKEN=test-token BFF_ADMIN_TOKEN=test-token KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:39092 pytest -q backend/tests/test_pipeline_execution_semantics_e2e.py 2>&1 | tee docs/foundry_checklist/evidence/backend_cl015016_test.log
+    tests:
+      - backend/tests/test_pipeline_execution_semantics_e2e.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_cl015016_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_cl015016_test.log
+- id: CL-017
+  priority: P0
+  original_text: "•\t☐ Streaming 파이프라인: 스트림 실행 단위/잡 구성·실패 의미가 명확하다."
+  description: 'Korean requirement: Streaming 파이프라인: 스트림 실행 단위/잡 구성·실패 의미가 명확하다.'
+  verification:
+    type: integration
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - PYTHONPATH=backend ADMIN_TOKEN=test-token BFF_ADMIN_TOKEN=test-token pytest -q backend/tests/test_pipeline_streaming_semantics_e2e.py 2>&1 | tee docs/foundry_checklist/evidence/backend_cl017_test.log
+    tests:
+      - backend/tests/test_pipeline_streaming_semantics_e2e.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_cl017_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_cl017_test.log
+- id: CL-018
+  priority: P0
+  original_text: "•\t☑ Deploy와 Build를 명확히 분리한다."
+  description: 'Korean requirement: Deploy와 Build를 명확히 분리한다.'
+  verification:
+    type: unit
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - pytest -q backend/bff/tests/test_pipeline_promotion_semantics.py
+    tests:
+      - backend/bff/tests/test_pipeline_promotion_semantics.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_test.log
+- id: CL-019
+  priority: P0
+  original_text: "•\t☑ **Deploy 전에 검증(Validation checks)**를 수행하고 통과해야 배포 가능."
+  description: 'Korean requirement: **Deploy 전에 검증(Validation checks)**를 수행하고 통과해야 배포 가능.'
+  verification:
+    type: unit
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - pytest -q backend/bff/tests/test_pipeline_promotion_semantics.py
+    tests:
+      - backend/bff/tests/test_pipeline_promotion_semantics.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_test.log
+- id: CL-020
+  priority: P0
+  original_text: "•\t☑ 출력 계약(스키마/컬럼/타입/제약)을 “기대값”으로 정의할 수 있다."
+  description: 'Korean requirement: 출력 계약(스키마/컬럼/타입/제약)을 “기대값”으로 정의할 수 있다.'
+  verification:
+    type: unit
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - pytest -q backend/tests/unit/services/test_pipeline_expectations_and_contracts.py
+    tests:
+      - backend/tests/unit/services/test_pipeline_expectations_and_contracts.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_test.log
+- id: CL-021
+  priority: P0
+  original_text: "•\t☑ Breaking change 자동 감지가 있다(특히 incremental/streaming에서)."
+  description: 'Korean requirement: Breaking change 자동 감지가 있다(특히 incremental/streaming에서).'
+  verification:
+    type: unit
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - pytest -q backend/bff/tests/test_pipeline_promotion_semantics.py
+    tests:
+      - backend/bff/tests/test_pipeline_promotion_semantics.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_test.log
+- id: CL-022
+  priority: P0
+  original_text: "•\t☑ Replay(재처리) 옵션: optional/required 정책이 있다."
+  description: 'Korean requirement: Replay(재처리) 옵션: optional/required 정책이 있다.'
+  verification:
+    type: unit
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - pytest -q backend/bff/tests/test_pipeline_promotion_semantics.py
+    tests:
+      - backend/bff/tests/test_pipeline_promotion_semantics.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_test.log
+- id: CL-023
+  priority: P0
+  original_text: "•\t☑ Primary key expectation을 output 및 중간 transform에 설정 가능."
+  description: 'Korean requirement: Primary key expectation을 output 및 중간 transform에 설정 가능.'
+  verification:
+    type: unit
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - pytest -q backend/tests/unit/services/test_pipeline_expectations_and_contracts.py
+    tests:
+      - backend/tests/unit/services/test_pipeline_expectations_and_contracts.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_test.log
+- id: CL-024
+  priority: P0
+  original_text: "•\t☑ Row count expectation 지원."
+  description: 'Korean requirement: Row count expectation 지원.'
+  verification:
+    type: unit
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - pytest -q backend/tests/unit/services/test_pipeline_expectations_and_contracts.py
+    tests:
+      - backend/tests/unit/services/test_pipeline_expectations_and_contracts.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_test.log
+- id: CL-025
+  priority: P0
+  original_text: "•\t☐ 테스트 구성요소: test inputs / transform nodes / expected outputs 3요소로 테스트를 정의."
+  description: 'Korean requirement: 테스트 구성요소: test inputs / transform nodes / expected outputs 3요소로 테스트를 정의.'
+  verification:
+    type: unit
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - PYTHONPATH=backend pytest -q backend/tests/unit/services/test_pipeline_unit_test_runner.py
+    tests:
+      - backend/tests/unit/services/test_pipeline_unit_test_runner.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_test.log
+- id: CL-026
+  priority: P0
+  original_text: "•\t☐ 테스트는 breaking change 탐지/디버깅에 유효하다."
+  description: 'Korean requirement: 테스트는 breaking change 탐지/디버깅에 유효하다.'
+  verification:
+    type: unit
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - PYTHONPATH=backend pytest -q backend/tests/unit/services/test_pipeline_unit_test_runner.py
+    tests:
+      - backend/tests/unit/services/test_pipeline_unit_test_runner.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_test.log
+- id: CL-027
+  priority: P1
+  original_text: "•\t☐ Job-level status check(output job 성공 여부)."
+  description: 'Korean requirement: Job-level status check(output job 성공 여부).'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-028
+  priority: P1
+  original_text: "•\t☐ Build-level duration check(예상 시간 내 완료)."
+  description: 'Korean requirement: Build-level duration check(예상 시간 내 완료).'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-029
+  priority: P1
+  original_text: "•\t☐ Freshness check(데이터가 최신인지)."
+  description: 'Korean requirement: Freshness check(데이터가 최신인지).'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-030
+  priority: P0
+  original_text: "•\t☑ 노드 단위 Preview 실행(해당 노드까지의 파이프라인 실행)."
+  description: 'Korean requirement: 노드 단위 Preview 실행(해당 노드까지의 파이프라인 실행).'
+  verification:
+    type: unit
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - pytest -q backend/tests/unit/services/test_pipeline_executor_preview.py
+      - pytest -q backend/bff/tests/test_pipeline_promotion_semantics.py
+    tests:
+      - backend/tests/unit/services/test_pipeline_executor_preview.py
+      - backend/bff/tests/test_pipeline_promotion_semantics.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_test.log
+- id: CL-031
+  priority: P0
+  original_text: "•\t☑ 컬럼 통계 제공(string 히스토그램/공백/대소문자/null, numeric 분포·min/max/mean 등)."
+  description: 'Korean requirement: 컬럼 통계 제공(string 히스토그램/공백/대소문자/null, numeric 분포·min/max/mean 등).'
+  verification:
+    type: unit
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - pytest -q backend/tests/unit/services/test_pipeline_profiler.py
+    tests:
+      - backend/tests/unit/services/test_pipeline_profiler.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_test.log
+- id: CL-032
+  priority: P0
+  original_text: "•\t☑ Row count 계산이 preview에서 가능."
+  description: 'Korean requirement: Row count 계산이 preview에서 가능.'
+  verification:
+    type: unit
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - pytest -q backend/tests/unit/services/test_pipeline_executor_preview.py
+    tests:
+      - backend/tests/unit/services/test_pipeline_executor_preview.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_test.log
+- id: CL-033
+  priority: P0
+  original_text: "•\t☑ Preview/Build 아티팩트는 prod prefix와 분리되고, Deploy는 prod로 “발행”된다."
+  description: 'Korean requirement: Preview/Build 아티팩트는 prod prefix와 분리되고, Deploy는 prod로 “발행”된다.'
+  verification:
+    type: unit
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - pytest -q backend/bff/tests/test_pipeline_promotion_semantics.py
+    tests:
+      - backend/bff/tests/test_pipeline_promotion_semantics.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_test.log
+- id: CL-034
+  priority: P0
+  original_text: "•\t☐ 차트 노드/시각화 기능(bar/histogram 지원)."
+  description: 'Korean requirement: 차트 노드/시각화 기능(bar/histogram 지원).'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-035
+  priority: P1
+  original_text: "•\t☐ 파라미터 타입 제공(최소 Column 파라미터, Expression 파라미터)."
+  description: 'Korean requirement: 파라미터 타입 제공(최소 Column 파라미터, Expression 파라미터).'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-036
+  priority: P1
+  original_text: "•\t☐ 커스텀 함수 정의 시 입력 인자 타입을 강제한다."
+  description: 'Korean requirement: 커스텀 함수 정의 시 입력 인자 타입을 강제한다.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-037
+  priority: P1
+  original_text: "•\t☐ 선택 노드 숨김/나머지 숨김 같은 스코프 축소 기능."
+  description: 'Korean requirement: 선택 노드 숨김/나머지 숨김 같은 스코프 축소 기능.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-038
+  priority: P1
+  original_text: "•\t☐ 파이프라인 검색 패널: 노드명/텍스트/컬럼/파라미터/상수/스키마 등으로 검색."
+  description: 'Korean requirement: 파이프라인 검색 패널: 노드명/텍스트/컬럼/파라미터/상수/스키마 등으로 검색.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-039
+  priority: P1
+  original_text: "•\t☐ 컬럼명 일괄 치환(Replace columns) 지원."
+  description: 'Korean requirement: 컬럼명 일괄 치환(Replace columns) 지원.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-040
+  priority: P1
+  original_text: "•\t☐ 그래프에 Markdown 텍스트 노드 추가(레이아웃 영향 X, 특정 노드에 종속 X)."
+  description: 'Korean requirement: 그래프에 Markdown 텍스트 노드 추가(레이아웃 영향 X, 특정 노드에 종속 X).'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-041
+  priority: P1
+  original_text: "•\t☐ Input sampling은 Preview만 가속하고 Build에는 영향이 없어야 한다."
+  description: 'Korean requirement: Input sampling은 Preview만 가속하고 Build에는 영향이 없어야 한다.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-042
+  priority: P1
+  original_text: "•\t☐ Checkpoints(배치 전용): 공유 upstream 로직을 1회만 계산하도록 중간 결과 저장."
+  description: 'Korean requirement: Checkpoints(배치 전용): 공유 upstream 로직을 1회만 계산하도록 중간 결과 저장.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-043
+  priority: P1
+  original_text: "•\t☐ Checkpoint 전략(단기 디스크/메모리/출력데이터로 저장) 같은 옵션이 있다."
+  description: 'Korean requirement: Checkpoint 전략(단기 디스크/메모리/출력데이터로 저장) 같은 옵션이 있다.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-044
+  priority: P1
+  original_text: "•\t☐ Job groups: 배치에서는 기본적으로 output별 job 분리, 스트리밍은 묶임 등 실행 단위 규칙이 있다."
+  description: 'Korean requirement: Job groups: 배치에서는 기본적으로 output별 job 분리, 스트리밍은 묶임 등 실행 단위 규칙이 있다.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-045
+  priority: P0
+  original_text: "•\t☑ 시간 기반 스케줄(매일 02:00 등)."
+  description: 'Korean requirement: 시간 기반 스케줄(매일 02:00 등).'
+  verification:
+    type: unit
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - pytest -q backend/tests/unit/services/test_pipeline_scheduler_ignored_runs.py
+    tests:
+      - backend/tests/unit/services/test_pipeline_scheduler_ignored_runs.py
+      - backend/tests/unit/services/test_pipeline_scheduler_validation.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_test.log
+- id: CL-046
+  priority: P0
+  original_text: "•\t☑ 주기 기반 스케줄(매 15분/매시간 등)."
+  description: 'Korean requirement: 주기 기반 스케줄(매 15분/매시간 등).'
+  verification:
+    type: unit
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - pytest -q backend/tests/unit/services/test_pipeline_scheduler_ignored_runs.py
+    tests:
+      - backend/tests/unit/services/test_pipeline_scheduler_ignored_runs.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_test.log
+- id: CL-047
+  priority: P0
+  original_text: "•\t☑ 업스트림 트리거 스케줄(업스트림 pipeline build/deploy 업데이트 시 실행)."
+  description: 'Korean requirement: 업스트림 트리거 스케줄(업스트림 pipeline build/deploy 업데이트 시 실행).'
+  verification:
+    type: unit
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - pytest -q backend/tests/unit/services/test_pipeline_scheduler_ignored_runs.py
+    tests:
+      - backend/tests/unit/services/test_pipeline_scheduler_ignored_runs.py
+      - backend/tests/unit/services/test_pipeline_scheduler_validation.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_test.log
+- id: CL-048
+  priority: P0
+  original_text: "•\t☐ 브랜치 생성(Main + 작업 브랜치) 및 브랜치 목록/아카이브/복원."
+  description: 'Korean requirement: 브랜치 생성(Main + 작업 브랜치) 및 브랜치 목록/아카이브/복원.'
+  verification:
+    type: integration
+    commands:
+      - "pytest backend/tests/integration/test_pipeline_branch_lifecycle.py -q"
+    tests:
+      - "backend/tests/integration/test_pipeline_branch_lifecycle.py::test_pipeline_branch_lifecycle"
+    artifacts:
+      - "docs/foundry_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log"
+  status: PASS
+  evidence_links:
+    - "docs/foundry_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log"
+- id: CL-049
+  priority: P0
+  original_text: "•\t☐ Propose(메인으로 변경 제안): 저장 후 제안 생성 + 설명 첨부."
+  description: 'Korean requirement: Propose(메인으로 변경 제안): 저장 후 제안 생성 + 설명 첨부.'
+  verification:
+    type: integration
+    commands:
+      - "pytest backend/bff/tests/test_pipeline_proposal_governance.py -q"
+    tests:
+      - "backend/bff/tests/test_pipeline_proposal_governance.py::test_pipeline_proposal_submit_and_approve_flow"
+    artifacts:
+      - "docs/foundry_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log"
+  status: PASS
+  evidence_links:
+    - "docs/foundry_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log"
+- id: CL-050
+  priority: P0
+  original_text: "•\t☐ Approve(승인): Edit 권한자 등 규칙에 따라 승인 가능, 오류 확인 가능."
+  description: 'Korean requirement: Approve(승인): Edit 권한자 등 규칙에 따라 승인 가능, 오류 확인 가능.'
+  verification:
+    type: integration
+    commands:
+      - "pytest backend/bff/tests/test_pipeline_proposal_governance.py -q"
+    tests:
+      - "backend/bff/tests/test_pipeline_proposal_governance.py::test_pipeline_proposal_requires_approve_role"
+    artifacts:
+      - "docs/foundry_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log"
+  status: PASS
+  evidence_links:
+    - "docs/foundry_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log"
+- id: CL-051
+  priority: P0
+  original_text: "•\t☐ Branch protection: 보호 브랜치에서는 제안+승인 없이는 merge 불가."
+  description: 'Korean requirement: Branch protection: 보호 브랜치에서는 제안+승인 없이는 merge 불가.'
+  verification:
+    type: integration
+    commands:
+      - "pytest backend/bff/tests/test_pipeline_proposal_governance.py -q"
+    tests:
+      - "backend/bff/tests/test_pipeline_proposal_governance.py::test_pipeline_proposal_requires_pending_status"
+    artifacts:
+      - "docs/foundry_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log"
+  status: PASS
+  evidence_links:
+    - "docs/foundry_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log"
+- id: CL-052
+  priority: P1
+  original_text: "•\t☐ **컴퓨트 프로파일/리소스 설정(배치·스트리밍)**을 UI에서 변경 가능."
+  description: 'Korean requirement: **컴퓨트 프로파일/리소스 설정(배치·스트리밍)**을 UI에서 변경 가능.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-053
+  priority: P1
+  original_text: "•\t☐ 저지연(특히 15분 이하) 워크로드 최적화 옵션(Foundry의 faster pipelines 포지션에 대응)."
+  description: 'Korean requirement: 저지연(특히 15분 이하) 워크로드 최적화 옵션(Foundry의 faster pipelines 포지션에 대응).'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-054
+  priority: P0
+  original_text: "•\t☐ Dataset output 생성."
+  description: 'Korean requirement: Dataset output 생성.'
+  verification:
+    type: unit
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - pytest -q backend/bff/tests/test_pipeline_promotion_semantics.py
+    tests:
+      - backend/bff/tests/test_pipeline_promotion_semantics.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_test.log
+- id: CL-055
+  priority: P0
+  original_text: "•\t☐ Virtual table output 생성(가능하다면)."
+  description: 'Korean requirement: Virtual table output 생성(가능하다면).'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-056
+  priority: P0
+  original_text: "•\t☐ Ontology output(객체/링크/타임시리즈) 생성."
+  description: 'Korean requirement: Ontology output(객체/링크/타임시리즈) 생성.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-057
+  priority: P0
+  original_text: "•\t☐ Media set output 생성(미디어 타입/포맷 설정, 배포 전 수정 가능, 배포 후 output 생성)."
+  description: 'Korean requirement: Media set output 생성(미디어 타입/포맷 설정, 배포 전 수정 가능, 배포 후 output 생성).'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-058
+  priority: P1
+  original_text: "•\t☐ 파이프라인 설명/메타데이터 편집."
+  description: 'Korean requirement: 파이프라인 설명/메타데이터 편집.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-059
+  priority: P1
+  original_text: "•\t☐ 권한/역할/액세스 요구사항 표시(최소 read/edit/admin 구분)."
+  description: 'Korean requirement: 권한/역할/액세스 요구사항 표시(최소 read/edit/admin 구분).'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-060
+  priority: P1
+  original_text: "•\t☐ 댓글/협업자(누가 참여 중인지) 표시."
+  description: 'Korean requirement: 댓글/협업자(누가 참여 중인지) 표시.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-061
+  priority: P1
+  original_text: "•\t☐ 공유(Share) 플로우."
+  description: 'Korean requirement: 공유(Share) 플로우.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-062
+  priority: P1
+  original_text: "•\t☐ 파이프라인 정의로부터 라인리지 그래프가 자동 생성된다."
+  description: 'Korean requirement: 파이프라인 정의로부터 라인리지 그래프가 자동 생성된다.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-063
+  priority: P1
+  original_text: "•\t☐ 라인리지에서 스키마/마지막 빌드/생성 로직(코드/정의) 드릴다운이 가능."
+  description: 'Korean requirement: 라인리지에서 스키마/마지막 빌드/생성 로직(코드/정의) 드릴다운이 가능.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-064
+  priority: P1
+  original_text: "•\t☐ 라인리지 스냅샷 저장/공유가 가능."
+  description: 'Korean requirement: 라인리지 스냅샷 저장/공유가 가능.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-065
+  priority: P1
+  original_text: "•\t☐ **외부 시스템 연결(네트워크 제약 환경 포함)**을 지원하는 아키텍처가 있다."
+  description: 'Korean requirement: **외부 시스템 연결(네트워크 제약 환경 포함)**을 지원하는 아키텍처가 있다.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-066
+  priority: P1
+  original_text: "•\t☐ 자격증명(credential) 로테이션/업데이트가 코드 변경 없이 가능하다."
+  description: 'Korean requirement: 자격증명(credential) 로테이션/업데이트가 코드 변경 없이 가능하다.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-067
+  priority: P1
+  original_text: "•\t☐ 연결 설정을 재사용(공유)할 수 있다(프로젝트/리포지토리 간)."
+  description: 'Korean requirement: 연결 설정을 재사용(공유)할 수 있다(프로젝트/리포지토리 간).'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-068
+  priority: P1
+  original_text: "•\t☐ 라인리지에 외부 연결까지 시각화된다."
+  description: 'Korean requirement: 라인리지에 외부 연결까지 시각화된다.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-069
+  priority: P1
+  original_text: "•\t☐ 노코드/로우코드 정의를 코드 리포로 export할 수 있다."
+  description: 'Korean requirement: 노코드/로우코드 정의를 코드 리포로 export할 수 있다.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-070
+  priority: P1
+  original_text: "•\t☐ **비가역성/제약(동일 출력 보장 X, 일부 변환 미지원 등)**을 제품 정책과 UI에서 명확히 고지한다."
+  description: 'Korean requirement: **비가역성/제약(동일 출력 보장 X, 일부 변환 미지원 등)**을 제품 정책과 UI에서 명확히 고지한다.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-071
+  priority: P0
+  original_text: "•\t☐ **모든 변경(노드 추가/삭제/설정 변경/배포/리플레이)**이 감사 로그로 남는다."
+  description: 'Korean requirement: **모든 변경(노드 추가/삭제/설정 변경/배포/리플레이)**이 감사 로그로 남는다.'
+  verification:
+    type: unit
+    commands:
+      - pytest backend/bff/tests/test_pipeline_audit_logging.py -q
+    tests:
+      - backend/bff/tests/test_pipeline_audit_logging.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_cl071_cl072_tests.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_cl071_cl072_tests.log
+- id: CL-072
+  priority: P0
+  original_text: "•\t☐ 권한 모델이 파이프라인 수준에서 실제로 강제된다(읽기/편집/승인 등)."
+  description: 'Korean requirement: 권한 모델이 파이프라인 수준에서 실제로 강제된다(읽기/편집/승인 등).'
+  verification:
+    type: unit
+    commands:
+      - pytest backend/bff/tests/test_pipeline_permissions_enforced.py -q
+    tests:
+      - backend/bff/tests/test_pipeline_permissions_enforced.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_cl071_cl072_tests.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_cl071_cl072_tests.log
+- id: CL-073
+  priority: P0
+  original_text: "•\t☐ 데이터 건강성 체크/기대조건이 ‘배포 게이트’로 동작한다(통과하지 않으면 프로덕션 배포 불가)."
+  description: 'Korean requirement: 데이터 건강성 체크/기대조건이 ‘배포 게이트’로 동작한다(통과하지 않으면 프로덕션 배포 불가).'
+  verification:
+    type: unit
+    commands:
+      - ./scripts/verify_foundry_checklist.sh
+      - pytest -q backend/bff/tests/test_pipeline_promotion_semantics.py -k expectations_failed
+    tests:
+      - backend/bff/tests/test_pipeline_promotion_semantics.py
+    artifacts:
+      - docs/foundry_checklist/evidence/backend_cl073_test.log
+      - docs/foundry_checklist/evidence/backend_test.log
+  status: PASS
+  evidence_links:
+    - docs/foundry_checklist/evidence/backend_cl073_test.log
+    - docs/foundry_checklist/evidence/backend_test.log
+- id: CL-074
+  priority: P2
+  original_text: "•\t☐ (P2) AIP “Generate”: 프롬프트로 변환 로직을 생성하고, 생성된 변환이 일반 변환처럼 파이프라인에 저장된다."
+  description: 'Korean requirement: (P2) AIP “Generate”: 프롬프트로 변환 로직을 생성하고, 생성된 변환이 일반 변환처럼 파이프라인에 저장된다.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-075
+  priority: P2
+  original_text: "•\t☐ (P2) AIP “Explain”: 선택한 변환 경로를 설명하고 이해를 돕는다."
+  description: 'Korean requirement: (P2) AIP “Explain”: 선택한 변환 경로를 설명하고 이해를 돕는다.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-076
+  priority: P2
+  original_text: "•\t☐ (P2) Use LLM node: 파이프라인 중간에 LLM 처리를 삽입(무코드), 템플릿 프롬프트 제공, 소량 행 trial 가능."
+  description: 'Korean requirement: (P2) Use LLM node: 파이프라인 중간에 LLM 처리를 삽입(무코드), 템플릿 프롬프트 제공, 소량 행 trial 가능.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []
+- id: CL-077
+  priority: P2
+  original_text: "•\t☐ (P2) 권한 게이트: LLM 기능은 관리자 권한 부여가 필요."
+  description: 'Korean requirement: (P2) 권한 게이트: LLM 기능은 관리자 권한 부여가 필요.'
+  verification:
+    type: unit
+    commands: []
+    tests: []
+    artifacts: []
+  status: FAIL
+  evidence_links: []

@@ -14,6 +14,7 @@ the canonical SSoT without importing other service packages.
 """
 
 import json
+import asyncio
 from datetime import datetime, timezone
 from typing import List, AsyncIterator, Optional, Dict, Any, AsyncGenerator
 from datetime import timedelta
@@ -70,59 +71,91 @@ class EventStore:
         self._audit_enabled = os.getenv("ENABLE_AUDIT_LOGS", "true").strip().lower() in {"1", "true", "yes", "on"}
         self._lineage_store: Optional[Any] = None
         self._audit_store: Optional[Any] = None
+
+    def _s3_client_kwargs(self) -> Dict[str, Any]:
+        parsed = urlparse(self.endpoint_url)
+        scheme = (parsed.scheme or "http").lower()
+        use_ssl = scheme == "https"
+        require_tls = os.getenv("EVENT_STORE_REQUIRE_TLS", "false").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if require_tls and not use_ssl:
+            raise RuntimeError(
+                f"Event Store requires TLS but endpoint is not https: {self.endpoint_url}"
+            )
+        verify_ssl = os.getenv("EVENT_STORE_SSL_VERIFY", "true").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+
+        addressing_style = (os.getenv("EVENT_STORE_S3_ADDRESSING_STYLE") or "").strip().lower()
+        if addressing_style in {"path", "virtual"}:
+            client_config = Config(s3={"addressing_style": addressing_style})
+        else:
+            host = (parsed.hostname or "").lower()
+            use_path_style = host in {
+                "localhost",
+                "127.0.0.1",
+                "0.0.0.0",
+                "minio",
+                "spice-minio",
+                "spice_minio",
+            } or host.endswith(".localhost")
+            client_config = Config(s3={"addressing_style": "path"}) if use_path_style else None
+
+        return {
+            "service_name": "s3",
+            "endpoint_url": self.endpoint_url,
+            "aws_access_key_id": self.access_key,
+            "aws_secret_access_key": self.secret_key,
+            "use_ssl": use_ssl,
+            "verify": verify_ssl if use_ssl else None,
+            "config": client_config,
+        }
         
     async def connect(self):
         """Initialize S3/MinIO connection"""
-        try:
-            self.session = aioboto3.Session()
+        if getattr(self, "_connected", False):
+            return
 
-            parsed = urlparse(self.endpoint_url)
-            scheme = (parsed.scheme or "http").lower()
-            use_ssl = scheme == "https"
-            require_tls = os.getenv("EVENT_STORE_REQUIRE_TLS", "false").strip().lower() in {"1", "true", "yes", "on"}
-            if require_tls and not use_ssl:
-                raise RuntimeError(
-                    f"Event Store requires TLS but endpoint is not https: {self.endpoint_url}"
-                )
-            verify_ssl = os.getenv("EVENT_STORE_SSL_VERIFY", "true").strip().lower() in {"1", "true", "yes", "on"}
-            addressing_style = (os.getenv("EVENT_STORE_S3_ADDRESSING_STYLE") or "").strip().lower()
-            if addressing_style in {"path", "virtual"}:
-                client_config = Config(s3={"addressing_style": addressing_style})
-            else:
-                host = (parsed.hostname or "").lower()
-                use_path_style = host in {"localhost", "127.0.0.1", "0.0.0.0"} or host.endswith(".localhost")
-                client_config = Config(s3={"addressing_style": "path"}) if use_path_style else None
+        if not hasattr(self, "_connect_lock"):
+            self._connect_lock = asyncio.Lock()
 
-            async with self.session.client(
-                's3',
-                endpoint_url=self.endpoint_url,
-                aws_access_key_id=self.access_key,
-                aws_secret_access_key=self.secret_key,
-                use_ssl=use_ssl,
-                verify=verify_ssl if use_ssl else None,
-                config=client_config,
-            ) as s3:
-                # Ensure bucket exists
-                try:
-                    await s3.head_bucket(Bucket=self.bucket_name)
-                    logger.info(f"✅ Event Store bucket '{self.bucket_name}' exists")
-                except ClientError:
-                    await s3.create_bucket(Bucket=self.bucket_name)
-                    logger.info(f"✅ Created Event Store bucket '{self.bucket_name}'")
-                    
-                    # Set bucket versioning for immutability
-                    await s3.put_bucket_versioning(
-                        Bucket=self.bucket_name,
-                        VersioningConfiguration={'Status': 'Enabled'}
-                    )
-                    logger.info("✅ Enabled versioning for immutability")
+        async with self._connect_lock:
+            if getattr(self, "_connected", False):
+                return
 
-            # Best-effort: initialize lineage/audit stores (Postgres-backed).
-            await self._initialize_lineage_and_audit()
-                    
-        except Exception as e:
-            logger.error(f"Failed to connect to S3/MinIO Event Store: {e}")
-            raise
+            try:
+                self.session = aioboto3.Session()
+
+                async with self.session.client(**self._s3_client_kwargs()) as s3:
+                    # Ensure bucket exists
+                    try:
+                        await s3.head_bucket(Bucket=self.bucket_name)
+                        logger.info(f"✅ Event Store bucket '{self.bucket_name}' exists")
+                    except ClientError:
+                        await s3.create_bucket(Bucket=self.bucket_name)
+                        logger.info(f"✅ Created Event Store bucket '{self.bucket_name}'")
+
+                        # Set bucket versioning for immutability
+                        await s3.put_bucket_versioning(
+                            Bucket=self.bucket_name,
+                            VersioningConfiguration={'Status': 'Enabled'}
+                        )
+                        logger.info("✅ Enabled versioning for immutability")
+
+                # Best-effort: initialize lineage/audit stores (Postgres-backed).
+                await self._initialize_lineage_and_audit()
+                self._connected = True
+
+            except Exception as e:
+                logger.error(f"Failed to connect to S3/MinIO Event Store: {e}")
+                raise
 
     async def _initialize_lineage_and_audit(self) -> None:
         if self._lineage_enabled and LineageStore:
@@ -429,13 +462,7 @@ class EventStore:
         )
         
         try:
-            async with self.session.client(
-                's3',
-                endpoint_url=self.endpoint_url,
-                aws_access_key_id=self.access_key,
-                aws_secret_access_key=self.secret_key,
-                use_ssl=False
-            ) as s3:
+            async with self.session.client(**self._s3_client_kwargs()) as s3:
                 # 0) Global idempotency guard: by-event-id index (stable across occurred_at changes).
                 existing_key = await self._get_existing_key_by_event_id(s3, str(event.event_id))
                 if existing_key:
@@ -453,7 +480,7 @@ class EventStore:
                         existing_event.metadata["kafka_topic"] = event.metadata.get("kafka_topic")
 
                     try:
-                        await self._update_indexes(existing_event, existing_key)
+                        await self._update_indexes(existing_event, existing_key, s3=s3)
                     except Exception as e:
                         logger.warning(f"Failed to update indexes for existing event {existing_event.event_id}: {e}")
 
@@ -487,7 +514,7 @@ class EventStore:
                         existing_event.metadata["kafka_topic"] = event.metadata.get("kafka_topic")
 
                     try:
-                        await self._update_indexes(existing_event, existing_key)
+                        await self._update_indexes(existing_event, existing_key, s3=s3)
                     except Exception as e:
                         logger.warning(f"Failed to update indexes for existing event {existing_event.event_id}: {e}")
 
@@ -520,7 +547,7 @@ class EventStore:
                         existing_event.metadata["kafka_topic"] = event.metadata.get("kafka_topic")
 
                     try:
-                        await self._update_indexes(existing_event, key)
+                        await self._update_indexes(existing_event, key, s3=s3)
                     except Exception as e:
                         logger.warning(f"Failed to update indexes for existing event {existing_event.event_id}: {e}")
 
@@ -563,7 +590,7 @@ class EventStore:
                 
                 # Update indexes (derived data). Never fail the append on index errors.
                 try:
-                    await self._update_indexes(event, key)
+                    await self._update_indexes(event, key, s3=s3)
                 except Exception as e:
                     logger.warning(f"Failed to update indexes for {event.event_id}: {e}")
 
@@ -683,13 +710,7 @@ class EventStore:
         if not self.session:
             self.session = aioboto3.Session()
 
-        async with self.session.client(
-            "s3",
-            endpoint_url=self.endpoint_url,
-            aws_access_key_id=self.access_key,
-            aws_secret_access_key=self.secret_key,
-            use_ssl=False,
-        ) as s3:
+        async with self.session.client(**self._s3_client_kwargs()) as s3:
             return await self._get_existing_key_by_event_id(s3, str(event_id))
 
     async def read_event_by_key(self, *, key: str) -> EventEnvelope:
@@ -697,13 +718,7 @@ class EventStore:
         if not self.session:
             self.session = aioboto3.Session()
 
-        async with self.session.client(
-            "s3",
-            endpoint_url=self.endpoint_url,
-            aws_access_key_id=self.access_key,
-            aws_secret_access_key=self.secret_key,
-            use_ssl=False,
-        ) as s3:
+        async with self.session.client(**self._s3_client_kwargs()) as s3:
             return await self._read_event_object(s3, key)
     
     async def get_events(
@@ -723,13 +738,7 @@ class EventStore:
             if not self.session:
                 self.session = aioboto3.Session()
 
-            async with self.session.client(
-                's3',
-                endpoint_url=self.endpoint_url,
-                aws_access_key_id=self.access_key,
-                aws_secret_access_key=self.secret_key,
-                use_ssl=False
-            ) as s3:
+            async with self.session.client(**self._s3_client_kwargs()) as s3:
                 # Fast path: use aggregate index entries (one object per event).
                 index_prefix = f"indexes/by-aggregate/{aggregate_type}/{aggregate_id}/"
                 paginator = s3.get_paginator('list_objects_v2')
@@ -840,13 +849,7 @@ class EventStore:
             if not self.session:
                 self.session = aioboto3.Session()
 
-            async with self.session.client(
-                's3',
-                endpoint_url=self.endpoint_url,
-                aws_access_key_id=self.access_key,
-                aws_secret_access_key=self.secret_key,
-                use_ssl=False
-            ) as s3:
+            async with self.session.client(**self._s3_client_kwargs()) as s3:
                 # Fast path: replay using by-date index entries.
                 start = from_timestamp.astimezone(timezone.utc) if from_timestamp.tzinfo else from_timestamp.replace(tzinfo=timezone.utc)
                 end_dt = to_timestamp or datetime.now(timezone.utc)
@@ -940,13 +943,7 @@ class EventStore:
         found = False
 
         try:
-            async with self.session.client(
-                "s3",
-                endpoint_url=self.endpoint_url,
-                aws_access_key_id=self.access_key,
-                aws_secret_access_key=self.secret_key,
-                use_ssl=False,
-            ) as s3:
+            async with self.session.client(**self._s3_client_kwargs()) as s3:
                 paginator = s3.get_paginator("list_objects_v2")
                 async for page in paginator.paginate(Bucket=self.bucket_name, Prefix=index_prefix):
                     for obj in page.get("Contents", []):
@@ -968,12 +965,12 @@ class EventStore:
         events = await self.get_events(aggregate_type, aggregate_id)
         return max((e.sequence_number or 0) for e in events) if events else 0
     
-    async def _update_indexes(self, event: EventEnvelope, key: str):
+    async def _update_indexes(self, event: EventEnvelope, key: str, *, s3: Optional[Any] = None):
         """
         Update various indexes for efficient querying.
         Indexes are derived data, not the source of truth.
         """
-        if not self.session:
+        if s3 is None and not self.session:
             self.session = aioboto3.Session()
 
         dt = (
@@ -1009,41 +1006,59 @@ class EventStore:
         event_id_index_key = f"indexes/by-event-id/{event.event_id}.json"
 
         try:
-            async with self.session.client(
-                "s3",
-                endpoint_url=self.endpoint_url,
-                aws_access_key_id=self.access_key,
-                aws_secret_access_key=self.secret_key,
-                use_ssl=False,
-            ) as s3:
-                body = json.dumps(index_entry).encode("utf-8")
-
-                # Independent objects -> concurrency-safe, no read/modify/write races.
-                await s3.put_object(
-                    Bucket=self.bucket_name,
-                    Key=aggregate_index_key,
-                    Body=body,
-                    ContentType="application/json",
-                )
-                await s3.put_object(
-                    Bucket=self.bucket_name,
-                    Key=date_index_key,
-                    Body=body,
-                    ContentType="application/json",
-                )
-                await s3.put_object(
-                    Bucket=self.bucket_name,
-                    Key=event_id_index_key,
-                    Body=body,
-                    ContentType="application/json",
+            if s3 is None:
+                async with self.session.client(**self._s3_client_kwargs()) as client:
+                    await self._write_index_entries(
+                        client,
+                        aggregate_index_key=aggregate_index_key,
+                        date_index_key=date_index_key,
+                        event_id_index_key=event_id_index_key,
+                        payload=index_entry,
+                    )
+            else:
+                await self._write_index_entries(
+                    s3,
+                    aggregate_index_key=aggregate_index_key,
+                    date_index_key=date_index_key,
+                    event_id_index_key=event_id_index_key,
+                    payload=index_entry,
                 )
 
-                logger.debug(
-                    f"Updated indexes for {event.event_id}: {aggregate_index_key} / {date_index_key}"
-                )
+            logger.debug(
+                f"Updated indexes for {event.event_id}: {aggregate_index_key} / {date_index_key}"
+            )
         except Exception as e:
             logger.warning(f"Failed to update indexes: {e}")
-            # Index update failures don't fail the event append
+        # Index update failures don't fail the event append
+
+    async def _write_index_entries(
+        self,
+        s3: Any,
+        *,
+        aggregate_index_key: str,
+        date_index_key: str,
+        event_id_index_key: str,
+        payload: Dict[str, Any],
+    ) -> None:
+        body = json.dumps(payload).encode("utf-8")
+        await s3.put_object(
+            Bucket=self.bucket_name,
+            Key=aggregate_index_key,
+            Body=body,
+            ContentType="application/json",
+        )
+        await s3.put_object(
+            Bucket=self.bucket_name,
+            Key=date_index_key,
+            Body=body,
+            ContentType="application/json",
+        )
+        await s3.put_object(
+            Bucket=self.bucket_name,
+            Key=event_id_index_key,
+            Body=body,
+            ContentType="application/json",
+        )
     
     async def get_snapshot(
         self,
@@ -1061,13 +1076,7 @@ class EventStore:
         )
         
         try:
-            async with self.session.client(
-                's3',
-                endpoint_url=self.endpoint_url,
-                aws_access_key_id=self.access_key,
-                aws_secret_access_key=self.secret_key,
-                use_ssl=False
-            ) as s3:
+            async with self.session.client(**self._s3_client_kwargs()) as s3:
                 response = await s3.get_object(
                     Bucket=self.bucket_name,
                     Key=snapshot_key
@@ -1102,13 +1111,7 @@ class EventStore:
         }
         
         try:
-            async with self.session.client(
-                's3',
-                endpoint_url=self.endpoint_url,
-                aws_access_key_id=self.access_key,
-                aws_secret_access_key=self.secret_key,
-                use_ssl=False
-            ) as s3:
+            async with self.session.client(**self._s3_client_kwargs()) as s3:
                 # Save versioned snapshot
                 await s3.put_object(
                     Bucket=self.bucket_name,

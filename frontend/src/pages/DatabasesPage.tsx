@@ -3,16 +3,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Button,
   Callout,
-  Card,
-  FormGroup,
-  HTMLTable,
-  InputGroup,
   Intent,
-  Text,
+  Icon,
 } from '@blueprintjs/core'
 import { createDatabase, deleteDatabase, getDatabaseExpectedSeq, listDatabases } from '../api/bff'
 import { useRequestContext } from '../api/useRequestContext'
 import { DangerConfirmDialog } from '../components/DangerConfirmDialog'
+import { ProjectFileIcon } from '../components/ProjectFileIcon'
 import { PageHeader } from '../components/layout/PageHeader'
 import { showAppToast } from '../app/AppToaster'
 import { useCommandRegistration } from '../commands/useCommandRegistration'
@@ -32,7 +29,7 @@ export const DatabasesPage = () => {
   const registerCommand = useCommandRegistration()
   const language = useAppStore((state) => state.context.language)
   const adminMode = useAppStore((state) => state.adminMode)
-  const adminToken = useAppStore((state) => state.adminToken)
+
 
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -44,20 +41,25 @@ export const DatabasesPage = () => {
   })
 
   const createMutation = useMutation({
-    mutationFn: () => createDatabase(requestContext, { name: name.trim(), description: description.trim() || undefined }),
-    onSuccess: (result) => {
+    mutationFn: (vars?: { name: string; description?: string }) => {
+      const dbName = vars?.name || name;
+      const dbDesc = vars?.description || description;
+      return createDatabase(requestContext, { name: dbName.trim(), description: dbDesc })
+    },
+    onSuccess: (result, vars) => {
+      const dbName = vars?.name || name;
       const commandId = result.commandId
       if (commandId) {
-        registerCommand({ commandId, kind: 'CREATE_DATABASE', targetDbName: name.trim() })
+        registerCommand({ commandId, kind: 'CREATE_DATABASE', targetDbName: dbName.trim() })
         void showAppToast({
           intent: Intent.SUCCESS,
-          message: `Create accepted: ${name.trim()}`,
+          message: `Create accepted: ${dbName.trim()}`,
         })
       } else {
         void queryClient.invalidateQueries({ queryKey: qk.databases(requestContext.language) })
         void showAppToast({
           intent: Intent.SUCCESS,
-          message: `Created: ${name.trim()}`,
+          message: `Created: ${dbName.trim()}`,
         })
       }
       setName('')
@@ -96,10 +98,10 @@ export const DatabasesPage = () => {
   const databases = useMemo(() => listQuery.data ?? [], [listQuery.data])
 
   return (
-    <div>
+    <div className="project-explorer-container">
       <PageHeader
         title="Projects"
-        subtitle="Create, open, and manage projects backed by the BFF."
+        subtitle="Manage your projects."
         actions={
           <Button
             icon="refresh"
@@ -111,84 +113,53 @@ export const DatabasesPage = () => {
         }
       />
 
-      <div className="card-stack">
-        <Card>
-          <div className="card-title">
-            <Text>Create project</Text>
-          </div>
-          <div className="form-row">
-            <FormGroup label="Name" helperText="lowercase + numbers + '_' or '-'">
-              <InputGroup value={name} onChange={(event) => setName(event.currentTarget.value)} />
-            </FormGroup>
-            <FormGroup label="Description">
-              <InputGroup
-                value={description}
-                onChange={(event) => setDescription(event.currentTarget.value)}
-                placeholder="Optional summary"
-              />
-            </FormGroup>
-            <Button
-              intent={Intent.PRIMARY}
-              onClick={() => createMutation.mutate()}
-              disabled={!name.trim() || createMutation.isPending}
-              loading={createMutation.isPending}
-            >
-              Create
-            </Button>
-          </div>
-          <Callout intent={Intent.PRIMARY} style={{ marginTop: 12 }}>
-            202 responses are tracked in the Command Tracker.
-          </Callout>
-        </Card>
+      {deleteMutation.isPending && (
+        <Callout intent={Intent.WARNING} style={{ marginBottom: 20 }}>
+          Deleting project...
+        </Callout>
+      )}
 
-        <Card>
-          <div className="card-title">
-            <Text>Projects</Text>
-            {listQuery.isFetching ? <Text className="muted small">Loading...</Text> : null}
+      <div className="project-grid">
+        {/* New Project "Folder" */}
+        <div
+          className="project-file-icon new-project-item"
+          onClick={() => {
+            setName('')
+            setDescription('')
+            // Open dialog or just focus input if we were inline, but let's use a prompt for now or existing state
+            // Re-using existing state logic but perhaps we need a dialog.
+            // For now, let's keep it simple: clicking this shows the creation form in a dialog?
+            // Actually, the previous UI had a form. Let's make this item trigger a dialog.
+            // Since I haven't created a CreateDialog, I'll use a local state to show a specific creation area or just a Prompt.
+            // Better: Reuse the creation logic but put it in a nicer container.
+            const newName = prompt("Enter new project name (lowercase, numbers, _, -):");
+            if (newName) {
+              setName(newName);
+              // use timeout to allow state update to propagate if needed, or just call mutate directly if we don't rely on 'name' state for the mutation *call* but the mutation closure uses it.
+              // Actually createMutation uses 'name' state. So we need to set it and then trigger.
+              // But setState is async. 
+              // Let's refactor createMutation to accept args.
+              createMutation.mutate({ name: newName });
+            }
+          }}
+        >
+          <div className="icon-container">
+            <Icon icon="add" size={48} className="folder-icon" />
           </div>
-          {listQuery.error ? (
-            <Callout intent={Intent.DANGER}>Failed to load projects.</Callout>
-          ) : null}
-          {databases.length === 0 ? (
-            <Text className="muted">No projects yet.</Text>
-          ) : (
-            <HTMLTable striped interactive className="command-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {databases.map((dbName) => (
-                  <tr key={dbName}>
-                    <td>{dbName}</td>
-                    <td>
-                      <Button small icon="arrow-right" onClick={() => navigate(`/db/${encodeURIComponent(dbName)}/overview`)}>
-                        Open
-                      </Button>
-                      <Button
-                        small
-                        icon="trash"
-                        intent={Intent.DANGER}
-                        disabled={!adminMode || !adminToken}
-                        style={{ marginLeft: 8 }}
-                        onClick={() => setDeleteTarget({ dbName })}
-                      >
-                        Delete
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </HTMLTable>
-          )}
-          {!adminMode ? (
-            <Text className="muted small" style={{ marginTop: 8 }}>
-              Enable Admin mode to delete projects.
-            </Text>
-          ) : null}
-        </Card>
+          <div className="filename-container">
+            <span className="filename">New Project</span>
+          </div>
+        </div>
+
+        {databases.map((dbName) => (
+          <ProjectFileIcon
+            key={dbName}
+            name={dbName}
+            onClick={() => navigate(`/db/${encodeURIComponent(dbName)}/overview`)}
+            onDelete={adminMode ? () => setDeleteTarget({ dbName }) : undefined}
+            isAdmin={adminMode}
+          />
+        ))}
       </div>
 
       <DangerConfirmDialog

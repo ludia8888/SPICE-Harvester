@@ -163,7 +163,7 @@ async def _wait_for_command_completed(
     session: aiohttp.ClientSession,
     *,
     command_id: str,
-    timeout_seconds: int = 120,
+    timeout_seconds: int = 300,
     poll_interval_seconds: float = 1.0,
 ) -> Dict[str, Any]:
     deadline = time.monotonic() + timeout_seconds
@@ -181,6 +181,7 @@ async def _wait_for_command_completed(
         if status_value in {"COMPLETED", "FAILED", "CANCELLED"}:
             if status_value != "COMPLETED":
                 raise AssertionError(f"Command {command_id} ended in {status_value}: {last}")
+            await asyncio.sleep(0.5)
             return last
 
         await asyncio.sleep(poll_interval_seconds)
@@ -204,6 +205,18 @@ def _xlsx_bytes(*, header: list[str], rows: list[list[Any]]) -> bytes:
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def _csv_bytes(*, header: list[str], rows: list[list[Any]]) -> bytes:
+    import csv
+    import io
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(header)
+    for row in rows:
+        writer.writerow(row)
+    return buf.getvalue().encode("utf-8")
 
 
 @dataclass(frozen=True)
@@ -241,6 +254,9 @@ class SmokeContext:
     legacy_class_id: str
     instance_id: str
     command_ids: Dict[str, str]
+    pipeline_id: Optional[str] = None
+    dataset_id: Optional[str] = None
+    connection_id: Optional[str] = None
 
     @property
     def ontology_aggregate_id(self) -> str:
@@ -253,6 +269,29 @@ class SmokeContext:
     @property
     def instance_aggregate_id(self) -> str:
         return f"{self.db_name}:main:{self.class_id}:{self.instance_id}"
+
+    @property
+    def pipeline_name(self) -> str:
+        return f"{self.db_name}_pipeline"
+
+    @property
+    def dataset_name(self) -> str:
+        return f"{self.db_name}_dataset"
+
+def _safe_pipeline_ref(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "main"
+    allowed: list[str] = []
+    for ch in raw:
+        if ch.isalnum() or ch in {"-", "_", "."}:
+            allowed.append(ch)
+        else:
+            allowed.append("-")
+    cleaned = "".join(allowed).strip("-")
+    while "--" in cleaned:
+        cleaned = cleaned.replace("--", "-")
+    return cleaned or "main"
 
 
 @dataclass
@@ -300,6 +339,7 @@ async def _request(
 def _format_path(template: str, ctx: SmokeContext, *, overrides: Optional[Dict[str, str]] = None) -> str:
     values = {
         "db_name": ctx.db_name,
+        "branch": ctx.branch_name,
         "branch_name": ctx.branch_name,
         "class_id": ctx.class_id,
         "class_label": ctx.class_id,
@@ -307,6 +347,9 @@ def _format_path(template: str, ctx: SmokeContext, *, overrides: Optional[Dict[s
         "command_id": ctx.command_ids.get("create_database") or next(iter(ctx.command_ids.values()), ""),
         "sheet_id": "0000000000000000000000000000000000000000",
         "task_id": "00000000-0000-0000-0000-000000000000",
+        "pipeline_id": ctx.pipeline_id or "pipeline_smoke",
+        "dataset_id": ctx.dataset_id or "dataset_smoke",
+        "connection_id": ctx.connection_id or "missing_connection",
     }
     if overrides:
         values.update(overrides)
@@ -406,6 +449,160 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     if key == ("GET", "/api/v1/databases/{db_name}/versions"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (200,))
+
+    # ---------- Pipelines ----------
+    if key == ("GET", "/api/v1/pipelines"):
+        url = f"{BFF_URL}{op.path}"
+        return RequestPlan(op.method, op.path, url, (200,), params={"db_name": ctx.db_name, "branch": "main"})
+
+    if key == ("GET", "/api/v1/pipelines/branches"):
+        url = f"{BFF_URL}{op.path}"
+        return RequestPlan(op.method, op.path, url, (200,), params={"db_name": ctx.db_name})
+
+    if key == ("GET", "/api/v1/pipelines/datasets"):
+        url = f"{BFF_URL}{op.path}"
+        return RequestPlan(op.method, op.path, url, (200,), params={"db_name": ctx.db_name})
+
+    if key == ("GET", "/api/v1/pipelines/proposals"):
+        url = f"{BFF_URL}{op.path}"
+        return RequestPlan(op.method, op.path, url, (200,), params={"db_name": ctx.db_name})
+
+    if key == ("POST", "/api/v1/pipelines"):
+        url = f"{BFF_URL}{op.path}"
+        body = {
+            "db_name": ctx.db_name,
+            "name": ctx.pipeline_name,
+            "description": "openapi smoke pipeline",
+            "pipeline_type": "batch",
+            "location": f"/projects/{ctx.db_name}/pipelines",
+            "branch": "main",
+            "definition_json": {"nodes": [], "edges": [], "parameters": []},
+        }
+        return RequestPlan(op.method, op.path, url, (200, 409, 400), json_body=body)
+
+    if key == ("GET", "/api/v1/pipelines/{pipeline_id}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (200, 404))
+
+    if key == ("PUT", "/api/v1/pipelines/{pipeline_id}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {
+            "description": "openapi smoke pipeline update",
+            "definition_json": {"nodes": [], "edges": []},
+            "branch": "main",
+        }
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409), json_body=body)
+
+    if key == ("POST", "/api/v1/pipelines/{pipeline_id}/branches"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {"branch": ctx.branch_name}
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409), json_body=body)
+
+    if key == ("POST", "/api/v1/pipelines/branches/{branch}/archive"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'branch': _safe_pipeline_ref(ctx.branch_name)})}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409), params={"db_name": ctx.db_name})
+
+    if key == ("POST", "/api/v1/pipelines/branches/{branch}/restore"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'branch': _safe_pipeline_ref(ctx.branch_name)})}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409), params={"db_name": ctx.db_name})
+
+    if key == ("POST", "/api/v1/pipelines/{pipeline_id}/build"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {"db_name": ctx.db_name, "limit": 5}
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409, 503), json_body=body)
+
+    if key == ("POST", "/api/v1/pipelines/{pipeline_id}/preview"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {
+            "db_name": ctx.db_name,
+            "definition_json": {"nodes": [], "edges": []},
+            "limit": 5,
+        }
+        return RequestPlan(op.method, op.path, url, (200, 400, 404), json_body=body)
+
+    if key == ("POST", "/api/v1/pipelines/{pipeline_id}/rebase"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {"onto_branch": "main"}
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409), json_body=body)
+
+    if key == ("POST", "/api/v1/pipelines/{pipeline_id}/deploy"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {
+            "definition_json": {"nodes": [], "edges": []},
+            "output": {"db_name": ctx.db_name, "dataset_name": f"{ctx.db_name}_output"},
+            "schedule": {"interval_seconds": 3600},
+        }
+        return RequestPlan(op.method, op.path, url, (200, 400, 404), json_body=body)
+
+    if key == ("POST", "/api/v1/pipelines/{pipeline_id}/proposals"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {"title": "OpenAPI Smoke Proposal", "description": "proposal smoke"}
+        return RequestPlan(op.method, op.path, url, (200, 400, 404), json_body=body)
+
+    if key in {
+        ("POST", "/api/v1/pipelines/{pipeline_id}/proposals/approve"),
+        ("POST", "/api/v1/pipelines/{pipeline_id}/proposals/reject"),
+    }:
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {"review_comment": "smoke review"}
+        return RequestPlan(op.method, op.path, url, (200, 400, 404), json_body=body)
+
+    if key == ("POST", "/api/v1/pipelines/datasets"):
+        url = f"{BFF_URL}{op.path}"
+        body = {
+            "db_name": ctx.db_name,
+            "name": ctx.dataset_name,
+            "description": "openapi smoke dataset",
+            "source_type": "manual",
+            "schema_json": {"columns": [{"name": "id", "type": "xsd:string"}]},
+        }
+        return RequestPlan(op.method, op.path, url, (200, 409, 400), json_body=body)
+
+    if key == ("POST", "/api/v1/pipelines/datasets/{dataset_id}/versions"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {
+            "row_count": 1,
+            "sample_json": {"columns": [{"name": "id", "type": "String"}], "rows": [{"id": "1"}]},
+            "schema_json": {"columns": [{"name": "id", "type": "xsd:string"}]},
+        }
+        return RequestPlan(op.method, op.path, url, (200, 400, 404), json_body=body)
+
+    if key == ("POST", "/api/v1/pipelines/datasets/excel-upload"):
+        url = f"{BFF_URL}{op.path}"
+        excel_bytes = _xlsx_bytes(
+            header=["id", "name"],
+            rows=[["1", "alpha"], ["2", "beta"]],
+        )
+        form = aiohttp.FormData()
+        form.add_field(
+            "file",
+            excel_bytes,
+            filename="openapi_smoke.xlsx",
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        form.add_field("dataset_name", f"{ctx.dataset_name}_excel")
+        form.add_field("description", "openapi smoke excel dataset")
+        params = {"db_name": ctx.db_name}
+        return RequestPlan(op.method, op.path, url, (200, 400, 422, 501), params=params, form=form)
+
+    if key == ("POST", "/api/v1/pipelines/datasets/csv-upload"):
+        url = f"{BFF_URL}{op.path}"
+        csv_bytes = _csv_bytes(header=["id", "name"], rows=[["1", "alpha"], ["2", "beta"]])
+        form = aiohttp.FormData()
+        form.add_field("file", csv_bytes, filename="openapi_smoke.csv", content_type="text/csv")
+        form.add_field("dataset_name", f"{ctx.dataset_name}_csv")
+        form.add_field("description", "openapi smoke csv dataset")
+        params = {"db_name": ctx.db_name}
+        return RequestPlan(op.method, op.path, url, (200, 400, 422), params=params, form=form)
+
+    if key == ("POST", "/api/v1/pipelines/datasets/media-upload"):
+        url = f"{BFF_URL}{op.path}"
+        form = aiohttp.FormData()
+        form.add_field("files", b"hello-world", filename="openapi_smoke.txt", content_type="text/plain")
+        form.add_field("dataset_name", f"{ctx.dataset_name}_media")
+        form.add_field("description", "openapi smoke media dataset")
+        params = {"db_name": ctx.db_name}
+        return RequestPlan(op.method, op.path, url, (200, 400, 422), params=params, form=form)
 
     if key == ("GET", "/api/v1/databases/{db_name}/branches"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
@@ -722,14 +919,12 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         }
         return RequestPlan(op.method, op.path, url, (200, 400, 422), json_body=body)
 
-    # ---------- Excel-backed endpoints ----------
-    excel_bytes = _xlsx_bytes(
-        header=[f"{ctx.class_id.lower()}_id", "name"],
-        rows=[[ctx.instance_id, "OpenAPI Smoke Product"], [f"{ctx.instance_id}_2", "OpenAPI Smoke Product 2"]],
-    )
-
     if key == ("POST", "/api/v1/database/{db_name}/suggest-schema-from-excel"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        excel_bytes = _xlsx_bytes(
+            header=[f"{ctx.class_id.lower()}_id", "name"],
+            rows=[[ctx.instance_id, "OpenAPI Smoke Product"], [f"{ctx.instance_id}_2", "OpenAPI Smoke Product 2"]],
+        )
         form = aiohttp.FormData()
         form.add_field(
             "file",
@@ -741,6 +936,10 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
 
     if key == ("POST", "/api/v1/database/{db_name}/suggest-mappings-from-excel"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        excel_bytes = _xlsx_bytes(
+            header=[f"{ctx.class_id.lower()}_id", "name"],
+            rows=[[ctx.instance_id, "OpenAPI Smoke Product"], [f"{ctx.instance_id}_2", "OpenAPI Smoke Product 2"]],
+        )
         form = aiohttp.FormData()
         form.add_field(
             "file",
@@ -754,6 +953,10 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
 
     if key == ("POST", "/api/v1/database/{db_name}/import-from-excel/dry-run"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        excel_bytes = _xlsx_bytes(
+            header=[f"{ctx.class_id.lower()}_id", "name"],
+            rows=[[ctx.instance_id, "OpenAPI Smoke Product"], [f"{ctx.instance_id}_2", "OpenAPI Smoke Product 2"]],
+        )
         form = aiohttp.FormData()
         form.add_field(
             "file",
@@ -767,6 +970,10 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
 
     if key == ("POST", "/api/v1/database/{db_name}/import-from-excel/commit"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        excel_bytes = _xlsx_bytes(
+            header=[f"{ctx.class_id.lower()}_id", "name"],
+            rows=[[ctx.instance_id, "OpenAPI Smoke Product"], [f"{ctx.instance_id}_2", "OpenAPI Smoke Product 2"]],
+        )
         form = aiohttp.FormData()
         form.add_field(
             "file",
@@ -807,6 +1014,31 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         # Missing sheet_url must fail fast (400) without external calls.
         return RequestPlan(op.method, op.path, url, (400,), json_body={})
 
+    if key == ("POST", "/api/v1/data-connectors/google-sheets/oauth/start"):
+        url = f"{BFF_URL}{op.path}"
+        body = {"redirect_uri": "http://localhost:5173/connector-callback", "db_name": ctx.db_name}
+        return RequestPlan(op.method, op.path, url, (200, 400), json_body=body)
+
+    if key == ("GET", "/api/v1/data-connectors/google-sheets/oauth/callback"):
+        url = f"{BFF_URL}{op.path}"
+        params = {"code": "smoke-code", "state": "invalid-state"}
+        return RequestPlan(op.method, op.path, url, (400, 302), params=params)
+
+    if key == ("GET", "/api/v1/data-connectors/google-sheets/drive/spreadsheets"):
+        url = f"{BFF_URL}{op.path}"
+        params = {"connection_id": ctx.connection_id or "missing_connection", "limit": 5}
+        return RequestPlan(op.method, op.path, url, (200, 400, 404), params=params)
+
+    if key == ("GET", "/api/v1/data-connectors/google-sheets/spreadsheets/{sheet_id}/worksheets"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'sheet_id': 'missing_sheet'})}"
+        params = {"connection_id": ctx.connection_id or "missing_connection"}
+        return RequestPlan(op.method, op.path, url, (200, 400, 404), params=params)
+
+    if key == ("POST", "/api/v1/data-connectors/google-sheets/{sheet_id}/start-pipelining"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'sheet_id': 'missing_sheet'})}"
+        body = {"db_name": ctx.db_name, "worksheet_name": "Sheet1", "limit": 5}
+        return RequestPlan(op.method, op.path, url, (200, 400, 404), json_body=body)
+
     if key == ("GET", "/api/v1/data-connectors/google-sheets/registered"):
         url = f"{BFF_URL}{op.path}"
         return RequestPlan(op.method, op.path, url, (200,))
@@ -819,6 +1051,10 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     if key == ("DELETE", "/api/v1/data-connectors/google-sheets/{sheet_id}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'sheet_id': 'not_registered_smoke'})}"
         return RequestPlan(op.method, op.path, url, (404, 400, 200))
+
+    if key == ("DELETE", "/api/v1/data-connectors/google-sheets/connections/{connection_id}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (200, 404))
 
     # ---------- AI (LLM) ----------
     if key in {("POST", "/api/v1/ai/query/{db_name}"), ("POST", "/api/v1/ai/translate/query-plan/{db_name}")}:
@@ -854,9 +1090,11 @@ async def test_openapi_stable_contract_smoke():
         try:
             async with session.get(f"{BFF_URL}/api/v1/health") as resp:
                 if resp.status != 200:
-                    pytest.skip(f"BFF not healthy at {BFF_URL} (status={resp.status})")
+                    raise RuntimeError(
+                        f"BFF not healthy at {BFF_URL} (status={resp.status})"
+                    )
         except Exception as e:  # pragma: no cover
-            pytest.skip(f"BFF not reachable at {BFF_URL}: {e}")
+            raise RuntimeError(f"BFF not reachable at {BFF_URL}: {e}")
 
     async with aiohttp.ClientSession(headers=BFF_HEADERS) as session:
         async with session.get(f"{BFF_URL}/openapi.json") as resp:
@@ -905,9 +1143,12 @@ async def test_openapi_stable_contract_smoke():
     failures: list[str] = []
     executed: set[Tuple[str, str]] = set()
 
+    # NOTE: Use force_close to avoid flaky keep-alive reuse across many sequential requests
+    # (observed as occasional aiohttp.ServerDisconnectedError on a single op).
     async with aiohttp.ClientSession(
         timeout=aiohttp.ClientTimeout(total=60),
         headers=BFF_HEADERS,
+        connector=aiohttp.TCPConnector(force_close=True),
     ) as session:
         # ---- Deterministic setup (also counts toward coverage) ----
         try:
@@ -972,6 +1213,34 @@ async def test_openapi_stable_contract_smoke():
             executed.add((plan.method, plan.path_template))
             if status not in plan.expected_statuses:
                 raise AssertionError(f"{plan.method} {plan.path_template} unexpected status {status}: {text[:500]}")
+
+            # Create dataset (Pipeline Builder) for dataset_id-dependent routes
+            plan = await _build_plan(
+                Operation("POST", "/api/v1/pipelines/datasets", ("Pipeline Builder",), "Create Dataset"),
+                ctx,
+            )
+            status, text, payload = await _request(session, plan)
+            executed.add((plan.method, plan.path_template))
+            if status not in plan.expected_statuses:
+                raise AssertionError(f"{plan.method} {plan.path_template} unexpected status {status}: {text[:500]}")
+            if isinstance(payload, dict):
+                dataset = (payload.get("data") or {}).get("dataset")
+                if isinstance(dataset, dict):
+                    ctx.dataset_id = dataset.get("dataset_id") or ctx.dataset_id
+
+            # Create pipeline for pipeline_id-dependent routes
+            plan = await _build_plan(
+                Operation("POST", "/api/v1/pipelines", ("Pipeline Builder",), "Create Pipeline"),
+                ctx,
+            )
+            status, text, payload = await _request(session, plan)
+            executed.add((plan.method, plan.path_template))
+            if status not in plan.expected_statuses:
+                raise AssertionError(f"{plan.method} {plan.path_template} unexpected status {status}: {text[:500]}")
+            if isinstance(payload, dict):
+                pipeline = (payload.get("data") or {}).get("pipeline")
+                if isinstance(pipeline, dict):
+                    ctx.pipeline_id = pipeline.get("pipeline_id") or ctx.pipeline_id
 
         except Exception as e:
             # Setup failure is fatal; without it, most OpenAPI ops can't be exercised meaningfully.

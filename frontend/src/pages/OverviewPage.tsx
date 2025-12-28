@@ -13,7 +13,7 @@ export const OverviewPage = () => {
 
   return (
     <div>
-      <PageHeader title="Home" subtitle="" />
+      <PageHeader title="Overview" subtitle="" />
       {/* Home page is intentionally empty for now */}
     </div>
   )

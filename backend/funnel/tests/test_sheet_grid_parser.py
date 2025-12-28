@@ -56,7 +56,7 @@ class TestSheetGridParser:
 
     def test_excel_parser_optional_dependency(self):
         if importlib.util.find_spec("openpyxl") is not None:
-            pytest.skip("openpyxl installed; this environment can run full Excel parser tests")
+            return
 
         with pytest.raises(RuntimeError) as exc:
             SheetGridParser.from_excel_bytes(b"not-an-xlsx")
@@ -67,7 +67,7 @@ class TestSheetGridParser:
     )
     def test_excel_parser_extracts_merges_and_currency_format(self):
         if importlib.util.find_spec("openpyxl") is None:
-            pytest.skip("openpyxl not installed")
+            raise RuntimeError("openpyxl is required for Excel parser tests")
 
         from openpyxl import Workbook
 

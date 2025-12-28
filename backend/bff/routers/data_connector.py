@@ -30,11 +30,13 @@ from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.services.sheet_grid_parser import SheetGridParseOptions, SheetGridParser
 from shared.services.connector_registry import ConnectorRegistry
 from shared.services.dataset_registry import DatasetRegistry
-from shared.dependencies.providers import LineageStoreDep, StorageServiceDep
+from shared.services.pipeline_registry import PipelineRegistry
+from shared.dependencies.providers import LineageStoreDep
 from shared.utils.s3_uri import build_s3_uri
 from shared.config.app_config import AppConfig
 from shared.services.event_store import event_store
 from shared.models.event_envelope import EventEnvelope
+from shared.utils.event_utils import build_command_event
 from data_connector.google_sheets.auth import GoogleOAuth2Client
 
 logger = logging.getLogger(__name__)
@@ -67,45 +69,16 @@ async def get_dataset_registry() -> DatasetRegistry:
     return await _get_dataset_registry()
 
 
+async def get_pipeline_registry() -> PipelineRegistry:
+    """Import here to avoid circular dependency"""
+    from bff.main import get_pipeline_registry as _get_pipeline_registry
+
+    return await _get_pipeline_registry()
+
+
 def _build_google_oauth_client() -> GoogleOAuth2Client:
     return GoogleOAuth2Client()
 
-
-def _build_event(
-    *,
-    event_type: str,
-    aggregate_type: str,
-    aggregate_id: str,
-    data: Dict[str, Any],
-    command_type: str,
-    actor: Optional[str] = None,
-) -> EventEnvelope:
-    command_payload = {
-        "command_id": str(uuid4()),
-        "command_type": command_type,
-        "aggregate_type": aggregate_type,
-        "aggregate_id": aggregate_id,
-        "payload": data,
-        "metadata": {},
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "created_by": actor,
-        "version": 1,
-    }
-    return EventEnvelope(
-        event_id=command_payload["command_id"],
-        event_type=event_type,
-        aggregate_type=aggregate_type,
-        aggregate_id=aggregate_id,
-        occurred_at=datetime.now(timezone.utc),
-        actor=actor,
-        data=command_payload,
-        metadata={
-            "kind": "command",
-            "command_type": command_type,
-            "command_version": 1,
-            "command_id": command_payload["command_id"],
-        },
-    )
 
 def _connector_oauth_enabled(oauth_client: GoogleOAuth2Client) -> bool:
     return bool(oauth_client.client_id and oauth_client.client_secret and oauth_client.redirect_uri)
@@ -628,6 +601,7 @@ async def register_google_sheet(
                 db_name=db_name,
                 source_type="connector",
                 source_ref=source_ref,
+                branch=branch or "main",
             )
             if existing_dataset:
                 dataset = existing_dataset
@@ -639,17 +613,12 @@ async def register_google_sheet(
                     source_type="connector",
                     source_ref=source_ref,
                     schema_json={"columns": [{"name": col, "type": "String"} for col in preview.columns]},
+                    branch=branch or "main",
                 )
 
             sample_rows = preview.sample_rows or []
-            if sample_rows:
-                await dataset_registry.add_version(
-                    dataset_id=dataset.dataset_id,
-                    artifact_key=None,
-                    row_count=len(sample_rows),
-                    sample_json={"columns": [{"name": col, "type": "String"} for col in preview.columns], "rows": sample_rows},
-                    schema_json={"columns": [{"name": col, "type": "String"} for col in preview.columns]},
-                )
+            # Do not create dataset versions from preview samples at registration time.
+            # Dataset versions should correspond to committed artifacts (lakeFS commit ids) created by sync runs.
             dataset_payload = {
                 "dataset_id": dataset.dataset_id,
                 "name": dataset.name,
@@ -861,7 +830,7 @@ async def list_registered_sheets(
     summary="Start pipelining from a registered Google Sheet",
     description="Materialize a dataset entry for a registered connector and return it for Pipeline Builder.",
 )
-@rate_limit(**RateLimitPresets.RELAXED)
+@rate_limit(**RateLimitPresets.WRITE)
 @trace_endpoint("start_pipelining_google_sheet")
 async def start_pipelining_google_sheet(
     sheet_id: str,
@@ -869,12 +838,16 @@ async def start_pipelining_google_sheet(
     http_request: Request,
     google_sheets_service: GoogleSheetsService = Depends(get_google_sheets_service),
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     *,
-    storage_service: StorageServiceDep,
     lineage_store: LineageStoreDep,
 ) -> Dict[str, Any]:
     try:
+        actor_user_id = (http_request.headers.get("X-User-ID") or "").strip() or None
+        lakefs_storage_service = await pipeline_registry.get_lakefs_storage(user_id=actor_user_id)
+        lakefs_client = await pipeline_registry.get_lakefs_client(user_id=actor_user_id)
+
         sanitized = sanitize_input(payload or {})
         db_name = str(sanitized.get("db_name") or "").strip()
         worksheet_name = str(sanitized.get("worksheet_name") or "").strip() or None
@@ -974,6 +947,7 @@ async def start_pipelining_google_sheet(
             db_name=db_name,
             source_type="connector",
             source_ref=source_ref,
+            branch=mapping.target_branch if mapping and mapping.target_branch else "main",
         )
         if not dataset:
             dataset = await dataset_registry.create_dataset(
@@ -983,9 +957,10 @@ async def start_pipelining_google_sheet(
                 source_type="connector",
                 source_ref=source_ref,
                 schema_json={"columns": schema_columns},
+                branch=mapping.target_branch if mapping and mapping.target_branch else "main",
             )
 
-            create_event = _build_event(
+            create_event = build_command_event(
                 event_type="DATASET_CREATED",
                 aggregate_type="Dataset",
                 aggregate_id=dataset.dataset_id,
@@ -999,39 +974,50 @@ async def start_pipelining_google_sheet(
             except Exception as e:
                 logger.warning(f"Failed to append gsheet dataset create event: {e}")
 
-        artifact_bucket = os.getenv("DATASET_ARTIFACT_BUCKET") or os.getenv(
-            "PIPELINE_ARTIFACT_BUCKET", "pipeline-artifacts"
+        repo = (os.getenv("LAKEFS_RAW_REPOSITORY") or "").strip() or "raw-datasets"
+        safe_name = dataset.name.replace(" ", "_")
+        object_prefix = f"datasets/{db_name}/{dataset.dataset_id}/{safe_name}"
+        object_key = f"{object_prefix}/source.csv"
+
+        csv_buffer = io.StringIO()
+        writer = csv.writer(csv_buffer)
+        if columns:
+            writer.writerow(columns)
+        for row in rows:
+            writer.writerow(row)
+
+        branch_name = (dataset.branch or "main").strip() or "main"
+        await lakefs_storage_service.save_bytes(
+            repo,
+            f"{branch_name}/{object_key}",
+            csv_buffer.getvalue().encode("utf-8"),
+            content_type="text/csv",
         )
-        artifact_key = None
-        if storage_service:
-            safe_name = dataset.name.replace(" ", "_")
-            timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-            object_key = f"datasets/{db_name}/{dataset.dataset_id}/{safe_name}/{timestamp}.csv"
-            await storage_service.create_bucket(artifact_bucket)
-            csv_buffer = io.StringIO()
-            writer = csv.writer(csv_buffer)
-            if columns:
-                writer.writerow(columns)
-            for row in rows:
-                writer.writerow(row)
-            await storage_service.save_bytes(
-                artifact_bucket,
-                object_key,
-                csv_buffer.getvalue().encode("utf-8"),
-                content_type="text/csv",
-            )
-            artifact_key = build_s3_uri(artifact_bucket, object_key)
+        commit_id = await lakefs_client.commit(
+            repository=repo,
+            branch=branch_name,
+            message=f"Google Sheets snapshot {db_name}/{dataset.name}",
+            metadata={
+                "dataset_id": dataset.dataset_id,
+                "db_name": db_name,
+                "dataset_name": dataset.name,
+                "source_type": "connector",
+                "source_ref": source_ref,
+            },
+        )
+        artifact_key = build_s3_uri(repo, f"{commit_id}/{object_key}")
 
         if rows:
             version = await dataset_registry.add_version(
                 dataset_id=dataset.dataset_id,
+                lakefs_commit_id=commit_id,
                 artifact_key=artifact_key,
                 row_count=len(rows),
                 sample_json={"columns": schema_columns, "rows": sample_rows},
                 schema_json={"columns": schema_columns},
             )
 
-            event = _build_event(
+            event = build_command_event(
                 event_type="DATASET_VERSION_CREATED",
                 aggregate_type="Dataset",
                 aggregate_id=dataset.dataset_id,
@@ -1039,7 +1025,7 @@ async def start_pipelining_google_sheet(
                     "dataset_id": dataset.dataset_id,
                     "db_name": db_name,
                     "name": dataset.name,
-                    "version": version.version,
+                    "lakefs_commit_id": version.lakefs_commit_id,
                     "artifact_key": artifact_key,
                 },
                 command_type="INGEST_DATASET_SNAPSHOT",
