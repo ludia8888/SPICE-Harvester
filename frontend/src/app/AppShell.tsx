@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { Alignment, Button, Navbar, NavbarGroup, Tag } from '@blueprintjs/core'
 import { SidebarRail } from '../components/SidebarRail'
 import { useAppStore } from '../state/store'
 import { HomePage } from '../pages/HomePage'
@@ -53,13 +52,6 @@ export const AppShell = () => {
 
   return (
     <div className="app-shell">
-      <Navbar className="top-nav">
-        <NavbarGroup align={Alignment.LEFT}>
-          <Button minimal icon="polygon-filter" text="SPICE Harvester" />
-          <Tag minimal intent="primary">Prototype</Tag>
-        </NavbarGroup>
-      </Navbar>
-
       <div className={`app-body ${isRailExpanded ? 'is-expanded' : ''}`}>
         <SidebarRail items={railItems} onHoverChange={setRailExpanded} />
         <main className="main">{content}</main>
