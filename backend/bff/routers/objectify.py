@@ -155,6 +155,8 @@ async def run_objectify(
             version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
         if not version:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset version not found")
+        if version.dataset_id != dataset_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dataset version mismatch")
         if not version.artifact_key:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dataset version is missing artifact_key")
 
@@ -167,6 +169,27 @@ async def run_objectify(
             )
         if not mapping_spec:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapping spec not found")
+        if mapping_spec.dataset_id != dataset_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mapping spec does not match dataset")
+
+        existing = await objectify_registry.find_objectify_job(
+            dataset_version_id=version.version_id,
+            mapping_spec_id=mapping_spec.mapping_spec_id,
+            mapping_spec_version=mapping_spec.version,
+            statuses=["QUEUED", "RUNNING", "SUBMITTED"],
+        )
+        if existing:
+            return ApiResponse.success(
+                message="Objectify job already queued",
+                data={
+                    "job_id": existing.job_id,
+                    "mapping_spec_id": mapping_spec.mapping_spec_id,
+                    "dataset_id": dataset_id,
+                    "dataset_version_id": version.version_id,
+                    "artifact_key": version.artifact_key,
+                    "status": existing.status,
+                },
+            ).to_dict()
 
         job_id = str(uuid4())
         await objectify_registry.create_objectify_job(

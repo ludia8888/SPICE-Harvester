@@ -1014,6 +1014,7 @@ class PipelineWorker:
                     "job_id": job.job_id,
                     "row_count": row_count,
                     "sample_row_count": len(output_sample),
+                    "sampling_strategy": {"type": "limit", "limit": preview_limit},
                     "column_stats": column_stats,
                     "definition_hash": job.definition_hash,
                     "branch": job.branch or "main",
@@ -1599,6 +1600,14 @@ class PipelineWorker:
         )
         if not mapping_spec or not mapping_spec.auto_sync:
             return None
+        existing = await self.objectify_registry.find_objectify_job(
+            dataset_version_id=version.version_id,
+            mapping_spec_id=mapping_spec.mapping_spec_id,
+            mapping_spec_version=mapping_spec.version,
+            statuses=["QUEUED", "RUNNING", "SUBMITTED"],
+        )
+        if existing:
+            return existing.job_id
         job_id = str(uuid4())
         await self.objectify_registry.create_objectify_job(
             job_id=job_id,

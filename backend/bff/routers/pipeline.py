@@ -127,6 +127,14 @@ async def _maybe_enqueue_objectify_job(
     )
     if not mapping_spec or not mapping_spec.auto_sync:
         return None
+    existing = await objectify_registry.find_objectify_job(
+        dataset_version_id=version.version_id,
+        mapping_spec_id=mapping_spec.mapping_spec_id,
+        mapping_spec_version=mapping_spec.version,
+        statuses=["QUEUED", "RUNNING", "SUBMITTED"],
+    )
+    if existing:
+        return existing.job_id
     job_id = str(uuid4())
     await objectify_registry.create_objectify_job(
         job_id=job_id,
@@ -2883,6 +2891,7 @@ async def create_dataset_version(
     ingest_request = None
     ingest_transaction = None
     ingest_transaction = None
+    ingest_transaction = None
     try:
         actor_user_id = (request.headers.get("X-User-ID") or "").strip() or None
         lakefs_storage_service = await pipeline_registry.get_lakefs_storage(user_id=actor_user_id)
@@ -2931,6 +2940,9 @@ async def create_dataset_version(
             branch=dataset_branch,
             idempotency_key=idempotency_key,
             request_fingerprint=request_fingerprint,
+            schema_json=schema_json,
+            sample_json=sample_json,
+            row_count=row_count,
         )
         ingest_transaction = await _ensure_ingest_transaction(
             dataset_registry,
@@ -3211,6 +3223,10 @@ async def upload_excel_dataset(
             branch=dataset_branch,
             idempotency_key=idempotency_key,
             request_fingerprint=request_fingerprint,
+            schema_json=schema_json,
+            sample_json={"columns": _columns_from_schema(schema_columns), "rows": sample_rows},
+            row_count=row_count,
+            source_metadata=preview.get("source_metadata") if isinstance(preview, dict) else None,
         )
         ingest_transaction = await _ensure_ingest_transaction(
             dataset_registry,
@@ -3539,6 +3555,19 @@ async def upload_csv_dataset(
             branch=dataset_branch,
             idempotency_key=idempotency_key,
             request_fingerprint=request_fingerprint,
+            schema_json=schema_json,
+            sample_json={"columns": _columns_from_schema(schema_columns), "rows": sample_rows},
+            row_count=row_count,
+            source_metadata={
+                "type": "csv",
+                "filename": filename,
+                "delimiter": resolved_delimiter,
+                "has_header": has_header,
+            },
+        )
+        ingest_transaction = await _ensure_ingest_transaction(
+            dataset_registry,
+            ingest_request_id=ingest_request.ingest_request_id,
         )
         if ingest_request.dataset_id != dataset.dataset_id:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Idempotency key already used for a different dataset")
@@ -3833,6 +3862,8 @@ async def upload_media_dataset(
             {"name": "content_type", "type": "xsd:string"},
             {"name": "size_bytes", "type": "xsd:integer"},
         ]
+        row_count = len(uploaded)
+        ingest_sample_json = {"columns": schema_columns, "rows": []}
 
         dataset = await dataset_registry.get_dataset_by_name(
             db_name=db_name,
@@ -3877,6 +3908,10 @@ async def upload_media_dataset(
             branch=dataset_branch,
             idempotency_key=idempotency_key,
             request_fingerprint=request_fingerprint,
+            schema_json={"columns": schema_columns},
+            sample_json=ingest_sample_json,
+            row_count=row_count,
+            source_metadata={"source_type": "media_upload", "file_count": row_count},
         )
         ingest_transaction = await _ensure_ingest_transaction(
             dataset_registry,
@@ -3968,8 +4003,6 @@ async def upload_media_dataset(
                     lakefs_commit_id=commit_id,
                     artifact_key=artifact_key,
                 )
-        row_count = len(uploaded)
-
         sample_rows: list[dict[str, Any]] = []
         for index, item in enumerate(uploaded):
             filename = str(item.get("filename") or f"upload-{index}")
@@ -3984,6 +4017,12 @@ async def upload_media_dataset(
                     "size_bytes": size_bytes,
                 }
             )
+
+        await dataset_registry.update_ingest_request_payload(
+            ingest_request_id=ingest_request.ingest_request_id,
+            sample_json={"columns": schema_columns, "rows": sample_rows},
+            row_count=row_count,
+        )
 
         outbox_entries: list[dict[str, Any]] = []
         if created_dataset:

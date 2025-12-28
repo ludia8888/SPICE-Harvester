@@ -156,7 +156,7 @@ class ObjectifyRegistry:
                     status TEXT NOT NULL DEFAULT 'QUEUED',
                     command_id TEXT,
                     error TEXT,
-                    report JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    report JSONB NOT NULL DEFAULT '{{}}'::jsonb,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     completed_at TIMESTAMPTZ,
@@ -170,6 +170,12 @@ class ObjectifyRegistry:
                 f"""
                 CREATE INDEX IF NOT EXISTS idx_objectify_jobs_status
                 ON {self._schema}.objectify_jobs(status, created_at)
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_objectify_jobs_version
+                ON {self._schema}.objectify_jobs(dataset_version_id, mapping_spec_id, mapping_spec_version, status)
                 """
             )
 
@@ -430,6 +436,86 @@ class ObjectifyRegistry:
             )
             if not row:
                 raise RuntimeError("Failed to create objectify job")
+            return ObjectifyJobRecord(
+                job_id=str(row["job_id"]),
+                mapping_spec_id=str(row["mapping_spec_id"]),
+                mapping_spec_version=int(row["mapping_spec_version"]),
+                dataset_id=str(row["dataset_id"]),
+                dataset_version_id=str(row["dataset_version_id"]),
+                dataset_branch=str(row["dataset_branch"]),
+                target_class_id=str(row["target_class_id"]),
+                status=str(row["status"]),
+                command_id=row["command_id"],
+                error=row["error"],
+                report=coerce_json_dataset(row["report"]) or {},
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+                completed_at=row["completed_at"],
+            )
+
+    async def get_objectify_job(self, *, job_id: str) -> Optional[ObjectifyJobRecord]:
+        if not self._pool:
+            raise RuntimeError("ObjectifyRegistry not connected")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT job_id, mapping_spec_id, mapping_spec_version, dataset_id, dataset_version_id,
+                       dataset_branch, target_class_id, status, command_id, error, report,
+                       created_at, updated_at, completed_at
+                FROM {self._schema}.objectify_jobs
+                WHERE job_id = $1::uuid
+                """,
+                job_id,
+            )
+            if not row:
+                return None
+            return ObjectifyJobRecord(
+                job_id=str(row["job_id"]),
+                mapping_spec_id=str(row["mapping_spec_id"]),
+                mapping_spec_version=int(row["mapping_spec_version"]),
+                dataset_id=str(row["dataset_id"]),
+                dataset_version_id=str(row["dataset_version_id"]),
+                dataset_branch=str(row["dataset_branch"]),
+                target_class_id=str(row["target_class_id"]),
+                status=str(row["status"]),
+                command_id=row["command_id"],
+                error=row["error"],
+                report=coerce_json_dataset(row["report"]) or {},
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+                completed_at=row["completed_at"],
+            )
+
+    async def find_objectify_job(
+        self,
+        *,
+        dataset_version_id: str,
+        mapping_spec_id: str,
+        mapping_spec_version: int,
+        statuses: Optional[List[str]] = None,
+    ) -> Optional[ObjectifyJobRecord]:
+        if not self._pool:
+            raise RuntimeError("ObjectifyRegistry not connected")
+        clause = "dataset_version_id = $1::uuid AND mapping_spec_id = $2::uuid AND mapping_spec_version = $3"
+        params: List[Any] = [dataset_version_id, mapping_spec_id, int(mapping_spec_version)]
+        if statuses:
+            clause += " AND status = ANY($4::text[])"
+            params.append([str(s) for s in statuses])
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT job_id, mapping_spec_id, mapping_spec_version, dataset_id, dataset_version_id,
+                       dataset_branch, target_class_id, status, command_id, error, report,
+                       created_at, updated_at, completed_at
+                FROM {self._schema}.objectify_jobs
+                WHERE {clause}
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                *params,
+            )
+            if not row:
+                return None
             return ObjectifyJobRecord(
                 job_id=str(row["job_id"]),
                 mapping_spec_id=str(row["mapping_spec_id"]),

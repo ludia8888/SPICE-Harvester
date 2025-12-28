@@ -9,7 +9,7 @@ import os
 import asyncio
 from urllib.parse import urlparse
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, AsyncIterator, Tuple
 
 try:
     import boto3
@@ -381,6 +381,50 @@ class StorageService:
             return response.get('Contents', [])
         except ClientError:
             return []
+
+    async def list_objects_paginated(
+        self,
+        bucket: str,
+        prefix: str = "",
+        max_keys: int = 1000,
+        continuation_token: Optional[str] = None,
+    ) -> Tuple[list, Optional[str]]:
+        """
+        Paginated object listing (returns next continuation token if more).
+        """
+        try:
+            params: Dict[str, Any] = {"Bucket": bucket, "Prefix": prefix, "MaxKeys": max_keys}
+            if continuation_token:
+                params["ContinuationToken"] = continuation_token
+            response = await asyncio.to_thread(self.client.list_objects_v2, **params)
+            contents = response.get("Contents", []) or []
+            token = response.get("NextContinuationToken") if response.get("IsTruncated") else None
+            return contents, token
+        except ClientError:
+            return [], None
+
+    async def iter_objects(
+        self,
+        bucket: str,
+        prefix: str = "",
+        max_keys: int = 1000,
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """
+        Async iterator over all objects under prefix (pagination-aware).
+        """
+        token: Optional[str] = None
+        while True:
+            contents, token = await self.list_objects_paginated(
+                bucket=bucket,
+                prefix=prefix,
+                max_keys=max_keys,
+                continuation_token=token,
+            )
+            for obj in contents:
+                if isinstance(obj, dict):
+                    yield obj
+            if not token:
+                break
             
     async def get_object_metadata(
         self,

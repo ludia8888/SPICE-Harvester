@@ -7,9 +7,10 @@ Stores dataset metadata + versions (artifact references + samples).
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -19,6 +20,7 @@ from shared.config.service_config import ServiceConfig
 from shared.utils.s3_uri import is_s3_uri
 from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
 
+logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class DatasetRecord:
@@ -57,6 +59,10 @@ class DatasetIngestRequestRecord:
     status: str
     lakefs_commit_id: Optional[str]
     artifact_key: Optional[str]
+    schema_json: Dict[str, Any]
+    sample_json: Dict[str, Any]
+    row_count: Optional[int]
+    source_metadata: Dict[str, Any]
     error: Optional[str]
     created_at: datetime
     updated_at: datetime
@@ -88,6 +94,40 @@ class DatasetIngestOutboxItem:
     error: Optional[str]
     created_at: datetime
     updated_at: datetime
+
+
+def _inject_dataset_version(outbox_entries: List[Dict[str, Any]], dataset_version_id: str) -> None:
+    """
+    Ensure dataset_version_id is propagated into outbox payloads that depend on it.
+
+    This allows outbox-based reconciliation to recover lineage/event metadata
+    even if the ingest job crashes between lakeFS commit and registry publish.
+    """
+    for entry in outbox_entries or []:
+        if not isinstance(entry, dict):
+            continue
+        kind = str(entry.get("kind") or "").lower()
+        payload = entry.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        if kind == "eventstore":
+            if payload.get("event_type") != "DATASET_VERSION_CREATED":
+                continue
+            data = payload.get("data")
+            if not isinstance(data, dict):
+                continue
+            inner = data.get("payload")
+            if isinstance(inner, dict) and "dataset_version_id" not in inner:
+                inner = {**inner, "dataset_version_id": dataset_version_id}
+                payload["data"] = {**data, "payload": inner}
+                entry["payload"] = payload
+        elif kind == "lineage":
+            meta = payload.get("edge_metadata")
+            if isinstance(meta, dict) and "dataset_version_id" not in meta:
+                payload["edge_metadata"] = {**meta, "dataset_version_id": dataset_version_id}
+            if isinstance(payload.get("from_node_id"), str) and payload["from_node_id"].startswith("event:"):
+                payload["from_node_id"] = f"agg:DatasetVersion:{dataset_version_id}"
+            entry["payload"] = payload
 
 
 class DatasetRegistry:
@@ -270,6 +310,10 @@ class DatasetRegistry:
                     status TEXT NOT NULL,
                     lakefs_commit_id TEXT,
                     artifact_key TEXT,
+                    schema_json JSONB,
+                    sample_json JSONB,
+                    row_count INTEGER,
+                    source_metadata JSONB,
                     error TEXT,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -285,6 +329,30 @@ class DatasetRegistry:
                 f"""
                 CREATE INDEX IF NOT EXISTS idx_dataset_ingest_requests_status
                 ON {self._schema}.dataset_ingest_requests(status, created_at)
+                """
+            )
+            await conn.execute(
+                f"""
+                ALTER TABLE {self._schema}.dataset_ingest_requests
+                    ADD COLUMN IF NOT EXISTS schema_json JSONB
+                """
+            )
+            await conn.execute(
+                f"""
+                ALTER TABLE {self._schema}.dataset_ingest_requests
+                    ADD COLUMN IF NOT EXISTS sample_json JSONB
+                """
+            )
+            await conn.execute(
+                f"""
+                ALTER TABLE {self._schema}.dataset_ingest_requests
+                    ADD COLUMN IF NOT EXISTS row_count INTEGER
+                """
+            )
+            await conn.execute(
+                f"""
+                ALTER TABLE {self._schema}.dataset_ingest_requests
+                    ADD COLUMN IF NOT EXISTS source_metadata JSONB
                 """
             )
             await conn.execute(
@@ -709,7 +777,8 @@ class DatasetRegistry:
             row = await conn.fetchrow(
                 f"""
                 SELECT ingest_request_id, dataset_id, db_name, branch, idempotency_key, request_fingerprint,
-                       status, lakefs_commit_id, artifact_key, error, created_at, updated_at, published_at
+                       status, lakefs_commit_id, artifact_key, schema_json, sample_json, row_count,
+                       source_metadata, error, created_at, updated_at, published_at
                 FROM {self._schema}.dataset_ingest_requests
                 WHERE idempotency_key = $1
                 """,
@@ -727,6 +796,10 @@ class DatasetRegistry:
                 status=row["status"],
                 lakefs_commit_id=row["lakefs_commit_id"],
                 artifact_key=row["artifact_key"],
+                schema_json=coerce_json_dataset(row["schema_json"]) or {},
+                sample_json=coerce_json_dataset(row["sample_json"]) or {},
+                row_count=row["row_count"],
+                source_metadata=coerce_json_dataset(row["source_metadata"]) or {},
                 error=row["error"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
@@ -741,21 +814,33 @@ class DatasetRegistry:
         branch: str,
         idempotency_key: str,
         request_fingerprint: Optional[str],
+        schema_json: Optional[Dict[str, Any]] = None,
+        sample_json: Optional[Dict[str, Any]] = None,
+        row_count: Optional[int] = None,
+        source_metadata: Optional[Dict[str, Any]] = None,
     ) -> tuple[DatasetIngestRequestRecord, bool]:
         if not self._pool:
             raise RuntimeError("DatasetRegistry not connected")
         ingest_request_id = str(uuid4())
+        schema_payload = normalize_json_payload(schema_json) if schema_json is not None else None
+        sample_payload = normalize_json_payload(sample_json) if sample_json is not None else None
+        source_payload = normalize_json_payload(source_metadata) if source_metadata is not None else None
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""
                 INSERT INTO {self._schema}.dataset_ingest_requests (
                     ingest_request_id, dataset_id, db_name, branch, idempotency_key,
-                    request_fingerprint, status
-                ) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, 'RECEIVED')
+                    request_fingerprint, status, schema_json, sample_json, row_count, source_metadata
+                ) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, 'RECEIVED', $7::jsonb, $8::jsonb, $9, $10::jsonb)
                 ON CONFLICT (idempotency_key) DO UPDATE
-                SET updated_at = NOW()
+                SET updated_at = NOW(),
+                    schema_json = COALESCE(EXCLUDED.schema_json, {self._schema}.dataset_ingest_requests.schema_json),
+                    sample_json = COALESCE(EXCLUDED.sample_json, {self._schema}.dataset_ingest_requests.sample_json),
+                    row_count = COALESCE(EXCLUDED.row_count, {self._schema}.dataset_ingest_requests.row_count),
+                    source_metadata = COALESCE(EXCLUDED.source_metadata, {self._schema}.dataset_ingest_requests.source_metadata)
                 RETURNING ingest_request_id, dataset_id, db_name, branch, idempotency_key, request_fingerprint,
-                          status, lakefs_commit_id, artifact_key, error, created_at, updated_at, published_at
+                          status, lakefs_commit_id, artifact_key, schema_json, sample_json, row_count,
+                          source_metadata, error, created_at, updated_at, published_at
                 """,
                 ingest_request_id,
                 dataset_id,
@@ -763,6 +848,10 @@ class DatasetRegistry:
                 branch,
                 idempotency_key,
                 request_fingerprint,
+                schema_payload,
+                sample_payload,
+                row_count,
+                source_payload,
             )
             if not row:
                 raise RuntimeError("Failed to create ingest request")
@@ -776,6 +865,10 @@ class DatasetRegistry:
                 status=row["status"],
                 lakefs_commit_id=row["lakefs_commit_id"],
                 artifact_key=row["artifact_key"],
+                schema_json=coerce_json_dataset(row["schema_json"]) or {},
+                sample_json=coerce_json_dataset(row["sample_json"]) or {},
+                row_count=row["row_count"],
+                source_metadata=coerce_json_dataset(row["source_metadata"]) or {},
                 error=row["error"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
@@ -954,7 +1047,8 @@ class DatasetRegistry:
                 WHERE ingest_request_id = $1::uuid
                   AND (lakefs_commit_id IS NULL OR lakefs_commit_id = '')
                 RETURNING ingest_request_id, dataset_id, db_name, branch, idempotency_key, request_fingerprint,
-                          status, lakefs_commit_id, artifact_key, error, created_at, updated_at, published_at
+                          status, lakefs_commit_id, artifact_key, schema_json, sample_json, row_count,
+                          source_metadata, error, created_at, updated_at, published_at
                 """,
                 ingest_request_id,
                 lakefs_commit_id,
@@ -964,7 +1058,8 @@ class DatasetRegistry:
                 row = await conn.fetchrow(
                     f"""
                     SELECT ingest_request_id, dataset_id, db_name, branch, idempotency_key, request_fingerprint,
-                           status, lakefs_commit_id, artifact_key, error, created_at, updated_at, published_at
+                           status, lakefs_commit_id, artifact_key, schema_json, sample_json, row_count,
+                           source_metadata, error, created_at, updated_at, published_at
                     FROM {self._schema}.dataset_ingest_requests
                     WHERE ingest_request_id = $1::uuid
                     """,
@@ -982,6 +1077,10 @@ class DatasetRegistry:
                 status=row["status"],
                 lakefs_commit_id=row["lakefs_commit_id"],
                 artifact_key=row["artifact_key"],
+                schema_json=coerce_json_dataset(row["schema_json"]) or {},
+                sample_json=coerce_json_dataset(row["sample_json"]) or {},
+                row_count=row["row_count"],
+                source_metadata=coerce_json_dataset(row["source_metadata"]) or {},
                 error=row["error"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
@@ -1019,6 +1118,38 @@ class DatasetRegistry:
                 """,
                 ingest_request_id,
                 error,
+            )
+
+    async def update_ingest_request_payload(
+        self,
+        *,
+        ingest_request_id: str,
+        schema_json: Optional[Dict[str, Any]] = None,
+        sample_json: Optional[Dict[str, Any]] = None,
+        row_count: Optional[int] = None,
+        source_metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        schema_payload = normalize_json_payload(schema_json) if schema_json is not None else None
+        sample_payload = normalize_json_payload(sample_json) if sample_json is not None else None
+        source_payload = normalize_json_payload(source_metadata) if source_metadata is not None else None
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                f"""
+                UPDATE {self._schema}.dataset_ingest_requests
+                SET schema_json = COALESCE($2::jsonb, schema_json),
+                    sample_json = COALESCE($3::jsonb, sample_json),
+                    row_count = COALESCE($4, row_count),
+                    source_metadata = COALESCE($5::jsonb, source_metadata),
+                    updated_at = NOW()
+                WHERE ingest_request_id = $1::uuid
+                """,
+                ingest_request_id,
+                schema_payload,
+                sample_payload,
+                row_count,
+                source_payload,
             )
 
     async def publish_ingest_request(
@@ -1063,6 +1194,7 @@ class DatasetRegistry:
                     ingest_request_id,
                 )
                 if existing:
+                    dataset_version_id = str(existing["version_id"])
                     await conn.execute(
                         f"""
                         UPDATE {self._schema}.dataset_ingest_requests
@@ -1083,8 +1215,31 @@ class DatasetRegistry:
                         """,
                         ingest_request_id,
                     )
+                    if outbox_entries:
+                        has_outbox = await conn.fetchval(
+                            f"""
+                            SELECT 1 FROM {self._schema}.dataset_ingest_outbox
+                            WHERE ingest_request_id = $1::uuid
+                            LIMIT 1
+                            """,
+                            ingest_request_id,
+                        )
+                        if not has_outbox:
+                            _inject_dataset_version(outbox_entries, dataset_version_id)
+                            for entry in outbox_entries:
+                                await conn.execute(
+                                    f"""
+                                    INSERT INTO {self._schema}.dataset_ingest_outbox (
+                                        outbox_id, ingest_request_id, kind, payload, status
+                                    ) VALUES ($1::uuid, $2::uuid, $3, $4::jsonb, 'pending')
+                                    """,
+                                    str(uuid4()),
+                                    ingest_request_id,
+                                    str(entry.get("kind") or "eventstore"),
+                                    normalize_json_payload(entry.get("payload") or {}),
+                                )
                     return DatasetVersionRecord(
-                        version_id=str(existing["version_id"]),
+                        version_id=dataset_version_id,
                         dataset_id=str(existing["dataset_id"]),
                         lakefs_commit_id=str(existing["lakefs_commit_id"]),
                         artifact_key=existing["artifact_key"],
@@ -1112,6 +1267,7 @@ class DatasetRegistry:
                 )
                 if not row:
                     raise RuntimeError("Failed to publish dataset version")
+                dataset_version_id = str(row["version_id"])
                 await conn.execute(
                     f"""
                     UPDATE {self._schema}.dataset_ingest_requests
@@ -1141,6 +1297,7 @@ class DatasetRegistry:
                     artifact_key,
                 )
                 if outbox_entries:
+                    _inject_dataset_version(outbox_entries, dataset_version_id)
                     for entry in outbox_entries:
                         await conn.execute(
                             f"""
@@ -1154,7 +1311,7 @@ class DatasetRegistry:
                             normalize_json_payload(entry.get("payload") or {}),
                         )
                 return DatasetVersionRecord(
-                    version_id=str(row["version_id"]),
+                    version_id=dataset_version_id,
                     dataset_id=str(row["dataset_id"]),
                     lakefs_commit_id=str(row["lakefs_commit_id"]),
                     artifact_key=row["artifact_key"],
@@ -1238,3 +1395,141 @@ class DatasetRegistry:
                 outbox_id,
                 error,
             )
+
+    async def reconcile_ingest_state(
+        self,
+        *,
+        stale_after_seconds: int = 3600,
+        limit: int = 200,
+    ) -> Dict[str, int]:
+        """
+        Best-effort reconciliation for ingest atomicity.
+
+        - Publishes RAW_COMMITTED ingests that never finalized into dataset_versions.
+        - Closes OPEN transactions that are stale (marks ingest FAILED/ABORTED).
+        - Repairs transactions that should be COMMITTED based on ingest status.
+        """
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+
+        results = {"published": 0, "aborted": 0, "committed_tx": 0}
+        cutoff = datetime.utcnow() - timedelta(seconds=max(60, int(stale_after_seconds)))
+
+        # 1) Publish RAW_COMMITTED ingests that never created a dataset_version.
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT ingest_request_id, dataset_id, db_name, branch, lakefs_commit_id, artifact_key,
+                       schema_json, sample_json, row_count
+                FROM {self._schema}.dataset_ingest_requests
+                WHERE status = 'RAW_COMMITTED'
+                  AND lakefs_commit_id IS NOT NULL
+                  AND artifact_key IS NOT NULL
+                ORDER BY updated_at ASC
+                LIMIT $1
+                """,
+                limit,
+            )
+
+        for row in rows or []:
+            ingest_request_id = str(row["ingest_request_id"])
+            dataset_id = str(row["dataset_id"])
+            db_name = str(row["db_name"])
+            branch = str(row["branch"])
+            lakefs_commit_id = str(row["lakefs_commit_id"])
+            artifact_key = row["artifact_key"]
+            sample_json = coerce_json_dataset(row["sample_json"]) or {}
+            schema_json = coerce_json_dataset(row["schema_json"]) or {}
+            row_count = row["row_count"]
+
+            try:
+                dataset = await self.get_dataset(dataset_id=dataset_id)
+                dataset_name = dataset.name if dataset else ""
+                transaction = await self.get_ingest_transaction(ingest_request_id=ingest_request_id)
+                transaction_id = transaction.transaction_id if transaction else None
+                from shared.services.dataset_ingest_outbox import build_dataset_event_payload
+
+                outbox_entries = [
+                    {
+                        "kind": "eventstore",
+                        "payload": build_dataset_event_payload(
+                            event_id=ingest_request_id,
+                            event_type="DATASET_VERSION_CREATED",
+                            aggregate_type="Dataset",
+                            aggregate_id=dataset_id,
+                            command_type="INGEST_DATASET_SNAPSHOT",
+                            actor=None,
+                            data={
+                                "dataset_id": dataset_id,
+                                "db_name": db_name,
+                                "name": dataset_name,
+                                "lakefs_commit_id": lakefs_commit_id,
+                                "artifact_key": artifact_key,
+                                "transaction_id": transaction_id,
+                            },
+                        ),
+                    }
+                ]
+                await self.publish_ingest_request(
+                    ingest_request_id=ingest_request_id,
+                    dataset_id=dataset_id,
+                    lakefs_commit_id=lakefs_commit_id,
+                    artifact_key=artifact_key,
+                    row_count=row_count,
+                    sample_json=sample_json,
+                    schema_json=schema_json,
+                    outbox_entries=outbox_entries,
+                )
+                results["published"] += 1
+            except Exception as exc:
+                logger.warning("Failed to reconcile RAW_COMMITTED ingest %s: %s", ingest_request_id, exc)
+
+        # 2) Repair OPEN transactions for already-published requests.
+        async with self._pool.acquire() as conn:
+            repaired = await conn.execute(
+                f"""
+                UPDATE {self._schema}.dataset_ingest_transactions t
+                SET status = 'COMMITTED',
+                    committed_at = COALESCE(committed_at, NOW()),
+                    updated_at = NOW()
+                FROM {self._schema}.dataset_ingest_requests r
+                WHERE r.ingest_request_id = t.ingest_request_id
+                  AND r.status = 'PUBLISHED'
+                  AND t.status = 'OPEN'
+                """
+            )
+        if isinstance(repaired, str) and repaired.startswith("UPDATE"):
+            try:
+                results["committed_tx"] = int(repaired.split()[-1])
+            except Exception:
+                pass
+
+        # 3) Abort stale OPEN transactions.
+        async with self._pool.acquire() as conn:
+            stale_rows = await conn.fetch(
+                f"""
+                SELECT t.ingest_request_id
+                FROM {self._schema}.dataset_ingest_transactions t
+                JOIN {self._schema}.dataset_ingest_requests r
+                  ON r.ingest_request_id = t.ingest_request_id
+                WHERE t.status = 'OPEN'
+                  AND t.created_at < $1
+                  AND r.status IN ('RECEIVED', 'RAW_COMMITTED')
+                ORDER BY t.created_at ASC
+                LIMIT $2
+                """,
+                cutoff,
+                limit,
+            )
+        for row in stale_rows or []:
+            ingest_request_id = str(row["ingest_request_id"])
+            try:
+                await self.mark_ingest_failed(
+                    ingest_request_id=ingest_request_id,
+                    error="reconciler_timeout",
+                )
+                results["aborted"] += 1
+            except Exception as exc:
+                logger.warning("Failed to abort stale ingest %s: %s", ingest_request_id, exc)
+
+        return results

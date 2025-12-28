@@ -42,6 +42,7 @@ from shared.dependencies import (
     register_core_services
 )
 from shared.services.dataset_ingest_outbox import run_dataset_ingest_outbox_worker
+from shared.services.dataset_ingest_reconciler import run_dataset_ingest_reconciler
 from shared.services.lineage_store import LineageStore
 from shared.dependencies.providers import (
     StorageServiceDep,
@@ -483,6 +484,8 @@ async def lifespan(app: FastAPI):
     
     dataset_outbox_task: Optional[asyncio.Task] = None
     dataset_outbox_stop: Optional[asyncio.Event] = None
+    dataset_reconcile_task: Optional[asyncio.Task] = None
+    dataset_reconcile_stop: Optional[asyncio.Event] = None
 
     try:
         ensure_bff_auth_configured()
@@ -521,6 +524,21 @@ async def lifespan(app: FastAPI):
             app.state.dataset_ingest_outbox_task = dataset_outbox_task
             app.state.dataset_ingest_outbox_stop = dataset_outbox_stop
 
+        enable_reconciler = (os.getenv("ENABLE_DATASET_INGEST_RECONCILER", "true") or "true").lower() != "false"
+        if enable_reconciler:
+            dataset_reconcile_stop = asyncio.Event()
+            dataset_registry = _bff_container.get_dataset_registry()
+            dataset_reconcile_task = asyncio.create_task(
+                run_dataset_ingest_reconciler(
+                    dataset_registry=dataset_registry,
+                    poll_interval_seconds=int(os.getenv("DATASET_INGEST_RECONCILER_POLL_SECONDS", "60")),
+                    stale_after_seconds=int(os.getenv("DATASET_INGEST_RECONCILER_STALE_SECONDS", "3600")),
+                    stop_event=dataset_reconcile_stop,
+                )
+            )
+            app.state.dataset_ingest_reconciler_task = dataset_reconcile_task
+            app.state.dataset_ingest_reconciler_stop = dataset_reconcile_stop
+
         # 6. Middleware setup is handled during app creation (service_factory)
         logger.info("BFF Service startup completed successfully")
         
@@ -533,6 +551,14 @@ async def lifespan(app: FastAPI):
     finally:
         # Shutdown in reverse order
         logger.info("BFF Service shutdown beginning...")
+
+        if dataset_reconcile_stop is not None:
+            dataset_reconcile_stop.set()
+        if dataset_reconcile_task is not None:
+            try:
+                await dataset_reconcile_task
+            except Exception as exc:
+                logger.warning("Dataset ingest reconciler shutdown failed: %s", exc)
 
         if dataset_outbox_stop is not None:
             dataset_outbox_stop.set()

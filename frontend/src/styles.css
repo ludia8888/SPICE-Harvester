@@ -1,0 +1,144 @@
+:root {
+  color-scheme: dark;
+  font-family: "Inter", "Segoe UI", sans-serif;
+  background: #10161a;
+  color: #f5f8fa;
+}
+
+body {
+  margin: 0;
+  background: #10161a;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.top-nav {
+  background: #182026;
+  border-bottom: 1px solid #293742;
+}
+
+.app-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 60px 1fr;
+  gap: 0;
+  transition: grid-template-columns 0.2s ease;
+}
+
+.app-body.is-expanded {
+  grid-template-columns: 200px 1fr;
+}
+
+.main {
+  padding: 24px 32px;
+  position: relative;
+  z-index: 1;
+}
+
+.sidebar-rail {
+  background: #182026;
+  border-right: 1px solid #293742;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 6px;
+  gap: 8px;
+  width: 100%;
+  position: relative;
+  z-index: 2;
+}
+
+.rail-content,
+.rail-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rail-spacer {
+  flex: 1;
+}
+
+.rail-item {
+  border: none;
+  background: transparent;
+  color: #bfccd6;
+  border-radius: 6px;
+  padding: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  cursor: pointer;
+  width: 100%;
+}
+
+.app-body.is-expanded .rail-item {
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.rail-item:hover,
+.rail-item.is-active {
+  background: #202b33;
+  color: #f5f8fa;
+}
+
+.rail-icon {
+  font-size: 16px;
+}
+
+.rail-label {
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: all 0.15s ease;
+  font-size: 12px;
+  white-space: nowrap;
+  max-width: 0;
+  overflow: hidden;
+  display: inline-block;
+}
+
+.app-body.is-expanded .rail-label {
+  opacity: 1;
+  transform: translateX(0);
+  max-width: 160px;
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.card {
+  background: #182026;
+  border: 1px solid #293742;
+}
+
+.card-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.card-meta {
+  color: #8a9ba8;
+  font-size: 12px;
+}
+
+.graph-frame {
+  height: 320px;
+  margin-top: 12px;
+  border: 1px solid #293742;
+  border-radius: 6px;
+  overflow: hidden;
+}
