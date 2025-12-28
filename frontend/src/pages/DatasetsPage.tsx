@@ -10,7 +10,6 @@ import {
   Icon,
   InputGroup,
   Menu,
-  MenuDivider,
   MenuItem,
   Popover,
   Radio,
@@ -221,6 +220,7 @@ type BreadcrumbSegment = {
 export const DatasetsPage = () => {
   const { data, isLoading, isFetching, refetch } = useQuery({ queryKey: ['folders'], queryFn: fetchFolderTree })
   const setActiveNav = useAppStore((state) => state.setActiveNav)
+  const setPipelineContext = useAppStore((state) => state.setPipelineContext)
   const [foldersState, setFoldersState] = useState<FolderRecord[] | null>(null)
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null)
   const [activeFileId, setActiveFileId] = useState<string | null>(null)
@@ -399,10 +399,28 @@ export const DatasetsPage = () => {
   }
 
   const handleCloseUploadDialog = () => {
+    if (isUploadComplete && activeFolderId) {
+      const newFiles: DatasetFile[] = uploadFiles.map((uploadFile, index) => ({
+        id: `${activeFolderId}-${Date.now()}-${index}`,
+        name: uploadFile.file.name,
+        datasetName: getResourceName(uploadFile.file.name),
+        source: 'upload',
+        updatedAt: 'just now',
+        sizeBytes: uploadFile.file.size,
+      }))
+
+      setFoldersState((current) => {
+        const base = current ?? data ?? []
+        return base.map((folder) =>
+          folder.id === activeFolderId ? { ...folder, files: [...folder.files, ...newFiles] } : folder,
+        )
+      })
+    }
     setUploadOpen(false)
     setDragActive(false)
     setUploading(false)
     setUploadProgress(0)
+    setUploadFiles([])
   }
 
   const handleOpenUploadDialog = () => {
@@ -463,8 +481,23 @@ export const DatasetsPage = () => {
       return
     }
     if (optionId === 'pipeline') {
+      if (activeFolder) {
+        const datasets = activeFolder.files.map((file) => ({
+          id: file.id,
+          name: file.name,
+          datasetName: file.datasetName,
+        }))
+        setPipelineContext({
+          folderId: activeFolder.id,
+          folderName: activeFolder.name,
+          datasets,
+        })
+      } else {
+        setPipelineContext(null)
+      }
       setCreateMenuOpen(false)
       setActiveNav('pipeline')
+      return
     }
   }
 
