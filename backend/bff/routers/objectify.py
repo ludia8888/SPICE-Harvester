@@ -8,12 +8,13 @@ import logging
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from shared.models.objectify_job import ObjectifyJob
 from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import sanitize_input, validate_class_id
+from shared.security.auth_utils import enforce_db_scope
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.objectify_registry import ObjectifyRegistry
 from shared.services.objectify_job_queue import ObjectifyJobQueue
@@ -66,17 +67,22 @@ class TriggerObjectifyRequest(BaseModel):
 
 @router.post("/mapping-specs", response_model=Dict[str, Any], status_code=status.HTTP_201_CREATED)
 async def create_mapping_spec(
-    request: CreateMappingSpecRequest,
+    body: CreateMappingSpecRequest,
+    request: Request,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
 ):
     try:
-        payload = sanitize_input(request.model_dump())
+        payload = sanitize_input(body.model_dump())
         dataset_id = str(payload.get("dataset_id") or "").strip()
         target_class_id = validate_class_id(payload.get("target_class_id") or "")
         dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
         if not dataset:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+        try:
+            enforce_db_scope(request.headers, db_name=dataset.db_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
 
         dataset_branch = str(payload.get("dataset_branch") or dataset.branch or "main").strip() or "main"
         mappings = payload.get("mappings") or []
@@ -139,7 +145,8 @@ async def list_mapping_specs(
 @router.post("/datasets/{dataset_id}/run", response_model=Dict[str, Any])
 async def run_objectify(
     dataset_id: str,
-    request: TriggerObjectifyRequest,
+    body: TriggerObjectifyRequest,
+    request: Request,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
     job_queue: ObjectifyJobQueue = Depends(get_objectify_job_queue),
@@ -149,8 +156,13 @@ async def run_objectify(
         if not dataset:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
 
-        if request.dataset_version_id:
-            version = await dataset_registry.get_version(version_id=request.dataset_version_id)
+        try:
+            enforce_db_scope(request.headers, db_name=dataset.db_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+
+        if body.dataset_version_id:
+            version = await dataset_registry.get_version(version_id=body.dataset_version_id)
         else:
             version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
         if not version:
@@ -160,8 +172,8 @@ async def run_objectify(
         if not version.artifact_key:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dataset version is missing artifact_key")
 
-        if request.mapping_spec_id:
-            mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=request.mapping_spec_id)
+        if body.mapping_spec_id:
+            mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=body.mapping_spec_id)
         else:
             mapping_spec = await objectify_registry.get_active_mapping_spec(
                 dataset_id=dataset_id,
@@ -203,7 +215,7 @@ async def run_objectify(
         )
 
         options = dict(mapping_spec.options or {})
-        override_options = request.options if isinstance(request.options, dict) else {}
+        override_options = body.options if isinstance(body.options, dict) else {}
         options.update(override_options)
 
         job = ObjectifyJob(
@@ -217,9 +229,9 @@ async def run_objectify(
             mapping_spec_version=mapping_spec.version,
             target_class_id=mapping_spec.target_class_id,
             ontology_branch=options.get("ontology_branch"),
-            max_rows=request.max_rows or options.get("max_rows"),
-            batch_size=request.batch_size or options.get("batch_size"),
-            allow_partial=bool(request.allow_partial or options.get("allow_partial")),
+            max_rows=body.max_rows or options.get("max_rows"),
+            batch_size=body.batch_size or options.get("batch_size"),
+            allow_partial=bool(body.allow_partial or options.get("allow_partial")),
             options=options,
         )
 

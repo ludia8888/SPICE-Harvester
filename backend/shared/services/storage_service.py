@@ -9,7 +9,7 @@ import os
 import asyncio
 from urllib.parse import urlparse
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, AsyncIterator, Tuple
+from typing import Any, Dict, Optional, AsyncIterator, Tuple, BinaryIO
 
 try:
     import boto3
@@ -224,6 +224,62 @@ class StorageService:
                 Body=blob,
                 ContentType=content_type,
                 Metadata=object_metadata,
+            )
+
+        await asyncio.to_thread(_put)
+        
+        return checksum
+
+    async def save_fileobj(
+        self,
+        bucket: str,
+        key: str,
+        fileobj: BinaryIO,
+        content_type: str = 'application/octet-stream',
+        metadata: Optional[Dict[str, str]] = None,
+        checksum: Optional[str] = None,
+    ) -> str:
+        """
+        Stream a file-like object into S3 and return a checksum.
+
+        The file object must be seekable so we can compute the checksum and
+        reset the cursor for upload.
+        """
+        if not hasattr(fileobj, "read"):
+            raise ValueError("fileobj must be file-like")
+        if not hasattr(fileobj, "seek"):
+            raise ValueError("fileobj must be seekable")
+
+        def _compute_checksum() -> str:
+            fileobj.seek(0)
+            hasher = hashlib.sha256()
+            while True:
+                chunk = fileobj.read(1024 * 1024)
+                if not chunk:
+                    break
+                hasher.update(chunk)
+            return hasher.hexdigest()
+
+        if not checksum:
+            checksum = await asyncio.to_thread(_compute_checksum)
+
+        object_metadata = metadata or {}
+        object_metadata.update({
+            'checksum': checksum,
+            'content-type': content_type,
+            'created-at': datetime.now(timezone.utc).isoformat(),
+        })
+
+        def _put() -> None:
+            fileobj.seek(0)
+            self.client.upload_fileobj(
+                fileobj,
+                Bucket=bucket,
+                Key=key,
+                ExtraArgs={
+                    "ContentType": content_type,
+                    "Metadata": object_metadata,
+                },
             )
 
         await asyncio.to_thread(_put)

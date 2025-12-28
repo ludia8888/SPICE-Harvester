@@ -48,6 +48,7 @@ from shared.utils.event_utils import build_command_event
 from shared.utils.path_utils import safe_lakefs_ref, safe_path_segment
 from shared.utils.time_utils import utcnow
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
+from shared.security.auth_utils import enforce_db_scope
 from shared.observability.tracing import trace_endpoint
 from shared.config.app_config import AppConfig
 from bff.dependencies import get_oms_client
@@ -602,6 +603,81 @@ def _detect_csv_delimiter(sample: str) -> str:
     scores = {delimiter: line.count(delimiter) for delimiter in candidates}
     best = max(scores, key=scores.get)
     return best if scores.get(best, 0) > 0 else ","
+
+
+def _parse_csv_file(
+    file_obj: Any,
+    *,
+    delimiter: str,
+    has_header: bool,
+    preview_limit: int = 200,
+) -> tuple[list[str], list[list[str]], int, str]:
+    if not hasattr(file_obj, "read"):
+        raise ValueError("file object does not support read()")
+    if not hasattr(file_obj, "seek"):
+        raise ValueError("file object does not support seek()")
+
+    class _HashingReader(io.RawIOBase):
+        def __init__(self, raw: Any, hasher: "hashlib._Hash") -> None:
+            self._raw = raw
+            self._hasher = hasher
+
+        def read(self, size: int = -1) -> bytes:
+            chunk = self._raw.read(size)
+            if chunk:
+                self._hasher.update(chunk)
+            return chunk
+
+        def readable(self) -> bool:
+            return True
+
+        def seekable(self) -> bool:
+            return hasattr(self._raw, "seek")
+
+        def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+            return self._raw.seek(offset, whence)
+
+        def tell(self) -> int:
+            return self._raw.tell()
+
+    file_obj.seek(0)
+    hasher = hashlib.sha256()
+    hashing_reader = _HashingReader(file_obj, hasher)
+    buffered = io.BufferedReader(hashing_reader)
+    text_stream = io.TextIOWrapper(buffered, encoding="utf-8", errors="replace", newline="")
+    columns: list[str] = []
+    preview_rows: list[list[str]] = []
+    total_rows = 0
+
+    try:
+        reader = csv.reader(text_stream, delimiter=delimiter)
+        for row in reader:
+            if not row or all(str(cell).strip() == "" for cell in row):
+                continue
+            if not columns:
+                if has_header:
+                    columns = [str(cell).strip() or f"column_{index + 1}" for index, cell in enumerate(row)]
+                    continue
+                columns = [f"column_{index + 1}" for index in range(len(row))]
+            normalized = [str(cell).strip() for cell in row]
+            if len(normalized) < len(columns):
+                normalized.extend([""] * (len(columns) - len(normalized)))
+            elif len(normalized) > len(columns):
+                normalized = normalized[: len(columns)]
+            total_rows += 1
+            if len(preview_rows) < preview_limit:
+                preview_rows.append(normalized)
+    finally:
+        try:
+            text_stream.detach()
+        except Exception:
+            pass
+        try:
+            file_obj.seek(0)
+        except Exception:
+            pass
+
+    return columns, preview_rows, total_rows, hasher.hexdigest()
 
 
 def _parse_csv_content(
@@ -2920,6 +2996,10 @@ async def create_dataset_version(
         dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
         if not dataset:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+        try:
+            enforce_db_scope(request.headers, db_name=dataset.db_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
 
         dataset_branch = safe_lakefs_ref(dataset.branch or "main")
         request_fingerprint = _build_ingest_request_fingerprint(
@@ -3138,6 +3218,10 @@ async def upload_excel_dataset(
         idempotency_key = _require_idempotency_key(request)
 
         db_name = validate_db_name(db_name)
+        try:
+            enforce_db_scope(request.headers, db_name=db_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
         filename = file.filename or "upload.xlsx"
         if not filename.lower().endswith((".xlsx", ".xlsm")):
             raise HTTPException(
@@ -3472,22 +3556,27 @@ async def upload_csv_dataset(
         idempotency_key = _require_idempotency_key(request)
 
         db_name = validate_db_name(db_name)
+        try:
+            enforce_db_scope(request.headers, db_name=db_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
         filename = file.filename or "upload.csv"
         if not filename.lower().endswith(".csv"):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only .csv files are supported")
 
-        content = await file.read()
-        if not content:
+        sample_bytes = await asyncio.to_thread(file.file.read, 65536)
+        if not sample_bytes:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
 
         resolved_name = (dataset_name or "").strip() or _default_dataset_name(filename)
         if not resolved_name:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dataset_name is required")
 
-        decoded = content.decode("utf-8", errors="replace")
-        resolved_delimiter = delimiter or _detect_csv_delimiter(decoded)
-        columns, preview_rows, total_rows = _parse_csv_content(
-            decoded,
+        sample_text = sample_bytes.decode("utf-8", errors="replace")
+        resolved_delimiter = delimiter or _detect_csv_delimiter(sample_text)
+        columns, preview_rows, total_rows, content_hash = await asyncio.to_thread(
+            _parse_csv_file,
+            file.file,
             delimiter=resolved_delimiter,
             has_header=has_header,
         )
@@ -3535,7 +3624,6 @@ async def upload_csv_dataset(
                 branch=dataset_branch,
             )
             created_dataset = True
-        content_hash = hashlib.sha256(content).hexdigest()
         request_fingerprint = _build_ingest_request_fingerprint(
             {
                 "db_name": db_name,
@@ -3613,10 +3701,10 @@ async def upload_csv_dataset(
             prefix = _dataset_artifact_prefix(db_name=db_name, dataset_id=dataset.dataset_id, dataset_name=dataset.name)
             staging_prefix = _ingest_staging_prefix(prefix, ingest_request.ingest_request_id)
             object_key = f"{staging_prefix}/source.csv"
-            await lakefs_storage_service.save_bytes(
+            await lakefs_storage_service.save_fileobj(
                 repo,
                 f"{dataset_branch}/{object_key}",
-                content,
+                file.file,
                 content_type="text/csv",
                 metadata=_sanitize_s3_metadata(
                     {
@@ -3626,6 +3714,7 @@ async def upload_csv_dataset(
                         "ingest_request_id": ingest_request.ingest_request_id,
                     }
                 ),
+                checksum=content_hash,
             )
             commit_id = await lakefs_client.commit(
                 repository=repo,

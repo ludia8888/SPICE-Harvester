@@ -5,6 +5,14 @@ from typing import Iterable, Mapping, Optional
 
 from shared.utils.env_utils import parse_bool
 
+_DB_SCOPE_HEADER_KEYS = (
+    "X-DB-Name",
+    "X-Project",
+    "X-Project-Id",
+    "X-Tenant",
+    "X-Tenant-Id",
+)
+
 
 def get_expected_token(env_keys: Iterable[str]) -> Optional[str]:
     for key in env_keys:
@@ -58,3 +66,27 @@ def get_exempt_paths(env_key: str, *, defaults: Iterable[str]) -> set[str]:
 
 def is_exempt_path(path: str, *, exempt_paths: Iterable[str]) -> bool:
     return path in set(exempt_paths)
+
+
+def get_db_scope(headers: Mapping[str, str]) -> Optional[str]:
+    for key in _DB_SCOPE_HEADER_KEYS:
+        value = (headers.get(key) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def enforce_db_scope(
+    headers: Mapping[str, str],
+    *,
+    db_name: str,
+    require_env_key: str = "BFF_REQUIRE_DB_SCOPE",
+) -> None:
+    required = parse_bool(os.getenv(require_env_key, "")) is True
+    scope = get_db_scope(headers)
+    if not scope:
+        if required:
+            raise ValueError("Project scope header is required")
+        return
+    if scope != (db_name or "").strip():
+        raise ValueError("Project scope mismatch")
