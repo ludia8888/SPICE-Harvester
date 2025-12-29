@@ -18,6 +18,8 @@ from shared.security.auth_utils import enforce_db_scope
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.objectify_registry import ObjectifyRegistry
 from shared.services.objectify_job_queue import ObjectifyJobQueue
+from shared.services.pipeline_registry import PipelineRegistry
+from shared.utils.s3_uri import parse_s3_uri
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +38,16 @@ async def get_objectify_registry() -> ObjectifyRegistry:
     return await _get_objectify_registry()
 
 
-async def get_objectify_job_queue() -> ObjectifyJobQueue:
-    return ObjectifyJobQueue()
+async def get_objectify_job_queue(
+    objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
+) -> ObjectifyJobQueue:
+    return ObjectifyJobQueue(objectify_registry=objectify_registry)
+
+
+async def get_pipeline_registry() -> PipelineRegistry:
+    from bff.main import get_pipeline_registry as _get_pipeline_registry
+
+    return await _get_pipeline_registry()
 
 
 class MappingSpecField(BaseModel):
@@ -59,10 +69,25 @@ class CreateMappingSpecRequest(BaseModel):
 class TriggerObjectifyRequest(BaseModel):
     mapping_spec_id: Optional[str] = Field(default=None)
     dataset_version_id: Optional[str] = Field(default=None)
+    artifact_id: Optional[str] = Field(default=None)
+    artifact_output_name: Optional[str] = Field(default=None)
     batch_size: Optional[int] = Field(default=None)
     max_rows: Optional[int] = Field(default=None)
     allow_partial: bool = Field(default=False)
     options: Optional[Dict[str, Any]] = Field(default=None)
+
+
+def _match_output_name(output: Dict[str, Any], name: str) -> bool:
+    if not name:
+        return False
+    target = name.strip()
+    if not target:
+        return False
+    for key in ("output_name", "dataset_name", "node_id"):
+        candidate = str(output.get(key) or "").strip()
+        if candidate and candidate == target:
+            return True
+    return False
 
 
 @router.post("/mapping-specs", response_model=Dict[str, Any], status_code=status.HTTP_201_CREATED)
@@ -150,6 +175,7 @@ async def run_objectify(
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
     job_queue: ObjectifyJobQueue = Depends(get_objectify_job_queue),
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
 ):
     try:
         dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
@@ -161,16 +187,64 @@ async def run_objectify(
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
 
-        if body.dataset_version_id:
-            version = await dataset_registry.get_version(version_id=body.dataset_version_id)
+        artifact_id = str(body.artifact_id or "").strip() or None
+        artifact_output_name = str(body.artifact_output_name or "").strip() or None
+        if artifact_id and body.dataset_version_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="dataset_version_id and artifact_id are mutually exclusive",
+            )
+
+        version = None
+        artifact_key = None
+        resolved_output_name = None
+
+        if artifact_id:
+            artifact = await pipeline_registry.get_artifact(artifact_id=artifact_id)
+            if not artifact:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline artifact not found")
+            if str(artifact.status or "").upper() != "SUCCESS":
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Artifact is not successful")
+            if str(artifact.mode or "").lower() != "build":
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Artifact is not a build artifact")
+            outputs = artifact.outputs or []
+            if not outputs:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Artifact has no outputs")
+            if not artifact_output_name:
+                if len(outputs) == 1:
+                    output = outputs[0]
+                    artifact_output_name = (
+                        str(output.get("output_name") or output.get("dataset_name") or output.get("node_id") or "").strip()
+                        or None
+                    )
+                if not artifact_output_name:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="artifact_output_name is required")
+            matches = [out for out in outputs if _match_output_name(out, artifact_output_name)]
+            if not matches:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact output not found")
+            if len(matches) > 1:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Artifact output is ambiguous")
+            selected = matches[0]
+            artifact_key = str(selected.get("artifact_commit_key") or selected.get("artifact_key") or "").strip() or None
+            if not artifact_key:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Artifact output is missing artifact_key")
+            if not parse_s3_uri(artifact_key):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Artifact output is not an s3:// URI")
+            resolved_output_name = artifact_output_name
         else:
-            version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
-        if not version:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset version not found")
-        if version.dataset_id != dataset_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dataset version mismatch")
-        if not version.artifact_key:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dataset version is missing artifact_key")
+            if body.dataset_version_id:
+                version = await dataset_registry.get_version(version_id=body.dataset_version_id)
+            else:
+                version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
+            if not version:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset version not found")
+            if version.dataset_id != dataset_id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dataset version mismatch")
+            if not version.artifact_key:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail="Dataset version is missing artifact_key"
+                )
+            artifact_key = version.artifact_key
 
         if body.mapping_spec_id:
             mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=body.mapping_spec_id)
@@ -184,36 +258,48 @@ async def run_objectify(
         if mapping_spec.dataset_id != dataset_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mapping spec does not match dataset")
 
-        existing = await objectify_registry.find_objectify_job(
-            dataset_version_id=version.version_id,
-            mapping_spec_id=mapping_spec.mapping_spec_id,
-            mapping_spec_version=mapping_spec.version,
-            statuses=["QUEUED", "RUNNING", "SUBMITTED"],
-        )
-        if existing:
-            return ApiResponse.success(
-                message="Objectify job already queued",
-                data={
-                    "job_id": existing.job_id,
-                    "mapping_spec_id": mapping_spec.mapping_spec_id,
-                    "dataset_id": dataset_id,
-                    "dataset_version_id": version.version_id,
-                    "artifact_key": version.artifact_key,
-                    "status": existing.status,
-                },
-            ).to_dict()
+        if artifact_id:
+            existing = await objectify_registry.find_objectify_job_for_artifact(
+                artifact_id=artifact_id,
+                artifact_output_name=resolved_output_name or "",
+                mapping_spec_id=mapping_spec.mapping_spec_id,
+                mapping_spec_version=mapping_spec.version,
+                statuses=["QUEUED", "ENQUEUE_REQUESTED", "ENQUEUED", "RUNNING", "SUBMITTED"],
+            )
+            if existing:
+                return ApiResponse.success(
+                    message="Objectify job already queued",
+                    data={
+                        "job_id": existing.job_id,
+                        "mapping_spec_id": mapping_spec.mapping_spec_id,
+                        "dataset_id": dataset_id,
+                        "artifact_id": artifact_id,
+                        "artifact_output_name": resolved_output_name,
+                        "artifact_key": artifact_key,
+                        "status": existing.status,
+                    },
+                ).to_dict()
+        else:
+            existing = await objectify_registry.find_objectify_job(
+                dataset_version_id=version.version_id,
+                mapping_spec_id=mapping_spec.mapping_spec_id,
+                mapping_spec_version=mapping_spec.version,
+                statuses=["QUEUED", "ENQUEUE_REQUESTED", "ENQUEUED", "RUNNING", "SUBMITTED"],
+            )
+            if existing:
+                return ApiResponse.success(
+                    message="Objectify job already queued",
+                    data={
+                        "job_id": existing.job_id,
+                        "mapping_spec_id": mapping_spec.mapping_spec_id,
+                        "dataset_id": dataset_id,
+                        "dataset_version_id": version.version_id,
+                        "artifact_key": artifact_key,
+                        "status": existing.status,
+                    },
+                ).to_dict()
 
         job_id = str(uuid4())
-        await objectify_registry.create_objectify_job(
-            job_id=job_id,
-            mapping_spec_id=mapping_spec.mapping_spec_id,
-            mapping_spec_version=mapping_spec.version,
-            dataset_id=dataset_id,
-            dataset_version_id=version.version_id,
-            dataset_branch=dataset.branch,
-            target_class_id=mapping_spec.target_class_id,
-        )
-
         options = dict(mapping_spec.options or {})
         override_options = body.options if isinstance(body.options, dict) else {}
         options.update(override_options)
@@ -222,9 +308,11 @@ async def run_objectify(
             job_id=job_id,
             db_name=dataset.db_name,
             dataset_id=dataset_id,
-            dataset_version_id=version.version_id,
+            dataset_version_id=(version.version_id if version else None),
+            artifact_id=artifact_id,
+            artifact_output_name=resolved_output_name,
             dataset_branch=dataset.branch,
-            artifact_key=version.artifact_key,
+            artifact_key=artifact_key,
             mapping_spec_id=mapping_spec.mapping_spec_id,
             mapping_spec_version=mapping_spec.version,
             target_class_id=mapping_spec.target_class_id,
@@ -243,8 +331,10 @@ async def run_objectify(
                 "job_id": job_id,
                 "mapping_spec_id": mapping_spec.mapping_spec_id,
                 "dataset_id": dataset_id,
-                "dataset_version_id": version.version_id,
-                "artifact_key": version.artifact_key,
+                "dataset_version_id": (version.version_id if version else None),
+                "artifact_id": artifact_id,
+                "artifact_output_name": resolved_output_name,
+                "artifact_key": artifact_key,
                 "status": "QUEUED",
             },
         ).to_dict()

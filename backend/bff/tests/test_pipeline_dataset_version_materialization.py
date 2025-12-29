@@ -45,6 +45,7 @@ class _DatasetRegistry:
         row_count: Optional[int],
         sample_json: dict[str, Any],
         schema_json: Optional[dict[str, Any]],
+        promoted_from_artifact_id: Optional[str] = None,
     ) -> Any:
         assert dataset_id == self._dataset.dataset_id
         self.received_artifact_key = artifact_key

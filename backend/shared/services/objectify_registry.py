@@ -17,6 +17,7 @@ import asyncpg
 from shared.config.service_config import ServiceConfig
 import json
 
+from shared.models.objectify_job import ObjectifyJob
 from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
 
 
@@ -68,7 +69,9 @@ class ObjectifyJobRecord:
     mapping_spec_id: str
     mapping_spec_version: int
     dataset_id: str
-    dataset_version_id: str
+    dataset_version_id: Optional[str]
+    artifact_id: Optional[str]
+    artifact_output_name: Optional[str]
     dataset_branch: str
     target_class_id: str
     status: str
@@ -78,6 +81,21 @@ class ObjectifyJobRecord:
     created_at: datetime
     updated_at: datetime
     completed_at: Optional[datetime]
+
+
+@dataclass(frozen=True)
+class ObjectifyOutboxItem:
+    outbox_id: str
+    job_id: str
+    payload: Dict[str, Any]
+    status: str
+    publish_attempts: int
+    error: Optional[str]
+    claimed_by: Optional[str]
+    claimed_at: Optional[datetime]
+    next_attempt_at: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime
 
 
 class ObjectifyRegistry:
@@ -150,7 +168,9 @@ class ObjectifyRegistry:
                     mapping_spec_id UUID NOT NULL,
                     mapping_spec_version INTEGER NOT NULL,
                     dataset_id UUID NOT NULL,
-                    dataset_version_id UUID NOT NULL,
+                    dataset_version_id UUID,
+                    artifact_id UUID,
+                    artifact_output_name TEXT,
                     dataset_branch TEXT NOT NULL DEFAULT 'main',
                     target_class_id TEXT NOT NULL,
                     status TEXT NOT NULL DEFAULT 'QUEUED',
@@ -168,6 +188,97 @@ class ObjectifyRegistry:
             )
             await conn.execute(
                 f"""
+                CREATE TABLE IF NOT EXISTS {self._schema}.objectify_job_outbox (
+                    outbox_id UUID PRIMARY KEY,
+                    job_id UUID NOT NULL,
+                    payload JSONB NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    publish_attempts INTEGER NOT NULL DEFAULT 0,
+                    error TEXT,
+                    claimed_by TEXT,
+                    claimed_at TIMESTAMPTZ,
+                    next_attempt_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    FOREIGN KEY (job_id)
+                        REFERENCES {self._schema}.objectify_jobs(job_id)
+                        ON DELETE CASCADE
+                )
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_objectify_outbox_status
+                ON {self._schema}.objectify_job_outbox(status, next_attempt_at, created_at)
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_objectify_outbox_claimed
+                ON {self._schema}.objectify_job_outbox(status, claimed_at)
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_objectify_outbox_job
+                ON {self._schema}.objectify_job_outbox(job_id, status, created_at)
+                """
+            )
+            await conn.execute(
+                f"ALTER TABLE {self._schema}.objectify_job_outbox ADD COLUMN IF NOT EXISTS claimed_by TEXT"
+            )
+            await conn.execute(
+                f"ALTER TABLE {self._schema}.objectify_job_outbox ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ"
+            )
+            await conn.execute(
+                f"ALTER TABLE {self._schema}.objectify_jobs ADD COLUMN IF NOT EXISTS artifact_id UUID"
+            )
+            await conn.execute(
+                f"ALTER TABLE {self._schema}.objectify_jobs ADD COLUMN IF NOT EXISTS artifact_output_name TEXT"
+            )
+            await conn.execute(
+                f"ALTER TABLE {self._schema}.objectify_jobs ALTER COLUMN dataset_version_id DROP NOT NULL"
+            )
+            await conn.execute(
+                f"""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'objectify_jobs_input_xor'
+                          AND conrelid = '{self._schema}.objectify_jobs'::regclass
+                    ) THEN
+                        ALTER TABLE {self._schema}.objectify_jobs
+                        ADD CONSTRAINT objectify_jobs_input_xor
+                        CHECK (
+                            (dataset_version_id IS NOT NULL AND artifact_id IS NULL)
+                            OR (dataset_version_id IS NULL AND artifact_id IS NOT NULL)
+                        );
+                    END IF;
+                END $$;
+                """
+            )
+            await conn.execute(
+                f"""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'objectify_jobs_artifact_output_required'
+                          AND conrelid = '{self._schema}.objectify_jobs'::regclass
+                    ) THEN
+                        ALTER TABLE {self._schema}.objectify_jobs
+                        ADD CONSTRAINT objectify_jobs_artifact_output_required
+                        CHECK (
+                            artifact_id IS NULL
+                            OR (artifact_output_name IS NOT NULL AND length(trim(artifact_output_name)) > 0)
+                        );
+                    END IF;
+                END $$;
+                """
+            )
+            await conn.execute(
+                f"""
                 CREATE INDEX IF NOT EXISTS idx_objectify_jobs_status
                 ON {self._schema}.objectify_jobs(status, created_at)
                 """
@@ -178,6 +289,33 @@ class ObjectifyRegistry:
                 ON {self._schema}.objectify_jobs(dataset_version_id, mapping_spec_id, mapping_spec_version, status)
                 """
             )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_objectify_jobs_artifact
+                ON {self._schema}.objectify_jobs(artifact_id, artifact_output_name, mapping_spec_id, mapping_spec_version, status)
+                """
+            )
+
+    @staticmethod
+    def _normalize_optional(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = str(value).strip()
+        return value or None
+
+    def _validate_objectify_inputs(
+        self,
+        *,
+        dataset_version_id: Optional[str],
+        artifact_id: Optional[str],
+        artifact_output_name: Optional[str],
+    ) -> None:
+        has_version = bool(dataset_version_id)
+        has_artifact = bool(artifact_id)
+        if has_version == has_artifact:
+            raise ValueError("Exactly one of dataset_version_id or artifact_id is required")
+        if has_artifact and not artifact_output_name:
+            raise ValueError("artifact_output_name is required when artifact_id is set")
 
     async def create_mapping_spec(
         self,
@@ -406,34 +544,60 @@ class ObjectifyRegistry:
         mapping_spec_id: str,
         mapping_spec_version: int,
         dataset_id: str,
-        dataset_version_id: str,
+        dataset_version_id: Optional[str] = None,
+        artifact_id: Optional[str] = None,
+        artifact_output_name: Optional[str] = None,
         dataset_branch: str,
         target_class_id: str,
         status: str = "QUEUED",
+        outbox_payload: Optional[Dict[str, Any]] = None,
     ) -> ObjectifyJobRecord:
         if not self._pool:
             raise RuntimeError("ObjectifyRegistry not connected")
         dataset_branch = dataset_branch or "main"
+        dataset_version_id = self._normalize_optional(dataset_version_id)
+        artifact_id = self._normalize_optional(artifact_id)
+        artifact_output_name = self._normalize_optional(artifact_output_name)
+        self._validate_objectify_inputs(
+            dataset_version_id=dataset_version_id,
+            artifact_id=artifact_id,
+            artifact_output_name=artifact_output_name,
+        )
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                f"""
-                INSERT INTO {self._schema}.objectify_jobs (
-                    job_id, mapping_spec_id, mapping_spec_version, dataset_id, dataset_version_id,
-                    dataset_branch, target_class_id, status
-                ) VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5::uuid, $6, $7, $8)
-                RETURNING job_id, mapping_spec_id, mapping_spec_version, dataset_id, dataset_version_id,
-                          dataset_branch, target_class_id, status, command_id, error, report,
-                          created_at, updated_at, completed_at
-                """,
-                job_id,
-                mapping_spec_id,
-                int(mapping_spec_version),
-                dataset_id,
-                dataset_version_id,
-                dataset_branch,
-                target_class_id,
-                status,
-            )
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    f"""
+                    INSERT INTO {self._schema}.objectify_jobs (
+                        job_id, mapping_spec_id, mapping_spec_version, dataset_id, dataset_version_id,
+                        artifact_id, artifact_output_name, dataset_branch, target_class_id, status
+                    ) VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5::uuid, $6::uuid, $7, $8, $9, $10)
+                    RETURNING job_id, mapping_spec_id, mapping_spec_version, dataset_id, dataset_version_id,
+                              artifact_id, artifact_output_name,
+                              dataset_branch, target_class_id, status, command_id, error, report,
+                              created_at, updated_at, completed_at
+                    """,
+                    job_id,
+                    mapping_spec_id,
+                    int(mapping_spec_version),
+                    dataset_id,
+                    dataset_version_id,
+                    artifact_id,
+                    artifact_output_name,
+                    dataset_branch,
+                    target_class_id,
+                    status,
+                )
+                if outbox_payload is not None:
+                    await conn.execute(
+                        f"""
+                        INSERT INTO {self._schema}.objectify_job_outbox (
+                            outbox_id, job_id, payload, status, created_at, updated_at
+                        ) VALUES ($1::uuid, $2::uuid, $3::jsonb, 'pending', NOW(), NOW())
+                        """,
+                        str(uuid4()),
+                        job_id,
+                        normalize_json_payload(outbox_payload),
+                    )
             if not row:
                 raise RuntimeError("Failed to create objectify job")
             return ObjectifyJobRecord(
@@ -441,7 +605,9 @@ class ObjectifyRegistry:
                 mapping_spec_id=str(row["mapping_spec_id"]),
                 mapping_spec_version=int(row["mapping_spec_version"]),
                 dataset_id=str(row["dataset_id"]),
-                dataset_version_id=str(row["dataset_version_id"]),
+                dataset_version_id=str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
+                artifact_id=str(row["artifact_id"]) if row["artifact_id"] else None,
+                artifact_output_name=str(row["artifact_output_name"]) if row["artifact_output_name"] else None,
                 dataset_branch=str(row["dataset_branch"]),
                 target_class_id=str(row["target_class_id"]),
                 status=str(row["status"]),
@@ -453,6 +619,280 @@ class ObjectifyRegistry:
                 completed_at=row["completed_at"],
             )
 
+    async def enqueue_objectify_job(self, *, job: ObjectifyJob) -> ObjectifyJobRecord:
+        payload = job.model_dump(mode="json")
+        return await self.create_objectify_job(
+            job_id=job.job_id,
+            mapping_spec_id=job.mapping_spec_id,
+            mapping_spec_version=job.mapping_spec_version,
+            dataset_id=job.dataset_id,
+            dataset_version_id=job.dataset_version_id,
+            artifact_id=job.artifact_id,
+            artifact_output_name=job.artifact_output_name,
+            dataset_branch=job.dataset_branch,
+            target_class_id=job.target_class_id,
+            status="ENQUEUE_REQUESTED",
+            outbox_payload=payload,
+        )
+
+    async def enqueue_outbox_for_job(
+        self,
+        *,
+        job_id: str,
+        payload: Dict[str, Any],
+    ) -> str:
+        if not self._pool:
+            raise RuntimeError("ObjectifyRegistry not connected")
+        outbox_id = str(uuid4())
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                f"""
+                INSERT INTO {self._schema}.objectify_job_outbox (
+                    outbox_id, job_id, payload, status, created_at, updated_at
+                ) VALUES ($1::uuid, $2::uuid, $3::jsonb, 'pending', NOW(), NOW())
+                """,
+                outbox_id,
+                job_id,
+                normalize_json_payload(payload),
+            )
+        return outbox_id
+
+    async def has_outbox_for_job(
+        self,
+        *,
+        job_id: str,
+        statuses: Optional[List[str]] = None,
+    ) -> bool:
+        if not self._pool:
+            raise RuntimeError("ObjectifyRegistry not connected")
+        clause = "WHERE job_id = $1::uuid"
+        values: List[Any] = [job_id]
+        if statuses:
+            clause += f" AND status = ANY(${len(values) + 1}::text[])"
+            values.append(statuses)
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchval(
+                f"""
+                SELECT 1
+                FROM {self._schema}.objectify_job_outbox
+                {clause}
+                LIMIT 1
+                """,
+                *values,
+            )
+        return bool(row)
+
+    async def claim_objectify_outbox_batch(
+        self,
+        *,
+        limit: int = 50,
+        claimed_by: Optional[str] = None,
+        claim_timeout_seconds: int = 300,
+    ) -> List[ObjectifyOutboxItem]:
+        if not self._pool:
+            raise RuntimeError("ObjectifyRegistry not connected")
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                claim_timeout = max(0, int(claim_timeout_seconds))
+                clause = """
+                    WHERE (
+                        status IN ('pending', 'failed')
+                        AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
+                    )
+                """
+                values: List[Any] = [limit]
+                if claim_timeout > 0:
+                    clause += f"""
+                        OR (
+                            status = 'publishing'
+                            AND (claimed_at IS NULL OR claimed_at <= NOW() - (${len(values) + 1}::int * INTERVAL '1 second'))
+                        )
+                    """
+                    values.append(claim_timeout)
+
+                rows = await conn.fetch(
+                    f"""
+                    SELECT outbox_id, job_id, payload, status, publish_attempts, error,
+                           claimed_by, claimed_at,
+                           next_attempt_at, created_at, updated_at
+                    FROM {self._schema}.objectify_job_outbox
+                    {clause}
+                    ORDER BY created_at ASC
+                    LIMIT $1
+                    FOR UPDATE SKIP LOCKED
+                    """,
+                    *values,
+                )
+                if not rows:
+                    return []
+                outbox_ids = [str(row["outbox_id"]) for row in rows]
+                await conn.execute(
+                    f"""
+                    UPDATE {self._schema}.objectify_job_outbox
+                    SET status = 'publishing',
+                        publish_attempts = publish_attempts + 1,
+                        claimed_by = $2,
+                        claimed_at = NOW(),
+                        updated_at = NOW()
+                    WHERE outbox_id = ANY($1::uuid[])
+                    """,
+                    outbox_ids,
+                    claimed_by,
+                )
+                return [
+                    ObjectifyOutboxItem(
+                        outbox_id=str(row["outbox_id"]),
+                        job_id=str(row["job_id"]),
+                        payload=coerce_json_dataset(row["payload"]),
+                        status=str(row["status"]),
+                        publish_attempts=int(row["publish_attempts"]),
+                        error=row["error"],
+                        claimed_by=str(row["claimed_by"]) if row["claimed_by"] else None,
+                        claimed_at=row["claimed_at"],
+                        next_attempt_at=row["next_attempt_at"],
+                        created_at=row["created_at"],
+                        updated_at=row["updated_at"],
+                    )
+                    for row in rows
+                ]
+
+    async def mark_objectify_outbox_published(self, *, outbox_id: str, job_id: str) -> None:
+        if not self._pool:
+            raise RuntimeError("ObjectifyRegistry not connected")
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    f"""
+                    UPDATE {self._schema}.objectify_job_outbox
+                    SET status = 'published',
+                        updated_at = NOW(),
+                        next_attempt_at = NULL,
+                        error = NULL,
+                        claimed_by = NULL,
+                        claimed_at = NULL
+                    WHERE outbox_id = $1::uuid
+                    """,
+                    outbox_id,
+                )
+                await conn.execute(
+                    f"""
+                    UPDATE {self._schema}.objectify_jobs
+                    SET status = 'ENQUEUED',
+                        updated_at = NOW()
+                    WHERE job_id = $1::uuid
+                      AND status IN ('QUEUED', 'ENQUEUE_REQUESTED')
+                    """,
+                    job_id,
+                )
+
+    async def mark_objectify_outbox_failed(
+        self,
+        *,
+        outbox_id: str,
+        error: str,
+        next_attempt_at: Optional[datetime] = None,
+    ) -> None:
+        if not self._pool:
+            raise RuntimeError("ObjectifyRegistry not connected")
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                f"""
+                UPDATE {self._schema}.objectify_job_outbox
+                SET status = 'failed',
+                    error = $2,
+                    next_attempt_at = $3,
+                    claimed_by = NULL,
+                    claimed_at = NULL,
+                    updated_at = NOW()
+                WHERE outbox_id = $1::uuid
+                """,
+                outbox_id,
+                error,
+                next_attempt_at,
+            )
+
+    async def purge_objectify_outbox(
+        self,
+        *,
+        retention_days: int = 7,
+        limit: int = 10_000,
+    ) -> int:
+        if not self._pool:
+            raise RuntimeError("ObjectifyRegistry not connected")
+        retention_days = max(1, int(retention_days))
+        limit = max(1, int(limit))
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                WITH doomed AS (
+                    SELECT ctid
+                    FROM {self._schema}.objectify_job_outbox
+                    WHERE status = 'published'
+                      AND updated_at < NOW() - ($1::int * INTERVAL '1 day')
+                    ORDER BY updated_at ASC
+                    LIMIT $2
+                )
+                DELETE FROM {self._schema}.objectify_job_outbox
+                WHERE ctid IN (SELECT ctid FROM doomed)
+                RETURNING 1
+                """,
+                retention_days,
+                limit,
+            )
+        return len(rows)
+
+    async def list_objectify_jobs(
+        self,
+        *,
+        statuses: List[str],
+        older_than: Optional[datetime] = None,
+        limit: int = 200,
+    ) -> List[ObjectifyJobRecord]:
+        if not self._pool:
+            raise RuntimeError("ObjectifyRegistry not connected")
+        if not statuses:
+            return []
+        status_clause = "WHERE status = ANY($1::text[])"
+        values: List[Any] = [statuses]
+        if older_than is not None:
+            status_clause += f" AND updated_at < ${len(values) + 1}"
+            values.append(older_than)
+        status_clause += f" ORDER BY updated_at ASC LIMIT ${len(values) + 1}"
+        values.append(limit)
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT job_id, mapping_spec_id, mapping_spec_version, dataset_id, dataset_version_id,
+                       artifact_id, artifact_output_name,
+                       dataset_branch, target_class_id, status, command_id, error, report,
+                       created_at, updated_at, completed_at
+                FROM {self._schema}.objectify_jobs
+                {status_clause}
+                """,
+                *values,
+            )
+        return [
+            ObjectifyJobRecord(
+                job_id=str(row["job_id"]),
+                mapping_spec_id=str(row["mapping_spec_id"]),
+                mapping_spec_version=int(row["mapping_spec_version"]),
+                dataset_id=str(row["dataset_id"]),
+                dataset_version_id=str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
+                artifact_id=str(row["artifact_id"]) if row["artifact_id"] else None,
+                artifact_output_name=str(row["artifact_output_name"]) if row["artifact_output_name"] else None,
+                dataset_branch=str(row["dataset_branch"]),
+                target_class_id=str(row["target_class_id"]),
+                status=str(row["status"]),
+                command_id=row["command_id"],
+                error=row["error"],
+                report=coerce_json_dataset(row["report"]) or {},
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+                completed_at=row["completed_at"],
+            )
+            for row in rows
+        ]
+
     async def get_objectify_job(self, *, job_id: str) -> Optional[ObjectifyJobRecord]:
         if not self._pool:
             raise RuntimeError("ObjectifyRegistry not connected")
@@ -460,6 +900,7 @@ class ObjectifyRegistry:
             row = await conn.fetchrow(
                 f"""
                 SELECT job_id, mapping_spec_id, mapping_spec_version, dataset_id, dataset_version_id,
+                       artifact_id, artifact_output_name,
                        dataset_branch, target_class_id, status, command_id, error, report,
                        created_at, updated_at, completed_at
                 FROM {self._schema}.objectify_jobs
@@ -474,7 +915,9 @@ class ObjectifyRegistry:
                 mapping_spec_id=str(row["mapping_spec_id"]),
                 mapping_spec_version=int(row["mapping_spec_version"]),
                 dataset_id=str(row["dataset_id"]),
-                dataset_version_id=str(row["dataset_version_id"]),
+                dataset_version_id=str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
+                artifact_id=str(row["artifact_id"]) if row["artifact_id"] else None,
+                artifact_output_name=str(row["artifact_output_name"]) if row["artifact_output_name"] else None,
                 dataset_branch=str(row["dataset_branch"]),
                 target_class_id=str(row["target_class_id"]),
                 status=str(row["status"]),
@@ -496,6 +939,9 @@ class ObjectifyRegistry:
     ) -> Optional[ObjectifyJobRecord]:
         if not self._pool:
             raise RuntimeError("ObjectifyRegistry not connected")
+        dataset_version_id = self._normalize_optional(dataset_version_id)
+        if not dataset_version_id:
+            raise ValueError("dataset_version_id is required")
         clause = "dataset_version_id = $1::uuid AND mapping_spec_id = $2::uuid AND mapping_spec_version = $3"
         params: List[Any] = [dataset_version_id, mapping_spec_id, int(mapping_spec_version)]
         if statuses:
@@ -505,6 +951,7 @@ class ObjectifyRegistry:
             row = await conn.fetchrow(
                 f"""
                 SELECT job_id, mapping_spec_id, mapping_spec_version, dataset_id, dataset_version_id,
+                       artifact_id, artifact_output_name,
                        dataset_branch, target_class_id, status, command_id, error, report,
                        created_at, updated_at, completed_at
                 FROM {self._schema}.objectify_jobs
@@ -521,7 +968,67 @@ class ObjectifyRegistry:
                 mapping_spec_id=str(row["mapping_spec_id"]),
                 mapping_spec_version=int(row["mapping_spec_version"]),
                 dataset_id=str(row["dataset_id"]),
-                dataset_version_id=str(row["dataset_version_id"]),
+                dataset_version_id=str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
+                artifact_id=str(row["artifact_id"]) if row["artifact_id"] else None,
+                artifact_output_name=str(row["artifact_output_name"]) if row["artifact_output_name"] else None,
+                dataset_branch=str(row["dataset_branch"]),
+                target_class_id=str(row["target_class_id"]),
+                status=str(row["status"]),
+                command_id=row["command_id"],
+                error=row["error"],
+                report=coerce_json_dataset(row["report"]) or {},
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+                completed_at=row["completed_at"],
+            )
+
+    async def find_objectify_job_for_artifact(
+        self,
+        *,
+        artifact_id: str,
+        artifact_output_name: str,
+        mapping_spec_id: str,
+        mapping_spec_version: int,
+        statuses: Optional[List[str]] = None,
+    ) -> Optional[ObjectifyJobRecord]:
+        if not self._pool:
+            raise RuntimeError("ObjectifyRegistry not connected")
+        artifact_id = self._normalize_optional(artifact_id)
+        artifact_output_name = self._normalize_optional(artifact_output_name)
+        if not artifact_id or not artifact_output_name:
+            raise ValueError("artifact_id and artifact_output_name are required")
+        clause = (
+            "artifact_id = $1::uuid AND artifact_output_name = $2 "
+            "AND mapping_spec_id = $3::uuid AND mapping_spec_version = $4"
+        )
+        params: List[Any] = [artifact_id, artifact_output_name, mapping_spec_id, int(mapping_spec_version)]
+        if statuses:
+            clause += " AND status = ANY($5::text[])"
+            params.append([str(s) for s in statuses])
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT job_id, mapping_spec_id, mapping_spec_version, dataset_id, dataset_version_id,
+                       artifact_id, artifact_output_name,
+                       dataset_branch, target_class_id, status, command_id, error, report,
+                       created_at, updated_at, completed_at
+                FROM {self._schema}.objectify_jobs
+                WHERE {clause}
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                *params,
+            )
+            if not row:
+                return None
+            return ObjectifyJobRecord(
+                job_id=str(row["job_id"]),
+                mapping_spec_id=str(row["mapping_spec_id"]),
+                mapping_spec_version=int(row["mapping_spec_version"]),
+                dataset_id=str(row["dataset_id"]),
+                dataset_version_id=str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
+                artifact_id=str(row["artifact_id"]) if row["artifact_id"] else None,
+                artifact_output_name=str(row["artifact_output_name"]) if row["artifact_output_name"] else None,
                 dataset_branch=str(row["dataset_branch"]),
                 target_class_id=str(row["target_class_id"]),
                 status=str(row["status"]),
@@ -557,6 +1064,7 @@ class ObjectifyRegistry:
                     updated_at = NOW()
                 WHERE job_id = $1::uuid
                 RETURNING job_id, mapping_spec_id, mapping_spec_version, dataset_id, dataset_version_id,
+                          artifact_id, artifact_output_name,
                           dataset_branch, target_class_id, status, command_id, error, report,
                           created_at, updated_at, completed_at
                 """,
@@ -574,7 +1082,9 @@ class ObjectifyRegistry:
                 mapping_spec_id=str(row["mapping_spec_id"]),
                 mapping_spec_version=int(row["mapping_spec_version"]),
                 dataset_id=str(row["dataset_id"]),
-                dataset_version_id=str(row["dataset_version_id"]),
+                dataset_version_id=str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
+                artifact_id=str(row["artifact_id"]) if row["artifact_id"] else None,
+                artifact_output_name=str(row["artifact_output_name"]) if row["artifact_output_name"] else None,
                 dataset_branch=str(row["dataset_branch"]),
                 target_class_id=str(row["target_class_id"]),
                 status=str(row["status"]),

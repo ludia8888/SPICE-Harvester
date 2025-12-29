@@ -25,6 +25,7 @@ from shared.config.service_config import ServiceConfig
 from shared.models.objectify_job import ObjectifyJob
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.objectify_registry import ObjectifyRegistry
+from shared.services.pipeline_registry import PipelineRegistry
 from shared.services.lakefs_storage_service import create_lakefs_storage_service
 from shared.services.lineage_store import LineageStore
 from shared.services.processed_event_registry import ClaimDecision, ProcessedEventRegistry
@@ -53,6 +54,7 @@ class ObjectifyWorker:
         self.dlq_producer: Optional[Producer] = None
         self.dataset_registry: Optional[DatasetRegistry] = None
         self.objectify_registry: Optional[ObjectifyRegistry] = None
+        self.pipeline_registry: Optional[PipelineRegistry] = None
         self.processed: Optional[ProcessedEventRegistry] = None
         self.lineage_store: Optional[LineageStore] = None
         self.storage = None
@@ -73,6 +75,9 @@ class ObjectifyWorker:
 
         self.objectify_registry = ObjectifyRegistry()
         await self.objectify_registry.initialize()
+
+        self.pipeline_registry = PipelineRegistry()
+        await self.pipeline_registry.initialize()
 
         self.processed = ProcessedEventRegistry()
         await self.processed.initialize()
@@ -137,6 +142,9 @@ class ObjectifyWorker:
         if self.objectify_registry:
             await self.objectify_registry.close()
             self.objectify_registry = None
+        if self.pipeline_registry:
+            await self.pipeline_registry.close()
+            self.pipeline_registry = None
         if self.dataset_registry:
             await self.dataset_registry.close()
             self.dataset_registry = None
@@ -289,11 +297,34 @@ class ObjectifyWorker:
         if dataset.db_name != job.db_name:
             await _fail_job("dataset_db_name_mismatch")
 
-        version = await self.dataset_registry.get_version(version_id=job.dataset_version_id)
-        if not version or version.dataset_id != job.dataset_id:
-            await _fail_job("dataset_version_mismatch")
-        if version.artifact_key and job.artifact_key and version.artifact_key != job.artifact_key:
-            await _fail_job("artifact_key_mismatch")
+        input_type = "dataset_version" if job.dataset_version_id else "artifact"
+        resolved_output_name: Optional[str] = None
+        stable_seed: Optional[str] = None
+
+        if job.dataset_version_id and job.artifact_id:
+            await _fail_job("objectify_input_conflict")
+        if not job.dataset_version_id and not job.artifact_id:
+            await _fail_job("objectify_input_missing")
+
+        if job.dataset_version_id:
+            version = await self.dataset_registry.get_version(version_id=job.dataset_version_id)
+            if not version or version.dataset_id != job.dataset_id:
+                await _fail_job("dataset_version_mismatch")
+            resolved_artifact_key = job.artifact_key or version.artifact_key
+            if not resolved_artifact_key:
+                await _fail_job("artifact_key_missing")
+            if version.artifact_key and job.artifact_key and version.artifact_key != job.artifact_key:
+                await _fail_job("artifact_key_mismatch")
+            stable_seed = job.dataset_version_id
+        else:
+            resolved_artifact_key, resolved_output_name = await self._resolve_artifact_output(job)
+            if job.artifact_key and job.artifact_key != resolved_artifact_key:
+                await _fail_job("artifact_key_mismatch")
+            stable_seed = f"artifact:{job.artifact_id}:{resolved_output_name}"
+
+        job.artifact_key = resolved_artifact_key
+        if resolved_output_name and not job.artifact_output_name:
+            job.artifact_output_name = resolved_output_name
 
         mapping_spec = await self.objectify_registry.get_mapping_spec(mapping_spec_id=job.mapping_spec_id)
         if not mapping_spec:
@@ -362,6 +393,8 @@ class ObjectifyWorker:
             job=job,
             mapping_spec=mapping_spec,
             ontology_version=ontology_version,
+            input_type=input_type,
+            artifact_output_name=resolved_output_name,
         )
 
         validation_errors: List[Dict[str, Any]] = []
@@ -489,7 +522,7 @@ class ObjectifyWorker:
             instances, instance_ids = self._ensure_instance_ids(
                 instances,
                 class_id=job.target_class_id,
-                stable_seed=job.dataset_version_id,
+                stable_seed=stable_seed or job.job_id,
                 mapping_spec_version=job.mapping_spec_version,
                 row_keys=row_keys,
                 instance_id_field=instance_id_field,
@@ -514,6 +547,8 @@ class ObjectifyWorker:
                 mapping_spec_version=mapping_spec.version,
                 ontology_version=ontology_version,
                 limit_remaining=lineage_remaining,
+                input_type=input_type,
+                artifact_output_name=resolved_output_name,
             )
 
         total_rows = validated_total_rows if not allow_partial else total_rows_seen
@@ -560,6 +595,8 @@ class ObjectifyWorker:
             "mapping_spec_version": job.mapping_spec_version,
             "dataset_id": job.dataset_id,
             "dataset_version_id": job.dataset_version_id,
+            "artifact_id": job.artifact_id,
+            "artifact_output_name": job.artifact_output_name,
             "options": job.options,
         }
         if ontology_version:
@@ -576,6 +613,51 @@ class ObjectifyWorker:
         if not resp.text:
             return {}
         return resp.json()
+
+    async def _resolve_artifact_output(self, job: ObjectifyJob) -> Tuple[str, str]:
+        if not self.pipeline_registry:
+            raise RuntimeError("PipelineRegistry not initialized")
+        if not job.artifact_id:
+            raise ValueError("artifact_id is required")
+        artifact = await self.pipeline_registry.get_artifact(artifact_id=job.artifact_id)
+        if not artifact:
+            raise ValueError(f"artifact_not_found:{job.artifact_id}")
+        if str(artifact.status or "").upper() != "SUCCESS":
+            raise ValueError("artifact_not_success")
+        if str(artifact.mode or "").lower() != "build":
+            raise ValueError("artifact_not_build")
+        outputs = artifact.outputs or []
+        if not outputs:
+            raise ValueError("artifact_outputs_missing")
+        output_name = (job.artifact_output_name or "").strip()
+        if not output_name:
+            if len(outputs) == 1:
+                output = outputs[0]
+                output_name = (
+                    str(output.get("output_name") or output.get("dataset_name") or output.get("node_id") or "").strip()
+                )
+            if not output_name:
+                raise ValueError("artifact_output_name_required")
+
+        matches = []
+        for output in outputs:
+            for key in ("output_name", "dataset_name", "node_id"):
+                candidate = str(output.get(key) or "").strip()
+                if candidate and candidate == output_name:
+                    matches.append(output)
+                    break
+        if not matches:
+            raise ValueError("artifact_output_not_found")
+        if len(matches) > 1:
+            raise ValueError("artifact_output_ambiguous")
+
+        selected = matches[0]
+        artifact_key = str(selected.get("artifact_commit_key") or selected.get("artifact_key") or "").strip() or None
+        if not artifact_key:
+            raise ValueError("artifact_key_missing")
+        if not parse_s3_uri(artifact_key):
+            raise ValueError("invalid_artifact_key")
+        return artifact_key, output_name
 
     async def _fetch_target_field_types(self, job: ObjectifyJob) -> Dict[str, str]:
         if not self.http:
@@ -946,26 +1028,43 @@ class ObjectifyWorker:
         job: ObjectifyJob,
         mapping_spec: Any,
         ontology_version: Optional[Dict[str, str]],
+        input_type: str,
+        artifact_output_name: Optional[str] = None,
     ) -> Optional[str]:
         if not self.lineage_store:
             return None
         try:
-            dataset_node = self.lineage_store.node_aggregate("DatasetVersion", job.dataset_version_id)
             job_node = self.lineage_store.node_aggregate("ObjectifyJob", job.job_id)
-            await self.lineage_store.record_link(
-                from_node_id=dataset_node,
-                to_node_id=job_node,
-                edge_type="dataset_version_objectify_job",
-                occurred_at=datetime.now(timezone.utc),
-                db_name=job.db_name,
-                edge_metadata={
+            if input_type == "artifact":
+                source_node = self.lineage_store.node_aggregate("PipelineArtifact", str(job.artifact_id))
+                edge_type = "pipeline_artifact_objectify_job"
+                edge_metadata = {
+                    "db_name": job.db_name,
+                    "dataset_id": job.dataset_id,
+                    "artifact_id": job.artifact_id,
+                    "artifact_output_name": artifact_output_name or job.artifact_output_name,
+                    "mapping_spec_id": job.mapping_spec_id,
+                    "mapping_spec_version": job.mapping_spec_version,
+                    "target_class_id": job.target_class_id,
+                }
+            else:
+                source_node = self.lineage_store.node_aggregate("DatasetVersion", str(job.dataset_version_id))
+                edge_type = "dataset_version_objectify_job"
+                edge_metadata = {
                     "db_name": job.db_name,
                     "dataset_id": job.dataset_id,
                     "dataset_version_id": job.dataset_version_id,
                     "mapping_spec_id": job.mapping_spec_id,
                     "mapping_spec_version": job.mapping_spec_version,
                     "target_class_id": job.target_class_id,
-                },
+                }
+            await self.lineage_store.record_link(
+                from_node_id=source_node,
+                to_node_id=job_node,
+                edge_type=edge_type,
+                occurred_at=datetime.now(timezone.utc),
+                db_name=job.db_name,
+                edge_metadata=edge_metadata,
             )
 
             mapping_version_id = f"{mapping_spec.mapping_spec_id}:v{mapping_spec.version}"
@@ -1015,12 +1114,38 @@ class ObjectifyWorker:
         mapping_spec_version: int,
         ontology_version: Optional[Dict[str, str]],
         limit_remaining: int,
+        input_type: str,
+        artifact_output_name: Optional[str] = None,
     ) -> int:
         if not self.lineage_store:
             return limit_remaining
         if limit_remaining <= 0:
             return limit_remaining
-        dataset_node = self.lineage_store.node_aggregate("DatasetVersion", job.dataset_version_id)
+        if input_type == "artifact":
+            source_node = self.lineage_store.node_aggregate("PipelineArtifact", str(job.artifact_id))
+            edge_type = "pipeline_artifact_objectified"
+            edge_metadata = {
+                "db_name": job.db_name,
+                "dataset_id": job.dataset_id,
+                "artifact_id": job.artifact_id,
+                "artifact_output_name": artifact_output_name or job.artifact_output_name,
+                "mapping_spec_id": mapping_spec_id,
+                "mapping_spec_version": mapping_spec_version,
+                "target_class_id": job.target_class_id,
+                "ontology": ontology_version or {},
+            }
+        else:
+            source_node = self.lineage_store.node_aggregate("DatasetVersion", str(job.dataset_version_id))
+            edge_type = "dataset_version_objectified"
+            edge_metadata = {
+                "db_name": job.db_name,
+                "dataset_id": job.dataset_id,
+                "dataset_version_id": job.dataset_version_id,
+                "mapping_spec_id": mapping_spec_id,
+                "mapping_spec_version": mapping_spec_version,
+                "target_class_id": job.target_class_id,
+                "ontology": ontology_version or {},
+            }
         for instance_id in instance_ids:
             if limit_remaining <= 0:
                 break
@@ -1028,20 +1153,12 @@ class ObjectifyWorker:
             instance_node = self.lineage_store.node_aggregate("Instance", aggregate_id)
             try:
                 await self.lineage_store.record_link(
-                    from_node_id=dataset_node,
+                    from_node_id=source_node,
                     to_node_id=instance_node,
-                    edge_type="dataset_version_objectified",
+                    edge_type=edge_type,
                     occurred_at=datetime.now(timezone.utc),
                     db_name=job.db_name,
-                    edge_metadata={
-                        "db_name": job.db_name,
-                        "dataset_id": job.dataset_id,
-                        "dataset_version_id": job.dataset_version_id,
-                        "mapping_spec_id": mapping_spec_id,
-                        "mapping_spec_version": mapping_spec_version,
-                        "target_class_id": job.target_class_id,
-                        "ontology": ontology_version or {},
-                    },
+                    edge_metadata=edge_metadata,
                 )
                 if job_node_id:
                     await self.lineage_store.record_link(
@@ -1054,6 +1171,8 @@ class ObjectifyWorker:
                             "db_name": job.db_name,
                             "dataset_id": job.dataset_id,
                             "dataset_version_id": job.dataset_version_id,
+                            "artifact_id": job.artifact_id,
+                            "artifact_output_name": artifact_output_name or job.artifact_output_name,
                             "mapping_spec_id": mapping_spec_id,
                             "mapping_spec_version": mapping_spec_version,
                             "target_class_id": job.target_class_id,
@@ -1123,6 +1242,17 @@ class ObjectifyWorker:
             "db_name_mismatch",
             "artifact_key_mismatch",
             "invalid artifact_key",
+            "invalid_artifact_key",
+            "artifact_not_found",
+            "artifact_not_success",
+            "artifact_not_build",
+            "artifact_outputs_missing",
+            "artifact_output_not_found",
+            "artifact_output_ambiguous",
+            "artifact_output_name_required",
+            "artifact_key_missing",
+            "objectify_input_conflict",
+            "objectify_input_missing",
             "no_rows_loaded",
         ]
         return not any(marker in msg for marker in non_retryable_markers)

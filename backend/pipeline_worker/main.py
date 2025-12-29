@@ -7,6 +7,7 @@ Consumes Kafka pipeline-jobs and executes dataset transforms using Spark.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -290,7 +291,7 @@ class PipelineWorker:
         self.dataset_registry: Optional[DatasetRegistry] = None
         self.pipeline_registry: Optional[PipelineRegistry] = None
         self.objectify_registry: Optional[ObjectifyRegistry] = None
-        self.objectify_job_queue = ObjectifyJobQueue()
+        self.objectify_job_queue: Optional[ObjectifyJobQueue] = None
         self.processed: Optional[ProcessedEventRegistry] = None
         self.lineage: Optional[LineageStore] = None
         self.storage: Optional[StorageService] = None
@@ -327,6 +328,8 @@ class PipelineWorker:
         except Exception as exc:
             logger.warning("ObjectifyRegistry unavailable: %s", exc)
             self.objectify_registry = None
+        if self.objectify_registry:
+            self.objectify_job_queue = ObjectifyJobQueue(objectify_registry=self.objectify_registry)
 
         self.processed = ProcessedEventRegistry()
         await self.processed.initialize()
@@ -798,6 +801,7 @@ class PipelineWorker:
             str(job.definition_commit_id).strip() if job.definition_commit_id else None
         )
         pipeline_spec_hash = str(job.definition_hash).strip() if job.definition_hash else None
+        declared_outputs = definition.get("outputs") if isinstance(definition.get("outputs"), list) else []
 
         async def record_preview(**kwargs: Any) -> None:
             if not resolved_pipeline_id or not self.pipeline_registry:
@@ -820,6 +824,49 @@ class PipelineWorker:
                 code_version=code_version,
                 **kwargs,
             )
+
+        artifact_id: Optional[str] = None
+        run_id: Optional[str] = None
+
+        async def record_artifact(
+            *,
+            status: str,
+            outputs: Optional[List[Dict[str, Any]]] = None,
+            inputs: Optional[Dict[str, Any]] = None,
+            lakefs: Optional[Dict[str, Any]] = None,
+            sampling_strategy: Optional[Dict[str, Any]] = None,
+            errors: Optional[List[str]] = None,
+        ) -> Optional[str]:
+            nonlocal artifact_id, run_id
+            if not resolved_pipeline_id or not self.pipeline_registry:
+                return None
+            if run_mode not in {"preview", "build"}:
+                return None
+            error_payload: Dict[str, Any] = {}
+            if errors:
+                error_payload["errors"] = errors
+            lakefs = lakefs or {}
+            artifact_id = await self.pipeline_registry.upsert_artifact(
+                pipeline_id=resolved_pipeline_id,
+                job_id=job.job_id,
+                run_id=run_id,
+                mode=run_mode,
+                status=status,
+                artifact_id=artifact_id,
+                definition_hash=job.definition_hash,
+                definition_commit_id=job.definition_commit_id,
+                pipeline_spec_hash=pipeline_spec_hash,
+                pipeline_spec_commit_id=pipeline_spec_commit_id,
+                inputs=inputs,
+                lakefs_repository=lakefs.get("repository"),
+                lakefs_branch=lakefs.get("branch"),
+                lakefs_commit_id=lakefs.get("commit_id"),
+                outputs=outputs,
+                declared_outputs=declared_outputs,
+                sampling_strategy=sampling_strategy,
+                error=error_payload,
+            )
+            return artifact_id
 
         job_mode = str(job.mode or "deploy").strip().lower()
         is_preview = job_mode == "preview"
@@ -881,6 +928,20 @@ class PipelineWorker:
             node_id=job.node_id,
         )
 
+        if resolved_pipeline_id and self.pipeline_registry:
+            try:
+                run_record = await self.pipeline_registry.get_run(
+                    pipeline_id=resolved_pipeline_id,
+                    job_id=job.job_id,
+                )
+                if run_record:
+                    run_id = run_record.get("run_id")
+            except Exception as exc:
+                logger.debug("Failed to resolve run_id for job %s: %s", job.job_id, exc)
+
+        run_ref = run_id or job.job_id
+        await record_artifact(status="RUNNING")
+
         validation_errors = self._validate_definition(definition, require_output=not is_preview)
         if requested_node_error:
             validation_errors.append(requested_node_error)
@@ -912,6 +973,7 @@ class PipelineWorker:
                 output_json={"errors": validation_errors} if not is_preview else None,
                 finished_at=utcnow(),
             )
+            await record_artifact(status="FAILED", errors=validation_errors)
             await emit_job_event(status="FAILED", errors=validation_errors)
             logger.error("Pipeline validation failed: %s", validation_errors)
             return
@@ -966,6 +1028,7 @@ class PipelineWorker:
                         output_json={"errors": schema_errors} if not is_preview else None,
                         finished_at=utcnow(),
                     )
+                    await record_artifact(status="FAILED", errors=schema_errors)
                     await emit_job_event(status="FAILED", errors=schema_errors)
                     logger.error("Pipeline schema checks failed: %s", schema_errors)
                     return
@@ -973,6 +1036,10 @@ class PipelineWorker:
                 tables[node_id] = df
 
             input_commit_payload = self._build_input_commit_payload(input_snapshots)
+            inputs_payload = {
+                "snapshots": input_snapshots,
+                "lakefs_commits": input_commit_payload,
+            }
             preview_limit = int(job.preview_limit or 200)
             preview_limit = max(1, min(500, preview_limit))
 
@@ -1000,6 +1067,11 @@ class PipelineWorker:
                         sample_json={"errors": contract_errors},
                         input_lakefs_commits=input_commit_payload,
                         finished_at=utcnow(),
+                    )
+                    await record_artifact(
+                        status="FAILED",
+                        errors=contract_errors,
+                        inputs=inputs_payload,
                     )
                     logger.error("Pipeline schema contract failed: %s", contract_errors)
                     return
@@ -1029,7 +1101,38 @@ class PipelineWorker:
                     sample_payload["node_id"] = primary_id
                 if expectation_errors:
                     sample_payload["expectations"] = expectation_errors
-                # Preview is sample-only; it does not materialize artifacts.
+                output_meta = nodes.get(primary_id, {}) if primary_id else {}
+                output_metadata = output_meta.get("metadata") or {}
+                output_name = (
+                    output_metadata.get("outputName")
+                    or output_metadata.get("datasetName")
+                    or output_meta.get("title")
+                    or (primary_id or "preview_output")
+                )
+                preview_outputs = [
+                    {
+                        "node_id": primary_id,
+                        "output_name": output_name,
+                        "dataset_name": output_name,
+                        "row_count": row_count,
+                        "columns": schema_columns,
+                        "schema_hash": _hash_schema_columns(schema_columns),
+                        "schema_json": {"columns": schema_columns},
+                        "rows": output_sample,
+                        "sample_row_count": len(output_sample),
+                        "column_stats": column_stats,
+                    }
+                ]
+                artifact_status = "FAILED" if expectation_errors else "SUCCESS"
+                artifact_id = await record_artifact(
+                    status=artifact_status,
+                    outputs=preview_outputs,
+                    inputs=inputs_payload,
+                    sampling_strategy={"type": "limit", "limit": preview_limit},
+                    errors=expectation_errors if expectation_errors else None,
+                )
+                if artifact_id:
+                    sample_payload["artifact_id"] = artifact_id
 
                 await record_preview(
                     status="FAILED" if expectation_errors else "SUCCESS",
@@ -1063,7 +1166,7 @@ class PipelineWorker:
                 output_write_mode = "append" if execution_semantics in {"incremental", "streaming"} else "overwrite"
 
                 base_branch = safe_lakefs_ref(job.branch or "main")
-                build_branch = safe_lakefs_ref(f"build/{pipeline_ref}/{job.job_id}")
+                build_branch = safe_lakefs_ref(f"build/{pipeline_ref}/{run_ref}")
                 try:
                     await self.lakefs_client.create_branch(
                         repository=artifact_repo,
@@ -1071,7 +1174,7 @@ class PipelineWorker:
                         source=base_branch,
                     )
                 except LakeFSConflictError:
-                    build_branch = safe_lakefs_ref(f"build/{pipeline_ref}/{job.job_id}/{uuid4().hex[:8]}")
+                    build_branch = safe_lakefs_ref(f"build/{pipeline_ref}/{run_ref}/{uuid4().hex[:8]}")
                     await self.lakefs_client.create_branch(
                         repository=artifact_repo,
                         name=build_branch,
@@ -1097,6 +1200,11 @@ class PipelineWorker:
                             input_lakefs_commits=input_commit_payload,
                             finished_at=utcnow(),
                         )
+                        await record_artifact(
+                            status="FAILED",
+                            errors=contract_errors,
+                            inputs=inputs_payload,
+                        )
                         await emit_job_event(status="FAILED", errors=contract_errors)
                         logger.error("Pipeline schema contract failed (build): %s", contract_errors)
                         return
@@ -1113,6 +1221,11 @@ class PipelineWorker:
                             input_lakefs_commits=input_commit_payload,
                             finished_at=utcnow(),
                         )
+                        await record_artifact(
+                            status="FAILED",
+                            errors=expectation_errors,
+                            inputs=inputs_payload,
+                        )
                         await emit_job_event(status="FAILED", errors=expectation_errors)
                         logger.error("Pipeline expectations failed (build): %s", expectation_errors)
                         return
@@ -1126,6 +1239,7 @@ class PipelineWorker:
                         or job.output_dataset_name
                     )
                     dataset_name = str(output_name or job.output_dataset_name)
+                    schema_hash = _hash_schema_columns(schema_columns)
 
                     row_count = delta_row_count
                     if output_write_mode == "append":
@@ -1160,12 +1274,15 @@ class PipelineWorker:
                     build_outputs.append(
                         {
                             "node_id": node_id,
+                            "output_name": output_name,
                             "dataset_name": dataset_name,
                             "artifact_key": artifact_key,
                             "artifact_prefix": artifact_prefix,
                             "row_count": row_count,
                             "delta_row_count": delta_row_count if output_write_mode == "append" else None,
                             "columns": schema_columns,
+                            "schema_hash": schema_hash,
+                            "schema_json": {"columns": schema_columns},
                             "rows": output_sample,
                             "sample_row_count": len(output_sample),
                             "column_stats": column_stats,
@@ -1190,6 +1307,42 @@ class PipelineWorker:
                     if artifact_prefix:
                         item["artifact_commit_key"] = build_s3_uri(artifact_repo, f"{commit_id}/{artifact_prefix}")
 
+                artifact_id = await record_artifact(
+                    status="SUCCESS",
+                    outputs=build_outputs,
+                    inputs=inputs_payload,
+                    lakefs={
+                        "repository": artifact_repo,
+                        "branch": build_branch,
+                        "commit_id": commit_id,
+                    },
+                )
+
+                output_json = {
+                    "outputs": build_outputs,
+                    "definition_hash": job.definition_hash,
+                    "branch": job.branch or "main",
+                    "execution_semantics": execution_semantics,
+                    "pipeline_spec_hash": pipeline_spec_hash,
+                    "pipeline_spec_commit_id": pipeline_spec_commit_id,
+                    "code_version": code_version,
+                    "spark_conf": spark_conf,
+                    "lakefs": {
+                        "repository": artifact_repo,
+                        "base_branch": base_branch,
+                        "build_branch": build_branch,
+                        "commit_id": commit_id,
+                    },
+                    "ontology": (
+                        (definition.get("__build_meta__") or {}).get("ontology")
+                        if isinstance(definition.get("__build_meta__"), dict)
+                        else None
+                    ),
+                    "input_snapshots": input_snapshots,
+                }
+                if artifact_id:
+                    output_json["artifact_id"] = artifact_id
+
                 await record_run(
                     job_id=job.job_id,
                     mode="build",
@@ -1197,30 +1350,12 @@ class PipelineWorker:
                     node_id=job.node_id,
                     input_lakefs_commits=input_commit_payload,
                     output_lakefs_commit_id=commit_id,
-                    output_json={
-                        "outputs": build_outputs,
-                        "definition_hash": job.definition_hash,
-                        "branch": job.branch or "main",
-                        "execution_semantics": execution_semantics,
-                        "pipeline_spec_hash": pipeline_spec_hash,
-                        "pipeline_spec_commit_id": pipeline_spec_commit_id,
-                        "code_version": code_version,
-                        "spark_conf": spark_conf,
-                        "lakefs": {
-                            "repository": artifact_repo,
-                            "base_branch": base_branch,
-                            "build_branch": build_branch,
-                            "commit_id": commit_id,
-                        },
-                        "ontology": (
-                            (definition.get("__build_meta__") or {}).get("ontology")
-                            if isinstance(definition.get("__build_meta__"), dict)
-                            else None
-                        ),
-                        "input_snapshots": input_snapshots,
-                    },
+                    output_json=output_json,
                     finished_at=utcnow(),
                 )
+                output_payload = {"outputs": build_outputs}
+                if artifact_id:
+                    output_payload["artifact_id"] = artifact_id
                 await emit_job_event(
                     status="SUCCESS",
                     lakefs={
@@ -1229,7 +1364,7 @@ class PipelineWorker:
                         "build_branch": build_branch,
                         "commit_id": commit_id,
                     },
-                    output={"outputs": build_outputs},
+                    output=output_payload,
                 )
                 return
 
@@ -1242,7 +1377,7 @@ class PipelineWorker:
             await self.storage.create_bucket(artifact_repo)
             base_branch = safe_lakefs_ref(job.branch or "main")
 
-            run_branch = safe_lakefs_ref(f"run/{pipeline_ref}/{job.job_id}")
+            run_branch = safe_lakefs_ref(f"run/{pipeline_ref}/{run_ref}")
             try:
                 await self.lakefs_client.create_branch(
                     repository=artifact_repo,
@@ -1250,7 +1385,7 @@ class PipelineWorker:
                     source=base_branch,
                 )
             except LakeFSConflictError:
-                run_branch = safe_lakefs_ref(f"run/{pipeline_ref}/{job.job_id}/{uuid4().hex[:8]}")
+                run_branch = safe_lakefs_ref(f"run/{pipeline_ref}/{run_ref}/{uuid4().hex[:8]}")
                 await self.lakefs_client.create_branch(
                     repository=artifact_repo,
                     name=run_branch,
@@ -1282,6 +1417,11 @@ class PipelineWorker:
                         input_lakefs_commits=input_commit_payload,
                         finished_at=utcnow(),
                     )
+                    await record_artifact(
+                        status="FAILED",
+                        errors=contract_errors,
+                        inputs=inputs_payload,
+                    )
                     await emit_job_event(status="FAILED", errors=contract_errors)
                     logger.error("Pipeline schema contract failed: %s", contract_errors)
                     return
@@ -1301,6 +1441,11 @@ class PipelineWorker:
                         output_json={"errors": expectation_errors},
                         input_lakefs_commits=input_commit_payload,
                         finished_at=utcnow(),
+                    )
+                    await record_artifact(
+                        status="FAILED",
+                        errors=expectation_errors,
+                        inputs=inputs_payload,
                     )
                     await emit_job_event(status="FAILED", errors=expectation_errors)
                     logger.error("Pipeline expectations failed: %s", expectation_errors)
@@ -1604,20 +1749,11 @@ class PipelineWorker:
             dataset_version_id=version.version_id,
             mapping_spec_id=mapping_spec.mapping_spec_id,
             mapping_spec_version=mapping_spec.version,
-            statuses=["QUEUED", "RUNNING", "SUBMITTED"],
+            statuses=["QUEUED", "ENQUEUE_REQUESTED", "ENQUEUED", "RUNNING", "SUBMITTED"],
         )
         if existing:
             return existing.job_id
         job_id = str(uuid4())
-        await self.objectify_registry.create_objectify_job(
-            job_id=job_id,
-            mapping_spec_id=mapping_spec.mapping_spec_id,
-            mapping_spec_version=mapping_spec.version,
-            dataset_id=dataset.dataset_id,
-            dataset_version_id=version.version_id,
-            dataset_branch=dataset.branch,
-            target_class_id=mapping_spec.target_class_id,
-        )
         options = dict(mapping_spec.options or {})
         job = ObjectifyJob(
             job_id=job_id,
@@ -1636,7 +1772,8 @@ class PipelineWorker:
             options=options,
         )
         try:
-            await self.objectify_job_queue.publish(job, require_delivery=False)
+            if self.objectify_job_queue:
+                await self.objectify_job_queue.publish(job, require_delivery=False)
         except Exception as exc:
             logger.warning("Failed to enqueue objectify job %s: %s", job_id, exc)
         return job_id
@@ -2497,6 +2634,11 @@ def _schema_from_dataframe(frame: DataFrame) -> List[Dict[str, str]]:
     for field in schema.fields:
         columns.append({"name": field.name, "type": _spark_type_to_xsd(field.dataType)})
     return columns
+
+
+def _hash_schema_columns(columns: List[Dict[str, Any]]) -> str:
+    payload = json.dumps(columns or [], sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _spark_type_to_xsd(data_type: Any) -> str:

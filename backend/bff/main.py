@@ -43,6 +43,8 @@ from shared.dependencies import (
 )
 from shared.services.dataset_ingest_outbox import run_dataset_ingest_outbox_worker
 from shared.services.dataset_ingest_reconciler import run_dataset_ingest_reconciler
+from shared.services.objectify_outbox import run_objectify_outbox_worker
+from shared.services.objectify_reconciler import run_objectify_reconciler
 from shared.services.lineage_store import LineageStore
 from shared.dependencies.providers import (
     StorageServiceDep,
@@ -58,6 +60,7 @@ from shared.services.dataset_registry import DatasetRegistry
 from shared.services.pipeline_registry import PipelineRegistry
 from shared.services.pipeline_executor import PipelineExecutor
 from shared.services.objectify_registry import ObjectifyRegistry
+from shared.utils.env_utils import parse_int_env
 
 # Shared models and utilities
 from shared.models.ontology import (
@@ -486,6 +489,10 @@ async def lifespan(app: FastAPI):
     dataset_outbox_stop: Optional[asyncio.Event] = None
     dataset_reconcile_task: Optional[asyncio.Task] = None
     dataset_reconcile_stop: Optional[asyncio.Event] = None
+    objectify_outbox_task: Optional[asyncio.Task] = None
+    objectify_outbox_stop: Optional[asyncio.Event] = None
+    objectify_reconcile_task: Optional[asyncio.Task] = None
+    objectify_reconcile_stop: Optional[asyncio.Event] = None
 
     try:
         ensure_bff_auth_configured()
@@ -539,6 +546,49 @@ async def lifespan(app: FastAPI):
             app.state.dataset_ingest_reconciler_task = dataset_reconcile_task
             app.state.dataset_ingest_reconciler_stop = dataset_reconcile_stop
 
+        enable_objectify_outbox = (os.getenv("ENABLE_OBJECTIFY_OUTBOX_WORKER", "true") or "true").lower() != "false"
+        if enable_objectify_outbox:
+            objectify_outbox_stop = asyncio.Event()
+            objectify_registry = _bff_container.get_objectify_registry()
+            objectify_outbox_task = asyncio.create_task(
+                run_objectify_outbox_worker(
+                    objectify_registry=objectify_registry,
+                    poll_interval_seconds=int(os.getenv("OBJECTIFY_OUTBOX_POLL_SECONDS", "5")),
+                    batch_size=int(os.getenv("OBJECTIFY_OUTBOX_BATCH", "50")),
+                    stop_event=objectify_outbox_stop,
+                )
+            )
+            app.state.objectify_outbox_task = objectify_outbox_task
+            app.state.objectify_outbox_stop = objectify_outbox_stop
+
+        enable_objectify_reconciler = (os.getenv("ENABLE_OBJECTIFY_RECONCILER", "true") or "true").lower() != "false"
+        if enable_objectify_reconciler:
+            objectify_reconcile_stop = asyncio.Event()
+            objectify_registry = _bff_container.get_objectify_registry()
+            dataset_registry = _bff_container.get_dataset_registry()
+            pipeline_registry = _bff_container.get_pipeline_registry()
+            enqueued_stale_seconds = parse_int_env(
+                "OBJECTIFY_RECONCILER_ENQUEUED_STALE_SECONDS",
+                900,
+                min_value=0,
+                max_value=86_400,
+            )
+            if enqueued_stale_seconds <= 0:
+                enqueued_stale_seconds = None
+            objectify_reconcile_task = asyncio.create_task(
+                run_objectify_reconciler(
+                    objectify_registry=objectify_registry,
+                    dataset_registry=dataset_registry,
+                    pipeline_registry=pipeline_registry,
+                    poll_interval_seconds=int(os.getenv("OBJECTIFY_RECONCILER_POLL_SECONDS", "60")),
+                    stale_after_seconds=int(os.getenv("OBJECTIFY_RECONCILER_STALE_SECONDS", "600")),
+                    enqueued_stale_seconds=enqueued_stale_seconds,
+                    stop_event=objectify_reconcile_stop,
+                )
+            )
+            app.state.objectify_reconciler_task = objectify_reconcile_task
+            app.state.objectify_reconciler_stop = objectify_reconcile_stop
+
         # 6. Middleware setup is handled during app creation (service_factory)
         logger.info("BFF Service startup completed successfully")
         
@@ -559,6 +609,22 @@ async def lifespan(app: FastAPI):
                 await dataset_reconcile_task
             except Exception as exc:
                 logger.warning("Dataset ingest reconciler shutdown failed: %s", exc)
+
+        if objectify_reconcile_stop is not None:
+            objectify_reconcile_stop.set()
+        if objectify_reconcile_task is not None:
+            try:
+                await objectify_reconcile_task
+            except Exception as exc:
+                logger.warning("Objectify reconciler shutdown failed: %s", exc)
+
+        if objectify_outbox_stop is not None:
+            objectify_outbox_stop.set()
+        if objectify_outbox_task is not None:
+            try:
+                await objectify_outbox_task
+            except Exception as exc:
+                logger.warning("Objectify outbox worker shutdown failed: %s", exc)
 
         if dataset_outbox_stop is not None:
             dataset_outbox_stop.set()

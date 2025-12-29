@@ -45,6 +45,7 @@ class DatasetVersionRecord:
     row_count: Optional[int]
     sample_json: Dict[str, Any]
     ingest_request_id: Optional[str]
+    promoted_from_artifact_id: Optional[str]
     created_at: datetime
 
 
@@ -218,6 +219,7 @@ class DatasetRegistry:
                     row_count INTEGER,
                     sample_json JSONB NOT NULL DEFAULT '{{}}'::jsonb,
                     ingest_request_id UUID,
+                    promoted_from_artifact_id UUID,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     UNIQUE (dataset_id, lakefs_commit_id),
                     FOREIGN KEY (dataset_id)
@@ -279,6 +281,12 @@ class DatasetRegistry:
             )
             await conn.execute(
                 f"""
+                ALTER TABLE {self._schema}.dataset_versions
+                    ADD COLUMN IF NOT EXISTS promoted_from_artifact_id UUID
+                """
+            )
+            await conn.execute(
+                f"""
                 CREATE UNIQUE INDEX IF NOT EXISTS dataset_versions_ingest_request_id_key
                 ON {self._schema}.dataset_versions(ingest_request_id)
                 WHERE ingest_request_id IS NOT NULL
@@ -288,6 +296,12 @@ class DatasetRegistry:
                 f"""
                 CREATE INDEX IF NOT EXISTS idx_dataset_versions_ingest_request_id
                 ON {self._schema}.dataset_versions(ingest_request_id)
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_dataset_versions_promoted_artifact
+                ON {self._schema}.dataset_versions(promoted_from_artifact_id)
                 """
             )
 
@@ -626,6 +640,7 @@ class DatasetRegistry:
         schema_json: Optional[Dict[str, Any]] = None,
         version_id: Optional[str] = None,
         ingest_request_id: Optional[str] = None,
+        promoted_from_artifact_id: Optional[str] = None,
     ) -> DatasetVersionRecord:
         if not self._pool:
             raise RuntimeError("DatasetRegistry not connected")
@@ -657,9 +672,11 @@ class DatasetRegistry:
             row = await conn.fetchrow(
                 f"""
                 INSERT INTO {self._schema}.dataset_versions (
-                    version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, ingest_request_id
-                ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::uuid)
-                RETURNING version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, ingest_request_id, created_at
+                    version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
+                    ingest_request_id, promoted_from_artifact_id
+                ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::uuid, $8::uuid)
+                RETURNING version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
+                          ingest_request_id, promoted_from_artifact_id, created_at
                 """,
                 version_id,
                 dataset_id,
@@ -668,6 +685,7 @@ class DatasetRegistry:
                 row_count,
                 sample_payload,
                 ingest_request_id,
+                promoted_from_artifact_id,
             )
             if not row:
                 raise RuntimeError("Failed to create dataset version")
@@ -679,6 +697,9 @@ class DatasetRegistry:
                 row_count=row["row_count"],
                 sample_json=coerce_json_dataset(row["sample_json"]),
                 ingest_request_id=str(row["ingest_request_id"]) if row["ingest_request_id"] else None,
+                promoted_from_artifact_id=(
+                    str(row["promoted_from_artifact_id"]) if row["promoted_from_artifact_id"] else None
+                ),
                 created_at=row["created_at"],
             )
 
@@ -689,7 +710,7 @@ class DatasetRegistry:
             row = await conn.fetchrow(
                 f"""
                 SELECT version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
-                       ingest_request_id, created_at
+                       ingest_request_id, promoted_from_artifact_id, created_at
                 FROM {self._schema}.dataset_versions
                 WHERE dataset_id = $1
                 ORDER BY created_at DESC
@@ -707,6 +728,9 @@ class DatasetRegistry:
                 row_count=row["row_count"],
                 sample_json=coerce_json_dataset(row["sample_json"]),
                 ingest_request_id=str(row["ingest_request_id"]) if row["ingest_request_id"] else None,
+                promoted_from_artifact_id=(
+                    str(row["promoted_from_artifact_id"]) if row["promoted_from_artifact_id"] else None
+                ),
                 created_at=row["created_at"],
             )
 
@@ -717,7 +741,7 @@ class DatasetRegistry:
             row = await conn.fetchrow(
                 f"""
                 SELECT version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
-                       ingest_request_id, created_at
+                       ingest_request_id, promoted_from_artifact_id, created_at
                 FROM {self._schema}.dataset_versions
                 WHERE version_id = $1::uuid
                 """,
@@ -733,6 +757,9 @@ class DatasetRegistry:
                 row_count=row["row_count"],
                 sample_json=coerce_json_dataset(row["sample_json"]),
                 ingest_request_id=str(row["ingest_request_id"]) if row["ingest_request_id"] else None,
+                promoted_from_artifact_id=(
+                    str(row["promoted_from_artifact_id"]) if row["promoted_from_artifact_id"] else None
+                ),
                 created_at=row["created_at"],
             )
 
@@ -747,7 +774,7 @@ class DatasetRegistry:
             row = await conn.fetchrow(
                 f"""
                 SELECT version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
-                       ingest_request_id, created_at
+                       ingest_request_id, promoted_from_artifact_id, created_at
                 FROM {self._schema}.dataset_versions
                 WHERE ingest_request_id = $1::uuid
                 """,
@@ -763,6 +790,9 @@ class DatasetRegistry:
                 row_count=row["row_count"],
                 sample_json=coerce_json_dataset(row["sample_json"]),
                 ingest_request_id=str(row["ingest_request_id"]) if row["ingest_request_id"] else None,
+                promoted_from_artifact_id=(
+                    str(row["promoted_from_artifact_id"]) if row["promoted_from_artifact_id"] else None
+                ),
                 created_at=row["created_at"],
             )
 
@@ -1187,7 +1217,7 @@ class DatasetRegistry:
                 existing = await conn.fetchrow(
                     f"""
                     SELECT version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
-                           ingest_request_id, created_at
+                           ingest_request_id, promoted_from_artifact_id, created_at
                     FROM {self._schema}.dataset_versions
                     WHERE ingest_request_id = $1::uuid
                     """,
@@ -1246,6 +1276,9 @@ class DatasetRegistry:
                         row_count=existing["row_count"],
                         sample_json=coerce_json_dataset(existing["sample_json"]),
                         ingest_request_id=str(existing["ingest_request_id"]) if existing["ingest_request_id"] else None,
+                        promoted_from_artifact_id=(
+                            str(existing["promoted_from_artifact_id"]) if existing["promoted_from_artifact_id"] else None
+                        ),
                         created_at=existing["created_at"],
                     )
 
@@ -1254,10 +1287,11 @@ class DatasetRegistry:
                         row = await conn.fetchrow(
                             f"""
                             INSERT INTO {self._schema}.dataset_versions (
-                                version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, ingest_request_id
-                            ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::uuid)
+                                version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
+                                ingest_request_id, promoted_from_artifact_id
+                            ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::uuid, NULL)
                             RETURNING version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
-                                      ingest_request_id, created_at
+                                      ingest_request_id, promoted_from_artifact_id, created_at
                             """,
                             str(uuid4()),
                             dataset_id,
@@ -1271,7 +1305,7 @@ class DatasetRegistry:
                     existing = await conn.fetchrow(
                         f"""
                         SELECT version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
-                               ingest_request_id, created_at
+                               ingest_request_id, promoted_from_artifact_id, created_at
                         FROM {self._schema}.dataset_versions
                         WHERE dataset_id = $1 AND lakefs_commit_id = $2
                         LIMIT 1
@@ -1341,6 +1375,9 @@ class DatasetRegistry:
                         row_count=existing["row_count"],
                         sample_json=coerce_json_dataset(existing["sample_json"]),
                         ingest_request_id=str(existing["ingest_request_id"]) if existing["ingest_request_id"] else None,
+                        promoted_from_artifact_id=(
+                            str(existing["promoted_from_artifact_id"]) if existing["promoted_from_artifact_id"] else None
+                        ),
                         created_at=existing["created_at"],
                     )
                 if not row:
@@ -1396,6 +1433,9 @@ class DatasetRegistry:
                     row_count=row["row_count"],
                     sample_json=coerce_json_dataset(row["sample_json"]),
                     ingest_request_id=str(row["ingest_request_id"]) if row["ingest_request_id"] else None,
+                    promoted_from_artifact_id=(
+                        str(row["promoted_from_artifact_id"]) if row["promoted_from_artifact_id"] else None
+                    ),
                     created_at=row["created_at"],
                 )
 

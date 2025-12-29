@@ -44,11 +44,13 @@ def coerce_json_dataset(value: Any) -> Dict[str, Any]:
         return {}
 
 
-def coerce_json_pipeline(value: Any) -> Dict[str, Any]:
+def coerce_json_pipeline(value: Any) -> Any:
     if value is None:
         return {}
     if isinstance(value, dict):
         return dict(value)
+    if isinstance(value, list):
+        return list(value)
     if isinstance(value, str):
         raw = value.strip()
         if not raw:
@@ -57,12 +59,11 @@ def coerce_json_pipeline(value: Any) -> Dict[str, Any]:
             parsed = json.loads(raw)
         except Exception:
             return {}
-        return dict(parsed) if isinstance(parsed, dict) else {}
-    if isinstance(value, list):
-        try:
-            return dict(value)
-        except Exception:
-            return {}
+        if isinstance(parsed, dict):
+            return dict(parsed)
+        if isinstance(parsed, list):
+            return list(parsed)
+        return {}
     return {}
 
 

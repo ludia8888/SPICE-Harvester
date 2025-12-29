@@ -175,6 +175,7 @@ class _DatasetRegistry:
         row_count: Any,
         sample_json: dict[str, Any],
         schema_json: dict[str, Any],
+        promoted_from_artifact_id: Optional[str] = None,
     ) -> None:
         self.versions.append(
             {

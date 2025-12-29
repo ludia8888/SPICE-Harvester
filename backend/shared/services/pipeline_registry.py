@@ -49,6 +49,19 @@ def _ensure_json_string(value: Any) -> str:
     return json.dumps(normalized, default=str)
 
 
+    def _normalize_output_list(value: Optional[List[Dict[str, Any]]], *, field_name: str) -> List[Dict[str, Any]]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValueError(f"{field_name} must be a list")
+        normalized: List[Dict[str, Any]] = []
+        for item in value:
+            if not isinstance(item, dict):
+                raise ValueError(f"{field_name} items must be objects")
+            normalized.append(item)
+        return normalized
+
+
 def _is_production_env() -> bool:
     raw = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or os.getenv("APP_ENVIRONMENT") or "").strip().lower()
     return raw in {"prod", "production"}
@@ -248,6 +261,55 @@ class PipelineUdfVersionRecord:
     version: int
     code: str
     created_at: datetime
+
+
+@dataclass(frozen=True)
+class PipelineArtifactRecord:
+    artifact_id: str
+    pipeline_id: str
+    job_id: str
+    run_id: Optional[str]
+    mode: str
+    status: str
+    definition_hash: Optional[str]
+    definition_commit_id: Optional[str]
+    pipeline_spec_hash: Optional[str]
+    pipeline_spec_commit_id: Optional[str]
+    inputs: Dict[str, Any]
+    lakefs_repository: Optional[str]
+    lakefs_branch: Optional[str]
+    lakefs_commit_id: Optional[str]
+    outputs: List[Dict[str, Any]]
+    declared_outputs: List[Dict[str, Any]]
+    sampling_strategy: Dict[str, Any]
+    error: Dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
+def _row_to_pipeline_artifact(row: asyncpg.Record) -> PipelineArtifactRecord:
+    return PipelineArtifactRecord(
+        artifact_id=str(row["artifact_id"]),
+        pipeline_id=str(row["pipeline_id"]),
+        job_id=str(row["job_id"]),
+        run_id=str(row["run_id"]) if row["run_id"] else None,
+        mode=str(row["mode"]),
+        status=str(row["status"]),
+        definition_hash=row["definition_hash"],
+        definition_commit_id=row["definition_commit_id"],
+        pipeline_spec_hash=row["pipeline_spec_hash"],
+        pipeline_spec_commit_id=row["pipeline_spec_commit_id"],
+        inputs=coerce_json_pipeline(row["inputs"]),
+        lakefs_repository=row["lakefs_repository"],
+        lakefs_branch=row["lakefs_branch"],
+        lakefs_commit_id=row["lakefs_commit_id"],
+        outputs=coerce_json_pipeline(row["outputs"]),
+        declared_outputs=coerce_json_pipeline(row["declared_outputs"]),
+        sampling_strategy=coerce_json_pipeline(row["sampling_strategy"]),
+        error=coerce_json_pipeline(row["error"]),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
 
 
 class PipelineRegistry:
@@ -669,6 +731,97 @@ class PipelineRegistry:
 
             await conn.execute(
                 f"""
+                CREATE TABLE IF NOT EXISTS {self._schema}.pipeline_artifacts (
+                    artifact_id UUID PRIMARY KEY,
+                    pipeline_id UUID NOT NULL,
+                    job_id TEXT NOT NULL,
+                    run_id UUID,
+                    mode TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    definition_hash TEXT,
+                    definition_commit_id TEXT,
+                    pipeline_spec_hash TEXT,
+                    pipeline_spec_commit_id TEXT,
+                    inputs JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    lakefs_repository TEXT,
+                    lakefs_branch TEXT,
+                    lakefs_commit_id TEXT,
+                    outputs JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    declared_outputs JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    sampling_strategy JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    error JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE (pipeline_id, job_id, mode),
+                    FOREIGN KEY (pipeline_id)
+                        REFERENCES {self._schema}.pipelines(pipeline_id)
+                        ON DELETE CASCADE
+                )
+                """
+            )
+            await conn.execute(
+                f"""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'pipeline_artifacts_outputs_array'
+                          AND conrelid = '{self._schema}.pipeline_artifacts'::regclass
+                    ) THEN
+                        ALTER TABLE {self._schema}.pipeline_artifacts
+                        ADD CONSTRAINT pipeline_artifacts_outputs_array
+                        CHECK (jsonb_typeof(outputs) = 'array') NOT VALID;
+                    END IF;
+                END $$;
+                """
+            )
+            await conn.execute(
+                f"""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'pipeline_artifacts_declared_outputs_array'
+                          AND conrelid = '{self._schema}.pipeline_artifacts'::regclass
+                    ) THEN
+                        ALTER TABLE {self._schema}.pipeline_artifacts
+                        ADD CONSTRAINT pipeline_artifacts_declared_outputs_array
+                        CHECK (jsonb_typeof(declared_outputs) = 'array') NOT VALID;
+                    END IF;
+                END $$;
+                """
+            )
+            await conn.execute(
+                f"""
+                UPDATE {self._schema}.pipeline_artifacts
+                SET outputs = jsonb_build_array(outputs)
+                WHERE jsonb_typeof(outputs) = 'object'
+                """
+            )
+            await conn.execute(
+                f"""
+                UPDATE {self._schema}.pipeline_artifacts
+                SET outputs = '[]'::jsonb
+                WHERE outputs IS NULL OR jsonb_typeof(outputs) <> 'array'
+                """
+            )
+            await conn.execute(
+                f"""
+                UPDATE {self._schema}.pipeline_artifacts
+                SET declared_outputs = jsonb_build_array(declared_outputs)
+                WHERE jsonb_typeof(declared_outputs) = 'object'
+                """
+            )
+            await conn.execute(
+                f"""
+                UPDATE {self._schema}.pipeline_artifacts
+                SET declared_outputs = '[]'::jsonb
+                WHERE declared_outputs IS NULL OR jsonb_typeof(declared_outputs) <> 'array'
+                """
+            )
+
+            await conn.execute(
+                f"""
                 ALTER TABLE {self._schema}.pipeline_runs
                     ADD COLUMN IF NOT EXISTS pipeline_spec_commit_id TEXT,
                     ADD COLUMN IF NOT EXISTS pipeline_spec_hash TEXT,
@@ -799,6 +952,12 @@ class PipelineRegistry:
             )
             await conn.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_pipeline_versions_branch ON {self._schema}.pipeline_versions(branch)"
+            )
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_pipeline_artifacts_pipeline_id ON {self._schema}.pipeline_artifacts(pipeline_id)"
+            )
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_pipeline_artifacts_job_id ON {self._schema}.pipeline_artifacts(job_id)"
             )
             await conn.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_pipeline_dependencies_pipeline_id ON {self._schema}.pipeline_dependencies(pipeline_id)"
@@ -1959,6 +2118,215 @@ class PipelineRegistry:
                 started_at,
                 finished_at,
             )
+
+    async def upsert_artifact(
+        self,
+        *,
+        pipeline_id: str,
+        job_id: str,
+        mode: str,
+        status: str,
+        run_id: Optional[str] = None,
+        artifact_id: Optional[str] = None,
+        definition_hash: Optional[str] = None,
+        definition_commit_id: Optional[str] = None,
+        pipeline_spec_hash: Optional[str] = None,
+        pipeline_spec_commit_id: Optional[str] = None,
+        inputs: Optional[Dict[str, Any]] = None,
+        lakefs_repository: Optional[str] = None,
+        lakefs_branch: Optional[str] = None,
+        lakefs_commit_id: Optional[str] = None,
+        outputs: Optional[List[Dict[str, Any]]] = None,
+        declared_outputs: Optional[List[Dict[str, Any]]] = None,
+        sampling_strategy: Optional[Dict[str, Any]] = None,
+        error: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        if not self._pool:
+            raise RuntimeError("PipelineRegistry not connected")
+        pipeline_id = str(pipeline_id)
+        job_id = str(job_id)
+        mode = str(mode)
+        status = str(status)
+        artifact_id = artifact_id or str(uuid4())
+        run_id = str(run_id) if run_id else None
+        definition_hash = (str(definition_hash).strip() if definition_hash is not None else None) or None
+        definition_commit_id = (
+            str(definition_commit_id).strip() if definition_commit_id is not None else None
+        ) or None
+        pipeline_spec_hash = (str(pipeline_spec_hash).strip() if pipeline_spec_hash is not None else None) or None
+        pipeline_spec_commit_id = (
+            str(pipeline_spec_commit_id).strip() if pipeline_spec_commit_id is not None else None
+        ) or None
+        inputs_payload = _ensure_json_string(inputs or {})
+        normalized_outputs = _normalize_output_list(outputs, field_name="outputs")
+        normalized_declared = _normalize_output_list(declared_outputs, field_name="declared_outputs")
+        outputs_payload = _ensure_json_string(normalized_outputs)
+        declared_payload = _ensure_json_string(normalized_declared)
+        sampling_payload = _ensure_json_string(sampling_strategy or {})
+        error_payload = _ensure_json_string(error or {})
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                INSERT INTO {self._schema}.pipeline_artifacts (
+                    artifact_id, pipeline_id, job_id, run_id, mode, status,
+                    definition_hash, definition_commit_id, pipeline_spec_hash, pipeline_spec_commit_id,
+                    inputs, lakefs_repository, lakefs_branch, lakefs_commit_id,
+                    outputs, declared_outputs, sampling_strategy, error,
+                    created_at, updated_at
+                ) VALUES (
+                    $1::uuid, $2::uuid, $3, $4::uuid, $5, $6,
+                    $7, $8, $9, $10,
+                    $11::jsonb, $12, $13, $14,
+                    $15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb,
+                    NOW(), NOW()
+                )
+                ON CONFLICT (pipeline_id, job_id, mode)
+                DO UPDATE SET
+                    status = EXCLUDED.status,
+                    run_id = COALESCE(EXCLUDED.run_id, pipeline_artifacts.run_id),
+                    definition_hash = COALESCE(EXCLUDED.definition_hash, pipeline_artifacts.definition_hash),
+                    definition_commit_id = COALESCE(EXCLUDED.definition_commit_id, pipeline_artifacts.definition_commit_id),
+                    pipeline_spec_hash = COALESCE(EXCLUDED.pipeline_spec_hash, pipeline_artifacts.pipeline_spec_hash),
+                    pipeline_spec_commit_id = COALESCE(EXCLUDED.pipeline_spec_commit_id, pipeline_artifacts.pipeline_spec_commit_id),
+                    inputs = CASE
+                        WHEN EXCLUDED.inputs = '{{}}'::jsonb THEN pipeline_artifacts.inputs
+                        ELSE EXCLUDED.inputs
+                    END,
+                    lakefs_repository = COALESCE(EXCLUDED.lakefs_repository, pipeline_artifacts.lakefs_repository),
+                    lakefs_branch = COALESCE(EXCLUDED.lakefs_branch, pipeline_artifacts.lakefs_branch),
+                    lakefs_commit_id = COALESCE(EXCLUDED.lakefs_commit_id, pipeline_artifacts.lakefs_commit_id),
+                    outputs = CASE
+                        WHEN EXCLUDED.outputs = '[]'::jsonb THEN pipeline_artifacts.outputs
+                        ELSE EXCLUDED.outputs
+                    END,
+                    declared_outputs = CASE
+                        WHEN EXCLUDED.declared_outputs = '[]'::jsonb THEN pipeline_artifacts.declared_outputs
+                        ELSE EXCLUDED.declared_outputs
+                    END,
+                    sampling_strategy = CASE
+                        WHEN EXCLUDED.sampling_strategy = '{{}}'::jsonb THEN pipeline_artifacts.sampling_strategy
+                        ELSE EXCLUDED.sampling_strategy
+                    END,
+                    error = CASE
+                        WHEN EXCLUDED.error = '{{}}'::jsonb THEN pipeline_artifacts.error
+                        ELSE EXCLUDED.error
+                    END,
+                    updated_at = NOW()
+                RETURNING artifact_id
+                """,
+                artifact_id,
+                pipeline_id,
+                job_id,
+                run_id,
+                mode,
+                status,
+                definition_hash,
+                definition_commit_id,
+                pipeline_spec_hash,
+                pipeline_spec_commit_id,
+                inputs_payload,
+                lakefs_repository,
+                lakefs_branch,
+                lakefs_commit_id,
+                outputs_payload,
+                declared_payload,
+                sampling_payload,
+                error_payload,
+            )
+        if not row:
+            raise RuntimeError("Failed to upsert pipeline artifact")
+        return str(row["artifact_id"])
+
+    async def get_artifact(self, *, artifact_id: str) -> Optional[PipelineArtifactRecord]:
+        if not self._pool:
+            raise RuntimeError("PipelineRegistry not connected")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT artifact_id, pipeline_id, job_id, run_id, mode, status,
+                       definition_hash, definition_commit_id, pipeline_spec_hash, pipeline_spec_commit_id,
+                       inputs, lakefs_repository, lakefs_branch, lakefs_commit_id,
+                       outputs, declared_outputs, sampling_strategy, error,
+                       created_at, updated_at
+                FROM {self._schema}.pipeline_artifacts
+                WHERE artifact_id = $1::uuid
+                LIMIT 1
+                """,
+                artifact_id,
+            )
+        if not row:
+            return None
+        return _row_to_pipeline_artifact(row)
+
+    async def get_artifact_by_job(
+        self,
+        *,
+        pipeline_id: str,
+        job_id: str,
+        mode: Optional[str] = None,
+    ) -> Optional[PipelineArtifactRecord]:
+        if not self._pool:
+            raise RuntimeError("PipelineRegistry not connected")
+        pipeline_id = str(pipeline_id)
+        job_id = str(job_id)
+        mode_clause = ""
+        values: list[Any] = [pipeline_id, job_id]
+        if mode:
+            mode_clause = f"AND mode = ${len(values) + 1}"
+            values.append(str(mode))
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT artifact_id, pipeline_id, job_id, run_id, mode, status,
+                       definition_hash, definition_commit_id, pipeline_spec_hash, pipeline_spec_commit_id,
+                       inputs, lakefs_repository, lakefs_branch, lakefs_commit_id,
+                       outputs, declared_outputs, sampling_strategy, error,
+                       created_at, updated_at
+                FROM {self._schema}.pipeline_artifacts
+                WHERE pipeline_id = $1::uuid AND job_id = $2
+                {mode_clause}
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                *values,
+            )
+        if not row:
+            return None
+        return _row_to_pipeline_artifact(row)
+
+    async def list_artifacts(
+        self,
+        *,
+        pipeline_id: str,
+        limit: int = 50,
+        mode: Optional[str] = None,
+    ) -> List[PipelineArtifactRecord]:
+        if not self._pool:
+            raise RuntimeError("PipelineRegistry not connected")
+        pipeline_id = str(pipeline_id)
+        limit = max(1, min(int(limit), 200))
+        clause = ""
+        values: list[Any] = [pipeline_id, limit]
+        if mode:
+            clause = f"AND mode = ${len(values) + 1}"
+            values.append(str(mode))
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT artifact_id, pipeline_id, job_id, run_id, mode, status,
+                       definition_hash, definition_commit_id, pipeline_spec_hash, pipeline_spec_commit_id,
+                       inputs, lakefs_repository, lakefs_branch, lakefs_commit_id,
+                       outputs, declared_outputs, sampling_strategy, error,
+                       created_at, updated_at
+                FROM {self._schema}.pipeline_artifacts
+                WHERE pipeline_id = $1::uuid
+                {clause}
+                ORDER BY created_at DESC
+                LIMIT $2
+                """,
+                *values,
+            )
+        return [_row_to_pipeline_artifact(row) for row in rows or []]
 
     async def list_runs(
         self,

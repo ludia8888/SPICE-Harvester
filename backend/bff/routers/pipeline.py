@@ -191,6 +191,14 @@ async def _build_proposal_bundle(
         if outputs_for_lookup:
             bundle["outputs"] = outputs_for_lookup
 
+        artifact_record = await pipeline_registry.get_artifact_by_job(
+            pipeline_id=pipeline.pipeline_id,
+            job_id=build_job_id,
+            mode="build",
+        )
+        if artifact_record:
+            bundle["artifact_id"] = artifact_record.artifact_id
+
     mapping_specs: list[dict[str, Any]] = []
     seen_spec_ids: set[str] = set()
 
@@ -281,8 +289,10 @@ async def get_objectify_registry() -> ObjectifyRegistry:
     return await _get_objectify_registry()
 
 
-async def get_objectify_job_queue() -> ObjectifyJobQueue:
-    return ObjectifyJobQueue()
+async def get_objectify_job_queue(
+    objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
+) -> ObjectifyJobQueue:
+    return ObjectifyJobQueue(objectify_registry=objectify_registry)
 
 
 async def _ensure_ingest_transaction(
@@ -322,20 +332,11 @@ async def _maybe_enqueue_objectify_job(
         dataset_version_id=version.version_id,
         mapping_spec_id=mapping_spec.mapping_spec_id,
         mapping_spec_version=mapping_spec.version,
-        statuses=["QUEUED", "RUNNING", "SUBMITTED"],
+        statuses=["QUEUED", "ENQUEUE_REQUESTED", "ENQUEUED", "RUNNING", "SUBMITTED"],
     )
     if existing:
         return existing.job_id
     job_id = str(uuid4())
-    await objectify_registry.create_objectify_job(
-        job_id=job_id,
-        mapping_spec_id=mapping_spec.mapping_spec_id,
-        mapping_spec_version=mapping_spec.version,
-        dataset_id=dataset.dataset_id,
-        dataset_version_id=version.version_id,
-        dataset_branch=dataset.branch,
-        target_class_id=mapping_spec.target_class_id,
-    )
     options = dict(mapping_spec.options or {})
     job = ObjectifyJob(
         job_id=job_id,
@@ -1442,6 +1443,61 @@ async def list_pipeline_runs(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@router.get("/{pipeline_id}/artifacts", response_model=ApiResponse)
+@trace_endpoint("list_pipeline_artifacts")
+async def list_pipeline_artifacts(
+    pipeline_id: str,
+    mode: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    request: Request = None,
+) -> ApiResponse:
+    try:
+        await _ensure_pipeline_permission(
+            pipeline_registry,
+            pipeline_id=pipeline_id,
+            request=request,
+            required_role="read",
+        )
+        artifacts = await pipeline_registry.list_artifacts(
+            pipeline_id=pipeline_id,
+            limit=limit,
+            mode=mode,
+        )
+        payload = [artifact.__dict__ for artifact in artifacts]
+        return ApiResponse.success(message="Pipeline artifacts", data={"artifacts": payload}).to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to list pipeline artifacts: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/{pipeline_id}/artifacts/{artifact_id}", response_model=ApiResponse)
+@trace_endpoint("get_pipeline_artifact")
+async def get_pipeline_artifact(
+    pipeline_id: str,
+    artifact_id: str,
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    request: Request = None,
+) -> ApiResponse:
+    try:
+        await _ensure_pipeline_permission(
+            pipeline_registry,
+            pipeline_id=pipeline_id,
+            request=request,
+            required_role="read",
+        )
+        artifact = await pipeline_registry.get_artifact(artifact_id=artifact_id)
+        if not artifact or artifact.pipeline_id != pipeline_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found")
+        return ApiResponse.success(message="Pipeline artifact", data={"artifact": artifact.__dict__}).to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to fetch pipeline artifact: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
 @router.post("/{pipeline_id}/branches", response_model=ApiResponse)
 @trace_endpoint("create_pipeline_branch")
 async def create_pipeline_branch(
@@ -2496,6 +2552,7 @@ async def deploy_pipeline(
         definition_json = sanitized.get("definition_json") if isinstance(sanitized.get("definition_json"), dict) else None
         promote_build = bool(sanitized.get("promote_build") or sanitized.get("promoteBuild") or False)
         build_job_id = str(sanitized.get("build_job_id") or sanitized.get("buildJobId") or "").strip() or None
+        artifact_id = str(sanitized.get("artifact_id") or sanitized.get("artifactId") or "").strip() or None
         replay_on_deploy = bool(
             sanitized.get("replay")
             or sanitized.get("replay_on_deploy")
@@ -2601,6 +2658,33 @@ async def deploy_pipeline(
             )
 
         if promote_build:
+            artifact_record = None
+            if artifact_id:
+                artifact_record = await pipeline_registry.get_artifact(artifact_id=artifact_id)
+                if not artifact_record:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Build artifact not found")
+                if artifact_record.pipeline_id != pipeline_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="artifact_id does not belong to this pipeline",
+                    )
+                if str(artifact_record.mode or "").lower() != "build":
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="artifact_id is not a build artifact",
+                    )
+                if str(artifact_record.status or "").upper() != "SUCCESS":
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="artifact_id is not a successful build artifact",
+                    )
+                if build_job_id and artifact_record.job_id != build_job_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="build_job_id does not match artifact_id",
+                    )
+                build_job_id = build_job_id or artifact_record.job_id
+
             if not build_job_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="build_job_id is required for promote_build")
 
@@ -2634,6 +2718,18 @@ async def deploy_pipeline(
             build_hash = str(output_json.get("definition_hash") or "").strip()
             if build_hash and build_hash != definition_hash:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Build definition does not match deploy definition")
+            if artifact_record and artifact_record.definition_hash and artifact_record.definition_hash != definition_hash:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Build artifact definition does not match deploy definition",
+                )
+
+            if artifact_record is None:
+                artifact_record = await pipeline_registry.get_artifact_by_job(
+                    pipeline_id=pipeline_id,
+                    job_id=build_job_id,
+                    mode="build",
+                )
 
             build_branch = str(output_json.get("branch") or "").strip() or "main"
             if build_branch != resolved_branch:
@@ -2668,6 +2764,17 @@ async def deploy_pipeline(
                             "message": "Approved proposal build does not match deploy build",
                             "proposal_build_job_id": bundle_build_job_id,
                             "deploy_build_job_id": build_job_id,
+                        },
+                    )
+                bundle_artifact_id = str(proposal_bundle.get("artifact_id") or "").strip()
+                if bundle_artifact_id and artifact_record and bundle_artifact_id != artifact_record.artifact_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "code": "PROPOSAL_ARTIFACT_MISMATCH",
+                            "message": "Approved proposal artifact does not match deploy artifact",
+                            "proposal_artifact_id": bundle_artifact_id,
+                            "deploy_artifact_id": artifact_record.artifact_id,
                         },
                     )
                 bundle_definition_hash = str(proposal_bundle.get("definition_hash") or "").strip()
@@ -2818,7 +2925,11 @@ async def deploy_pipeline(
                     },
                 )
 
-            outputs_payload = output_json.get("outputs")
+            outputs_payload = None
+            if artifact_record and artifact_record.outputs:
+                outputs_payload = artifact_record.outputs
+            if outputs_payload is None:
+                outputs_payload = output_json.get("outputs")
             outputs_list: list[dict[str, Any]] = []
             if isinstance(outputs_payload, list):
                 outputs_list = [item for item in outputs_payload if isinstance(item, dict)]
@@ -2851,6 +2962,13 @@ async def deploy_pipeline(
             staged_bucket, _ = parsed_first
 
             lakefs_meta = output_json.get("lakefs") if isinstance(output_json.get("lakefs"), dict) else {}
+            if artifact_record:
+                if artifact_record.lakefs_repository:
+                    lakefs_meta.setdefault("repository", artifact_record.lakefs_repository)
+                if artifact_record.lakefs_branch:
+                    lakefs_meta.setdefault("build_branch", artifact_record.lakefs_branch)
+                if artifact_record.lakefs_commit_id:
+                    lakefs_meta.setdefault("commit_id", artifact_record.lakefs_commit_id)
             expected_repo = str(lakefs_meta.get("repository") or "").strip()
             expected_build_branch = str(lakefs_meta.get("build_branch") or "").strip()
             if expected_repo and expected_repo != staged_bucket:
@@ -2991,6 +3109,7 @@ async def deploy_pipeline(
                     "pipeline_id": pipeline_id,
                     "promote_job_id": promote_job_id,
                     "build_job_id": build_job_id,
+                    "artifact_id": (artifact_record.artifact_id if artifact_record else None),
                     "db_name": db_name,
                     "branch": resolved_branch,
                     "node_id": node_id,
@@ -3095,6 +3214,7 @@ async def deploy_pipeline(
                     row_count=row_count_int,
                     sample_json=sample_json,
                     schema_json={"columns": schema_columns},
+                    promoted_from_artifact_id=(artifact_record.artifact_id if artifact_record else None),
                 )
 
                 build_outputs.append(
@@ -3110,6 +3230,7 @@ async def deploy_pipeline(
                         "merge_commit_id": merge_commit_id,
                         "breaking_changes": item.get("breaking_changes") or [],
                         "replay_on_deploy": replay_on_deploy,
+                        "promoted_from_artifact_id": (artifact_record.artifact_id if artifact_record else None),
                     }
                 )
 
@@ -3121,6 +3242,7 @@ async def deploy_pipeline(
                     "outputs": build_outputs,
                     "ontology": build_ontology,
                     "promoted_from_build_job_id": build_job_id,
+                    "promoted_from_artifact_id": (artifact_record.artifact_id if artifact_record else None),
                     "promote_job_id": promote_job_id,
                     "lakefs": {
                         "repository": staged_bucket,
@@ -3145,6 +3267,7 @@ async def deploy_pipeline(
                     "outputs": build_outputs,
                     "ontology": build_ontology,
                     "promoted_from_build_job_id": build_job_id,
+                    "promoted_from_artifact_id": (artifact_record.artifact_id if artifact_record else None),
                     "lakefs": {
                         "repository": staged_bucket,
                         "source_ref": build_ref,
@@ -3164,6 +3287,7 @@ async def deploy_pipeline(
                     "pipeline_id": pipeline_id,
                     "promote_job_id": promote_job_id,
                     "build_job_id": build_job_id,
+                    "artifact_id": (artifact_record.artifact_id if artifact_record else None),
                     "db_name": db_name,
                     "branch": resolved_branch,
                     "node_id": node_id,
@@ -3189,18 +3313,19 @@ async def deploy_pipeline(
                             edge_type="pipeline_output_stored",
                             occurred_at=utcnow(),
                             db_name=db_name,
-                            edge_metadata={
-                                "db_name": db_name,
-                                "pipeline_id": str(pipeline_id),
-                                "artifact_key": promoted_artifact_key,
-                                "dataset_name": item.get("dataset_name"),
-                                "node_id": item.get("node_id"),
-                                "promoted_from_build_job_id": build_job_id,
-                                "build_artifact_key": item.get("build_artifact_key"),
-                                "build_ref": build_ref,
-                                "artifact_path": item.get("artifact_path"),
-                                "merge_commit_id": merge_commit_id,
-                            },
+                                edge_metadata={
+                                    "db_name": db_name,
+                                    "pipeline_id": str(pipeline_id),
+                                    "artifact_key": promoted_artifact_key,
+                                    "dataset_name": item.get("dataset_name"),
+                                    "node_id": item.get("node_id"),
+                                    "promoted_from_build_job_id": build_job_id,
+                                    "promoted_from_artifact_id": (artifact_record.artifact_id if artifact_record else None),
+                                    "build_artifact_key": item.get("build_artifact_key"),
+                                    "build_ref": build_ref,
+                                    "artifact_path": item.get("artifact_path"),
+                                    "merge_commit_id": merge_commit_id,
+                                },
                         )
                     except Exception as exc:
                         logger.warning("Lineage record_link failed (promotion deploy): %s", exc)
@@ -3227,6 +3352,7 @@ async def deploy_pipeline(
                 metadata={
                     "promote_build": promote_build,
                     "build_job_id": build_job_id,
+                    "artifact_id": (artifact_record.artifact_id if artifact_record else None),
                     "node_id": node_id,
                     "merge_commit_id": deployed_commit_id,
                     "branch": resolved_branch,
@@ -3241,6 +3367,7 @@ async def deploy_pipeline(
                     "job_id": promote_job_id,
                     "deployed_commit_id": deployed_commit_id,
                     "outputs": build_outputs,
+                    "artifact_id": (artifact_record.artifact_id if artifact_record else None),
                 },
             ).to_dict()
 
