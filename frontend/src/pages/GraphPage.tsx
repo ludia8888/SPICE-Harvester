@@ -5,7 +5,7 @@ import ReactFlow, {
   addEdge,
   type Connection,
   type Edge,
-  type Node,
+  type Node as FlowNode,
   type ReactFlowInstance,
   useEdgesState,
   useNodesState,
@@ -15,18 +15,35 @@ import { useAppStore } from '../state/store'
 
 type ToolMode = 'pan' | 'pointer' | 'select' | 'remove'
 
+type PreviewRow = {
+  id: string
+  address: string
+  city: string
+  zip: string
+  latitude: string
+  longitude: string
+}
+
+type PreviewColumn = {
+  key: keyof PreviewRow
+  label: string
+  type: string
+  icon: IconName
+  width: number
+}
+
 const previewDatasetName = 'Clean Facility Data'
 
-const previewColumns: Array<{ key: string; label: string; type: string; icon: IconName }> = [
-  { key: 'id', label: 'id', type: 'String', icon: 'font' },
-  { key: 'address', label: 'address', type: 'String', icon: 'font' },
-  { key: 'city', label: 'city', type: 'String', icon: 'font' },
-  { key: 'zip', label: 'zip', type: 'String', icon: 'font' },
-  { key: 'latitude', label: 'latitude', type: 'Double', icon: 'numerical' },
-  { key: 'longitude', label: 'longitude', type: 'Double', icon: 'numerical' },
+const initialPreviewColumns: PreviewColumn[] = [
+  { key: 'id', label: 'id', type: 'String', icon: 'font', width: 180 },
+  { key: 'address', label: 'address', type: 'String', icon: 'font', width: 260 },
+  { key: 'city', label: 'city', type: 'String', icon: 'font', width: 160 },
+  { key: 'zip', label: 'zip', type: 'String', icon: 'font', width: 120 },
+  { key: 'latitude', label: 'latitude', type: 'Double', icon: 'numerical', width: 180 },
+  { key: 'longitude', label: 'longitude', type: 'Double', icon: 'numerical', width: 180 },
 ]
 
-const previewRows = [
+const previewRows: PreviewRow[] = [
   {
     id: '0022093277',
     address: '1100 SO. AKERS STREET',
@@ -76,9 +93,13 @@ export const GraphPage = () => {
   const [isRightPanelOpen, setRightPanelOpen] = useState(false)
   const [isBottomPanelOpen, setBottomPanelOpen] = useState(false)
   const [columnSearch, setColumnSearch] = useState('')
-  const [activeColumn, setActiveColumn] = useState(previewColumns[0]?.key ?? '')
+  const [previewColumns, setPreviewColumns] = useState<PreviewColumn[]>(initialPreviewColumns)
+  const [activeColumn, setActiveColumn] = useState<keyof PreviewRow | ''>(initialPreviewColumns[0]?.key ?? '')
+  const [draggedColumnKey, setDraggedColumnKey] = useState<keyof PreviewRow | null>(null)
+  const [dragOverColumnKey, setDragOverColumnKey] = useState<keyof PreviewRow | null>(null)
+  const [activeOutputTab, setActiveOutputTab] = useState<'datasets' | 'objectTypes' | 'linkTypes'>('datasets')
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node[]>([])
+  const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode[]>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge[]>([])
   const pipelineDisplayName = pipelineContext?.folderName || 'Pipeline Builder'
   const pipelineType = 'batch'
@@ -95,10 +116,15 @@ export const GraphPage = () => {
       return previewColumns
     }
     return previewColumns.filter((column) => column.label.toLowerCase().includes(query))
-  }, [columnSearch])
+  }, [columnSearch, previewColumns])
   const tableGridTemplate = useMemo(() => {
-    return `48px repeat(${previewColumns.length}, minmax(160px, 1fr))`
-  }, [])
+    return ['48px', ...previewColumns.map((column) => `minmax(${column.width}px, 1fr)`)].join(' ')
+  }, [previewColumns])
+  const tableMinWidth = useMemo(() => {
+    const baseWidth = previewColumns.reduce((sum, column) => sum + column.width, 48)
+    const gaps = previewColumns.length * 8
+    return baseWidth + gaps
+  }, [previewColumns])
 
   const canvasClassName = useMemo(() => {
     if (isPanMode) {
@@ -117,7 +143,7 @@ export const GraphPage = () => {
     setEdges((current) => addEdge(connection, current))
   }, [setEdges])
 
-  const handleNodeClick = useCallback((_: unknown, node: Node) => {
+  const handleNodeClick = useCallback((_: unknown, node: FlowNode) => {
     if (!isRemoveMode) {
       if (!isSelectableMode) {
         return
@@ -200,6 +226,65 @@ export const GraphPage = () => {
       }),
     )
   }, [nodes, edges, setNodes])
+
+  const reorderColumns = useCallback((sourceKey: keyof PreviewRow, targetKey: keyof PreviewRow) => {
+    if (sourceKey === targetKey) {
+      return
+    }
+    setPreviewColumns((current) => {
+      const sourceIndex = current.findIndex((column) => column.key === sourceKey)
+      const targetIndex = current.findIndex((column) => column.key === targetKey)
+      if (sourceIndex < 0 || targetIndex < 0) {
+        return current
+      }
+      const next = [...current]
+      const [moved] = next.splice(sourceIndex, 1)
+      next.splice(targetIndex, 0, moved)
+      return next
+    })
+  }, [])
+
+  const handleColumnDragStart = useCallback((event: React.DragEvent<HTMLButtonElement>, key: keyof PreviewRow) => {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', key)
+    setDraggedColumnKey(key)
+  }, [])
+
+  const handleColumnDragEnd = useCallback(() => {
+    setDraggedColumnKey(null)
+    setDragOverColumnKey(null)
+  }, [])
+
+  const handleColumnDragOver = useCallback((event: React.DragEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+  }, [])
+
+  const handleColumnDragEnter = useCallback((key: keyof PreviewRow) => {
+    if (draggedColumnKey === key) {
+      return
+    }
+    setDragOverColumnKey(key)
+  }, [draggedColumnKey])
+
+  const handleColumnDragLeave = useCallback((event: React.DragEvent<HTMLButtonElement>) => {
+    const nextTarget = event.relatedTarget as Element | null
+    if (nextTarget && event.currentTarget.contains(nextTarget)) {
+      return
+    }
+    setDragOverColumnKey(null)
+  }, [])
+
+  const handleColumnDrop = useCallback((event: React.DragEvent<HTMLButtonElement>, targetKey: keyof PreviewRow) => {
+    event.preventDefault()
+    const sourceKey = event.dataTransfer.getData('text/plain') as keyof PreviewRow
+    if (!sourceKey) {
+      return
+    }
+    reorderColumns(sourceKey, targetKey)
+    setDraggedColumnKey(null)
+    setDragOverColumnKey(null)
+  }, [reorderColumns])
 
   const handleZoomIn = useCallback(() => {
     reactFlowInstance?.zoomIn()
@@ -461,7 +546,7 @@ export const GraphPage = () => {
             <div className={`pipeline-bottom-panel ${isBottomPanelOpen ? 'is-open' : ''}`}>
               <div className="pipeline-bottom-panel-header">
                 <div className="pipeline-bottom-panel-title">
-                  <Icon icon="grid-view" size={14} />
+                  <Icon icon="th" size={14} />
                   <span>Data preview</span>
                 </div>
                 <button
@@ -489,7 +574,7 @@ export const GraphPage = () => {
                         className="pipeline-preview-input"
                         value={columnSearch}
                         onChange={(event) => setColumnSearch(event.target.value)}
-                        placeholder="Search 27 columns..."
+                        placeholder={`Search ${previewColumns.length} columns...`}
                       />
                     </label>
                     <div className="pipeline-preview-columns">
@@ -500,8 +585,17 @@ export const GraphPage = () => {
                           <button
                             key={column.key}
                             type="button"
-                            className={`pipeline-preview-column ${activeColumn === column.key ? 'is-active' : ''}`}
+                            className={`pipeline-preview-column${activeColumn === column.key ? ' is-active' : ''}${
+                              draggedColumnKey === column.key ? ' is-dragging' : ''
+                            }${dragOverColumnKey === column.key ? ' is-dragover' : ''}`}
                             onClick={() => setActiveColumn(column.key)}
+                            draggable
+                            onDragStart={(event) => handleColumnDragStart(event, column.key)}
+                            onDragEnd={handleColumnDragEnd}
+                            onDragOver={handleColumnDragOver}
+                            onDragEnter={() => handleColumnDragEnter(column.key)}
+                            onDragLeave={handleColumnDragLeave}
+                            onDrop={(event) => handleColumnDrop(event, column.key)}
                           >
                             <div className="pipeline-preview-column-left">
                               <Icon icon={column.icon} size={14} className="pipeline-preview-column-icon" />
@@ -515,12 +609,17 @@ export const GraphPage = () => {
                   </div>
                   <div className="pipeline-preview-table">
                     <div className="pipeline-preview-table-scroll">
-                      <div className="pipeline-preview-table-header" style={{ gridTemplateColumns: tableGridTemplate }}>
+                      <div
+                        className="pipeline-preview-table-header"
+                        style={{ gridTemplateColumns: tableGridTemplate, minWidth: tableMinWidth }}
+                      >
                         <div className="pipeline-preview-table-cell is-index">#</div>
                         {previewColumns.map((column) => (
                           <div
                             key={column.key}
-                            className={`pipeline-preview-table-cell is-header ${activeColumn === column.key ? 'is-active' : ''}`}
+                            className={`pipeline-preview-table-cell is-header${
+                              activeColumn === column.key ? ' is-active' : ''
+                            }`}
                           >
                             <div className="pipeline-preview-header-main">
                               <span>{column.label}</span>
@@ -534,15 +633,17 @@ export const GraphPage = () => {
                         <div
                           key={row.id}
                           className="pipeline-preview-table-row"
-                          style={{ gridTemplateColumns: tableGridTemplate }}
+                          style={{ gridTemplateColumns: tableGridTemplate, minWidth: tableMinWidth }}
                         >
                           <div className="pipeline-preview-table-cell is-index">{index + 1}</div>
                           {previewColumns.map((column) => (
                             <div
                               key={column.key}
-                              className={`pipeline-preview-table-cell ${activeColumn === column.key ? 'is-active' : ''}`}
+                              className={`pipeline-preview-table-cell${
+                                activeColumn === column.key ? ' is-active' : ''
+                              }`}
                             >
-                              {row[column.key as keyof typeof row]}
+                              {row[column.key]}
                             </div>
                           ))}
                         </div>
@@ -555,7 +656,32 @@ export const GraphPage = () => {
           </div>
           <aside className={`pipeline-right-panel ${isRightPanelOpen ? 'is-open' : ''}`}>
             <div className="pipeline-right-panel-header">
-              <span className="pipeline-right-panel-title">Panel</span>
+              <div className="pipeline-right-panel-tabs">
+                <button
+                  type="button"
+                  className={`pipeline-right-panel-tab ${activeOutputTab === 'datasets' ? 'is-active' : ''}`}
+                  onClick={() => setActiveOutputTab('datasets')}
+                >
+                  <Icon icon="database" size={12} />
+                  <span>Datasets</span>
+                </button>
+                <button
+                  type="button"
+                  className={`pipeline-right-panel-tab ${activeOutputTab === 'objectTypes' ? 'is-active' : ''}`}
+                  onClick={() => setActiveOutputTab('objectTypes')}
+                >
+                  <Icon icon="cube" size={12} />
+                  <span>Object types</span>
+                </button>
+                <button
+                  type="button"
+                  className={`pipeline-right-panel-tab ${activeOutputTab === 'linkTypes' ? 'is-active' : ''}`}
+                  onClick={() => setActiveOutputTab('linkTypes')}
+                >
+                  <Icon icon="link" size={12} />
+                  <span>Link types</span>
+                </button>
+              </div>
               <button
                 type="button"
                 className="pipeline-right-panel-close"
@@ -566,7 +692,77 @@ export const GraphPage = () => {
               </button>
             </div>
             <div className="pipeline-right-panel-body">
-              <span className="pipeline-right-panel-empty">Select a node to view details.</span>
+              {activeOutputTab === 'datasets' ? (
+                <div className="pipeline-output-panel">
+                  <div className="pipeline-output-list">
+                    <div className="pipeline-output-card">
+                      <div className="pipeline-output-header">
+                        <div className="pipeline-output-title">
+                          <Icon icon="th" size={14} />
+                          <span>Vendor</span>
+                        </div>
+                        <button type="button" className="pipeline-output-menu" aria-label="Output actions">
+                          <Icon icon="more" size={12} />
+                        </button>
+                      </div>
+                      <div className="pipeline-output-path">
+                        <Icon icon="folder-close" size={12} />
+                        <span>/Pipeline Builder</span>
+                      </div>
+                      <div className="pipeline-output-row">
+                        <div className="pipeline-output-status is-success">
+                          <Icon icon="tick-circle" size={12} />
+                          <span>17/17 required columns</span>
+                        </div>
+                        <button type="button" className="pipeline-output-action">
+                          <Icon icon="edit" size={12} />
+                          <span>Edit schema</span>
+                        </button>
+                      </div>
+                    </div>
+                    <div className="pipeline-output-card">
+                      <div className="pipeline-output-header">
+                        <div className="pipeline-output-title">
+                          <Icon icon="th" size={14} />
+                          <span>Facility</span>
+                        </div>
+                        <button type="button" className="pipeline-output-menu" aria-label="Output actions">
+                          <Icon icon="more" size={12} />
+                        </button>
+                      </div>
+                      <div className="pipeline-output-path">
+                        <Icon icon="folder-close" size={12} />
+                        <span>/Pipeline Builder</span>
+                      </div>
+                      <div className="pipeline-output-row">
+                        <div className="pipeline-output-status is-success">
+                          <Icon icon="tick-circle" size={12} />
+                          <span>28/28 required columns</span>
+                        </div>
+                        <button type="button" className="pipeline-output-action">
+                          <Icon icon="edit" size={12} />
+                          <span>Edit schema</span>
+                        </button>
+                      </div>
+                      <div className="pipeline-output-alert">
+                        <Icon icon="warning-sign" size={12} />
+                        <span>1 column will be dropped</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="pipeline-output-footer">
+                    <button type="button" className="pipeline-output-add">
+                      <Icon icon="add" size={12} />
+                      <span>Add output</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="pipeline-output-empty">
+                  <Icon icon="info-sign" size={14} />
+                  <span>No outputs configured yet.</span>
+                </div>
+              )}
             </div>
           </aside>
         </div>
