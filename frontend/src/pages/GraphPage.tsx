@@ -1,10 +1,12 @@
 import { useCallback, useMemo, useState } from 'react'
 import { Button, Icon } from '@blueprintjs/core'
+import type { IconName } from '@blueprintjs/icons'
 import ReactFlow, {
   addEdge,
   type Connection,
   type Edge,
   type Node,
+  type ReactFlowInstance,
   useEdgesState,
   useNodesState,
 } from 'reactflow'
@@ -13,10 +15,69 @@ import { useAppStore } from '../state/store'
 
 type ToolMode = 'pan' | 'pointer' | 'select' | 'remove'
 
+const previewDatasetName = 'Clean Facility Data'
+
+const previewColumns: Array<{ key: string; label: string; type: string; icon: IconName }> = [
+  { key: 'id', label: 'id', type: 'String', icon: 'font' },
+  { key: 'address', label: 'address', type: 'String', icon: 'font' },
+  { key: 'city', label: 'city', type: 'String', icon: 'font' },
+  { key: 'zip', label: 'zip', type: 'String', icon: 'font' },
+  { key: 'latitude', label: 'latitude', type: 'Double', icon: 'numerical' },
+  { key: 'longitude', label: 'longitude', type: 'Double', icon: 'numerical' },
+]
+
+const previewRows = [
+  {
+    id: '0022093277',
+    address: '1100 SO. AKERS STREET',
+    city: 'VISALIA',
+    zip: '93277',
+    latitude: '36.320843946',
+    longitude: '-119.292350112',
+  },
+  {
+    id: '0013177954',
+    address: '1100 EAST LOOP 304',
+    city: 'CROCKETT',
+    zip: '77954',
+    latitude: '31.33260364',
+    longitude: '-94.78860542',
+  },
+  {
+    id: '0015371373',
+    address: '209 FRONT ST.',
+    city: 'VIDALIA',
+    zip: '71373',
+    latitude: '31.561174863',
+    longitude: '-91.421041997',
+  },
+  {
+    id: '0072590723',
+    address: '16453 SOUTH COLORADO AVE',
+    city: 'PARAMOUNT',
+    zip: '90723',
+    latitude: '33.884631861',
+    longitude: '-118.15974012',
+  },
+  {
+    id: '0196500984',
+    address: 'CALLE FERNANDEZ JUNCO',
+    city: 'CAROLINA',
+    zip: '00984',
+    latitude: '18.380443',
+    longitude: '-65.984141',
+  },
+]
+
 export const GraphPage = () => {
   const pipelineContext = useAppStore((state) => state.pipelineContext)
   const [activeTab, setActiveTab] = useState<'edit' | 'proposals' | 'history'>('edit')
   const [toolMode, setToolMode] = useState<ToolMode>('pointer')
+  const [isRightPanelOpen, setRightPanelOpen] = useState(false)
+  const [isBottomPanelOpen, setBottomPanelOpen] = useState(false)
+  const [columnSearch, setColumnSearch] = useState('')
+  const [activeColumn, setActiveColumn] = useState(previewColumns[0]?.key ?? '')
+  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
   const [nodes, setNodes, onNodesChange] = useNodesState<Node[]>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge[]>([])
   const pipelineDisplayName = pipelineContext?.folderName || 'Pipeline Builder'
@@ -27,6 +88,17 @@ export const GraphPage = () => {
   const isSelectMode = toolMode === 'select'
   const isRemoveMode = toolMode === 'remove'
   const isSelectableMode = isPointerMode || isSelectMode
+  const isViewportReady = Boolean(reactFlowInstance)
+  const filteredColumns = useMemo(() => {
+    const query = columnSearch.trim().toLowerCase()
+    if (!query) {
+      return previewColumns
+    }
+    return previewColumns.filter((column) => column.label.toLowerCase().includes(query))
+  }, [columnSearch])
+  const tableGridTemplate = useMemo(() => {
+    return `48px repeat(${previewColumns.length}, minmax(160px, 1fr))`
+  }, [])
 
   const canvasClassName = useMemo(() => {
     if (isPanMode) {
@@ -47,11 +119,15 @@ export const GraphPage = () => {
 
   const handleNodeClick = useCallback((_: unknown, node: Node) => {
     if (!isRemoveMode) {
+      if (!isSelectableMode) {
+        return
+      }
+      setBottomPanelOpen(true)
       return
     }
     setNodes((current) => current.filter((item) => item.id !== node.id))
     setEdges((current) => current.filter((item) => item.source !== node.id && item.target !== node.id))
-  }, [isRemoveMode, setNodes, setEdges])
+  }, [isRemoveMode, isSelectableMode, setNodes, setEdges])
 
   const handleEdgeClick = useCallback((_: unknown, edge: Edge) => {
     if (!isRemoveMode) {
@@ -124,6 +200,22 @@ export const GraphPage = () => {
       }),
     )
   }, [nodes, edges, setNodes])
+
+  const handleZoomIn = useCallback(() => {
+    reactFlowInstance?.zoomIn()
+  }, [reactFlowInstance])
+
+  const handleZoomOut = useCallback(() => {
+    reactFlowInstance?.zoomOut()
+  }, [reactFlowInstance])
+
+  const handleFitView = useCallback(() => {
+    reactFlowInstance?.fitView({ padding: 0.1 })
+  }, [reactFlowInstance])
+
+  const handleCloseBottomPanel = useCallback(() => {
+    setBottomPanelOpen(false)
+  }, [])
 
   const topbar = (
     <div className="pipeline-topbar">
@@ -233,6 +325,22 @@ export const GraphPage = () => {
 
         <Button minimal icon="share" text="Share" small disabled={actionsDisabled} />
         <Button minimal icon="menu" small />
+        <Button
+          minimal
+          icon="grid-view"
+          small
+          className={`pipeline-bottom-panel-toggle ${isBottomPanelOpen ? 'is-active' : ''}`}
+          onClick={() => setBottomPanelOpen((open) => !open)}
+          aria-pressed={isBottomPanelOpen}
+        />
+        <Button
+          minimal
+          icon="panel-table"
+          small
+          className={`pipeline-panel-toggle ${isRightPanelOpen ? 'is-active' : ''}`}
+          onClick={() => setRightPanelOpen((open) => !open)}
+          aria-pressed={isRightPanelOpen}
+        />
       </div>
     </div>
   )
@@ -241,82 +349,226 @@ export const GraphPage = () => {
     <div className="page pipeline-page">
       {topbar}
       <div className="pipeline-canvas">
-        <div className={canvasClassName}>
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={handleConnect}
-            onNodeClick={handleNodeClick}
-            onEdgeClick={handleEdgeClick}
-            panOnDrag={isPanMode}
-            nodesDraggable={isPointerMode}
-            nodesConnectable={isPointerMode}
-            elementsSelectable={isSelectableMode}
-            selectionOnDrag={isSelectMode}
-            selectNodesOnDrag={isSelectMode}
-            selectionKeyCode={isSelectMode ? 'Shift' : null}
-            multiSelectionKeyCode={isSelectMode ? ['Meta', 'Control'] : null}
-            deleteKeyCode={['Backspace', 'Delete']}
-            fitView
-            proOptions={{ hideAttribution: true }}
-          />
-          <div className="pipeline-toolbox">
-            <div className="pipeline-toolbox-group">
-              <div className="pipeline-toolbox-button-group">
+        <div className="pipeline-canvas-inner">
+          <div className="pipeline-canvas-stage">
+            <div className={canvasClassName}>
+              <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onConnect={handleConnect}
+                onNodeClick={handleNodeClick}
+                onEdgeClick={handleEdgeClick}
+                onInit={setReactFlowInstance}
+                panOnDrag={isPanMode}
+                nodesDraggable={isPointerMode}
+                nodesConnectable={isPointerMode}
+                elementsSelectable={isSelectableMode}
+                selectionOnDrag={isSelectMode}
+                selectNodesOnDrag={isSelectMode}
+                selectionKeyCode={isSelectMode ? 'Shift' : null}
+                multiSelectionKeyCode={isSelectMode ? ['Meta', 'Control'] : null}
+                deleteKeyCode={['Backspace', 'Delete']}
+                fitView
+                proOptions={{ hideAttribution: true }}
+              />
+              <div className="pipeline-toolbox">
+                <div className="pipeline-toolbox-group">
+                  <div className="pipeline-toolbox-button-group">
+                    <button
+                      type="button"
+                      className={`pipeline-tool-button ${isPanMode ? 'is-active' : ''}`}
+                      onClick={() => setToolMode('pan')}
+                      aria-pressed={isPanMode}
+                    >
+                      <Icon icon="move" size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      className={`pipeline-tool-button ${isPointerMode ? 'is-active' : ''}`}
+                      onClick={() => setToolMode('pointer')}
+                      aria-pressed={isPointerMode}
+                    >
+                      <Icon icon="select" size={16} />
+                    </button>
+                  </div>
+                  <span className="pipeline-toolbox-label">Tools</span>
+                </div>
+                <div className="pipeline-toolbox-group">
+                  <button
+                    type="button"
+                    className={`pipeline-tool-button ${isSelectMode ? 'is-active' : ''}`}
+                    onClick={() => setToolMode('select')}
+                    aria-pressed={isSelectMode}
+                  >
+                    <Icon icon="locate" size={16} />
+                  </button>
+                  <span className="pipeline-toolbox-label">Select</span>
+                </div>
+                <div className="pipeline-toolbox-group">
+                  <button
+                    type="button"
+                    className={`pipeline-tool-button ${isRemoveMode ? 'is-active' : ''}`}
+                    onClick={() => setToolMode('remove')}
+                    aria-pressed={isRemoveMode}
+                  >
+                    <Icon icon="small-cross" size={16} />
+                  </button>
+                  <span className="pipeline-toolbox-label">Remove</span>
+                </div>
+                <div className="pipeline-toolbox-group">
+                  <button
+                    type="button"
+                    className="pipeline-tool-button"
+                    onClick={handleLayout}
+                  >
+                    <Icon icon="layout-hierarchy" size={16} />
+                  </button>
+                  <span className="pipeline-toolbox-label">Layout</span>
+                </div>
+              </div>
+              <div className="pipeline-viewport-controls">
                 <button
                   type="button"
-                  className={`pipeline-tool-button ${isPanMode ? 'is-active' : ''}`}
-                  onClick={() => setToolMode('pan')}
-                  aria-pressed={isPanMode}
+                  className="pipeline-viewport-button"
+                  onClick={handleZoomIn}
+                  disabled={!isViewportReady}
+                  aria-label="Zoom in"
                 >
-                  <Icon icon="move" size={16} />
+                  <Icon icon="zoom-in" size={18} />
                 </button>
                 <button
                   type="button"
-                  className={`pipeline-tool-button ${isPointerMode ? 'is-active' : ''}`}
-                  onClick={() => setToolMode('pointer')}
-                  aria-pressed={isPointerMode}
+                  className="pipeline-viewport-button"
+                  onClick={handleZoomOut}
+                  disabled={!isViewportReady}
+                  aria-label="Zoom out"
                 >
-                  <Icon icon="select" size={16} />
+                  <Icon icon="zoom-out" size={18} />
+                </button>
+                <button
+                  type="button"
+                  className="pipeline-viewport-button"
+                  onClick={handleFitView}
+                  disabled={!isViewportReady}
+                  aria-label="Fit view"
+                >
+                  <Icon icon="zoom-to-fit" size={18} />
                 </button>
               </div>
-              <span className="pipeline-toolbox-label">Tools</span>
             </div>
-            <div className="pipeline-toolbox-group">
-              <button
-                type="button"
-                className={`pipeline-tool-button ${isSelectMode ? 'is-active' : ''}`}
-                onClick={() => setToolMode('select')}
-                aria-pressed={isSelectMode}
-              >
-                <Icon icon="locate" size={16} />
-              </button>
-              <span className="pipeline-toolbox-label">Select</span>
-            </div>
-            <div className="pipeline-toolbox-group">
-              <button
-                type="button"
-                className={`pipeline-tool-button ${isRemoveMode ? 'is-active' : ''}`}
-                onClick={() => setToolMode('remove')}
-                aria-pressed={isRemoveMode}
-              >
-                <Icon icon="small-cross" size={16} />
-              </button>
-              <span className="pipeline-toolbox-label">Remove</span>
-            </div>
-            <div className="pipeline-toolbox-group">
-              <button
-                type="button"
-                className="pipeline-tool-button"
-                onClick={handleLayout}
-              >
-                <Icon icon="layout-hierarchy" size={16} />
-              </button>
-              <span className="pipeline-toolbox-label">Layout</span>
+            <div className={`pipeline-bottom-panel ${isBottomPanelOpen ? 'is-open' : ''}`}>
+              <div className="pipeline-bottom-panel-header">
+                <div className="pipeline-bottom-panel-title">
+                  <Icon icon="grid-view" size={14} />
+                  <span>Data preview</span>
+                </div>
+                <button
+                  type="button"
+                  className="pipeline-bottom-panel-collapse"
+                  onClick={handleCloseBottomPanel}
+                  aria-label="Close preview"
+                >
+                  <Icon icon="chevron-down" size={16} />
+                </button>
+              </div>
+              <div className="pipeline-bottom-panel-body">
+                <div className="pipeline-preview">
+                  <div className="pipeline-preview-sidebar">
+                    <button type="button" className="pipeline-preview-selector">
+                      <div className="pipeline-preview-selector-left">
+                        <Icon icon="database" size={14} />
+                        <span>{previewDatasetName}</span>
+                      </div>
+                      <Icon icon="chevron-down" size={14} />
+                    </button>
+                    <label className="pipeline-preview-search">
+                      <Icon icon="search" size={14} />
+                      <input
+                        className="pipeline-preview-input"
+                        value={columnSearch}
+                        onChange={(event) => setColumnSearch(event.target.value)}
+                        placeholder="Search 27 columns..."
+                      />
+                    </label>
+                    <div className="pipeline-preview-columns">
+                      {filteredColumns.length === 0 ? (
+                        <div className="pipeline-preview-empty">No matching columns.</div>
+                      ) : (
+                        filteredColumns.map((column) => (
+                          <button
+                            key={column.key}
+                            type="button"
+                            className={`pipeline-preview-column ${activeColumn === column.key ? 'is-active' : ''}`}
+                            onClick={() => setActiveColumn(column.key)}
+                          >
+                            <div className="pipeline-preview-column-left">
+                              <Icon icon={column.icon} size={14} className="pipeline-preview-column-icon" />
+                              <span>{column.label}</span>
+                            </div>
+                            <Icon icon="drag-handle-vertical" size={14} className="pipeline-preview-column-menu" />
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                  <div className="pipeline-preview-table">
+                    <div className="pipeline-preview-table-scroll">
+                      <div className="pipeline-preview-table-header" style={{ gridTemplateColumns: tableGridTemplate }}>
+                        <div className="pipeline-preview-table-cell is-index">#</div>
+                        {previewColumns.map((column) => (
+                          <div
+                            key={column.key}
+                            className={`pipeline-preview-table-cell is-header ${activeColumn === column.key ? 'is-active' : ''}`}
+                          >
+                            <div className="pipeline-preview-header-main">
+                              <span>{column.label}</span>
+                              <Icon icon="caret-down" size={12} />
+                            </div>
+                            <span className="pipeline-preview-header-type">{column.type}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {previewRows.map((row, index) => (
+                        <div
+                          key={row.id}
+                          className="pipeline-preview-table-row"
+                          style={{ gridTemplateColumns: tableGridTemplate }}
+                        >
+                          <div className="pipeline-preview-table-cell is-index">{index + 1}</div>
+                          {previewColumns.map((column) => (
+                            <div
+                              key={column.key}
+                              className={`pipeline-preview-table-cell ${activeColumn === column.key ? 'is-active' : ''}`}
+                            >
+                              {row[column.key as keyof typeof row]}
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
+          <aside className={`pipeline-right-panel ${isRightPanelOpen ? 'is-open' : ''}`}>
+            <div className="pipeline-right-panel-header">
+              <span className="pipeline-right-panel-title">Panel</span>
+              <button
+                type="button"
+                className="pipeline-right-panel-close"
+                onClick={() => setRightPanelOpen(false)}
+                aria-label="Close panel"
+              >
+                <Icon icon="cross" size={12} />
+              </button>
+            </div>
+            <div className="pipeline-right-panel-body">
+              <span className="pipeline-right-panel-empty">Select a node to view details.</span>
+            </div>
+          </aside>
         </div>
       </div>
     </div>
