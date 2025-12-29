@@ -137,6 +137,13 @@ services:
       - postgres
       - lakefs
       - oms
+
+  ingest-reconciler-worker:
+    extends:
+      file: backend/docker-compose.yml
+      service: ingest-reconciler-worker
+    depends_on:
+      - postgres
       
   # Database services
   postgres:

@@ -1479,6 +1479,8 @@ class DatasetRegistry:
         *,
         stale_after_seconds: int = 3600,
         limit: int = 200,
+        use_lock: bool = True,
+        lock_key: Optional[int] = None,
     ) -> Dict[str, int]:
         """
         Best-effort reconciliation for ingest atomicity.
@@ -1490,124 +1492,148 @@ class DatasetRegistry:
         if not self._pool:
             raise RuntimeError("DatasetRegistry not connected")
 
-        results = {"published": 0, "aborted": 0, "committed_tx": 0}
+        results = {"published": 0, "aborted": 0, "committed_tx": 0, "skipped": 0}
         cutoff = datetime.utcnow() - timedelta(seconds=max(60, int(stale_after_seconds)))
 
-        # 1) Publish RAW_COMMITTED ingests that never created a dataset_version.
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT ingest_request_id, dataset_id, db_name, branch, lakefs_commit_id, artifact_key,
-                       schema_json, sample_json, row_count
-                FROM {self._schema}.dataset_ingest_requests
-                WHERE status = 'RAW_COMMITTED'
-                  AND lakefs_commit_id IS NOT NULL
-                  AND artifact_key IS NOT NULL
-                ORDER BY updated_at ASC
-                LIMIT $1
-                """,
-                limit,
-            )
-
-        for row in rows or []:
-            ingest_request_id = str(row["ingest_request_id"])
-            dataset_id = str(row["dataset_id"])
-            db_name = str(row["db_name"])
-            branch = str(row["branch"])
-            lakefs_commit_id = str(row["lakefs_commit_id"])
-            artifact_key = row["artifact_key"]
-            sample_json = coerce_json_dataset(row["sample_json"]) or {}
-            schema_json = coerce_json_dataset(row["schema_json"]) or {}
-            row_count = row["row_count"]
-
+        lock_conn: Optional[asyncpg.Connection] = None
+        resolved_lock_key = lock_key
+        if resolved_lock_key is None:
             try:
-                dataset = await self.get_dataset(dataset_id=dataset_id)
-                dataset_name = dataset.name if dataset else ""
-                transaction = await self.get_ingest_transaction(ingest_request_id=ingest_request_id)
-                transaction_id = transaction.transaction_id if transaction else None
-                from shared.services.dataset_ingest_outbox import build_dataset_event_payload
+                resolved_lock_key = int(os.getenv("DATASET_INGEST_RECONCILER_LOCK_KEY", "910214"))
+            except ValueError:
+                resolved_lock_key = 910214
 
-                outbox_entries = [
-                    {
-                        "kind": "eventstore",
-                        "payload": build_dataset_event_payload(
-                            event_id=ingest_request_id,
-                            event_type="DATASET_VERSION_CREATED",
-                            aggregate_type="Dataset",
-                            aggregate_id=dataset_id,
-                            command_type="INGEST_DATASET_SNAPSHOT",
-                            actor=None,
-                            data={
-                                "dataset_id": dataset_id,
-                                "db_name": db_name,
-                                "name": dataset_name,
-                                "lakefs_commit_id": lakefs_commit_id,
-                                "artifact_key": artifact_key,
-                                "transaction_id": transaction_id,
-                            },
-                        ),
-                    }
-                ]
-                await self.publish_ingest_request(
-                    ingest_request_id=ingest_request_id,
-                    dataset_id=dataset_id,
-                    lakefs_commit_id=lakefs_commit_id,
-                    artifact_key=artifact_key,
-                    row_count=row_count,
-                    sample_json=sample_json,
-                    schema_json=schema_json,
-                    outbox_entries=outbox_entries,
+        try:
+            if use_lock and resolved_lock_key is not None:
+                lock_conn = await self._pool.acquire()
+                locked = await lock_conn.fetchval("SELECT pg_try_advisory_lock($1)", resolved_lock_key)
+                if not locked:
+                    results["skipped"] = 1
+                    return results
+
+            # 1) Publish RAW_COMMITTED ingests that never created a dataset_version.
+            async with self._pool.acquire() as conn:
+                rows = await conn.fetch(
+                    f"""
+                    SELECT ingest_request_id, dataset_id, db_name, branch, lakefs_commit_id, artifact_key,
+                           schema_json, sample_json, row_count
+                    FROM {self._schema}.dataset_ingest_requests
+                    WHERE status = 'RAW_COMMITTED'
+                      AND lakefs_commit_id IS NOT NULL
+                      AND artifact_key IS NOT NULL
+                    ORDER BY updated_at ASC
+                    LIMIT $1
+                    """,
+                    limit,
                 )
-                results["published"] += 1
-            except Exception as exc:
-                logger.warning("Failed to reconcile RAW_COMMITTED ingest %s: %s", ingest_request_id, exc)
 
-        # 2) Repair OPEN transactions for already-published requests.
-        async with self._pool.acquire() as conn:
-            repaired = await conn.execute(
-                f"""
-                UPDATE {self._schema}.dataset_ingest_transactions t
-                SET status = 'COMMITTED',
-                    committed_at = COALESCE(committed_at, NOW()),
-                    updated_at = NOW()
-                FROM {self._schema}.dataset_ingest_requests r
-                WHERE r.ingest_request_id = t.ingest_request_id
-                  AND r.status = 'PUBLISHED'
-                  AND t.status = 'OPEN'
-                """
-            )
-        if isinstance(repaired, str) and repaired.startswith("UPDATE"):
-            try:
-                results["committed_tx"] = int(repaired.split()[-1])
-            except Exception:
-                pass
+            for row in rows or []:
+                ingest_request_id = str(row["ingest_request_id"])
+                dataset_id = str(row["dataset_id"])
+                db_name = str(row["db_name"])
+                branch = str(row["branch"])
+                lakefs_commit_id = str(row["lakefs_commit_id"])
+                artifact_key = row["artifact_key"]
+                sample_json = coerce_json_dataset(row["sample_json"]) or {}
+                schema_json = coerce_json_dataset(row["schema_json"]) or {}
+                row_count = row["row_count"]
 
-        # 3) Abort stale OPEN transactions.
-        async with self._pool.acquire() as conn:
-            stale_rows = await conn.fetch(
-                f"""
-                SELECT t.ingest_request_id
-                FROM {self._schema}.dataset_ingest_transactions t
-                JOIN {self._schema}.dataset_ingest_requests r
-                  ON r.ingest_request_id = t.ingest_request_id
-                WHERE t.status = 'OPEN'
-                  AND t.created_at < $1
-                  AND r.status IN ('RECEIVED', 'RAW_COMMITTED')
-                ORDER BY t.created_at ASC
-                LIMIT $2
-                """,
-                cutoff,
-                limit,
-            )
-        for row in stale_rows or []:
-            ingest_request_id = str(row["ingest_request_id"])
-            try:
-                await self.mark_ingest_failed(
-                    ingest_request_id=ingest_request_id,
-                    error="reconciler_timeout",
+                try:
+                    dataset = await self.get_dataset(dataset_id=dataset_id)
+                    dataset_name = dataset.name if dataset else ""
+                    transaction = await self.get_ingest_transaction(ingest_request_id=ingest_request_id)
+                    transaction_id = transaction.transaction_id if transaction else None
+                    from shared.services.dataset_ingest_outbox import build_dataset_event_payload
+
+                    outbox_entries = [
+                        {
+                            "kind": "eventstore",
+                            "payload": build_dataset_event_payload(
+                                event_id=ingest_request_id,
+                                event_type="DATASET_VERSION_CREATED",
+                                aggregate_type="Dataset",
+                                aggregate_id=dataset_id,
+                                command_type="INGEST_DATASET_SNAPSHOT",
+                                actor=None,
+                                data={
+                                    "dataset_id": dataset_id,
+                                    "db_name": db_name,
+                                    "name": dataset_name,
+                                    "lakefs_commit_id": lakefs_commit_id,
+                                    "artifact_key": artifact_key,
+                                    "transaction_id": transaction_id,
+                                },
+                            ),
+                        }
+                    ]
+                    await self.publish_ingest_request(
+                        ingest_request_id=ingest_request_id,
+                        dataset_id=dataset_id,
+                        lakefs_commit_id=lakefs_commit_id,
+                        artifact_key=artifact_key,
+                        row_count=row_count,
+                        sample_json=sample_json,
+                        schema_json=schema_json,
+                        outbox_entries=outbox_entries,
+                    )
+                    results["published"] += 1
+                except Exception as exc:
+                    logger.warning("Failed to reconcile RAW_COMMITTED ingest %s: %s", ingest_request_id, exc)
+
+            # 2) Repair OPEN transactions for already-published requests.
+            async with self._pool.acquire() as conn:
+                repaired = await conn.execute(
+                    f"""
+                    UPDATE {self._schema}.dataset_ingest_transactions t
+                    SET status = 'COMMITTED',
+                        committed_at = COALESCE(committed_at, NOW()),
+                        updated_at = NOW()
+                    FROM {self._schema}.dataset_ingest_requests r
+                    WHERE r.ingest_request_id = t.ingest_request_id
+                      AND r.status = 'PUBLISHED'
+                      AND t.status = 'OPEN'
+                    """
                 )
-                results["aborted"] += 1
-            except Exception as exc:
-                logger.warning("Failed to abort stale ingest %s: %s", ingest_request_id, exc)
+            if isinstance(repaired, str) and repaired.startswith("UPDATE"):
+                try:
+                    results["committed_tx"] = int(repaired.split()[-1])
+                except Exception:
+                    pass
+
+            # 3) Abort stale OPEN transactions.
+            async with self._pool.acquire() as conn:
+                stale_rows = await conn.fetch(
+                    f"""
+                    SELECT t.ingest_request_id
+                    FROM {self._schema}.dataset_ingest_transactions t
+                    JOIN {self._schema}.dataset_ingest_requests r
+                      ON r.ingest_request_id = t.ingest_request_id
+                    WHERE t.status = 'OPEN'
+                      AND t.created_at < $1
+                      AND r.status IN ('RECEIVED', 'RAW_COMMITTED')
+                    ORDER BY t.created_at ASC
+                    LIMIT $2
+                    """,
+                    cutoff,
+                    limit,
+                )
+            for row in stale_rows or []:
+                ingest_request_id = str(row["ingest_request_id"])
+                try:
+                    await self.mark_ingest_failed(
+                        ingest_request_id=ingest_request_id,
+                        error="reconciler_timeout",
+                    )
+                    results["aborted"] += 1
+                except Exception as exc:
+                    logger.warning("Failed to abort stale ingest %s: %s", ingest_request_id, exc)
+        finally:
+            if lock_conn is not None:
+                if resolved_lock_key is not None:
+                    try:
+                        await lock_conn.execute("SELECT pg_advisory_unlock($1)", resolved_lock_key)
+                    except Exception:
+                        logger.warning("Failed to release ingest reconciler lock", exc_info=True)
+                await self._pool.release(lock_conn)
 
         return results

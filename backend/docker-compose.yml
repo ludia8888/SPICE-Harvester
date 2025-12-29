@@ -246,6 +246,7 @@ services:
       - DOCKER_CONTAINER=true
       - BFF_REQUIRE_AUTH=${BFF_REQUIRE_AUTH:-true}
       - BFF_REQUIRE_DB_SCOPE=${BFF_REQUIRE_DB_SCOPE:-false}
+      - ENABLE_DATASET_INGEST_RECONCILER=false
       - ADMIN_TOKEN=${ADMIN_TOKEN:?ADMIN_TOKEN is required}
       # Event Store / Dataset artifacts (S3/MinIO)
       - MINIO_ENDPOINT_URL=http://spice-minio:9000
@@ -436,6 +437,39 @@ services:
       - postgres
       - lakefs
       - oms
+    networks:
+      - spice_network
+    restart: unless-stopped
+
+  # Dataset ingest reconciler worker (runs atomicity repair loop)
+  ingest-reconciler-worker:
+    build:
+      context: .
+      dockerfile: ./ingest_reconciler_worker/Dockerfile
+    container_name: spice_ingest_reconciler_worker
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
+      - POSTGRES_DB=${POSTGRES_DB:-spicedb}
+      - LOG_LEVEL=INFO
+      - DOCKER_CONTAINER=true
+      - ENABLE_DATASET_INGEST_RECONCILER=${ENABLE_DATASET_INGEST_RECONCILER:-true}
+      - DATASET_INGEST_RECONCILER_POLL_SECONDS=${DATASET_INGEST_RECONCILER_POLL_SECONDS:-60}
+      - DATASET_INGEST_RECONCILER_STALE_SECONDS=${DATASET_INGEST_RECONCILER_STALE_SECONDS:-3600}
+      - DATASET_INGEST_RECONCILER_LIMIT=${DATASET_INGEST_RECONCILER_LIMIT:-200}
+      - DATASET_INGEST_RECONCILER_LOCK_KEY=${DATASET_INGEST_RECONCILER_LOCK_KEY:-910214}
+      - INGEST_RECONCILER_PORT=${INGEST_RECONCILER_PORT:-8012}
+      - INGEST_RECONCILER_ALERT_WEBHOOK_URL=${INGEST_RECONCILER_ALERT_WEBHOOK_URL:-}
+      - INGEST_RECONCILER_ALERT_PUBLISHED_THRESHOLD=${INGEST_RECONCILER_ALERT_PUBLISHED_THRESHOLD:-1}
+      - INGEST_RECONCILER_ALERT_ABORTED_THRESHOLD=${INGEST_RECONCILER_ALERT_ABORTED_THRESHOLD:-1}
+      - INGEST_RECONCILER_ALERT_ON_ERROR=${INGEST_RECONCILER_ALERT_ON_ERROR:-true}
+      - INGEST_RECONCILER_ALERT_COOLDOWN_SECONDS=${INGEST_RECONCILER_ALERT_COOLDOWN_SECONDS:-300}
+    ports:
+      - "${INGEST_RECONCILER_PORT_HOST:-8012}:8012"
+    depends_on:
+      - postgres
     networks:
       - spice_network
     restart: unless-stopped

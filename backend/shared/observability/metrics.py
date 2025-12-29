@@ -176,6 +176,53 @@ class MetricsCollector:
                 description="Current number of active users",
                 unit="1"
             )
+
+            # Ingest reconciler metrics
+            self._metrics["ingest_reconciler_runs"] = self.meter.create_counter(
+                name="ingest_reconciler_runs_total",
+                description="Total ingest reconciler runs",
+                unit="1",
+            )
+            self._metrics["ingest_reconciler_published"] = self.meter.create_counter(
+                name="ingest_reconciler_published_total",
+                description="Total ingests published by reconciler",
+                unit="1",
+            )
+            self._metrics["ingest_reconciler_aborted"] = self.meter.create_counter(
+                name="ingest_reconciler_aborted_total",
+                description="Total ingests aborted by reconciler",
+                unit="1",
+            )
+            self._metrics["ingest_reconciler_committed_tx"] = self.meter.create_counter(
+                name="ingest_reconciler_committed_tx_total",
+                description="Total ingest transactions repaired to COMMITTED",
+                unit="1",
+            )
+            self._metrics["ingest_reconciler_skipped"] = self.meter.create_counter(
+                name="ingest_reconciler_skipped_total",
+                description="Total reconciler runs skipped due to lock contention",
+                unit="1",
+            )
+            self._metrics["ingest_reconciler_errors"] = self.meter.create_counter(
+                name="ingest_reconciler_errors_total",
+                description="Total ingest reconciler errors",
+                unit="1",
+            )
+            self._metrics["ingest_reconciler_alerts"] = self.meter.create_counter(
+                name="ingest_reconciler_alerts_total",
+                description="Total ingest reconciler alerts sent",
+                unit="1",
+            )
+            self._metrics["ingest_reconciler_alert_failures"] = self.meter.create_counter(
+                name="ingest_reconciler_alert_failures_total",
+                description="Total ingest reconciler alert delivery failures",
+                unit="1",
+            )
+            self._metrics["ingest_reconciler_duration_seconds"] = self.meter.create_histogram(
+                name="ingest_reconciler_duration_seconds",
+                description="Ingest reconciler run duration in seconds",
+                unit="s",
+            )
             
             logger.info(f"Metrics initialized for service: {self.service_name}")
 

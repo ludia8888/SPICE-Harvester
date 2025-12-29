@@ -22,7 +22,9 @@ async def run_dataset_ingest_reconciler(
             result = await dataset_registry.reconcile_ingest_state(
                 stale_after_seconds=stale_after_seconds,
             )
-            if any(value > 0 for value in result.values()):
+            if result.get("skipped"):
+                logger.info("Ingest reconciler skipped (lock held)")
+            elif any(value > 0 for value in result.values()):
                 logger.info("Ingest reconciler ran: %s", result)
         except Exception as exc:
             logger.warning("Ingest reconciler failed: %s", exc)
