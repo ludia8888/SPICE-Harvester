@@ -60,13 +60,15 @@ from shared.services.elasticsearch_service import ElasticsearchService
 from shared.models.requests import ApiResponse
 from shared.utils.jsonld import JSONToJSONLDConverter
 from shared.utils.label_mapper import LabelMapper
+from oms.services.ontology_deploy_outbox import run_ontology_deploy_outbox_worker
+from oms.services.ontology_deployment_registry import OntologyDeploymentRegistry
 
 # Rate limiting middleware
 from shared.middleware.rate_limiter import rate_limit, RateLimitPresets, RateLimiter
 
 # Router imports
 from oms.routers import (
-    branch, database, ontology, version,
+    branch, database, ontology, ontology_extensions, version,
     instance_async, instance, query, command_status
 )
 
@@ -330,6 +332,9 @@ async def lifespan(app: FastAPI):
     
     logger.info("OMS Service startup beginning...")
     
+    ontology_outbox_task: Optional[asyncio.Task] = None
+    ontology_outbox_stop: Optional[asyncio.Event] = None
+
     try:
         ensure_oms_auth_configured()
 
@@ -353,7 +358,22 @@ async def lifespan(app: FastAPI):
 
         # 6. Middleware setup is handled during app creation (service_factory)
         logger.info("OMS Service startup completed successfully")
-        
+
+        enable_ontology_outbox = (os.getenv("ENABLE_ONTOLOGY_DEPLOY_OUTBOX_WORKER", "true") or "true").lower() != "false"
+        if enable_ontology_outbox:
+            ontology_outbox_stop = asyncio.Event()
+            registry = OntologyDeploymentRegistry()
+            ontology_outbox_task = asyncio.create_task(
+                run_ontology_deploy_outbox_worker(
+                    registry=registry,
+                    poll_interval_seconds=int(os.getenv("ONTOLOGY_DEPLOY_OUTBOX_POLL_SECONDS", "5")),
+                    batch_size=int(os.getenv("ONTOLOGY_DEPLOY_OUTBOX_BATCH", "50")),
+                    stop_event=ontology_outbox_stop,
+                )
+            )
+            app.state.ontology_deploy_outbox_task = ontology_outbox_task
+            app.state.ontology_deploy_outbox_stop = ontology_outbox_stop
+
         yield
         
     except Exception as e:
@@ -363,6 +383,14 @@ async def lifespan(app: FastAPI):
     finally:
         # Shutdown in reverse order
         logger.info("OMS Service shutdown beginning...")
+
+        if ontology_outbox_stop is not None:
+            ontology_outbox_stop.set()
+        if ontology_outbox_task is not None:
+            try:
+                await ontology_outbox_task
+            except Exception as exc:
+                logger.warning("Ontology deploy outbox worker shutdown failed: %s", exc)
         
         if _oms_container:
             await _oms_container.shutdown_oms_services()
@@ -618,6 +646,7 @@ if settings.is_development:
 # Router registration
 app.include_router(database.router, prefix="/api/v1", tags=["database"])
 app.include_router(ontology.router, prefix="/api/v1", tags=["ontology"])
+app.include_router(ontology_extensions.router, prefix="/api/v1", tags=["ontology"])
 app.include_router(query.router, prefix="/api/v1", tags=["query"])
 app.include_router(instance_async.router, prefix="/api/v1", tags=["async-instance"])
 app.include_router(instance.router, prefix="/api/v1", tags=["instance"])

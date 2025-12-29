@@ -223,8 +223,14 @@ class TerminusService:
             # If it's a 404, return None (not found)
             if e.response.status_code == 404:
                 return None
-            # Re-raise other HTTP errors
-            raise
+            detail: Any = e.response.text
+            try:
+                detail_json = e.response.json()
+                if isinstance(detail_json, dict):
+                    detail = detail_json.get("detail") or detail_json
+            except Exception:
+                pass
+            raise HTTPException(status_code=e.response.status_code, detail=detail) from e
         except Exception:
             # Re-raise other exceptions
             raise

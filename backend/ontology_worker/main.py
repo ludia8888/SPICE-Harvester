@@ -294,7 +294,8 @@ class OntologyWorker:
                 properties=payload.get('properties', []),
                 relationships=payload.get('relationships', []),
                 parent_class=payload.get('parent_class'),
-                abstract=payload.get('abstract', False)
+                abstract=payload.get('abstract', False),
+                metadata=payload.get('metadata') if isinstance(payload.get('metadata'), dict) else {},
             )
             
             # Idempotent create: if it already exists, treat as success.

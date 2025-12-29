@@ -246,6 +246,224 @@ class OMSClient:
             logger.error(f"브랜치 목록 조회 실패 ({db_name}): {e}")
             raise
 
+    async def list_ontology_resources(
+        self,
+        db_name: str,
+        *,
+        resource_type: Optional[str] = None,
+        branch: str = "main",
+        limit: int = 200,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """온톨로지 리소스 목록 조회"""
+        try:
+            params = {"branch": branch, "limit": limit, "offset": offset}
+            if resource_type:
+                response = await self.client.get(
+                    f"/api/v1/database/{db_name}/ontology/resources/{resource_type}",
+                    params=params,
+                )
+            else:
+                response = await self.client.get(
+                    f"/api/v1/database/{db_name}/ontology/resources",
+                    params=params,
+                )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Ontology resource list failed ({db_name}): {e}")
+            raise
+
+    async def get_ontology_resource(
+        self,
+        db_name: str,
+        *,
+        resource_type: str,
+        resource_id: str,
+        branch: str = "main",
+    ) -> Dict[str, Any]:
+        """단일 온톨로지 리소스 조회"""
+        try:
+            response = await self.client.get(
+                f"/api/v1/database/{db_name}/ontology/resources/{resource_type}/{resource_id}",
+                params={"branch": branch},
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Ontology resource get failed ({db_name}): {e}")
+            raise
+
+    async def create_ontology_resource(
+        self,
+        db_name: str,
+        *,
+        resource_type: str,
+        payload: Dict[str, Any],
+        branch: str = "main",
+        expected_head_commit: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """온톨로지 리소스 생성"""
+        try:
+            params = {"branch": branch}
+            if expected_head_commit:
+                params["expected_head_commit"] = expected_head_commit
+            response = await self.client.post(
+                f"/api/v1/database/{db_name}/ontology/resources/{resource_type}",
+                params=params,
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Ontology resource create failed ({db_name}): {e}")
+            raise
+
+    async def update_ontology_resource(
+        self,
+        db_name: str,
+        *,
+        resource_type: str,
+        resource_id: str,
+        payload: Dict[str, Any],
+        branch: str = "main",
+        expected_head_commit: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """온톨로지 리소스 업데이트"""
+        try:
+            params = {"branch": branch}
+            if expected_head_commit:
+                params["expected_head_commit"] = expected_head_commit
+            response = await self.client.put(
+                f"/api/v1/database/{db_name}/ontology/resources/{resource_type}/{resource_id}",
+                params=params,
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Ontology resource update failed ({db_name}): {e}")
+            raise
+
+    async def delete_ontology_resource(
+        self,
+        db_name: str,
+        *,
+        resource_type: str,
+        resource_id: str,
+        branch: str = "main",
+        expected_head_commit: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """온톨로지 리소스 삭제"""
+        try:
+            params = {"branch": branch}
+            if expected_head_commit:
+                params["expected_head_commit"] = expected_head_commit
+            response = await self.client.delete(
+                f"/api/v1/database/{db_name}/ontology/resources/{resource_type}/{resource_id}",
+                params=params,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Ontology resource delete failed ({db_name}): {e}")
+            raise
+
+    async def list_ontology_branches(self, db_name: str) -> Dict[str, Any]:
+        """온톨로지 브랜치 목록 조회"""
+        try:
+            response = await self.client.get(f"/api/v1/database/{db_name}/ontology/branches")
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Ontology branch list failed ({db_name}): {e}")
+            raise
+
+    async def create_ontology_branch(self, db_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """온톨로지 브랜치 생성"""
+        try:
+            response = await self.client.post(
+                f"/api/v1/database/{db_name}/ontology/branches",
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Ontology branch create failed ({db_name}): {e}")
+            raise
+
+    async def list_ontology_proposals(
+        self, db_name: str, *, status_filter: Optional[str] = None, limit: int = 100
+    ) -> Dict[str, Any]:
+        """온톨로지 제안 목록 조회"""
+        try:
+            params: Dict[str, Any] = {"limit": limit}
+            if status_filter:
+                params["status"] = status_filter
+            response = await self.client.get(
+                f"/api/v1/database/{db_name}/ontology/proposals",
+                params=params,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Ontology proposal list failed ({db_name}): {e}")
+            raise
+
+    async def create_ontology_proposal(self, db_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """온톨로지 제안 생성"""
+        try:
+            response = await self.client.post(
+                f"/api/v1/database/{db_name}/ontology/proposals",
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Ontology proposal create failed ({db_name}): {e}")
+            raise
+
+    async def approve_ontology_proposal(
+        self, db_name: str, proposal_id: str, payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """온톨로지 제안 승인"""
+        try:
+            response = await self.client.post(
+                f"/api/v1/database/{db_name}/ontology/proposals/{proposal_id}/approve",
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Ontology proposal approve failed ({db_name}): {e}")
+            raise
+
+    async def deploy_ontology(self, db_name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """온톨로지 배포(승격)"""
+        try:
+            response = await self.client.post(
+                f"/api/v1/database/{db_name}/ontology/deploy",
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Ontology deploy failed ({db_name}): {e}")
+            raise
+
+    async def get_ontology_health(self, db_name: str, *, branch: str = "main") -> Dict[str, Any]:
+        """온톨로지 헬스 체크"""
+        try:
+            response = await self.client.get(
+                f"/api/v1/database/{db_name}/ontology/health",
+                params={"branch": branch},
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Ontology health failed ({db_name}): {e}")
+            raise
+
     async def create_branch(self, db_name: str, branch_data: Dict[str, Any]) -> Dict[str, Any]:
         """브랜치 생성"""
         try:

@@ -75,6 +75,20 @@ class OntologyService(BaseTerminusService):
                 or f"{label_display} class"
             )
 
+            documentation = {
+                "@comment": description_display,
+                "@label": label_display,
+                # Extra fields are safe to store in TerminusDB and allow EN/KR round-trip.
+                "@comment_i18n": description_i18n,
+                "@label_i18n": label_i18n,
+            }
+
+            metadata_payload = ontology.metadata if isinstance(ontology.metadata, dict) else {}
+            if metadata_payload:
+                documentation["metadata"] = metadata_payload
+                if metadata_payload.get("internal"):
+                    documentation["@internal"] = True
+
             # 스키마 문서 생성 - 🔥 CRITICAL FIX: Correct TerminusDB format
             schema_doc = {
                 "@type": "Class",
@@ -82,13 +96,7 @@ class OntologyService(BaseTerminusService):
                 "@key": {
                     "@type": "Random"
                 },
-                "@documentation": {
-                    "@comment": description_display,
-                    "@label": label_display,
-                    # Extra fields are safe to store in TerminusDB and allow EN/KR round-trip.
-                    "@comment_i18n": description_i18n,
-                    "@label_i18n": label_i18n,
-                }
+                "@documentation": documentation,
             }
             
             # 속성 추가
@@ -291,6 +299,10 @@ class OntologyService(BaseTerminusService):
                 raise
             
             ontologies = []
+
+            def _is_internal(doc: Dict[str, Any]) -> bool:
+                documentation = doc.get("@documentation", {}) if isinstance(doc, dict) else {}
+                return bool(isinstance(documentation, dict) and documentation.get("@internal"))
             
             # Handle the result - it should be a list of schema documents
             if isinstance(result, list):
@@ -299,10 +311,20 @@ class OntologyService(BaseTerminusService):
                 end_idx = offset + limit
                 
                 for doc in result[start_idx:end_idx]:
-                    if isinstance(doc, dict) and "@type" in doc and doc["@type"] == "Class":
+                    if (
+                        isinstance(doc, dict)
+                        and "@type" in doc
+                        and doc["@type"] == "Class"
+                        and not _is_internal(doc)
+                    ):
                         ontology = self._parse_ontology_document(doc)
                         ontologies.append(ontology)
-            elif isinstance(result, dict) and "@type" in result and result["@type"] == "Class":
+            elif (
+                isinstance(result, dict)
+                and "@type" in result
+                and result["@type"] == "Class"
+                and not _is_internal(result)
+            ):
                 # Single document returned
                 if offset == 0 and limit > 0:
                     ontology = self._parse_ontology_document(result)
@@ -471,12 +493,21 @@ class OntologyService(BaseTerminusService):
         label_i18n = documentation.get("@label_i18n")
         comment_i18n = documentation.get("@comment_i18n")
         
+        metadata: Dict[str, Any] = {}
+        if isinstance(documentation, dict):
+            doc_metadata = documentation.get("metadata")
+            if isinstance(doc_metadata, dict):
+                metadata.update(doc_metadata)
+            if documentation.get("@internal"):
+                metadata["internal"] = True
+
         ontology = OntologyResponse(
             id=ontology_id,
             label=label_i18n if isinstance(label_i18n, dict) and label_i18n else documentation.get("@label", ontology_id),
             description=comment_i18n if isinstance(comment_i18n, dict) and comment_i18n else documentation.get("@comment", ""),
             properties=[],
             relationships=[],
+            metadata=metadata,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc)
         )

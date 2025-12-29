@@ -49,4 +49,3 @@ def test_bff_http_exception_detail_localizes_by_lang_param():
 
     assert en.status_code == 404
     assert "was not found" in en.json()["detail"]
-

@@ -102,7 +102,7 @@ from bff.services.oms_client import OMSClient
 # Data connector imports
 from data_connector.google_sheets.service import GoogleSheetsService
 from bff.routers import (
-    database, health, mapping, merge_conflict, ontology, query,
+    database, health, mapping, merge_conflict, ontology, ontology_extensions, query,
     instances, instance_async, websocket, tasks, admin, data_connector,
     command_status, graph, lineage, audit, ai, summary, pipeline, objectify
 )
@@ -732,6 +732,7 @@ async def get_pipeline_executor() -> PipelineExecutor:
 # Router registration (unchanged)
 app.include_router(database.router, prefix="/api/v1")
 app.include_router(ontology.router, prefix="/api/v1")
+app.include_router(ontology_extensions.router, prefix="/api/v1")
 app.include_router(query.router, prefix="/api/v1")
 app.include_router(mapping.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")

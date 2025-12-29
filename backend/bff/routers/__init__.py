@@ -9,6 +9,7 @@ from . import health
 from . import mapping
 from . import merge_conflict
 from . import ontology
+from . import ontology_extensions
 from . import query
 from . import instances
 from . import instance_async
@@ -30,6 +31,7 @@ __all__ = [
     "mapping",
     "merge_conflict",
     "ontology",
+    "ontology_extensions",
     "query",
     "instances", 
     "instance_async",

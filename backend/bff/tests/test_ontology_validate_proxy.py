@@ -73,4 +73,3 @@ def test_ontology_validate_update_resolves_label_and_proxies_to_oms():
     assert called.args[0] == "demo_db"
     assert called.args[1] == "Product"
     assert called.kwargs["branch"] == "main"
-

@@ -6,6 +6,13 @@ API 라우터 모듈
 from .branch import router as branch_router
 from .database import router as database_router
 from .ontology import router as ontology_router
+from .ontology_extensions import router as ontology_extensions_router
 from .version import router as version_router
 
-__all__ = ["database_router", "ontology_router", "branch_router", "version_router"]
+__all__ = [
+    "database_router",
+    "ontology_router",
+    "ontology_extensions_router",
+    "branch_router",
+    "version_router",
+]

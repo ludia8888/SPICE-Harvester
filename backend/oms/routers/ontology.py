@@ -43,6 +43,12 @@ from shared.models.ontology_lint import LintReport
 
 # OMS 서비스 import
 from oms.services.async_terminus import AsyncTerminusService
+from oms.services.ontology_interface_contract import (
+    collect_interface_contract_issues,
+    extract_interface_refs,
+    strip_interface_prefix,
+)
+from oms.services.ontology_resources import OntologyResourceService
 from shared.utils.jsonld import JSONToJSONLDConverter
 from shared.utils.label_mapper import LabelMapper
 from shared.models.common import BaseResponse
@@ -102,6 +108,53 @@ def _extract_change_reason(request: Request) -> Optional[str]:
 def _extract_actor(request: Request) -> Optional[str]:
     actor = (request.headers.get("X-Admin-Actor") or request.headers.get("X-Actor") or "").strip()
     return actor or None
+
+
+async def _collect_interface_issues(
+    *,
+    terminus: AsyncTerminusService,
+    db_name: str,
+    branch: str,
+    ontology_id: str,
+    metadata: Dict[str, Any],
+    properties: List[Any],
+    relationships: List[Any],
+) -> List[Dict[str, Any]]:
+    refs = extract_interface_refs(metadata)
+    if not refs:
+        return []
+
+    resource_service = OntologyResourceService(terminus)
+    interface_index: Dict[str, Dict[str, Any]] = {}
+    for raw_ref in refs:
+        interface_id = strip_interface_prefix(raw_ref)
+        if not interface_id:
+            continue
+        resource = await resource_service.get_resource(
+            db_name,
+            branch=branch,
+            resource_type="interface",
+            resource_id=interface_id,
+        )
+        if resource:
+            interface_index[interface_id] = resource
+
+    return collect_interface_contract_issues(
+        ontology_id=ontology_id,
+        metadata=metadata,
+        properties=properties,
+        relationships=relationships,
+        interface_index=interface_index,
+    )
+
+
+def _is_internal_ontology(ontology: OntologyResponse) -> bool:
+    if not ontology:
+        return False
+    metadata = ontology.metadata if isinstance(ontology.metadata, dict) else {}
+    if metadata.get("internal"):
+        return True
+    return str(ontology.id or "").startswith("__")
 
 
 def _localized_to_string(value: Any, *, lang: str) -> Optional[str]:
@@ -244,6 +297,30 @@ async def create_ontology(
                 | {"data": {"lint_report": lint_report.model_dump()}},
             )
 
+        metadata_payload = (
+            ontology_data.get("metadata")
+            if isinstance(ontology_data.get("metadata"), dict)
+            else {}
+        )
+        interface_issues = await _collect_interface_issues(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            ontology_id=str(ontology_data.get("id") or ""),
+            metadata=metadata_payload,
+            properties=list(ontology_request.properties or []),
+            relationships=list(ontology_request.relationships or []),
+        )
+        if interface_issues:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ApiResponse.error(
+                    message="온톨로지 인터페이스 계약 검증에 실패했습니다",
+                    errors=[issue.get("message") for issue in interface_issues],
+                ).to_dict()
+                | {"data": {"interface_issues": interface_issues}},
+            )
+
         if enable_event_sourcing:
             ontology_version = await resolve_ontology_version(
                 terminus, db_name=db_name, branch=branch, logger=logger
@@ -265,6 +342,7 @@ async def create_ontology(
                     "relationships": ontology_data.get("relationships", []),
                     "parent_class": ontology_data.get("parent_class"),
                     "abstract": ontology_data.get("abstract", False),
+                    "metadata": metadata_payload,
                 },
                 metadata={"source": "OMS", "user": "system", "ontology": ontology_version},
                 created_by=_extract_actor(request),
@@ -414,6 +492,16 @@ async def validate_ontology_create(
             relationships=list(ontology_request.relationships or []),
             config=OntologyLinterConfig.from_env(),
         )
+        metadata_payload = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        interface_issues = await _collect_interface_issues(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            ontology_id=class_id,
+            metadata=metadata_payload,
+            properties=list(ontology_request.properties or []),
+            relationships=list(ontology_request.relationships or []),
+        )
         return ApiResponse.success(
             message="온톨로지 스키마 검증 결과입니다",
             data={
@@ -422,6 +510,7 @@ async def validate_ontology_create(
                 "class_id": class_id,
                 "id_generated": id_generated,
                 "lint_report": lint_report.model_dump(),
+                "interface_issues": interface_issues,
             },
         ).to_dict()
     except SecurityViolationError as e:
@@ -489,6 +578,21 @@ async def validate_ontology_update(
         high_risk = any((issue.rule_id or "").startswith("ONT9") for issue in diff.warnings or [])
         protected_branch = _is_protected_branch(branch)
 
+        if "metadata" in patch:
+            metadata_payload = patch.get("metadata") if isinstance(patch.get("metadata"), dict) else {}
+        else:
+            metadata_payload = existing.metadata if isinstance(existing.metadata, dict) else {}
+
+        interface_issues = await _collect_interface_issues(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            ontology_id=class_id,
+            metadata=metadata_payload,
+            properties=list(updated_properties or []),
+            relationships=list(updated_relationships or []),
+        )
+
         return ApiResponse.success(
             message="온톨로지 스키마 검증 결과입니다",
             data={
@@ -500,6 +604,7 @@ async def validate_ontology_update(
                 "lint_report": merged.model_dump(),
                 "lint_report_create": baseline.model_dump(),
                 "lint_report_diff": diff.model_dump(),
+                "interface_issues": interface_issues,
             },
         ).to_dict()
     except SecurityViolationError as e:
@@ -629,6 +734,12 @@ async def get_ontology(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"온톨로지 '{class_id}'를 찾을 수 없습니다",
+            )
+
+        if _is_internal_ontology(ontology) and not _admin_authorized(request):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Internal ontology schema requires admin access",
             )
 
         # JSON-LD를 일반 JSON으로 변환
@@ -768,6 +879,34 @@ async def update_ontology(
                     errors=[issue.message for issue in merged_lint.errors],
                 ).to_dict()
                 | {"data": {"lint_report": merged_lint.model_dump()}},
+            )
+
+        if "metadata" in sanitized_data:
+            metadata_payload = (
+                sanitized_data.get("metadata")
+                if isinstance(sanitized_data.get("metadata"), dict)
+                else {}
+            )
+        else:
+            metadata_payload = existing.metadata if isinstance(existing.metadata, dict) else {}
+
+        interface_issues = await _collect_interface_issues(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            ontology_id=class_id,
+            metadata=metadata_payload,
+            properties=list(updated_properties or []),
+            relationships=list(updated_relationships or []),
+        )
+        if interface_issues:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ApiResponse.error(
+                    message="온톨로지 인터페이스 계약 검증에 실패했습니다",
+                    errors=[issue.get("message") for issue in interface_issues],
+                ).to_dict()
+                | {"data": {"interface_issues": interface_issues}},
             )
 
         protected_branch = _is_protected_branch(branch)
@@ -1189,6 +1328,30 @@ async def create_ontology_with_advanced_relationships(
                 | {"data": {"lint_report": lint_report.model_dump()}},
             )
 
+        metadata_payload = (
+            ontology_data.get("metadata")
+            if isinstance(ontology_data.get("metadata"), dict)
+            else {}
+        )
+        interface_issues = await _collect_interface_issues(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            ontology_id=str(ontology_data.get("id") or ""),
+            metadata=metadata_payload,
+            properties=list(ontology_request.properties or []),
+            relationships=list(ontology_request.relationships or []),
+        )
+        if interface_issues:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ApiResponse.error(
+                    message="온톨로지 인터페이스 계약 검증에 실패했습니다",
+                    errors=[issue.get("message") for issue in interface_issues],
+                ).to_dict()
+                | {"data": {"interface_issues": interface_issues}},
+            )
+
         if enable_event_sourcing:
             ontology_version = await resolve_ontology_version(
                 terminus, db_name=db_name, branch=branch, logger=logger
@@ -1209,6 +1372,7 @@ async def create_ontology_with_advanced_relationships(
                     "relationships": ontology_data.get("relationships", []),
                     "parent_class": ontology_data.get("parent_class"),
                     "abstract": ontology_data.get("abstract", False),
+                    "metadata": metadata_payload,
                     "advanced_options": {
                         "auto_generate_inverse": bool(auto_generate_inverse),
                         "validate_relationships": bool(validate_relationships),

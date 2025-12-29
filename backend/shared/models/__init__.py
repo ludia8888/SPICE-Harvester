@@ -7,6 +7,7 @@ from .config import *
 from .google_sheets import *
 from .pipeline_job import PipelineJob
 from .ontology import *
+from .ontology_resources import *
 
 __all__ = [
     # common models
@@ -26,6 +27,14 @@ __all__ = [
     "OntologyCreateRequest",
     "OntologyUpdateRequest",
     "OntologyResponse",
+    "OntologyResourceBase",
+    "OntologyResourceRecord",
+    "SharedPropertyDefinition",
+    "ValueTypeDefinition",
+    "InterfaceDefinition",
+    "GroupDefinition",
+    "FunctionDefinition",
+    "ActionTypeDefinition",
     # google sheets models
     "GoogleSheetPreviewRequest",
     "GoogleSheetPreviewResponse",
