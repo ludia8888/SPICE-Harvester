@@ -107,6 +107,8 @@ Deploy는 로직을 업데이트, Build는 로직을 실행해 결과를 물리�
 		- backend/pipeline_worker/main.py (build: pipelines-staging/, deploy: pipelines/)
 		- frontend/src/pages/PipelineBuilderPage.tsx (deploy=buildPipeline → deployPipeline(promote_build))
 		- backend/bff/tests/test_pipeline_promotion_semantics.py
+		- scripts/run_pipeline_artifact_e2e.sh
+		- docs/foundry_checklist/PIPELINE_ARTIFACT_E2E.md
 	•	☑ **Deploy 전에 검증(Validation checks)**를 수행하고 통과해야 배포 가능.
 	•	검증: 타입 오류/출력 체크 실패 상태에서 deploy 시도.
 	•	합격: deploy가 차단되고 어떤 검증이 실패했는지 표시.  ￼

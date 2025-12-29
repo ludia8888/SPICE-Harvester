@@ -90,8 +90,8 @@ export const GraphPage = () => {
   const pipelineContext = useAppStore((state) => state.pipelineContext)
   const [activeTab, setActiveTab] = useState<'edit' | 'proposals' | 'history'>('edit')
   const [toolMode, setToolMode] = useState<ToolMode>('pointer')
-  const [isRightPanelOpen, setRightPanelOpen] = useState(false)
-  const [isBottomPanelOpen, setBottomPanelOpen] = useState(false)
+  const [isRightPanelOpen, setRightPanelOpen] = useState(true)
+  const [isBottomPanelOpen, setBottomPanelOpen] = useState(true)
   const [columnSearch, setColumnSearch] = useState('')
   const [previewColumns, setPreviewColumns] = useState<PreviewColumn[]>(initialPreviewColumns)
   const [activeColumn, setActiveColumn] = useState<keyof PreviewRow | ''>(initialPreviewColumns[0]?.key ?? '')
@@ -688,7 +688,7 @@ export const GraphPage = () => {
                 onClick={() => setRightPanelOpen(false)}
                 aria-label="Close panel"
               >
-                <Icon icon="cross" size={12} />
+                <Icon icon="chevron-right" size={12} />
               </button>
             </div>
             <div className="pipeline-right-panel-body">
