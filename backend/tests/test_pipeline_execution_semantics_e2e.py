@@ -30,10 +30,18 @@ def _lakefs_s3_client():
     import boto3
     from botocore.config import Config
 
-    port = int(os.getenv("LAKEFS_PORT_HOST") or "48080")
+    port = int(os.getenv("LAKEFS_PORT_HOST") or os.getenv("LAKEFS_API_PORT") or "48080")
     endpoint = f"http://127.0.0.1:{port}"
-    access = (os.getenv("LAKEFS_INSTALLATION_ACCESS_KEY_ID") or "spice-lakefs-admin").strip()
-    secret = (os.getenv("LAKEFS_INSTALLATION_SECRET_ACCESS_KEY") or "spice-lakefs-admin-secret").strip()
+    access = (
+        os.getenv("LAKEFS_INSTALLATION_ACCESS_KEY_ID")
+        or os.getenv("LAKEFS_ACCESS_KEY_ID")
+        or "spice-lakefs-admin"
+    ).strip()
+    secret = (
+        os.getenv("LAKEFS_INSTALLATION_SECRET_ACCESS_KEY")
+        or os.getenv("LAKEFS_SECRET_ACCESS_KEY")
+        or "spice-lakefs-admin-secret"
+    ).strip()
     return boto3.client(
         "s3",
         endpoint_url=endpoint,
@@ -190,9 +198,9 @@ async def test_snapshot_overwrites_outputs_across_runs() -> None:
     - Two deploy runs against the same latest input version must not retain prior output part objects
       (relative keys differ across commits due to overwrite semantics).
     """
-    headers = {"X-Admin-Token": ADMIN_TOKEN}
     suffix = uuid.uuid4().hex[:8]
     db_name = f"e2e_snap_{suffix}"
+    headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
     async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
         create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "snap"})
@@ -318,9 +326,9 @@ async def test_incremental_appends_outputs_and_preserves_previous_parts() -> Non
     - After appending new input rows and running again, the new commit must contain all previous part keys
       plus at least one new part key (append semantics).
     """
-    headers = {"X-Admin-Token": ADMIN_TOKEN}
     suffix = uuid.uuid4().hex[:8]
     db_name = f"e2e_inc_{suffix}"
+    headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
     async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
         create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "inc"})

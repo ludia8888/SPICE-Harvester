@@ -59,6 +59,196 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pipelines", tags=["Pipeline Builder"])
 
 _DEPENDENCY_STATUS_ALLOWLIST = {"DEPLOYED", "SUCCESS"}
+_utcnow = utcnow
+
+
+def _resolve_pipeline_protected_branches() -> set[str]:
+    raw = os.getenv("PIPELINE_PROTECTED_BRANCHES", "main")
+    return {branch.strip() for branch in raw.split(",") if branch.strip()}
+
+
+def _pipeline_requires_proposal(branch: str) -> bool:
+    if not parse_bool_env("PIPELINE_REQUIRE_PROPOSALS", False):
+        return False
+    resolved = (branch or "").strip() or "main"
+    return resolved in _resolve_pipeline_protected_branches()
+
+
+def _normalize_mapping_spec_ids(raw: Any) -> list[str]:
+    if raw is None:
+        return []
+    values: list[str] = []
+    if isinstance(raw, str):
+        raw = raw.split(",") if "," in raw else [raw]
+    if isinstance(raw, list):
+        for item in raw:
+            if item is None:
+                continue
+            value = str(item).strip()
+            if value:
+                values.append(value)
+    else:
+        value = str(raw).strip()
+        if value:
+            values.append(value)
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
+
+
+async def _build_proposal_bundle(
+    *,
+    pipeline,
+    build_job_id: Optional[str],
+    mapping_spec_ids: list[str],
+    pipeline_registry: PipelineRegistry,
+    dataset_registry: DatasetRegistry,
+    objectify_registry: ObjectifyRegistry,
+) -> dict[str, Any]:
+    bundle: dict[str, Any] = {
+        "captured_at": utcnow().isoformat(),
+        "pipeline_id": str(pipeline.pipeline_id),
+        "db_name": str(pipeline.db_name),
+        "branch": str(pipeline.branch or "main"),
+    }
+
+    outputs_for_lookup: list[dict[str, Any]] = []
+
+    if build_job_id:
+        build_run = await pipeline_registry.get_run(pipeline_id=pipeline.pipeline_id, job_id=build_job_id)
+        if not build_run:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Build run not found for proposal bundle")
+        if str(build_run.get("mode") or "").lower() != "build":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="build_job_id is not a build run")
+        build_status = str(build_run.get("status") or "").upper()
+        if build_status != "SUCCESS":
+            output_json = build_run.get("output_json")
+            errors: list[str] = []
+            if isinstance(output_json, dict):
+                raw_errors = output_json.get("errors")
+                if isinstance(raw_errors, list):
+                    errors = [str(item) for item in raw_errors if str(item).strip()]
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "BUILD_NOT_SUCCESS",
+                    "message": "Build is not successful yet",
+                    "build_status": build_status or None,
+                    "errors": errors,
+                    "build_job_id": build_job_id,
+                },
+            )
+
+        output_json = build_run.get("output_json") if isinstance(build_run.get("output_json"), dict) else {}
+        definition_hash = (
+            str(output_json.get("definition_hash") or build_run.get("pipeline_spec_hash") or "").strip() or None
+        )
+        definition_commit_id = (
+            str(output_json.get("pipeline_spec_commit_id") or build_run.get("pipeline_spec_commit_id") or "").strip()
+            or None
+        )
+        build_branch = str(output_json.get("branch") or pipeline.branch or "main").strip() or "main"
+        lakefs_meta = output_json.get("lakefs") if isinstance(output_json.get("lakefs"), dict) else {}
+        ontology_meta = output_json.get("ontology") if isinstance(output_json.get("ontology"), dict) else {}
+
+        bundle.update(
+            {
+                "build_job_id": build_job_id,
+                "definition_hash": definition_hash,
+                "definition_commit_id": definition_commit_id,
+                "build_branch": build_branch,
+                "lakefs": {
+                    "repository": str(lakefs_meta.get("repository") or "").strip() or None,
+                    "build_branch": str(lakefs_meta.get("build_branch") or "").strip() or None,
+                    "commit_id": str(lakefs_meta.get("commit_id") or "").strip() or None,
+                },
+                "ontology": {
+                    "branch": str(ontology_meta.get("branch") or "").strip() or None,
+                    "commit": str(ontology_meta.get("commit") or "").strip() or None,
+                },
+            }
+        )
+
+        outputs_payload = output_json.get("outputs") if isinstance(output_json.get("outputs"), list) else []
+        for item in outputs_payload:
+            if not isinstance(item, dict):
+                continue
+            dataset_name = str(item.get("dataset_name") or item.get("datasetName") or "").strip()
+            if not dataset_name:
+                continue
+            outputs_for_lookup.append(
+                {
+                    "dataset_name": dataset_name,
+                    "node_id": str(item.get("node_id") or "").strip() or None,
+                    "artifact_key": str(item.get("artifact_key") or "").strip() or None,
+                }
+            )
+        if outputs_for_lookup:
+            bundle["outputs"] = outputs_for_lookup
+
+    mapping_specs: list[dict[str, Any]] = []
+    seen_spec_ids: set[str] = set()
+
+    if mapping_spec_ids:
+        for mapping_spec_id in mapping_spec_ids:
+            record = await objectify_registry.get_mapping_spec(mapping_spec_id=mapping_spec_id)
+            if not record:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"code": "MAPPING_SPEC_NOT_FOUND", "mapping_spec_id": mapping_spec_id},
+                )
+            if record.mapping_spec_id in seen_spec_ids:
+                continue
+            seen_spec_ids.add(record.mapping_spec_id)
+            mapping_specs.append(
+                {
+                    "mapping_spec_id": record.mapping_spec_id,
+                    "mapping_spec_version": record.version,
+                    "dataset_id": record.dataset_id,
+                    "dataset_branch": record.dataset_branch,
+                    "target_class_id": record.target_class_id,
+                }
+            )
+
+    for output in outputs_for_lookup:
+        dataset_name = str(output.get("dataset_name") or "").strip()
+        if not dataset_name:
+            continue
+        dataset = await dataset_registry.get_dataset_by_name(
+            db_name=str(pipeline.db_name),
+            name=dataset_name,
+            branch=str(pipeline.branch or "main"),
+        )
+        if not dataset:
+            continue
+        mapping_spec = await objectify_registry.get_active_mapping_spec(
+            dataset_id=dataset.dataset_id,
+            dataset_branch=dataset.branch,
+        )
+        if not mapping_spec:
+            continue
+        if mapping_spec.mapping_spec_id in seen_spec_ids:
+            continue
+        seen_spec_ids.add(mapping_spec.mapping_spec_id)
+        mapping_specs.append(
+            {
+                "mapping_spec_id": mapping_spec.mapping_spec_id,
+                "mapping_spec_version": mapping_spec.version,
+                "dataset_id": mapping_spec.dataset_id,
+                "dataset_branch": mapping_spec.dataset_branch,
+                "target_class_id": mapping_spec.target_class_id,
+                "dataset_name": dataset_name,
+            }
+        )
+
+    if mapping_specs:
+        bundle["mapping_specs"] = mapping_specs
+    return bundle
 
 
 async def get_dataset_registry() -> DatasetRegistry:
@@ -187,7 +377,6 @@ def _resolve_definition_commit_id(
         return None
     if definition_hash is None:
         definition_hash = _stable_definition_hash(definition_json)
-        definition_commit_id = _resolve_definition_commit_id(definition_json, latest, definition_hash)
     latest_hash = _stable_definition_hash(getattr(latest_version, "definition_json", {}) or {})
     if latest_hash == definition_hash:
         return str(getattr(latest_version, "lakefs_commit_id", "") or "").strip() or None
@@ -628,6 +817,13 @@ def _parse_csv_file(
                 self._hasher.update(chunk)
             return chunk
 
+        def readinto(self, b: bytearray | memoryview) -> int:
+            chunk = self.read(len(b))
+            if not chunk:
+                return 0
+            b[: len(chunk)] = chunk
+            return len(chunk)
+
         def readable(self) -> bool:
             return True
 
@@ -892,6 +1088,8 @@ async def submit_pipeline_proposal(
     payload: Dict[str, Any],
     audit_store: AuditLogStoreDep,
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
     request: Request = None,
 ) -> ApiResponse:
     try:
@@ -906,10 +1104,31 @@ async def submit_pipeline_proposal(
         if not title:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="title is required")
         description = str(sanitized.get("description") or "").strip() or None
+        build_job_id = str(sanitized.get("build_job_id") or sanitized.get("buildJobId") or "").strip() or None
+        mapping_spec_ids = _normalize_mapping_spec_ids(
+            sanitized.get("mapping_spec_ids")
+            or sanitized.get("mappingSpecIds")
+            or sanitized.get("mapping_spec_id")
+            or sanitized.get("mappingSpecId")
+        )
+        proposal_bundle = None
+        if build_job_id or mapping_spec_ids:
+            pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
+            if not pipeline:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline not found")
+            proposal_bundle = await _build_proposal_bundle(
+                pipeline=pipeline,
+                build_job_id=build_job_id,
+                mapping_spec_ids=mapping_spec_ids,
+                pipeline_registry=pipeline_registry,
+                dataset_registry=dataset_registry,
+                objectify_registry=objectify_registry,
+            )
         record = await pipeline_registry.submit_proposal(
             pipeline_id=pipeline_id,
             title=title,
             description=description,
+            proposal_bundle=proposal_bundle,
         )
         await _log_pipeline_audit(
             audit_store,
@@ -917,7 +1136,7 @@ async def submit_pipeline_proposal(
             action="PIPELINE_PROPOSAL_SUBMITTED",
             status="success",
             pipeline_id=pipeline_id,
-            metadata={"title": title, "description": description},
+            metadata={"title": title, "description": description, "build_job_id": build_job_id},
         )
         return ApiResponse.success(
             message="Proposal submitted",
@@ -1722,9 +1941,7 @@ async def update_pipeline(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Archived branch cannot be updated; restore the branch before making changes",
             )
-        protected_raw = os.getenv("PIPELINE_PROTECTED_BRANCHES", "main")
-        protected_branches = [b.strip() for b in protected_raw.split(",") if b.strip()]
-        if pipeline.branch in protected_branches and definition_json is not None:
+        if pipeline.branch in _resolve_pipeline_protected_branches() and definition_json is not None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Protected branch cannot be updated directly; create a branch and submit a proposal",
@@ -1935,6 +2152,7 @@ async def preview_pipeline(
             definition_json = {**definition_json, "schemaContract": schema_contract}
 
         definition_hash = _stable_definition_hash(definition_json)
+        definition_commit_id = _resolve_definition_commit_id(definition_json, latest, definition_hash)
         node_key = (node_id or "pipeline").replace("node-", "").replace("/", "-").replace(" ", "-")
         node_key = node_key[:16] if node_key else "pipeline"
         hash_key = str(definition_hash or uuid4().hex)[:12]
@@ -2260,6 +2478,7 @@ async def deploy_pipeline(
     request: Request,
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
     oms_client: OMSClient = Depends(get_oms_client),
     *,
     lineage_store: LineageStoreDep,
@@ -2341,6 +2560,19 @@ async def deploy_pipeline(
             )
 
         resolved_branch = branch or (pipeline.branch if pipeline else None) or "main"
+        proposal_required = _pipeline_requires_proposal(resolved_branch)
+        proposal_bundle = getattr(pipeline, "proposal_bundle", {}) if pipeline else {}
+        if proposal_required:
+            if getattr(pipeline, "proposal_status", None) != "approved":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Approved proposal is required for protected branches",
+                )
+            if not proposal_bundle:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Approved proposal is missing bundle metadata",
+                )
         latest = await pipeline_registry.get_latest_version(
             pipeline_id=pipeline_id,
             branch=resolved_branch,
@@ -2420,6 +2652,133 @@ async def deploy_pipeline(
                         "message": "Build output is missing ontology commit id; re-run build after ontology is ready",
                     },
                 )
+
+            if proposal_required:
+                bundle_build_job_id = str(proposal_bundle.get("build_job_id") or "").strip()
+                if not bundle_build_job_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Approved proposal is missing build_job_id",
+                    )
+                if bundle_build_job_id != build_job_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "code": "PROPOSAL_BUILD_MISMATCH",
+                            "message": "Approved proposal build does not match deploy build",
+                            "proposal_build_job_id": bundle_build_job_id,
+                            "deploy_build_job_id": build_job_id,
+                        },
+                    )
+                bundle_definition_hash = str(proposal_bundle.get("definition_hash") or "").strip()
+                if bundle_definition_hash and bundle_definition_hash != definition_hash:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "code": "PROPOSAL_DEFINITION_MISMATCH",
+                            "message": "Approved proposal definition hash does not match deploy definition",
+                            "proposal_definition_hash": bundle_definition_hash,
+                            "deploy_definition_hash": definition_hash,
+                        },
+                    )
+                bundle_ontology_commit = str(
+                    (proposal_bundle.get("ontology") or {}).get("commit") or ""
+                ).strip()
+                if bundle_ontology_commit and bundle_ontology_commit != build_ontology_commit:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "code": "PROPOSAL_ONTOLOGY_MISMATCH",
+                            "message": "Approved proposal ontology commit does not match build",
+                            "proposal_ontology_commit": bundle_ontology_commit,
+                            "build_ontology_commit": build_ontology_commit,
+                        },
+                    )
+                bundle_lakefs_commit = str(
+                    (proposal_bundle.get("lakefs") or {}).get("commit_id") or ""
+                ).strip()
+                build_lakefs_commit = str((output_json.get("lakefs") or {}).get("commit_id") or "").strip()
+                if bundle_lakefs_commit and build_lakefs_commit and bundle_lakefs_commit != build_lakefs_commit:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "code": "PROPOSAL_LAKEFS_MISMATCH",
+                            "message": "Approved proposal lakeFS commit does not match build",
+                            "proposal_commit_id": bundle_lakefs_commit,
+                            "build_commit_id": build_lakefs_commit,
+                        },
+                    )
+                mapping_specs_payload = proposal_bundle.get("mapping_specs")
+                if isinstance(mapping_specs_payload, list):
+                    mismatches: list[dict[str, Any]] = []
+                    for item in mapping_specs_payload:
+                        if not isinstance(item, dict):
+                            continue
+                        dataset_id = str(item.get("dataset_id") or "").strip()
+                        dataset_branch = str(item.get("dataset_branch") or resolved_branch).strip() or resolved_branch
+                        target_class_id = str(item.get("target_class_id") or "").strip() or None
+                        expected_spec_id = str(item.get("mapping_spec_id") or "").strip()
+                        expected_version = item.get("mapping_spec_version")
+                        if not dataset_id:
+                            mismatches.append(
+                                {
+                                    "reason": "missing_dataset_id",
+                                    "mapping_spec_id": expected_spec_id or None,
+                                }
+                            )
+                            continue
+                        current = await objectify_registry.get_active_mapping_spec(
+                            dataset_id=dataset_id,
+                            dataset_branch=dataset_branch,
+                            target_class_id=target_class_id,
+                        )
+                        if not current:
+                            mismatches.append(
+                                {
+                                    "reason": "mapping_spec_inactive",
+                                    "dataset_id": dataset_id,
+                                    "dataset_branch": dataset_branch,
+                                    "target_class_id": target_class_id,
+                                    "mapping_spec_id": expected_spec_id or None,
+                                }
+                            )
+                            continue
+                        if expected_spec_id and current.mapping_spec_id != expected_spec_id:
+                            mismatches.append(
+                                {
+                                    "reason": "mapping_spec_id_mismatch",
+                                    "dataset_id": dataset_id,
+                                    "dataset_branch": dataset_branch,
+                                    "target_class_id": target_class_id,
+                                    "proposal_mapping_spec_id": expected_spec_id,
+                                    "current_mapping_spec_id": current.mapping_spec_id,
+                                }
+                            )
+                        if expected_version is not None:
+                            try:
+                                expected_version_int = int(expected_version)
+                            except Exception:
+                                expected_version_int = None
+                            if expected_version_int is not None and expected_version_int != current.version:
+                                mismatches.append(
+                                    {
+                                        "reason": "mapping_spec_version_mismatch",
+                                        "dataset_id": dataset_id,
+                                        "dataset_branch": dataset_branch,
+                                        "target_class_id": target_class_id,
+                                        "proposal_version": expected_version_int,
+                                        "current_version": current.version,
+                                    }
+                                )
+                    if mismatches:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail={
+                                "code": "MAPPING_SPEC_MISMATCH",
+                                "message": "Approved proposal mapping specs no longer match active specs",
+                                "mismatches": mismatches,
+                            },
+                        )
             try:
                 head_response = await oms_client.get_version_head(db_name, branch=resolved_branch)
                 head_data = head_response.get("data") if isinstance(head_response, dict) else {}
@@ -2972,7 +3331,9 @@ async def create_dataset_version(
         actor_user_id = (request.headers.get("X-User-ID") or "").strip() or None
         lakefs_storage_service = await pipeline_registry.get_lakefs_storage(user_id=actor_user_id)
         lakefs_client = await pipeline_registry.get_lakefs_client(user_id=actor_user_id)
-        idempotency_key = _require_idempotency_key(request)
+        idempotency_key = (request.headers.get("Idempotency-Key") or "").strip()
+        if not idempotency_key:
+            idempotency_key = f"manual-{uuid4().hex}"
 
         sanitized = sanitize_input(payload)
         sample_json = sanitized.get("sample_json") if isinstance(sanitized.get("sample_json"), dict) else {}
@@ -3002,6 +3363,56 @@ async def create_dataset_version(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
 
         dataset_branch = safe_lakefs_ref(dataset.branch or "main")
+        if not hasattr(dataset_registry, "create_ingest_request"):
+            if not artifact_key:
+                repo = _resolve_lakefs_raw_repository()
+                await _ensure_lakefs_branch_exists(
+                    lakefs_client=lakefs_client,
+                    repository=repo,
+                    branch=dataset_branch,
+                    source_branch="main",
+                )
+                prefix = _dataset_artifact_prefix(
+                    db_name=dataset.db_name, dataset_id=dataset.dataset_id, dataset_name=dataset.name
+                )
+                object_key = f"{prefix}/data.json"
+                await lakefs_storage_service.save_json(
+                    repo,
+                    f"{dataset_branch}/{object_key}",
+                    sample_json,
+                    metadata=_sanitize_s3_metadata(
+                        {
+                            "db_name": dataset.db_name,
+                            "dataset_id": dataset.dataset_id,
+                            "dataset_name": dataset.name,
+                            "source": "manual",
+                        }
+                    ),
+                )
+                lakefs_commit_id = await lakefs_client.commit(
+                    repository=repo,
+                    branch=dataset_branch,
+                    message=f"Manual dataset version {dataset.db_name}/{dataset.name}",
+                    metadata={
+                        "dataset_id": dataset.dataset_id,
+                        "db_name": dataset.db_name,
+                        "dataset_name": dataset.name,
+                        "source_type": str(dataset.source_type or "manual"),
+                    },
+                )
+                artifact_key = build_s3_uri(repo, f"{lakefs_commit_id}/{object_key}")
+            version = await dataset_registry.add_version(
+                dataset_id=dataset.dataset_id,
+                lakefs_commit_id=lakefs_commit_id or "",
+                artifact_key=artifact_key,
+                row_count=row_count,
+                sample_json=sample_json,
+                schema_json=schema_json,
+            )
+            return ApiResponse.success(
+                message="Dataset version created",
+                data={"version": version.__dict__},
+            ).to_dict()
         request_fingerprint = _build_ingest_request_fingerprint(
             {
                 "dataset_id": dataset_id,
@@ -3705,21 +4116,37 @@ async def upload_csv_dataset(
             prefix = _dataset_artifact_prefix(db_name=db_name, dataset_id=dataset.dataset_id, dataset_name=dataset.name)
             staging_prefix = _ingest_staging_prefix(prefix, ingest_request.ingest_request_id)
             object_key = f"{staging_prefix}/source.csv"
-            await lakefs_storage_service.save_fileobj(
-                repo,
-                f"{dataset_branch}/{object_key}",
-                file.file,
-                content_type="text/csv",
-                metadata=_sanitize_s3_metadata(
-                    {
-                        "db_name": db_name,
-                        "dataset_name": resolved_name,
-                        "source": "csv_upload",
-                        "ingest_request_id": ingest_request.ingest_request_id,
-                    }
-                ),
-                checksum=content_hash,
+            file.file.seek(0)
+            metadata_payload = _sanitize_s3_metadata(
+                {
+                    "db_name": db_name,
+                    "dataset_name": resolved_name,
+                    "source": "csv_upload",
+                    "ingest_request_id": ingest_request.ingest_request_id,
+                }
             )
+            save_fileobj = getattr(lakefs_storage_service, "save_fileobj", None)
+            if callable(save_fileobj):
+                await save_fileobj(
+                    repo,
+                    f"{dataset_branch}/{object_key}",
+                    file.file,
+                    content_type="text/csv",
+                    metadata=metadata_payload,
+                    checksum=content_hash,
+                )
+            else:
+                save_bytes = getattr(lakefs_storage_service, "save_bytes", None)
+                if not callable(save_bytes):
+                    raise RuntimeError("lakeFS storage service missing save_fileobj/save_bytes")
+                content = await asyncio.to_thread(file.file.read)
+                await save_bytes(
+                    repo,
+                    f"{dataset_branch}/{object_key}",
+                    content,
+                    content_type="text/csv",
+                    metadata=metadata_payload,
+                )
             commit_id = await lakefs_client.commit(
                 repository=repo,
                 branch=dataset_branch,
@@ -3878,7 +4305,7 @@ async def upload_csv_dataset(
                 )
             except Exception as exc:
                 logger.warning("Failed to mark csv ingest request failed: %s", exc)
-        logger.error(f"Failed to upload csv dataset: {e}")
+        logger.exception("Failed to upload csv dataset")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 

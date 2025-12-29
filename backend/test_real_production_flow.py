@@ -14,6 +14,14 @@ from uuid import uuid4
 import subprocess
 import pytest
 
+ELASTICSEARCH_HOST = (os.getenv("ELASTICSEARCH_HOST") or "localhost").strip()
+ELASTICSEARCH_PORT = (
+    os.getenv("ELASTICSEARCH_PORT") or os.getenv("ELASTICSEARCH_PORT_HOST") or "9200"
+).strip()
+ELASTICSEARCH_URL = (
+    os.getenv("ELASTICSEARCH_URL") or f"http://{ELASTICSEARCH_HOST}:{ELASTICSEARCH_PORT}"
+).rstrip("/")
+
 # REAL production configuration
 PRODUCTION_ENV = {
     "DOCKER_CONTAINER": "false",
@@ -25,8 +33,8 @@ PRODUCTION_ENV = {
     "POSTGRES_USER": "spiceadmin",
     "POSTGRES_PASSWORD": "spicepass123",
     "POSTGRES_DB": "spicedb",
-    "ELASTICSEARCH_HOST": "localhost",
-    "ELASTICSEARCH_PORT": "9200",
+    "ELASTICSEARCH_HOST": ELASTICSEARCH_HOST or "localhost",
+    "ELASTICSEARCH_PORT": ELASTICSEARCH_PORT or "9200",
     "ELASTICSEARCH_USER": "",
     "ELASTICSEARCH_PASSWORD": "",
     "KAFKA_BOOTSTRAP_SERVERS": "localhost:39092",
@@ -94,7 +102,7 @@ class ProductionFlowTest:
         try:
             async with aiohttp.ClientSession(headers=HEADERS) as session:
                 async with session.get(
-                    'http://localhost:9200/_cluster/health',
+                    f"{ELASTICSEARCH_URL}/_cluster/health",
                 ) as resp:
                     data = await resp.json()
                     status = data.get('status', 'unknown')

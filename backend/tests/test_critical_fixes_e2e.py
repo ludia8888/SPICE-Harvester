@@ -38,6 +38,21 @@ def _docker(*args: str) -> str:
     return (result.stdout or "").strip()
 
 
+def _match_container(names: set[str], candidates: tuple[str, ...]) -> Optional[str]:
+    for candidate in candidates:
+        if candidate in names:
+            return candidate
+    for name in names:
+        for candidate in candidates:
+            if name.endswith(candidate) or name.startswith(candidate):
+                return name
+            if name.endswith(f"_{candidate}") or name.endswith(f"-{candidate}"):
+                return name
+            if name.startswith(f"{candidate}_") or name.startswith(f"{candidate}-"):
+                return name
+    return None
+
+
 def _resolve_redis_container() -> str:
     names = set(_docker("ps", "--format", "{{.Names}}").splitlines())
     explicit = (os.getenv("REDIS_CONTAINER") or "").strip()
@@ -45,9 +60,9 @@ def _resolve_redis_container() -> str:
         if explicit not in names:
             raise AssertionError(f"REDIS_CONTAINER={explicit} is not running")
         return explicit
-    for candidate in ("spice_redis", "spice-foundry-redis"):
-        if candidate in names:
-            return candidate
+    match = _match_container(names, ("spice_redis", "spice-foundry-redis"))
+    if match:
+        return match
     raise AssertionError("Redis container not found. Set REDIS_CONTAINER to the running Redis container name.")
 
 
@@ -65,9 +80,9 @@ def _resolve_postgres_container() -> str:
         if explicit not in names:
             raise AssertionError(f"POSTGRES_CONTAINER={explicit} is not running")
         return explicit
-    for candidate in ("spice_postgres", "spice-foundry-postgres"):
-        if candidate in names:
-            return candidate
+    match = _match_container(names, ("spice_postgres", "spice-foundry-postgres"))
+    if match:
+        return match
     raise AssertionError("Postgres container not found. Set POSTGRES_CONTAINER to the running Postgres container name.")
 
 

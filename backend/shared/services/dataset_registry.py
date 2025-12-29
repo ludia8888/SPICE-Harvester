@@ -1249,22 +1249,100 @@ class DatasetRegistry:
                         created_at=existing["created_at"],
                     )
 
-                row = await conn.fetchrow(
-                    f"""
-                    INSERT INTO {self._schema}.dataset_versions (
-                        version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, ingest_request_id
-                    ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::uuid)
-                    RETURNING version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
-                              ingest_request_id, created_at
-                    """,
-                    str(uuid4()),
-                    dataset_id,
-                    lakefs_commit_id,
-                    artifact_key,
-                    row_count,
-                    sample_payload,
-                    ingest_request_id,
-                )
+                try:
+                    async with conn.transaction():
+                        row = await conn.fetchrow(
+                            f"""
+                            INSERT INTO {self._schema}.dataset_versions (
+                                version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, ingest_request_id
+                            ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::uuid)
+                            RETURNING version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
+                                      ingest_request_id, created_at
+                            """,
+                            str(uuid4()),
+                            dataset_id,
+                            lakefs_commit_id,
+                            artifact_key,
+                            row_count,
+                            sample_payload,
+                            ingest_request_id,
+                        )
+                except asyncpg.UniqueViolationError:
+                    existing = await conn.fetchrow(
+                        f"""
+                        SELECT version_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json,
+                               ingest_request_id, created_at
+                        FROM {self._schema}.dataset_versions
+                        WHERE dataset_id = $1 AND lakefs_commit_id = $2
+                        LIMIT 1
+                        """,
+                        dataset_id,
+                        lakefs_commit_id,
+                    )
+                    if not existing:
+                        raise
+                    dataset_version_id = str(existing["version_id"])
+                    await conn.execute(
+                        f"""
+                        UPDATE {self._schema}.dataset_ingest_requests
+                        SET status = 'PUBLISHED',
+                            lakefs_commit_id = $2,
+                            artifact_key = $3,
+                            published_at = NOW(),
+                            updated_at = NOW()
+                        WHERE ingest_request_id = $1::uuid
+                        """,
+                        ingest_request_id,
+                        lakefs_commit_id,
+                        artifact_key,
+                    )
+                    await conn.execute(
+                        f"""
+                        UPDATE {self._schema}.dataset_ingest_transactions
+                        SET status = 'COMMITTED',
+                            lakefs_commit_id = $2,
+                            artifact_key = $3,
+                            committed_at = COALESCE(committed_at, NOW()),
+                            updated_at = NOW()
+                        WHERE ingest_request_id = $1::uuid
+                        """,
+                        ingest_request_id,
+                        lakefs_commit_id,
+                        artifact_key,
+                    )
+                    if outbox_entries:
+                        has_outbox = await conn.fetchval(
+                            f"""
+                            SELECT 1 FROM {self._schema}.dataset_ingest_outbox
+                            WHERE ingest_request_id = $1::uuid
+                            LIMIT 1
+                            """,
+                            ingest_request_id,
+                        )
+                        if not has_outbox:
+                            _inject_dataset_version(outbox_entries, dataset_version_id)
+                            for entry in outbox_entries:
+                                await conn.execute(
+                                    f"""
+                                    INSERT INTO {self._schema}.dataset_ingest_outbox (
+                                        outbox_id, ingest_request_id, kind, payload, status
+                                    ) VALUES ($1::uuid, $2::uuid, $3, $4::jsonb, 'pending')
+                                    """,
+                                    str(uuid4()),
+                                    ingest_request_id,
+                                    str(entry.get("kind") or "eventstore"),
+                                    normalize_json_payload(entry.get("payload") or {}),
+                                )
+                    return DatasetVersionRecord(
+                        version_id=dataset_version_id,
+                        dataset_id=str(existing["dataset_id"]),
+                        lakefs_commit_id=str(existing["lakefs_commit_id"]),
+                        artifact_key=existing["artifact_key"],
+                        row_count=existing["row_count"],
+                        sample_json=coerce_json_dataset(existing["sample_json"]),
+                        ingest_request_id=str(existing["ingest_request_id"]) if existing["ingest_request_id"] else None,
+                        created_at=existing["created_at"],
+                    )
                 if not row:
                     raise RuntimeError("Failed to publish dataset version")
                 dataset_version_id = str(row["version_id"])

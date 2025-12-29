@@ -17,6 +17,7 @@ from shared.services.pipeline_control_plane_events import emit_pipeline_control_
 from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
+_utcnow = utcnow
 
 
 @dataclass
@@ -61,7 +62,7 @@ class PipelineScheduler:
 
     async def _tick(self) -> None:
         pipelines = await self.registry.list_scheduled_pipelines()
-        now = utcnow()
+        now = _utcnow()
         for pipeline in pipelines:
             interval = pipeline.get("schedule_interval_seconds")
             cron = pipeline.get("schedule_cron")

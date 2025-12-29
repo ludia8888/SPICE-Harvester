@@ -6,6 +6,7 @@ BFF에서 Funnel 마이크로서비스와 통신하기 위한 HTTP 클라이언�
 import hashlib
 import io
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -23,6 +24,7 @@ class FunnelClient:
 
         # SSL 설정 가져오기
         ssl_config = ServiceConfig.get_client_ssl_config()
+        self.excel_timeout_seconds = self._resolve_excel_timeout_seconds()
 
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
@@ -32,6 +34,16 @@ class FunnelClient:
         )
 
         logger.info(f"Funnel Client initialized with base URL: {self.base_url}")
+
+    @staticmethod
+    def _resolve_excel_timeout_seconds() -> float:
+        raw = (os.getenv("FUNNEL_EXCEL_TIMEOUT_SECONDS") or os.getenv("FUNNEL_CLIENT_TIMEOUT_SECONDS") or "").strip()
+        if not raw:
+            return 120.0
+        try:
+            return max(5.0, float(raw))
+        except ValueError:
+            return 120.0
 
     async def close(self):
         """클라이언트 연결 종료"""
@@ -462,7 +474,12 @@ class FunnelClient:
             )
         }
 
-        response = await self.client.post("/api/v1/funnel/structure/analyze/excel", params=params, files=files)
+        response = await self.client.post(
+            "/api/v1/funnel/structure/analyze/excel",
+            params=params,
+            files=files,
+            timeout=self.excel_timeout_seconds,
+        )
         response.raise_for_status()
         return response.json()
 
@@ -535,7 +552,12 @@ class FunnelClient:
             )
         }
 
-        response = await self.client.post("/api/v1/funnel/structure/analyze/excel", params=params, files=files)
+        response = await self.client.post(
+            "/api/v1/funnel/structure/analyze/excel",
+            params=params,
+            files=files,
+            timeout=self.excel_timeout_seconds,
+        )
         response.raise_for_status()
         try:
             fileobj.seek(0)

@@ -10,6 +10,8 @@ from fastapi import HTTPException, status
 from bff.routers.pipeline import approve_pipeline_proposal, submit_pipeline_proposal
 from shared.config.service_config import ServiceConfig
 from shared.services.audit_log_store import AuditLogStore
+from shared.services.dataset_registry import DatasetRegistry
+from shared.services.objectify_registry import ObjectifyRegistry
 from shared.services.pipeline_registry import PipelineRegistry
 
 
@@ -31,8 +33,12 @@ class _LakeFSStorage:
 @pytest.mark.asyncio
 async def test_pipeline_proposal_submit_and_approve_flow(monkeypatch: pytest.MonkeyPatch) -> None:
     registry = PipelineRegistry(dsn=ServiceConfig.get_postgres_url())
+    dataset_registry = DatasetRegistry(dsn=ServiceConfig.get_postgres_url())
+    objectify_registry = ObjectifyRegistry(dsn=ServiceConfig.get_postgres_url())
     audit_store = AuditLogStore(dsn=ServiceConfig.get_postgres_url())
     await registry.connect()
+    await dataset_registry.connect()
+    await objectify_registry.connect()
     await audit_store.connect()
 
     db_name = f"test_proposal_{uuid4().hex}"
@@ -73,6 +79,8 @@ async def test_pipeline_proposal_submit_and_approve_flow(monkeypatch: pytest.Mon
         payload={"title": "Proposal", "description": "test"},
         audit_store=audit_store,
         pipeline_registry=registry,
+        dataset_registry=dataset_registry,
+        objectify_registry=objectify_registry,
         request=_Request(headers={"X-Principal-Id": "editor"}),
     )
     assert response["status"] == "success"
@@ -96,6 +104,8 @@ async def test_pipeline_proposal_submit_and_approve_flow(monkeypatch: pytest.Mon
     assert reviewed.proposal_status == "approved"
 
     await audit_store.close()
+    await objectify_registry.close()
+    await dataset_registry.close()
     await registry.close()
 
 

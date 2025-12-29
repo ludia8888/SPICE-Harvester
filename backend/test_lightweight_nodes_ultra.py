@@ -12,6 +12,14 @@ import time
 import pytest
 import os
 
+
+OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhost:8000").rstrip("/")
+BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
+ELASTICSEARCH_URL = (
+    os.getenv("ELASTICSEARCH_URL")
+    or f"http://{os.getenv('ELASTICSEARCH_HOST', 'localhost')}:{os.getenv('ELASTICSEARCH_PORT', '9200')}"
+).rstrip("/")
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_lightweight_architecture():
@@ -26,7 +34,7 @@ async def test_lightweight_architecture():
         # 1. Create database
         print("\n1️⃣ Creating test database...")
         async with session.post(
-            'http://localhost:8000/api/v1/database/create',
+            f"{OMS_URL}/api/v1/database/create",
             json={'name': db_name, 'description': 'Lightweight nodes test'}
         ) as resp:
             if resp.status in (200, 201, 202):
@@ -49,7 +57,7 @@ async def test_lightweight_architecture():
         }
         
         async with session.post(
-            f'http://localhost:8000/api/v1/database/{db_name}/ontology',
+            f"{OMS_URL}/api/v1/database/{db_name}/ontology",
             json=client_schema
         ) as resp:
             print(f"   Client schema: {resp.status}")
@@ -74,7 +82,7 @@ async def test_lightweight_architecture():
         }
         
         async with session.post(
-            f'http://localhost:8000/api/v1/database/{db_name}/ontology',
+            f"{OMS_URL}/api/v1/database/{db_name}/ontology",
             json=product_schema
         ) as resp:
             print(f"   Product schema: {resp.status}")
@@ -92,7 +100,7 @@ async def test_lightweight_architecture():
         }
         
         async with session.post(
-            f'http://localhost:8000/api/v1/instances/{db_name}/async/Client/create',
+            f"{OMS_URL}/api/v1/instances/{db_name}/async/Client/create",
             json={'data': client_data}
         ) as resp:
             print(f"   Client instance: {resp.status}")
@@ -106,7 +114,7 @@ async def test_lightweight_architecture():
         }
         
         async with session.post(
-            f'http://localhost:8000/api/v1/instances/{db_name}/async/Product/create',
+            f"{OMS_URL}/api/v1/instances/{db_name}/async/Product/create",
             json={'data': product_data}
         ) as resp:
             print(f"   Product instance: {resp.status}")
@@ -151,7 +159,7 @@ async def test_lightweight_architecture():
         
         index_name = f"{db_name.replace('-', '_')}_instances"
         async with session.post(
-            f'http://localhost:9200/{index_name}/_search',
+            f"{ELASTICSEARCH_URL}/{index_name}/_search",
             json={'query': {'match_all': {}}, 'size': 10},
         ) as resp:
             if resp.status in (200, 201, 202):
@@ -175,7 +183,7 @@ async def test_lightweight_architecture():
         print("\n6️⃣ Testing Federation query...")
         
         async with session.post(
-            f'http://localhost:8002/api/v1/graph-query/{db_name}/simple',
+            f"{BFF_URL}/api/v1/graph-query/{db_name}/simple",
             json={
                 'class_name': 'Product',
                 'include_documents': True,

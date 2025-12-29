@@ -66,9 +66,9 @@ async def test_streaming_build_deploy_promotes_all_outputs() -> None:
     - Build succeeds even if node_id is provided (API ignores node targeting for streaming).
     - Deploy promotion without node_id publishes all build outputs, with a single merge commit id.
     """
-    headers = {"X-Admin-Token": ADMIN_TOKEN}
     suffix = uuid.uuid4().hex[:8]
     db_name = f"e2e_stream_{suffix}"
+    headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
     async with httpx.AsyncClient(headers=headers, timeout=60.0) as client:
         create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "stream"})
@@ -192,9 +192,9 @@ async def test_streaming_build_fails_as_job_group_on_contract_mismatch() -> None
     Checklist CL-017:
     - Streaming pipelines run as a unit: if one output violates schema contract, the build fails and no output is published.
     """
-    headers = {"X-Admin-Token": ADMIN_TOKEN}
     suffix = uuid.uuid4().hex[:8]
     db_name = f"e2e_stream_fail_{suffix}"
+    headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
     async with httpx.AsyncClient(headers=headers, timeout=60.0) as client:
         create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "stream"})
@@ -299,4 +299,3 @@ async def test_streaming_build_fails_as_job_group_on_contract_mismatch() -> None
         assert out_bad is None
     finally:
         await dataset_registry.close()
-

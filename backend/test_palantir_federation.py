@@ -16,6 +16,13 @@ import aiohttp
 import pytest
 import os
 
+OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhost:8000").rstrip("/")
+BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
+ELASTICSEARCH_URL = (
+    os.getenv("ELASTICSEARCH_URL")
+    or f"http://{os.getenv('ELASTICSEARCH_HOST', 'localhost')}:{os.getenv('ELASTICSEARCH_PORT', '9200')}"
+).rstrip("/")
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_palantir_federation():
@@ -33,7 +40,7 @@ async def test_palantir_federation():
         # 1. Create test database
         print(f"\n1️⃣ Creating test database: {db_name}")
         async with session.post(
-            'http://localhost:8000/api/v1/database/create',
+            f"{OMS_URL}/api/v1/database/create",
             json={'name': db_name, 'description': 'Palantir Federation Test'}
         ) as resp:
             if resp.status in (200, 201, 202):
@@ -66,7 +73,7 @@ async def test_palantir_federation():
         }
         
         async with session.post(
-            f'http://localhost:8000/api/v1/database/{db_name}/ontology',
+            f"{OMS_URL}/api/v1/database/{db_name}/ontology",
             json=ontology_data
         ) as resp:
             if resp.status in (200, 201, 202):
@@ -88,7 +95,7 @@ async def test_palantir_federation():
         }
         
         async with session.post(
-            f'http://localhost:8000/api/v1/instances/{db_name}/async/Product/create',
+            f"{OMS_URL}/api/v1/instances/{db_name}/async/Product/create",
             json=product_data
         ) as resp:
             if resp.status in (200, 201, 202):
@@ -105,7 +112,7 @@ async def test_palantir_federation():
         # 4. Check TerminusDB schema (should have NO system fields)
         print("\n4️⃣ Verifying TerminusDB schema purity")
         async with session.get(
-            f'http://localhost:8000/api/v1/database/{db_name}/ontology'
+            f"{OMS_URL}/api/v1/database/{db_name}/ontology"
         ) as resp:
             if resp.status in (200, 201, 202):
                 result = await resp.json()
@@ -133,7 +140,7 @@ async def test_palantir_federation():
         index_name = f"{db_name.replace('-', '_')}_instances"
         
         async with session.post(
-            f'http://localhost:9200/{index_name}/_search',
+            f"{ELASTICSEARCH_URL}/{index_name}/_search",
             json={
                 'query': {'match_all': {}},
                 'size': 1
@@ -170,7 +177,7 @@ async def test_palantir_federation():
         }
         
         async with session.post(
-            f'http://localhost:8002/api/v1/graph-query/{db_name}/simple',
+            f"{BFF_URL}/api/v1/graph-query/{db_name}/simple",
             json=federation_query
         ) as resp:
             if resp.status in (200, 201, 202):

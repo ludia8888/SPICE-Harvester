@@ -162,6 +162,7 @@ def _row_to_pipeline_record(row: asyncpg.Record) -> PipelineRecord:
         proposal_submitted_at=row["proposal_submitted_at"],
         proposal_reviewed_at=row["proposal_reviewed_at"],
         proposal_review_comment=row["proposal_review_comment"],
+        proposal_bundle=coerce_json_pipeline(row["proposal_bundle"]),
         last_preview_status=row["last_preview_status"],
         last_preview_at=row["last_preview_at"],
         last_preview_rows=row["last_preview_rows"],
@@ -199,6 +200,7 @@ class PipelineRecord:
     proposal_submitted_at: Optional[datetime]
     proposal_reviewed_at: Optional[datetime]
     proposal_review_comment: Optional[str]
+    proposal_bundle: Dict[str, Any]
     last_preview_status: Optional[str]
     last_preview_at: Optional[datetime]
     last_preview_rows: Optional[int]
@@ -504,6 +506,7 @@ class PipelineRegistry:
                     proposal_submitted_at TIMESTAMPTZ,
                     proposal_reviewed_at TIMESTAMPTZ,
                     proposal_review_comment TEXT,
+                    proposal_bundle JSONB NOT NULL DEFAULT '{{}}'::jsonb,
                     last_preview_status TEXT,
                     last_preview_at TIMESTAMPTZ,
                     last_preview_rows INTEGER,
@@ -551,6 +554,7 @@ class PipelineRegistry:
                     ADD COLUMN IF NOT EXISTS proposal_submitted_at TIMESTAMPTZ,
                     ADD COLUMN IF NOT EXISTS proposal_reviewed_at TIMESTAMPTZ,
                     ADD COLUMN IF NOT EXISTS proposal_review_comment TEXT,
+                    ADD COLUMN IF NOT EXISTS proposal_bundle JSONB NOT NULL DEFAULT '{{}}'::jsonb,
                     ADD COLUMN IF NOT EXISTS last_preview_job_id TEXT,
                     ADD COLUMN IF NOT EXISTS last_preview_node_id TEXT,
                     ADD COLUMN IF NOT EXISTS last_preview_nodes JSONB NOT NULL DEFAULT '{{}}'::jsonb,
@@ -1060,6 +1064,7 @@ class PipelineRegistry:
         proposal_submitted_at: Optional[datetime] = None,
         proposal_reviewed_at: Optional[datetime] = None,
         proposal_review_comment: Optional[str] = None,
+        proposal_bundle: Optional[Dict[str, Any]] = None,
         schedule_interval_seconds: Optional[int] = None,
         schedule_cron: Optional[str] = None,
         pipeline_id: Optional[str] = None,
@@ -1081,13 +1086,13 @@ class PipelineRegistry:
                             pipeline_id, db_name, name, description, pipeline_type, location, status,
                             branch, lakefs_repository,
                             proposal_status, proposal_title, proposal_description,
-                            proposal_submitted_at, proposal_reviewed_at, proposal_review_comment,
+                            proposal_submitted_at, proposal_reviewed_at, proposal_review_comment, proposal_bundle,
                             schedule_interval_seconds, schedule_cron
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
                         RETURNING pipeline_id, db_name, name, description, pipeline_type, location, status,
                                   branch, lakefs_repository,
                                   proposal_status, proposal_title, proposal_description,
-                                  proposal_submitted_at, proposal_reviewed_at, proposal_review_comment,
+                                  proposal_submitted_at, proposal_reviewed_at, proposal_review_comment, proposal_bundle,
                                   last_preview_status, last_preview_at, last_preview_rows,
                                   last_preview_job_id, last_preview_node_id, last_preview_sample, last_preview_nodes,
                                   last_build_status, last_build_at, last_build_output,
@@ -1109,6 +1114,7 @@ class PipelineRegistry:
                         proposal_submitted_at,
                         proposal_reviewed_at,
                         proposal_review_comment,
+                        _ensure_json_string(proposal_bundle or {}),
                         schedule_interval_seconds,
                         schedule_cron,
                     )
@@ -1138,7 +1144,7 @@ class PipelineRegistry:
                     f"""
                     SELECT p.pipeline_id, p.db_name, p.name, p.description, p.pipeline_type, p.location,
                            p.status, p.branch, p.lakefs_repository, p.proposal_status, p.proposal_title, p.proposal_description,
-                           p.proposal_submitted_at, p.proposal_reviewed_at, p.proposal_review_comment,
+                           p.proposal_submitted_at, p.proposal_reviewed_at, p.proposal_review_comment, p.proposal_bundle,
                            p.last_preview_status, p.last_preview_at, p.last_preview_rows,
                            p.last_preview_job_id, p.last_preview_node_id,
                            p.last_preview_sample, p.last_preview_nodes,
@@ -1165,7 +1171,7 @@ class PipelineRegistry:
                     f"""
                     SELECT p.pipeline_id, p.db_name, p.name, p.description, p.pipeline_type, p.location,
                            p.status, p.branch, p.lakefs_repository, p.proposal_status, p.proposal_title, p.proposal_description,
-                           p.proposal_submitted_at, p.proposal_reviewed_at, p.proposal_review_comment,
+                           p.proposal_submitted_at, p.proposal_reviewed_at, p.proposal_review_comment, p.proposal_bundle,
                            p.last_preview_status, p.last_preview_at, p.last_preview_rows,
                            p.last_preview_job_id, p.last_preview_node_id,
                            p.last_preview_sample, p.last_preview_nodes,
@@ -1206,6 +1212,7 @@ class PipelineRegistry:
                     "proposal_submitted_at": row["proposal_submitted_at"],
                     "proposal_reviewed_at": row["proposal_reviewed_at"],
                     "proposal_review_comment": row["proposal_review_comment"],
+                    "proposal_bundle": coerce_json_pipeline(row["proposal_bundle"]),
                     "last_preview_status": row["last_preview_status"],
                     "last_preview_at": row["last_preview_at"],
                     "last_preview_rows": row["last_preview_rows"],
@@ -1253,9 +1260,9 @@ class PipelineRegistry:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
-                SELECT pipeline_id, db_name, name, branch,
+               SELECT pipeline_id, db_name, name, branch,
                        proposal_status, proposal_title, proposal_description,
-                       proposal_submitted_at, proposal_reviewed_at, proposal_review_comment
+                       proposal_submitted_at, proposal_reviewed_at, proposal_review_comment, proposal_bundle
                 FROM {self._schema}.pipelines
                 WHERE {where_clause}
                 ORDER BY proposal_submitted_at DESC NULLS LAST, updated_at DESC
@@ -1278,6 +1285,7 @@ class PipelineRegistry:
                     "submitted_at": row["proposal_submitted_at"],
                     "reviewed_at": row["proposal_reviewed_at"],
                     "review_comment": row["proposal_review_comment"],
+                    "proposal_bundle": coerce_json_pipeline(row["proposal_bundle"]),
                 }
             )
         return output
@@ -1288,6 +1296,7 @@ class PipelineRegistry:
         pipeline_id: str,
         title: str,
         description: Optional[str],
+        proposal_bundle: Optional[Dict[str, Any]] = None,
     ) -> PipelineRecord:
         if not self._pool:
             raise RuntimeError("PipelineRegistry not connected")
@@ -1302,12 +1311,13 @@ class PipelineRegistry:
                     proposal_submitted_at = NOW(),
                     proposal_reviewed_at = NULL,
                     proposal_review_comment = NULL,
+                    proposal_bundle = $4,
                     updated_at = NOW()
                 WHERE pipeline_id = $1
                 RETURNING pipeline_id, db_name, name, description, pipeline_type, location, status,
                           branch, lakefs_repository,
                           proposal_status, proposal_title, proposal_description,
-                          proposal_submitted_at, proposal_reviewed_at, proposal_review_comment,
+                          proposal_submitted_at, proposal_reviewed_at, proposal_review_comment, proposal_bundle,
                           last_preview_status, last_preview_at, last_preview_rows,
                           last_preview_job_id, last_preview_node_id,
                           last_preview_sample, last_preview_nodes,
@@ -1318,6 +1328,7 @@ class PipelineRegistry:
                 pipeline_id,
                 title,
                 description,
+                _ensure_json_string(proposal_bundle or {}),
             )
             if not row:
                 raise RuntimeError("Pipeline not found")
@@ -1345,7 +1356,7 @@ class PipelineRegistry:
                 RETURNING pipeline_id, db_name, name, description, pipeline_type, location, status,
                           branch, lakefs_repository,
                           proposal_status, proposal_title, proposal_description,
-                          proposal_submitted_at, proposal_reviewed_at, proposal_review_comment,
+                          proposal_submitted_at, proposal_reviewed_at, proposal_review_comment, proposal_bundle,
                           last_preview_status, last_preview_at, last_preview_rows,
                           last_preview_job_id, last_preview_node_id,
                           last_preview_sample, last_preview_nodes,
@@ -1463,14 +1474,14 @@ class PipelineRegistry:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""
-                SELECT pipeline_id, db_name, name, description, pipeline_type, location, status,
-                       branch, lakefs_repository,
-                       proposal_status, proposal_title, proposal_description,
-                       proposal_submitted_at, proposal_reviewed_at, proposal_review_comment,
-                       last_preview_status, last_preview_at, last_preview_rows,
-                       last_preview_job_id, last_preview_node_id,
-                       last_preview_sample, last_preview_nodes,
-                       last_build_status, last_build_at, last_build_output,
+               SELECT pipeline_id, db_name, name, description, pipeline_type, location, status,
+                      branch, lakefs_repository,
+                      proposal_status, proposal_title, proposal_description,
+                      proposal_submitted_at, proposal_reviewed_at, proposal_review_comment, proposal_bundle,
+                      last_preview_status, last_preview_at, last_preview_rows,
+                      last_preview_job_id, last_preview_node_id,
+                      last_preview_sample, last_preview_nodes,
+                      last_build_status, last_build_at, last_build_output,
                        deployed_at, deployed_commit_id, schedule_interval_seconds, schedule_cron, last_scheduled_at,
                        created_at, updated_at
                 FROM {self._schema}.pipelines
@@ -1494,14 +1505,14 @@ class PipelineRegistry:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""
-                SELECT pipeline_id, db_name, name, description, pipeline_type, location, status,
-                       branch, lakefs_repository,
-                       proposal_status, proposal_title, proposal_description,
-                       proposal_submitted_at, proposal_reviewed_at, proposal_review_comment,
-                       last_preview_status, last_preview_at, last_preview_rows,
-                       last_preview_job_id, last_preview_node_id,
-                       last_preview_sample, last_preview_nodes,
-                       last_build_status, last_build_at, last_build_output,
+               SELECT pipeline_id, db_name, name, description, pipeline_type, location, status,
+                      branch, lakefs_repository,
+                      proposal_status, proposal_title, proposal_description,
+                      proposal_submitted_at, proposal_reviewed_at, proposal_review_comment, proposal_bundle,
+                      last_preview_status, last_preview_at, last_preview_rows,
+                      last_preview_job_id, last_preview_node_id,
+                      last_preview_sample, last_preview_nodes,
+                      last_build_status, last_build_at, last_build_output,
                        deployed_at, deployed_commit_id, schedule_interval_seconds, schedule_cron, last_scheduled_at,
                        created_at, updated_at
                 FROM {self._schema}.pipelines
@@ -1533,6 +1544,7 @@ class PipelineRegistry:
         proposal_submitted_at: Optional[datetime] = None,
         proposal_reviewed_at: Optional[datetime] = None,
         proposal_review_comment: Optional[str] = None,
+        proposal_bundle: Optional[Dict[str, Any]] = None,
     ) -> PipelineRecord:
         if not self._pool:
             raise RuntimeError("PipelineRegistry not connected")
@@ -1571,6 +1583,8 @@ class PipelineRegistry:
             _append("proposal_reviewed_at", proposal_reviewed_at)
         if proposal_review_comment is not None:
             _append("proposal_review_comment", proposal_review_comment)
+        if proposal_bundle is not None:
+            _append("proposal_bundle", _ensure_json_string(proposal_bundle))
 
         if not fields:
             pipeline = await self.get_pipeline(pipeline_id=pipeline_id)
@@ -1590,7 +1604,7 @@ class PipelineRegistry:
                 RETURNING pipeline_id, db_name, name, description, pipeline_type, location, status,
                           branch, lakefs_repository,
                           proposal_status, proposal_title, proposal_description,
-                          proposal_submitted_at, proposal_reviewed_at, proposal_review_comment,
+                          proposal_submitted_at, proposal_reviewed_at, proposal_review_comment, proposal_bundle,
                           last_preview_status, last_preview_at, last_preview_rows,
                           last_preview_job_id, last_preview_node_id,
                           last_preview_sample, last_preview_nodes,

@@ -46,6 +46,7 @@ def _pipeline_record(*, pipeline_id: str, db_name: str, name: str, branch: str) 
         proposal_submitted_at=None,
         proposal_reviewed_at=None,
         proposal_review_comment=None,
+        proposal_bundle={},
         last_preview_status=None,
         last_preview_at=None,
         last_preview_rows=None,
@@ -153,4 +154,3 @@ async def test_add_version_handles_lakefs_predicate_failed_by_resolving_head_com
     assert inserted["commit_id"] == head_commit_id
     assert client.commit_calls == 1
     assert client.head_calls == 1
-

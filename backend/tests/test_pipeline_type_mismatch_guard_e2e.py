@@ -70,6 +70,8 @@ async def test_preview_rejects_type_mismatch_in_compute_expression() -> None:
     async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
         suffix = uuid.uuid4().hex[:8]
         db_name = f"e2e_tm_{suffix}"
+        headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
+        client.headers.update(headers)
 
         create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "tm"})
         create_db.raise_for_status()

@@ -199,12 +199,19 @@ class ConnectorSyncWorker:
         await self._producer_call(self.dlq_producer.produce, topic=self.dlq_topic, key=key, value=value)
         await self._producer_call(self.dlq_producer.flush, 10)
 
+    def _bff_scope_headers(self, *, db_name: str) -> Dict[str, str]:
+        scope = (db_name or "").strip()
+        if not scope:
+            return {}
+        return {"X-DB-Name": scope, "X-Project": scope}
+
     async def _fetch_ontology_schema(self, *, db_name: str, class_label: str, branch: str) -> Dict[str, Any]:
         if not self.http:
             raise RuntimeError("HTTP client not initialized")
         bff_url = ServiceConfig.get_bff_url()
         url = f"{bff_url}/api/v1/database/{db_name}/ontology/{class_label}/schema"
-        resp = await self.http.get(url, params={"format": "json", "branch": branch})
+        headers = self._bff_scope_headers(db_name=db_name)
+        resp = await self.http.get(url, params={"format": "json", "branch": branch}, headers=headers or None)
         resp.raise_for_status()
         data = resp.json()
         if not isinstance(data, dict):
@@ -360,7 +367,8 @@ class ConnectorSyncWorker:
             },
         }
 
-        resp = await self.http.post(url, params={"branch": branch}, json=payload)
+        headers = self._bff_scope_headers(db_name=db_name)
+        resp = await self.http.post(url, params={"branch": branch}, json=payload, headers=headers or None)
         resp.raise_for_status()
         result = resp.json()
 

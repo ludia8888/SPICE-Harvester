@@ -26,6 +26,7 @@ def _pipeline_record(*, pipeline_id: str, db_name: str, name: str, branch: str) 
         proposal_submitted_at=None,
         proposal_reviewed_at=None,
         proposal_review_comment=None,
+        proposal_bundle={},
         last_preview_status=None,
         last_preview_at=None,
         last_preview_rows=None,
@@ -109,4 +110,3 @@ async def test_create_branch_is_idempotent_when_db_unique_violation_races(monkey
     assert result.pipeline_id == existing.pipeline_id
     assert call_count["create_pipeline"] == 1
     assert call_count["get_by_name"] == 2
-

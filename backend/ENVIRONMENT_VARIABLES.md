@@ -11,6 +11,8 @@ BFF_BASE_URL=http://localhost:8002
 FUNNEL_BASE_URL=http://localhost:8003
 USE_HTTPS=false
 VERIFY_SSL=false
+# Funnel Excel analysis timeout (seconds)
+FUNNEL_EXCEL_TIMEOUT_SECONDS=120
 ```
 
 ## 1.1) Auth + scope guard
@@ -24,6 +26,16 @@ BFF_REQUIRE_DB_SCOPE=false
 
 # Token used by BFF/OMS (or set BFF_ADMIN_TOKEN / OMS_CLIENT_TOKEN separately)
 ADMIN_TOKEN=change_me
+```
+
+## 1.2) Pipeline governance
+
+```bash
+# Protected branches (disallow direct edits to definitions)
+PIPELINE_PROTECTED_BRANCHES=main
+
+# Require approved proposals before deploying to protected branches
+PIPELINE_REQUIRE_PROPOSALS=false
 ```
 
 ## 2) Core infra

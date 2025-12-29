@@ -515,7 +515,21 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         body = {
             "db_name": ctx.db_name,
-            "definition_json": {"nodes": [], "edges": []},
+            "definition_json": {
+                "nodes": [
+                    {
+                        "id": "in1",
+                        "type": "input",
+                        "metadata": {
+                            "datasetId": ctx.dataset_id or "dataset_smoke",
+                            "datasetName": ctx.dataset_name,
+                        },
+                    },
+                    {"id": "out1", "type": "output", "metadata": {"datasetName": f"{ctx.db_name}_preview_out"}},
+                ],
+                "edges": [{"from": "in1", "to": "out1"}],
+                "parameters": [],
+            },
             "limit": 5,
         }
         return RequestPlan(op.method, op.path, url, (200, 400, 404), json_body=body)
@@ -554,18 +568,60 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
             "name": ctx.dataset_name,
             "description": "openapi smoke dataset",
             "source_type": "manual",
-            "schema_json": {"columns": [{"name": "id", "type": "xsd:string"}]},
+            "schema_json": {
+                "columns": [
+                    {"name": f"{ctx.class_id.lower()}_id", "type": "xsd:string"},
+                    {"name": "name", "type": "xsd:string"},
+                ]
+            },
         }
         return RequestPlan(op.method, op.path, url, (200, 409, 400), json_body=body)
 
     if key == ("POST", "/api/v1/pipelines/datasets/{dataset_id}/versions"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        headers = {"X-DB-Name": ctx.db_name}
         body = {
             "row_count": 1,
-            "sample_json": {"columns": [{"name": "id", "type": "String"}], "rows": [{"id": "1"}]},
-            "schema_json": {"columns": [{"name": "id", "type": "xsd:string"}]},
+            "sample_json": {
+                "columns": [
+                    {"name": f"{ctx.class_id.lower()}_id", "type": "String"},
+                    {"name": "name", "type": "String"},
+                ],
+                "rows": [
+                    {f"{ctx.class_id.lower()}_id": ctx.instance_id, "name": "OpenAPI Smoke"}
+                ],
+            },
+            "schema_json": {
+                "columns": [
+                    {"name": f"{ctx.class_id.lower()}_id", "type": "xsd:string"},
+                    {"name": "name", "type": "xsd:string"},
+                ]
+            },
         }
-        return RequestPlan(op.method, op.path, url, (200, 400, 404), json_body=body)
+        return RequestPlan(op.method, op.path, url, (200, 400, 404), json_body=body, headers=headers)
+
+    if key == ("POST", "/api/v1/objectify/mapping-specs"):
+        url = f"{BFF_URL}{op.path}"
+        headers = {"X-DB-Name": ctx.db_name}
+        body = {
+            "dataset_id": ctx.dataset_id or "dataset_smoke",
+            "target_class_id": ctx.class_id,
+            "mappings": [
+                {
+                    "source_field": f"{ctx.class_id.lower()}_id",
+                    "target_field": f"{ctx.class_id.lower()}_id",
+                },
+                {"source_field": "name", "target_field": "name"},
+            ],
+            "auto_sync": False,
+        }
+        return RequestPlan(op.method, op.path, url, (201, 400, 404), json_body=body, headers=headers)
+
+    if key == ("POST", "/api/v1/objectify/datasets/{dataset_id}/run"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        headers = {"X-DB-Name": ctx.db_name}
+        body = {"allow_partial": True}
+        return RequestPlan(op.method, op.path, url, (200, 400, 404), json_body=body, headers=headers)
 
     if key == ("POST", "/api/v1/pipelines/datasets/excel-upload"):
         url = f"{BFF_URL}{op.path}"

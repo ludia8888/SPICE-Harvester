@@ -20,6 +20,13 @@ import aiohttp
 import os
 import pytest
 
+OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhost:8000").rstrip("/")
+BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
+ELASTICSEARCH_URL = (
+    os.getenv("ELASTICSEARCH_URL")
+    or f"http://{os.getenv('ELASTICSEARCH_HOST', 'localhost')}:{os.getenv('ELASTICSEARCH_PORT', '9200')}"
+).rstrip("/")
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_full_api_integration():
@@ -42,7 +49,7 @@ async def test_full_api_integration():
         # 1.1 Create database via OMS API (Event Sourcing)
         print("\n1️⃣ Creating database via OMS API...")
         async with session.post(
-            'http://localhost:8000/api/v1/database/create',
+            f"{OMS_URL}/api/v1/database/create",
             json={
                 'name': db_name,
                 'description': 'Full API Integration Test'
@@ -62,7 +69,7 @@ async def test_full_api_integration():
         max_retries = 10
         for retry in range(max_retries):
             async with session.get(
-                f'http://localhost:8000/api/v1/database/exists/{db_name}',
+                f"{OMS_URL}/api/v1/database/exists/{db_name}",
                 headers=headers,
             ) as resp:
                 if resp.status == 200:
@@ -96,7 +103,7 @@ async def test_full_api_integration():
         }
         
         async with session.post(
-            f'http://localhost:8000/api/v1/database/{db_name}/ontology',
+            f"{OMS_URL}/api/v1/database/{db_name}/ontology",
             json=client_ontology
         ) as resp:
             if resp.status in (200, 201, 202):
@@ -131,7 +138,7 @@ async def test_full_api_integration():
         }
         
         async with session.post(
-            f'http://localhost:8000/api/v1/database/{db_name}/ontology',
+            f"{OMS_URL}/api/v1/database/{db_name}/ontology",
             json=product_ontology
         ) as resp:
             if resp.status in (200, 201, 202):
@@ -170,7 +177,7 @@ async def test_full_api_integration():
         }
         
         async with session.post(
-            f'http://localhost:8000/api/v1/database/{db_name}/ontology',
+            f"{OMS_URL}/api/v1/database/{db_name}/ontology",
             json=order_ontology
         ) as resp:
             if resp.status in (200, 201, 202):
@@ -198,7 +205,7 @@ async def test_full_api_integration():
         
         for client_data in clients:
             async with session.post(
-                f'http://localhost:8000/api/v1/instances/{db_name}/async/Client/create',
+                f"{OMS_URL}/api/v1/instances/{db_name}/async/Client/create",
                 json={'data': client_data}
             ) as resp:
                 if resp.status in (200, 201, 202):
@@ -239,7 +246,7 @@ async def test_full_api_integration():
         
         for product_data in products:
             async with session.post(
-                f'http://localhost:8000/api/v1/instances/{db_name}/async/Product/create',
+                f"{OMS_URL}/api/v1/instances/{db_name}/async/Product/create",
                 json={'data': product_data}
             ) as resp:
                 if resp.status in (200, 201, 202):
@@ -273,7 +280,7 @@ async def test_full_api_integration():
         
         for order_data in orders:
             async with session.post(
-                f'http://localhost:8000/api/v1/instances/{db_name}/async/Order/create',
+                f"{OMS_URL}/api/v1/instances/{db_name}/async/Order/create",
                 json={'data': order_data}
             ) as resp:
                 if resp.status in (200, 201, 202):
@@ -300,7 +307,7 @@ async def test_full_api_integration():
         for attempt in range(query_retries):
             try:
                 async with session.post(
-                    f'http://localhost:8000/api/v1/query/{db_name}',
+                    f"{OMS_URL}/api/v1/query/{db_name}",
                     json=query_payload,
                     headers=headers,
                 ) as resp:
@@ -322,7 +329,7 @@ async def test_full_api_integration():
         # 3.2 Federation query via BFF (Graph + ES)
         print("\n2️⃣ Federation query via BFF API...")
         async with session.post(
-            f'http://localhost:8002/api/v1/graph-query/{db_name}/simple',
+            f"{BFF_URL}/api/v1/graph-query/{db_name}/simple",
             json={
                 'class_name': 'Product',
                 'include_documents': True,
@@ -353,7 +360,7 @@ async def test_full_api_integration():
         # 4.1 Find all Products owned by a specific Client
         print("\n1️⃣ Single-hop: Products owned by Acme Corp...")
         async with session.post(
-            f'http://localhost:8002/api/v1/graph-query/{db_name}/multi-hop',
+            f"{BFF_URL}/api/v1/graph-query/{db_name}/multi-hop",
             json={
                 'start_class': 'Product',
                 'hops': [('owned_by', 'Client')],
@@ -379,7 +386,7 @@ async def test_full_api_integration():
         # 4.2 Two-hop query: Orders → Products → Client
         print("\n2️⃣ Two-hop: Orders → Products → Client...")
         async with session.post(
-            f'http://localhost:8002/api/v1/graph-query/{db_name}/multi-hop',
+            f"{BFF_URL}/api/v1/graph-query/{db_name}/multi-hop",
             json={
                 'start_class': 'Order',
                 'hops': [
@@ -435,7 +442,7 @@ async def test_full_api_integration():
         es_retries = 15
         for attempt in range(es_retries):
             async with session.post(
-                f'http://localhost:9200/{index_name}/_search',
+                f"{ELASTICSEARCH_URL}/{index_name}/_search",
                 json=es_query_payload,
             ) as resp:
                 if resp.status == 200:
@@ -476,7 +483,7 @@ async def test_full_api_integration():
         # 5.3 Check TerminusDB for lightweight nodes
         print("\n3️⃣ Verifying TerminusDB lightweight nodes...")
         async with session.get(
-            f'http://localhost:8000/api/v1/database/{db_name}/ontology',
+            f"{OMS_URL}/api/v1/database/{db_name}/ontology",
             headers=headers,
         ) as resp:
             if resp.status == 200:
@@ -528,7 +535,7 @@ async def test_full_api_integration():
             }
             for attempt in range(20):
                 async with session.post(
-                    f'http://localhost:9200/{index_name}/_count',
+                    f"{ELASTICSEARCH_URL}/{index_name}/_count",
                     json=count_payload,
                 ) as resp:
                     if resp.status == 200:
@@ -583,7 +590,7 @@ async def test_full_api_integration():
 
         # Cleanup database
         async with session.delete(
-            f'http://localhost:8000/api/v1/database/{db_name}',
+            f"{OMS_URL}/api/v1/database/{db_name}",
             headers=headers,
         ) as resp:
             if resp.status in (200, 202):
