@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Button,
   Card,
@@ -20,6 +20,15 @@ import {
 } from '@blueprintjs/core'
 import type { IconName } from '@blueprintjs/icons'
 import { useAppStore } from '../state/store'
+import {
+  createDatabase,
+  listDatabases,
+  listDatasets,
+  uploadDataset,
+  type DatabaseRecord,
+  type DatasetRecord,
+  type UploadMode,
+} from '../api/bff'
 
 type DatasetFile = {
   id: string
@@ -27,19 +36,27 @@ type DatasetFile = {
   datasetName: string
   source: string
   updatedAt: string
+  updatedLabel: string
   sizeBytes: number
 }
 
 type FolderRecord = {
   id: string
   name: string
-  files: DatasetFile[]
+  description?: string
+  updatedAt?: string
+  datasetCount?: number
 }
 
 type UploadFile = {
   id: string
   file: File
+  status: UploadStatus
+  datasetName?: string
+  error?: string
 }
+
+type UploadStatus = 'queued' | 'active' | 'complete' | 'error'
 
 type SortKey = 'name' | 'updated' | 'size'
 type ViewMode = 'grid' | 'list'
@@ -66,57 +83,31 @@ const createCategories = [
 
 type CreateCategory = (typeof createCategories)[number]
 
-const fetchFolderTree = async (): Promise<FolderRecord[]> => {
-  await new Promise((resolve) => setTimeout(resolve, 400))
-  return [
-    {
-      id: 'bigdata-doctor',
-      name: 'Bigdata Doctor',
-      files: [
-        {
-          id: 'bdd-1',
-          name: 'transactions.csv',
-          datasetName: 'transactions',
-          source: 'google_sheets',
-          updatedAt: '2 hours ago',
-          sizeBytes: 116570,
-        },
-        {
-          id: 'bdd-2',
-          name: 'customer_profiles.csv',
-          datasetName: 'customer_profiles',
-          source: 'csv_upload',
-          updatedAt: 'just now',
-          sizeBytes: 5710,
-        },
-      ],
-    },
-    {
-      id: 'marketing-atlas',
-      name: 'Marketing Atlas',
-      files: [
-        {
-          id: 'mk-1',
-          name: 'campaigns.xlsx',
-          datasetName: 'campaigns',
-          source: 'xlsx_import',
-          updatedAt: 'yesterday',
-          sizeBytes: 95700,
-        },
-        {
-          id: 'mk-2',
-          name: 'ads_performance.csv',
-          datasetName: 'ads_performance',
-          source: 'csv_upload',
-          updatedAt: '3 days ago',
-          sizeBytes: 39560,
-        },
-      ],
-    },
-  ]
+const normalizeDatabaseRecord = (record: DatabaseRecord | string): FolderRecord | null => {
+  if (typeof record === 'string') {
+    return { id: record, name: record }
+  }
+
+  const name = record.name || record.db_name || record.id
+  if (!name) {
+    return null
+  }
+
+  const datasetCount =
+    record.dataset_count ??
+    record.datasetCount ??
+    (Array.isArray(record.datasets) ? record.datasets.length : undefined)
+
+  return {
+    id: name,
+    name: record.display_name || record.label || name,
+    description: record.description,
+    updatedAt: record.updated_at || record.created_at,
+    datasetCount,
+  }
 }
 
-const uploadOptions = [
+const uploadOptions: Array<{ value: UploadMode; title: string; description: string }> = [
   {
     value: 'structured',
     title: 'Upload as individual structured datasets (recommended)',
@@ -209,7 +200,52 @@ const formatFileSize = (bytes: number) => {
   return `${gigaBytes.toFixed(2)} GB`
 }
 
+const formatRelativeTime = (isoDate?: string) => {
+  if (!isoDate) {
+    return ''
+  }
+  const date = new Date(isoDate)
+  if (Number.isNaN(date.getTime())) {
+    return isoDate
+  }
+  const diffMs = Date.now() - date.getTime()
+  const diffMinutes = Math.floor(diffMs / 60000)
+  if (diffMinutes < 1) {
+    return 'just now'
+  }
+  if (diffMinutes < 60) {
+    return `${diffMinutes} minute${diffMinutes === 1 ? '' : 's'} ago`
+  }
+  const diffHours = Math.floor(diffMinutes / 60)
+  if (diffHours < 24) {
+    return `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`
+  }
+  const diffDays = Math.floor(diffHours / 24)
+  if (diffDays < 7) {
+    return `${diffDays} day${diffDays === 1 ? '' : 's'} ago`
+  }
+  return date.toLocaleDateString()
+}
+
 const getResourceName = (fileName: string) => fileName.replace(/\.[^/.]+$/, '')
+
+const parseTimestamp = (value?: string) => {
+  if (!value) {
+    return 0
+  }
+  const parsed = Date.parse(value)
+  return Number.isNaN(parsed) ? 0 : parsed
+}
+
+const mapDatasetToFile = (dataset: DatasetRecord): DatasetFile => ({
+  id: dataset.dataset_id,
+  name: dataset.name,
+  datasetName: dataset.name,
+  source: dataset.source_type,
+  updatedAt: dataset.updated_at || dataset.created_at || '',
+  updatedLabel: formatRelativeTime(dataset.updated_at || dataset.created_at),
+  sizeBytes: dataset.row_count ?? 0,
+})
 
 type BreadcrumbSegment = {
   label: string
@@ -218,80 +254,95 @@ type BreadcrumbSegment = {
 }
 
 export const DatasetsPage = () => {
-  const { data, isLoading, isFetching, refetch } = useQuery({ queryKey: ['folders'], queryFn: fetchFolderTree })
+  const queryClient = useQueryClient()
+  const databasesQuery = useQuery({ queryKey: ['databases'], queryFn: listDatabases })
   const setActiveNav = useAppStore((state) => state.setActiveNav)
   const setPipelineContext = useAppStore((state) => state.setPipelineContext)
-  const [foldersState, setFoldersState] = useState<FolderRecord[] | null>(null)
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null)
   const [activeFileId, setActiveFileId] = useState<string | null>(null)
   const [isCreateFolderOpen, setCreateFolderOpen] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
+  const [createFolderError, setCreateFolderError] = useState<string | null>(null)
+  const [isCreatingFolder, setCreatingFolder] = useState(false)
   const [isCreateMenuOpen, setCreateMenuOpen] = useState(false)
   const [createMenuCategory, setCreateMenuCategory] = useState<CreateCategory>('All')
   const [createMenuSearch, setCreateMenuSearch] = useState('')
   const [isUploadOpen, setUploadOpen] = useState(false)
-  const [uploadMode, setUploadMode] = useState(uploadOptions[0].value)
+  const [uploadMode, setUploadMode] = useState<UploadMode>(uploadOptions[0].value)
   const [isUploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
+  const [isUploadComplete, setUploadComplete] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [uploadFiles, setUploadFiles] = useState<UploadFile[]>([])
   const [isDragActive, setDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
-  useEffect(() => {
-    if (data && foldersState === null) {
-      setFoldersState(data)
-    }
-  }, [data, foldersState])
+  const datasetsQuery = useQuery({
+    queryKey: ['datasets', activeFolderId],
+    queryFn: () => listDatasets(activeFolderId ?? ''),
+    enabled: Boolean(activeFolderId),
+  })
+
+  const folders = useMemo(
+    () => (databasesQuery.data ?? []).map(normalizeDatabaseRecord).filter(Boolean) as FolderRecord[],
+    [databasesQuery.data],
+  )
+
+  const files = useMemo(() => (datasetsQuery.data ?? []).map(mapDatasetToFile), [datasetsQuery.data])
+
+  const databaseErrorMessage = databasesQuery.error instanceof Error ? databasesQuery.error.message : null
+  const datasetErrorMessage = datasetsQuery.error instanceof Error ? datasetsQuery.error.message : null
 
   useEffect(() => {
-    if (!isUploading) {
+    if (!activeFolderId) {
+      setActiveFileId(null)
       return
     }
-    if (uploadFiles.length === 0) {
-      setUploading(false)
-      return
-    }
-
-    const stepsPerFile = 4
-    const totalSteps = uploadFiles.length * stepsPerFile
-    let currentStep = 0
-    setUploadProgress(0)
-
-    const intervalId = window.setInterval(() => {
-      currentStep += 1
-      const progress = Math.min(currentStep / totalSteps, 1)
-      setUploadProgress(progress)
-      if (progress >= 1) {
-        window.clearInterval(intervalId)
+    if (files.length > 0 && activeFileId) {
+      const exists = files.some((file) => file.id === activeFileId)
+      if (!exists) {
+        setActiveFileId(null)
       }
-    }, 400)
+    }
+  }, [activeFileId, activeFolderId, files])
 
-    return () => window.clearInterval(intervalId)
-  }, [isUploading, uploadFiles.length])
+  useEffect(() => {
+    if (activeFolderId && folders.length > 0) {
+      const exists = folders.some((folder) => folder.id === activeFolderId)
+      if (!exists) {
+        setActiveFolderId(null)
+        setActiveFileId(null)
+      }
+    }
+  }, [activeFolderId, folders])
 
-  const folders = foldersState ?? data ?? []
   const activeFolder = folders.find((folder) => folder.id === activeFolderId) ?? null
-  const files = activeFolder?.files ?? []
   const activeFile = files.find((file) => file.id === activeFileId) ?? null
   const isRootView = !activeFolder
   const isFilesView = !!activeFolder && !activeFile
   const isDatasetView = !!activeFile
   const isCreateFolderDisabled = newFolderName.trim().length === 0
   const totalUploads = uploadFiles.length
-  const completedCount = totalUploads === 0 ? 0 : Math.floor(uploadProgress * totalUploads)
-  const isUploadComplete = uploadProgress >= 1 && totalUploads > 0
-  const activeUploadIndex = isUploading && !isUploadComplete ? completedCount : null
-  const uploadStepLabel = totalUploads === 0
-    ? '0/0'
-    : `${Math.min(completedCount + 1, totalUploads)}/${totalUploads}`
-  const uploadProgressPercent = Math.min(uploadProgress * 100, 100)
+  const completedCount = uploadFiles.filter((file) => file.status === 'complete' || file.status === 'error').length
+  const successfulUploads = uploadFiles.filter((file) => file.status === 'complete')
+  const failedUploads = uploadFiles.filter((file) => file.status === 'error')
+  const uploadStepLabel = totalUploads === 0 ? '0/0' : `${completedCount}/${totalUploads}`
+  const uploadProgressPercent = totalUploads === 0 ? 0 : (completedCount / totalUploads) * 100
   const uploadProgressText = `Uploading files... (${uploadStepLabel})`
-  const resourceLabel = totalUploads === 1 ? 'resource' : 'resources'
-  const uploadCompleteMessage = `Successfully created ${totalUploads} ${resourceLabel}`
-  const uploadDialogTitle = isUploading ? (isUploadComplete ? 'Upload finished' : 'Uploading...') : 'Upload files'
-  const uploadDialogIcon = isUploading ? (isUploadComplete ? 'tick-circle' : 'upload') : 'upload'
+  const resourceLabel = successfulUploads.length === 1 ? 'resource' : 'resources'
+  const uploadCompleteMessage = successfulUploads.length
+    ? `Successfully created ${successfulUploads.length} ${resourceLabel}`
+    : 'No resources were created'
+  const uploadFailureMessage = failedUploads.length
+    ? `${failedUploads.length} file${failedUploads.length === 1 ? '' : 's'} failed to upload.`
+    : null
+  const uploadDialogTitle = isUploading
+    ? 'Uploading...'
+    : isUploadComplete
+      ? 'Upload finished'
+      : 'Upload files'
+  const uploadDialogIcon = isUploading ? 'upload' : isUploadComplete ? 'tick-circle' : 'upload'
 
   const filteredCreateOptions = createOptions.filter((option) => {
     const matchesCategory = createMenuCategory === 'All' || option.category === createMenuCategory
@@ -299,17 +350,16 @@ export const DatasetsPage = () => {
     return matchesCategory && matchesSearch
   })
 
-  const getFolderSize = (folder: FolderRecord) =>
-    folder.files.reduce((total, file) => total + file.sizeBytes, 0)
+  const getFolderSize = (folder: FolderRecord) => folder.datasetCount ?? 0
 
-  const getFolderUpdatedAt = (folder: FolderRecord) => folder.files[0]?.updatedAt ?? ''
+  const getFolderUpdatedAt = (folder: FolderRecord) => folder.updatedAt ?? ''
 
   const sortedFolders = [...folders].sort((left, right) => {
     if (sortKey === 'size') {
       return getFolderSize(right) - getFolderSize(left)
     }
     if (sortKey === 'updated') {
-      return getFolderUpdatedAt(right).localeCompare(getFolderUpdatedAt(left))
+      return parseTimestamp(getFolderUpdatedAt(right)) - parseTimestamp(getFolderUpdatedAt(left))
     }
     return left.name.localeCompare(right.name)
   })
@@ -319,23 +369,12 @@ export const DatasetsPage = () => {
       return right.sizeBytes - left.sizeBytes
     }
     if (sortKey === 'updated') {
-      return right.updatedAt.localeCompare(left.updatedAt)
+      return parseTimestamp(right.updatedAt) - parseTimestamp(left.updatedAt)
     }
     return left.name.localeCompare(right.name)
   })
 
-  const getUploadStatus = (index: number) => {
-    if (!isUploading) {
-      return 'idle'
-    }
-    if (isUploadComplete || index < completedCount) {
-      return 'complete'
-    }
-    if (activeUploadIndex === index) {
-      return 'active'
-    }
-    return 'queued'
-  }
+  const getUploadStatus = (uploadFile: UploadFile) => uploadFile.status
 
   const addUploadFiles = (incomingFiles: FileList | File[]) => {
     const normalized = Array.from(incomingFiles)
@@ -346,7 +385,11 @@ export const DatasetsPage = () => {
     setUploadFiles((current) => {
       const existingIds = new Set(current.map((file) => file.id))
       const additions = normalized
-        .map((file) => ({ id: `${file.name}-${file.size}-${file.lastModified}`, file }))
+        .map((file) => ({
+          id: `${file.name}-${file.size}-${file.lastModified}`,
+          file,
+          status: 'queued' as const,
+        }))
         .filter((entry) => !existingIds.has(entry.id))
       return [...current, ...additions]
     })
@@ -399,34 +442,20 @@ export const DatasetsPage = () => {
   }
 
   const handleCloseUploadDialog = () => {
-    if (isUploadComplete && activeFolderId) {
-      const newFiles: DatasetFile[] = uploadFiles.map((uploadFile, index) => ({
-        id: `${activeFolderId}-${Date.now()}-${index}`,
-        name: uploadFile.file.name,
-        datasetName: getResourceName(uploadFile.file.name),
-        source: 'upload',
-        updatedAt: 'just now',
-        sizeBytes: uploadFile.file.size,
-      }))
-
-      setFoldersState((current) => {
-        const base = current ?? data ?? []
-        return base.map((folder) =>
-          folder.id === activeFolderId ? { ...folder, files: [...folder.files, ...newFiles] } : folder,
-        )
-      })
-    }
     setUploadOpen(false)
     setDragActive(false)
     setUploading(false)
-    setUploadProgress(0)
+    setUploadComplete(false)
+    setUploadError(null)
     setUploadFiles([])
   }
 
   const handleOpenUploadDialog = () => {
     setUploadOpen(true)
     setUploading(false)
-    setUploadProgress(0)
+    setUploadComplete(false)
+    setUploadError(null)
+    setUploadFiles([])
   }
 
   const handleOpenCreateMenu = () => {
@@ -447,6 +476,7 @@ export const DatasetsPage = () => {
   const handleCloseCreateFolder = () => {
     setCreateFolderOpen(false)
     setNewFolderName('')
+    setCreateFolderError(null)
   }
 
   const handleCreateFolder = () => {
@@ -455,18 +485,22 @@ export const DatasetsPage = () => {
       return
     }
 
-    setFoldersState((current) => {
-      const base = current ?? data ?? []
-      return [
-        ...base,
-        {
-          id: `folder-${Date.now()}`,
-          name: trimmedName,
-          files: [],
-        },
-      ]
-    })
-    handleCloseCreateFolder()
+    const create = async () => {
+      try {
+        setCreatingFolder(true)
+        setCreateFolderError(null)
+        await createDatabase(trimmedName)
+        await queryClient.invalidateQueries({ queryKey: ['databases'] })
+        handleCloseCreateFolder()
+        setCreateFolderError(null)
+      } catch (error) {
+        setCreateFolderError(error instanceof Error ? error.message : 'Failed to create folder')
+      } finally {
+        setCreatingFolder(false)
+      }
+    }
+
+    void create()
   }
 
   const handleSelectCreateOption = (optionId: CreateOption['id']) => {
@@ -482,15 +516,9 @@ export const DatasetsPage = () => {
     }
     if (optionId === 'pipeline') {
       if (activeFolder) {
-        const datasets = activeFolder.files.map((file) => ({
-          id: file.id,
-          name: file.name,
-          datasetName: file.datasetName,
-        }))
         setPipelineContext({
           folderId: activeFolder.id,
           folderName: activeFolder.name,
-          datasets,
         })
       } else {
         setPipelineContext(null)
@@ -505,8 +533,62 @@ export const DatasetsPage = () => {
     if (uploadFiles.length === 0) {
       return
     }
-    setDragActive(false)
-    setUploading(true)
+    if (!activeFolder) {
+      setUploadError('Select a folder before uploading.')
+      return
+    }
+
+    const runUpload = async () => {
+      setDragActive(false)
+      setUploadError(null)
+      setUploading(true)
+
+      const results = await Promise.all(
+        uploadFiles.map(async (uploadFile) => {
+          setUploadFiles((current) =>
+            current.map((item) =>
+              item.id === uploadFile.id ? { ...item, status: 'active' } : item,
+            ),
+          )
+          try {
+            const dataset = await uploadDataset({
+              dbName: activeFolder.id,
+              file: uploadFile.file,
+              mode: uploadMode,
+            })
+            setUploadFiles((current) =>
+              current.map((item) =>
+                item.id === uploadFile.id
+                  ? { ...item, status: 'complete', datasetName: dataset.name }
+                  : item,
+              ),
+            )
+            return dataset
+          } catch (error) {
+            setUploadFiles((current) =>
+              current.map((item) =>
+                item.id === uploadFile.id
+                  ? {
+                      ...item,
+                      status: 'error',
+                      error: error instanceof Error ? error.message : 'Upload failed',
+                    }
+                  : item,
+              ),
+            )
+            return null
+          }
+        }),
+      )
+
+      setUploading(false)
+      setUploadComplete(true)
+      if (results.some((dataset) => dataset)) {
+        await queryClient.invalidateQueries({ queryKey: ['datasets', activeFolder.id] })
+      }
+    }
+
+    void runUpload()
   }
 
   const actionsMenu = (
@@ -528,7 +610,17 @@ export const DatasetsPage = () => {
           onClick={() => setSortKey('size')}
         />
       </MenuItem>
-      <MenuItem icon="refresh" text="Refresh" onClick={() => void refetch()} disabled={isFetching} />
+      <MenuItem
+        icon="refresh"
+        text="Refresh"
+        onClick={() => {
+          void databasesQuery.refetch()
+          if (activeFolderId) {
+            void datasetsQuery.refetch()
+          }
+        }}
+        disabled={databasesQuery.isFetching || datasetsQuery.isFetching}
+      />
       <MenuItem icon="layout" text="View">
         <MenuItem
           icon={viewMode === 'grid' ? 'small-tick' : 'blank'}
@@ -605,7 +697,7 @@ export const DatasetsPage = () => {
         })}
       </div>
       {isDatasetView ? <H3>{activeFile?.datasetName ?? 'Dataset'}</H3> : null}
-      {isLoading ? <Spinner size={24} /> : null}
+      {databasesQuery.isLoading ? <Spinner size={24} /> : null}
       {isRootView ? (
         <section className="files-panel">
           <header className="files-panel-header">
@@ -616,7 +708,12 @@ export const DatasetsPage = () => {
             </div>
           </header>
           <div className="files-panel-body">
-            {folders.length === 0 ? (
+            {databaseErrorMessage ? (
+              <div className="files-empty">
+                <Icon icon="error" size={32} className="files-empty-icon" />
+                <Text className="files-empty-title">{databaseErrorMessage}</Text>
+              </div>
+            ) : folders.length === 0 ? (
               <div className="files-empty">
                 <Icon icon="folder-close" size={40} className="files-empty-icon" />
                 <Text className="files-empty-title">No folders yet</Text>
@@ -634,7 +731,9 @@ export const DatasetsPage = () => {
                     }}
                   >
                     <Text className="card-title">{folder.name}</Text>
-                    <Text className="card-meta">{folder.files.length} files</Text>
+                    <Text className="card-meta">
+                      {folder.datasetCount ?? 0} files
+                    </Text>
                   </Card>
                 ))}
               </div>
@@ -651,7 +750,16 @@ export const DatasetsPage = () => {
             </div>
           </header>
           <div className="files-panel-body">
-            {files.length === 0 ? (
+            {datasetsQuery.isFetching ? (
+              <div className="files-empty">
+                <Spinner size={24} />
+              </div>
+            ) : datasetErrorMessage ? (
+              <div className="files-empty">
+                <Icon icon="error" size={32} className="files-empty-icon" />
+                <Text className="files-empty-title">{datasetErrorMessage}</Text>
+              </div>
+            ) : files.length === 0 ? (
               <div className="files-empty">
                 <Icon icon="folder-open" size={40} className="files-empty-icon" />
                 <Text className="files-empty-title">This project is empty</Text>
@@ -667,7 +775,7 @@ export const DatasetsPage = () => {
                   >
                     <Text className="card-title">{file.name}</Text>
                     <Text className="card-meta">Source: {file.source}</Text>
-                    <Text className="card-meta">Updated: {file.updatedAt}</Text>
+                    <Text className="card-meta">Updated: {file.updatedLabel || file.updatedAt}</Text>
                     <Tag minimal intent="primary">{file.datasetName}</Tag>
                   </Card>
                 ))}
@@ -681,7 +789,7 @@ export const DatasetsPage = () => {
             <Text className="card-title">{activeFile.datasetName}</Text>
             <Text className="card-meta">File: {activeFile.name}</Text>
             <Text className="card-meta">Source: {activeFile.source}</Text>
-            <Text className="card-meta">Updated: {activeFile.updatedAt}</Text>
+            <Text className="card-meta">Updated: {activeFile.updatedLabel || activeFile.updatedAt}</Text>
             <Tag minimal intent="primary">{activeFile.datasetName}</Tag>
           </Card>
         </div>
@@ -695,56 +803,63 @@ export const DatasetsPage = () => {
       >
         <div className="upload-dialog-body">
           {isUploading ? (
-            isUploadComplete ? (
-              <div className="upload-complete-view">
-                <Text className="upload-complete-message">{uploadCompleteMessage}</Text>
-                <div className="upload-complete-list">
-                  {uploadFiles.map((uploadFile) => (
+            <div className="upload-progress-view">
+              {uploadFiles.length > 0 ? (
+                <div className="upload-file-list is-progress">
+                  {uploadFiles.map((uploadFile) => {
+                    const status = getUploadStatus(uploadFile)
+                    return (
+                      <div key={uploadFile.id} className="upload-file-row">
+                        <div className="upload-file-meta">
+                          <span className={`upload-status ${status}`}>
+                            {status === 'complete' ? (
+                              <Icon icon="tick" size={12} />
+                            ) : status === 'error' ? (
+                              <Icon icon="error" size={12} />
+                            ) : status === 'active' ? (
+                              <span className="upload-status-dot" />
+                            ) : null}
+                          </span>
+                          <Icon icon="document" className="upload-file-icon" />
+                          <Text className="upload-file-name">{uploadFile.file.name}</Text>
+                        </div>
+                        <div className="upload-file-actions">
+                          <Text className="upload-file-size">{formatFileSize(uploadFile.file.size)}</Text>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : null}
+              <div className="upload-progress">
+                <div className="upload-progress-bar">
+                  <span className="upload-progress-fill" style={{ width: `${uploadProgressPercent}%` }} />
+                </div>
+                <Text className="upload-progress-text">{uploadProgressText}</Text>
+              </div>
+            </div>
+          ) : isUploadComplete ? (
+            <div className="upload-complete-view">
+              <Text className="upload-complete-message">{uploadCompleteMessage}</Text>
+              {uploadFailureMessage ? (
+                <Text className="upload-complete-warning">{uploadFailureMessage}</Text>
+              ) : null}
+              <div className="upload-complete-list">
+                {uploadFiles
+                  .filter((uploadFile) => uploadFile.status === 'complete')
+                  .map((uploadFile) => (
                     <div key={uploadFile.id} className="upload-complete-row">
                       <Icon icon="document" className="upload-complete-icon" />
-                      <Text className="upload-complete-name">{getResourceName(uploadFile.file.name)}</Text>
+                      <Text className="upload-complete-name">
+                        {uploadFile.datasetName || getResourceName(uploadFile.file.name)}
+                      </Text>
                     </div>
                   ))}
-                </div>
-                <div className="upload-dialog-footer">
-                  <Button intent="primary" text="Done" onClick={handleCloseUploadDialog} />
-                </div>
               </div>
-            ) : (
-              <div className="upload-progress-view">
-                {uploadFiles.length > 0 ? (
-                  <div className="upload-file-list is-progress">
-                    {uploadFiles.map((uploadFile, index) => {
-                      const status = getUploadStatus(index)
-                      return (
-                        <div key={uploadFile.id} className="upload-file-row">
-                          <div className="upload-file-meta">
-                            <span className={`upload-status ${status}`}>
-                              {status === 'complete' ? (
-                                <Icon icon="tick" size={12} />
-                              ) : status === 'active' ? (
-                                <span className="upload-status-dot" />
-                              ) : null}
-                            </span>
-                            <Icon icon="document" className="upload-file-icon" />
-                            <Text className="upload-file-name">{uploadFile.file.name}</Text>
-                          </div>
-                          <div className="upload-file-actions">
-                            <Text className="upload-file-size">{formatFileSize(uploadFile.file.size)}</Text>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : null}
-                <div className="upload-progress">
-                  <div className="upload-progress-bar">
-                    <span className="upload-progress-fill" style={{ width: `${uploadProgressPercent}%` }} />
-                  </div>
-                  <Text className="upload-progress-text">{uploadProgressText}</Text>
-                </div>
+              <div className="upload-dialog-footer">
+                <Button intent="primary" text="Done" onClick={handleCloseUploadDialog} />
               </div>
-            )
+            </div>
           ) : (
             <>
               <div
@@ -797,10 +912,13 @@ export const DatasetsPage = () => {
                   ))}
                 </div>
               ) : null}
+              {uploadError ? (
+                <Text className="upload-error">{uploadError}</Text>
+              ) : null}
               <RadioGroup
                 className="upload-options"
                 selectedValue={uploadMode}
-                onChange={(event) => setUploadMode(event.currentTarget.value)}
+                onChange={(event) => setUploadMode(event.currentTarget.value as UploadMode)}
               >
                 {uploadOptions.map((option) => (
                   <Radio
@@ -881,21 +999,27 @@ export const DatasetsPage = () => {
         icon="folder-new"
         className="folder-dialog bp5-dark"
       >
-        <div className="folder-dialog-body">
-          <FormGroup label="Folder name" labelFor="folder-name-input">
-            <InputGroup
-              id="folder-name-input"
-              placeholder="Enter folder name"
-              value={newFolderName}
-              autoFocus
-              onChange={(event) => setNewFolderName(event.currentTarget.value)}
-            />
-          </FormGroup>
-          <div className="folder-dialog-footer">
-            <Button minimal text="Cancel" onClick={handleCloseCreateFolder} />
-            <Button intent="success" text="Create" onClick={handleCreateFolder} disabled={isCreateFolderDisabled} />
+          <div className="folder-dialog-body">
+            <FormGroup label="Folder name" labelFor="folder-name-input">
+              <InputGroup
+                id="folder-name-input"
+                placeholder="Enter folder name"
+                value={newFolderName}
+                autoFocus
+                onChange={(event) => setNewFolderName(event.currentTarget.value)}
+              />
+            </FormGroup>
+            {createFolderError ? <Text className="upload-error">{createFolderError}</Text> : null}
+            <div className="folder-dialog-footer">
+              <Button minimal text="Cancel" onClick={handleCloseCreateFolder} />
+              <Button
+                intent="success"
+                text={isCreatingFolder ? 'Creating...' : 'Create'}
+                onClick={handleCreateFolder}
+                disabled={isCreateFolderDisabled || isCreatingFolder}
+              />
+            </div>
           </div>
-        </div>
       </Dialog>
     </div>
   )

@@ -54,7 +54,7 @@ export const AppShell = () => {
     <div className="app-shell">
       <div className={`app-body ${isRailExpanded ? 'is-expanded' : ''}`}>
         <SidebarRail items={railItems} onHoverChange={setRailExpanded} />
-        <main className="main">{content}</main>
+        <main className={`main ${activeNav === 'pipeline' ? 'is-pipeline' : ''}`}>{content}</main>
       </div>
     </div>
   )
