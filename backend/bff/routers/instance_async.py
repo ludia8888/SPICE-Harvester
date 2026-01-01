@@ -34,7 +34,7 @@ from shared.utils.language import get_accept_language
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/database/{db_name}/instances", tags=["Async Instance Management"])
+router = APIRouter(prefix="/databases/{db_name}/instances", tags=["Async Instance Management"])
 
 def _raise_httpx_as_http_exception(exc: httpx.HTTPStatusError) -> None:
     resp = getattr(exc, "response", None)

@@ -21,7 +21,7 @@ from shared.security.input_sanitizer import SecurityViolationError, sanitize_inp
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/database/{db_name}/mappings", tags=["Label Mappings"])
+router = APIRouter(prefix="/databases/{db_name}/mappings", tags=["Label Mappings"])
 
 
 class MappingImportPayload(BaseModel):

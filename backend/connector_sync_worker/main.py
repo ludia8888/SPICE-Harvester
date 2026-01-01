@@ -209,7 +209,7 @@ class ConnectorSyncWorker:
         if not self.http:
             raise RuntimeError("HTTP client not initialized")
         bff_url = ServiceConfig.get_bff_url()
-        url = f"{bff_url}/api/v1/database/{db_name}/ontology/{class_label}/schema"
+        url = f"{bff_url}/api/v1/databases/{db_name}/ontology/{class_label}/schema"
         headers = self._bff_scope_headers(db_name=db_name)
         resp = await self.http.get(url, params={"format": "json", "branch": branch}, headers=headers or None)
         resp.raise_for_status()
@@ -346,7 +346,7 @@ class ConnectorSyncWorker:
             raise ValueError(f"No valid instances to import (errors={len(errors)})")
 
         bff_url = ServiceConfig.get_bff_url()
-        url = f"{bff_url}/api/v1/database/{db_name}/instances/{class_label}/bulk-create"
+        url = f"{bff_url}/api/v1/databases/{db_name}/instances/{class_label}/bulk-create"
         payload = {
             "instances": instances,
             "metadata": {

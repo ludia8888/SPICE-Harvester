@@ -178,7 +178,7 @@ export default function (data) {
   const submitStart = Date.now();
   const res = http.post(
     api(
-      `/database/${data.dbName}/instances/${encodeURIComponent(
+      `/databases/${data.dbName}/instances/${encodeURIComponent(
         data.classId
       )}/create?branch=${encodeURIComponent(data.branch)}`
     ),

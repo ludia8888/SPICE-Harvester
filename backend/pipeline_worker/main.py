@@ -73,6 +73,7 @@ from shared.security.auth_utils import get_expected_token
 from shared.utils.env_utils import parse_bool_env, parse_int_env
 from shared.utils.path_utils import safe_lakefs_ref
 from shared.utils.s3_uri import build_s3_uri, parse_s3_uri
+from shared.utils.schema_hash import compute_schema_hash
 from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
@@ -269,8 +270,78 @@ def _max_watermark_from_snapshots(
     return max_value
 
 
+def _collect_input_commit_map(input_snapshots: list[dict[str, Any]]) -> Dict[str, str]:
+    commits: Dict[str, str] = {}
+    for snapshot in input_snapshots or []:
+        if not isinstance(snapshot, dict):
+            continue
+        node_id = str(snapshot.get("node_id") or "").strip()
+        commit_id = str(snapshot.get("lakefs_commit_id") or "").strip()
+        if node_id and commit_id:
+            commits[node_id] = commit_id
+    return commits
+
+
+def _inputs_diff_empty(input_snapshots: list[dict[str, Any]]) -> bool:
+    diff_snapshots = [
+        snapshot
+        for snapshot in input_snapshots or []
+        if isinstance(snapshot, dict) and snapshot.get("diff_requested")
+    ]
+    if not diff_snapshots:
+        return False
+    return all(bool(snapshot.get("diff_ok")) and bool(snapshot.get("diff_empty")) for snapshot in diff_snapshots)
+
+
 def _resolve_execution_semantics(*, job: PipelineJob, definition: Dict[str, Any]) -> str:
     return _resolve_pipeline_execution_mode(pipeline_type=str(job.pipeline_type or ""), definition=definition)
+
+
+def _resolve_output_format(*, definition: Dict[str, Any], output_metadata: Dict[str, Any]) -> str:
+    settings = definition.get("settings") if isinstance(definition.get("settings"), dict) else {}
+    for key in ("outputFormat", "output_format", "format"):
+        raw = output_metadata.get(key)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip().lower()
+        raw = settings.get(key)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip().lower()
+        raw = definition.get(key)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip().lower()
+    return "parquet"
+
+
+def _resolve_partition_columns(
+    *,
+    definition: Dict[str, Any],
+    output_metadata: Dict[str, Any],
+) -> List[str]:
+    settings = definition.get("settings") if isinstance(definition.get("settings"), dict) else {}
+    raw = (
+        output_metadata.get("partitionBy")
+        or output_metadata.get("partition_by")
+        or settings.get("partitionBy")
+        or settings.get("partition_by")
+        or definition.get("partitionBy")
+        or definition.get("partition_by")
+    )
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        values = [item.strip() for item in raw.split(",") if item.strip()]
+    elif isinstance(raw, list):
+        values = [str(item).strip() for item in raw if str(item).strip()]
+    else:
+        return []
+    seen: set[str] = set()
+    deduped: List[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
 
 
 class PipelineWorker:
@@ -716,6 +787,7 @@ class PipelineWorker:
             raise RuntimeError("Storage service not available")
 
         definition = job.definition_json or {}
+        preview_meta = definition.get("__preview_meta__") or {}
         tables: Dict[str, DataFrame] = {}
         nodes = normalize_nodes(definition.get("nodes"))
         edges = normalize_edges(definition.get("edges"))
@@ -723,6 +795,7 @@ class PipelineWorker:
         incoming = build_incoming(edges)
         parameters = normalize_parameters(definition.get("parameters"))
         input_snapshots: list[dict[str, Any]] = []
+        input_sampling: dict[str, Any] = {}
         input_commit_payload: Optional[list[dict[str, Any]]] = None
         temp_dirs: list[str] = []
         output_nodes = {
@@ -768,7 +841,8 @@ class PipelineWorker:
             metadata=definition.get("settings") if isinstance(definition.get("settings"), dict) else {},
         )
         previous_watermark: Optional[Any] = None
-        if execution_semantics in {"incremental", "streaming"} and resolved_pipeline_id and watermark_column:
+        previous_input_commits: Dict[str, str] = {}
+        if execution_semantics in {"incremental", "streaming"} and resolved_pipeline_id:
             try:
                 state = await self.pipeline_registry.get_watermarks(
                     pipeline_id=resolved_pipeline_id,
@@ -787,10 +861,24 @@ class PipelineWorker:
                     if "watermarkValue" in state
                     else state.get("value")
                 )
-                if stored_column and stored_column != watermark_column:
-                    previous_watermark = None
-                else:
-                    previous_watermark = stored_value
+                if watermark_column:
+                    if stored_column and stored_column != watermark_column:
+                        previous_watermark = None
+                    else:
+                        previous_watermark = stored_value
+                commits_payload = (
+                    state.get("input_commits")
+                    if isinstance(state, dict)
+                    else None
+                )
+                if commits_payload is None and isinstance(state, dict):
+                    commits_payload = state.get("inputCommits")
+                if isinstance(commits_payload, dict):
+                    for key, value in commits_payload.items():
+                        node_key = str(key or "").strip()
+                        commit_value = str(value or "").strip()
+                        if node_key and commit_value:
+                            previous_input_commits[node_key] = commit_value
             except Exception as exc:
                 logger.warning("Failed to load pipeline watermarks (pipeline_id=%s): %s", resolved_pipeline_id, exc)
 
@@ -872,6 +960,8 @@ class PipelineWorker:
         is_preview = job_mode == "preview"
         is_build = job_mode == "build"
         run_mode = "preview" if is_preview else "build" if is_build else "deploy"
+        preview_sampling_seed = self._preview_sampling_seed(job.job_id)
+        use_lakefs_diff = parse_bool_env("PIPELINE_LAKEFS_DIFF_ENABLED", True)
 
         async def emit_job_event(
             *,
@@ -996,9 +1086,26 @@ class PipelineWorker:
                         job.branch,
                         node_id=node_id,
                         input_snapshots=input_snapshots,
+                        previous_commit_id=previous_input_commits.get(node_id),
+                        use_lakefs_diff=use_lakefs_diff and execution_semantics in {"incremental", "streaming"},
                         watermark_column=watermark_column if execution_semantics in {"incremental", "streaming"} else None,
                         watermark_after=previous_watermark if execution_semantics in {"incremental", "streaming"} else None,
                     )
+                    if is_preview:
+                        sampling_strategy = self._resolve_sampling_strategy(metadata, preview_meta)
+                        if sampling_strategy:
+                            df = self._apply_sampling_strategy(
+                                df,
+                                sampling_strategy,
+                                node_id=node_id,
+                                seed=preview_sampling_seed,
+                            )
+                            input_sampling[node_id] = sampling_strategy
+                            self._attach_sampling_snapshot(
+                                input_snapshots,
+                                node_id=node_id,
+                                sampling_strategy=sampling_strategy,
+                            )
                 elif node_type == "output":
                     df = inputs[0] if inputs else self._empty_dataframe()
                 else:
@@ -1040,6 +1147,7 @@ class PipelineWorker:
                 "snapshots": input_snapshots,
                 "lakefs_commits": input_commit_payload,
             }
+            diff_empty_inputs = _inputs_diff_empty(input_snapshots)
             preview_limit = int(job.preview_limit or 200)
             preview_limit = max(1, min(500, preview_limit))
 
@@ -1076,7 +1184,51 @@ class PipelineWorker:
                     logger.error("Pipeline schema contract failed: %s", contract_errors)
                     return
 
-                expectation_errors = self._validate_expectations(output_df, definition.get("expectations") or [])
+                output_meta = nodes.get(primary_id, {}) if primary_id else {}
+                output_metadata = output_meta.get("metadata") or {}
+                output_name = (
+                    output_metadata.get("outputName")
+                    or output_metadata.get("datasetName")
+                    or output_meta.get("title")
+                    or (primary_id or "preview_output")
+                )
+                pk_semantics = self._resolve_pk_semantics(
+                    execution_semantics=execution_semantics,
+                    definition=definition,
+                    output_metadata=output_metadata,
+                )
+                delete_column = self._resolve_delete_column(
+                    definition=definition,
+                    output_metadata=output_metadata,
+                )
+                pk_columns = self._resolve_pk_columns(
+                    definition=definition,
+                    output_metadata=output_metadata,
+                    output_name=output_name,
+                    output_node_id=primary_id,
+                    declared_outputs=declared_outputs,
+                )
+                available_columns = set(output_df.columns)
+                pk_semantic_errors = self._validate_pk_semantics(
+                    output_df,
+                    pk_semantics=pk_semantics,
+                    pk_columns=pk_columns,
+                    delete_column=delete_column,
+                )
+                expectation_errors = pk_semantic_errors + self._validate_expectations(
+                    output_df,
+                    self._build_expectations_with_pk(
+                        definition=definition,
+                        output_metadata=output_metadata,
+                        output_name=output_name,
+                        output_node_id=primary_id,
+                        declared_outputs=declared_outputs,
+                        pk_semantics=pk_semantics,
+                        delete_column=delete_column,
+                        pk_columns=pk_columns,
+                        available_columns=available_columns,
+                    ),
+                )
                 sample_rows = output_df.limit(preview_limit).collect()
                 output_sample = [row.asDict(recursive=True) for row in sample_rows]
                 column_stats = compute_column_stats(rows=output_sample, columns=schema_columns)
@@ -1086,7 +1238,10 @@ class PipelineWorker:
                     "job_id": job.job_id,
                     "row_count": row_count,
                     "sample_row_count": len(output_sample),
-                    "sampling_strategy": {"type": "limit", "limit": preview_limit},
+                    "sampling_strategy": {
+                        "output": {"type": "limit", "limit": preview_limit},
+                        **({"input": input_sampling} if input_sampling else {}),
+                    },
                     "column_stats": column_stats,
                     "definition_hash": job.definition_hash,
                     "branch": job.branch or "main",
@@ -1101,14 +1256,6 @@ class PipelineWorker:
                     sample_payload["node_id"] = primary_id
                 if expectation_errors:
                     sample_payload["expectations"] = expectation_errors
-                output_meta = nodes.get(primary_id, {}) if primary_id else {}
-                output_metadata = output_meta.get("metadata") or {}
-                output_name = (
-                    output_metadata.get("outputName")
-                    or output_metadata.get("datasetName")
-                    or output_meta.get("title")
-                    or (primary_id or "preview_output")
-                )
                 preview_outputs = [
                     {
                         "node_id": primary_id,
@@ -1128,7 +1275,10 @@ class PipelineWorker:
                     status=artifact_status,
                     outputs=preview_outputs,
                     inputs=inputs_payload,
-                    sampling_strategy={"type": "limit", "limit": preview_limit},
+                    sampling_strategy={
+                        "output": {"type": "limit", "limit": preview_limit},
+                        **({"input": input_sampling} if input_sampling else {}),
+                    },
                     errors=expectation_errors if expectation_errors else None,
                 )
                 if artifact_id:
@@ -1162,31 +1312,19 @@ class PipelineWorker:
                     lock.raise_if_lost()
                 artifact_repo = _resolve_lakefs_repository()
                 await self.storage.create_bucket(artifact_repo)
-                build_outputs: List[Dict[str, Any]] = []
                 output_write_mode = "append" if execution_semantics in {"incremental", "streaming"} else "overwrite"
-
                 base_branch = safe_lakefs_ref(job.branch or "main")
-                build_branch = safe_lakefs_ref(f"build/{pipeline_ref}/{run_ref}")
-                try:
-                    await self.lakefs_client.create_branch(
-                        repository=artifact_repo,
-                        name=build_branch,
-                        source=base_branch,
-                    )
-                except LakeFSConflictError:
-                    build_branch = safe_lakefs_ref(f"build/{pipeline_ref}/{run_ref}/{uuid4().hex[:8]}")
-                    await self.lakefs_client.create_branch(
-                        repository=artifact_repo,
-                        name=build_branch,
-                        source=base_branch,
-                    )
-
+                output_work: List[Dict[str, Any]] = []
+                has_output_rows = False
+                no_op_candidate = execution_semantics in {"incremental", "streaming"} and diff_empty_inputs
                 for node_id in target_node_ids:
                     if lock:
                         lock.raise_if_lost()
                     output_df = tables.get(node_id, self._empty_dataframe())
                     schema_columns = _schema_from_dataframe(output_df)
                     delta_row_count = int(output_df.count())
+                    if delta_row_count > 0:
+                        has_output_rows = True
                     schema_contract = definition.get("schemaContract") or definition.get("schema_contract") or []
                     contract_errors = self._validate_schema_contract(output_df, schema_contract)
                     if contract_errors:
@@ -1209,7 +1347,51 @@ class PipelineWorker:
                         logger.error("Pipeline schema contract failed (build): %s", contract_errors)
                         return
 
-                    expectation_errors = self._validate_expectations(output_df, definition.get("expectations") or [])
+                    output_meta = output_nodes.get(node_id) or {}
+                    metadata = output_meta.get("metadata") or {}
+                    output_name = (
+                        metadata.get("outputName")
+                        or metadata.get("datasetName")
+                        or output_meta.get("title")
+                        or job.output_dataset_name
+                    )
+                    pk_semantics = self._resolve_pk_semantics(
+                        execution_semantics=execution_semantics,
+                        definition=definition,
+                        output_metadata=metadata,
+                    )
+                    delete_column = self._resolve_delete_column(
+                        definition=definition,
+                        output_metadata=metadata,
+                    )
+                    pk_columns = self._resolve_pk_columns(
+                        definition=definition,
+                        output_metadata=metadata,
+                        output_name=output_name,
+                        output_node_id=node_id,
+                        declared_outputs=declared_outputs,
+                    )
+                    available_columns = set(output_df.columns)
+                    pk_semantic_errors = self._validate_pk_semantics(
+                        output_df,
+                        pk_semantics=pk_semantics,
+                        pk_columns=pk_columns,
+                        delete_column=delete_column,
+                    )
+                    expectation_errors = pk_semantic_errors + self._validate_expectations(
+                        output_df,
+                        self._build_expectations_with_pk(
+                            definition=definition,
+                            output_metadata=metadata,
+                            output_name=output_name,
+                            output_node_id=node_id,
+                            declared_outputs=declared_outputs,
+                            pk_semantics=pk_semantics,
+                            delete_column=delete_column,
+                            pk_columns=pk_columns,
+                            available_columns=available_columns,
+                        ),
+                    )
                     if expectation_errors:
                         await record_run(
                             job_id=job.job_id,
@@ -1230,23 +1412,100 @@ class PipelineWorker:
                         logger.error("Pipeline expectations failed (build): %s", expectation_errors)
                         return
 
-                    output_meta = output_nodes.get(node_id) or {}
-                    metadata = output_meta.get("metadata") or {}
-                    output_name = (
-                        metadata.get("outputName")
-                        or metadata.get("datasetName")
-                        or output_meta.get("title")
-                        or job.output_dataset_name
+                    output_format = _resolve_output_format(definition=definition, output_metadata=metadata)
+                    partition_cols = _resolve_partition_columns(
+                        definition=definition,
+                        output_metadata=metadata,
                     )
                     dataset_name = str(output_name or job.output_dataset_name)
                     schema_hash = _hash_schema_columns(schema_columns)
+                    sample_rows = output_df.limit(preview_limit).collect()
+                    output_sample = [row.asDict(recursive=True) for row in sample_rows]
+                    column_stats = compute_column_stats(rows=output_sample, columns=schema_columns)
 
-                    row_count = delta_row_count
+                    safe_name = dataset_name.replace(" ", "_")
+                    artifact_prefix = f"pipelines/{job.db_name}/{pipeline_ref}/{safe_name}"
+                    output_work.append(
+                        {
+                            "node_id": node_id,
+                            "output_name": output_name,
+                            "dataset_name": dataset_name,
+                            "output_df": output_df,
+                            "output_format": output_format,
+                            "partition_columns": partition_cols,
+                            "artifact_prefix": artifact_prefix,
+                            "schema_columns": schema_columns,
+                            "schema_hash": schema_hash,
+                            "delta_row_count": delta_row_count,
+                            "output_sample": output_sample,
+                            "column_stats": column_stats,
+                        }
+                    )
+
+                if no_op_candidate and not has_output_rows:
+                    no_op_payload = {
+                        "outputs": [],
+                        "definition_hash": job.definition_hash,
+                        "branch": job.branch or "main",
+                        "execution_semantics": execution_semantics,
+                        "pipeline_spec_hash": pipeline_spec_hash,
+                        "pipeline_spec_commit_id": pipeline_spec_commit_id,
+                        "code_version": code_version,
+                        "spark_conf": spark_conf,
+                        "no_op": True,
+                        "input_snapshots": input_snapshots,
+                    }
+                    await record_build(status="SUCCESS", output_json=no_op_payload)
+                    await record_run(
+                        job_id=job.job_id,
+                        mode="build",
+                        status="SUCCESS",
+                        node_id=job.node_id,
+                        input_lakefs_commits=input_commit_payload,
+                        output_json=no_op_payload,
+                        finished_at=utcnow(),
+                    )
+                    await record_artifact(
+                        status="SUCCESS",
+                        outputs=[],
+                        inputs=inputs_payload,
+                    )
+                    await emit_job_event(status="SUCCESS", output={"no_op": True, "outputs": []})
+                    return
+
+                build_branch = safe_lakefs_ref(f"build/{pipeline_ref}/{run_ref}")
+                try:
+                    await self.lakefs_client.create_branch(
+                        repository=artifact_repo,
+                        name=build_branch,
+                        source=base_branch,
+                    )
+                except LakeFSConflictError:
+                    build_branch = safe_lakefs_ref(f"build/{pipeline_ref}/{run_ref}/{uuid4().hex[:8]}")
+                    await self.lakefs_client.create_branch(
+                        repository=artifact_repo,
+                        name=build_branch,
+                        source=base_branch,
+                    )
+
+                build_outputs: List[Dict[str, Any]] = []
+                for item in output_work:
+                    output_df = item["output_df"]
+                    artifact_key = await self._materialize_output_dataframe(
+                        output_df,
+                        artifact_bucket=artifact_repo,
+                        prefix=f"{build_branch}/{item['artifact_prefix']}",
+                        write_mode=output_write_mode,
+                        file_prefix=job.job_id,
+                        file_format=item["output_format"],
+                        partition_cols=item["partition_columns"],
+                    )
+                    row_count = int(item["delta_row_count"])
                     if output_write_mode == "append":
                         try:
                             existing_dataset = await self.dataset_registry.get_dataset_by_name(
                                 db_name=job.db_name,
-                                name=dataset_name,
+                                name=item["dataset_name"],
                                 branch=base_branch,
                             )
                             if existing_dataset:
@@ -1254,38 +1513,26 @@ class PipelineWorker:
                                     dataset_id=existing_dataset.dataset_id
                                 )
                                 if existing_version and existing_version.row_count is not None:
-                                    row_count = int(existing_version.row_count) + delta_row_count
+                                    row_count = int(existing_version.row_count) + int(item["delta_row_count"])
                         except Exception as exc:
                             logger.debug("Failed to resolve previous row_count for incremental build: %s", exc)
-
-                    sample_rows = output_df.limit(preview_limit).collect()
-                    output_sample = [row.asDict(recursive=True) for row in sample_rows]
-                    column_stats = compute_column_stats(rows=output_sample, columns=schema_columns)
-
-                    safe_name = dataset_name.replace(" ", "_")
-                    artifact_prefix = f"pipelines/{job.db_name}/{pipeline_ref}/{safe_name}"
-                    artifact_key = await self._materialize_output_dataframe(
-                        output_df,
-                        artifact_bucket=artifact_repo,
-                        prefix=f"{build_branch}/{artifact_prefix}",
-                        write_mode=output_write_mode,
-                        file_prefix=job.job_id,
-                    )
                     build_outputs.append(
                         {
-                            "node_id": node_id,
-                            "output_name": output_name,
-                            "dataset_name": dataset_name,
+                            "node_id": item["node_id"],
+                            "output_name": item["output_name"],
+                            "dataset_name": item["dataset_name"],
                             "artifact_key": artifact_key,
-                            "artifact_prefix": artifact_prefix,
+                            "artifact_prefix": item["artifact_prefix"],
+                            "output_format": item["output_format"],
+                            "partition_columns": item["partition_columns"],
                             "row_count": row_count,
-                            "delta_row_count": delta_row_count if output_write_mode == "append" else None,
-                            "columns": schema_columns,
-                            "schema_hash": schema_hash,
-                            "schema_json": {"columns": schema_columns},
-                            "rows": output_sample,
-                            "sample_row_count": len(output_sample),
-                            "column_stats": column_stats,
+                            "delta_row_count": item["delta_row_count"] if output_write_mode == "append" else None,
+                            "columns": item["schema_columns"],
+                            "schema_hash": item["schema_hash"],
+                            "schema_json": {"columns": item["schema_columns"]},
+                            "rows": item["output_sample"],
+                            "sample_row_count": len(item["output_sample"]),
+                            "column_stats": item["column_stats"],
                         }
                     )
 
@@ -1377,29 +1624,18 @@ class PipelineWorker:
             await self.storage.create_bucket(artifact_repo)
             base_branch = safe_lakefs_ref(job.branch or "main")
 
-            run_branch = safe_lakefs_ref(f"run/{pipeline_ref}/{run_ref}")
-            try:
-                await self.lakefs_client.create_branch(
-                    repository=artifact_repo,
-                    name=run_branch,
-                    source=base_branch,
-                )
-            except LakeFSConflictError:
-                run_branch = safe_lakefs_ref(f"run/{pipeline_ref}/{run_ref}/{uuid4().hex[:8]}")
-                await self.lakefs_client.create_branch(
-                    repository=artifact_repo,
-                    name=run_branch,
-                    source=base_branch,
-                )
-
-            staged_outputs: List[Dict[str, Any]] = []
             output_write_mode = "append" if execution_semantics in {"incremental", "streaming"} else "overwrite"
+            output_work: List[Dict[str, Any]] = []
+            has_output_rows = False
+            no_op_candidate = execution_semantics in {"incremental", "streaming"} and diff_empty_inputs
             for node_id in target_node_ids:
                 if lock:
                     lock.raise_if_lost()
                 output_df = tables.get(node_id, self._empty_dataframe())
                 schema_columns = _schema_from_dataframe(output_df)
                 delta_row_count = int(output_df.count())
+                if delta_row_count > 0:
+                    has_output_rows = True
                 schema_contract = definition.get("schemaContract") or definition.get("schema_contract") or []
                 contract_errors = self._validate_schema_contract(output_df, schema_contract)
                 if contract_errors:
@@ -1426,7 +1662,51 @@ class PipelineWorker:
                     logger.error("Pipeline schema contract failed: %s", contract_errors)
                     return
 
-                expectation_errors = self._validate_expectations(output_df, definition.get("expectations") or [])
+                output_meta = output_nodes.get(node_id) or {}
+                metadata = output_meta.get("metadata") or {}
+                output_name = (
+                    metadata.get("outputName")
+                    or metadata.get("datasetName")
+                    or output_meta.get("title")
+                    or job.output_dataset_name
+                )
+                pk_semantics = self._resolve_pk_semantics(
+                    execution_semantics=execution_semantics,
+                    definition=definition,
+                    output_metadata=metadata,
+                )
+                delete_column = self._resolve_delete_column(
+                    definition=definition,
+                    output_metadata=metadata,
+                )
+                pk_columns = self._resolve_pk_columns(
+                    definition=definition,
+                    output_metadata=metadata,
+                    output_name=output_name,
+                    output_node_id=node_id,
+                    declared_outputs=declared_outputs,
+                )
+                available_columns = set(output_df.columns)
+                pk_semantic_errors = self._validate_pk_semantics(
+                    output_df,
+                    pk_semantics=pk_semantics,
+                    pk_columns=pk_columns,
+                    delete_column=delete_column,
+                )
+                expectation_errors = pk_semantic_errors + self._validate_expectations(
+                    output_df,
+                    self._build_expectations_with_pk(
+                        definition=definition,
+                        output_metadata=metadata,
+                        output_name=output_name,
+                        output_node_id=node_id,
+                        declared_outputs=declared_outputs,
+                        pk_semantics=pk_semantics,
+                        delete_column=delete_column,
+                        pk_columns=pk_columns,
+                        available_columns=available_columns,
+                    ),
+                )
                 if expectation_errors:
                     await record_build(
                         status="FAILED",
@@ -1454,38 +1734,99 @@ class PipelineWorker:
                 sample_rows = output_df.limit(preview_limit).collect()
                 output_sample = [row.asDict(recursive=True) for row in sample_rows]
 
-                output_meta = output_nodes.get(node_id) or {}
-                metadata = output_meta.get("metadata") or {}
-                output_name = (
-                    metadata.get("outputName")
-                    or metadata.get("datasetName")
-                    or output_meta.get("title")
-                    or job.output_dataset_name
+                output_format = _resolve_output_format(definition=definition, output_metadata=metadata)
+                partition_cols = _resolve_partition_columns(
+                    definition=definition,
+                    output_metadata=metadata,
                 )
                 dataset_name = str(output_name or job.output_dataset_name)
                 safe_name = dataset_name.replace(" ", "_")
                 artifact_prefix = f"pipelines/{job.db_name}/{pipeline_ref}/{safe_name}"
-                branch_prefix = f"{run_branch}/{artifact_prefix}"
-
-                await self._materialize_output_dataframe(
-                    output_df,
-                    artifact_bucket=artifact_repo,
-                    prefix=branch_prefix,
-                    write_mode=output_write_mode,
-                    file_prefix=job.job_id,
-                )
-
                 column_stats = compute_column_stats(rows=output_sample, columns=schema_columns)
-                staged_outputs.append(
+                output_work.append(
                     {
                         "node_id": node_id,
                         "dataset_name": dataset_name,
+                        "output_df": output_df,
                         "artifact_prefix": artifact_prefix,
+                        "output_format": output_format,
+                        "partition_columns": partition_cols,
                         "row_count": delta_row_count,
                         "columns": schema_columns,
                         "rows": output_sample,
                         "sample_row_count": len(output_sample),
                         "column_stats": column_stats,
+                    }
+                )
+
+            if no_op_candidate and not has_output_rows:
+                no_op_payload = {
+                    "outputs": [],
+                    "definition_hash": job.definition_hash,
+                    "branch": base_branch,
+                    "execution_semantics": execution_semantics,
+                    "pipeline_spec_hash": pipeline_spec_hash,
+                    "pipeline_spec_commit_id": pipeline_spec_commit_id,
+                    "code_version": code_version,
+                    "spark_conf": spark_conf,
+                    "no_op": True,
+                    "input_snapshots": input_snapshots,
+                }
+                await record_build(
+                    status="DEPLOYED",
+                    output_json=no_op_payload,
+                )
+                await record_run(
+                    job_id=job.job_id,
+                    mode="deploy",
+                    status="DEPLOYED",
+                    node_id=job.node_id,
+                    input_lakefs_commits=input_commit_payload,
+                    output_json=no_op_payload,
+                    finished_at=utcnow(),
+                )
+                await emit_job_event(status="DEPLOYED", output={"no_op": True, "outputs": []})
+                return
+
+            run_branch = safe_lakefs_ref(f"run/{pipeline_ref}/{run_ref}")
+            try:
+                await self.lakefs_client.create_branch(
+                    repository=artifact_repo,
+                    name=run_branch,
+                    source=base_branch,
+                )
+            except LakeFSConflictError:
+                run_branch = safe_lakefs_ref(f"run/{pipeline_ref}/{run_ref}/{uuid4().hex[:8]}")
+                await self.lakefs_client.create_branch(
+                    repository=artifact_repo,
+                    name=run_branch,
+                    source=base_branch,
+                )
+
+            staged_outputs: List[Dict[str, Any]] = []
+            for item in output_work:
+                branch_prefix = f"{run_branch}/{item['artifact_prefix']}"
+                await self._materialize_output_dataframe(
+                    item["output_df"],
+                    artifact_bucket=artifact_repo,
+                    prefix=branch_prefix,
+                    write_mode=output_write_mode,
+                    file_prefix=job.job_id,
+                    file_format=item["output_format"],
+                    partition_cols=item["partition_columns"],
+                )
+                staged_outputs.append(
+                    {
+                        "node_id": item["node_id"],
+                        "dataset_name": item["dataset_name"],
+                        "artifact_prefix": item["artifact_prefix"],
+                        "output_format": item["output_format"],
+                        "partition_columns": item["partition_columns"],
+                        "row_count": item["row_count"],
+                        "columns": item["columns"],
+                        "rows": item["rows"],
+                        "sample_row_count": item["sample_row_count"],
+                        "column_stats": item["column_stats"],
                     }
                 )
 
@@ -1635,26 +1976,31 @@ class PipelineWorker:
             if (
                 execution_semantics in {"incremental", "streaming"}
                 and resolved_pipeline_id
-                and watermark_column
                 and input_snapshots
             ):
-                next_watermark = _max_watermark_from_snapshots(
-                    input_snapshots, watermark_column=watermark_column
+                next_watermark = (
+                    _max_watermark_from_snapshots(input_snapshots, watermark_column=watermark_column)
+                    if watermark_column
+                    else None
                 )
-                if next_watermark is not None and self.pipeline_registry:
+                input_commit_map = _collect_input_commit_map(input_snapshots)
+                if (next_watermark is not None or input_commit_map) and self.pipeline_registry:
+                    watermarks_payload: Dict[str, Any] = {}
+                    if watermark_column:
+                        watermarks_payload["watermark_column"] = watermark_column
+                        if next_watermark is not None:
+                            watermarks_payload["watermark_value"] = next_watermark
+                        elif previous_watermark is not None:
+                            watermarks_payload["watermark_value"] = previous_watermark
+                    if input_commit_map:
+                        watermarks_payload["input_commits"] = input_commit_map
                     try:
                         await self.pipeline_registry.upsert_watermarks(
                             pipeline_id=resolved_pipeline_id,
                             branch=job.branch or "main",
-                            watermarks={
-                                "watermark_column": watermark_column,
-                                "watermark_value": next_watermark,
-                            },
+                            watermarks=watermarks_payload,
                         )
-                        watermark_update = {
-                            "watermark_column": watermark_column,
-                            "watermark_value": next_watermark,
-                        }
+                        watermark_update = watermarks_payload
                     except Exception as exc:
                         logger.warning(
                             "Failed to persist pipeline watermarks (pipeline_id=%s): %s",
@@ -1739,18 +2085,28 @@ class PipelineWorker:
             return None
         if not getattr(version, "artifact_key", None):
             return None
+        resolved_output_name = getattr(dataset, "name", None)
+        schema_hash = compute_schema_hash(version.sample_json.get("columns")) if isinstance(getattr(version, "sample_json", None), dict) else None
+        if not schema_hash and isinstance(getattr(dataset, "schema_json", None), dict):
+            schema_hash = compute_schema_hash(dataset.schema_json.get("columns") or [])
         mapping_spec = await self.objectify_registry.get_active_mapping_spec(
             dataset_id=dataset.dataset_id,
             dataset_branch=dataset.branch,
+            artifact_output_name=resolved_output_name,
+            schema_hash=schema_hash,
         )
         if not mapping_spec or not mapping_spec.auto_sync:
             return None
-        existing = await self.objectify_registry.find_objectify_job(
-            dataset_version_id=version.version_id,
+        dedupe_key = self.objectify_registry.build_dedupe_key(
+            dataset_id=dataset.dataset_id,
+            dataset_branch=dataset.branch,
             mapping_spec_id=mapping_spec.mapping_spec_id,
             mapping_spec_version=mapping_spec.version,
-            statuses=["QUEUED", "ENQUEUE_REQUESTED", "ENQUEUED", "RUNNING", "SUBMITTED"],
+            dataset_version_id=version.version_id,
+            artifact_id=None,
+            artifact_output_name=resolved_output_name,
         )
+        existing = await self.objectify_registry.get_objectify_job_by_dedupe_key(dedupe_key=dedupe_key)
         if existing:
             return existing.job_id
         job_id = str(uuid4())
@@ -1760,6 +2116,8 @@ class PipelineWorker:
             db_name=dataset.db_name,
             dataset_id=dataset.dataset_id,
             dataset_version_id=version.version_id,
+            artifact_output_name=resolved_output_name,
+            dedupe_key=dedupe_key,
             dataset_branch=dataset.branch,
             artifact_key=version.artifact_key or "",
             mapping_spec_id=mapping_spec.mapping_spec_id,
@@ -1786,6 +2144,8 @@ class PipelineWorker:
         prefix: str,
         write_mode: str = "overwrite",
         file_prefix: Optional[str] = None,
+        file_format: str = "parquet",
+        partition_cols: Optional[List[str]] = None,
     ) -> str:
         if not self.storage:
             raise RuntimeError("Storage service not available")
@@ -1796,6 +2156,14 @@ class PipelineWorker:
         resolved_write_mode = str(write_mode or "overwrite").strip().lower() or "overwrite"
         if resolved_write_mode not in {"overwrite", "append"}:
             raise ValueError("write_mode must be overwrite or append")
+        resolved_format = str(file_format or "parquet").strip().lower() or "parquet"
+        if resolved_format not in {"parquet", "json"}:
+            raise ValueError("file_format must be parquet or json")
+        resolved_partition_cols = [col for col in (partition_cols or []) if str(col).strip()]
+        if resolved_partition_cols:
+            missing = [col for col in resolved_partition_cols if col not in df.columns]
+            if missing:
+                raise ValueError(f"Partition columns missing from output: {', '.join(missing)}")
         # Use stable output paths in lakeFS branches:
         # - overwrite: delete old part files then write the new snapshot.
         # - append: keep old part files and upload new parts under unique keys.
@@ -1804,24 +2172,39 @@ class PipelineWorker:
         temp_dir = tempfile.mkdtemp(prefix="pipeline-output-")
         try:
             output_path = os.path.join(temp_dir, "data")
-            df.write.mode("overwrite").json(output_path)
-            part_files = _list_part_files(output_path)
+            writer = df.write.mode("overwrite")
+            if resolved_partition_cols:
+                writer = writer.partitionBy(*resolved_partition_cols)
+            if resolved_format == "parquet":
+                writer.parquet(output_path)
+            else:
+                writer.json(output_path)
+            part_files = _list_part_files(
+                output_path,
+                extensions={".parquet"} if resolved_format == "parquet" else {".json"},
+            )
             if not part_files:
                 raise FileNotFoundError("Spark output part files not found")
             unique_prefix = str(file_prefix or "").strip().replace("/", "_")
             if not unique_prefix:
                 unique_prefix = uuid4().hex[:12]
             for part_file in part_files:
-                basename = os.path.basename(part_file)
+                rel_path = os.path.relpath(part_file, output_path)
+                base_name = os.path.basename(rel_path)
+                dir_name = os.path.dirname(rel_path)
                 if resolved_write_mode == "append":
-                    basename = f"{unique_prefix}_{basename}"
-                target_key = f"{normalized_prefix}/{basename}"
+                    base_name = f"{unique_prefix}_{base_name}"
+                rel_path = os.path.join(dir_name, base_name) if dir_name else base_name
+                target_key = f"{normalized_prefix}/{rel_path.replace(os.sep, '/')}"
+                content_type = (
+                    "application/x-parquet" if resolved_format == "parquet" else "application/json"
+                )
                 with open(part_file, "rb") as handle:
                     await self.storage.save_bytes(
                         artifact_bucket,
                         target_key,
                         handle.read(),
-                        content_type="application/json",
+                        content_type=content_type,
                     )
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -1836,6 +2219,8 @@ class PipelineWorker:
         *,
         node_id: str,
         input_snapshots: Optional[list[dict[str, Any]]] = None,
+        previous_commit_id: Optional[str] = None,
+        use_lakefs_diff: bool = False,
         watermark_column: Optional[str] = None,
         watermark_after: Optional[Any] = None,
     ) -> DataFrame:
@@ -1921,6 +2306,118 @@ class PipelineWorker:
                 f"Input node {node_id} artifact_key is not a valid s3:// URI: {version.artifact_key}"
             )
         bucket, key = parsed
+        current_commit_id = str(version.lakefs_commit_id or "").strip()
+        artifact_prefix = self._strip_commit_prefix(key, current_commit_id)
+        diff_requested = bool(
+            use_lakefs_diff and previous_commit_id and current_commit_id and self.lakefs_client
+        )
+        if diff_requested:
+            diff_paths: List[str] = []
+            diff_ok = True
+            if previous_commit_id != current_commit_id:
+                diff_paths, diff_ok = await self._list_lakefs_diff_paths(
+                    repository=bucket,
+                    ref=current_commit_id,
+                    since=previous_commit_id,
+                    prefix=artifact_prefix,
+                    node_id=node_id,
+                )
+            diff_paths_count = len(diff_paths)
+            parquet_paths = [path for path in diff_paths if path.endswith(".parquet")]
+            if snapshot is not None:
+                snapshot.update(
+                    {
+                        "previous_commit_id": previous_commit_id,
+                        "diff_requested": True,
+                        "diff_ok": diff_ok,
+                        "diff_paths_count": diff_paths_count,
+                        "diff_empty": bool(diff_ok and diff_paths_count == 0),
+                    }
+                )
+            if diff_ok and diff_paths_count == 0:
+                if snapshot is not None:
+                    input_snapshots.append(snapshot)
+                return self._empty_dataframe()
+            if parquet_paths:
+                df = await self._load_parquet_keys_dataframe(
+                    bucket=bucket,
+                    keys=[f"{current_commit_id}/{path.lstrip('/')}" for path in parquet_paths],
+                    temp_dirs=temp_dirs,
+                    prefix=f"{current_commit_id}/{artifact_prefix}".rstrip("/"),
+                )
+                if snapshot is not None:
+                    snapshot["diff_used"] = True
+                    snapshot["diff_parquet_paths"] = len(parquet_paths)
+                resolved_watermark_column = str(watermark_column or "").strip()
+                if resolved_watermark_column:
+                    if resolved_watermark_column not in df.columns:
+                        raise ValueError(
+                            f"Input node {node_id} is missing watermark column '{resolved_watermark_column}'"
+                        )
+                    if watermark_after is not None:
+                        df = df.filter(F.col(resolved_watermark_column) > F.lit(watermark_after))
+                    if input_snapshots is not None:
+                        snapshot = {
+                            "node_id": node_id,
+                            "dataset_id": dataset.dataset_id,
+                            "dataset_name": dataset.name,
+                            "dataset_branch": resolved_branch or dataset.branch or requested_branch,
+                            "requested_dataset_branch": requested_branch,
+                            "used_fallback": bool(
+                                (resolved_branch or dataset.branch or requested_branch) != requested_branch
+                            ),
+                            "lakefs_commit_id": current_commit_id,
+                            "previous_commit_id": previous_commit_id,
+                            "version_id": version.version_id,
+                            "artifact_key": version.artifact_key,
+                            "diff_requested": True,
+                            "diff_ok": diff_ok,
+                            "diff_paths_count": diff_paths_count,
+                            "diff_empty": bool(diff_ok and diff_paths_count == 0),
+                            "diff_used": True,
+                            "diff_parquet_paths": len(parquet_paths),
+                        }
+                        snapshot["watermark_column"] = resolved_watermark_column
+                        if watermark_after is not None:
+                            snapshot["watermark_after"] = watermark_after
+                        try:
+                            watermark_max = df.agg(
+                                F.max(F.col(resolved_watermark_column)).alias("watermark_max")
+                            ).collect()[0]["watermark_max"]
+                        except Exception:
+                            watermark_max = None
+                        snapshot["watermark_max"] = watermark_max
+                        input_snapshots.append(snapshot)
+                elif input_snapshots is not None:
+                    input_snapshots.append(
+                        {
+                            "node_id": node_id,
+                            "dataset_id": dataset.dataset_id,
+                            "dataset_name": dataset.name,
+                            "dataset_branch": resolved_branch or dataset.branch or requested_branch,
+                            "requested_dataset_branch": requested_branch,
+                            "used_fallback": bool(
+                                (resolved_branch or dataset.branch or requested_branch) != requested_branch
+                            ),
+                            "lakefs_commit_id": current_commit_id,
+                            "previous_commit_id": previous_commit_id,
+                            "version_id": version.version_id,
+                            "artifact_key": version.artifact_key,
+                            "diff_requested": True,
+                            "diff_ok": diff_ok,
+                            "diff_paths_count": diff_paths_count,
+                            "diff_empty": bool(diff_ok and diff_paths_count == 0),
+                            "diff_used": True,
+                            "diff_parquet_paths": len(parquet_paths),
+                        }
+                    )
+                return df
+            if diff_ok and diff_paths_count:
+                logger.warning(
+                    "lakeFS diff returned %s paths without parquet data for input node %s; falling back to full load",
+                    diff_paths_count,
+                    node_id,
+                )
 
         source_type = str(getattr(dataset, "source_type", "") or "").strip().lower()
         if source_type == "media":
@@ -1949,6 +2446,178 @@ class PipelineWorker:
         if snapshot is not None:
             input_snapshots.append(snapshot)
         return df
+
+    def _preview_sampling_seed(self, job_id: str) -> int:
+        seed_raw = abs(hash(str(job_id)))
+        return seed_raw % 2_147_483_647
+
+    def _resolve_sampling_strategy(
+        self,
+        metadata: Dict[str, Any],
+        preview_meta: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        raw = metadata.get("samplingStrategy") or metadata.get("sampling_strategy")
+        if raw is None:
+            raw = preview_meta.get("samplingStrategy") or preview_meta.get("sampling_strategy")
+        if raw is None:
+            return None
+        if isinstance(raw, str):
+            return {"type": raw}
+        if isinstance(raw, dict):
+            return raw
+        raise ValueError("sampling_strategy must be an object")
+
+    def _attach_sampling_snapshot(
+        self,
+        input_snapshots: list[dict[str, Any]],
+        *,
+        node_id: str,
+        sampling_strategy: Dict[str, Any],
+    ) -> None:
+        for snapshot in reversed(input_snapshots):
+            if snapshot.get("node_id") == node_id:
+                snapshot["sampling_strategy"] = sampling_strategy
+                break
+
+    def _normalize_sampling_fraction(self, value: Any, *, field: str) -> float:
+        try:
+            fraction = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"sampling_strategy.{field} must be a number")
+        if fraction <= 0 or fraction > 1:
+            raise ValueError(f"sampling_strategy.{field} must be within (0, 1]")
+        return fraction
+
+    def _apply_sampling_strategy(
+        self,
+        df: DataFrame,
+        sampling_strategy: Dict[str, Any],
+        *,
+        node_id: str,
+        seed: Optional[int],
+    ) -> DataFrame:
+        strategy = sampling_strategy or {}
+        strategy_type = str(strategy.get("type") or strategy.get("mode") or "").strip().lower()
+        if not strategy_type:
+            raise ValueError(f"sampling_strategy.type is required for input node {node_id}")
+        if strategy_type in {"random", "sample", "bernoulli", "tablesample"}:
+            fraction = strategy.get("fraction")
+            if fraction is None:
+                percent = strategy.get("percent")
+                if percent is not None:
+                    fraction = float(percent) / 100.0
+            if fraction is None:
+                raise ValueError(f"sampling_strategy.fraction is required for input node {node_id}")
+            resolved_fraction = self._normalize_sampling_fraction(fraction, field="fraction")
+            with_replacement = bool(strategy.get("with_replacement") or strategy.get("withReplacement") or False)
+            return df.sample(withReplacement=with_replacement, fraction=resolved_fraction, seed=seed)
+        if strategy_type in {"stratified", "sampleby"}:
+            column = str(strategy.get("column") or "").strip()
+            fractions_raw = strategy.get("fractions")
+            if not column:
+                raise ValueError(f"sampling_strategy.column is required for input node {node_id}")
+            if not isinstance(fractions_raw, dict) or not fractions_raw:
+                raise ValueError(f"sampling_strategy.fractions is required for input node {node_id}")
+            fractions: Dict[Any, float] = {}
+            for key, value in fractions_raw.items():
+                fractions[key] = self._normalize_sampling_fraction(value, field="fractions")
+            return df.sampleBy(column, fractions, seed=seed)
+        if strategy_type in {"limit", "head"}:
+            limit = strategy.get("limit") or strategy.get("rows")
+            try:
+                limit_value = int(limit)
+            except (TypeError, ValueError):
+                raise ValueError(f"sampling_strategy.limit must be an integer for input node {node_id}")
+            if limit_value <= 0:
+                raise ValueError(f"sampling_strategy.limit must be positive for input node {node_id}")
+            return df.limit(limit_value)
+        raise ValueError(f"Unsupported sampling_strategy.type '{strategy_type}' for input node {node_id}")
+
+    def _strip_commit_prefix(self, key: str, commit_id: str) -> str:
+        normalized = (key or "").lstrip("/")
+        if commit_id and normalized.startswith(f"{commit_id}/"):
+            return normalized[len(commit_id) + 1 :]
+        return normalized
+
+    async def _list_lakefs_diff_paths(
+        self,
+        *,
+        repository: str,
+        ref: str,
+        since: str,
+        prefix: str,
+        node_id: str,
+    ) -> tuple[List[str], bool]:
+        if not self.lakefs_client:
+            return [], False
+        resolved_prefix = str(prefix or "").lstrip("/")
+        try:
+            diff_items = await self.lakefs_client.list_diff_objects(
+                repository=repository,
+                ref=ref,
+                since=since,
+                prefix=resolved_prefix or None,
+            )
+        except Exception as exc:
+            logger.warning(
+                "lakeFS diff failed for input node %s (repo=%s ref=%s since=%s): %s",
+                node_id,
+                repository,
+                ref,
+                since,
+                exc,
+            )
+            return [], False
+        paths: List[str] = []
+        for item in diff_items:
+            if not isinstance(item, dict):
+                continue
+            change_type = str(item.get("type") or item.get("change_type") or "").lower()
+            if change_type and change_type not in {"added", "changed", "modified"}:
+                continue
+            path = item.get("path") or item.get("path_uri") or item.get("key")
+            if not isinstance(path, str) or not path.strip():
+                continue
+            resolved_path = path.lstrip("/")
+            if resolved_prefix and not resolved_path.startswith(resolved_prefix):
+                continue
+            if _is_data_object(resolved_path):
+                paths.append(resolved_path)
+        return paths, True
+
+    async def _load_parquet_keys_dataframe(
+        self,
+        *,
+        bucket: str,
+        keys: List[str],
+        temp_dirs: list[str],
+        prefix: str,
+    ) -> DataFrame:
+        if not self.spark or not self.storage:
+            raise RuntimeError("Storage/Spark not initialized")
+        if not keys:
+            return self._empty_dataframe()
+        temp_dir = tempfile.mkdtemp(prefix="pipeline-input-")
+        temp_dirs.append(temp_dir)
+        normalized_prefix = (prefix or "").rstrip("/") + "/"
+        local_paths: list[str] = []
+        for object_key in keys:
+            key = str(object_key or "").lstrip("/")
+            if not key:
+                continue
+            rel_path = (
+                os.path.relpath(key, normalized_prefix)
+                if normalized_prefix and key.startswith(normalized_prefix)
+                else os.path.basename(key)
+            )
+            local_path = os.path.join(temp_dir, rel_path)
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            await self._download_object_to_path(bucket, key, local_path)
+            local_paths.append(local_path)
+        if not local_paths:
+            return self._empty_dataframe()
+        reader = self.spark.read.option("basePath", temp_dir)
+        return reader.parquet(*local_paths)
 
     async def _load_media_prefix_dataframe(self, bucket: str, key: str, *, node_id: str) -> DataFrame:
         """
@@ -2244,6 +2913,276 @@ class PipelineWorker:
 
         return errors
 
+    @staticmethod
+    def _split_expectation_columns(column: str) -> List[str]:
+        return [part.strip() for part in str(column or "").split(",") if part.strip()]
+
+    def _coerce_pk_columns(self, value: Any) -> List[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [part.strip() for part in value.split(",") if part.strip()]
+        if isinstance(value, list):
+            columns: List[str] = []
+            for item in value:
+                if isinstance(item, dict):
+                    columns.extend(
+                        self._coerce_pk_columns(
+                            item.get("column")
+                            or item.get("name")
+                            or item.get("key")
+                            or item.get("field")
+                        )
+                    )
+                else:
+                    columns.extend(self._coerce_pk_columns(item))
+            return columns
+        if isinstance(value, dict):
+            columns: List[str] = []
+            for key in (
+                "columns",
+                "column",
+                "keys",
+                "key",
+                "fields",
+                "field",
+                "propertyKeys",
+                "property_keys",
+                "primaryKey",
+                "primary_key",
+                "primaryKeys",
+                "primary_keys",
+            ):
+                columns.extend(self._coerce_pk_columns(value.get(key)))
+            return columns
+        return []
+
+    def _collect_pk_columns(self, *candidates: Any) -> List[str]:
+        seen: set[str] = set()
+        output: List[str] = []
+        for candidate in candidates:
+            for column in self._coerce_pk_columns(candidate):
+                if column and column not in seen:
+                    seen.add(column)
+                    output.append(column)
+        return output
+
+    @staticmethod
+    def _match_output_declaration(
+        output: Dict[str, Any],
+        *,
+        node_id: Optional[str],
+        output_name: Optional[str],
+    ) -> bool:
+        if node_id:
+            declared_node_id = str(output.get("node_id") or output.get("nodeId") or "").strip()
+            if declared_node_id and declared_node_id == node_id:
+                return True
+        if output_name:
+            declared_name = (
+                output.get("output_name")
+                or output.get("outputName")
+                or output.get("dataset_name")
+                or output.get("datasetName")
+                or output.get("name")
+            )
+            if declared_name and str(declared_name).strip() == output_name:
+                return True
+        return False
+
+    @staticmethod
+    def _normalize_pk_semantics(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        raw = str(value).strip().lower()
+        if not raw:
+            return None
+        if raw in {"snapshot", "overwrite", "full", "full_refresh", "replace"}:
+            return "snapshot"
+        if raw in {"append", "append_log", "log", "event", "history", "audit"}:
+            return "append_log"
+        if raw in {"state", "append_state", "latest", "upsert", "merge"}:
+            return "append_state"
+        if raw in {"remove", "delete", "tombstone"}:
+            return "remove"
+        return raw
+
+    @staticmethod
+    def _is_truthy(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return False
+
+    def _resolve_pk_semantics(
+        self,
+        *,
+        execution_semantics: str,
+        definition: Dict[str, Any],
+        output_metadata: Dict[str, Any],
+    ) -> str:
+        settings = definition.get("settings") if isinstance(definition.get("settings"), dict) else {}
+        incremental = _resolve_incremental_config(definition)
+        raw: Optional[str] = None
+        for key in ("pkSemantics", "pk_semantics", "pkMode", "pk_mode", "loadSemantics", "load_semantics"):
+            value = output_metadata.get(key) or incremental.get(key) or settings.get(key) or definition.get(key)
+            if isinstance(value, str) and value.strip():
+                raw = value
+                break
+        if raw is None:
+            remove_flag = (
+                output_metadata.get("remove")
+                or output_metadata.get("delete")
+                or incremental.get("remove")
+                or incremental.get("delete")
+            )
+            if self._is_truthy(remove_flag):
+                raw = "remove"
+
+        normalized = self._normalize_pk_semantics(raw)
+        if execution_semantics == "snapshot":
+            return "snapshot"
+        if normalized:
+            return normalized
+        if execution_semantics in {"incremental", "streaming"}:
+            return "append_state"
+        return "snapshot"
+
+    def _resolve_delete_column(
+        self,
+        *,
+        definition: Dict[str, Any],
+        output_metadata: Dict[str, Any],
+    ) -> Optional[str]:
+        settings = definition.get("settings") if isinstance(definition.get("settings"), dict) else {}
+        incremental = _resolve_incremental_config(definition)
+        for key in ("deleteColumn", "delete_column", "removeColumn", "remove_column", "is_deleted", "isDeleted"):
+            value = output_metadata.get(key) or incremental.get(key) or settings.get(key) or definition.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
+
+    @staticmethod
+    def _validate_pk_semantics(
+        df: DataFrame,
+        *,
+        pk_semantics: str,
+        pk_columns: List[str],
+        delete_column: Optional[str],
+    ) -> List[str]:
+        errors: List[str] = []
+        available = set(df.columns)
+        missing_pk = [col for col in pk_columns if col not in available]
+        if missing_pk:
+            errors.append(f"pk columns missing: {', '.join(missing_pk)}")
+        if pk_semantics == "remove":
+            if not delete_column:
+                errors.append("remove semantics requires deleteColumn (e.g. is_deleted)")
+            elif delete_column not in available:
+                errors.append(f"delete column missing: {delete_column}")
+        return errors
+
+    def _resolve_pk_columns(
+        self,
+        *,
+        definition: Dict[str, Any],
+        output_metadata: Dict[str, Any],
+        output_name: Optional[str],
+        output_node_id: Optional[str],
+        declared_outputs: List[Dict[str, Any]],
+    ) -> List[str]:
+        definition_pk = self._collect_pk_columns(
+            definition.get("pk_spec") or definition.get("pkSpec"),
+            definition.get("primary_key")
+            or definition.get("primaryKey")
+            or definition.get("primary_keys")
+            or definition.get("primaryKeys"),
+        )
+        output_pk = self._collect_pk_columns(
+            output_metadata.get("pk_spec") or output_metadata.get("pkSpec"),
+            output_metadata.get("primary_key")
+            or output_metadata.get("primaryKey")
+            or output_metadata.get("primary_keys")
+            or output_metadata.get("primaryKeys")
+            or output_metadata.get("pkColumns")
+            or output_metadata.get("pk_columns"),
+        )
+        declared_pk: List[str] = []
+        for item in declared_outputs:
+            if not isinstance(item, dict):
+                continue
+            if not self._match_output_declaration(item, node_id=output_node_id, output_name=output_name):
+                continue
+            declared_pk.extend(
+                self._collect_pk_columns(
+                    item.get("pk_spec") or item.get("pkSpec"),
+                    item.get("primary_key")
+                    or item.get("primaryKey")
+                    or item.get("primary_keys")
+                    or item.get("primaryKeys")
+                    or item.get("pkColumns")
+                    or item.get("pk_columns"),
+                )
+            )
+        return self._collect_pk_columns(definition_pk, output_pk, declared_pk)
+
+    def _build_expectations_with_pk(
+        self,
+        *,
+        definition: Dict[str, Any],
+        output_metadata: Dict[str, Any],
+        output_name: Optional[str],
+        output_node_id: Optional[str],
+        declared_outputs: List[Dict[str, Any]],
+        pk_semantics: str,
+        delete_column: Optional[str],
+        pk_columns: Optional[List[str]] = None,
+        available_columns: Optional[set[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        base_expectations = definition.get("expectations") if isinstance(definition.get("expectations"), list) else []
+        pk_columns = pk_columns or self._resolve_pk_columns(
+            definition=definition,
+            output_metadata=output_metadata,
+            output_name=output_name,
+            output_node_id=output_node_id,
+            declared_outputs=declared_outputs,
+        )
+        if available_columns is not None:
+            pk_columns = [col for col in pk_columns if col in available_columns]
+        if not pk_columns and pk_semantics != "remove":
+            return list(base_expectations)
+
+        existing_not_null: set[str] = set()
+        existing_unique: set[str] = set()
+        for exp in normalize_expectations(base_expectations):
+            if exp.rule in {"not_null", "non_null"}:
+                for col in self._split_expectation_columns(exp.column):
+                    if col:
+                        existing_not_null.add(col)
+            if exp.rule == "unique":
+                cols = self._split_expectation_columns(exp.column)
+                if cols:
+                    existing_unique.add(",".join(cols))
+
+        injected: List[Dict[str, Any]] = []
+        enforce_unique = pk_semantics in {"snapshot", "append_state"}
+        for col in pk_columns:
+            if col not in existing_not_null:
+                injected.append({"rule": "not_null", "column": col})
+        if enforce_unique and pk_columns:
+            composite_key = ",".join(pk_columns)
+            if composite_key not in existing_unique:
+                injected.append({"rule": "unique", "column": composite_key})
+        if pk_semantics == "remove" and delete_column:
+            if available_columns is None or delete_column in available_columns:
+                if delete_column not in existing_not_null:
+                    injected.append({"rule": "not_null", "column": delete_column})
+
+        return list(base_expectations) + injected
+
     def _validate_expectations(self, df: DataFrame, expectations: List[Dict[str, Any]]) -> List[str]:
         errors: List[str] = []
         specs = normalize_expectations(expectations)
@@ -2259,7 +3198,7 @@ class PipelineWorker:
 
         for exp in specs:
             rule = exp.rule
-            column = exp.column
+            columns = self._split_expectation_columns(exp.column)
             value = exp.value
             if rule == "row_count_min" and value is not None:
                 if get_total() < int(value):
@@ -2267,18 +3206,24 @@ class PipelineWorker:
             if rule == "row_count_max" and value is not None:
                 if get_total() > int(value):
                     errors.append(f"row_count_max failed: {value}")
-            if rule in {"not_null", "non_null"} and column:
-                if df.filter(F.col(column).isNull()).limit(1).count() > 0:
-                    errors.append(f"not_null failed: {column}")
-            if rule == "non_empty" and column:
+            if rule in {"not_null", "non_null"} and columns:
+                for column in columns:
+                    if df.filter(F.col(column).isNull()).limit(1).count() > 0:
+                        errors.append(f"not_null failed: {column}")
+            if rule == "non_empty" and len(columns) == 1:
+                column = columns[0]
                 if df.filter(F.col(column).isNull() | (F.trim(F.col(column)) == "")).limit(1).count() > 0:
                     errors.append(f"non_empty failed: {column}")
-            if rule == "unique" and column:
+            if rule == "unique" and columns:
                 total = get_total()
-                unique = df.select(column).distinct().count()
+                if len(columns) == 1:
+                    unique = df.select(columns[0]).distinct().count()
+                else:
+                    unique = df.select(*columns).distinct().count()
                 if unique != total:
-                    errors.append(f"unique failed: {column}")
-            if rule in {"min", "max"} and column:
+                    errors.append(f"unique failed: {','.join(columns)}")
+            if rule in {"min", "max"} and len(columns) == 1:
+                column = columns[0]
                 threshold = normalize_number(value)
                 if threshold is None:
                     continue
@@ -2287,11 +3232,13 @@ class PipelineWorker:
                     errors.append(f"min failed: {column} < {threshold}")
                 if rule == "max" and result["max"] is not None and float(result["max"]) > threshold:
                     errors.append(f"max failed: {column} > {threshold}")
-            if rule == "regex" and column and value:
+            if rule == "regex" and len(columns) == 1 and value:
+                column = columns[0]
                 pattern = str(value)
                 if df.filter(~F.col(column).rlike(pattern)).limit(1).count() > 0:
                     errors.append(f"regex failed: {column}")
-            if rule == "in_set" and column:
+            if rule == "in_set" and len(columns) == 1:
+                column = columns[0]
                 allowed = normalize_value_list(value)
                 if allowed:
                     if df.filter(~F.col(column).isin(allowed)).limit(1).count() > 0:
@@ -2337,9 +3284,24 @@ class PipelineWorker:
         temp_dir = tempfile.mkdtemp(prefix="pipeline-input-")
         temp_dirs.append(temp_dir)
         local_paths: list[str] = []
+        normalized_prefix = str(prefix or "").lstrip("/").rstrip("/")
+        if normalized_prefix:
+            normalized_prefix = f"{normalized_prefix}/"
         for object_key in data_keys:
-            local_paths.append(await self._download_object(bucket, object_key, temp_dirs, temp_dir=temp_dir))
+            key = str(object_key or "").lstrip("/")
+            if not key:
+                continue
+            rel_path = (
+                os.path.relpath(key, normalized_prefix)
+                if normalized_prefix and key.startswith(normalized_prefix)
+                else os.path.basename(key)
+            )
+            local_path = os.path.join(temp_dir, rel_path)
+            await self._download_object_to_path(bucket, key, local_path)
+            local_paths.append(local_path)
 
+        if any(path.endswith(".parquet") for path in local_paths):
+            return self.spark.read.parquet(temp_dir)
         if any(path.endswith(".json") for path in local_paths):
             return self.spark.read.json(temp_dir)
         if any(path.endswith(".csv") for path in local_paths):
@@ -2352,19 +3314,36 @@ class PipelineWorker:
             f"Unsupported dataset artifact format in s3://{bucket}/{prefix} (extensions={','.join(extensions) or 'unknown'})"
         )
 
-    async def _download_object(self, bucket: str, key: str, temp_dirs: list[str], *, temp_dir: Optional[str] = None) -> str:
+    async def _download_object_to_path(self, bucket: str, key: str, local_path: str) -> None:
+        if not self.storage:
+            raise RuntimeError("Storage service not available")
+        directory = os.path.dirname(local_path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        with open(local_path, "wb") as handle:
+            self.storage.client.download_fileobj(bucket, key, handle)
+
+    async def _download_object(
+        self,
+        bucket: str,
+        key: str,
+        temp_dirs: list[str],
+        *,
+        temp_dir: Optional[str] = None,
+    ) -> str:
         if temp_dir is None:
             temp_dir = tempfile.mkdtemp(prefix="pipeline-input-")
             temp_dirs.append(temp_dir)
         filename = os.path.basename(key) or f"artifact-{uuid4().hex}"
         local_path = os.path.join(temp_dir, filename)
-        with open(local_path, "wb") as handle:
-            self.storage.client.download_fileobj(bucket, key, handle)
+        await self._download_object_to_path(bucket, key, local_path)
         return local_path
 
     def _read_local_file(self, path: str) -> DataFrame:
         if path.endswith(".csv"):
             return self.spark.read.option("header", "true").csv(path)
+        if path.endswith(".parquet"):
+            return self.spark.read.parquet(path)
         if path.endswith((".xlsx", ".xlsm")):
             return self._load_excel_path(path)
         if path.endswith(".json"):
@@ -2637,8 +3616,7 @@ def _schema_from_dataframe(frame: DataFrame) -> List[Dict[str, str]]:
 
 
 def _hash_schema_columns(columns: List[Dict[str, Any]]) -> str:
-    payload = json.dumps(columns or [], sort_keys=True, default=str)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return compute_schema_hash(columns)
 
 
 def _spark_type_to_xsd(data_type: Any) -> str:
@@ -2653,11 +3631,17 @@ def _spark_type_to_xsd(data_type: Any) -> str:
     return "xsd:string"
 
 
-def _list_part_files(path: str) -> List[str]:
+def _list_part_files(path: str, *, extensions: Optional[set[str]] = None) -> List[str]:
+    if extensions is None:
+        extensions = {".json", ".parquet"}
+    normalized = {ext.lower() for ext in extensions}
     part_files: List[str] = []
     for root, _, files in os.walk(path):
         for name in files:
-            if name.startswith("part-") and name.endswith(".json"):
+            if not name.startswith("part-"):
+                continue
+            ext = os.path.splitext(name)[1].lower()
+            if ext in normalized:
                 part_files.append(os.path.join(root, name))
     return part_files
 

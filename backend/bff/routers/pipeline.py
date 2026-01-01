@@ -43,10 +43,12 @@ from shared.services.pipeline_schema_utils import normalize_schema_type
 from shared.services.pipeline_scheduler import _is_valid_cron_expression
 from shared.services.redis_service import create_redis_service_legacy
 from shared.utils.env_utils import parse_bool_env, parse_int_env
+from shared.utils.schema_hash import compute_schema_hash
 from shared.utils.s3_uri import build_s3_uri, parse_s3_uri
 from shared.utils.event_utils import build_command_event
 from shared.utils.path_utils import safe_lakefs_ref, safe_path_segment
 from shared.utils.time_utils import utcnow
+from shared.utils.branch_utils import protected_branch_write_message
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.security.auth_utils import enforce_db_scope
 from shared.observability.tracing import trace_endpoint
@@ -227,6 +229,9 @@ async def _build_proposal_bundle(
         dataset_name = str(output.get("dataset_name") or "").strip()
         if not dataset_name:
             continue
+        schema_hash = str(output.get("schema_hash") or "").strip() or None
+        if not schema_hash and isinstance(output.get("columns"), list):
+            schema_hash = compute_schema_hash(output.get("columns"))
         dataset = await dataset_registry.get_dataset_by_name(
             db_name=str(pipeline.db_name),
             name=dataset_name,
@@ -237,6 +242,8 @@ async def _build_proposal_bundle(
         mapping_spec = await objectify_registry.get_active_mapping_spec(
             dataset_id=dataset.dataset_id,
             dataset_branch=dataset.branch,
+            artifact_output_name=dataset_name,
+            schema_hash=schema_hash,
         )
         if not mapping_spec:
             continue
@@ -322,18 +329,28 @@ async def _maybe_enqueue_objectify_job(
         return None
     if not getattr(version, "artifact_key", None):
         return None
+    resolved_output_name = getattr(dataset, "name", None)
+    schema_hash = compute_schema_hash(version.sample_json.get("columns")) if isinstance(getattr(version, "sample_json", None), dict) else None
+    if not schema_hash and isinstance(getattr(dataset, "schema_json", None), dict):
+        schema_hash = compute_schema_hash(dataset.schema_json.get("columns") or [])
     mapping_spec = await objectify_registry.get_active_mapping_spec(
         dataset_id=dataset.dataset_id,
         dataset_branch=dataset.branch,
+        artifact_output_name=resolved_output_name,
+        schema_hash=schema_hash,
     )
     if not mapping_spec or not mapping_spec.auto_sync:
         return None
-    existing = await objectify_registry.find_objectify_job(
-        dataset_version_id=version.version_id,
+    dedupe_key = objectify_registry.build_dedupe_key(
+        dataset_id=dataset.dataset_id,
+        dataset_branch=dataset.branch,
         mapping_spec_id=mapping_spec.mapping_spec_id,
         mapping_spec_version=mapping_spec.version,
-        statuses=["QUEUED", "ENQUEUE_REQUESTED", "ENQUEUED", "RUNNING", "SUBMITTED"],
+        dataset_version_id=version.version_id,
+        artifact_id=None,
+        artifact_output_name=resolved_output_name,
     )
+    existing = await objectify_registry.get_objectify_job_by_dedupe_key(dedupe_key=dedupe_key)
     if existing:
         return existing.job_id
     job_id = str(uuid4())
@@ -343,6 +360,8 @@ async def _maybe_enqueue_objectify_job(
         db_name=dataset.db_name,
         dataset_id=dataset.dataset_id,
         dataset_version_id=version.version_id,
+        artifact_output_name=resolved_output_name,
+        dedupe_key=dedupe_key,
         dataset_branch=dataset.branch,
         artifact_key=version.artifact_key or "",
         mapping_spec_id=mapping_spec.mapping_spec_id,
@@ -572,8 +591,15 @@ async def _ensure_pipeline_permission(
     required_role: str,
 ) -> tuple[str, str]:
     principal_type, principal_id = _resolve_principal(request)
+    try:
+        UUID(str(pipeline_id))
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline not found")
     has_any = await pipeline_registry.has_any_permissions(pipeline_id=pipeline_id)
     if not has_any:
+        pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
+        if not pipeline:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline not found")
         await pipeline_registry.grant_permission(
             pipeline_id=pipeline_id,
             principal_type=principal_type,
@@ -2050,6 +2076,12 @@ async def update_pipeline(
         schema_contract = (
             sanitized.get("schema_contract") if isinstance(sanitized.get("schema_contract"), list) else None
         )
+        sampling_strategy = sanitized.get("sampling_strategy") or sanitized.get("samplingStrategy")
+        if sampling_strategy is not None and not isinstance(sampling_strategy, dict):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="sampling_strategy must be an object",
+            )
         if expectations is not None:
             definition_json = {**definition_json, "expectations": expectations}
         if schema_contract is not None:
@@ -2179,6 +2211,12 @@ async def preview_pipeline(
         schema_contract = (
             sanitized.get("schema_contract") if isinstance(sanitized.get("schema_contract"), list) else None
         )
+        sampling_strategy = sanitized.get("sampling_strategy") or sanitized.get("samplingStrategy")
+        if sampling_strategy is not None and not isinstance(sampling_strategy, dict):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="sampling_strategy must be an object",
+            )
         branch = str(sanitized.get("branch") or "").strip() or None
         pipeline = await pipeline_registry.get_pipeline(pipeline_id=pipeline_id)
         if not pipeline:
@@ -2258,9 +2296,11 @@ async def preview_pipeline(
         )
 
         preview_definition = dict(definition_json)
-        preview_definition["__preview_meta__"] = {
-            "branch": branch or "main",
-        }
+        preview_meta = dict(preview_definition.get("__preview_meta__") or {})
+        preview_meta["branch"] = branch or "main"
+        if sampling_strategy:
+            preview_meta["sampling_strategy"] = sampling_strategy
+        preview_definition["__preview_meta__"] = preview_meta
         job = PipelineJob(
             job_id=job_id,
             pipeline_id=pipeline_id,
@@ -2623,7 +2663,7 @@ async def deploy_pipeline(
             if getattr(pipeline, "proposal_status", None) != "approved":
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail="Approved proposal is required for protected branches",
+                    detail=protected_branch_write_message(),
                 )
             if not proposal_bundle:
                 raise HTTPException(
@@ -3197,6 +3237,7 @@ async def deploy_pipeline(
                         branch=resolved_branch,
                     )
 
+                schema_hash = compute_schema_hash(schema_columns)
                 sample_json: dict[str, Any] = {
                     "columns": schema_columns,
                     "rows": normalized_sample_rows,
@@ -3207,7 +3248,7 @@ async def deploy_pipeline(
                 if delta_row_count_int is not None:
                     sample_json["delta_row_count"] = delta_row_count_int
 
-                await dataset_registry.add_version(
+                dataset_version = await dataset_registry.add_version(
                     dataset_id=dataset.dataset_id,
                     lakefs_commit_id=merge_commit_id,
                     artifact_key=promoted_artifact_key,
@@ -3215,6 +3256,60 @@ async def deploy_pipeline(
                     sample_json=sample_json,
                     schema_json={"columns": schema_columns},
                     promoted_from_artifact_id=(artifact_record.artifact_id if artifact_record else None),
+                )
+
+                mapping_spec_id = None
+                mapping_spec_version = None
+                mapping_spec_target_class_id = None
+                mapping_specs_payload = None
+                if isinstance(proposal_bundle, dict):
+                    mapping_specs_payload = proposal_bundle.get("mapping_specs")
+                if dataset and isinstance(mapping_specs_payload, list):
+                    for spec in mapping_specs_payload:
+                        if not isinstance(spec, dict):
+                            continue
+                        spec_dataset_id = str(spec.get("dataset_id") or "").strip()
+                        if spec_dataset_id != dataset.dataset_id:
+                            continue
+                        spec_branch = str(spec.get("dataset_branch") or resolved_branch).strip() or resolved_branch
+                        if spec_branch != dataset.branch:
+                            continue
+                        mapping_spec_id = str(spec.get("mapping_spec_id") or "").strip() or None
+                        mapping_spec_version = spec.get("mapping_spec_version")
+                        mapping_spec_target_class_id = str(spec.get("target_class_id") or "").strip() or None
+                        break
+                if mapping_spec_id is None and dataset:
+                    mapping_spec = await objectify_registry.get_active_mapping_spec(
+                        dataset_id=dataset.dataset_id,
+                        dataset_branch=dataset.branch,
+                        artifact_output_name=staged_dataset_name,
+                        schema_hash=schema_hash,
+                    )
+                    if mapping_spec:
+                        mapping_spec_id = mapping_spec.mapping_spec_id
+                        mapping_spec_version = mapping_spec.version
+                        mapping_spec_target_class_id = mapping_spec.target_class_id
+
+                await pipeline_registry.record_promotion_manifest(
+                    pipeline_id=pipeline_id,
+                    db_name=db_name,
+                    build_job_id=build_job_id,
+                    artifact_id=(artifact_record.artifact_id if artifact_record else None),
+                    definition_hash=definition_hash,
+                    lakefs_repository=staged_bucket,
+                    lakefs_commit_id=merge_commit_id,
+                    ontology_commit_id=build_ontology_commit,
+                    mapping_spec_id=mapping_spec_id,
+                    mapping_spec_version=mapping_spec_version,
+                    mapping_spec_target_class_id=mapping_spec_target_class_id,
+                    promoted_dataset_version_id=dataset_version.version_id,
+                    promoted_dataset_name=staged_dataset_name,
+                    target_branch=resolved_branch,
+                    promoted_by=principal_id,
+                    metadata={
+                        "node_id": item.get("node_id"),
+                        "build_artifact_key": item.get("build_artifact_key"),
+                    },
                 )
 
                 build_outputs.append(

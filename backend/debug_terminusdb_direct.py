@@ -63,7 +63,7 @@ def test_direct_terminusdb_query():
         }
         
         bff_response = requests.post(
-            f"http://localhost:8002/api/v1/database/{db_name}/ontology",
+            f"http://localhost:8002/api/v1/databases/{db_name}/ontology",
             json=employee_data,
             headers={"Content-Type": "application/json"}
         )
@@ -93,7 +93,7 @@ def test_direct_terminusdb_query():
         }
         
         bff_response = requests.post(
-            f"http://localhost:8002/api/v1/database/{db_name}/ontology",
+            f"http://localhost:8002/api/v1/databases/{db_name}/ontology",
             json=team_data,
             headers={"Content-Type": "application/json"}
         )
@@ -145,7 +145,7 @@ def test_direct_terminusdb_query():
         print("\n🔍 Comparing with BFF retrieval...")
         
         bff_get_response = requests.get(
-            f"http://localhost:8002/api/v1/database/{db_name}/ontology/Team",
+            f"http://localhost:8002/api/v1/databases/{db_name}/ontology/Team",
             headers={"Content-Type": "application/json"}
         )
         bff_get_response.raise_for_status()

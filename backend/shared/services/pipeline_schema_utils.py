@@ -77,7 +77,12 @@ def normalize_expectations(expectations: Any) -> List[ExpectationSpec]:
         if not isinstance(exp, dict):
             continue
         rule = str(exp.get("rule") or "").strip().lower()
-        column = str(exp.get("column") or "").strip()
+        column_value: Any = exp.get("column")
+        if not column_value and isinstance(exp.get("columns"), list):
+            column_value = ",".join(
+                str(item).strip() for item in exp.get("columns", []) if str(item).strip()
+            )
+        column = str(column_value or "").strip()
         value = exp.get("value")
         if not rule:
             continue

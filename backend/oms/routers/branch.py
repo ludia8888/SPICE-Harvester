@@ -20,6 +20,7 @@ from shared.security.input_sanitizer import (
     validate_branch_name,
     validate_db_name,
 )
+from shared.utils.branch_utils import protected_branch_write_message
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +177,7 @@ async def delete_branch(
         if branch_name in protected_branches and not force:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"보호된 브랜치 '{branch_name}'은(는) 삭제할 수 없습니다. 강제 삭제를 원하면 force=true를 사용하세요",
+                detail=protected_branch_write_message(),
             )
 
         # 현재 브랜치 확인

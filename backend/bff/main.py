@@ -104,7 +104,7 @@ from data_connector.google_sheets.service import GoogleSheetsService
 from bff.routers import (
     database, health, mapping, merge_conflict, ontology, ontology_extensions, query,
     instances, instance_async, websocket, tasks, admin, data_connector,
-    command_status, graph, lineage, audit, ai, summary, pipeline, objectify
+    command_status, graph, lineage, audit, ai, summary, pipeline, objectify, ops
 )
 
 # Monitoring and observability routers
@@ -750,6 +750,7 @@ app.include_router(ai.router, prefix="/api/v1")
 app.include_router(summary.router, prefix="/api/v1")
 app.include_router(pipeline.router, prefix="/api/v1")
 app.include_router(objectify.router, prefix="/api/v1")
+app.include_router(ops.router, prefix="/api/v1")
 app.include_router(graph.router)  # Graph router has its own /api/v1 prefix
 
 # Monitoring and observability endpoints (modernized architecture)

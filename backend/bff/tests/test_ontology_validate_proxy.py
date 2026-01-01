@@ -28,7 +28,7 @@ def test_ontology_validate_create_proxies_to_oms():
     client = TestClient(app)
     try:
         res = client.post(
-            "/api/v1/database/demo_db/ontology/validate",
+            "/api/v1/databases/demo_db/ontology/validate",
             params={"branch": "main"},
             json={
                 "id": "Product",
@@ -58,7 +58,7 @@ def test_ontology_validate_update_resolves_label_and_proxies_to_oms():
     client = TestClient(app)
     try:
         res = client.post(
-            "/api/v1/database/demo_db/ontology/Product/validate",
+            "/api/v1/databases/demo_db/ontology/Product/validate",
             params={"branch": "main"},
             json={"label": "Product v2"},
         )

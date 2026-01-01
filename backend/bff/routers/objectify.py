@@ -20,6 +20,7 @@ from shared.services.objectify_registry import ObjectifyRegistry
 from shared.services.objectify_job_queue import ObjectifyJobQueue
 from shared.services.pipeline_registry import PipelineRegistry
 from shared.utils.s3_uri import parse_s3_uri
+from shared.utils.schema_hash import compute_schema_hash
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,10 @@ class MappingSpecField(BaseModel):
 class CreateMappingSpecRequest(BaseModel):
     dataset_id: str
     dataset_branch: Optional[str] = Field(default=None, description="Dataset branch (default: dataset branch)")
+    artifact_output_name: Optional[str] = Field(
+        default=None, description="Artifact output name this mapping spec applies to (default: dataset name)"
+    )
+    schema_hash: Optional[str] = Field(default=None, description="Schema hash for the bound output")
     target_class_id: str
     mappings: List[MappingSpecField]
     target_field_types: Optional[Dict[str, str]] = Field(default=None, description="Optional target field types")
@@ -90,6 +95,15 @@ def _match_output_name(output: Dict[str, Any], name: str) -> bool:
     return False
 
 
+def _compute_schema_hash_from_sample(sample_json: Any) -> Optional[str]:
+    if not isinstance(sample_json, dict):
+        return None
+    columns = sample_json.get("columns")
+    if not isinstance(columns, list) or not columns:
+        return None
+    return compute_schema_hash(columns)
+
+
 @router.post("/mapping-specs", response_model=Dict[str, Any], status_code=status.HTTP_201_CREATED)
 async def create_mapping_spec(
     body: CreateMappingSpecRequest,
@@ -110,6 +124,17 @@ async def create_mapping_spec(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
 
         dataset_branch = str(payload.get("dataset_branch") or dataset.branch or "main").strip() or "main"
+        artifact_output_name = str(payload.get("artifact_output_name") or dataset.name or "").strip()
+        if not artifact_output_name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="artifact_output_name is required")
+        schema_hash = str(payload.get("schema_hash") or "").strip()
+        if not schema_hash:
+            latest_version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
+            schema_hash = _compute_schema_hash_from_sample(latest_version.sample_json) if latest_version else None
+            if not schema_hash:
+                schema_hash = _compute_schema_hash_from_sample(dataset.schema_json)
+        if not schema_hash:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="schema_hash is required for mapping spec")
         mappings = payload.get("mappings") or []
         if not isinstance(mappings, list) or not mappings:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mappings is required")
@@ -122,6 +147,8 @@ async def create_mapping_spec(
         record = await objectify_registry.create_mapping_spec(
             dataset_id=dataset_id,
             dataset_branch=dataset_branch,
+            artifact_output_name=artifact_output_name,
+            schema_hash=schema_hash,
             target_class_id=target_class_id,
             mappings=mappings,
             target_field_types=target_field_types,
@@ -198,6 +225,7 @@ async def run_objectify(
         version = None
         artifact_key = None
         resolved_output_name = None
+        resolved_schema_hash = None
 
         if artifact_id:
             artifact = await pipeline_registry.get_artifact(artifact_id=artifact_id)
@@ -231,6 +259,11 @@ async def run_objectify(
             if not parse_s3_uri(artifact_key):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Artifact output is not an s3:// URI")
             resolved_output_name = artifact_output_name
+            resolved_schema_hash = str(selected.get("schema_hash") or "").strip() or None
+            if not resolved_schema_hash:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT, detail="Artifact output is missing schema_hash"
+                )
         else:
             if body.dataset_version_id:
                 version = await dataset_registry.get_version(version_id=body.dataset_version_id)
@@ -245,6 +278,15 @@ async def run_objectify(
                     status_code=status.HTTP_400_BAD_REQUEST, detail="Dataset version is missing artifact_key"
                 )
             artifact_key = version.artifact_key
+            resolved_output_name = dataset.name
+            resolved_schema_hash = _compute_schema_hash_from_sample(version.sample_json)
+            if not resolved_schema_hash:
+                resolved_schema_hash = _compute_schema_hash_from_sample(dataset.schema_json)
+            if not resolved_schema_hash:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Dataset schema_hash could not be determined for objectify",
+                )
 
         if body.mapping_spec_id:
             mapping_spec = await objectify_registry.get_mapping_spec(mapping_spec_id=body.mapping_spec_id)
@@ -252,52 +294,45 @@ async def run_objectify(
             mapping_spec = await objectify_registry.get_active_mapping_spec(
                 dataset_id=dataset_id,
                 dataset_branch=dataset.branch,
+                artifact_output_name=resolved_output_name,
+                schema_hash=resolved_schema_hash,
             )
         if not mapping_spec:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapping spec not found")
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Active mapping spec not found for output/schema",
+            )
         if mapping_spec.dataset_id != dataset_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mapping spec does not match dataset")
+        if resolved_output_name and mapping_spec.artifact_output_name and mapping_spec.artifact_output_name != resolved_output_name:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Mapping spec output does not match input")
+        if resolved_schema_hash and mapping_spec.schema_hash and mapping_spec.schema_hash != resolved_schema_hash:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Mapping spec schema_hash mismatch")
 
-        if artifact_id:
-            existing = await objectify_registry.find_objectify_job_for_artifact(
-                artifact_id=artifact_id,
-                artifact_output_name=resolved_output_name or "",
-                mapping_spec_id=mapping_spec.mapping_spec_id,
-                mapping_spec_version=mapping_spec.version,
-                statuses=["QUEUED", "ENQUEUE_REQUESTED", "ENQUEUED", "RUNNING", "SUBMITTED"],
-            )
-            if existing:
-                return ApiResponse.success(
-                    message="Objectify job already queued",
-                    data={
-                        "job_id": existing.job_id,
-                        "mapping_spec_id": mapping_spec.mapping_spec_id,
-                        "dataset_id": dataset_id,
-                        "artifact_id": artifact_id,
-                        "artifact_output_name": resolved_output_name,
-                        "artifact_key": artifact_key,
-                        "status": existing.status,
-                    },
-                ).to_dict()
-        else:
-            existing = await objectify_registry.find_objectify_job(
-                dataset_version_id=version.version_id,
-                mapping_spec_id=mapping_spec.mapping_spec_id,
-                mapping_spec_version=mapping_spec.version,
-                statuses=["QUEUED", "ENQUEUE_REQUESTED", "ENQUEUED", "RUNNING", "SUBMITTED"],
-            )
-            if existing:
-                return ApiResponse.success(
-                    message="Objectify job already queued",
-                    data={
-                        "job_id": existing.job_id,
-                        "mapping_spec_id": mapping_spec.mapping_spec_id,
-                        "dataset_id": dataset_id,
-                        "dataset_version_id": version.version_id,
-                        "artifact_key": artifact_key,
-                        "status": existing.status,
-                    },
-                ).to_dict()
+        dedupe_key = objectify_registry.build_dedupe_key(
+            dataset_id=dataset_id,
+            dataset_branch=dataset.branch,
+            mapping_spec_id=mapping_spec.mapping_spec_id,
+            mapping_spec_version=mapping_spec.version,
+            dataset_version_id=(version.version_id if version else None),
+            artifact_id=artifact_id,
+            artifact_output_name=resolved_output_name,
+        )
+        existing = await objectify_registry.get_objectify_job_by_dedupe_key(dedupe_key=dedupe_key)
+        if existing:
+            return ApiResponse.success(
+                message="Objectify job already queued",
+                data={
+                    "job_id": existing.job_id,
+                    "mapping_spec_id": mapping_spec.mapping_spec_id,
+                    "dataset_id": dataset_id,
+                    "dataset_version_id": version.version_id if version else None,
+                    "artifact_id": artifact_id,
+                    "artifact_output_name": resolved_output_name,
+                    "artifact_key": artifact_key,
+                    "status": existing.status,
+                },
+            ).to_dict()
 
         job_id = str(uuid4())
         options = dict(mapping_spec.options or {})
@@ -311,6 +346,7 @@ async def run_objectify(
             dataset_version_id=(version.version_id if version else None),
             artifact_id=artifact_id,
             artifact_output_name=resolved_output_name,
+            dedupe_key=dedupe_key,
             dataset_branch=dataset.branch,
             artifact_key=artifact_key,
             mapping_spec_id=mapping_spec.mapping_spec_id,

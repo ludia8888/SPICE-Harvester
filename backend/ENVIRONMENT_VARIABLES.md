@@ -38,6 +38,27 @@ PIPELINE_PROTECTED_BRANCHES=main
 PIPELINE_REQUIRE_PROPOSALS=false
 ```
 
+## 1.3) Ontology governance
+
+```bash
+# Protected branches for ontology schema changes
+ONTOLOGY_PROTECTED_BRANCHES=main
+
+# Require proposals for protected branches (default: true)
+ONTOLOGY_REQUIRE_PROPOSALS=true
+
+# Require Health gate before proposal merge on protected branches (default: true)
+ONTOLOGY_REQUIRE_HEALTH_GATE=true
+
+# Use v2 ontology deployments registry/outbox (default: true)
+ONTOLOGY_DEPLOYMENTS_V2=true
+
+# Writeback target defaults (optional overrides)
+ONTOLOGY_WRITEBACK_REPO=ontology_writeback
+ONTOLOGY_WRITEBACK_BRANCH_PREFIX=writeback
+ONTOLOGY_WRITEBACK_DATASET_ID=
+```
+
 ## 2) Core infra
 
 ### PostgreSQL (idempotency registry + seq allocator)

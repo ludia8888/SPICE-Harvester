@@ -10,7 +10,7 @@ Script: `backend/perf/k6/async_instance_flow.js`
 
 What it does:
 - Creates a temporary DB + ontology class (`LoadTestItem`)
-- Repeatedly calls `POST /api/v1/database/{db}/instances/{class}/create?branch=main`
+- Repeatedly calls `POST /api/v1/databases/{db}/instances/{class}/create?branch=main`
 - Polls `GET /api/v1/commands/{command_id}/status` until `COMPLETED|FAILED`
 - Deletes the temporary DB in teardown (requires `/api/v1/databases/{db}/expected-seq`; older BFF images may not have it yet)
 

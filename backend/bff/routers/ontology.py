@@ -146,7 +146,7 @@ from bff.services.oms_client import OMSClient
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/database/{db_name}", tags=["Ontology Management"])
+router = APIRouter(prefix="/databases/{db_name}", tags=["Ontology Management"])
 
 
 @router.post(

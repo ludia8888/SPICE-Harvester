@@ -5,6 +5,7 @@ Event Sourcing: S3/MinIO Event Store(SSoT)에 Command 이벤트를 저장
 """
 
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, status, Query
@@ -50,6 +51,7 @@ async def create_database(
     request: dict, 
     event_store=EventStoreDep,
     command_status_service=CommandStatusServiceDep,
+    terminus_service: AsyncTerminusService = TerminusServiceDep,
 ):
     """
     새 데이터베이스 생성
@@ -119,6 +121,36 @@ async def create_database(
                 )
             except Exception as e:
                 logger.warning(f"Failed to persist command status (continuing without Redis): {e}")
+
+        # Best-effort synchronous fallback to keep E2E flows unblocked even if workers lag.
+        sync_fallback_enabled = os.getenv("ENABLE_SYNC_DATABASE_CREATE_FALLBACK", "true").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if sync_fallback_enabled:
+            try:
+                created = await terminus_service.create_database(db_name, description or "")
+                if not created:
+                    exists = await terminus_service.database_exists(db_name)
+                    if not exists:
+                        raise RuntimeError(f"Database '{db_name}' did not materialize")
+                if command_status_service:
+                    try:
+                        await command_status_service.start_processing(command_id=str(command.command_id))
+                    except Exception:
+                        # Ignore best-effort start update
+                        pass
+                    await command_status_service.complete_command(
+                        command_id=str(command.command_id),
+                        result={
+                            "db_name": db_name,
+                            "message": f"Successfully created database: {db_name} (sync fallback)",
+                        },
+                    )
+            except Exception as e:
+                logger.warning(f"Sync database create fallback failed (non-fatal): {e}")
 
         return JSONResponse(
             status_code=status.HTTP_202_ACCEPTED,

@@ -8,6 +8,8 @@ from fastapi import HTTPException, status
 
 from bff.routers.pipeline import deploy_pipeline
 
+PIPELINE_ID = "00000000-0000-0000-0000-000000000002"
+
 
 @dataclass
 class _Request:
@@ -50,6 +52,12 @@ class _PipelineRegistry:
 
         return _Version()
 
+    async def get_artifact_by_job(self, *, pipeline_id: str, job_id: str, mode: str) -> Any:
+        return None
+
+    async def record_promotion_manifest(self, **kwargs: Any) -> str:
+        return "manifest-1"
+
 
 class _PipelineJobQueue:
     async def publish(self, job: Any) -> None:  # pragma: no cover - not expected in gate tests
@@ -58,6 +66,19 @@ class _PipelineJobQueue:
 
 class _DatasetRegistry:
     async def get_dataset_by_name(self, *, db_name: str, name: str, branch: str) -> Any:  # pragma: no cover
+        return None
+
+
+class _ObjectifyRegistry:
+    async def get_active_mapping_spec(
+        self,
+        *,
+        dataset_id: str,
+        dataset_branch: str,
+        target_class_id: Optional[str] = None,
+        artifact_output_name: Optional[str] = None,
+        schema_hash: Optional[str] = None,
+    ) -> Any:
         return None
 
 
@@ -84,7 +105,7 @@ class _FailingOMSClient:
 
 @pytest.mark.asyncio
 async def test_promote_build_rejects_missing_ontology_commit() -> None:
-    pipeline = _Pipeline(pipeline_id="p", db_name="testdb", branch="main")
+    pipeline = _Pipeline(pipeline_id=PIPELINE_ID, db_name="testdb", branch="main")
     build_run = {
         "job_id": "build-job",
         "mode": "build",
@@ -95,7 +116,7 @@ async def test_promote_build_rejects_missing_ontology_commit() -> None:
 
     with pytest.raises(HTTPException) as exc_info:
         await deploy_pipeline(
-            pipeline_id="p",
+            pipeline_id=PIPELINE_ID,
             payload={
                 "promote_build": True,
                 "build_job_id": "build-job",
@@ -105,6 +126,7 @@ async def test_promote_build_rejects_missing_ontology_commit() -> None:
             request=_Request(headers={}),
             pipeline_registry=registry,
             dataset_registry=_DatasetRegistry(),
+            objectify_registry=_ObjectifyRegistry(),
             lineage_store=None,
             oms_client=_OMSClient(head_commit_id="c-main"),
             audit_store=_AuditStore(),
@@ -116,7 +138,7 @@ async def test_promote_build_rejects_missing_ontology_commit() -> None:
 
 @pytest.mark.asyncio
 async def test_promote_build_rejects_ontology_commit_mismatch() -> None:
-    pipeline = _Pipeline(pipeline_id="p", db_name="testdb", branch="main")
+    pipeline = _Pipeline(pipeline_id=PIPELINE_ID, db_name="testdb", branch="main")
     build_run = {
         "job_id": "build-job",
         "mode": "build",
@@ -127,7 +149,7 @@ async def test_promote_build_rejects_ontology_commit_mismatch() -> None:
 
     with pytest.raises(HTTPException) as exc_info:
         await deploy_pipeline(
-            pipeline_id="p",
+            pipeline_id=PIPELINE_ID,
             payload={
                 "promote_build": True,
                 "build_job_id": "build-job",
@@ -137,6 +159,7 @@ async def test_promote_build_rejects_ontology_commit_mismatch() -> None:
             request=_Request(headers={}),
             pipeline_registry=registry,
             dataset_registry=_DatasetRegistry(),
+            objectify_registry=_ObjectifyRegistry(),
             lineage_store=None,
             oms_client=_OMSClient(head_commit_id="c-main"),
             audit_store=_AuditStore(),
@@ -151,7 +174,7 @@ async def test_promote_build_rejects_ontology_commit_mismatch() -> None:
 
 @pytest.mark.asyncio
 async def test_promote_build_returns_503_when_ontology_gate_unavailable() -> None:
-    pipeline = _Pipeline(pipeline_id="p", db_name="testdb", branch="main")
+    pipeline = _Pipeline(pipeline_id=PIPELINE_ID, db_name="testdb", branch="main")
     build_run = {
         "job_id": "build-job",
         "mode": "build",
@@ -162,7 +185,7 @@ async def test_promote_build_returns_503_when_ontology_gate_unavailable() -> Non
 
     with pytest.raises(HTTPException) as exc_info:
         await deploy_pipeline(
-            pipeline_id="p",
+            pipeline_id=PIPELINE_ID,
             payload={
                 "promote_build": True,
                 "build_job_id": "build-job",
@@ -172,6 +195,7 @@ async def test_promote_build_returns_503_when_ontology_gate_unavailable() -> Non
             request=_Request(headers={}),
             pipeline_registry=registry,
             dataset_registry=_DatasetRegistry(),
+            objectify_registry=_ObjectifyRegistry(),
             lineage_store=None,
             oms_client=_FailingOMSClient(),
             audit_store=_AuditStore(),

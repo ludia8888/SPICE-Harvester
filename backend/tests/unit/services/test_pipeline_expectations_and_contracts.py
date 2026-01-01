@@ -12,6 +12,17 @@ def test_expectations_unique_detects_duplicate_primary_key() -> None:
 
 
 @pytest.mark.unit
+def test_expectations_unique_detects_duplicate_composite_key() -> None:
+    table = PipelineTable(
+        columns=["id", "sub_id", "value"],
+        rows=[{"id": 1, "sub_id": 1, "value": "a"}, {"id": 1, "sub_id": 1, "value": "b"}],
+    )
+    errors = _validate_expectations(table, [{"rule": "unique", "column": "id,sub_id"}])
+
+    assert errors == ["unique failed: id,sub_id"]
+
+
+@pytest.mark.unit
 def test_expectations_row_count_bounds() -> None:
     table = PipelineTable(columns=["id"], rows=[{"id": 1}, {"id": 2}])
 

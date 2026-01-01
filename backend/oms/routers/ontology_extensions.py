@@ -13,7 +13,7 @@ from oms.database.postgres import db as postgres_db
 from oms.dependencies import TerminusServiceDep
 from oms.exceptions import DatabaseError, OntologyNotFoundError
 from oms.services.async_terminus import AsyncTerminusService
-from oms.services.ontology_deployment_registry import OntologyDeploymentRegistry
+from oms.services.ontology_deployment_registry_v2 import OntologyDeploymentRegistryV2
 from oms.services.ontology_resources import (
     OntologyResourceService,
     normalize_resource_type,
@@ -48,7 +48,7 @@ from shared.security.input_sanitizer import (
     validate_db_name,
     validate_instance_id,
 )
-from shared.utils.branch_utils import get_protected_branches
+from shared.utils.branch_utils import get_protected_branches, protected_branch_write_message
 from shared.services.ontology_linter import (
     OntologyLinterConfig,
     compute_risk_score,
@@ -127,12 +127,18 @@ def _resource_validation_strict() -> bool:
     return os.getenv("ONTOLOGY_RESOURCE_STRICT", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _require_health_gate(branch: str) -> bool:
+    if branch not in get_protected_branches():
+        return False
+    return os.getenv("ONTOLOGY_REQUIRE_HEALTH_GATE", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _ensure_branch_writable(branch: str) -> None:
     protected = get_protected_branches()
     if branch in protected:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Branch '{branch}' is protected for ontology resource writes",
+            detail=protected_branch_write_message(),
         )
 
 
@@ -172,6 +178,257 @@ async def _assert_expected_head_commit(
         )
 
     return head_commit
+
+
+async def _compute_ontology_health(
+    *,
+    db_name: str,
+    branch: str,
+    terminus: AsyncTerminusService,
+) -> Dict[str, Any]:
+    ontologies = await terminus.get_ontology(
+        db_name, class_id=None, raise_if_missing=False, branch=branch
+    )
+    if not isinstance(ontologies, list):
+        ontologies = []
+
+    linter_config = OntologyLinterConfig.from_env(branch=branch)
+    lint_reports: List[Dict[str, Any]] = []
+    errors = []
+    warnings = []
+    infos = []
+
+    for ontology in ontologies:
+        label_value = ontology.label
+        label_text = label_value if isinstance(label_value, str) else (
+            label_value.get("en") if isinstance(label_value, dict) else str(label_value)
+        )
+        report = lint_ontology_create(
+            class_id=ontology.id,
+            label=label_text or ontology.id,
+            abstract=bool(ontology.abstract),
+            properties=list(ontology.properties or []),
+            relationships=list(ontology.relationships or []),
+            config=linter_config,
+        )
+        lint_reports.append(
+            {
+                "class_id": ontology.id,
+                "report": report.model_dump(mode="json"),
+            }
+        )
+        errors.extend(report.errors or [])
+        warnings.extend(report.warnings or [])
+        infos.extend(report.infos or [])
+
+    validator = RelationshipValidator(existing_ontologies=ontologies)
+    rel_results = validator.validate_multiple_ontologies(ontologies)
+    rel_issues = [_validation_result_to_issue(r) for r in rel_results]
+
+    resource_service = OntologyResourceService(terminus)
+    resources = await resource_service.list_resources(db_name, branch=branch)
+
+    issue_items: List[Dict[str, Any]] = []
+
+    resource_issues = []
+    referenced_ids: set[str] = set()
+    for resource in resources:
+        spec = resource.get("spec") or {}
+        referenced_ids.update(collect_reference_values(spec))
+
+    object_type_contracts = {
+        res.get("id") for res in resources if res.get("resource_type") == "object_type"
+    }
+    for ontology in ontologies:
+        metadata = ontology.metadata if isinstance(ontology.metadata, dict) else {}
+        if metadata.get("internal") or ontology.id == "__ontology_resource":
+            continue
+        if ontology.id in object_type_contracts:
+            continue
+        resource_issues.append(
+            {
+                "resource_type": "object_type",
+                "resource_id": ontology.id,
+                "severity": "error",
+                "code": "RESOURCE_OBJECT_TYPE_CONTRACT_MISSING",
+                "message": f"Missing object_type contract for '{ontology.id}'",
+            }
+        )
+        issue_items.append(
+            _build_issue(
+                code="RESOURCE_OBJECT_TYPE_CONTRACT_MISSING",
+                severity="ERROR",
+                resource_ref=build_object_type_ref(ontology.id),
+                details={"object_type_id": ontology.id},
+                suggested_fix=None,
+                source="resource_validation",
+            )
+        )
+
+    interface_index = {
+        res.get("id"): res for res in resources if res.get("resource_type") == "interface"
+    }
+
+    interface_contract_issues = []
+    for ontology in ontologies:
+        interface_contract_issues.extend(
+            collect_interface_contract_issues(
+                ontology_id=ontology.id,
+                metadata=ontology.metadata if isinstance(ontology.metadata, dict) else {},
+                properties=list(ontology.properties or []),
+                relationships=list(ontology.relationships or []),
+                interface_index=interface_index,
+            )
+        )
+
+    resource_issues.extend(interface_contract_issues)
+    for issue in interface_contract_issues:
+        issue_items.append(_normalize_issue(issue, source="interface_contract"))
+
+    for resource in resources:
+        resource_type = resource.get("resource_type")
+        resource_id = resource.get("id")
+        spec = resource.get("spec") or {}
+
+        for issue in check_required_fields(resource_type, spec):
+            message = issue.get("message")
+            details = issue.get("details") or {}
+            resource_issues.append(
+                {
+                    "resource_type": resource_type,
+                    "resource_id": resource_id,
+                    "severity": "error",
+                    "code": "RES001",
+                    "message": message,
+                }
+            )
+            issue_items.append(
+                _build_issue(
+                    code=issue.get("code"),
+                    severity=None,
+                    resource_ref=_resource_ref(resource_type, resource_id),
+                    details=details,
+                    suggested_fix=None,
+                    source="resource_validation",
+                )
+            )
+
+        missing = await find_missing_references(
+            db_name=db_name,
+            resource_type=resource_type,
+            payload=resource,
+            terminus=terminus,
+            branch=branch,
+        )
+        if missing:
+            resource_issues.append(
+                {
+                    "resource_type": resource_type,
+                    "resource_id": resource_id,
+                    "severity": "error",
+                    "code": "RES002",
+                    "message": f"Missing references: {', '.join(missing)}",
+                    "missing": missing,
+                }
+            )
+            issue_items.append(
+                _build_issue(
+                    code="RESOURCE_MISSING_REFERENCE",
+                    severity=None,
+                    resource_ref=_resource_ref(resource_type, resource_id),
+                    details={"missing_refs": missing},
+                    suggested_fix=None,
+                    source="resource_validation",
+                )
+            )
+
+    unused_types = {"value_type", "interface", "shared_property"}
+    for resource in resources:
+        resource_type = resource.get("resource_type")
+        resource_id = resource.get("id")
+        if resource_type not in unused_types:
+            continue
+        if _resource_is_referenced(resource_type, resource_id, referenced_ids):
+            continue
+        issue_items.append(
+            _build_issue(
+                code="RESOURCE_UNUSED",
+                severity=None,
+                resource_ref=_resource_ref(resource_type, resource_id),
+                details={},
+                suggested_fix=None,
+                source="resource_validation",
+            )
+        )
+
+    class_ids = {ontology.id for ontology in ontologies}
+    for result in rel_results:
+        issue_items.append(
+            _build_issue(
+                code=result.code,
+                severity=result.severity.value,
+                resource_ref=_resolve_relationship_resource_ref(result, class_ids),
+                details={"field": result.field, "related_objects": result.related_objects or []},
+                suggested_fix=None,
+                source="relationship_validation",
+            )
+        )
+
+    for entry in lint_reports:
+        report = entry.get("report") or {}
+        for issue in report.get("errors") or []:
+            issue_items.append(
+                _build_issue(
+                    code=issue.get("rule_id"),
+                    severity="ERROR",
+                    resource_ref=build_object_type_ref(entry.get("class_id")),
+                    details=issue.get("metadata") or {},
+                    suggested_fix=issue.get("suggestion"),
+                    message=issue.get("message"),
+                    source="lint",
+                )
+            )
+        for issue in report.get("warnings") or []:
+            issue_items.append(
+                _build_issue(
+                    code=issue.get("rule_id"),
+                    severity="WARN",
+                    resource_ref=build_object_type_ref(entry.get("class_id")),
+                    details=issue.get("metadata") or {},
+                    suggested_fix=issue.get("suggestion"),
+                    message=issue.get("message"),
+                    source="lint",
+                )
+            )
+        for issue in report.get("infos") or []:
+            issue_items.append(
+                _build_issue(
+                    code=issue.get("rule_id"),
+                    severity="INFO",
+                    resource_ref=build_object_type_ref(entry.get("class_id")),
+                    details=issue.get("metadata") or {},
+                    suggested_fix=issue.get("suggestion"),
+                    message=issue.get("message"),
+                    source="lint",
+                )
+            )
+
+    summary = {
+        "lint_errors": len(errors),
+        "lint_warnings": len(warnings),
+        "lint_infos": len(infos),
+        "relationship_issues": len(rel_issues),
+        "resource_issues": len(resource_issues),
+        "issues": len(issue_items),
+    }
+
+    return {
+        "lint_reports": lint_reports,
+        "relationship_issues": rel_issues,
+        "resource_issues": resource_issues,
+        "issues": issue_items,
+        "summary": summary,
+    }
 
 
 @router.get("/resources")
@@ -279,6 +536,8 @@ async def create_resource(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except ResourceReferenceError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except DatabaseError as e:
@@ -371,6 +630,8 @@ async def update_resource(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except ResourceReferenceError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except (DatabaseError, OntologyNotFoundError) as e:
@@ -413,6 +674,8 @@ async def delete_resource(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except OntologyNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to delete resource: %s", e)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
@@ -513,9 +776,57 @@ async def approve_ontology_proposal(
     proposal_id: str,
     request: OntologyApproveRequest,
     pr_service: PullRequestService = Depends(_get_pr_service),
+    terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     try:
         db_name = validate_db_name(db_name)
+        pr_data = await pr_service.get_pull_request(proposal_id)
+        if not pr_data or pr_data.get("db_name") != db_name:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proposal not found")
+
+        source_branch = pr_data.get("source_branch") or "main"
+        target_branch = pr_data.get("target_branch") or "main"
+
+        source_commit_id = pr_data.get("source_commit_id")
+        if source_commit_id:
+            head_commit = None
+            branches = await terminus.version_control_service.list_branches(db_name)
+            for item in branches or []:
+                if isinstance(item, dict) and item.get("name") == source_branch:
+                    head_commit = coerce_commit_id(item.get("head"))
+                    break
+            if head_commit and str(head_commit) != str(source_commit_id):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "message": "Source branch head moved since proposal creation; re-propose required",
+                        "source_branch": source_branch,
+                        "captured_commit_id": source_commit_id,
+                        "current_head_commit": head_commit,
+                    },
+                )
+
+        if _require_health_gate(target_branch):
+            health = await _compute_ontology_health(
+                db_name=db_name,
+                branch=source_branch,
+                terminus=terminus,
+            )
+            errors = [
+                issue
+                for issue in health.get("issues") or []
+                if str(issue.get("severity") or "").upper() == "ERROR"
+            ]
+            if errors:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "message": "Ontology health gate failed",
+                        "summary": health.get("summary"),
+                        "errors": errors,
+                    },
+                )
+
         result = await pr_service.merge_pull_request(
             pr_id=proposal_id,
             merge_message=request.merge_message,
@@ -589,17 +900,36 @@ async def deploy_ontology(
                 },
             )
 
-        registry = OntologyDeploymentRegistry()
+        health_summary = None
+        try:
+            health = await _compute_ontology_health(
+                db_name=db_name,
+                branch=target_branch,
+                terminus=terminus,
+            )
+            if isinstance(health, dict):
+                health_summary = health.get("summary")
+        except Exception as e:
+            logger.error("Failed to compute ontology health for deploy: %s", e)
+
+        registry = OntologyDeploymentRegistryV2()
         deployment = await registry.record_deployment(
             db_name=db_name,
-            proposal_id=request.proposal_id,
-            source_branch=pr_data.get("source_branch") or "",
             target_branch=target_branch,
-            approved_ontology_commit_id=request.ontology_commit_id,
-            merge_commit_id=str(merge_commit_id),
+            ontology_commit_id=request.ontology_commit_id,
+            snapshot_rid=None,
+            proposal_id=request.proposal_id,
+            status="succeeded",
+            gate_policy=None,
+            health_summary=health_summary,
             deployed_by=request.author,
-            definition_hash=request.definition_hash,
-            metadata={"proposal_status": pr_data.get("status")},
+            error=None,
+            metadata={
+                "proposal_status": pr_data.get("status"),
+                "definition_hash": request.definition_hash,
+                "merge_commit_id": str(merge_commit_id),
+                "source_branch": pr_data.get("source_branch") or "",
+            },
         )
         return ApiResponse.success(
             message="Ontology deploy completed",
@@ -626,221 +956,16 @@ async def ontology_health(
     try:
         db_name = validate_db_name(db_name)
         branch = validate_branch_name(branch)
-
-        ontologies = await terminus.get_ontology(
-            db_name, class_id=None, raise_if_missing=False, branch=branch
-        )
-        if not isinstance(ontologies, list):
-            ontologies = []
-
-        linter_config = OntologyLinterConfig.from_env()
-        lint_reports: List[Dict[str, Any]] = []
-        errors = []
-        warnings = []
-        infos = []
-
-        for ontology in ontologies:
-            label_value = ontology.label
-            label_text = label_value if isinstance(label_value, str) else (
-                label_value.get("en") if isinstance(label_value, dict) else str(label_value)
-            )
-            report = lint_ontology_create(
-                class_id=ontology.id,
-                label=label_text or ontology.id,
-                abstract=bool(ontology.abstract),
-                properties=list(ontology.properties or []),
-                relationships=list(ontology.relationships or []),
-                config=linter_config,
-            )
-            lint_reports.append(
-                {
-                    "class_id": ontology.id,
-                    "report": report.model_dump(mode="json"),
-                }
-            )
-            errors.extend(report.errors or [])
-            warnings.extend(report.warnings or [])
-            infos.extend(report.infos or [])
-
-        validator = RelationshipValidator(existing_ontologies=ontologies)
-        rel_results = validator.validate_multiple_ontologies(ontologies)
-        rel_issues = [_validation_result_to_issue(r) for r in rel_results]
-
-        resource_service = OntologyResourceService(terminus)
-        resources = await resource_service.list_resources(db_name, branch=branch)
-
-        issue_items: List[Dict[str, Any]] = []
-
-        resource_issues = []
-        referenced_ids: set[str] = set()
-        for resource in resources:
-            spec = resource.get("spec") or {}
-            referenced_ids.update(collect_reference_values(spec))
-
-        interface_index = {
-            res.get("id"): res for res in resources if res.get("resource_type") == "interface"
-        }
-
-        interface_contract_issues = []
-        for ontology in ontologies:
-            interface_contract_issues.extend(
-                collect_interface_contract_issues(
-                    ontology_id=ontology.id,
-                    metadata=ontology.metadata if isinstance(ontology.metadata, dict) else {},
-                    properties=list(ontology.properties or []),
-                    relationships=list(ontology.relationships or []),
-                    interface_index=interface_index,
-                )
-            )
-
-        resource_issues.extend(interface_contract_issues)
-        for issue in interface_contract_issues:
-            issue_items.append(_normalize_issue(issue, source="interface_contract"))
-
-        for resource in resources:
-            resource_type = resource.get("resource_type")
-            resource_id = resource.get("id")
-            spec = resource.get("spec") or {}
-
-            for issue in check_required_fields(resource_type, spec):
-                message = issue.get("message")
-                details = issue.get("details") or {}
-                resource_issues.append(
-                    {
-                        "resource_type": resource_type,
-                        "resource_id": resource_id,
-                        "severity": "error",
-                        "code": "RES001",
-                        "message": message,
-                    }
-                )
-                issue_items.append(
-                    _build_issue(
-                        code=issue.get("code"),
-                        severity=None,
-                        resource_ref=_resource_ref(resource_type, resource_id),
-                        details=details,
-                        suggested_fix=None,
-                        source="resource_validation",
-                    )
-                )
-
-            missing = await find_missing_references(
-                db_name=db_name,
-                resource_type=resource_type,
-                payload=resource,
-                terminus=terminus,
-                branch=branch,
-            )
-            if missing:
-                resource_issues.append(
-                    {
-                        "resource_type": resource_type,
-                        "resource_id": resource_id,
-                        "severity": "error",
-                        "code": "RES002",
-                        "message": f"Missing references: {', '.join(missing)}",
-                        "missing": missing,
-                    }
-                )
-                issue_items.append(
-                    _build_issue(
-                        code="RESOURCE_MISSING_REFERENCE",
-                        severity=None,
-                        resource_ref=_resource_ref(resource_type, resource_id),
-                        details={"missing_refs": missing},
-                        suggested_fix=None,
-                        source="resource_validation",
-                    )
-                )
-
-        unused_types = {"value_type", "interface", "shared_property"}
-        for resource in resources:
-            resource_type = resource.get("resource_type")
-            resource_id = resource.get("id")
-            if resource_type not in unused_types or not resource_id:
-                continue
-            if _resource_is_referenced(resource_type, resource_id, referenced_ids):
-                continue
-            resource_issues.append(
-                {
-                    "resource_type": resource_type,
-                    "resource_id": resource_id,
-                    "severity": "warning",
-                    "code": "RES010",
-                    "message": "Resource is not referenced by any other ontology resource",
-                }
-            )
-            issue_items.append(
-                _build_issue(
-                    code="RESOURCE_UNUSED",
-                    severity=None,
-                    resource_ref=_resource_ref(resource_type, resource_id),
-                    details={},
-                    suggested_fix=None,
-                    source="resource_validation",
-                )
-            )
-
-        class_ids = {ontology.id for ontology in ontologies}
-        for result in rel_results:
-            issue_items.append(
-                _build_issue(
-                    code=normalize_issue_code(result.code, "relationship_validation"),
-                    severity=normalize_severity(result.severity),
-                    resource_ref=_resolve_relationship_resource_ref(result, class_ids),
-                    details={
-                        "field": result.field,
-                        "related_objects": result.related_objects or [],
-                    },
-                    suggested_fix=None,
-                    source="relationship_validation",
-                )
-            )
-
-        for entry in lint_reports:
-            class_id = entry.get("class_id")
-            report = entry.get("report") or {}
-            for key in ("errors", "warnings", "infos"):
-                for issue in report.get(key, []) or []:
-                    issue_items.append(
-                        _build_issue(
-                            code=issue.get("rule_id") or "UNKNOWN",
-                            severity=normalize_severity(issue.get("severity")),
-                            resource_ref=build_object_type_ref(class_id or "unknown"),
-                            details={
-                                "path": issue.get("path"),
-                                "rationale": issue.get("rationale"),
-                                "metadata": issue.get("metadata") or {},
-                            },
-                            suggested_fix=issue.get("suggestion"),
-                            message=issue.get("message"),
-                            source="lint",
-                        )
-                    )
-
-        risk_score = compute_risk_score(errors, warnings, infos)
+        data = await _compute_ontology_health(db_name=db_name, branch=branch, terminus=terminus)
 
         return ApiResponse.success(
             message="Ontology health check complete",
             data={
-                "branch": branch,
-                "summary": {
-                    "ontology_count": len(ontologies),
-                    "lint_errors": len(errors),
-                    "lint_warnings": len(warnings),
-                    "lint_infos": len(infos),
-                    "relationship_issues": len(rel_issues),
-                    "resource_issues": len(resource_issues),
-                    "issues": len(issue_items),
-                    "risk_score": risk_score,
-                    "risk_level": risk_level(risk_score),
-                    "issue_catalog_version": ISSUE_CATALOG_VERSION,
-                },
-                "lint_reports": lint_reports,
-                "relationship_issues": rel_issues,
-                "resource_issues": resource_issues,
-                "issues": issue_items,
+                "summary": data["summary"],
+                "lint_reports": data["lint_reports"],
+                "relationship_issues": data["relationship_issues"],
+                "resource_issues": data["resource_issues"],
+                "issues": data["issues"],
             },
         ).to_dict()
     except HTTPException:

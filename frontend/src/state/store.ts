@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type NavKey = 'home' | 'datasets' | 'connectors' | 'pipeline' | 'ontology' | 'workshop'
+export type NavKey = 'home' | 'datasets' | 'connectors' | 'pipeline' | 'ontology' | 'ai-agent' | 'workshop'
 
 export type PipelineContext = {
   folderId: string

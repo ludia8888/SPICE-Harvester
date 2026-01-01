@@ -62,7 +62,7 @@ class TestInformationLeakagePrevention:
         app.dependency_overrides[get_elasticsearch_service] = lambda: mock_es
         app.dependency_overrides[get_oms_client] = lambda: mock_oms
         try:
-            response = client.get("/api/v1/database/test_db/class/TestClass/instance/test_instance")
+            response = client.get("/api/v1/databases/test_db/class/TestClass/instance/test_instance")
         finally:
             app.dependency_overrides.clear()
         
@@ -104,7 +104,7 @@ class TestInformationLeakagePrevention:
         app.dependency_overrides[get_elasticsearch_service] = lambda: mock_es
         app.dependency_overrides[get_oms_client] = lambda: mock_oms
         try:
-            response = client.get("/api/v1/database/test_db/class/TestClass/instance/test_instance")
+            response = client.get("/api/v1/databases/test_db/class/TestClass/instance/test_instance")
         finally:
             app.dependency_overrides.clear()
         
@@ -144,7 +144,7 @@ class TestInformationLeakagePrevention:
         app.dependency_overrides[get_elasticsearch_service] = lambda: mock_es
         app.dependency_overrides[get_oms_client] = lambda: mock_oms
         try:
-            response = client.get("/api/v1/database/test_db/class/TestClass/instances")
+            response = client.get("/api/v1/databases/test_db/class/TestClass/instances")
         finally:
             app.dependency_overrides.clear()
         
@@ -182,7 +182,7 @@ class TestInformationLeakagePrevention:
         app.dependency_overrides[get_elasticsearch_service] = lambda: mock_es
         app.dependency_overrides[get_oms_client] = lambda: mock_oms
         try:
-            response = client.get("/api/v1/database/test_db/class/TestClass/instances")
+            response = client.get("/api/v1/databases/test_db/class/TestClass/instances")
         finally:
             app.dependency_overrides.clear()
         
@@ -214,7 +214,7 @@ class TestInformationLeakagePrevention:
         app.dependency_overrides[get_elasticsearch_service] = lambda: mock_es
         app.dependency_overrides[get_oms_client] = lambda: mock_oms
         try:
-            response = client.get("/api/v1/database/test_db/class/TestClass/instance/nonexistent")
+            response = client.get("/api/v1/databases/test_db/class/TestClass/instance/nonexistent")
         finally:
             app.dependency_overrides.clear()
         

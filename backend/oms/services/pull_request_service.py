@@ -10,6 +10,7 @@ SOLID Principles:
 - DIP: Depends on abstractions (MVCCTransactionManager, BaseTerminusService)
 """
 
+import json
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
@@ -21,6 +22,8 @@ from oms.database.mvcc import MVCCTransactionManager, IsolationLevel, MVCCError
 from oms.database.decorators import with_mvcc_retry, with_optimistic_lock
 from shared.models.base import OptimisticLockError
 from oms.exceptions import DatabaseError
+from shared.utils.commit_utils import coerce_commit_id
+from shared.utils.diff_utils import normalize_diff_response
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +34,15 @@ class PullRequestStatus:
     MERGED = "merged"
     CLOSED = "closed"
     REJECTED = "rejected"
+
+
+def _maybe_decode_json(value: Any) -> Any:
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except Exception:
+            return value
+    return value
 
 
 class PullRequestService(BaseTerminusService):
@@ -105,9 +117,16 @@ class PullRequestService(BaseTerminusService):
             
             # Check for conflicts
             conflicts = await self.check_merge_conflicts(db_name, source_branch, target_branch)
+            diff_payload = json.dumps(diff) if diff is not None else None
+            conflicts_payload = json.dumps(conflicts) if conflicts is not None else None
             
             # Store PR metadata in PostgreSQL with MVCC
             pr_id = None
+            source_commit_id = None
+            for branch in branches:
+                if branch.get("name") == source_branch:
+                    source_commit_id = coerce_commit_id(branch.get("head"))
+                    break
             async with self.mvcc.transaction(IsolationLevel.REPEATABLE_READ) as conn:
                 # Check if an open PR already exists for these branches
                 existing = await conn.fetchrow("""
@@ -125,13 +144,14 @@ class PullRequestService(BaseTerminusService):
                 pr_id = await conn.fetchval("""
                     INSERT INTO pull_requests 
                     (db_name, source_branch, target_branch, title, description, 
-                     author, status, version, diff_cache, conflicts)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9)
+                     author, status, version, diff_cache, conflicts, source_commit_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9, $10)
                     RETURNING id
                 """, db_name, source_branch, target_branch, title, description,
-                    author, PullRequestStatus.OPEN, 
-                    diff if diff else None,
-                    conflicts if conflicts else None)
+                    author, PullRequestStatus.OPEN,
+                    diff_payload,
+                    conflicts_payload,
+                    source_commit_id)
             
             logger.info(f"Created PR {pr_id}: {source_branch} -> {target_branch} in {db_name}")
             
@@ -147,6 +167,7 @@ class PullRequestService(BaseTerminusService):
                 "diff": diff,
                 "conflicts": conflicts,
                 "has_conflicts": bool(conflicts),
+                "source_commit_id": source_commit_id,
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
             
@@ -164,7 +185,7 @@ class PullRequestService(BaseTerminusService):
         target_branch: str
     ) -> Dict[str, Any]:
         """
-        Get diff between two branches using WOQL
+        Get diff between two branches using TerminusDB diff API
         
         Args:
             db_name: Database name
@@ -175,46 +196,15 @@ class PullRequestService(BaseTerminusService):
             Diff information
         """
         try:
-            endpoint = f"/api/woql/{self.connection_info.account}/{db_name}"
-            
-            # WOQL Diff query
-            query = {
-                "query": {
-                    "@type": "Diff",
-                    "from": f"branch/{source_branch}",
-                    "to": f"branch/{target_branch}"
-                }
-            }
-            
-            result = await self._make_request("POST", endpoint, query)
-            
-            # Parse diff result
-            diff_info = {
-                "changes": [],
-                "additions": 0,
-                "deletions": 0,
-                "modifications": 0
-            }
-            
-            if isinstance(result, dict):
-                if "patch" in result:
-                    # Parse patch format
-                    diff_info["changes"] = result["patch"]
-                    for change in result.get("patch", []):
-                        if change.get("op") == "add":
-                            diff_info["additions"] += 1
-                        elif change.get("op") == "remove":
-                            diff_info["deletions"] += 1
-                        else:
-                            diff_info["modifications"] += 1
-                elif "diff" in result:
-                    diff_info["changes"] = result["diff"]
-            
-            return diff_info
+            result = await self.version_control.get_diff(db_name, source_branch, target_branch)
+
+            return normalize_diff_response(source_branch, target_branch, result)
             
         except Exception as e:
             logger.error(f"Failed to get branch diff: {e}")
-            return {"changes": [], "error": str(e)}
+            diff_payload = normalize_diff_response(source_branch, target_branch, None)
+            diff_payload["error"] = str(e)
+            return diff_payload
     
     async def check_merge_conflicts(
         self,
@@ -295,6 +285,19 @@ class PullRequestService(BaseTerminusService):
                 
                 if not pr_data:
                     raise DatabaseError(f"PR {pr_id} not found or not open")
+
+                source_commit_id = pr_data.get("source_commit_id")
+                if source_commit_id:
+                    branches = await self.version_control.list_branches(pr_data["db_name"])
+                    head_commit_id = None
+                    for branch in branches:
+                        if branch.get("name") == pr_data["source_branch"]:
+                            head_commit_id = coerce_commit_id(branch.get("head"))
+                            break
+                    if head_commit_id and head_commit_id != source_commit_id:
+                        raise DatabaseError(
+                            "Source branch head has moved since proposal creation; re-propose to merge"
+                        )
                 
                 # Perform rebase in TerminusDB
                 endpoint = f"/api/rebase/{self.connection_info.account}/{pr_data['db_name']}"
@@ -306,11 +309,18 @@ class PullRequestService(BaseTerminusService):
                     "message": merge_message or f"Merge PR: {pr_data['title']}"
                 }
                 
-                # Execute rebase
-                rebase_result = await self._make_request("POST", endpoint, rebase_data)
-                
-                # Get merge commit ID if available
-                merge_commit = rebase_result.get("commit") if isinstance(rebase_result, dict) else None
+                # Execute rebase (updates source branch head)
+                await self._make_request("POST", endpoint, rebase_data)
+
+                def _find_branch_head(branches, name: str) -> Optional[str]:
+                    for branch in branches or []:
+                        if branch.get("name") == name:
+                            return coerce_commit_id(branch.get("head"))
+                    return None
+
+                branches = await self.version_control.list_branches(pr_data["db_name"])
+                source_head = _find_branch_head(branches, pr_data["source_branch"])
+                merge_commit = _find_branch_head(branches, pr_data["target_branch"]) or source_head
                 
                 # Update PR status in PostgreSQL
                 await conn.execute("""
@@ -357,7 +367,14 @@ class PullRequestService(BaseTerminusService):
                 
                 if not pr_data:
                     return None
-                
+                diff_cache = _maybe_decode_json(pr_data['diff_cache'])
+                if diff_cache is not None:
+                    diff_cache = normalize_diff_response(
+                        pr_data['source_branch'],
+                        pr_data['target_branch'],
+                        diff_cache,
+                    )
+
                 return {
                     "id": str(pr_data['id']),
                     "db_name": pr_data['db_name'],
@@ -368,9 +385,10 @@ class PullRequestService(BaseTerminusService):
                     "author": pr_data['author'],
                     "status": pr_data['status'],
                     "version": pr_data['version'],
-                    "diff_cache": pr_data['diff_cache'],
-                    "conflicts": pr_data['conflicts'],
+                    "diff_cache": diff_cache,
+                    "conflicts": _maybe_decode_json(pr_data['conflicts']),
                     "merge_commit_id": pr_data['merge_commit_id'],
+                    "source_commit_id": pr_data.get("source_commit_id"),
                     "created_at": pr_data['created_at'].isoformat() if pr_data['created_at'] else None,
                     "updated_at": pr_data['updated_at'].isoformat() if pr_data['updated_at'] else None,
                     "merged_at": pr_data['merged_at'].isoformat() if pr_data['merged_at'] else None
@@ -423,6 +441,7 @@ class PullRequestService(BaseTerminusService):
                         "title": row['title'],
                         "author": row['author'],
                         "status": row['status'],
+                        "source_commit_id": row.get("source_commit_id"),
                         "created_at": row['created_at'].isoformat() if row['created_at'] else None
                     }
                     for row in rows

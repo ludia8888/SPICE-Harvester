@@ -125,6 +125,31 @@ async def _wait_for_db_exists(
     raise AssertionError(f"Timed out waiting for db exists={expected} (last={last})")
 
 
+async def _wait_for_command_completed(
+    session: aiohttp.ClientSession,
+    *,
+    command_id: str,
+    timeout_seconds: int = 180,
+    poll_interval_seconds: float = 2.0,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    last = None
+    while time.monotonic() < deadline:
+        async with session.get(f"{OMS_URL}/api/v1/commands/{command_id}/status") as resp:
+            if resp.status != 200:
+                last = {"status": resp.status, "body": await resp.text()}
+                await asyncio.sleep(poll_interval_seconds)
+                continue
+            last = await resp.json()
+        status_value = str(last.get("status") or "").upper()
+        if status_value in {"COMPLETED", "FAILED", "CANCELLED"}:
+            if status_value != "COMPLETED":
+                raise AssertionError(f"Command {command_id} ended in {status_value}: {last}")
+            return
+        await asyncio.sleep(poll_interval_seconds)
+    raise AssertionError(f"Timed out waiting for command completion (command_id={command_id}, last={last})")
+
+
 async def _wait_for_ontology_present(
     session: aiohttp.ClientSession,
     *,
@@ -244,6 +269,10 @@ async def test_branch_virtualization_overlay_copy_on_write():
                 json={"name": db_name, "description": "branch virtualization e2e"},
             ) as resp:
                 assert resp.status == 202
+                payload = await resp.json()
+                db_command_id = (payload.get("data") or {}).get("command_id") or payload.get("command_id")
+                if db_command_id:
+                    await _wait_for_command_completed(session, command_id=str(db_command_id))
 
             await _wait_for_db_exists(session, db_name=db_name, expected=True)
 
@@ -261,6 +290,10 @@ async def test_branch_virtualization_overlay_copy_on_write():
             }
             async with session.post(f"{OMS_URL}/api/v1/database/{db_name}/ontology", json=ontology) as resp:
                 assert resp.status == 202
+                payload = await resp.json()
+                ontology_command_id = (payload.get("data") or {}).get("command_id") or payload.get("command_id")
+                if ontology_command_id:
+                    await _wait_for_command_completed(session, command_id=str(ontology_command_id))
 
             await _wait_for_ontology_present(session, db_name=db_name, ontology_id=class_id)
 
@@ -271,6 +304,10 @@ async def test_branch_virtualization_overlay_copy_on_write():
                 json={"data": {"product_id": prod_a, "name": main_a_name, "category": "alpha"}},
             ) as resp:
                 assert resp.status == 202
+                payload = await resp.json()
+                command_id = payload.get("command_id") or (payload.get("data") or {}).get("command_id")
+                if command_id:
+                    await _wait_for_command_completed(session, command_id=str(command_id))
 
             async with session.post(
                 f"{OMS_URL}/api/v1/instances/{db_name}/async/{class_id}/create",
@@ -278,6 +315,10 @@ async def test_branch_virtualization_overlay_copy_on_write():
                 json={"data": {"product_id": prod_b, "name": main_b_name, "category": "beta"}},
             ) as resp:
                 assert resp.status == 202
+                payload = await resp.json()
+                command_id = payload.get("command_id") or (payload.get("data") or {}).get("command_id")
+                if command_id:
+                    await _wait_for_command_completed(session, command_id=str(command_id))
 
             # Wait until ES enrichment is ready in main (GraphFederation reads Terminus + ES)
             node_a_main = await _wait_for_graph_node(
@@ -316,6 +357,10 @@ async def test_branch_virtualization_overlay_copy_on_write():
                 json={"data": {"name": branch_a_name}},
             ) as resp:
                 assert resp.status == 202
+                payload = await resp.json()
+                command_id = payload.get("command_id") or (payload.get("data") or {}).get("command_id")
+                if command_id:
+                    await _wait_for_command_completed(session, command_id=str(command_id))
 
             # 6) Branch overlay: updated doc must come from branch index and preserve base fields
             node_a_branch = await _wait_for_graph_node(

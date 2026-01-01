@@ -129,6 +129,38 @@ async def _wait_for_db_exists(
     raise AssertionError(f"Timed out waiting for db exists={expected} (last={last})")
 
 
+async def _wait_for_command_completed(
+    session: aiohttp.ClientSession,
+    *,
+    command_id: str,
+    db_name: Optional[str] = None,
+    timeout_seconds: int = 120,
+    poll_interval_seconds: float = 2.0,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    last = None
+    while time.monotonic() < deadline:
+        async with session.get(f"{OMS_URL}/api/v1/commands/{command_id}/status") as resp:
+            if resp.status != 200:
+                last = {"status": resp.status, "body": await resp.text()}
+                await asyncio.sleep(poll_interval_seconds)
+                continue
+            last = await resp.json()
+        status_value = str(last.get("status") or "").upper()
+        if status_value in {"COMPLETED", "FAILED", "CANCELLED"}:
+            if status_value != "COMPLETED":
+                raise AssertionError(f"Command {command_id} ended in {status_value}: {last}")
+            return
+        if db_name:
+            async with session.get(f"{OMS_URL}/api/v1/database/exists/{db_name}") as resp:
+                if resp.status == 200:
+                    payload = await resp.json()
+                    if (payload.get("data") or {}).get("exists") is True:
+                        return
+        await asyncio.sleep(poll_interval_seconds)
+    raise AssertionError(f"Timed out waiting for command completion (command_id={command_id}, last={last})")
+
+
 async def _wait_for_ontology_present(
     session: aiohttp.ClientSession,
     *,
@@ -189,6 +221,10 @@ async def test_oms_end_to_end_smoke():
                 json={"name": db_name, "description": "OMS smoke test DB"},
             ) as resp:
                 assert resp.status == 202
+                payload = await resp.json()
+                db_command_id = (payload.get("data") or {}).get("command_id") or payload.get("command_id")
+                if db_command_id:
+                    await _wait_for_command_completed(session, command_id=str(db_command_id), db_name=db_name)
 
             await _wait_for_db_exists(session, db_name=db_name, expected=True)
 
@@ -239,6 +275,7 @@ async def test_oms_end_to_end_smoke():
                 ontology_command_id = (payload.get("data") or {}).get("command_id")
                 assert ontology_command_id
                 await _assert_command_event_has_ontology_stamp(event_id=str(ontology_command_id))
+                await _wait_for_command_completed(session, command_id=str(ontology_command_id))
 
             await _wait_for_ontology_present(session, db_name=db_name, ontology_id=class_id)
 
@@ -252,6 +289,7 @@ async def test_oms_end_to_end_smoke():
                 instance_command_id = payload.get("command_id")
                 assert instance_command_id
                 await _assert_command_event_has_ontology_stamp(event_id=str(instance_command_id))
+                await _wait_for_command_completed(session, command_id=str(instance_command_id))
 
             await _wait_for_instance_count(
                 session,

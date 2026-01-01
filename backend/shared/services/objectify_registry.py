@@ -6,16 +6,17 @@ Tracks dataset→ontology mapping specs and objectify job lifecycle.
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 import asyncpg
+from asyncpg.exceptions import UniqueViolationError
 
 from shared.config.service_config import ServiceConfig
-import json
 
 from shared.models.objectify_job import ObjectifyJob
 from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
@@ -52,6 +53,8 @@ class OntologyMappingSpecRecord:
     mapping_spec_id: str
     dataset_id: str
     dataset_branch: str
+    artifact_output_name: Optional[str]
+    schema_hash: Optional[str]
     target_class_id: str
     mappings: List[Dict[str, Any]]
     target_field_types: Dict[str, str]
@@ -68,6 +71,7 @@ class ObjectifyJobRecord:
     job_id: str
     mapping_spec_id: str
     mapping_spec_version: int
+    dedupe_key: Optional[str]
     dataset_id: str
     dataset_version_id: Optional[str]
     artifact_id: Optional[str]
@@ -143,6 +147,8 @@ class ObjectifyRegistry:
                     mapping_spec_id UUID PRIMARY KEY,
                     dataset_id UUID NOT NULL,
                     dataset_branch TEXT NOT NULL DEFAULT 'main',
+                    artifact_output_name TEXT,
+                    schema_hash TEXT,
                     target_class_id TEXT NOT NULL,
                     mappings JSONB NOT NULL DEFAULT '[]'::jsonb,
                     target_field_types JSONB NOT NULL DEFAULT '{{}}'::jsonb,
@@ -162,11 +168,24 @@ class ObjectifyRegistry:
                 """
             )
             await conn.execute(
+                f"ALTER TABLE {self._schema}.ontology_mapping_specs ADD COLUMN IF NOT EXISTS artifact_output_name TEXT"
+            )
+            await conn.execute(
+                f"ALTER TABLE {self._schema}.ontology_mapping_specs ADD COLUMN IF NOT EXISTS schema_hash TEXT"
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_mapping_specs_output
+                ON {self._schema}.ontology_mapping_specs(dataset_id, dataset_branch, artifact_output_name, schema_hash, status)
+                """
+            )
+            await conn.execute(
                 f"""
                 CREATE TABLE IF NOT EXISTS {self._schema}.objectify_jobs (
                     job_id UUID PRIMARY KEY,
                     mapping_spec_id UUID NOT NULL,
                     mapping_spec_version INTEGER NOT NULL,
+                    dedupe_key TEXT,
                     dataset_id UUID NOT NULL,
                     dataset_version_id UUID,
                     artifact_id UUID,
@@ -237,6 +256,23 @@ class ObjectifyRegistry:
                 f"ALTER TABLE {self._schema}.objectify_jobs ADD COLUMN IF NOT EXISTS artifact_output_name TEXT"
             )
             await conn.execute(
+                f"ALTER TABLE {self._schema}.objectify_jobs ADD COLUMN IF NOT EXISTS dedupe_key TEXT"
+            )
+            await conn.execute(
+                f"""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_objectify_jobs_dedupe_key
+                ON {self._schema}.objectify_jobs(dedupe_key)
+                WHERE dedupe_key IS NOT NULL
+                """
+            )
+            await conn.execute(
+                f"""
+                UPDATE {self._schema}.objectify_jobs
+                SET dedupe_key = COALESCE(dedupe_key, job_id::text)
+                WHERE dedupe_key IS NULL
+                """
+            )
+            await conn.execute(
                 f"ALTER TABLE {self._schema}.objectify_jobs ALTER COLUMN dataset_version_id DROP NOT NULL"
             )
             await conn.execute(
@@ -303,6 +339,31 @@ class ObjectifyRegistry:
         value = str(value).strip()
         return value or None
 
+    @staticmethod
+    def build_dedupe_key(
+        *,
+        dataset_id: str,
+        dataset_branch: str,
+        mapping_spec_id: str,
+        mapping_spec_version: int,
+        dataset_version_id: Optional[str],
+        artifact_id: Optional[str],
+        artifact_output_name: Optional[str],
+    ) -> str:
+        parts: List[str] = [
+            f"spec:{mapping_spec_id}",
+            f"version:{int(mapping_spec_version)}",
+            f"dataset:{dataset_id}",
+            f"branch:{dataset_branch or 'main'}",
+        ]
+        if dataset_version_id:
+            parts.append(f"dataset_version:{dataset_version_id}")
+        if artifact_id:
+            parts.append(f"artifact:{artifact_id}")
+            if artifact_output_name:
+                parts.append(f"output:{artifact_output_name}")
+        return "|".join(parts)
+
     def _validate_objectify_inputs(
         self,
         *,
@@ -322,6 +383,8 @@ class ObjectifyRegistry:
         *,
         dataset_id: str,
         dataset_branch: str,
+        artifact_output_name: str,
+        schema_hash: str,
         target_class_id: str,
         mappings: List[Dict[str, Any]],
         target_field_types: Optional[Dict[str, str]] = None,
@@ -332,6 +395,12 @@ class ObjectifyRegistry:
         if not self._pool:
             raise RuntimeError("ObjectifyRegistry not connected")
         dataset_branch = dataset_branch or "main"
+        artifact_output_name = self._normalize_optional(artifact_output_name) or ""
+        schema_hash = self._normalize_optional(schema_hash) or ""
+        if not artifact_output_name:
+            raise ValueError("artifact_output_name is required")
+        if not schema_hash:
+            raise ValueError("schema_hash is required")
         target_field_types = target_field_types or {}
         options = options or {}
         async with self._pool.acquire() as conn:
@@ -343,10 +412,14 @@ class ObjectifyRegistry:
                     WHERE dataset_id = $1::uuid
                       AND dataset_branch = $2
                       AND target_class_id = $3
+                      AND artifact_output_name = $4
+                      AND schema_hash = $5
                     """,
                     dataset_id,
                     dataset_branch,
                     target_class_id,
+                    artifact_output_name,
+                    schema_hash,
                 )
                 next_version = int(row["current_version"] or 0) + 1 if row else 1
 
@@ -354,13 +427,15 @@ class ObjectifyRegistry:
                 await conn.execute(
                     f"""
                     INSERT INTO {self._schema}.ontology_mapping_specs (
-                        mapping_spec_id, dataset_id, dataset_branch, target_class_id,
-                        mappings, target_field_types, status, version, auto_sync, options
-                    ) VALUES ($1::uuid, $2::uuid, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10::jsonb)
+                        mapping_spec_id, dataset_id, dataset_branch, artifact_output_name, schema_hash,
+                        target_class_id, mappings, target_field_types, status, version, auto_sync, options
+                    ) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12::jsonb)
                     """,
                     mapping_spec_id,
                     dataset_id,
                     dataset_branch,
+                    artifact_output_name,
+                    schema_hash,
                     target_class_id,
                     normalize_json_payload(mappings),
                     normalize_json_payload(target_field_types),
@@ -377,18 +452,22 @@ class ObjectifyRegistry:
                         WHERE dataset_id = $1::uuid
                           AND dataset_branch = $2
                           AND target_class_id = $3
-                          AND mapping_spec_id != $4::uuid
+                          AND artifact_output_name = $4
+                          AND schema_hash = $5
+                          AND mapping_spec_id != $6::uuid
                           AND status = 'ACTIVE'
                         """,
                         dataset_id,
                         dataset_branch,
                         target_class_id,
+                        artifact_output_name,
+                        schema_hash,
                         mapping_spec_id,
                     )
                 record = await conn.fetchrow(
                     f"""
-                    SELECT mapping_spec_id, dataset_id, dataset_branch, target_class_id,
-                           mappings, target_field_types, status, version, auto_sync, options,
+                    SELECT mapping_spec_id, dataset_id, dataset_branch, artifact_output_name, schema_hash,
+                           target_class_id, mappings, target_field_types, status, version, auto_sync, options,
                            created_at, updated_at
                     FROM {self._schema}.ontology_mapping_specs
                     WHERE mapping_spec_id = $1::uuid
@@ -401,6 +480,8 @@ class ObjectifyRegistry:
                 mapping_spec_id=str(record["mapping_spec_id"]),
                 dataset_id=str(record["dataset_id"]),
                 dataset_branch=str(record["dataset_branch"]),
+                artifact_output_name=record["artifact_output_name"],
+                schema_hash=record["schema_hash"],
                 target_class_id=str(record["target_class_id"]),
                 mappings=_coerce_json_list(record["mappings"]),
                 target_field_types=coerce_json_dataset(record["target_field_types"]) or {},
@@ -418,8 +499,8 @@ class ObjectifyRegistry:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""
-                SELECT mapping_spec_id, dataset_id, dataset_branch, target_class_id,
-                       mappings, target_field_types, status, version, auto_sync, options,
+                SELECT mapping_spec_id, dataset_id, dataset_branch, artifact_output_name, schema_hash,
+                       target_class_id, mappings, target_field_types, status, version, auto_sync, options,
                        created_at, updated_at
                 FROM {self._schema}.ontology_mapping_specs
                 WHERE mapping_spec_id = $1::uuid
@@ -432,6 +513,8 @@ class ObjectifyRegistry:
                 mapping_spec_id=str(row["mapping_spec_id"]),
                 dataset_id=str(row["dataset_id"]),
                 dataset_branch=str(row["dataset_branch"]),
+                artifact_output_name=row["artifact_output_name"],
+                schema_hash=row["schema_hash"],
                 target_class_id=str(row["target_class_id"]),
                 mappings=_coerce_json_list(row["mappings"]),
                 target_field_types=coerce_json_dataset(row["target_field_types"]) or {},
@@ -463,8 +546,8 @@ class ObjectifyRegistry:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
-                SELECT mapping_spec_id, dataset_id, dataset_branch, target_class_id,
-                       mappings, target_field_types, status, version, auto_sync, options,
+                SELECT mapping_spec_id, dataset_id, dataset_branch, artifact_output_name, schema_hash,
+                       target_class_id, mappings, target_field_types, status, version, auto_sync, options,
                        created_at, updated_at
                 FROM {self._schema}.ontology_mapping_specs
                 {clause}
@@ -479,6 +562,8 @@ class ObjectifyRegistry:
                         mapping_spec_id=str(row["mapping_spec_id"]),
                         dataset_id=str(row["dataset_id"]),
                         dataset_branch=str(row["dataset_branch"]),
+                        artifact_output_name=row["artifact_output_name"],
+                        schema_hash=row["schema_hash"],
                         target_class_id=str(row["target_class_id"]),
                         mappings=_coerce_json_list(row["mappings"]),
                         target_field_types=coerce_json_dataset(row["target_field_types"]) or {},
@@ -498,20 +583,31 @@ class ObjectifyRegistry:
         dataset_id: str,
         dataset_branch: str,
         target_class_id: Optional[str] = None,
+        artifact_output_name: Optional[str] = None,
+        schema_hash: Optional[str] = None,
     ) -> Optional[OntologyMappingSpecRecord]:
         if not self._pool:
             raise RuntimeError("ObjectifyRegistry not connected")
         dataset_branch = dataset_branch or "main"
         clause = "dataset_id = $1::uuid AND dataset_branch = $2 AND status = 'ACTIVE'"
         params: List[Any] = [dataset_id, dataset_branch]
+        param_index = len(params) + 1
         if target_class_id:
-            clause += " AND target_class_id = $3"
+            clause += f" AND target_class_id = ${param_index}"
             params.append(target_class_id)
+            param_index += 1
+        if artifact_output_name:
+            clause += f" AND artifact_output_name = ${param_index}"
+            params.append(artifact_output_name)
+            param_index += 1
+        if schema_hash:
+            clause += f" AND schema_hash = ${param_index}"
+            params.append(schema_hash)
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""
-                SELECT mapping_spec_id, dataset_id, dataset_branch, target_class_id,
-                       mappings, target_field_types, status, version, auto_sync, options,
+                SELECT mapping_spec_id, dataset_id, dataset_branch, artifact_output_name, schema_hash,
+                       target_class_id, mappings, target_field_types, status, version, auto_sync, options,
                        created_at, updated_at
                 FROM {self._schema}.ontology_mapping_specs
                 WHERE {clause}
@@ -526,6 +622,8 @@ class ObjectifyRegistry:
                 mapping_spec_id=str(row["mapping_spec_id"]),
                 dataset_id=str(row["dataset_id"]),
                 dataset_branch=str(row["dataset_branch"]),
+                artifact_output_name=row["artifact_output_name"],
+                schema_hash=row["schema_hash"],
                 target_class_id=str(row["target_class_id"]),
                 mappings=_coerce_json_list(row["mappings"]),
                 target_field_types=coerce_json_dataset(row["target_field_types"]) or {},
@@ -551,6 +649,7 @@ class ObjectifyRegistry:
         target_class_id: str,
         status: str = "QUEUED",
         outbox_payload: Optional[Dict[str, Any]] = None,
+        dedupe_key: Optional[str] = None,
     ) -> ObjectifyJobRecord:
         if not self._pool:
             raise RuntimeError("ObjectifyRegistry not connected")
@@ -563,30 +662,56 @@ class ObjectifyRegistry:
             artifact_id=artifact_id,
             artifact_output_name=artifact_output_name,
         )
+        dedupe_key = dedupe_key or self.build_dedupe_key(
+            dataset_id=dataset_id,
+            dataset_branch=dataset_branch,
+            mapping_spec_id=mapping_spec_id,
+            mapping_spec_version=mapping_spec_version,
+            dataset_version_id=dataset_version_id,
+            artifact_id=artifact_id,
+            artifact_output_name=artifact_output_name,
+        )
         async with self._pool.acquire() as conn:
             async with conn.transaction():
-                row = await conn.fetchrow(
-                    f"""
-                    INSERT INTO {self._schema}.objectify_jobs (
-                        job_id, mapping_spec_id, mapping_spec_version, dataset_id, dataset_version_id,
-                        artifact_id, artifact_output_name, dataset_branch, target_class_id, status
-                    ) VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5::uuid, $6::uuid, $7, $8, $9, $10)
-                    RETURNING job_id, mapping_spec_id, mapping_spec_version, dataset_id, dataset_version_id,
-                              artifact_id, artifact_output_name,
-                              dataset_branch, target_class_id, status, command_id, error, report,
-                              created_at, updated_at, completed_at
-                    """,
-                    job_id,
-                    mapping_spec_id,
-                    int(mapping_spec_version),
-                    dataset_id,
-                    dataset_version_id,
-                    artifact_id,
-                    artifact_output_name,
-                    dataset_branch,
-                    target_class_id,
-                    status,
-                )
+                row = None
+                try:
+                    row = await conn.fetchrow(
+                        f"""
+                        INSERT INTO {self._schema}.objectify_jobs (
+                            job_id, mapping_spec_id, mapping_spec_version, dedupe_key, dataset_id, dataset_version_id,
+                            artifact_id, artifact_output_name, dataset_branch, target_class_id, status
+                        ) VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6::uuid, $7::uuid, $8, $9, $10, $11)
+                        RETURNING job_id, mapping_spec_id, mapping_spec_version, dedupe_key, dataset_id, dataset_version_id,
+                                  artifact_id, artifact_output_name,
+                                  dataset_branch, target_class_id, status, command_id, error, report,
+                                  created_at, updated_at, completed_at
+                        """,
+                        job_id,
+                        mapping_spec_id,
+                        int(mapping_spec_version),
+                        dedupe_key,
+                        dataset_id,
+                        dataset_version_id,
+                        artifact_id,
+                        artifact_output_name,
+                        dataset_branch,
+                        target_class_id,
+                        status,
+                    )
+                except UniqueViolationError:
+                    row = await conn.fetchrow(
+                        f"""
+                        SELECT job_id, mapping_spec_id, mapping_spec_version, dedupe_key, dataset_id, dataset_version_id,
+                               artifact_id, artifact_output_name,
+                               dataset_branch, target_class_id, status, command_id, error, report,
+                               created_at, updated_at, completed_at
+                        FROM {self._schema}.objectify_jobs
+                        WHERE dedupe_key = $1
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                        """,
+                        dedupe_key,
+                    )
                 if outbox_payload is not None:
                     await conn.execute(
                         f"""
@@ -604,6 +729,7 @@ class ObjectifyRegistry:
                 job_id=str(row["job_id"]),
                 mapping_spec_id=str(row["mapping_spec_id"]),
                 mapping_spec_version=int(row["mapping_spec_version"]),
+                dedupe_key=row["dedupe_key"],
                 dataset_id=str(row["dataset_id"]),
                 dataset_version_id=str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
                 artifact_id=str(row["artifact_id"]) if row["artifact_id"] else None,
@@ -619,8 +745,62 @@ class ObjectifyRegistry:
                 completed_at=row["completed_at"],
             )
 
+    async def get_objectify_metrics(self) -> Dict[str, Any]:
+        if not self._pool:
+            raise RuntimeError("ObjectifyRegistry not connected")
+        async with self._pool.acquire() as conn:
+            outbox_rows = await conn.fetch(
+                f"""
+                SELECT status, count(*) AS count, MIN(created_at) AS oldest_created_at,
+                       MIN(next_attempt_at) AS next_attempt_at,
+                       MAX(publish_attempts) AS max_attempts
+                FROM {self._schema}.objectify_job_outbox
+                GROUP BY status
+                """
+            )
+            job_rows = await conn.fetch(
+                f"""
+                SELECT status, count(*) AS count, MIN(created_at) AS oldest_created_at
+                FROM {self._schema}.objectify_jobs
+                GROUP BY status
+                """
+            )
+
+        outbox_counts = {str(row["status"]): int(row["count"]) for row in outbox_rows or []}
+        job_counts = {str(row["status"]): int(row["count"]) for row in job_rows or []}
+        oldest_created = min((row["oldest_created_at"] for row in outbox_rows or [] if row["oldest_created_at"]), default=None)
+        next_attempt = min((row["next_attempt_at"] for row in outbox_rows or [] if row["next_attempt_at"]), default=None)
+        now = datetime.now(timezone.utc)
+        oldest_age_seconds = None
+        if oldest_created:
+            try:
+                oldest_age_seconds = int((now - oldest_created).total_seconds())
+            except Exception:
+                oldest_age_seconds = None
+
+        return {
+            "outbox": {
+                "counts": outbox_counts,
+                "oldest_created_at": oldest_created.isoformat() if oldest_created else None,
+                "oldest_age_seconds": oldest_age_seconds,
+                "next_attempt_at": next_attempt.isoformat() if next_attempt else None,
+            },
+            "jobs": {
+                "counts": job_counts,
+            },
+        }
+
     async def enqueue_objectify_job(self, *, job: ObjectifyJob) -> ObjectifyJobRecord:
         payload = job.model_dump(mode="json")
+        dedupe_key = job.dedupe_key or self.build_dedupe_key(
+            dataset_id=job.dataset_id,
+            dataset_branch=job.dataset_branch,
+            mapping_spec_id=job.mapping_spec_id,
+            mapping_spec_version=job.mapping_spec_version,
+            dataset_version_id=job.dataset_version_id,
+            artifact_id=job.artifact_id,
+            artifact_output_name=job.artifact_output_name,
+        )
         return await self.create_objectify_job(
             job_id=job.job_id,
             mapping_spec_id=job.mapping_spec_id,
@@ -633,6 +813,7 @@ class ObjectifyRegistry:
             target_class_id=job.target_class_id,
             status="ENQUEUE_REQUESTED",
             outbox_payload=payload,
+            dedupe_key=dedupe_key,
         )
 
     async def enqueue_outbox_for_job(
@@ -862,7 +1043,7 @@ class ObjectifyRegistry:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
-                SELECT job_id, mapping_spec_id, mapping_spec_version, dataset_id, dataset_version_id,
+                SELECT job_id, mapping_spec_id, mapping_spec_version, dedupe_key, dataset_id, dataset_version_id,
                        artifact_id, artifact_output_name,
                        dataset_branch, target_class_id, status, command_id, error, report,
                        created_at, updated_at, completed_at
@@ -876,6 +1057,7 @@ class ObjectifyRegistry:
                 job_id=str(row["job_id"]),
                 mapping_spec_id=str(row["mapping_spec_id"]),
                 mapping_spec_version=int(row["mapping_spec_version"]),
+                dedupe_key=row["dedupe_key"],
                 dataset_id=str(row["dataset_id"]),
                 dataset_version_id=str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
                 artifact_id=str(row["artifact_id"]) if row["artifact_id"] else None,
@@ -899,7 +1081,7 @@ class ObjectifyRegistry:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""
-                SELECT job_id, mapping_spec_id, mapping_spec_version, dataset_id, dataset_version_id,
+                SELECT job_id, mapping_spec_id, mapping_spec_version, dedupe_key, dataset_id, dataset_version_id,
                        artifact_id, artifact_output_name,
                        dataset_branch, target_class_id, status, command_id, error, report,
                        created_at, updated_at, completed_at
@@ -914,6 +1096,49 @@ class ObjectifyRegistry:
                 job_id=str(row["job_id"]),
                 mapping_spec_id=str(row["mapping_spec_id"]),
                 mapping_spec_version=int(row["mapping_spec_version"]),
+                dedupe_key=row["dedupe_key"],
+                dataset_id=str(row["dataset_id"]),
+                dataset_version_id=str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
+                artifact_id=str(row["artifact_id"]) if row["artifact_id"] else None,
+                artifact_output_name=str(row["artifact_output_name"]) if row["artifact_output_name"] else None,
+                dataset_branch=str(row["dataset_branch"]),
+                target_class_id=str(row["target_class_id"]),
+                status=str(row["status"]),
+                command_id=row["command_id"],
+                error=row["error"],
+                report=coerce_json_dataset(row["report"]) or {},
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+                completed_at=row["completed_at"],
+            )
+
+    async def get_objectify_job_by_dedupe_key(self, *, dedupe_key: str) -> Optional[ObjectifyJobRecord]:
+        if not self._pool:
+            raise RuntimeError("ObjectifyRegistry not connected")
+        dedupe_key = self._normalize_optional(dedupe_key)
+        if not dedupe_key:
+            return None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT job_id, mapping_spec_id, mapping_spec_version, dedupe_key, dataset_id, dataset_version_id,
+                       artifact_id, artifact_output_name,
+                       dataset_branch, target_class_id, status, command_id, error, report,
+                       created_at, updated_at, completed_at
+                FROM {self._schema}.objectify_jobs
+                WHERE dedupe_key = $1
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                dedupe_key,
+            )
+            if not row:
+                return None
+            return ObjectifyJobRecord(
+                job_id=str(row["job_id"]),
+                mapping_spec_id=str(row["mapping_spec_id"]),
+                mapping_spec_version=int(row["mapping_spec_version"]),
+                dedupe_key=row["dedupe_key"],
                 dataset_id=str(row["dataset_id"]),
                 dataset_version_id=str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
                 artifact_id=str(row["artifact_id"]) if row["artifact_id"] else None,
@@ -950,7 +1175,7 @@ class ObjectifyRegistry:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""
-                SELECT job_id, mapping_spec_id, mapping_spec_version, dataset_id, dataset_version_id,
+                SELECT job_id, mapping_spec_id, mapping_spec_version, dedupe_key, dataset_id, dataset_version_id,
                        artifact_id, artifact_output_name,
                        dataset_branch, target_class_id, status, command_id, error, report,
                        created_at, updated_at, completed_at
@@ -967,6 +1192,7 @@ class ObjectifyRegistry:
                 job_id=str(row["job_id"]),
                 mapping_spec_id=str(row["mapping_spec_id"]),
                 mapping_spec_version=int(row["mapping_spec_version"]),
+                dedupe_key=row["dedupe_key"],
                 dataset_id=str(row["dataset_id"]),
                 dataset_version_id=str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
                 artifact_id=str(row["artifact_id"]) if row["artifact_id"] else None,
@@ -1008,7 +1234,7 @@ class ObjectifyRegistry:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""
-                SELECT job_id, mapping_spec_id, mapping_spec_version, dataset_id, dataset_version_id,
+                SELECT job_id, mapping_spec_id, mapping_spec_version, dedupe_key, dataset_id, dataset_version_id,
                        artifact_id, artifact_output_name,
                        dataset_branch, target_class_id, status, command_id, error, report,
                        created_at, updated_at, completed_at
@@ -1025,6 +1251,7 @@ class ObjectifyRegistry:
                 job_id=str(row["job_id"]),
                 mapping_spec_id=str(row["mapping_spec_id"]),
                 mapping_spec_version=int(row["mapping_spec_version"]),
+                dedupe_key=row["dedupe_key"],
                 dataset_id=str(row["dataset_id"]),
                 dataset_version_id=str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
                 artifact_id=str(row["artifact_id"]) if row["artifact_id"] else None,
@@ -1063,7 +1290,7 @@ class ObjectifyRegistry:
                     completed_at = COALESCE($6, completed_at),
                     updated_at = NOW()
                 WHERE job_id = $1::uuid
-                RETURNING job_id, mapping_spec_id, mapping_spec_version, dataset_id, dataset_version_id,
+                RETURNING job_id, mapping_spec_id, mapping_spec_version, dedupe_key, dataset_id, dataset_version_id,
                           artifact_id, artifact_output_name,
                           dataset_branch, target_class_id, status, command_id, error, report,
                           created_at, updated_at, completed_at
@@ -1081,6 +1308,7 @@ class ObjectifyRegistry:
                 job_id=str(row["job_id"]),
                 mapping_spec_id=str(row["mapping_spec_id"]),
                 mapping_spec_version=int(row["mapping_spec_version"]),
+                dedupe_key=row["dedupe_key"],
                 dataset_id=str(row["dataset_id"]),
                 dataset_version_id=str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
                 artifact_id=str(row["artifact_id"]) if row["artifact_id"] else None,

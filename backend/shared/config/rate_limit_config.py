@@ -106,23 +106,23 @@ class RateLimitConfig:
     # Specific endpoint overrides
     ENDPOINT_LIMITS: Dict[str, RateLimitRule] = {
         # OMS endpoints
-        "/api/v1/database/*/ontology/*": RateLimitRule(
+        "/api/v1/databases/*/ontology/*": RateLimitRule(
             requests=200,
             window=60,
             strategy=RateLimitStrategy.IP
         ),
-        "/api/v1/database/*/ontologies": RateLimitRule(
+        "/api/v1/databases/*/ontologies": RateLimitRule(
             requests=100,
             window=60,
             strategy=RateLimitStrategy.IP
         ),
-        "/api/v1/database/*/create": RateLimitRule(
+        "/api/v1/databases/*/create": RateLimitRule(
             requests=5,
             window=60,
             strategy=RateLimitStrategy.USER,
             cost=10
         ),
-        "/api/v1/database/*/delete": RateLimitRule(
+        "/api/v1/databases/*/delete": RateLimitRule(
             requests=3,
             window=60,
             strategy=RateLimitStrategy.USER,

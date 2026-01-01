@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -204,6 +204,70 @@ class LakeFSClient:
             if isinstance(commit_id, str) and commit_id.strip():
                 return commit_id.strip()
         raise LakeFSError(f"lakeFS branch response missing commit_id: {payload!r}")
+
+    async def list_diff_objects(
+        self,
+        *,
+        repository: str,
+        ref: str,
+        since: str,
+        prefix: Optional[str] = None,
+        amount: int = 1000,
+    ) -> List[Dict[str, Any]]:
+        repository = str(repository).strip()
+        ref = str(ref).strip()
+        since = str(since).strip()
+        if not repository:
+            raise ValueError("repository is required")
+        if not ref:
+            raise ValueError("ref is required")
+        if not since:
+            raise ValueError("since is required")
+
+        params: Dict[str, Any] = {"since": since, "amount": max(1, int(amount))}
+        if prefix:
+            params["prefix"] = str(prefix).strip()
+
+        results: List[Dict[str, Any]] = []
+        after: Optional[str] = None
+        async with self._client() as client:
+            while True:
+                if after:
+                    params["after"] = after
+                resp = await client.get(
+                    f"/repositories/{repository}/refs/{ref}/diff",
+                    params=params,
+                )
+                if resp.status_code in {401, 403}:
+                    raise LakeFSAuthError(resp.text)
+                if resp.status_code == 404:
+                    raise LakeFSNotFoundError(resp.text)
+                if not resp.is_success:
+                    raise LakeFSError(f"lakeFS diff failed ({resp.status_code}): {resp.text}")
+                payload = resp.json()
+                items = []
+                if isinstance(payload, dict):
+                    items = payload.get("results") or payload.get("diffs") or []
+                elif isinstance(payload, list):
+                    items = payload
+                if isinstance(items, list):
+                    for item in items:
+                        if isinstance(item, dict):
+                            results.append(item)
+                pagination = payload.get("pagination") if isinstance(payload, dict) else {}
+                next_offset = None
+                if isinstance(pagination, dict):
+                    next_offset = (
+                        pagination.get("next_offset")
+                        or pagination.get("nextOffset")
+                        or pagination.get("next")
+                    )
+                if not next_offset:
+                    break
+                after = str(next_offset).strip() or None
+                if not after:
+                    break
+        return results
 
     async def merge(
         self,

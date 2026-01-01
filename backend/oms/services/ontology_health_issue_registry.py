@@ -53,6 +53,11 @@ ISSUE_CODE_REGISTRY: Dict[str, Dict[str, Any]] = {
         "details_schema": {"missing_refs": []},
         "suggested_fix": "Create referenced resources or update the spec.",
     },
+    "RESOURCE_OBJECT_TYPE_CONTRACT_MISSING": {
+        "severity": "ERROR",
+        "details_schema": {"object_type_id": ""},
+        "suggested_fix": "Create the object_type resource with pk_spec and backing_source.",
+    },
     "RESOURCE_UNUSED": {
         "severity": "WARN",
         "details_schema": {},

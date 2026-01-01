@@ -4,6 +4,7 @@ import { useAppStore } from '../state/store'
 import { HomePage } from '../pages/HomePage'
 import { DatasetsPage } from '../pages/DatasetsPage'
 import { GraphPage } from '../pages/GraphPage'
+import { OntologyPage } from '../pages/OntologyPage'
 import { PlaceholderPage } from '../pages/PlaceholderPage'
 
 type NavItem = {
@@ -18,6 +19,7 @@ const navItems: NavItem[] = [
   { icon: 'database', label: 'Connectors', key: 'connectors' },
   { icon: 'flow-branch', label: 'Pipeline Builder', key: 'pipeline' },
   { icon: 'cube', label: 'Ontology Management', key: 'ontology' },
+  { icon: 'predictive-analysis', label: 'AI Agent', key: 'ai-agent' },
   { icon: 'build', label: 'Workshop', key: 'workshop' },
 ]
 
@@ -29,6 +31,7 @@ export const AppShell = () => {
   const railItems = useMemo(
     () =>
       navItems.map((item) => ({
+        id: item.key,
         icon: item.icon,
         label: item.label,
         active: activeNav === item.key,
@@ -43,6 +46,8 @@ export const AppShell = () => {
         return <DatasetsPage />
       case 'pipeline':
         return <GraphPage />
+      case 'ontology':
+        return <OntologyPage />
       case 'home':
         return <HomePage />
       default:
@@ -54,7 +59,11 @@ export const AppShell = () => {
     <div className="app-shell">
       <div className={`app-body ${isRailExpanded ? 'is-expanded' : ''}`}>
         <SidebarRail items={railItems} onHoverChange={setRailExpanded} />
-        <main className={`main ${activeNav === 'pipeline' ? 'is-pipeline' : ''}`}>{content}</main>
+        <main
+          className={`main ${activeNav === 'pipeline' ? 'is-pipeline' : ''} ${activeNav === 'ontology' ? 'is-ontology' : ''} ${activeNav === 'datasets' ? 'is-files' : ''}`}
+        >
+          {content}
+        </main>
       </div>
     </div>
   )

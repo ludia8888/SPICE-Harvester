@@ -6,7 +6,8 @@ Handles database creation, deletion, and listing
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, DefaultDict
+from collections import defaultdict
 
 import httpx
 import asyncpg
@@ -23,6 +24,7 @@ from shared.security.input_sanitizer import (
     validate_branch_name,
     validate_db_name,
 )
+from shared.utils.branch_utils import protected_branch_write_message
 
 # Add shared path for common utilities
 from shared.utils.language import get_accept_language
@@ -31,6 +33,10 @@ from shared.config.service_config import ServiceConfig
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/databases", tags=["Database Management"])
+
+
+def _is_dev_mode() -> bool:
+    return not ServiceConfig.is_production()
 
 
 async def _get_expected_seq_for_database(db_name: str) -> int:
@@ -57,8 +63,169 @@ async def _get_expected_seq_for_database(db_name: str) -> int:
         await conn.close()
 
 
+def _coerce_db_entry(entry: Any) -> Dict[str, Any]:
+    if isinstance(entry, dict):
+        payload = dict(entry)
+    elif isinstance(entry, str):
+        payload = {"name": entry}
+    else:
+        payload = {}
+
+    name = payload.get("name") or payload.get("db_name") or payload.get("id") or payload.get("label")
+    if name and "name" not in payload:
+        payload["name"] = name
+    return payload
+
+
+def _enrich_db_entry(entry: Any, actor_id: str, actor_name: str) -> Dict[str, Any]:
+    payload = _coerce_db_entry(entry)
+    owner_id = payload.get("owner_id") or payload.get("ownerId") or actor_id
+    owner_name = payload.get("owner_name") or payload.get("ownerName") or actor_name or owner_id
+    role = payload.get("role")
+    shared = payload.get("shared")
+    shared_with = payload.get("shared_with") or payload.get("sharedWith")
+
+    if role is None:
+        role = "Owner" if owner_id == actor_id else "Viewer"
+    if shared is None:
+        shared = owner_id != actor_id
+    if shared_with is None:
+        shared_with = [actor_id] if shared and actor_id else []
+    elif isinstance(shared_with, str):
+        shared_with = [shared_with]
+
+    payload.update(
+        {
+            "owner_id": owner_id,
+            "owner_name": owner_name,
+            "role": role,
+            "shared": shared,
+            "shared_with": shared_with,
+        }
+    )
+    return payload
+
+
+async def _fetch_database_access(db_names: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+    if not db_names:
+        return {}
+    conn = await asyncpg.connect(ServiceConfig.get_postgres_url())
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT db_name, principal_type, principal_id, principal_name, role
+            FROM database_access
+            WHERE db_name = ANY($1)
+            """,
+            db_names,
+        )
+    finally:
+        await conn.close()
+
+    grouped: DefaultDict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for row in rows or []:
+        grouped[str(row["db_name"])].append(
+            {
+                "principal_type": str(row["principal_type"]),
+                "principal_id": str(row["principal_id"]),
+                "principal_name": str(row["principal_name"]) if row["principal_name"] else None,
+                "role": str(row["role"]),
+            }
+        )
+    return dict(grouped)
+
+
+async def _upsert_database_owner(
+    *,
+    db_name: str,
+    principal_type: str,
+    principal_id: str,
+    principal_name: str,
+) -> None:
+    if not principal_id:
+        return
+    conn = await asyncpg.connect(ServiceConfig.get_postgres_url())
+    try:
+        await conn.execute(
+            """
+            INSERT INTO database_access (
+                db_name, principal_type, principal_id, principal_name, role, created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, 'Owner', NOW(), NOW())
+            ON CONFLICT (db_name, principal_type, principal_id)
+            DO UPDATE SET
+                principal_name = EXCLUDED.principal_name,
+                role = EXCLUDED.role,
+                updated_at = NOW()
+            """,
+            db_name,
+            principal_type,
+            principal_id,
+            principal_name,
+        )
+    finally:
+        await conn.close()
+
+
+def _resolve_actor(request: Request) -> tuple[str, str, str]:
+    principal_type = (request.headers.get("X-User-Type") or "user").strip().lower() or "user"
+    principal_id = (
+        request.headers.get("X-User-ID")
+        or request.headers.get("X-User")
+        or request.headers.get("X-User-Id")
+        or ""
+    ).strip() or "system"
+    principal_name = (request.headers.get("X-User-Name") or "").strip() or principal_id
+    return principal_type, principal_id, principal_name
+
+
+def _enrich_db_entry(
+    entry: Any,
+    *,
+    actor_type: str,
+    actor_id: str,
+    actor_name: str,
+    access_rows: Dict[str, List[Dict[str, Any]]],
+) -> Dict[str, Any]:
+    payload = _coerce_db_entry(entry)
+    db_name = payload.get("name") or payload.get("db_name") or payload.get("id")
+    rows = access_rows.get(db_name, []) if db_name else []
+
+    owner_row = next((row for row in rows if row.get("role") == "Owner"), None)
+    actor_row = next(
+        (row for row in rows if row.get("principal_type") == actor_type and row.get("principal_id") == actor_id),
+        None,
+    )
+
+    owner_id = owner_row["principal_id"] if owner_row else payload.get("owner_id") or actor_id
+    owner_name = owner_row.get("principal_name") if owner_row else payload.get("owner_name") or actor_name
+    role = actor_row["role"] if actor_row else payload.get("role")
+
+    shared_with = [row["principal_id"] for row in rows if row.get("role") != "Owner"]
+    shared = bool(shared_with)
+
+    if not rows:
+        shared_with = []
+        shared = False
+        role = role or ("Owner" if actor_id == owner_id else "Viewer")
+        owner_id = owner_id or actor_id
+        owner_name = owner_name or actor_name
+    else:
+        role = role or "Viewer"
+
+    payload.update(
+        {
+            "owner_id": owner_id,
+            "owner_name": owner_name,
+            "role": role,
+            "shared": shared,
+            "shared_with": shared_with,
+        }
+    )
+    return payload
+
+
 @router.get("", response_model=ApiResponse)
-async def list_databases(oms: OMSClient = OMSClientDep):
+async def list_databases(request: Request, oms: OMSClient = OMSClientDep):
     """데이터베이스 목록 조회"""
     try:
         # 기본 보안 검증 (관리자 권한 필요한 작업)
@@ -67,10 +234,32 @@ async def list_databases(oms: OMSClient = OMSClientDep):
         result = await oms.list_databases()
 
         databases = result.get("data", {}).get("databases", [])
+        actor_type, actor_id, actor_name = _resolve_actor(request)
+        db_names = [entry.get("name") for entry in map(_coerce_db_entry, databases) if entry.get("name")]
+        access_rows = await _fetch_database_access(db_names)
+        is_dev = _is_dev_mode()
+        enriched = []
+        for entry in databases:
+            payload = _enrich_db_entry(
+                entry,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                actor_name=actor_name,
+                access_rows=access_rows,
+            )
+            if is_dev:
+                payload["role"] = "Owner"
+            entry_rows = access_rows.get(payload.get("name") or payload.get("db_name") or payload.get("id"), [])
+            actor_has_access = any(
+                row.get("principal_type") == actor_type and row.get("principal_id") == actor_id for row in entry_rows
+            )
+            if entry_rows and not actor_has_access and not is_dev:
+                continue
+            enriched.append(payload)
 
         return ApiResponse.success(
-            message=f"데이터베이스 목록 조회 완료 ({len(databases)}개)",
-            data={"databases": databases, "count": len(databases)},
+            message=f"데이터베이스 목록 조회 완료 ({len(enriched)}개)",
+            data={"databases": enriched, "count": len(enriched)},
         ).to_dict()
     except Exception as e:
         logger.error(f"Failed to list databases: {e}")
@@ -87,7 +276,7 @@ async def list_databases(oms: OMSClient = OMSClientDep):
         status.HTTP_409_CONFLICT: {"description": "Conflict (already exists / OCC)"},
     },
 )
-async def create_database(request: DatabaseCreateRequest, oms: OMSClient = OMSClientDep):
+async def create_database(request: DatabaseCreateRequest, http_request: Request, oms: OMSClient = OMSClientDep):
     """데이터베이스 생성"""
     logger.info(f"🔥 BFF: Database creation request received - name: {request.name}, description: {request.description}")
     
@@ -101,6 +290,8 @@ async def create_database(request: DatabaseCreateRequest, oms: OMSClient = OMSCl
             sanitized_description = sanitize_input(request.description)
             logger.info(f"✅ BFF: Description sanitized")
         
+        actor_type, actor_id, actor_name = _resolve_actor(http_request)
+
         # OMS를 통해 데이터베이스 생성
         logger.info(f"📡 BFF: Calling OMS to create database - URL: {oms.base_url}")
         result = await oms.create_database(request.name, request.description)
@@ -108,6 +299,12 @@ async def create_database(request: DatabaseCreateRequest, oms: OMSClient = OMSCl
 
         # Event Sourcing mode: pass through async contract (202 + command_id)
         if isinstance(result, dict) and result.get("status") == "accepted":
+            await _upsert_database_owner(
+                db_name=request.name,
+                principal_type=actor_type,
+                principal_id=actor_id,
+                principal_name=actor_name,
+            )
             return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=result)
 
         # 자동 커밋: 데이터베이스 생성 기록
@@ -126,6 +323,13 @@ async def create_database(request: DatabaseCreateRequest, oms: OMSClient = OMSCl
             # 커밋 실패해도 데이터베이스 생성은 성공으로 처리
             logger.warning(f"Failed to auto-commit database creation for '{request.name}': {commit_error}")
 
+        await _upsert_database_owner(
+            db_name=request.name,
+            principal_type=actor_type,
+            principal_id=actor_id,
+            principal_name=actor_name,
+        )
+
         return JSONResponse(
             status_code=status.HTTP_201_CREATED,
             content=ApiResponse.created(
@@ -142,8 +346,10 @@ async def create_database(request: DatabaseCreateRequest, oms: OMSClient = OMSCl
             detail = e.response.text or str(e)
 
         if status_code == status.HTTP_409_CONFLICT:
-            if isinstance(detail, dict) and detail.get("detail") is not None:
-                detail = detail.get("detail")
+            if isinstance(detail, dict):
+                detail = detail.get("detail") or detail.get("message") or detail.get("error") or detail
+            if not isinstance(detail, str) or not detail.strip():
+                detail = f"데이터베이스 '{request.name}'이(가) 이미 존재합니다"
         raise HTTPException(status_code=status_code, detail=detail)
     except SecurityViolationError as e:
         # 보안 검증 실패는 400 Bad Request로 처리
@@ -179,7 +385,12 @@ async def create_database(request: DatabaseCreateRequest, oms: OMSClient = OMSCl
 )
 async def delete_database(
     db_name: str,
-    expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
+    http_request: Request,
+    expected_seq: Optional[int] = Query(
+        default=None,
+        ge=0,
+        description="Expected current aggregate sequence (OCC). When omitted, server resolves the current value.",
+    ),
     oms: OMSClient = OMSClientDep,
 ):
     """데이터베이스 삭제"""
@@ -194,6 +405,28 @@ async def delete_database(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"시스템 데이터베이스 '{validated_db_name}'은(는) 삭제할 수 없습니다",
             )
+
+        actor_type, actor_id, _actor_name = _resolve_actor(http_request)
+        if not _is_dev_mode():
+            access_rows = await _fetch_database_access([validated_db_name])
+            db_access = access_rows.get(validated_db_name, [])
+            actor_row = next(
+                (
+                    row
+                    for row in db_access
+                    if row.get("principal_type") == actor_type and row.get("principal_id") == actor_id
+                ),
+                None,
+            )
+            actor_role = (actor_row or {}).get("role", "")
+            if not actor_role or actor_role.lower() != "owner":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Only owners can delete projects.",
+                )
+
+        if expected_seq is None:
+            expected_seq = await _get_expected_seq_for_database(validated_db_name)
 
         # OMS를 통해 데이터베이스 삭제
         result = await oms.delete_database(validated_db_name, expected_seq=expected_seq)
@@ -293,7 +526,10 @@ async def delete_branch(
             if resp.status_code == 404:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="브랜치를 찾을 수 없습니다") from e
             if resp.status_code == 403:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="보호된 브랜치는 삭제할 수 없습니다") from e
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=protected_branch_write_message(),
+                ) from e
             if resp.status_code == 400:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="현재 브랜치는 삭제할 수 없습니다") from e
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="OMS 브랜치 삭제 실패") from e

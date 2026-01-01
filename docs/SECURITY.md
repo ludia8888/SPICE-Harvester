@@ -536,7 +536,7 @@ class RequestValidator:
         """Validate required fields for endpoint"""
         # Define required fields per endpoint
         required_fields = {
-            "/api/v1/database/create": ["name"],
+            "/api/v1/databases": ["name"],
             "/api/v1/ontology/create": ["label", "properties"],
             "/api/v1/instance/create": ["class_id", "data"],
         }
@@ -1592,7 +1592,7 @@ class TestSecurityFeatures:
         """Test authentication enforcement"""
         protected_endpoints = [
             "/api/v1/admin/users",
-            "/api/v1/database/create",
+            "/api/v1/databases",
             "/api/v1/settings/update"
         ]
         

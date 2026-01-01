@@ -8,6 +8,8 @@ from fastapi import HTTPException, status
 
 from bff.routers.pipeline import build_pipeline, deploy_pipeline, preview_pipeline
 
+PIPELINE_ID = "00000000-0000-0000-0000-000000000004"
+
 
 @dataclass
 class _Request:
@@ -32,6 +34,14 @@ class _Dataset:
     schema_json: dict[str, Any] | None = None
 
 
+@dataclass
+class _DatasetVersion:
+    version_id: str
+    dataset_id: str
+    lakefs_commit_id: str
+    artifact_key: str
+
+
 class _PipelineRegistry:
     def __init__(
         self,
@@ -48,6 +58,7 @@ class _PipelineRegistry:
         self.recorded_runs: list[dict[str, Any]] = []
         self.recorded_builds: list[dict[str, Any]] = []
         self.recorded_previews: list[dict[str, Any]] = []
+        self.recorded_manifests: list[dict[str, Any]] = []
 
     async def get_pipeline(self, *, pipeline_id: str) -> Optional[_Pipeline]:
         if pipeline_id == self._pipeline.pipeline_id:
@@ -137,6 +148,13 @@ class _PipelineRegistry:
 
         return _LakeFS()
 
+    async def get_artifact_by_job(self, *, pipeline_id: str, job_id: str, mode: str) -> Any:
+        return None
+
+    async def record_promotion_manifest(self, **kwargs: Any) -> str:
+        self.recorded_manifests.append(dict(kwargs))
+        return "manifest-1"
+
 
 class _PipelineJobQueue:
     def __init__(self) -> None:
@@ -176,7 +194,7 @@ class _DatasetRegistry:
         sample_json: dict[str, Any],
         schema_json: dict[str, Any],
         promoted_from_artifact_id: Optional[str] = None,
-    ) -> None:
+    ) -> _DatasetVersion:
         self.versions.append(
             {
                 "dataset_id": dataset_id,
@@ -187,6 +205,25 @@ class _DatasetRegistry:
                 "schema_json": schema_json,
             }
         )
+        return _DatasetVersion(
+            version_id=f"v-{len(self.versions)}",
+            dataset_id=dataset_id,
+            lakefs_commit_id=lakefs_commit_id,
+            artifact_key=artifact_key,
+        )
+
+
+class _ObjectifyRegistry:
+    async def get_active_mapping_spec(
+        self,
+        *,
+        dataset_id: str,
+        dataset_branch: str,
+        target_class_id: Optional[str] = None,
+        artifact_output_name: Optional[str] = None,
+        schema_hash: Optional[str] = None,
+    ) -> Any:
+        return None
 
 
 class _OMSClient:
@@ -212,12 +249,12 @@ def lakefs_merge_stub(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 
 @pytest.mark.asyncio
 async def test_build_enqueues_job_and_records_run() -> None:
-    pipeline = _Pipeline(pipeline_id="p", db_name="testdb", branch="main")
+    pipeline = _Pipeline(pipeline_id=PIPELINE_ID, db_name="testdb", branch="main")
     registry = _PipelineRegistry(pipeline=pipeline, build_run={"job_id": "x"})
     queue = _PipelineJobQueue()
 
     response = await build_pipeline(
-        pipeline_id="p",
+        pipeline_id=PIPELINE_ID,
         payload={
             "db_name": "testdb",
             "definition_json": {"nodes": [], "edges": []},
@@ -230,13 +267,13 @@ async def test_build_enqueues_job_and_records_run() -> None:
     )
 
     assert response["status"] == "success"
-    assert response["data"]["pipeline_id"] == "p"
-    assert response["data"]["job_id"].startswith("build-p-")
+    assert response["data"]["pipeline_id"] == PIPELINE_ID
+    assert response["data"]["job_id"].startswith(f"build-{PIPELINE_ID}-")
     assert response["data"]["limit"] == 123
 
     assert len(queue.published) == 1
     job = queue.published[0]
-    assert job.pipeline_id == "p"
+    assert job.pipeline_id == PIPELINE_ID
     assert job.db_name == "testdb"
     assert job.mode == "build"
     assert job.preview_limit == 123
@@ -245,7 +282,7 @@ async def test_build_enqueues_job_and_records_run() -> None:
 
     assert len(registry.recorded_runs) == 1
     run = registry.recorded_runs[0]
-    assert run["pipeline_id"] == "p"
+    assert run["pipeline_id"] == PIPELINE_ID
     assert run["mode"] == "build"
     assert run["status"] == "QUEUED"
     assert run["output_json"]["queued"] is True
@@ -264,12 +301,12 @@ async def test_preview_enqueues_job_with_node_id_and_records_preview_and_run(mon
 
     monkeypatch.setattr(pipeline_router, "event_store", _EventStore())
 
-    pipeline = _Pipeline(pipeline_id="p", db_name="testdb", branch="main")
+    pipeline = _Pipeline(pipeline_id=PIPELINE_ID, db_name="testdb", branch="main")
     registry = _PipelineRegistry(pipeline=pipeline, build_run={"job_id": "x"})
     queue = _PipelineJobQueue()
 
     response = await preview_pipeline(
-        pipeline_id="p",
+        pipeline_id=PIPELINE_ID,
         payload={
             "db_name": "testdb",
             "definition_json": {"nodes": [], "edges": []},
@@ -282,13 +319,13 @@ async def test_preview_enqueues_job_with_node_id_and_records_preview_and_run(mon
     )
 
     assert response["status"] == "success"
-    assert response["data"]["pipeline_id"] == "p"
-    assert response["data"]["job_id"].startswith("preview-p-")
+    assert response["data"]["pipeline_id"] == PIPELINE_ID
+    assert response["data"]["job_id"].startswith(f"preview-{PIPELINE_ID}-")
     assert response["data"]["limit"] == 42
 
     assert len(queue.published) == 1
     job = queue.published[0]
-    assert job.pipeline_id == "p"
+    assert job.pipeline_id == PIPELINE_ID
     assert job.db_name == "testdb"
     assert job.mode == "preview"
     assert job.preview_limit == 42
@@ -309,7 +346,7 @@ async def test_preview_enqueues_job_with_node_id_and_records_preview_and_run(mon
 async def test_promote_build_merges_build_branch_to_main_and_registers_version(
     lakefs_merge_stub: list[dict[str, Any]],
 ) -> None:
-    pipeline = _Pipeline(pipeline_id="p", db_name="testdb", branch="main")
+    pipeline = _Pipeline(pipeline_id=PIPELINE_ID, db_name="testdb", branch="main")
     build_job_id = "build-p-123"
     node_id = "node-1"
 
@@ -340,7 +377,7 @@ async def test_promote_build_merges_build_branch_to_main_and_registers_version(
     dataset_registry = _DatasetRegistry()
 
     response = await deploy_pipeline(
-        pipeline_id="p",
+        pipeline_id=PIPELINE_ID,
         payload={
             "promote_build": True,
             "build_job_id": build_job_id,
@@ -350,6 +387,7 @@ async def test_promote_build_merges_build_branch_to_main_and_registers_version(
         request=_Request(headers={}),
         pipeline_registry=registry,
         dataset_registry=dataset_registry,
+        objectify_registry=_ObjectifyRegistry(),
         oms_client=_OMSClient(head_commit_id="c-main"),
         lineage_store=None,
         audit_store=_AuditStore(),
@@ -375,7 +413,7 @@ async def test_promote_build_merges_build_branch_to_main_and_registers_version(
 
 @pytest.mark.asyncio
 async def test_promote_build_rejects_non_staged_artifact_key() -> None:
-    pipeline = _Pipeline(pipeline_id="p", db_name="testdb", branch="main")
+    pipeline = _Pipeline(pipeline_id=PIPELINE_ID, db_name="testdb", branch="main")
     build_job_id = "build-p-456"
     node_id = "node-1"
     build_branch = "build-p-456"
@@ -405,7 +443,7 @@ async def test_promote_build_rejects_non_staged_artifact_key() -> None:
 
     with pytest.raises(HTTPException) as exc_info:
         await deploy_pipeline(
-            pipeline_id="p",
+            pipeline_id=PIPELINE_ID,
             payload={
                 "promote_build": True,
                 "build_job_id": build_job_id,
@@ -415,6 +453,7 @@ async def test_promote_build_rejects_non_staged_artifact_key() -> None:
             request=_Request(headers={}),
             pipeline_registry=registry,
             dataset_registry=_DatasetRegistry(),
+            objectify_registry=_ObjectifyRegistry(),
             oms_client=_OMSClient(head_commit_id="c-main"),
             lineage_store=None,
             audit_store=_AuditStore(),
@@ -426,7 +465,7 @@ async def test_promote_build_rejects_non_staged_artifact_key() -> None:
 
 @pytest.mark.asyncio
 async def test_promote_build_surfaces_build_errors_when_build_failed() -> None:
-    pipeline = _Pipeline(pipeline_id="p", db_name="testdb", branch="main")
+    pipeline = _Pipeline(pipeline_id=PIPELINE_ID, db_name="testdb", branch="main")
     build_job_id = "build-job-failed"
 
     build_run = {
@@ -440,7 +479,7 @@ async def test_promote_build_surfaces_build_errors_when_build_failed() -> None:
 
     with pytest.raises(HTTPException) as exc_info:
         await deploy_pipeline(
-            pipeline_id="p",
+            pipeline_id=PIPELINE_ID,
             payload={
                 "promote_build": True,
                 "build_job_id": build_job_id,
@@ -450,6 +489,7 @@ async def test_promote_build_surfaces_build_errors_when_build_failed() -> None:
             request=_Request(headers={}),
             pipeline_registry=registry,
             dataset_registry=_DatasetRegistry(),
+            objectify_registry=_ObjectifyRegistry(),
             oms_client=_OMSClient(head_commit_id="c-main"),
             lineage_store=None,
             audit_store=_AuditStore(),
@@ -463,7 +503,7 @@ async def test_promote_build_surfaces_build_errors_when_build_failed() -> None:
 
 @pytest.mark.asyncio
 async def test_promote_build_blocks_deploy_when_expectations_failed() -> None:
-    pipeline = _Pipeline(pipeline_id="p", db_name="testdb", branch="main")
+    pipeline = _Pipeline(pipeline_id=PIPELINE_ID, db_name="testdb", branch="main")
     build_job_id = "build-job-expectations-failed"
 
     build_run = {
@@ -477,7 +517,7 @@ async def test_promote_build_blocks_deploy_when_expectations_failed() -> None:
 
     with pytest.raises(HTTPException) as exc_info:
         await deploy_pipeline(
-            pipeline_id="p",
+            pipeline_id=PIPELINE_ID,
             payload={
                 "promote_build": True,
                 "build_job_id": build_job_id,
@@ -487,6 +527,7 @@ async def test_promote_build_blocks_deploy_when_expectations_failed() -> None:
             request=_Request(headers={}),
             pipeline_registry=registry,
             dataset_registry=_DatasetRegistry(),
+            objectify_registry=_ObjectifyRegistry(),
             oms_client=_OMSClient(head_commit_id="c-main"),
             lineage_store=None,
             audit_store=_AuditStore(),
@@ -501,7 +542,7 @@ async def test_promote_build_blocks_deploy_when_expectations_failed() -> None:
 async def test_promote_build_requires_replay_for_breaking_schema_changes(
     lakefs_merge_stub: list[dict[str, Any]],
 ) -> None:
-    pipeline = _Pipeline(pipeline_id="p", db_name="testdb", branch="main")
+    pipeline = _Pipeline(pipeline_id=PIPELINE_ID, db_name="testdb", branch="main")
     build_job_id = "build-p-breaking"
     node_id = "node-1"
     build_branch = "build-p-breaking"
@@ -539,7 +580,7 @@ async def test_promote_build_requires_replay_for_breaking_schema_changes(
 
     with pytest.raises(HTTPException) as exc_info:
         await deploy_pipeline(
-            pipeline_id="p",
+            pipeline_id=PIPELINE_ID,
             payload={
                 "promote_build": True,
                 "build_job_id": build_job_id,
@@ -549,6 +590,7 @@ async def test_promote_build_requires_replay_for_breaking_schema_changes(
             request=_Request(headers={}),
             pipeline_registry=registry,
             dataset_registry=dataset_registry,
+            objectify_registry=_ObjectifyRegistry(),
             lineage_store=None,
             oms_client=_OMSClient(head_commit_id="c-main"),
             audit_store=_AuditStore(),
@@ -563,7 +605,7 @@ async def test_promote_build_requires_replay_for_breaking_schema_changes(
 async def test_promote_build_allows_breaking_schema_changes_with_replay_flag(
     lakefs_merge_stub: list[dict[str, Any]],
 ) -> None:
-    pipeline = _Pipeline(pipeline_id="p", db_name="testdb", branch="main")
+    pipeline = _Pipeline(pipeline_id=PIPELINE_ID, db_name="testdb", branch="main")
     build_job_id = "build-p-breaking-allow"
     node_id = "node-1"
     build_branch = "build-p-breaking-allow"
@@ -600,7 +642,7 @@ async def test_promote_build_allows_breaking_schema_changes_with_replay_flag(
     )
 
     response = await deploy_pipeline(
-        pipeline_id="p",
+        pipeline_id=PIPELINE_ID,
         payload={
             "promote_build": True,
             "build_job_id": build_job_id,
@@ -611,6 +653,7 @@ async def test_promote_build_allows_breaking_schema_changes_with_replay_flag(
         request=_Request(headers={}),
         pipeline_registry=registry,
         dataset_registry=dataset_registry,
+        objectify_registry=_ObjectifyRegistry(),
         lineage_store=None,
         oms_client=_OMSClient(head_commit_id="c-main"),
         audit_store=_AuditStore(),

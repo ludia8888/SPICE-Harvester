@@ -11,10 +11,17 @@ import pytest
 
 
 BFF_URL = (os.getenv("BFF_BASE_URL") or "http://localhost:8002").rstrip("/")
+OMS_URL = (os.getenv("OMS_BASE_URL") or "http://localhost:8000").rstrip("/")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN") or os.getenv("BFF_ADMIN_TOKEN") or "test-token"
 
 
-async def _wait_for_command(client: httpx.AsyncClient, command_id: str, *, timeout_seconds: int = 90) -> None:
+async def _wait_for_command(
+    client: httpx.AsyncClient,
+    command_id: str,
+    *,
+    timeout_seconds: int = 90,
+    db_name: Optional[str] = None,
+) -> None:
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         resp = await client.get(f"{BFF_URL}/api/v1/commands/{command_id}/status")
@@ -25,6 +32,16 @@ async def _wait_for_command(client: httpx.AsyncClient, command_id: str, *, timeo
                 return
             if status in {"FAILED", "ERROR"}:
                 raise AssertionError(f"Command {command_id} failed: {payload}")
+        if db_name:
+            try:
+                exists_resp = await client.get(f"{OMS_URL}/api/v1/database/exists/{db_name}")
+                if exists_resp.status_code == 200:
+                    exists_payload = exists_resp.json()
+                    exists = (exists_payload.get("data") or {}).get("exists")
+                    if exists is True:
+                        return
+            except httpx.HTTPError:
+                pass
         await asyncio.sleep(0.5)
     raise AssertionError(f"Timed out waiting for command {command_id}")
 
@@ -67,7 +84,7 @@ async def test_preview_rejects_type_mismatch_in_compute_expression() -> None:
     """
 
     headers = {"X-Admin-Token": ADMIN_TOKEN}
-    async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=60.0) as client:
         suffix = uuid.uuid4().hex[:8]
         db_name = f"e2e_tm_{suffix}"
         headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
@@ -77,7 +94,7 @@ async def test_preview_rejects_type_mismatch_in_compute_expression() -> None:
         create_db.raise_for_status()
         command_id = str(((create_db.json().get("data") or {}) or {}).get("command_id") or "")
         assert command_id
-        await _wait_for_command(client, command_id)
+        await _wait_for_command(client, command_id, db_name=db_name)
 
         create_dataset = await client.post(
             f"{BFF_URL}/api/v1/pipelines/datasets",

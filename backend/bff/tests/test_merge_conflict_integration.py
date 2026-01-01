@@ -136,7 +136,7 @@ class TestMergeConflictIntegration:
             }
 
             # API 호출
-            response = client.post("/api/v1/database/test-db/merge/simulate", json=merge_request)
+            response = client.post("/api/v1/databases/test-db/merge/simulate", json=merge_request)
 
             # 응답 검증
             assert response.status_code == status.HTTP_200_OK
@@ -206,7 +206,7 @@ class TestMergeConflictIntegration:
                 "strategy": "merge",
             }
 
-            response = client.post("/api/v1/database/test-db/merge/simulate", json=merge_request)
+            response = client.post("/api/v1/databases/test-db/merge/simulate", json=merge_request)
 
             assert response.status_code == status.HTTP_200_OK
 
@@ -265,7 +265,7 @@ class TestMergeConflictIntegration:
             }
 
             response = client.post(
-                "/api/v1/database/test-db/merge/resolve", json=resolution_request
+                "/api/v1/databases/test-db/merge/resolve", json=resolution_request
             )
 
             assert response.status_code == status.HTTP_200_OK
@@ -354,7 +354,7 @@ class TestMergeConflictIntegration:
                 "strategy": "merge",
             }
 
-            response = client.post("/api/v1/database/test-db/merge/simulate", json=merge_request)
+            response = client.post("/api/v1/databases/test-db/merge/simulate", json=merge_request)
 
             assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
 
@@ -375,7 +375,7 @@ class TestMergeConflictIntegration:
                 "strategy": "merge",
             }
 
-            response = client.post("/api/v1/database/test-db/merge/simulate", json=invalid_request)
+            response = client.post("/api/v1/databases/test-db/merge/simulate", json=invalid_request)
 
             assert response.status_code == status.HTTP_400_BAD_REQUEST
 
@@ -417,7 +417,7 @@ class TestMergeConflictIntegration:
         # Mock calls 검증
         mock_oms.client.post.assert_called_once()
         call_args = mock_oms.client.post.call_args
-        assert "/database/test-db/merge/simulate" in call_args[0][0]
+        assert "/api/v1/database/test-db/merge/simulate" in call_args[0][0]
 
     def test_api_documentation_completeness(self, client):
         """API 문서화 완성도 테스트"""
@@ -432,8 +432,8 @@ class TestMergeConflictIntegration:
         paths = openapi_schema.get("paths", {})
 
         expected_endpoints = [
-            "/api/v1/database/{db_name}/merge/simulate",
-            "/api/v1/database/{db_name}/merge/resolve",
+            "/api/v1/databases/{db_name}/merge/simulate",
+            "/api/v1/databases/{db_name}/merge/resolve",
         ]
 
         for endpoint in expected_endpoints:

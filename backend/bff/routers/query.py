@@ -19,7 +19,7 @@ from shared.utils.language import get_accept_language
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/database/{db_name}", tags=["Query"])
+router = APIRouter(prefix="/databases/{db_name}", tags=["Query"])
 
 
 @router.post("/query", response_model=QueryResponse)

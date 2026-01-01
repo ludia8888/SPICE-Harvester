@@ -20,7 +20,7 @@ from elasticsearch.exceptions import ConnectionError as ESConnectionError, NotFo
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/database/{db_name}", tags=["Instance Management"])
+router = APIRouter(prefix="/databases/{db_name}", tags=["Instance Management"])
 
 def _normalize_es_search_result(result: Any) -> tuple[int, List[Dict[str, Any]]]:
     """

@@ -27,6 +27,38 @@ ELASTICSEARCH_URL = (
     or f"http://{os.getenv('ELASTICSEARCH_HOST', 'localhost')}:{os.getenv('ELASTICSEARCH_PORT', '9200')}"
 ).rstrip("/")
 
+
+async def _wait_for_command_completed(
+    session: aiohttp.ClientSession,
+    *,
+    command_id: str,
+    db_name: str | None = None,
+    timeout_seconds: int = 120,
+    poll_interval_seconds: float = 2.0,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    last = None
+    while time.monotonic() < deadline:
+        async with session.get(f"{OMS_URL}/api/v1/commands/{command_id}/status") as resp:
+            if resp.status != 200:
+                last = {"status": resp.status, "body": await resp.text()}
+                await asyncio.sleep(poll_interval_seconds)
+                continue
+            last = await resp.json()
+        status_value = str(last.get("status") or "").upper()
+        if status_value in {"COMPLETED", "FAILED", "CANCELLED"}:
+            if status_value != "COMPLETED":
+                raise AssertionError(f"Command {command_id} ended in {status_value}: {last}")
+            return
+        if db_name:
+            async with session.get(f"{OMS_URL}/api/v1/database/exists/{db_name}") as resp:
+                if resp.status == 200:
+                    payload = await resp.json()
+                    if (payload.get("data") or {}).get("exists") is True:
+                        return
+        await asyncio.sleep(poll_interval_seconds)
+    raise AssertionError(f"Timed out waiting for command completion (command_id={command_id}, last={last})")
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_full_api_integration():
@@ -63,29 +95,26 @@ async def test_full_api_integration():
         
         # Wait for async processing
         await asyncio.sleep(5)  # More time for Event Sourcing
+
+        if db_command_id:
+            await _wait_for_command_completed(
+                session,
+                command_id=str(db_command_id),
+                db_name=db_name,
+                timeout_seconds=180,
+            )
         
         # 1.2 Verify database exists
         print("\n2️⃣ Verifying database creation...")
-        max_retries = 10
-        for retry in range(max_retries):
-            async with session.get(
-                f"{OMS_URL}/api/v1/database/exists/{db_name}",
-                headers=headers,
-            ) as resp:
-                if resp.status == 200:
-                    result = await resp.json()
-                    exists = result.get('data', {}).get('exists')
-                    if exists:
-                        print(f"   ✅ Database exists: {exists}")
-                        break
-                    else:
-                        print(f"   ⏳ Retry {retry+1}/{max_retries}: Database not ready yet...")
-                        await asyncio.sleep(2)
-                elif resp.status == 404:
-                    print(f"   ⏳ Retry {retry+1}/{max_retries}: Database not found yet...")
-                    await asyncio.sleep(2)
-        else:
-            raise AssertionError("Database creation did not complete in time")
+        async with session.get(
+            f"{OMS_URL}/api/v1/database/exists/{db_name}",
+            headers=headers,
+        ) as resp:
+            assert resp.status == 200
+            result = await resp.json()
+            exists = result.get('data', {}).get('exists')
+            assert exists is True, f"Database {db_name} not ready"
+            print(f"   ✅ Database exists: {exists}")
         
         # 1.3 Create ontologies with relationships
         print("\n3️⃣ Creating ontologies with relationships...")
@@ -212,6 +241,8 @@ async def test_full_api_integration():
                     result = await resp.json()
                     command_id = result.get('command_id')
                     print(f"   ✅ Client {client_data['client_id']} accepted: {command_id}")
+                    if command_id:
+                        await _wait_for_command_completed(session, command_id=command_id)
                 else:
                     text = await resp.text()
                     raise AssertionError(f"Client {client_data['client_id']} failed: {resp.status} {text[:200]}")
@@ -251,8 +282,11 @@ async def test_full_api_integration():
             ) as resp:
                 if resp.status in (200, 201, 202):
                     result = await resp.json()
+                    command_id = result.get('command_id')
                     print(f"   ✅ Product {product_data['product_id']} accepted")
                     print(f"      → owned_by: {product_data['owned_by']}")
+                    if command_id:
+                        await _wait_for_command_completed(session, command_id=command_id)
                 else:
                     text = await resp.text()
                     raise AssertionError(f"Product {product_data['product_id']} failed: {resp.status} {text[:200]}")
@@ -285,9 +319,12 @@ async def test_full_api_integration():
             ) as resp:
                 if resp.status in (200, 201, 202):
                     result = await resp.json()
+                    command_id = result.get('command_id')
                     print(f"   ✅ Order {order_data['order_id']} accepted")
                     print(f"      → ordered_by: {order_data['ordered_by']}")
                     print(f"      → contains: {order_data['contains']}")
+                    if command_id:
+                        await _wait_for_command_completed(session, command_id=command_id)
                 else:
                     text = await resp.text()
                     raise AssertionError(f"Order {order_data['order_id']} failed: {resp.status} {text[:200]}")

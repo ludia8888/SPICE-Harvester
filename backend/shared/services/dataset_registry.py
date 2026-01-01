@@ -10,15 +10,16 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 import asyncpg
 
 from shared.config.service_config import ServiceConfig
-from shared.utils.s3_uri import is_s3_uri
+from shared.utils.s3_uri import is_s3_uri, parse_s3_uri
 from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
+from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,12 @@ class DatasetIngestOutboxItem:
     payload: Dict[str, Any]
     status: str
     publish_attempts: int
+    retry_count: int
     error: Optional[str]
+    last_error: Optional[str]
+    claimed_by: Optional[str]
+    claimed_at: Optional[datetime]
+    next_attempt_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime
 
@@ -405,7 +411,12 @@ class DatasetRegistry:
                     payload JSONB NOT NULL,
                     status TEXT NOT NULL DEFAULT 'pending',
                     publish_attempts INTEGER NOT NULL DEFAULT 0,
+                    retry_count INTEGER NOT NULL DEFAULT 0,
                     error TEXT,
+                    last_error TEXT,
+                    claimed_by TEXT,
+                    claimed_at TIMESTAMPTZ,
+                    next_attempt_at TIMESTAMPTZ,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     FOREIGN KEY (ingest_request_id)
@@ -416,8 +427,38 @@ class DatasetRegistry:
             )
             await conn.execute(
                 f"""
+                ALTER TABLE {self._schema}.dataset_ingest_outbox
+                    ADD COLUMN IF NOT EXISTS claimed_by TEXT,
+                    ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ,
+                    ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ,
+                    ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0,
+                    ADD COLUMN IF NOT EXISTS last_error TEXT
+                """
+            )
+            await conn.execute(
+                f"""
+                UPDATE {self._schema}.dataset_ingest_outbox
+                SET retry_count = GREATEST(retry_count, publish_attempts),
+                    last_error = COALESCE(last_error, error)
+                WHERE retry_count = 0 AND publish_attempts > 0
+                """
+            )
+            await conn.execute(
+                f"""
                 CREATE INDEX IF NOT EXISTS idx_dataset_ingest_outbox_status
                 ON {self._schema}.dataset_ingest_outbox(status, created_at)
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_dataset_ingest_outbox_status_next
+                ON {self._schema}.dataset_ingest_outbox(status, next_attempt_at, created_at)
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_dataset_ingest_outbox_claimed
+                ON {self._schema}.dataset_ingest_outbox(status, claimed_at)
                 """
             )
 
@@ -1250,6 +1291,7 @@ class DatasetRegistry:
                             f"""
                             SELECT 1 FROM {self._schema}.dataset_ingest_outbox
                             WHERE ingest_request_id = $1::uuid
+                              AND status <> 'dead'
                             LIMIT 1
                             """,
                             ingest_request_id,
@@ -1349,6 +1391,7 @@ class DatasetRegistry:
                             f"""
                             SELECT 1 FROM {self._schema}.dataset_ingest_outbox
                             WHERE ingest_request_id = $1::uuid
+                              AND status <> 'dead'
                             LIMIT 1
                             """,
                             ingest_request_id,
@@ -1439,22 +1482,45 @@ class DatasetRegistry:
                     created_at=row["created_at"],
                 )
 
-    async def claim_ingest_outbox_batch(self, *, limit: int = 50) -> List[DatasetIngestOutboxItem]:
+    async def claim_ingest_outbox_batch(
+        self,
+        *,
+        limit: int = 50,
+        claimed_by: Optional[str] = None,
+        claim_timeout_seconds: int = 300,
+    ) -> List[DatasetIngestOutboxItem]:
         if not self._pool:
             raise RuntimeError("DatasetRegistry not connected")
         async with self._pool.acquire() as conn:
             async with conn.transaction():
+                claim_timeout = max(0, int(claim_timeout_seconds))
+                clause = """
+                    WHERE (
+                        status IN ('pending', 'failed')
+                        AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
+                    )
+                """
+                values: List[Any] = [limit]
+                if claim_timeout > 0:
+                    clause += f"""
+                        OR (
+                            status = 'publishing'
+                            AND (claimed_at IS NULL OR claimed_at <= NOW() - (${len(values) + 1}::int * INTERVAL '1 second'))
+                        )
+                    """
+                    values.append(claim_timeout)
                 rows = await conn.fetch(
                     f"""
                     SELECT outbox_id, ingest_request_id, kind, payload, status, publish_attempts, error,
-                           created_at, updated_at
+                           retry_count, last_error,
+                           claimed_by, claimed_at, next_attempt_at, created_at, updated_at
                     FROM {self._schema}.dataset_ingest_outbox
-                    WHERE status = 'pending'
+                    {clause}
                     ORDER BY created_at ASC
                     LIMIT $1
                     FOR UPDATE SKIP LOCKED
                     """,
-                    limit,
+                    *values,
                 )
                 if not rows:
                     return []
@@ -1464,10 +1530,14 @@ class DatasetRegistry:
                     UPDATE {self._schema}.dataset_ingest_outbox
                     SET status = 'publishing',
                         publish_attempts = publish_attempts + 1,
+                        retry_count = retry_count + 1,
+                        claimed_by = $2,
+                        claimed_at = NOW(),
                         updated_at = NOW()
                     WHERE outbox_id = ANY($1::uuid[])
                     """,
                     outbox_ids,
+                    claimed_by,
                 )
                 return [
                     DatasetIngestOutboxItem(
@@ -1478,6 +1548,11 @@ class DatasetRegistry:
                         status=row["status"],
                         publish_attempts=int(row["publish_attempts"]),
                         error=row["error"],
+                        retry_count=int(row["retry_count"] or 0),
+                        last_error=row["last_error"],
+                        claimed_by=str(row["claimed_by"]) if row["claimed_by"] else None,
+                        claimed_at=row["claimed_at"],
+                        next_attempt_at=row["next_attempt_at"],
                         created_at=row["created_at"],
                         updated_at=row["updated_at"],
                     )
@@ -1492,13 +1567,24 @@ class DatasetRegistry:
                 f"""
                 UPDATE {self._schema}.dataset_ingest_outbox
                 SET status = 'published',
-                    updated_at = NOW()
+                    updated_at = NOW(),
+                    next_attempt_at = NULL,
+                    error = NULL,
+                    last_error = NULL,
+                    claimed_by = NULL,
+                    claimed_at = NULL
                 WHERE outbox_id = $1::uuid
                 """,
                 outbox_id,
             )
 
-    async def mark_ingest_outbox_failed(self, *, outbox_id: str, error: str) -> None:
+    async def mark_ingest_outbox_failed(
+        self,
+        *,
+        outbox_id: str,
+        error: str,
+        next_attempt_at: Optional[datetime] = None,
+    ) -> None:
         if not self._pool:
             raise RuntimeError("DatasetRegistry not connected")
         async with self._pool.acquire() as conn:
@@ -1507,12 +1593,108 @@ class DatasetRegistry:
                 UPDATE {self._schema}.dataset_ingest_outbox
                 SET status = 'failed',
                     error = $2,
+                    last_error = $2,
+                    next_attempt_at = $3,
+                    claimed_by = NULL,
+                    claimed_at = NULL,
+                    updated_at = NOW()
+                WHERE outbox_id = $1::uuid
+                """,
+                outbox_id,
+                error,
+                next_attempt_at,
+            )
+
+    async def mark_ingest_outbox_dead(self, *, outbox_id: str, error: str) -> None:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                f"""
+                UPDATE {self._schema}.dataset_ingest_outbox
+                SET status = 'dead',
+                    error = $2,
+                    last_error = $2,
+                    next_attempt_at = NULL,
+                    claimed_by = NULL,
+                    claimed_at = NULL,
                     updated_at = NOW()
                 WHERE outbox_id = $1::uuid
                 """,
                 outbox_id,
                 error,
             )
+
+    async def purge_ingest_outbox(
+        self,
+        *,
+        retention_days: int = 7,
+        limit: int = 10_000,
+    ) -> int:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        retention_days = max(1, int(retention_days))
+        limit = max(1, int(limit))
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                WITH doomed AS (
+                    SELECT ctid
+                    FROM {self._schema}.dataset_ingest_outbox
+                    WHERE status = 'published'
+                      AND updated_at < NOW() - ($1::int * INTERVAL '1 day')
+                    ORDER BY updated_at ASC
+                    LIMIT $2
+                )
+                DELETE FROM {self._schema}.dataset_ingest_outbox
+                WHERE ctid IN (SELECT ctid FROM doomed)
+                RETURNING 1
+                """,
+                retention_days,
+                limit,
+            )
+        return len(rows or [])
+
+    async def get_ingest_outbox_metrics(self) -> Dict[str, Any]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT status, count(*) AS count, MIN(created_at) AS oldest_created_at,
+                       MIN(next_attempt_at) AS next_attempt_at,
+                       MAX(retry_count) AS max_retry
+                FROM {self._schema}.dataset_ingest_outbox
+                GROUP BY status
+                """
+            )
+        counts = {str(row["status"]): int(row["count"]) for row in rows or []}
+        backlog_statuses = {"pending", "publishing", "failed"}
+        backlog = sum(counts.get(status, 0) for status in backlog_statuses)
+        oldest_candidates = [
+            row["oldest_created_at"]
+            for row in rows or []
+            if row["status"] in backlog_statuses and row["oldest_created_at"]
+        ]
+        oldest_created = min(oldest_candidates) if oldest_candidates else None
+        next_attempt = min(
+            (row["next_attempt_at"] for row in rows or [] if row["next_attempt_at"]), default=None
+        )
+        now = datetime.now(timezone.utc)
+        oldest_age_seconds = None
+        if oldest_created:
+            try:
+                oldest_age_seconds = int((now - oldest_created).total_seconds())
+            except Exception:
+                oldest_age_seconds = None
+
+        return {
+            "counts": counts,
+            "backlog": backlog,
+            "oldest_created_at": oldest_created.isoformat() if oldest_created else None,
+            "oldest_age_seconds": oldest_age_seconds,
+            "next_attempt_at": next_attempt.isoformat() if next_attempt else None,
+        }
 
     async def reconcile_ingest_state(
         self,
@@ -1532,7 +1714,7 @@ class DatasetRegistry:
         if not self._pool:
             raise RuntimeError("DatasetRegistry not connected")
 
-        results = {"published": 0, "aborted": 0, "committed_tx": 0, "skipped": 0}
+        results = {"published": 0, "outbox_repaired": 0, "aborted": 0, "committed_tx": 0, "skipped": 0}
         cutoff = datetime.utcnow() - timedelta(seconds=max(60, int(stale_after_seconds)))
 
         lock_conn: Optional[asyncpg.Connection] = None
@@ -1619,6 +1801,110 @@ class DatasetRegistry:
                     results["published"] += 1
                 except Exception as exc:
                     logger.warning("Failed to reconcile RAW_COMMITTED ingest %s: %s", ingest_request_id, exc)
+
+            # 1b) Repair published dataset versions missing outbox rows.
+            async with self._pool.acquire() as conn:
+                rows = await conn.fetch(
+                    f"""
+                    SELECT v.version_id, v.dataset_id, v.lakefs_commit_id, v.artifact_key,
+                           r.ingest_request_id, r.db_name, r.branch, r.schema_json, r.sample_json, r.row_count,
+                           d.name AS dataset_name,
+                           t.transaction_id
+                    FROM {self._schema}.dataset_versions v
+                    JOIN {self._schema}.dataset_ingest_requests r
+                      ON r.ingest_request_id = v.ingest_request_id
+                    JOIN {self._schema}.datasets d
+                      ON d.dataset_id = v.dataset_id
+                    LEFT JOIN {self._schema}.dataset_ingest_transactions t
+                      ON t.ingest_request_id = r.ingest_request_id
+                    WHERE r.status = 'PUBLISHED'
+                      AND NOT EXISTS (
+                        SELECT 1
+                        FROM {self._schema}.dataset_ingest_outbox o
+                        WHERE o.ingest_request_id = r.ingest_request_id
+                          AND o.status <> 'dead'
+                      )
+                    ORDER BY v.created_at ASC
+                    LIMIT $1
+                    """,
+                    limit,
+                )
+
+            for row in rows or []:
+                ingest_request_id = str(row["ingest_request_id"])
+                dataset_id = str(row["dataset_id"])
+                db_name = str(row["db_name"])
+                dataset_name = str(row["dataset_name"] or "")
+                lakefs_commit_id = str(row["lakefs_commit_id"])
+                artifact_key = row["artifact_key"]
+                schema_json = coerce_json_dataset(row["schema_json"]) if row["schema_json"] is not None else None
+                sample_json = coerce_json_dataset(row["sample_json"]) if row["sample_json"] is not None else None
+                row_count = row["row_count"]
+                transaction_id = str(row["transaction_id"]) if row["transaction_id"] else None
+                from shared.services.dataset_ingest_outbox import build_dataset_event_payload
+
+                outbox_entries: list[dict[str, Any]] = [
+                    {
+                        "kind": "eventstore",
+                        "payload": build_dataset_event_payload(
+                            event_id=ingest_request_id,
+                            event_type="DATASET_VERSION_CREATED",
+                            aggregate_type="Dataset",
+                            aggregate_id=dataset_id,
+                            command_type="INGEST_DATASET_SNAPSHOT",
+                            actor=None,
+                            data={
+                                "dataset_id": dataset_id,
+                                "db_name": db_name,
+                                "name": dataset_name,
+                                "lakefs_commit_id": lakefs_commit_id,
+                                "artifact_key": artifact_key,
+                                "transaction_id": transaction_id,
+                            },
+                        ),
+                    }
+                ]
+                if artifact_key:
+                    parsed = parse_s3_uri(artifact_key)
+                    if parsed:
+                        bucket, key = parsed
+                        outbox_entries.append(
+                            {
+                                "kind": "lineage",
+                                "payload": {
+                                    "from_node_id": f"event:{ingest_request_id}",
+                                    "to_node_id": f"artifact:s3:{bucket}:{key}",
+                                    "edge_type": "dataset_artifact_stored",
+                                    "occurred_at": utcnow(),
+                                    "from_label": "ingest_reconciler",
+                                    "to_label": artifact_key,
+                                    "db_name": db_name,
+                                    "edge_metadata": {
+                                        "db_name": db_name,
+                                        "dataset_id": dataset_id,
+                                        "dataset_name": dataset_name,
+                                        "bucket": bucket,
+                                        "key": key,
+                                        "source": "ingest_reconciler",
+                                    },
+                                },
+                            }
+                        )
+
+                try:
+                    await self.publish_ingest_request(
+                        ingest_request_id=ingest_request_id,
+                        dataset_id=dataset_id,
+                        lakefs_commit_id=lakefs_commit_id,
+                        artifact_key=artifact_key,
+                        row_count=row_count,
+                        sample_json=sample_json,
+                        schema_json=schema_json,
+                        outbox_entries=outbox_entries,
+                    )
+                    results["outbox_repaired"] += 1
+                except Exception as exc:
+                    logger.warning("Failed to repair ingest outbox for %s: %s", ingest_request_id, exc)
 
             # 2) Repair OPEN transactions for already-published requests.
             async with self._pool.acquire() as conn:

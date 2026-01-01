@@ -8,6 +8,8 @@ from fastapi import HTTPException, status
 
 from bff.routers.pipeline import get_pipeline
 
+PIPELINE_ID = "00000000-0000-0000-0000-000000000003"
+
 
 @dataclass
 class _Request:
@@ -40,7 +42,7 @@ class _PipelineRegistryDenied:
 class _PipelineRegistryBootstrap:
     def __init__(self) -> None:
         self.granted = False
-        self.pipeline = _Pipeline(pipeline_id="p", db_name="testdb")
+        self.pipeline = _Pipeline(pipeline_id=PIPELINE_ID, db_name="testdb")
 
     async def has_any_permissions(self, *, pipeline_id: str) -> bool:
         return False
@@ -72,7 +74,7 @@ async def test_get_pipeline_requires_read_permission() -> None:
     registry = _PipelineRegistryDenied()
     with pytest.raises(HTTPException) as exc_info:
         await get_pipeline(
-            pipeline_id="p",
+            pipeline_id=PIPELINE_ID,
             pipeline_registry=registry,
             branch=None,
             preview_node_id=None,
@@ -87,7 +89,7 @@ async def test_get_pipeline_requires_read_permission() -> None:
 async def test_get_pipeline_bootstraps_permissions_when_missing() -> None:
     registry = _PipelineRegistryBootstrap()
     response = await get_pipeline(
-        pipeline_id="p",
+        pipeline_id=PIPELINE_ID,
         pipeline_registry=registry,
         branch=None,
         preview_node_id=None,

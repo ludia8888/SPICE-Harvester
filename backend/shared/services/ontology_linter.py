@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from shared.models.ontology import Property, Relationship
 from shared.models.ontology_lint import LintIssue, LintReport, LintSeverity
+from shared.utils.branch_utils import get_protected_branches
 from shared.i18n import m
 
 _SNAKE_CASE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -26,16 +27,37 @@ class OntologyLinterConfig:
     """Controls strictness (domain-neutral)."""
 
     require_primary_key: bool = True
+    allow_implicit_primary_key: bool = True
     block_event_like_class_names: bool = False
     enforce_snake_case_fields: bool = False
 
     @classmethod
-    def from_env(cls) -> "OntologyLinterConfig":
+    def from_env(cls, *, branch: Optional[str] = None) -> "OntologyLinterConfig":
         def _truthy(name: str, default: str) -> bool:
             return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
+        def _is_production_env() -> bool:
+            raw = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or os.getenv("APP_ENVIRONMENT") or "")
+            return raw.strip().lower() in {"prod", "production"}
+
+        def _requires_proposals() -> bool:
+            return _truthy("ONTOLOGY_REQUIRE_PROPOSALS", "true")
+
+        def _allow_implicit_primary_key_default() -> bool:
+            if _is_production_env():
+                return False
+            if _requires_proposals() and branch:
+                protected = get_protected_branches()
+                if branch in protected:
+                    return False
+            return True
+
         return cls(
             require_primary_key=_truthy("ONTOLOGY_REQUIRE_PRIMARY_KEY", "true"),
+            allow_implicit_primary_key=_truthy(
+                "ONTOLOGY_ALLOW_IMPLICIT_PRIMARY_KEY",
+                "true" if _allow_implicit_primary_key_default() else "false",
+            ),
             block_event_like_class_names=_truthy("ONTOLOGY_BLOCK_EVENT_LIKE_CLASS", "false"),
             enforce_snake_case_fields=_truthy("ONTOLOGY_ENFORCE_SNAKE_CASE_FIELDS", "false"),
         )
@@ -173,46 +195,85 @@ def lint_ontology_create(
 
     if cfg.require_primary_key and not abstract:
         expected_pk = f"{class_id.lower()}_id"
-        pk_candidates = [p for p in properties if getattr(p, "primary_key", False)]
+        explicit_pk = [p for p in properties if getattr(p, "primary_key", False)]
         id_like = [p for p in properties if p.name == expected_pk or p.name.endswith("_id")]
 
-        if not pk_candidates and not id_like:
-            errors.append(
-                _issue(
-                    LintSeverity.ERROR,
-                    "ONT001",
-                    m(
-                        en="Missing primary key field. Instances must be stably identifiable.",
-                        ko="기본키(primary key) 속성이 없습니다. 인스턴스를 안정적으로 식별할 수 있어야 합니다.",
-                    ),
-                    path="properties",
-                    suggestion=m(
-                        en=f"Example: add '{expected_pk}' (xsd:string) to properties",
-                        ko=f"예: properties에 '{expected_pk}'(xsd:string) 추가",
-                    ),
-                    rationale=m(
-                        en="Without a primary key, duplicates/merges/updates become unreliable.",
-                        ko="기본키가 없으면 중복/병합/업데이트 시 데이터가 꼬일 가능성이 큽니다.",
-                    ),
+        if not explicit_pk:
+            if not cfg.allow_implicit_primary_key:
+                errors.append(
+                    _issue(
+                        LintSeverity.ERROR,
+                        "ONT001",
+                        m(
+                            en="Explicit primary_key is required on protected/prod branches.",
+                            ko="보호/프로덕션 브랜치에서는 primary_key를 명시해야 합니다.",
+                        ),
+                        path="properties",
+                        suggestion=m(
+                            en=f"Set primary_key=true on '{expected_pk}' (or define pk_spec in the object_type resource).",
+                            ko=f"'{expected_pk}'에 primary_key=true를 지정하세요 (또는 object_type의 pk_spec로 명시).",
+                        ),
+                        rationale=m(
+                            en="Implicit '*_id' heuristics are disabled to prevent collisions.",
+                            ko="암묵적 '*_id' 규칙은 충돌 위험 때문에 비활성화됩니다.",
+                        ),
+                        metadata={"id_like_fields": [p.name for p in id_like]},
+                    )
                 )
-            )
-        elif len(id_like) > 1 and not pk_candidates:
-            warnings.append(
-                _issue(
-                    LintSeverity.WARNING,
-                    "ONT003",
-                    m(
-                        en="Multiple '*_id' candidates found. Setting primary_key explicitly reduces ambiguity.",
-                        ko="여러 개의 '*_id' 후보가 있습니다. primary_key를 명시하면 혼동을 줄일 수 있습니다.",
-                    ),
-                    path="properties",
-                    suggestion=m(
-                        en="Choose one canonical identifier and set primary_key=true.",
-                        ko="가장 대표 식별자 1개에 primary_key=true를 지정하세요",
-                    ),
-                    metadata={"id_like_fields": [p.name for p in id_like]},
+            elif not id_like:
+                errors.append(
+                    _issue(
+                        LintSeverity.ERROR,
+                        "ONT001",
+                        m(
+                            en="Missing primary key field. Instances must be stably identifiable.",
+                            ko="기본키(primary key) 속성이 없습니다. 인스턴스를 안정적으로 식별할 수 있어야 합니다.",
+                        ),
+                        path="properties",
+                        suggestion=m(
+                            en=f"Example: add '{expected_pk}' (xsd:string) to properties",
+                            ko=f"예: properties에 '{expected_pk}'(xsd:string) 추가",
+                        ),
+                        rationale=m(
+                            en="Without a primary key, duplicates/merges/updates become unreliable.",
+                            ko="기본키가 없으면 중복/병합/업데이트 시 데이터가 꼬일 가능성이 큽니다.",
+                        ),
+                    )
                 )
-            )
+            else:
+                warnings.append(
+                    _issue(
+                        LintSeverity.WARNING,
+                        "ONT002",
+                        m(
+                            en="Implicit '*_id' accepted in dev. Declare primary_key explicitly for production.",
+                            ko="개발 환경에서는 '*_id'를 허용하지만, 프로덕션에서는 primary_key를 명시하세요.",
+                        ),
+                        path="properties",
+                        suggestion=m(
+                            en="Choose one canonical identifier and set primary_key=true.",
+                            ko="가장 대표 식별자 1개에 primary_key=true를 지정하세요",
+                        ),
+                        metadata={"id_like_fields": [p.name for p in id_like]},
+                    )
+                )
+                if len(id_like) > 1:
+                    warnings.append(
+                        _issue(
+                            LintSeverity.WARNING,
+                            "ONT003",
+                            m(
+                                en="Multiple '*_id' candidates found. Setting primary_key explicitly reduces ambiguity.",
+                                ko="여러 개의 '*_id' 후보가 있습니다. primary_key를 명시하면 혼동을 줄일 수 있습니다.",
+                            ),
+                            path="properties",
+                            suggestion=m(
+                                en="Choose one canonical identifier and set primary_key=true.",
+                                ko="가장 대표 식별자 1개에 primary_key=true를 지정하세요",
+                            ),
+                            metadata={"id_like_fields": [p.name for p in id_like]},
+                        )
+                    )
 
     triggers = list({*(_event_like_triggers(label)), *(_event_like_triggers(class_id))})
     if triggers:
@@ -354,8 +415,12 @@ def lint_ontology_update(
         )
 
     if cfg.require_primary_key:
-        existing_pk = [p for p in existing_properties if p.primary_key or p.name.endswith("_id")]
-        updated_pk = [p for p in updated_properties if p.primary_key or p.name.endswith("_id")]
+        if cfg.allow_implicit_primary_key:
+            existing_pk = [p for p in existing_properties if p.primary_key or p.name.endswith("_id")]
+            updated_pk = [p for p in updated_properties if p.primary_key or p.name.endswith("_id")]
+        else:
+            existing_pk = [p for p in existing_properties if p.primary_key]
+            updated_pk = [p for p in updated_properties if p.primary_key]
         if existing_pk and not updated_pk:
             errors.append(
                 _issue(

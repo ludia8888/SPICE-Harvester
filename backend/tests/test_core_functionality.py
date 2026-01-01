@@ -52,6 +52,25 @@ if BFF_HEADERS.get("X-Admin-Token") != OMS_HEADERS.get("X-Admin-Token"):
 AUTH_HEADERS = BFF_HEADERS
 
 
+async def _resolve_bff_path(
+    session: aiohttp.ClientSession,
+    candidates: list[str],
+) -> str:
+    try:
+        async with session.get(f"{BFF_URL}/openapi.json") as resp:
+            if resp.status != 200:
+                return candidates[0]
+            spec = await resp.json()
+    except Exception:
+        return candidates[0]
+
+    path_set = set(spec.get("paths") or {})
+    for candidate in candidates:
+        if candidate in path_set:
+            return candidate
+    return candidates[0]
+
+
 async def _get_write_side_last_sequence(*, aggregate_type: str, aggregate_id: str) -> int:
     """
     Fetch the current write-side sequence for an aggregate from Postgres.
@@ -516,6 +535,14 @@ class TestBFFGraphFederation:
     async def test_schema_suggestion(self):
         """Test ML-driven schema suggestion"""
         async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
+            path_template = await _resolve_bff_path(
+                session,
+                [
+                    "/api/v1/databases/{db_name}/suggest-schema-from-data",
+                    "/api/v1/database/{db_name}/suggest-schema-from-data",
+                ],
+            )
+            suggest_path = path_template.format(db_name="test_db")
             sample_data = [
                 {"name": "iPhone 15", "price": 999.99, "in_stock": True},
                 {"name": "Samsung S24", "price": 899.99, "in_stock": False},
@@ -525,7 +552,7 @@ class TestBFFGraphFederation:
             data = [[row.get(col) for col in columns] for row in sample_data]
             
             async with session.post(
-                f"{BFF_URL}/api/v1/database/test_db/suggest-schema-from-data",
+                f"{BFF_URL}{suggest_path}",
                 json={
                     "data": data,
                     "columns": columns,

@@ -212,8 +212,8 @@ def test_core_foundry_conflict_system():
 
         # 핵심 엔드포인트 존재 확인
         expected_endpoints = [
-            "/api/v1/database/{db_name}/merge/simulate",
-            "/api/v1/database/{db_name}/merge/resolve",
+            "/api/v1/databases/{db_name}/merge/simulate",
+            "/api/v1/databases/{db_name}/merge/resolve",
         ]
 
         for expected in expected_endpoints:

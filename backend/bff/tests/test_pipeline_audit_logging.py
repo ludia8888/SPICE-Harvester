@@ -8,6 +8,8 @@ import pytest
 from bff.routers import pipeline as pipeline_router
 from bff.routers.pipeline import update_pipeline
 
+PIPELINE_ID = "00000000-0000-0000-0000-000000000001"
+
 
 @dataclass
 class _Request:
@@ -76,9 +78,9 @@ async def test_pipeline_update_writes_audit_log(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(pipeline_router, "event_store", _EventStore())
 
     audit_store = _AuditStore()
-    registry = _PipelineRegistry(_Pipeline(pipeline_id="p", db_name="testdb"))
+    registry = _PipelineRegistry(_Pipeline(pipeline_id=PIPELINE_ID, db_name="testdb"))
     response = await update_pipeline(
-        pipeline_id="p",
+        pipeline_id=PIPELINE_ID,
         payload={"status": "draft"},
         pipeline_registry=registry,
         audit_store=audit_store,

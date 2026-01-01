@@ -21,6 +21,18 @@ def pytest_configure() -> None:
 
     if "ELASTICSEARCH_PORT" not in os.environ:
         os.environ["ELASTICSEARCH_PORT"] = os.getenv("ELASTICSEARCH_PORT_HOST", "9200")
+    kafka_port = os.getenv("KAFKA_PORT_HOST", "39092").strip()
+    postgres_port = os.getenv("POSTGRES_PORT_HOST", "55433").strip()
+    redis_port = os.getenv("REDIS_PORT_HOST", "6380").strip()
+
+    os.environ.setdefault("KAFKA_BOOTSTRAP_SERVERS", f"localhost:{kafka_port}")
+    os.environ.setdefault(
+        "POSTGRES_URL",
+        f"postgresql://spiceadmin:spicepass123@localhost:{postgres_port}/spicedb",
+    )
+    os.environ.setdefault("REDIS_URL", f"redis://:spicepass123@localhost:{redis_port}/0")
+    os.environ.setdefault("REDIS_HOST", "localhost")
+    os.environ.setdefault("REDIS_PORT", redis_port)
     # MinIO host port is intentionally not 9000 to avoid clashing with any local MinIO.
     os.environ.setdefault("MINIO_ENDPOINT_URL", "http://localhost:9002")
     os.environ.setdefault("MINIO_ACCESS_KEY", "minioadmin")

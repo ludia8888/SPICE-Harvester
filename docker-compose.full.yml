@@ -22,6 +22,8 @@ services:
     extends:
       file: backend/docker-compose.yml
       service: oms
+    environment:
+      - ENABLE_PULL_REQUESTS=true
     depends_on:
       - terminusdb
       - postgres
@@ -31,6 +33,9 @@ services:
     extends:
       file: backend/docker-compose.yml
       service: bff
+    environment:
+      - BFF_REQUIRE_AUTH=false
+      - ALLOW_INSECURE_BFF_AUTH_DISABLE=true
     depends_on:
       - oms
       - funnel

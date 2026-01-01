@@ -111,12 +111,7 @@ npm run preview
 
 Tip: 아래 예시는 편의를 위해 `jq`를 사용합니다.
 
-⚠️ **경로(Endpoint) 네이밍 혼재**  
-현재 BFF는 라우터 추가 시점이 달라 두 가지 URL 패턴이 공존합니다(legacy).
-- DB/브랜치/DB 삭제: `/api/v1/databases/...` (복수형 컬렉션)
-- 온톨로지/인스턴스/쿼리/매핑: `/api/v1/database/{db_name}/...` (DB 스코프, 단수형)
-
-이 문서의 예시는 “현재 계약된 경로”를 그대로 사용합니다. (향후 `/api/v1/databases/{db_name}/...`로 통일 예정)
+BFF의 DB 스코프 리소스는 `/api/v1/databases/{db_name}/...` 형식을 사용합니다.
 
 ⚠️ **비동기 Write(202)**  
 현재 지원되는 시스템 포지션에서는 core write가 모두 **202 Accepted + command_id**로 반환되며, 아래를 폴링해 완료를 확인해야 합니다.  
@@ -125,7 +120,7 @@ Tip: 아래 예시는 편의를 위해 `jq`를 사용합니다.
 
 Tip: `command_id` 위치가 응답 타입에 따라 다를 수 있습니다. (예: DB/온톨로지 `ApiResponse`는 `.data.command_id`, 인스턴스 `CommandResult`는 `.command_id`)
 
-`/api/v1/database/{db_name}/instances/...`(Async Instance) API는 “커맨드 제출” API이므로 **항상 202로 취급**하는 것이 안전합니다.
+`/api/v1/databases/{db_name}/instances/...`(Async Instance) API는 “커맨드 제출” API이므로 **항상 202로 취급**하는 것이 안전합니다.
 
 ```bash
 DB=demo_db_$(date +%s)
@@ -138,7 +133,7 @@ DB_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/databases" \
 curl -fsS "http://localhost:8002/api/v1/commands/${DB_CMD}/status" | jq .
 
 # 2) 온톨로지 생성 (BFF -> OMS; async 202)
-CUST_ONTO_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/database/${DB}/ontology" \
+CUST_ONTO_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/databases/${DB}/ontology" \
   -H 'Content-Type: application/json' \
   -d '{
     "id":"Customer",
@@ -150,7 +145,7 @@ CUST_ONTO_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/database/${DB}/o
     "relationships":[]
   }' | jq -r '.data.command_id')
 
-PROD_ONTO_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/database/${DB}/ontology" \
+PROD_ONTO_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/databases/${DB}/ontology" \
   -H 'Content-Type: application/json' \
   -d '{
     "id":"Product",
@@ -168,11 +163,11 @@ curl -fsS "http://localhost:8002/api/v1/commands/${CUST_ONTO_CMD}/status" | jq .
 curl -fsS "http://localhost:8002/api/v1/commands/${PROD_ONTO_CMD}/status" | jq .
 
 # 3) 인스턴스 생성 (BFF label API; async 202) + command_id 캡처
-CUST_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/database/${DB}/instances/Customer/create" \
+CUST_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/databases/${DB}/instances/Customer/create" \
   -H 'Content-Type: application/json' \
   -d '{"data":{"customer_id":"cust_001","name":"Alice"}}' | jq -r '.command_id')
 
-PROD_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/database/${DB}/instances/Product/create" \
+PROD_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/databases/${DB}/instances/Product/create" \
   -H 'Content-Type: application/json' \
   -d '{"data":{"product_id":"prod_001","name":"Shirt","owned_by":"Customer/cust_001"}}' | jq -r '.command_id')
 
@@ -218,7 +213,7 @@ curl -fsS -X POST "http://localhost:8002/api/v1/graph-query/${DB}?branch=feature
   -d '{"start_class":"Product","hops":[],"filters":{"product_id":"prod_001"},"include_documents":true}' | jq .
 
 # 3) 브랜치에서 업데이트(OCC): expected_seq는 nodes[].index_status.event_sequence에서 가져옵니다
-curl -fsS -X PUT "http://localhost:8002/api/v1/database/${DB}/instances/Product/prod_001/update?branch=feature/whatif&expected_seq=<expected_seq>" \
+curl -fsS -X PUT "http://localhost:8002/api/v1/databases/${DB}/instances/Product/prod_001/update?branch=feature/whatif&expected_seq=<expected_seq>" \
   -H 'Content-Type: application/json' \
   -d '{"data":{"name":"Shirt (WhatIf)"}}'
 ```

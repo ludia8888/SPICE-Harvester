@@ -21,6 +21,8 @@ from shared.security.input_sanitizer import (
     validate_db_name,
 )
 from shared.utils.commit_utils import coerce_commit_id
+from shared.utils.diff_utils import normalize_diff_response
+from shared.utils.branch_utils import protected_branch_write_message
 
 logger = logging.getLogger(__name__)
 
@@ -287,32 +289,11 @@ async def get_diff(
         # 차이점 조회
         diff = await terminus.diff(db_name, from_ref, to_ref)
 
-        summary = {"added": 0, "modified": 0, "deleted": 0}
-        if isinstance(diff, list):
-            for change in diff:
-                if not isinstance(change, dict):
-                    continue
-                change_type = change.get("type")
-                if change_type in summary:
-                    summary[change_type] += 1
-        elif isinstance(diff, dict):
-            changes = diff.get("changes")
-            if isinstance(changes, list):
-                for change in changes:
-                    if not isinstance(change, dict):
-                        continue
-                    change_type = change.get("type")
-                    if change_type in summary:
-                        summary[change_type] += 1
+        normalized = normalize_diff_response(from_ref, to_ref, diff)
 
         return ApiResponse.success(
             message="차이점을 조회했습니다",
-            data={
-                "from": from_ref,
-                "to": to_ref,
-                "changes": diff,
-                "summary": summary,
-            }
+            data=normalized,
         ).to_dict()
 
     except SecurityViolationError as e:
@@ -484,7 +465,7 @@ async def rollback(
 
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Rollback is blocked on protected branch '{target_branch}'",
+                detail=protected_branch_write_message(),
             )
 
         # 타겟 검증

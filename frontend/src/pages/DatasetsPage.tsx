@@ -10,18 +10,19 @@ import {
   Icon,
   InputGroup,
   Menu,
+  MenuDivider,
   MenuItem,
   Popover,
   Radio,
   RadioGroup,
   Spinner,
-  Tag,
   Text,
 } from '@blueprintjs/core'
 import type { IconName } from '@blueprintjs/icons'
 import { useAppStore } from '../state/store'
 import {
   createDatabase,
+  deleteDatabase,
   listDatabases,
   listDatasets,
   uploadDataset,
@@ -46,6 +47,11 @@ type FolderRecord = {
   description?: string
   updatedAt?: string
   datasetCount?: number
+  ownerId?: string
+  ownerName?: string
+  role?: string
+  shared?: boolean
+  sharedWith?: string[]
 }
 
 type UploadFile = {
@@ -60,6 +66,7 @@ type UploadStatus = 'queued' | 'active' | 'complete' | 'error'
 
 type SortKey = 'name' | 'updated' | 'size'
 type ViewMode = 'grid' | 'list'
+type ProjectTab = 'projects' | 'recents' | 'favorites'
 
 type CreateOption = {
   id: 'folder' | 'weblink' | 'upload' | 'pipeline' | 'aip-agent' | 'aip-logic'
@@ -104,6 +111,11 @@ const normalizeDatabaseRecord = (record: DatabaseRecord | string): FolderRecord 
     description: record.description,
     updatedAt: record.updated_at || record.created_at,
     datasetCount,
+    ownerId: record.owner_id,
+    ownerName: record.owner_name,
+    role: record.role,
+    shared: record.shared,
+    sharedWith: record.shared_with ?? record.sharedWith,
   }
 }
 
@@ -136,8 +148,8 @@ const uploadOptions: Array<{ value: UploadMode; title: string; description: stri
 const createOptions: CreateOption[] = [
   {
     id: 'folder',
-    label: 'Folder',
-    description: 'Create a new folder to organize files.',
+    label: 'Project (Root only)',
+    description: '',
     icon: 'folder-new',
     category: 'All',
   },
@@ -227,6 +239,24 @@ const formatRelativeTime = (isoDate?: string) => {
   return date.toLocaleDateString()
 }
 
+const formatShortDate = (isoDate?: string) => {
+  if (!isoDate) {
+    return '-'
+  }
+  const date = new Date(isoDate)
+  if (Number.isNaN(date.getTime())) {
+    return isoDate
+  }
+  return date.toLocaleDateString()
+}
+
+const formatRowCount = (value?: number) => {
+  if (value === undefined || value === null) {
+    return '-'
+  }
+  return value.toLocaleString()
+}
+
 const getResourceName = (fileName: string) => fileName.replace(/\.[^/.]+$/, '')
 
 const parseTimestamp = (value?: string) => {
@@ -258,12 +288,16 @@ export const DatasetsPage = () => {
   const databasesQuery = useQuery({ queryKey: ['databases'], queryFn: listDatabases })
   const setActiveNav = useAppStore((state) => state.setActiveNav)
   const setPipelineContext = useAppStore((state) => state.setPipelineContext)
+  const currentUserId = (import.meta.env.VITE_USER_ID as string | undefined) ?? 'system'
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null)
   const [activeFileId, setActiveFileId] = useState<string | null>(null)
   const [isCreateFolderOpen, setCreateFolderOpen] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
   const [createFolderError, setCreateFolderError] = useState<string | null>(null)
   const [isCreatingFolder, setCreatingFolder] = useState(false)
+  const [isDeleteProjectOpen, setDeleteProjectOpen] = useState(false)
+  const [isDeletingProject, setDeletingProject] = useState(false)
+  const [deleteProjectError, setDeleteProjectError] = useState<string | null>(null)
   const [isCreateMenuOpen, setCreateMenuOpen] = useState(false)
   const [createMenuCategory, setCreateMenuCategory] = useState<CreateCategory>('All')
   const [createMenuSearch, setCreateMenuSearch] = useState('')
@@ -274,6 +308,10 @@ export const DatasetsPage = () => {
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
+  const [activeProjectTab, setActiveProjectTab] = useState<ProjectTab>('projects')
+  const [favoriteFolderIds, setFavoriteFolderIds] = useState<string[]>([])
+  const [showAllProjects, setShowAllProjects] = useState(false)
+  const [filesSearchQuery, setFilesSearchQuery] = useState('')
   const [uploadFiles, setUploadFiles] = useState<UploadFile[]>([])
   const [isDragActive, setDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -319,6 +357,8 @@ export const DatasetsPage = () => {
 
   const activeFolder = folders.find((folder) => folder.id === activeFolderId) ?? null
   const activeFile = files.find((file) => file.id === activeFileId) ?? null
+  const canDeleteProject =
+    !!activeFolder && (activeFolder.role?.toLowerCase() === 'owner' || activeFolder.ownerId === currentUserId)
   const isRootView = !activeFolder
   const isFilesView = !!activeFolder && !activeFile
   const isDatasetView = !!activeFile
@@ -343,8 +383,17 @@ export const DatasetsPage = () => {
       ? 'Upload finished'
       : 'Upload files'
   const uploadDialogIcon = isUploading ? 'upload' : isUploadComplete ? 'tick-circle' : 'upload'
+  const normalizedSearchQuery = filesSearchQuery.trim().toLowerCase()
+  const emptyProjectsMessage = normalizedSearchQuery
+    ? 'No matching projects'
+    : activeProjectTab === 'favorites' && folders.length > 0
+      ? 'No favorites yet'
+      : 'No projects yet'
 
   const filteredCreateOptions = createOptions.filter((option) => {
+    if (!isRootView && option.id === 'folder') {
+      return false
+    }
     const matchesCategory = createMenuCategory === 'All' || option.category === createMenuCategory
     const matchesSearch = option.label.toLowerCase().includes(createMenuSearch.toLowerCase())
     return matchesCategory && matchesSearch
@@ -364,6 +413,36 @@ export const DatasetsPage = () => {
     return left.name.localeCompare(right.name)
   })
 
+  const visibleFolders = sortedFolders.filter((folder) => {
+    if (normalizedSearchQuery) {
+      const haystack = [
+        folder.name,
+        folder.description,
+        folder.ownerName,
+        folder.ownerId,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      if (!haystack.includes(normalizedSearchQuery)) {
+        return false
+      }
+    }
+    if (activeProjectTab === 'favorites') {
+      return favoriteFolderIds.includes(folder.id)
+    }
+    if (activeProjectTab === 'projects') {
+      if (showAllProjects) {
+        return true
+      }
+      if (!folder.ownerId) {
+        return true
+      }
+      return folder.ownerId === currentUserId
+    }
+    return true
+  })
+
   const sortedFiles = [...files].sort((left, right) => {
     if (sortKey === 'size') {
       return right.sizeBytes - left.sizeBytes
@@ -373,6 +452,13 @@ export const DatasetsPage = () => {
     }
     return left.name.localeCompare(right.name)
   })
+
+  const handleToggleFavoriteFolder = (folderId: string) => {
+    setFavoriteFolderIds((current) => {
+      const isFavorite = current.includes(folderId)
+      return isFavorite ? current.filter((id) => id !== folderId) : [...current, folderId]
+    })
+  }
 
   const getUploadStatus = (uploadFile: UploadFile) => uploadFile.status
 
@@ -479,6 +565,44 @@ export const DatasetsPage = () => {
     setCreateFolderError(null)
   }
 
+  const handleOpenDeleteProject = () => {
+    setDeleteProjectError(null)
+    setDeleteProjectOpen(true)
+  }
+
+  const handleCloseDeleteProject = () => {
+    if (isDeletingProject) {
+      return
+    }
+    setDeleteProjectOpen(false)
+    setDeleteProjectError(null)
+  }
+
+  const handleConfirmDeleteProject = () => {
+    if (!activeFolder) {
+      return
+    }
+
+    const runDelete = async () => {
+      try {
+        setDeletingProject(true)
+        setDeleteProjectError(null)
+        await deleteDatabase(activeFolder.id)
+        setFavoriteFolderIds((current) => current.filter((id) => id !== activeFolder.id))
+        setActiveFolderId(null)
+        setActiveFileId(null)
+        await queryClient.invalidateQueries({ queryKey: ['databases'] })
+        handleCloseDeleteProject()
+      } catch (error) {
+        setDeleteProjectError(error instanceof Error ? error.message : 'Failed to delete project')
+      } finally {
+        setDeletingProject(false)
+      }
+    }
+
+    void runDelete()
+  }
+
   const handleCreateFolder = () => {
     const trimmedName = newFolderName.trim()
     if (!trimmedName) {
@@ -494,7 +618,7 @@ export const DatasetsPage = () => {
         handleCloseCreateFolder()
         setCreateFolderError(null)
       } catch (error) {
-        setCreateFolderError(error instanceof Error ? error.message : 'Failed to create folder')
+        setCreateFolderError(error instanceof Error ? error.message : 'Failed to create project')
       } finally {
         setCreatingFolder(false)
       }
@@ -534,7 +658,7 @@ export const DatasetsPage = () => {
       return
     }
     if (!activeFolder) {
-      setUploadError('Select a folder before uploading.')
+      setUploadError('Select a project before uploading.')
       return
     }
 
@@ -633,6 +757,18 @@ export const DatasetsPage = () => {
           onClick={() => setViewMode('list')}
         />
       </MenuItem>
+      {activeFolder ? (
+        <>
+          <MenuDivider />
+          <MenuItem
+            icon="trash"
+            text="Delete project"
+            intent="danger"
+            onClick={handleOpenDeleteProject}
+            disabled={!canDeleteProject}
+          />
+        </>
+      ) : null}
     </Menu>
   )
 
@@ -671,7 +807,7 @@ export const DatasetsPage = () => {
   ]
 
   return (
-    <div className="page">
+    <div className="page files-page">
       <div className="page-topbar">
         {breadcrumbSegments.map((segment, index) => {
           const isLast = index === breadcrumbSegments.length - 1
@@ -696,47 +832,141 @@ export const DatasetsPage = () => {
           )
         })}
       </div>
+      {isRootView ? (
+        <section className="files-explore">
+          <div className="files-explore-header">
+            <Text className="files-explore-title">Explore all projects</Text>
+            <div className="files-explore-search">
+              <InputGroup
+                leftIcon="search"
+                placeholder="Search..."
+                value={filesSearchQuery}
+                onChange={(event) => setFilesSearchQuery(event.target.value)}
+              />
+            </div>
+          </div>
+          <div className="files-explore-tabs">
+            <div className="files-explore-tab-group">
+              <button
+                type="button"
+                className={`files-explore-tab ${activeProjectTab === 'projects' ? 'is-active' : ''}`}
+                onClick={() => setActiveProjectTab('projects')}
+              >
+                Your projects
+              </button>
+              <button
+                type="button"
+                className={`files-explore-tab ${activeProjectTab === 'recents' ? 'is-active' : ''}`}
+                onClick={() => setActiveProjectTab('recents')}
+              >
+                Recents
+              </button>
+              <button
+                type="button"
+                className={`files-explore-tab ${activeProjectTab === 'favorites' ? 'is-active' : ''}`}
+                onClick={() => setActiveProjectTab('favorites')}
+              >
+                Favorites
+              </button>
+            </div>
+            <div className="files-explore-actions">
+              <button
+                type="button"
+                className="files-explore-link"
+                onClick={() => setShowAllProjects((current) => !current)}
+              >
+                {showAllProjects ? 'Your projects' : 'All projects'}
+              </button>
+              <Button icon="add" intent="success" text="New project" small onClick={handleOpenCreateFolder} />
+            </div>
+          </div>
+        </section>
+      ) : null}
       {isDatasetView ? <H3>{activeFile?.datasetName ?? 'Dataset'}</H3> : null}
       {databasesQuery.isLoading ? <Spinner size={24} /> : null}
       {isRootView ? (
-        <section className="files-panel">
-          <header className="files-panel-header">
-            <Text className="files-panel-title">Folders</Text>
-            <div className="files-panel-actions">
-              {renderActionsPopover()}
-              <Button icon="add" intent="success" text="New Folder" onClick={handleOpenCreateFolder} />
-            </div>
-          </header>
+        <section className="files-panel files-projects">
           <div className="files-panel-body">
             {databaseErrorMessage ? (
               <div className="files-empty">
                 <Icon icon="error" size={32} className="files-empty-icon" />
                 <Text className="files-empty-title">{databaseErrorMessage}</Text>
               </div>
-            ) : folders.length === 0 ? (
+            ) : visibleFolders.length === 0 ? (
               <div className="files-empty">
                 <Icon icon="folder-close" size={40} className="files-empty-icon" />
-                <Text className="files-empty-title">No folders yet</Text>
+                <Text className="files-empty-title">{emptyProjectsMessage}</Text>
               </div>
             ) : (
-              <div className={`grid files-grid ${viewMode === 'list' ? 'is-list' : ''}`}>
-                {sortedFolders.map((folder) => (
-                  <Card
-                    key={folder.id}
-                    interactive
-                    className="card select-card"
-                    onClick={() => {
-                      setActiveFolderId(folder.id)
-                      setActiveFileId(null)
-                    }}
-                  >
-                    <Text className="card-title">{folder.name}</Text>
-                    <Text className="card-meta">
-                      {folder.datasetCount ?? 0} files
-                    </Text>
-                  </Card>
-                ))}
-              </div>
+              <>
+                <div className="files-table-frame">
+                  <div className="files-table-header">
+                    <span className="files-table-col name">Projects</span>
+                    <span className="files-table-col portfolio">Portfolio</span>
+                    <span className="files-table-col role">Role</span>
+                    <span className="files-table-col owner">Created by</span>
+                    <span className="files-table-col updated">Last viewed</span>
+                  </div>
+                  <div className="files-table-scroll">
+                    <div className="files-table">
+                      {visibleFolders.map((folder, index) => {
+                        const isFavorite = favoriteFolderIds.includes(folder.id)
+                        return (
+                          <div
+                            key={folder.id}
+                            role="button"
+                            tabIndex={0}
+                            className="files-table-row"
+                            onClick={() => {
+                              setActiveFolderId(folder.id)
+                              setActiveFileId(null)
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault()
+                                setActiveFolderId(folder.id)
+                                setActiveFileId(null)
+                              }
+                            }}
+                          >
+                            <span className="files-table-col name">
+                              <Icon icon="folder-close" size={14} className="files-table-icon" />
+                              <span className="files-table-name-stack">
+                                <span className="files-table-title-row">
+                                  <span className="files-table-title">{folder.name}</span>
+                                  <button
+                                    type="button"
+                                    className={`files-table-favorite-button ${isFavorite ? 'is-active' : ''}`}
+                                    aria-pressed={isFavorite}
+                                    aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+                                    onClick={(event) => {
+                                      event.stopPropagation()
+                                      handleToggleFavoriteFolder(folder.id)
+                                    }}
+                                  >
+                                    <Icon icon={isFavorite ? 'star' : 'star-empty'} size={12} />
+                                  </button>
+                                </span>
+                                <span className="files-table-meta">
+                                  {folder.description || `${folder.datasetCount ?? 0} files`}
+                                </span>
+                              </span>
+                            </span>
+                            <span className="files-table-col portfolio">Default</span>
+                            <span className="files-table-col role">
+                              {folder.role || (folder.ownerId === currentUserId ? 'Owner' : 'Viewer')}
+                            </span>
+                            <span className="files-table-col owner">
+                              {folder.ownerName || folder.ownerId || 'Unknown'}
+                            </span>
+                            <span className="files-table-col updated">{index === 0 ? 'Today' : 'Last week'}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </>
             )}
           </div>
         </section>
@@ -765,21 +995,53 @@ export const DatasetsPage = () => {
                 <Text className="files-empty-title">This project is empty</Text>
               </div>
             ) : (
-              <div className={`grid files-grid ${viewMode === 'list' ? 'is-list' : ''}`}>
-                {sortedFiles.map((file) => (
-                  <Card
-                    key={file.id}
-                    interactive
-                    className="card select-card"
-                    onClick={() => setActiveFileId(file.id)}
-                  >
-                    <Text className="card-title">{file.name}</Text>
-                    <Text className="card-meta">Source: {file.source}</Text>
-                    <Text className="card-meta">Updated: {file.updatedLabel || file.updatedAt}</Text>
-                    <Tag minimal intent="primary">{file.datasetName}</Tag>
-                  </Card>
-                ))}
-              </div>
+              <>
+                <div className="files-table-frame">
+                  <div className="files-table-header">
+                    <span className="files-table-col name">Files</span>
+                    <span className="files-table-col portfolio">Source</span>
+                    <span className="files-table-col role">Rows</span>
+                    <span className="files-table-col owner">Updated</span>
+                    <span className="files-table-col updated">Last viewed</span>
+                  </div>
+                  <div className="files-table-scroll">
+                    <div className="files-table">
+                      {sortedFiles.map((file, index) => (
+                        <div
+                          key={file.id}
+                          role="button"
+                          tabIndex={0}
+                          className="files-table-row"
+                          onClick={() => setActiveFileId(file.id)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault()
+                              setActiveFileId(file.id)
+                            }
+                          }}
+                        >
+                          <span className="files-table-col name">
+                            <Icon icon="document" size={14} className="files-table-icon" />
+                            <span className="files-table-name-stack">
+                              <span className="files-table-title-row">
+                                <span className="files-table-title">{file.name}</span>
+                                <Icon icon="star-empty" size={12} className="files-table-favorite-icon" />
+                              </span>
+                              <span className="files-table-meta">Source: {file.source}</span>
+                            </span>
+                          </span>
+                          <span className="files-table-col portfolio">{file.source || 'manual'}</span>
+                          <span className="files-table-col role">{formatRowCount(file.sizeBytes)}</span>
+                          <span className="files-table-col owner">{formatShortDate(file.updatedAt)}</span>
+                          <span className="files-table-col updated">
+                            {file.updatedLabel || (index === 0 ? 'Today' : 'Last week')}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </>
             )}
           </div>
         </section>
@@ -790,7 +1052,6 @@ export const DatasetsPage = () => {
             <Text className="card-meta">File: {activeFile.name}</Text>
             <Text className="card-meta">Source: {activeFile.source}</Text>
             <Text className="card-meta">Updated: {activeFile.updatedLabel || activeFile.updatedAt}</Text>
-            <Tag minimal intent="primary">{activeFile.datasetName}</Tag>
           </Card>
         </div>
       )}
@@ -981,7 +1242,9 @@ export const DatasetsPage = () => {
                   <Icon icon={option.icon} className="create-dialog-item-icon" />
                   <div className="create-dialog-item-text">
                     <Text className="create-dialog-item-title">{option.label}</Text>
-                    <Text className="create-dialog-item-description">{option.description}</Text>
+                    {option.description ? (
+                      <Text className="create-dialog-item-description">{option.description}</Text>
+                    ) : null}
                   </div>
                 </button>
               ))}
@@ -995,15 +1258,15 @@ export const DatasetsPage = () => {
       <Dialog
         isOpen={isCreateFolderOpen}
         onClose={handleCloseCreateFolder}
-        title="New folder"
+        title="New project"
         icon="folder-new"
         className="folder-dialog bp5-dark"
       >
           <div className="folder-dialog-body">
-            <FormGroup label="Folder name" labelFor="folder-name-input">
+            <FormGroup label="Project name" labelFor="folder-name-input">
               <InputGroup
                 id="folder-name-input"
-                placeholder="Enter folder name"
+                placeholder="Enter project name"
                 value={newFolderName}
                 autoFocus
                 onChange={(event) => setNewFolderName(event.currentTarget.value)}
@@ -1020,6 +1283,30 @@ export const DatasetsPage = () => {
               />
             </div>
           </div>
+      </Dialog>
+      <Dialog
+        isOpen={isDeleteProjectOpen}
+        onClose={handleCloseDeleteProject}
+        title="Delete project"
+        icon="trash"
+        className="folder-dialog bp5-dark"
+      >
+        <div className="folder-dialog-body">
+          <Text>
+            Delete <strong>{activeFolder?.name ?? 'this project'}</strong>? This will remove the project and its
+            datasets.
+          </Text>
+          {deleteProjectError ? <Text className="upload-error">{deleteProjectError}</Text> : null}
+          <div className="folder-dialog-footer">
+            <Button minimal text="Cancel" onClick={handleCloseDeleteProject} disabled={isDeletingProject} />
+            <Button
+              intent="danger"
+              text={isDeletingProject ? 'Deleting...' : 'Delete'}
+              onClick={handleConfirmDeleteProject}
+              disabled={isDeletingProject || !canDeleteProject}
+            />
+          </div>
+        </div>
       </Dialog>
     </div>
   )

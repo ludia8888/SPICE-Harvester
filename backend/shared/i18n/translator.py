@@ -108,6 +108,14 @@ def _translate_known(text: str, *, target_lang: str) -> Optional[str]:
         "Not found.": {"en": "Not found.", "ko": "찾을 수 없습니다"},
         "권한이 없습니다": {"en": "You do not have permission.", "ko": "권한이 없습니다"},
         "You do not have permission.": {"en": "You do not have permission.", "ko": "권한이 없습니다"},
+        "Protected branch. Use proposal workflow to modify ontology resources.": {
+            "en": "Protected branch. Use proposal workflow to modify ontology resources.",
+            "ko": "보호된 브랜치입니다. 온톨로지 리소스 변경은 proposal 흐름을 사용하세요.",
+        },
+        "Protected branch. Use proposal workflow for changes.": {
+            "en": "Protected branch. Use proposal workflow for changes.",
+            "ko": "보호된 브랜치입니다. 변경은 proposal 흐름을 사용하세요.",
+        },
         "인증이 필요합니다": {"en": "Authentication required.", "ko": "인증이 필요합니다"},
         "Authentication required.": {"en": "Authentication required.", "ko": "인증이 필요합니다"},
         "Service is healthy": {"en": "Service is healthy.", "ko": "서비스가 정상입니다."},

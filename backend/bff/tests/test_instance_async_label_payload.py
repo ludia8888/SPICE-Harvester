@@ -36,7 +36,7 @@ def test_instance_create_allows_label_keys_with_spaces():
     client = TestClient(app)
     try:
         res = client.post(
-            "/api/v1/database/demo_db/instances/Product/create",
+            "/api/v1/databases/demo_db/instances/Product/create",
             params={"branch": "main"},
             json={"data": {"Product ID": "PROD-1", "Name": "Apple"}, "metadata": {}},
         )

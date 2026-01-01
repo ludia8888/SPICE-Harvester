@@ -287,6 +287,28 @@ class PipelineArtifactRecord:
     updated_at: datetime
 
 
+@dataclass(frozen=True)
+class PromotionManifestRecord:
+    manifest_id: str
+    pipeline_id: str
+    db_name: str
+    build_job_id: str
+    artifact_id: Optional[str]
+    definition_hash: Optional[str]
+    lakefs_repository: str
+    lakefs_commit_id: str
+    ontology_commit_id: str
+    mapping_spec_id: Optional[str]
+    mapping_spec_version: Optional[int]
+    mapping_spec_target_class_id: Optional[str]
+    promoted_dataset_version_id: str
+    promoted_dataset_name: Optional[str]
+    target_branch: str
+    promoted_by: Optional[str]
+    promoted_at: datetime
+    metadata: Dict[str, Any]
+
+
 def _row_to_pipeline_artifact(row: asyncpg.Record) -> PipelineArtifactRecord:
     return PipelineArtifactRecord(
         artifact_id=str(row["artifact_id"]),
@@ -818,6 +840,49 @@ class PipelineRegistry:
                 SET declared_outputs = '[]'::jsonb
                 WHERE declared_outputs IS NULL OR jsonb_typeof(declared_outputs) <> 'array'
                 """
+            )
+
+            await conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self._schema}.promotion_manifests (
+                    manifest_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    pipeline_id UUID NOT NULL,
+                    db_name TEXT NOT NULL,
+                    build_job_id TEXT NOT NULL,
+                    artifact_id UUID,
+                    definition_hash TEXT,
+                    lakefs_repository TEXT NOT NULL,
+                    lakefs_commit_id TEXT NOT NULL,
+                    ontology_commit_id TEXT NOT NULL,
+                    mapping_spec_id TEXT,
+                    mapping_spec_version INTEGER,
+                    mapping_spec_target_class_id TEXT,
+                    promoted_dataset_version_id UUID NOT NULL,
+                    promoted_dataset_name TEXT,
+                    target_branch TEXT NOT NULL,
+                    promoted_by TEXT,
+                    promoted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    metadata JSONB
+                )
+                """
+            )
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_promotion_manifests_pipeline_id ON {self._schema}.promotion_manifests(pipeline_id)"
+            )
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_promotion_manifests_build_job ON {self._schema}.promotion_manifests(build_job_id)"
+            )
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_promotion_manifests_artifact_id ON {self._schema}.promotion_manifests(artifact_id)"
+            )
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_promotion_manifests_dataset_version ON {self._schema}.promotion_manifests(promoted_dataset_version_id)"
+            )
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_promotion_manifests_lakefs_commit ON {self._schema}.promotion_manifests(lakefs_commit_id)"
+            )
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_promotion_manifests_ontology_commit ON {self._schema}.promotion_manifests(ontology_commit_id)"
             )
 
             await conn.execute(
@@ -2509,6 +2574,127 @@ class PipelineRegistry:
                 output_payload,
                 deployed_commit_id,
             )
+
+    async def record_promotion_manifest(
+        self,
+        *,
+        pipeline_id: str,
+        db_name: str,
+        build_job_id: str,
+        artifact_id: Optional[str],
+        definition_hash: Optional[str],
+        lakefs_repository: str,
+        lakefs_commit_id: str,
+        ontology_commit_id: str,
+        mapping_spec_id: Optional[str] = None,
+        mapping_spec_version: Optional[int] = None,
+        mapping_spec_target_class_id: Optional[str] = None,
+        promoted_dataset_version_id: str,
+        promoted_dataset_name: Optional[str] = None,
+        target_branch: str,
+        promoted_by: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        manifest_id: Optional[str] = None,
+        promoted_at: Optional[datetime] = None,
+    ) -> str:
+        if not self._pool:
+            raise RuntimeError("PipelineRegistry not connected")
+        manifest_id = manifest_id or str(uuid4())
+        pipeline_id = str(pipeline_id)
+        db_name = str(db_name)
+        build_job_id = str(build_job_id)
+        lakefs_repository = str(lakefs_repository or "").strip()
+        lakefs_commit_id = str(lakefs_commit_id or "").strip()
+        ontology_commit_id = str(ontology_commit_id or "").strip()
+        target_branch = str(target_branch or "").strip()
+        if not pipeline_id:
+            raise ValueError("pipeline_id is required")
+        if not db_name:
+            raise ValueError("db_name is required")
+        if not build_job_id:
+            raise ValueError("build_job_id is required")
+        if not lakefs_repository:
+            raise ValueError("lakefs_repository is required")
+        if not lakefs_commit_id:
+            raise ValueError("lakefs_commit_id is required")
+        if not ontology_commit_id:
+            raise ValueError("ontology_commit_id is required")
+        if not target_branch:
+            raise ValueError("target_branch is required")
+        promoted_dataset_version_id = str(promoted_dataset_version_id)
+        if not promoted_dataset_version_id:
+            raise ValueError("promoted_dataset_version_id is required")
+        if mapping_spec_version is not None:
+            mapping_spec_version = int(mapping_spec_version)
+        metadata_payload = _ensure_json_string(metadata or {})
+        promoted_at = promoted_at or utcnow()
+
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                INSERT INTO {self._schema}.promotion_manifests (
+                    manifest_id,
+                    pipeline_id,
+                    db_name,
+                    build_job_id,
+                    artifact_id,
+                    definition_hash,
+                    lakefs_repository,
+                    lakefs_commit_id,
+                    ontology_commit_id,
+                    mapping_spec_id,
+                    mapping_spec_version,
+                    mapping_spec_target_class_id,
+                    promoted_dataset_version_id,
+                    promoted_dataset_name,
+                    target_branch,
+                    promoted_by,
+                    promoted_at,
+                    metadata
+                ) VALUES (
+                    $1::uuid,
+                    $2::uuid,
+                    $3,
+                    $4,
+                    $5::uuid,
+                    $6,
+                    $7,
+                    $8,
+                    $9,
+                    $10,
+                    $11,
+                    $12,
+                    $13::uuid,
+                    $14,
+                    $15,
+                    $16,
+                    $17,
+                    $18::jsonb
+                )
+                RETURNING manifest_id
+                """,
+                manifest_id,
+                pipeline_id,
+                db_name,
+                build_job_id,
+                artifact_id,
+                definition_hash,
+                lakefs_repository,
+                lakefs_commit_id,
+                ontology_commit_id,
+                mapping_spec_id,
+                mapping_spec_version,
+                mapping_spec_target_class_id,
+                promoted_dataset_version_id,
+                promoted_dataset_name,
+                target_branch,
+                promoted_by,
+                promoted_at,
+                metadata_payload,
+            )
+            if not row:
+                raise RuntimeError("Failed to record promotion manifest")
+            return str(row["manifest_id"])
 
     async def list_scheduled_pipelines(self) -> List[Dict[str, Any]]:
         if not self._pool:

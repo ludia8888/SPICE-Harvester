@@ -26,6 +26,8 @@ _SPEC_ALIASES = {
     "return_type": "return_type_ref",
     "returnType": "return_type_ref",
     "baseType": "base_type",
+    "pkSpec": "pk_spec",
+    "backingSource": "backing_source",
     "inputSchema": "input_schema",
     "permissionPolicy": "permission_policy",
     "requiredProperties": "required_properties",
@@ -73,6 +75,7 @@ _REFERENCE_TYPE_PREFIX = {
     "interface:": "interface",
     "shared_property:": "shared_property",
     "shared:": "shared_property",
+    "object_type:": "object_type",
     "object:": "object",
     "class:": "object",
 }
@@ -172,6 +175,9 @@ def _canonicalize_ref(raw: str) -> Tuple[Optional[str], Optional[str]]:
 
 def _is_primitive_reference(value: str) -> bool:
     lowered = value.lower()
+    if lowered.startswith("primitive:"):
+        base = lowered.split(":", 1)[1]
+        return base in _PRIMITIVE_BASE_TYPES
     if lowered in _PRIMITIVE_BASE_TYPES:
         return True
     return any(lowered.startswith(prefix) for prefix in _REFERENCE_SKIP_PREFIXES)
@@ -193,6 +199,40 @@ def _collect_required_field_issues(resource_type: str, spec: Dict[str, Any]) -> 
                 message="value_type requires non-empty base_type",
                 missing_fields=["base_type"],
             )
+    elif resource_type == "object_type":
+        pk_spec = spec.get("pk_spec")
+        backing_source = spec.get("backing_source")
+        if not isinstance(pk_spec, dict) or not pk_spec:
+            _append_spec_issue(
+                issues,
+                message="object_type requires non-empty pk_spec",
+                missing_fields=["pk_spec"],
+            )
+        if not isinstance(backing_source, dict) or not backing_source:
+            _append_spec_issue(
+                issues,
+                message="object_type requires non-empty backing_source",
+                missing_fields=["backing_source"],
+            )
+        if isinstance(backing_source, dict):
+            if not str(backing_source.get("kind") or "").strip():
+                _append_spec_issue(
+                    issues,
+                    message="object_type backing_source requires kind",
+                    missing_fields=["backing_source.kind"],
+                )
+            if not str(backing_source.get("ref") or "").strip():
+                _append_spec_issue(
+                    issues,
+                    message="object_type backing_source requires ref",
+                    missing_fields=["backing_source.ref"],
+                )
+            if not str(backing_source.get("schema_hash") or "").strip():
+                _append_spec_issue(
+                    issues,
+                    message="object_type backing_source requires schema_hash",
+                    missing_fields=["backing_source.schema_hash"],
+                )
     elif resource_type == "function":
         expr = spec.get("expression") or spec.get("dsl")
         if not isinstance(expr, str) or not expr.strip():
@@ -463,6 +503,10 @@ async def _reference_exists(
     if ref_type == "shared_property":
         return bool(
             await resources.get_resource(db_name, branch=branch, resource_type="shared_property", resource_id=ref)
+        )
+    if ref_type == "object_type":
+        return bool(
+            await resources.get_resource(db_name, branch=branch, resource_type="object_type", resource_id=ref)
         )
     if ref_type == "object":
         return bool(await terminus.get_ontology(db_name, ref, branch=branch))

@@ -122,7 +122,7 @@ DB_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/databases" \
 curl -fsS "http://localhost:8002/api/v1/commands/${DB_CMD}/status" | jq .
 
 # 2) Create ontologies (BFF -> OMS; async 202)
-CUST_ONTO_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/database/${DB}/ontology" \
+CUST_ONTO_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/databases/${DB}/ontology" \
   -H 'Content-Type: application/json' \
   -d '{
     "id":"Customer",
@@ -134,7 +134,7 @@ CUST_ONTO_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/database/${DB}/o
     "relationships":[]
   }' | jq -r '.data.command_id')
 
-PROD_ONTO_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/database/${DB}/ontology" \
+PROD_ONTO_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/databases/${DB}/ontology" \
   -H 'Content-Type: application/json' \
   -d '{
     "id":"Product",
@@ -152,11 +152,11 @@ curl -fsS "http://localhost:8002/api/v1/commands/${CUST_ONTO_CMD}/status" | jq .
 curl -fsS "http://localhost:8002/api/v1/commands/${PROD_ONTO_CMD}/status" | jq .
 
 # 3) Create instances (BFF label API; async 202) and capture command_ids
-CUST_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/database/${DB}/instances/Customer/create" \
+CUST_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/databases/${DB}/instances/Customer/create" \
   -H 'Content-Type: application/json' \
   -d '{"data":{"customer_id":"cust_001","name":"Alice"}}' | jq -r '.command_id')
 
-PROD_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/database/${DB}/instances/Product/create" \
+PROD_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/databases/${DB}/instances/Product/create" \
   -H 'Content-Type: application/json' \
   -d '{"data":{"product_id":"prod_001","name":"Shirt","owned_by":"Customer/cust_001"}}' | jq -r '.command_id')
 
@@ -202,7 +202,7 @@ curl -fsS -X POST "http://localhost:8002/api/v1/graph-query/${DB}?branch=feature
   -d '{"start_class":"Product","hops":[],"filters":{"product_id":"prod_001"},"include_documents":true}' | jq .
 
 # 3) Update on the branch (OCC): expected_seq comes from nodes[].index_status.event_sequence
-curl -fsS -X PUT "http://localhost:8002/api/v1/database/${DB}/instances/Product/prod_001/update?branch=feature/whatif&expected_seq=<expected_seq>" \
+curl -fsS -X PUT "http://localhost:8002/api/v1/databases/${DB}/instances/Product/prod_001/update?branch=feature/whatif&expected_seq=<expected_seq>" \
   -H 'Content-Type: application/json' \
   -d '{"data":{"name":"Shirt (WhatIf)"}}'
 ```

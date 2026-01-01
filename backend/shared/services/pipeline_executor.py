@@ -167,12 +167,56 @@ class PipelineExecutor:
 
         output_nodes = [node_id for node_id, node in nodes.items() if node.get("type") == "output"]
         output_table = self._select_table(PipelineRunResult(tables=tables, output_nodes=output_nodes), None)
+        output_node_id = output_nodes[-1] if output_nodes else None
+        output_node = nodes.get(output_node_id) if output_node_id else {}
+        output_metadata = output_node.get("metadata") or {}
+        output_name = (
+            output_metadata.get("outputName")
+            or output_metadata.get("datasetName")
+            or output_node.get("title")
+            or output_node_id
+        )
+        declared_outputs = definition.get("outputs") if isinstance(definition.get("outputs"), list) else []
+        execution_semantics = _resolve_execution_semantics(definition)
+        pk_semantics = _resolve_pk_semantics(
+            execution_semantics=execution_semantics,
+            definition=definition,
+            output_metadata=output_metadata,
+        )
+        delete_column = _resolve_delete_column(definition=definition, output_metadata=output_metadata)
+        pk_columns = _resolve_pk_columns(
+            definition=definition,
+            output_metadata=output_metadata,
+            output_name=output_name,
+            output_node_id=output_node_id,
+            declared_outputs=declared_outputs,
+        )
+        available_columns = set(output_table.columns)
 
         contract_errors = _validate_schema_contract(output_table, definition.get("schemaContract") or definition.get("schema_contract"))
         if contract_errors:
             raise PipelineExpectationError(f"Schema contract failed: {contract_errors}")
 
-        expectation_errors = _validate_expectations(output_table, definition.get("expectations") or [])
+        pk_semantic_errors = _validate_pk_semantics(
+            output_table,
+            pk_semantics=pk_semantics,
+            pk_columns=pk_columns,
+            delete_column=delete_column,
+        )
+        expectation_errors = pk_semantic_errors + _validate_expectations(
+            output_table,
+            _build_expectations_with_pk(
+                definition=definition,
+                output_metadata=output_metadata,
+                output_name=output_name,
+                output_node_id=output_node_id,
+                declared_outputs=declared_outputs,
+                pk_semantics=pk_semantics,
+                delete_column=delete_column,
+                pk_columns=pk_columns,
+                available_columns=available_columns,
+            ),
+        )
         if expectation_errors:
             raise PipelineExpectationError(f"Expectations failed: {expectation_errors}")
         return PipelineRunResult(tables=tables, output_nodes=output_nodes)
@@ -1153,6 +1197,309 @@ def _validate_schema_checks(table: PipelineTable, checks: List[Dict[str, Any]]) 
     return errors
 
 
+def _split_expectation_columns(column: str) -> List[str]:
+    return [part.strip() for part in str(column or "").split(",") if part.strip()]
+
+
+def _normalize_pk_semantics(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    raw = str(value).strip().lower()
+    if not raw:
+        return None
+    if raw in {"snapshot", "overwrite", "full", "full_refresh", "replace"}:
+        return "snapshot"
+    if raw in {"append", "append_log", "log", "event", "history", "audit"}:
+        return "append_log"
+    if raw in {"state", "append_state", "latest", "upsert", "merge"}:
+        return "append_state"
+    if raw in {"remove", "delete", "tombstone"}:
+        return "remove"
+    return raw
+
+
+def _is_truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
+def _resolve_execution_semantics(definition: Dict[str, Any]) -> str:
+    raw_mode = ""
+    for key in ("execution_mode", "executionMode", "run_mode", "runMode", "batch_mode", "batchMode"):
+        value = definition.get(key)
+        if isinstance(value, str) and value.strip():
+            raw_mode = value.strip().lower()
+            break
+    if not raw_mode:
+        settings = definition.get("settings")
+        if isinstance(settings, dict):
+            engine = settings.get("engine")
+            if isinstance(engine, str) and engine.strip():
+                raw_mode = engine.strip().lower()
+
+    if raw_mode in {"incremental", "increment", "append"}:
+        return "incremental"
+    if raw_mode in {"stream", "streaming"}:
+        return "streaming"
+    pipeline_type = str(definition.get("pipeline_type") or definition.get("pipelineType") or "").strip().lower()
+    if pipeline_type in {"stream", "streaming"}:
+        return "streaming"
+    if pipeline_type in {"incremental", "increment", "inc"}:
+        return "incremental"
+    return "snapshot"
+
+
+def _resolve_incremental_config(definition: Dict[str, Any]) -> Dict[str, Any]:
+    raw = definition.get("incremental") or definition.get("incremental_config") or definition.get("incrementalConfig")
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _resolve_pk_semantics(
+    *,
+    execution_semantics: str,
+    definition: Dict[str, Any],
+    output_metadata: Dict[str, Any],
+) -> str:
+    settings = definition.get("settings") if isinstance(definition.get("settings"), dict) else {}
+    incremental = _resolve_incremental_config(definition)
+    raw: Optional[str] = None
+    for key in ("pkSemantics", "pk_semantics", "pkMode", "pk_mode", "loadSemantics", "load_semantics"):
+        value = output_metadata.get(key) or incremental.get(key) or settings.get(key) or definition.get(key)
+        if isinstance(value, str) and value.strip():
+            raw = value
+            break
+    if raw is None:
+        remove_flag = (
+            output_metadata.get("remove")
+            or output_metadata.get("delete")
+            or incremental.get("remove")
+            or incremental.get("delete")
+        )
+        if _is_truthy(remove_flag):
+            raw = "remove"
+
+    normalized = _normalize_pk_semantics(raw)
+    if execution_semantics == "snapshot":
+        return "snapshot"
+    if normalized:
+        return normalized
+    if execution_semantics in {"incremental", "streaming"}:
+        return "append_state"
+    return "snapshot"
+
+
+def _resolve_delete_column(
+    *,
+    definition: Dict[str, Any],
+    output_metadata: Dict[str, Any],
+) -> Optional[str]:
+    settings = definition.get("settings") if isinstance(definition.get("settings"), dict) else {}
+    incremental = _resolve_incremental_config(definition)
+    for key in ("deleteColumn", "delete_column", "removeColumn", "remove_column", "is_deleted", "isDeleted"):
+        value = output_metadata.get(key) or incremental.get(key) or settings.get(key) or definition.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _validate_pk_semantics(
+    table: PipelineTable,
+    *,
+    pk_semantics: str,
+    pk_columns: List[str],
+    delete_column: Optional[str],
+) -> List[str]:
+    errors: List[str] = []
+    available = set(table.columns)
+    missing_pk = [col for col in pk_columns if col not in available]
+    if missing_pk:
+        errors.append(f"pk columns missing: {', '.join(missing_pk)}")
+    if pk_semantics == "remove":
+        if not delete_column:
+            errors.append("remove semantics requires deleteColumn (e.g. is_deleted)")
+        elif delete_column not in available:
+            errors.append(f"delete column missing: {delete_column}")
+    return errors
+
+
+def _coerce_pk_columns(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [part.strip() for part in value.split(",") if part.strip()]
+    if isinstance(value, list):
+        columns: List[str] = []
+        for item in value:
+            if isinstance(item, dict):
+                columns.extend(
+                    _coerce_pk_columns(
+                        item.get("column")
+                        or item.get("name")
+                        or item.get("key")
+                        or item.get("field")
+                    )
+                )
+            else:
+                columns.extend(_coerce_pk_columns(item))
+        return columns
+    if isinstance(value, dict):
+        columns: List[str] = []
+        for key in (
+            "columns",
+            "column",
+            "keys",
+            "key",
+            "fields",
+            "field",
+            "propertyKeys",
+            "property_keys",
+            "primaryKey",
+            "primary_key",
+            "primaryKeys",
+            "primary_keys",
+        ):
+            columns.extend(_coerce_pk_columns(value.get(key)))
+        return columns
+    return []
+
+
+def _collect_pk_columns(*candidates: Any) -> List[str]:
+    seen: set[str] = set()
+    output: List[str] = []
+    for candidate in candidates:
+        for column in _coerce_pk_columns(candidate):
+            if column and column not in seen:
+                seen.add(column)
+                output.append(column)
+    return output
+
+
+def _match_output_declaration(
+    output: Dict[str, Any],
+    *,
+    node_id: Optional[str],
+    output_name: Optional[str],
+) -> bool:
+    if node_id:
+        declared_node_id = str(output.get("node_id") or output.get("nodeId") or "").strip()
+        if declared_node_id and declared_node_id == node_id:
+            return True
+    if output_name:
+        declared_name = (
+            output.get("output_name")
+            or output.get("outputName")
+            or output.get("dataset_name")
+            or output.get("datasetName")
+            or output.get("name")
+        )
+        if declared_name and str(declared_name).strip() == output_name:
+            return True
+    return False
+
+
+def _resolve_pk_columns(
+    *,
+    definition: Dict[str, Any],
+    output_metadata: Dict[str, Any],
+    output_name: Optional[str],
+    output_node_id: Optional[str],
+    declared_outputs: List[Dict[str, Any]],
+) -> List[str]:
+    definition_pk = _collect_pk_columns(
+        definition.get("pk_spec") or definition.get("pkSpec"),
+        definition.get("primary_key")
+        or definition.get("primaryKey")
+        or definition.get("primary_keys")
+        or definition.get("primaryKeys"),
+    )
+    output_pk = _collect_pk_columns(
+        output_metadata.get("pk_spec") or output_metadata.get("pkSpec"),
+        output_metadata.get("primary_key")
+        or output_metadata.get("primaryKey")
+        or output_metadata.get("primary_keys")
+        or output_metadata.get("primaryKeys")
+        or output_metadata.get("pkColumns")
+        or output_metadata.get("pk_columns"),
+    )
+    declared_pk: List[str] = []
+    for item in declared_outputs:
+        if not isinstance(item, dict):
+            continue
+        if not _match_output_declaration(item, node_id=output_node_id, output_name=output_name):
+            continue
+        declared_pk.extend(
+            _collect_pk_columns(
+                item.get("pk_spec") or item.get("pkSpec"),
+                item.get("primary_key")
+                or item.get("primaryKey")
+                or item.get("primary_keys")
+                or item.get("primaryKeys")
+                or item.get("pkColumns")
+                or item.get("pk_columns"),
+            )
+        )
+    return _collect_pk_columns(definition_pk, output_pk, declared_pk)
+
+
+def _build_expectations_with_pk(
+    *,
+    definition: Dict[str, Any],
+    output_metadata: Dict[str, Any],
+    output_name: Optional[str],
+    output_node_id: Optional[str],
+    declared_outputs: List[Dict[str, Any]],
+    pk_semantics: str,
+    delete_column: Optional[str],
+    pk_columns: Optional[List[str]] = None,
+    available_columns: Optional[set[str]] = None,
+) -> List[Dict[str, Any]]:
+    base_expectations = definition.get("expectations") if isinstance(definition.get("expectations"), list) else []
+    pk_columns = pk_columns or _resolve_pk_columns(
+        definition=definition,
+        output_metadata=output_metadata,
+        output_name=output_name,
+        output_node_id=output_node_id,
+        declared_outputs=declared_outputs,
+    )
+    if available_columns is not None:
+        pk_columns = [col for col in pk_columns if col in available_columns]
+    if not pk_columns and pk_semantics != "remove":
+        return list(base_expectations)
+
+    existing_not_null: set[str] = set()
+    existing_unique: set[str] = set()
+    for exp in normalize_expectations(base_expectations):
+        if exp.rule in {"not_null", "non_null"}:
+            for col in _split_expectation_columns(exp.column):
+                if col:
+                    existing_not_null.add(col)
+        if exp.rule == "unique":
+            cols = _split_expectation_columns(exp.column)
+            if cols:
+                existing_unique.add(",".join(cols))
+
+    injected: List[Dict[str, Any]] = []
+    enforce_unique = pk_semantics in {"snapshot", "append_state"}
+    for col in pk_columns:
+        if col not in existing_not_null:
+            injected.append({"rule": "not_null", "column": col})
+    if enforce_unique and pk_columns:
+        composite_key = ",".join(pk_columns)
+        if composite_key not in existing_unique:
+            injected.append({"rule": "unique", "column": composite_key})
+    if pk_semantics == "remove" and delete_column:
+        if available_columns is None or delete_column in available_columns:
+            if delete_column not in existing_not_null:
+                injected.append({"rule": "not_null", "column": delete_column})
+
+    return list(base_expectations) + injected
+
+
 def _validate_expectations(table: PipelineTable, expectations: Iterable[Dict[str, Any]]) -> List[str]:
     errors: List[str] = []
     specs = normalize_expectations(list(expectations))
@@ -1163,7 +1510,7 @@ def _validate_expectations(table: PipelineTable, expectations: Iterable[Dict[str
 
     for exp in specs:
         rule = exp.rule
-        column = exp.column
+        columns = _split_expectation_columns(exp.column)
         value = exp.value
         if rule == "row_count_min" and value is not None:
             if total_count < int(value):
@@ -1171,17 +1518,25 @@ def _validate_expectations(table: PipelineTable, expectations: Iterable[Dict[str
         if rule == "row_count_max" and value is not None:
             if total_count > int(value):
                 errors.append(f"row_count_max failed: {value}")
-        if rule in {"not_null", "non_null"} and column:
-            if any(row.get(column) in (None, "") for row in table.rows):
-                errors.append(f"not_null failed: {column}")
-        if rule == "non_empty" and column:
+        if rule in {"not_null", "non_null"} and columns:
+            for column in columns:
+                if any(row.get(column) in (None, "") for row in table.rows):
+                    errors.append(f"not_null failed: {column}")
+        if rule == "non_empty" and len(columns) == 1:
+            column = columns[0]
             if any(str(row.get(column) or "").strip() == "" for row in table.rows):
                 errors.append(f"non_empty failed: {column}")
-        if rule == "unique" and column:
-            values = [row.get(column) for row in table.rows]
-            if len(set(values)) != len(values):
-                errors.append(f"unique failed: {column}")
-        if rule in {"min", "max"} and column:
+        if rule == "unique" and columns:
+            if len(columns) == 1:
+                values = [row.get(columns[0]) for row in table.rows]
+                if len(set(values)) != len(values):
+                    errors.append(f"unique failed: {columns[0]}")
+            else:
+                values = [tuple(row.get(column) for column in columns) for row in table.rows]
+                if len(set(values)) != len(values):
+                    errors.append(f"unique failed: {','.join(columns)}")
+        if rule in {"min", "max"} and len(columns) == 1:
+            column = columns[0]
             threshold = normalize_number(value)
             if threshold is None:
                 continue
@@ -1193,7 +1548,8 @@ def _validate_expectations(table: PipelineTable, expectations: Iterable[Dict[str
                 errors.append(f"min failed: {column} < {threshold}")
             if rule == "max" and max(numbers) > threshold:
                 errors.append(f"max failed: {column} > {threshold}")
-        if rule == "regex" and column and value:
+        if rule == "regex" and len(columns) == 1 and value:
+            column = columns[0]
             pattern = str(value)
             try:
                 import re
@@ -1202,7 +1558,8 @@ def _validate_expectations(table: PipelineTable, expectations: Iterable[Dict[str
                     errors.append(f"regex failed: {column}")
             except re.error:
                 errors.append(f"regex invalid: {pattern}")
-        if rule == "in_set" and column:
+        if rule == "in_set" and len(columns) == 1:
+            column = columns[0]
             allowed = normalize_value_list(value)
             if allowed:
                 if any(row.get(column) not in allowed for row in table.rows):

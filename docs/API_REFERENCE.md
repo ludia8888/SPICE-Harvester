@@ -81,24 +81,12 @@ docker compose -f docker-compose.full.yml up -d --build
 - 일부 읽기 API는 **branch를 받지 않거나 무시**한다(예: 인스턴스 리스트/샘플값).
 - Google Sheets/Excel 커밋은 현재 `branch=main` 고정이다.
 
-### 경로 (⚠️ 현재 네이밍 혼재)
+### 경로
 
-현재 BFF에는 두 가지 URL 형식이 공존한다:
+BFF의 DB 스코프 리소스는 `/api/v1/databases/{db_name}/...` 형식을 사용한다.
 
-- 컬렉션형(복수): `/api/v1/databases`, `/api/v1/databases/{db_name}/branches`, ...
-- DB 스코프형(레거시 단수): `/api/v1/database/{db_name}/ontology`, `/api/v1/database/{db_name}/query`, ...
-
-이 혼재는 라우터가 추가된 시점이 달라서 생긴 **사용자 경험 불편 요소**이다.
-
-**프론트엔드 가이드**
-- 이 문서에 적힌 경로를 그대로 사용한다(프론트엔드 계약의 일부).
-- 헷갈릴 때는:
-  - **DB 생성/조회/수정/삭제 / 브랜치**는 `/api/v1/databases...`
-  - **온톨로지/쿼리/인스턴스/매핑**는 주로 `/api/v1/database/{db_name}...`
-
-**폐기 계획 (문서 레벨, 코드에서 별칭 추가 전까지)**
-- 모든 DB 스코프 리소스를 `/api/v1/databases/{db_name}/...`로 수렴할 계획이다.
-- 그 전까지는 `/api/v1/database/{db_name}/...` 경로를 **안정적이지만 레거시**로 취급한다.
+- 컬렉션: `/api/v1/databases`, `/api/v1/databases/{db_name}/branches`
+- DB 스코프: `/api/v1/databases/{db_name}/ontology`, `/api/v1/databases/{db_name}/query`, `/api/v1/databases/{db_name}/instances`, `/api/v1/databases/{db_name}/mappings`
 
 ### 시간
 
@@ -334,10 +322,10 @@ docker compose -f docker-compose.full.yml up -d --build
 - `GET /api/v1/admin/system-health` — 시스템 상태 요약 조회. 권한: 운영자 전용. 응답: 상태 요약 JSON(OpenAPI 스키마).
 
 ### 비동기 인스턴스 관리 (**안정**)
-- `POST /api/v1/database/{db_name}/instances/{class_label}/create` — 인스턴스 생성 명령 제출(비동기, **HTTP 202**). 요청: 경로 `db_name`, `class_label`; JSON 바디(`data`, `metadata` 등; OpenAPI 스키마). 응답: `CommandResult` + `command_id`.
-- `PUT /api/v1/database/{db_name}/instances/{class_label}/{instance_id}/update` — 인스턴스 업데이트 명령 제출(비동기, **HTTP 202**). 요청: 경로 `db_name`, `class_label`, `instance_id`; `expected_seq` 필요(OCC, 위치/형식 OpenAPI 참고). 응답: `CommandResult` + `command_id`.
-- `DELETE /api/v1/database/{db_name}/instances/{class_label}/{instance_id}/delete` — 인스턴스 삭제 명령 제출(비동기, **HTTP 202**). 요청: 경로 `db_name`, `class_label`, `instance_id`; `expected_seq` 필요(OCC, 위치/형식 OpenAPI 참고). 응답: `CommandResult` + `command_id`.
-- `POST /api/v1/database/{db_name}/instances/{class_label}/bulk-create` — 인스턴스 다건 생성 명령 제출(비동기, **HTTP 202**). 요청: 경로 `db_name`, `class_label`; JSON 바디(OpenAPI 스키마). 응답: `CommandResult` + `command_id`.
+- `POST /api/v1/databases/{db_name}/instances/{class_label}/create` — 인스턴스 생성 명령 제출(비동기, **HTTP 202**). 요청: 경로 `db_name`, `class_label`; JSON 바디(`data`, `metadata` 등; OpenAPI 스키마). 응답: `CommandResult` + `command_id`.
+- `PUT /api/v1/databases/{db_name}/instances/{class_label}/{instance_id}/update` — 인스턴스 업데이트 명령 제출(비동기, **HTTP 202**). 요청: 경로 `db_name`, `class_label`, `instance_id`; `expected_seq` 필요(OCC, 위치/형식 OpenAPI 참고). 응답: `CommandResult` + `command_id`.
+- `DELETE /api/v1/databases/{db_name}/instances/{class_label}/{instance_id}/delete` — 인스턴스 삭제 명령 제출(비동기, **HTTP 202**). 요청: 경로 `db_name`, `class_label`, `instance_id`; `expected_seq` 필요(OCC, 위치/형식 OpenAPI 참고). 응답: `CommandResult` + `command_id`.
+- `POST /api/v1/databases/{db_name}/instances/{class_label}/bulk-create` — 인스턴스 다건 생성 명령 제출(비동기, **HTTP 202**). 요청: 경로 `db_name`, `class_label`; JSON 바디(OpenAPI 스키마). 응답: `CommandResult` + `command_id`.
 
 비고:
 - `data` 키는 **속성 라벨**(사람이 읽는 라벨)입니다. BFF가 LabelMapper로 내부 `property_id`에 매핑합니다.
@@ -411,16 +399,16 @@ docker compose -f docker-compose.full.yml up -d --build
 - `GET /api/v1/health` — 헬스 체크. 응답: JSON(OpenAPI 스키마).
 
 ### 인스턴스 관리 (**안정**)
-- `GET /api/v1/database/{db_name}/class/{class_id}/instances` — 인스턴스 목록 조회(ES 우선, TerminusDB 폴백). 요청: 경로 `db_name`, `class_id`, 쿼리 파라미터(OpenAPI 스키마). 응답: JSON(OpenAPI 스키마).
-- `GET /api/v1/database/{db_name}/class/{class_id}/instance/{instance_id}` — 인스턴스 단건 조회(ES 우선, TerminusDB 폴백). 요청: 경로 `db_name`, `class_id`, `instance_id`. 응답: JSON(OpenAPI 스키마).
-- `GET /api/v1/database/{db_name}/class/{class_id}/sample-values` — 필드 샘플 값 조회(UI 필터용). 요청: 경로 `db_name`, `class_id`. 응답: JSON(OpenAPI 스키마).
+- `GET /api/v1/databases/{db_name}/class/{class_id}/instances` — 인스턴스 목록 조회(ES 우선, TerminusDB 폴백). 요청: 경로 `db_name`, `class_id`, 쿼리 파라미터(OpenAPI 스키마). 응답: JSON(OpenAPI 스키마).
+- `GET /api/v1/databases/{db_name}/class/{class_id}/instance/{instance_id}` — 인스턴스 단건 조회(ES 우선, TerminusDB 폴백). 요청: 경로 `db_name`, `class_id`, `instance_id`. 응답: JSON(OpenAPI 스키마).
+- `GET /api/v1/databases/{db_name}/class/{class_id}/sample-values` — 필드 샘플 값 조회(UI 필터용). 요청: 경로 `db_name`, `class_id`. 응답: JSON(OpenAPI 스키마).
 
 ### 라벨 매핑 (**안정**)
-- `GET /api/v1/database/{db_name}/mappings/` — 라벨 매핑 요약 조회. 요청: 경로 `db_name`. 응답: JSON(OpenAPI 스키마).
-- `POST /api/v1/database/{db_name}/mappings/export` — 라벨 매핑 내보내기. 요청: 경로 `db_name` (바디 없음). 응답: JSON 파일 다운로드(`Content-Disposition`).
-- `POST /api/v1/database/{db_name}/mappings/import` — 라벨 매핑 가져오기. 요청: `multipart/form-data`의 `file`(JSON). 응답: JSON(OpenAPI 스키마).
-- `POST /api/v1/database/{db_name}/mappings/validate` — 라벨 매핑 검증(쓰기 없음). 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 검증 결과 JSON(OpenAPI 스키마).
-- `DELETE /api/v1/database/{db_name}/mappings/` — 라벨 매핑 전체 삭제. 요청: 경로 `db_name`. 응답: JSON(OpenAPI 스키마).
+- `GET /api/v1/databases/{db_name}/mappings/` — 라벨 매핑 요약 조회. 요청: 경로 `db_name`. 응답: JSON(OpenAPI 스키마).
+- `POST /api/v1/databases/{db_name}/mappings/export` — 라벨 매핑 내보내기. 요청: 경로 `db_name` (바디 없음). 응답: JSON 파일 다운로드(`Content-Disposition`).
+- `POST /api/v1/databases/{db_name}/mappings/import` — 라벨 매핑 가져오기. 요청: `multipart/form-data`의 `file`(JSON). 응답: JSON(OpenAPI 스키마).
+- `POST /api/v1/databases/{db_name}/mappings/validate` — 라벨 매핑 검증(쓰기 없음). 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 검증 결과 JSON(OpenAPI 스키마).
+- `DELETE /api/v1/databases/{db_name}/mappings/` — 라벨 매핑 전체 삭제. 요청: 경로 `db_name`. 응답: JSON(OpenAPI 스키마).
 
 ### 라인리지 (**안정**)
 - `GET /api/v1/lineage/graph` — 라인리지 그래프 조회. 요청: 쿼리 `root` 필수(예: `event:<uuid>`), `db_name` 권장. 응답: JSON(OpenAPI 스키마).
@@ -428,8 +416,8 @@ docker compose -f docker-compose.full.yml up -d --build
 - `GET /api/v1/lineage/metrics` — 라인리지 메트릭 조회. 요청: 쿼리 `db_name`(선택), `window_minutes`(기본 60). 응답: JSON(OpenAPI 스키마).
 
 ### 머지 충돌 해결 (**안정**)
-- `POST /api/v1/database/{db_name}/merge/simulate` — 머지 충돌 시뮬레이션. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 시뮬레이션 결과 JSON(OpenAPI 스키마).
-- `POST /api/v1/database/{db_name}/merge/resolve` — 머지 충돌 해결. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 해결 결과 JSON(OpenAPI 스키마).
+- `POST /api/v1/databases/{db_name}/merge/simulate` — 머지 충돌 시뮬레이션. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 시뮬레이션 결과 JSON(OpenAPI 스키마).
+- `POST /api/v1/databases/{db_name}/merge/resolve` — 머지 충돌 해결. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 해결 결과 JSON(OpenAPI 스키마).
 
 ### 모니터링 (**운영자 전용**)
 - `GET /api/v1/monitoring/health` — 기본 헬스 상태 조회. 권한: 운영자 전용. 응답: JSON(OpenAPI 스키마).
@@ -447,30 +435,30 @@ docker compose -f docker-compose.full.yml up -d --build
 - 의존성 그래프 및 “서비스 재시작” API는 의도적으로 **노출하지 않습니다**(가짜 제어 방지 목적). 대신 `/health/detailed`, `/status`를 사용하세요.
 
 ### 온톨로지 관리 (**안정**)
-- `POST /api/v1/database/{db_name}/ontology?branch=<branch>` — 온톨로지 클래스 생성(비동기, **HTTP 202**). 요청: 경로 `db_name`, 쿼리 `branch`; JSON 바디(OpenAPI 스키마). 응답: `ApiResponse` + `command_id`.
-- `POST /api/v1/database/{db_name}/ontology/validate?branch=<branch>` — 온톨로지 생성 검증(린트, 쓰기 없음). 요청: 경로 `db_name`, 쿼리 `branch`; JSON 바디(OpenAPI 스키마). 응답: 검증 리포트 JSON(OpenAPI 스키마).
-- `GET /api/v1/database/{db_name}/ontology/{class_label}?branch=<branch>` — 온톨로지 클래스 조회. 요청: 경로 `db_name`, `class_label`, 쿼리 `branch`. 응답: JSON(OpenAPI 스키마).
-- `POST /api/v1/database/{db_name}/ontology/{class_label}/validate?branch=<branch>` — 온톨로지 업데이트 검증(린트+diff, 쓰기 없음). 요청: 경로 `db_name`, `class_label`, 쿼리 `branch`; JSON 바디(OpenAPI 스키마). 응답: 검증 리포트 JSON(OpenAPI 스키마).
-- `PUT /api/v1/database/{db_name}/ontology/{class_label}?branch=<branch>&expected_seq=...` — 온톨로지 업데이트(비동기, **HTTP 202**). 요청: 경로 `db_name`, `class_label`, 쿼리 `branch` + `expected_seq`(OCC). 응답: `ApiResponse` + `command_id`.
-- `DELETE /api/v1/database/{db_name}/ontology/{class_label}?branch=<branch>&expected_seq=...` — 온톨로지 삭제(비동기, **HTTP 202**). 요청: 경로 `db_name`, `class_label`, 쿼리 `branch` + `expected_seq`(OCC). 응답: `ApiResponse` + `command_id`.
-- `GET /api/v1/database/{db_name}/ontology/list?branch=<branch>` — 온톨로지 목록 조회. 요청: 경로 `db_name`, 쿼리 `branch`. 응답: JSON(OpenAPI 스키마).
-- `GET /api/v1/database/{db_name}/ontology/{class_id}/schema?branch=<branch>&format=json|jsonld|owl` — 스키마 내보내기(형식 선택). 요청: 경로 `db_name`, `class_id`, 쿼리 `branch`, `format`. 응답: JSON/JSON-LD/OWL.
-- `POST /api/v1/database/{db_name}/ontology-advanced` — 고급 관계 검증(비동기, 202). 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: `ApiResponse` + `command_id`. 비고: `auto_generate_inverse=true`면 `501`.
-- `POST /api/v1/database/{db_name}/validate-relationships` — 관계 검증(사전 검증, 쓰기 없음). 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 검증 결과 JSON(OpenAPI 스키마).
-- `POST /api/v1/database/{db_name}/check-circular-references` — 순환 참조 탐지(사전 검증). 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 분석 결과 JSON(OpenAPI 스키마).
-- `GET /api/v1/database/{db_name}/relationship-network/analyze` — 관계 네트워크 분석. 요청: 경로 `db_name`, 쿼리 파라미터(OpenAPI 스키마). 응답: 분석 결과 JSON(OpenAPI 스키마).
-- `GET /api/v1/database/{db_name}/relationship-paths` — 관계 경로 탐색. 요청: 경로 `db_name`, 쿼리 파라미터(OpenAPI 스키마). 응답: 결과 JSON(OpenAPI 스키마).
-- `POST /api/v1/database/{db_name}/suggest-schema-from-data` — 샘플 데이터 기반 스키마 제안. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 제안 스키마 JSON(OpenAPI 스키마).
-- `POST /api/v1/database/{db_name}/suggest-schema-from-google-sheets` — 구글 시트 기반 스키마 제안. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 제안 스키마 JSON(OpenAPI 스키마).
-- `POST /api/v1/database/{db_name}/suggest-schema-from-excel` — 엑셀 기반 스키마 제안. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 제안 스키마 JSON(OpenAPI 스키마).
-- `POST /api/v1/database/{db_name}/suggest-mappings` — 스키마 간 매핑 제안. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 제안 매핑 JSON(OpenAPI 스키마).
-- `POST /api/v1/database/{db_name}/suggest-mappings-from-google-sheets` — 구글 시트 기반 매핑 제안. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 제안 매핑 JSON(OpenAPI 스키마).
-- `POST /api/v1/database/{db_name}/suggest-mappings-from-excel` — 엑셀 기반 매핑 제안. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 제안 매핑 JSON(OpenAPI 스키마).
-- `POST /api/v1/database/{db_name}/import-from-google-sheets/dry-run` — 구글 시트 임포트 드라이런(쓰기 없음). 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 미리보기/검증 JSON(OpenAPI 스키마).
-- `POST /api/v1/database/{db_name}/import-from-google-sheets/commit` — 구글 시트 임포트 커밋(OMS 비동기 쓰기 제출, 배치). 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 배치 제출 결과 JSON(여러 `command_id` 포함).
-- `POST /api/v1/database/{db_name}/import-from-excel/dry-run` — 엑셀 임포트 드라이런(쓰기 없음). 요청: `multipart/form-data`(파일 + 폼 필드; OpenAPI 참고). 응답: 미리보기/검증 JSON(OpenAPI 스키마).
-- `POST /api/v1/database/{db_name}/import-from-excel/commit` — 엑셀 임포트 커밋(OMS 비동기 쓰기 제출, 배치). 요청: `multipart/form-data`(파일 + 폼 필드). 응답: 배치 제출 결과 JSON(여러 `command_id` 포함).
-- `POST /api/v1/database/{db_name}/ontology/{class_id}/mapping-metadata` — 매핑 메타데이터 저장. 요청: 경로 `db_name`, `class_id`, JSON 바디(OpenAPI 스키마). 응답: 저장 결과 JSON(OpenAPI 스키마).
+- `POST /api/v1/databases/{db_name}/ontology?branch=<branch>` — 온톨로지 클래스 생성(비동기, **HTTP 202**). 요청: 경로 `db_name`, 쿼리 `branch`; JSON 바디(OpenAPI 스키마). 응답: `ApiResponse` + `command_id`.
+- `POST /api/v1/databases/{db_name}/ontology/validate?branch=<branch>` — 온톨로지 생성 검증(린트, 쓰기 없음). 요청: 경로 `db_name`, 쿼리 `branch`; JSON 바디(OpenAPI 스키마). 응답: 검증 리포트 JSON(OpenAPI 스키마).
+- `GET /api/v1/databases/{db_name}/ontology/{class_label}?branch=<branch>` — 온톨로지 클래스 조회. 요청: 경로 `db_name`, `class_label`, 쿼리 `branch`. 응답: JSON(OpenAPI 스키마).
+- `POST /api/v1/databases/{db_name}/ontology/{class_label}/validate?branch=<branch>` — 온톨로지 업데이트 검증(린트+diff, 쓰기 없음). 요청: 경로 `db_name`, `class_label`, 쿼리 `branch`; JSON 바디(OpenAPI 스키마). 응답: 검증 리포트 JSON(OpenAPI 스키마).
+- `PUT /api/v1/databases/{db_name}/ontology/{class_label}?branch=<branch>&expected_seq=...` — 온톨로지 업데이트(비동기, **HTTP 202**). 요청: 경로 `db_name`, `class_label`, 쿼리 `branch` + `expected_seq`(OCC). 응답: `ApiResponse` + `command_id`.
+- `DELETE /api/v1/databases/{db_name}/ontology/{class_label}?branch=<branch>&expected_seq=...` — 온톨로지 삭제(비동기, **HTTP 202**). 요청: 경로 `db_name`, `class_label`, 쿼리 `branch` + `expected_seq`(OCC). 응답: `ApiResponse` + `command_id`.
+- `GET /api/v1/databases/{db_name}/ontology/list?branch=<branch>` — 온톨로지 목록 조회. 요청: 경로 `db_name`, 쿼리 `branch`. 응답: JSON(OpenAPI 스키마).
+- `GET /api/v1/databases/{db_name}/ontology/{class_id}/schema?branch=<branch>&format=json|jsonld|owl` — 스키마 내보내기(형식 선택). 요청: 경로 `db_name`, `class_id`, 쿼리 `branch`, `format`. 응답: JSON/JSON-LD/OWL.
+- `POST /api/v1/databases/{db_name}/ontology-advanced` — 고급 관계 검증(비동기, 202). 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: `ApiResponse` + `command_id`. 비고: `auto_generate_inverse=true`면 `501`.
+- `POST /api/v1/databases/{db_name}/validate-relationships` — 관계 검증(사전 검증, 쓰기 없음). 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 검증 결과 JSON(OpenAPI 스키마).
+- `POST /api/v1/databases/{db_name}/check-circular-references` — 순환 참조 탐지(사전 검증). 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 분석 결과 JSON(OpenAPI 스키마).
+- `GET /api/v1/databases/{db_name}/relationship-network/analyze` — 관계 네트워크 분석. 요청: 경로 `db_name`, 쿼리 파라미터(OpenAPI 스키마). 응답: 분석 결과 JSON(OpenAPI 스키마).
+- `GET /api/v1/databases/{db_name}/relationship-paths` — 관계 경로 탐색. 요청: 경로 `db_name`, 쿼리 파라미터(OpenAPI 스키마). 응답: 결과 JSON(OpenAPI 스키마).
+- `POST /api/v1/databases/{db_name}/suggest-schema-from-data` — 샘플 데이터 기반 스키마 제안. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 제안 스키마 JSON(OpenAPI 스키마).
+- `POST /api/v1/databases/{db_name}/suggest-schema-from-google-sheets` — 구글 시트 기반 스키마 제안. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 제안 스키마 JSON(OpenAPI 스키마).
+- `POST /api/v1/databases/{db_name}/suggest-schema-from-excel` — 엑셀 기반 스키마 제안. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 제안 스키마 JSON(OpenAPI 스키마).
+- `POST /api/v1/databases/{db_name}/suggest-mappings` — 스키마 간 매핑 제안. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 제안 매핑 JSON(OpenAPI 스키마).
+- `POST /api/v1/databases/{db_name}/suggest-mappings-from-google-sheets` — 구글 시트 기반 매핑 제안. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 제안 매핑 JSON(OpenAPI 스키마).
+- `POST /api/v1/databases/{db_name}/suggest-mappings-from-excel` — 엑셀 기반 매핑 제안. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 제안 매핑 JSON(OpenAPI 스키마).
+- `POST /api/v1/databases/{db_name}/import-from-google-sheets/dry-run` — 구글 시트 임포트 드라이런(쓰기 없음). 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 미리보기/검증 JSON(OpenAPI 스키마).
+- `POST /api/v1/databases/{db_name}/import-from-google-sheets/commit` — 구글 시트 임포트 커밋(OMS 비동기 쓰기 제출, 배치). 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 배치 제출 결과 JSON(여러 `command_id` 포함).
+- `POST /api/v1/databases/{db_name}/import-from-excel/dry-run` — 엑셀 임포트 드라이런(쓰기 없음). 요청: `multipart/form-data`(파일 + 폼 필드; OpenAPI 참고). 응답: 미리보기/검증 JSON(OpenAPI 스키마).
+- `POST /api/v1/databases/{db_name}/import-from-excel/commit` — 엑셀 임포트 커밋(OMS 비동기 쓰기 제출, 배치). 요청: `multipart/form-data`(파일 + 폼 필드). 응답: 배치 제출 결과 JSON(여러 `command_id` 포함).
+- `POST /api/v1/databases/{db_name}/ontology/{class_id}/mapping-metadata` — 매핑 메타데이터 저장. 요청: 경로 `db_name`, `class_id`, JSON 바디(OpenAPI 스키마). 응답: 저장 결과 JSON(OpenAPI 스키마).
 
 비고: Google Sheets/Excel 커밋은 배치로 OMS bulk-create를 호출하며 응답에 `write.commands[]`가 포함된다. 현재 커밋은 `branch=main` 고정이다.
 
@@ -482,9 +470,9 @@ docker compose -f docker-compose.full.yml up -d --build
   - 선택: `X-Admin-Actor: <name>` (감사/추적용)
 
 ### 쿼리 (**안정**)
-- `POST /api/v1/database/{db_name}/query` — 쿼리 실행. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 쿼리 결과 JSON(OpenAPI 스키마).
-- `GET /api/v1/database/{db_name}/query/builder` — 쿼리 빌더 정보 조회. 요청: 경로 `db_name`. 응답: 빌더 정보 JSON(OpenAPI 스키마).
-- `POST /api/v1/database/{db_name}/query/raw` — 원시 쿼리 실행. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 결과 JSON(OpenAPI 스키마).
+- `POST /api/v1/databases/{db_name}/query` — 쿼리 실행. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 쿼리 결과 JSON(OpenAPI 스키마).
+- `GET /api/v1/databases/{db_name}/query/builder` — 쿼리 빌더 정보 조회. 요청: 경로 `db_name`. 응답: 빌더 정보 JSON(OpenAPI 스키마).
+- `POST /api/v1/databases/{db_name}/query/raw` — 원시 쿼리 실행. 요청: 경로 `db_name`, JSON 바디(OpenAPI 스키마). 응답: 결과 JSON(OpenAPI 스키마).
 
 ## 상세 API 가이드 (FE 구현용)
 
@@ -649,63 +637,63 @@ docker compose -f docker-compose.full.yml up -d --build
 
 ### 3) 온톨로지 CRUD
 
-**POST /api/v1/database/{db_name}/ontology?branch=...**
+**POST /api/v1/databases/{db_name}/ontology?branch=...**
 - 역할: 클래스 생성(비동기). `id` 없으면 자동 생성.
 - 바디: `OntologyCreateRequest`
 - 응답: `202` + `command_id`
 
-**POST /api/v1/database/{db_name}/ontology/validate?branch=...**
+**POST /api/v1/databases/{db_name}/ontology/validate?branch=...**
 - 역할: 생성 요청 사전 검증(쓰기 없음).
 - 바디: `OntologyCreateRequest`
 - 응답: 검증 리포트(JSON)
 
-**GET /api/v1/database/{db_name}/ontology/{class_label}?branch=...**
+**GET /api/v1/databases/{db_name}/ontology/{class_label}?branch=...**
 - 역할: 클래스 조회 (라벨 기반). `class_label`은 라벨 또는 class_id.
 
-**POST /api/v1/database/{db_name}/ontology/{class_label}/validate?branch=...**
+**POST /api/v1/databases/{db_name}/ontology/{class_label}/validate?branch=...**
 - 역할: 업데이트 검증(린트+diff).
 - 바디: `OntologyUpdateRequest`
 
-**PUT /api/v1/database/{db_name}/ontology/{class_label}?branch=...&expected_seq=...**
+**PUT /api/v1/databases/{db_name}/ontology/{class_label}?branch=...&expected_seq=...**
 - 역할: 클래스 업데이트(비동기, OCC).
 - 바디: `OntologyUpdateRequest`
 - 응답: `202` + `command_id`
 
-**DELETE /api/v1/database/{db_name}/ontology/{class_label}?branch=...&expected_seq=...**
+**DELETE /api/v1/databases/{db_name}/ontology/{class_label}?branch=...&expected_seq=...**
 - 역할: 클래스 삭제(비동기, OCC).
 
-**GET /api/v1/database/{db_name}/ontology/list?branch=...**
+**GET /api/v1/databases/{db_name}/ontology/list?branch=...**
 - 역할: 클래스 목록(라벨 매핑 포함).
 
-**GET /api/v1/database/{db_name}/ontology/{class_id}/schema?branch=...&format=json|jsonld|owl**
+**GET /api/v1/databases/{db_name}/ontology/{class_id}/schema?branch=...&format=json|jsonld|owl**
 - 역할: 스키마 내보내기.
 
 ---
 
 ### 4) 관계/스키마 검증 (고급)
 
-**POST /api/v1/database/{db_name}/ontology-advanced**
+**POST /api/v1/databases/{db_name}/ontology-advanced**
 - 역할: 관계 검증/순환 참조 체크를 포함한 생성(비동기).
 - 쿼리: `branch`, `auto_generate_inverse`(미구현, true면 501), `validate_relationships`, `check_circular_references`
 - 바디: `OntologyCreateRequest`
 
-**POST /api/v1/database/{db_name}/validate-relationships**
+**POST /api/v1/databases/{db_name}/validate-relationships**
 - 역할: 관계 검증(쓰기 없음).
 
-**POST /api/v1/database/{db_name}/check-circular-references**
+**POST /api/v1/databases/{db_name}/check-circular-references**
 - 역할: 순환 참조 검사(쓰기 없음).
 
-**GET /api/v1/database/{db_name}/relationship-network/analyze**
+**GET /api/v1/databases/{db_name}/relationship-network/analyze**
 - 역할: 관계 네트워크 분석.
 
-**GET /api/v1/database/{db_name}/relationship-paths**
+**GET /api/v1/databases/{db_name}/relationship-paths**
 - 역할: 관계 경로 탐색(라벨 기반 힌트 제공용).
 
 ---
 
 ### 5) 스키마/매핑 제안 (Funnel)
 
-**POST /api/v1/database/{db_name}/suggest-schema-from-data**
+**POST /api/v1/databases/{db_name}/suggest-schema-from-data**
 - 역할: 샘플 데이터 기반 클래스/타입 제안.
 - 바디:
   | 필드 | 타입 | 필수 | 설명 |
@@ -716,15 +704,15 @@ docker compose -f docker-compose.full.yml up -d --build
   | include_complex_types | boolean | N | 복합 타입 추론 |
 - 응답: `suggested_schema`, `analysis_summary`, `detailed_analysis`
 
-**POST /api/v1/database/{db_name}/suggest-schema-from-google-sheets**
+**POST /api/v1/databases/{db_name}/suggest-schema-from-google-sheets**
 - 역할: Google Sheets 기반 스키마 제안.
 - 바디: `sheet_url`, `worksheet_name`, `api_key`, `table_id`, `table_bbox` 등.
 
-**POST /api/v1/database/{db_name}/suggest-schema-from-excel**
+**POST /api/v1/databases/{db_name}/suggest-schema-from-excel**
 - 역할: Excel 업로드 기반 스키마 제안.
 - 요청: `multipart/form-data` (파일 + 폼 필드)
 
-**POST /api/v1/database/{db_name}/suggest-mappings**
+**POST /api/v1/databases/{db_name}/suggest-mappings**
 - 역할: 소스/타겟 스키마 간 매핑 제안.
 - 바디:
   | 필드 | 타입 | 필수 | 설명 |
@@ -734,30 +722,30 @@ docker compose -f docker-compose.full.yml up -d --build
   | sample_data | object[] | N | 샘플 값 |
   | target_sample_data | object[] | N | 타겟 샘플 값 |
 
-**POST /api/v1/database/{db_name}/suggest-mappings-from-google-sheets**
+**POST /api/v1/databases/{db_name}/suggest-mappings-from-google-sheets**
 - 역할: Google Sheets → 타겟 클래스 매핑 제안.
 - 바디: `sheet_url`, `worksheet_name`, `target_class_id`, `target_schema`, `table_id`, `table_bbox`,
   `include_relationships`, `enable_semantic_hints`
 
-**POST /api/v1/database/{db_name}/suggest-mappings-from-excel**
+**POST /api/v1/databases/{db_name}/suggest-mappings-from-excel**
 - 역할: Excel → 타겟 클래스 매핑 제안.
 
 ---
 
 ### 6) Import (Google Sheets / Excel)
 
-**POST /api/v1/database/{db_name}/import-from-google-sheets/dry-run**
+**POST /api/v1/databases/{db_name}/import-from-google-sheets/dry-run**
 - 역할: 타입 변환/매핑 검증(쓰기 없음).
 - 바디: `ImportFromGoogleSheetsRequest`
 - 응답: `stats`, `errors`, `preview_data`, `structure`, `sample_instances`
 
-**POST /api/v1/database/{db_name}/import-from-google-sheets/commit**
+**POST /api/v1/databases/{db_name}/import-from-google-sheets/commit**
 - 역할: OMS bulk-create로 비동기 쓰기 제출(배치).
 - 바디: `ImportFromGoogleSheetsRequest`
 - 응답: `write.commands[]` (각 항목에 `command_id`, `status_url`)
 - 비고: 현재 `branch=main` 고정.
 
-**POST /api/v1/database/{db_name}/import-from-excel/dry-run**
+**POST /api/v1/databases/{db_name}/import-from-excel/dry-run**
 - 역할: Excel 파일 기반 dry-run.
 - 요청: `multipart/form-data`
   - `file` (xlsx/xlsm)
@@ -766,11 +754,11 @@ docker compose -f docker-compose.full.yml up -d --build
   - `mappings_json` (JSON string, ImportFieldMapping[])
   - `sheet_name`, `table_id`, `table_top/left/bottom/right`, `dry_run_rows`, `options_json` 등
 
-**POST /api/v1/database/{db_name}/import-from-excel/commit**
+**POST /api/v1/databases/{db_name}/import-from-excel/commit**
 - 역할: Excel 파일 기반 커밋(배치).
 - 응답: `write.commands[]` 포함.
 
-**POST /api/v1/database/{db_name}/ontology/{class_id}/mapping-metadata**
+**POST /api/v1/databases/{db_name}/ontology/{class_id}/mapping-metadata**
 - 역할: 매핑 이력/통계 메타데이터를 클래스에 저장.
 - 바디: 임의 JSON (권장 키: `sourceFile`, `mappingsCount`, `averageConfidence`, `mappingDetails`, `timestamp`)
 
@@ -778,43 +766,43 @@ docker compose -f docker-compose.full.yml up -d --build
 
 ### 7) 라벨 매핑
 
-**GET /api/v1/database/{db_name}/mappings/**
+**GET /api/v1/databases/{db_name}/mappings/**
 - 역할: 매핑 요약 통계(언어별 집계).
 
-**POST /api/v1/database/{db_name}/mappings/export**
+**POST /api/v1/databases/{db_name}/mappings/export**
 - 역할: 전체 매핑 번들 다운로드(JSON).
 - 응답: `Content-Disposition` 첨부파일.
 
-**POST /api/v1/database/{db_name}/mappings/import**
+**POST /api/v1/databases/{db_name}/mappings/import**
 - 역할: 매핑 번들 업로드/적용.
 - 요청: `multipart/form-data`의 `file`(JSON).
 
-**POST /api/v1/database/{db_name}/mappings/validate**
+**POST /api/v1/databases/{db_name}/mappings/validate**
 - 역할: 업로드 매핑 검증(쓰기 없음).
 - 요청: `multipart/form-data`의 `file`(JSON).
 - 응답: `validation_passed`, `details`(unmapped/충돌 목록)
 
-**DELETE /api/v1/database/{db_name}/mappings/**
+**DELETE /api/v1/databases/{db_name}/mappings/**
 - 역할: 매핑 전체 삭제.
 
 ---
 
 ### 8) 인스턴스 쓰기 (비동기)
 
-**POST /api/v1/database/{db_name}/instances/{class_label}/create?branch=...**
+**POST /api/v1/databases/{db_name}/instances/{class_label}/create?branch=...**
 - 역할: 단건 생성(라벨 기반).
 - 바디: `{ data: { <label>: <value> }, metadata?: object }`
 - 응답: `CommandResult` (`command_id`, `status` 등)
 - 에러: `unknown_label_keys`, `409`(OCC), `400`(검증 실패)
 
-**PUT /api/v1/database/{db_name}/instances/{class_label}/{instance_id}/update?branch=...&expected_seq=...**
+**PUT /api/v1/databases/{db_name}/instances/{class_label}/{instance_id}/update?branch=...&expected_seq=...**
 - 역할: 단건 업데이트(OCC 필요).
 - 바디: `{ data: {...}, metadata?: {...} }`
 
-**DELETE /api/v1/database/{db_name}/instances/{class_label}/{instance_id}/delete?branch=...&expected_seq=...**
+**DELETE /api/v1/databases/{db_name}/instances/{class_label}/{instance_id}/delete?branch=...&expected_seq=...**
 - 역할: 단건 삭제(OCC 필요).
 
-**POST /api/v1/database/{db_name}/instances/{class_label}/bulk-create?branch=...**
+**POST /api/v1/databases/{db_name}/instances/{class_label}/bulk-create?branch=...**
 - 역할: 다건 생성(라벨 기반).
 - 바디: `{ instances: [ {<label>:<value>}, ... ], metadata?: {...} }`
 
@@ -825,16 +813,16 @@ docker compose -f docker-compose.full.yml up -d --build
 
 ### 9) 인스턴스 읽기 (ES 우선, TerminusDB 폴백)
 
-**GET /api/v1/database/{db_name}/class/{class_id}/instances**
+**GET /api/v1/databases/{db_name}/class/{class_id}/instances**
 - 쿼리: `limit`(<=1000), `offset`, `search`(문자열)
 - 응답: `{ class_id, total, limit, offset, search, instances }`
 - 비고: 현재 `branch` 미지원.
   - ES 응답에는 `version`, `event_timestamp`, `class_id`, `instance_id` 등이 포함될 수 있다.
 
-**GET /api/v1/database/{db_name}/class/{class_id}/instance/{instance_id}**
+**GET /api/v1/databases/{db_name}/class/{class_id}/instance/{instance_id}**
 - 응답: `{ status: "success", data: <instance> }`
 
-**GET /api/v1/database/{db_name}/class/{class_id}/sample-values**
+**GET /api/v1/databases/{db_name}/class/{class_id}/sample-values**
 - 쿼리: `property_name` (선택)
 - 응답:
   - `property_name` 있을 때: `{ values: [...] }`
@@ -882,12 +870,12 @@ docker compose -f docker-compose.full.yml up -d --build
 
 ### 11) 머지 충돌
 
-**POST /api/v1/database/{db_name}/merge/simulate**
+**POST /api/v1/databases/{db_name}/merge/simulate**
 - 역할: 충돌 미리보기.
 - 바디: `{ source_branch, target_branch, message?, strategy? }`
 - 응답: `merge_preview` + `conflicts[]`
 
-**POST /api/v1/database/{db_name}/merge/resolve**
+**POST /api/v1/databases/{db_name}/merge/resolve**
 - 역할: 충돌 해결 + 병합 실행.
 - 바디:
   - `source_branch`, `target_branch`, `strategy`, `message`, `author`
@@ -983,7 +971,7 @@ docker compose -f docker-compose.full.yml up -d --build
 
 ### 17) 쿼리 (Label 기반)
 
-**POST /api/v1/database/{db_name}/query**
+**POST /api/v1/databases/{db_name}/query**
 - 역할: 라벨 기반 쿼리 실행.
 - 바디 예시:
   ```json
@@ -1002,10 +990,10 @@ docker compose -f docker-compose.full.yml up -d --build
 - operator 허용값: `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `like`, `in`, `not_in`, `is_null`, `is_not_null`
 - UI 빌더에서 제공되는 기호(`=`, `!=`, `>=` 등)는 위 연산자 키로 매핑해서 전송해야 한다.
 
-**GET /api/v1/database/{db_name}/query/builder**
+**GET /api/v1/databases/{db_name}/query/builder**
 - 역할: UI 빌더용 연산자/예시 제공.
 
-**POST /api/v1/database/{db_name}/query/raw**
+**POST /api/v1/databases/{db_name}/query/raw**
 - 역할: 제한된 원시 쿼리. 허용 타입: `select|count|exists`
 
 ---
@@ -1090,7 +1078,7 @@ docker compose -f docker-compose.full.yml up -d --build
   - 이후: `GET /api/v1/databases`에 DB 이름이 포함
 - **온톨로지 클래스 생성**
   - 비동기일 때: 커맨드 상태 → `COMPLETED`
-  - 이후: `GET /api/v1/database/{db_name}/ontology/list`에 클래스 포함
+  - 이후: `GET /api/v1/databases/{db_name}/ontology/list`에 클래스 포함
 - **인스턴스 생성**
   - 커맨드 상태 → `COMPLETED`
   - 이후: `POST /api/v1/graph-query/{db_name}`가 노드를 반환
@@ -1125,7 +1113,7 @@ curl -sS -X POST 'http://localhost:8002/api/v1/databases' \
 ### 2) 온톨로지 클래스 생성 (비동기)
 
 ```bash
-curl -sS -X POST 'http://localhost:8002/api/v1/database/demo_db/ontology?branch=main' \
+curl -sS -X POST 'http://localhost:8002/api/v1/databases/demo_db/ontology?branch=main' \
   -H 'Content-Type: application/json' \
   -d '{
     "id": "Product",
@@ -1145,7 +1133,7 @@ curl -sS -X POST 'http://localhost:8002/api/v1/database/demo_db/ontology?branch=
 - OMS는 `{class_id}_id`(예: `product_id`) 또는 `*_id` 필드에서 `instance_id`를 파생한다.
 
 ```bash
-curl -sS -X POST 'http://localhost:8002/api/v1/database/demo_db/instances/Product/create?branch=main' \
+curl -sS -X POST 'http://localhost:8002/api/v1/databases/demo_db/instances/Product/create?branch=main' \
   -H 'Content-Type: application/json' \
   -d '{
     "data": {"Product ID": "PROD-1", "Name": "Apple"},

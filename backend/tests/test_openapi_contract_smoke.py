@@ -348,12 +348,29 @@ def _format_path(template: str, ctx: SmokeContext, *, overrides: Optional[Dict[s
         "sheet_id": "0000000000000000000000000000000000000000",
         "task_id": "00000000-0000-0000-0000-000000000000",
         "pipeline_id": ctx.pipeline_id or "pipeline_smoke",
+        "artifact_id": "00000000-0000-0000-0000-000000000000",
         "dataset_id": ctx.dataset_id or "dataset_smoke",
         "connection_id": ctx.connection_id or "missing_connection",
     }
     if overrides:
         values.update(overrides)
     return template.format(**values)
+
+
+def _normalize_db_path(path: str) -> str:
+    if path == "/api/v1/database":
+        return "/api/v1/databases"
+    if path.startswith("/api/v1/database/"):
+        return path.replace("/api/v1/database/", "/api/v1/databases/", 1)
+    return path
+
+
+def _pick_spec_path(paths: Iterable[str], *candidates: str) -> str:
+    path_set = set(paths)
+    for candidate in candidates:
+        if candidate in path_set:
+            return candidate
+    return candidates[0]
 
 
 def _ontology_payload(*, class_id: str, label_en: str, label_ko: str) -> Dict[str, Any]:
@@ -427,7 +444,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     exercise the endpoint safely (e.g., 422 validation) or report a controlled, non-5xx failure.
     """
 
-    key = (op.method, op.path)
+    key = (op.method, _normalize_db_path(op.path))
 
     # ---------- Health ----------
     if key == ("GET", "/api/v1/"):
@@ -481,6 +498,10 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         return RequestPlan(op.method, op.path, url, (200, 409, 400), json_body=body)
 
     if key == ("GET", "/api/v1/pipelines/{pipeline_id}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (200, 404))
+
+    if key == ("GET", "/api/v1/pipelines/{pipeline_id}/artifacts/{artifact_id}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (200, 404))
 
@@ -713,52 +734,52 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         return RequestPlan(op.method, op.path, url, (200,))
 
     # ---------- Ontology ----------
-    if key == ("POST", "/api/v1/database/{db_name}/ontology"):
+    if key == ("POST", "/api/v1/databases/{db_name}/ontology"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         body = _ontology_payload(class_id=ctx.class_id, label_en="Product", label_ko="제품")
         return RequestPlan(op.method, op.path, url, (200, 202, 409), json_body=body)
 
-    if key == ("POST", "/api/v1/database/{db_name}/ontology-advanced"):
+    if key == ("POST", "/api/v1/databases/{db_name}/ontology-advanced"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         body = _ontology_payload(class_id=ctx.advanced_class_id, label_en="Order", label_ko="주문")
         return RequestPlan(op.method, op.path, url, (200, 202, 409), json_body=body)
 
-    if key == ("GET", "/api/v1/database/{db_name}/ontology/list"):
+    if key == ("GET", "/api/v1/databases/{db_name}/ontology/list"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (200,))
 
-    if key == ("GET", "/api/v1/database/{db_name}/ontology/{class_label}"):
+    if key == ("GET", "/api/v1/databases/{db_name}/ontology/{class_label}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_label': ctx.class_id})}"
         return RequestPlan(op.method, op.path, url, (200,))
 
-    if key == ("GET", "/api/v1/database/{db_name}/ontology/{class_id}/schema"):
+    if key == ("GET", "/api/v1/databases/{db_name}/ontology/{class_id}/schema"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_id': ctx.class_id})}"
         return RequestPlan(op.method, op.path, url, (200,))
 
-    if key == ("POST", "/api/v1/database/{db_name}/ontology/validate"):
+    if key == ("POST", "/api/v1/databases/{db_name}/ontology/validate"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         body = _ontology_payload(class_id=f"Validate{ctx.class_id}", label_en="ValidateClass", label_ko="검증클래스")
         return RequestPlan(op.method, op.path, url, (200, 400, 422), json_body=body)
 
-    if key == ("POST", "/api/v1/database/{db_name}/validate-relationships"):
+    if key == ("POST", "/api/v1/databases/{db_name}/validate-relationships"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         body = _ontology_payload(class_id=f"RelValidate{ctx.class_id}", label_en="RelValidate", label_ko="관계검증")
         return RequestPlan(op.method, op.path, url, (200, 400, 422), json_body=body)
 
-    if key == ("POST", "/api/v1/database/{db_name}/check-circular-references"):
+    if key == ("POST", "/api/v1/databases/{db_name}/check-circular-references"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         # No body -> checks existing DB schema.
         return RequestPlan(op.method, op.path, url, (200, 404))
 
-    if key == ("GET", "/api/v1/database/{db_name}/relationship-network/analyze"):
+    if key == ("GET", "/api/v1/databases/{db_name}/relationship-network/analyze"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (200,))
 
-    if key == ("GET", "/api/v1/database/{db_name}/relationship-paths"):
+    if key == ("GET", "/api/v1/databases/{db_name}/relationship-paths"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (200, 400), params={"start_entity": ctx.class_id})
 
-    if key == ("PUT", "/api/v1/database/{db_name}/ontology/{class_label}"):
+    if key == ("PUT", "/api/v1/databases/{db_name}/ontology/{class_label}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_label': ctx.class_id})}"
         expected_seq = await _get_write_side_last_sequence(
             aggregate_type="OntologyClass", aggregate_id=ctx.ontology_aggregate_id
@@ -766,12 +787,12 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         body = {"description": {"en": "Updated (openapi smoke)"}}
         return RequestPlan(op.method, op.path, url, (200, 202, 409, 404), params={"expected_seq": expected_seq}, json_body=body)
 
-    if key == ("POST", "/api/v1/database/{db_name}/ontology/{class_label}/validate"):
+    if key == ("POST", "/api/v1/databases/{db_name}/ontology/{class_label}/validate"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_label': ctx.class_id})}"
         body = {"description": {"en": "Validate update (openapi smoke)"}}
         return RequestPlan(op.method, op.path, url, (200, 400, 422), json_body=body)
 
-    if key == ("DELETE", "/api/v1/database/{db_name}/ontology/{class_label}"):
+    if key == ("DELETE", "/api/v1/databases/{db_name}/ontology/{class_label}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_label': ctx.advanced_class_id})}"
         expected_seq = await _get_write_side_last_sequence(
             aggregate_type="OntologyClass", aggregate_id=ctx.advanced_ontology_aggregate_id
@@ -789,18 +810,18 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
             headers=headers,
         )
 
-    if key == ("POST", "/api/v1/database/{db_name}/ontology/{class_id}/mapping-metadata"):
+    if key == ("POST", "/api/v1/databases/{db_name}/ontology/{class_id}/mapping-metadata"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_id': ctx.class_id})}"
         body = {"source": "openapi_smoke", "note": "mapping metadata smoke"}
         return RequestPlan(op.method, op.path, url, (200, 400, 404, 422), json_body=body)
 
     # ---------- Async instances (write-side) ----------
-    if key == ("POST", "/api/v1/database/{db_name}/instances/{class_label}/create"):
+    if key == ("POST", "/api/v1/databases/{db_name}/instances/{class_label}/create"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_label': ctx.class_id})}"
         body = {"data": {f"{ctx.class_id.lower()}_id": ctx.instance_id, "name": "OpenAPI Smoke Product"}, "metadata": {}}
         return RequestPlan(op.method, op.path, url, (202, 409, 404), json_body=body)
 
-    if key == ("POST", "/api/v1/database/{db_name}/instances/{class_label}/bulk-create"):
+    if key == ("POST", "/api/v1/databases/{db_name}/instances/{class_label}/bulk-create"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_label': ctx.class_id})}"
         body = {
             "instances": [
@@ -811,36 +832,36 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         }
         return RequestPlan(op.method, op.path, url, (202, 404), json_body=body)
 
-    if key == ("PUT", "/api/v1/database/{db_name}/instances/{class_label}/{instance_id}/update"):
+    if key == ("PUT", "/api/v1/databases/{db_name}/instances/{class_label}/{instance_id}/update"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_label': ctx.class_id, 'instance_id': ctx.instance_id})}"
         expected_seq = await _get_write_side_last_sequence(aggregate_type="Instance", aggregate_id=ctx.instance_aggregate_id)
         body = {"data": {"name": "OpenAPI Smoke Product (updated)"}, "metadata": {}}
         return RequestPlan(op.method, op.path, url, (202, 404, 409), params={"expected_seq": expected_seq}, json_body=body)
 
-    if key == ("DELETE", "/api/v1/database/{db_name}/instances/{class_label}/{instance_id}/delete"):
+    if key == ("DELETE", "/api/v1/databases/{db_name}/instances/{class_label}/{instance_id}/delete"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_label': ctx.class_id, 'instance_id': ctx.instance_id})}"
         expected_seq = await _get_write_side_last_sequence(aggregate_type="Instance", aggregate_id=ctx.instance_aggregate_id)
         return RequestPlan(op.method, op.path, url, (202, 404, 409), params={"expected_seq": expected_seq})
 
     # ---------- Instances (read-side) ----------
-    if key == ("GET", "/api/v1/database/{db_name}/class/{class_id}/instances"):
+    if key == ("GET", "/api/v1/databases/{db_name}/class/{class_id}/instances"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_id': ctx.class_id})}"
         return RequestPlan(op.method, op.path, url, (200,))
 
-    if key == ("GET", "/api/v1/database/{db_name}/class/{class_id}/instance/{instance_id}"):
+    if key == ("GET", "/api/v1/databases/{db_name}/class/{class_id}/instance/{instance_id}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_id': ctx.class_id, 'instance_id': ctx.instance_id})}"
         return RequestPlan(op.method, op.path, url, (200,))
 
-    if key == ("GET", "/api/v1/database/{db_name}/class/{class_id}/sample-values"):
+    if key == ("GET", "/api/v1/databases/{db_name}/class/{class_id}/sample-values"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_id': ctx.class_id})}"
         return RequestPlan(op.method, op.path, url, (200,))
 
     # ---------- Query ----------
-    if key == ("GET", "/api/v1/database/{db_name}/query/builder"):
+    if key == ("GET", "/api/v1/databases/{db_name}/query/builder"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (200,))
 
-    if key == ("POST", "/api/v1/database/{db_name}/query"):
+    if key == ("POST", "/api/v1/databases/{db_name}/query"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         body = {
             "class_id": ctx.class_id,
@@ -849,7 +870,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         }
         return RequestPlan(op.method, op.path, url, (200,), json_body=body)
 
-    if key == ("POST", "/api/v1/database/{db_name}/query/raw"):
+    if key == ("POST", "/api/v1/databases/{db_name}/query/raw"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         body = {
             "type": "select",
@@ -919,19 +940,19 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         return RequestPlan(op.method, op.path, url, (404, 200))
 
     # ---------- Label mappings (file upload) ----------
-    if key == ("GET", "/api/v1/database/{db_name}/mappings/"):
+    if key == ("GET", "/api/v1/databases/{db_name}/mappings/"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (200,))
 
-    if key == ("DELETE", "/api/v1/database/{db_name}/mappings/"):
+    if key == ("DELETE", "/api/v1/databases/{db_name}/mappings/"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (200, 202, 404))
 
-    if key == ("POST", "/api/v1/database/{db_name}/mappings/export"):
+    if key == ("POST", "/api/v1/databases/{db_name}/mappings/export"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (200,), note="Export is a JSON file response")
 
-    if key in {("POST", "/api/v1/database/{db_name}/mappings/import"), ("POST", "/api/v1/database/{db_name}/mappings/validate")}:
+    if key in {("POST", "/api/v1/databases/{db_name}/mappings/import"), ("POST", "/api/v1/databases/{db_name}/mappings/validate")}:
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         form = aiohttp.FormData()
         form.add_field(
@@ -943,18 +964,18 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         return RequestPlan(op.method, op.path, url, (200,), form=form)
 
     # ---------- Merge conflicts ----------
-    if key == ("POST", "/api/v1/database/{db_name}/merge/simulate"):
+    if key == ("POST", "/api/v1/databases/{db_name}/merge/simulate"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         body = {"source_branch": ctx.branch_name, "target_branch": "main", "strategy": "merge"}
         return RequestPlan(op.method, op.path, url, (200, 404, 400), json_body=body)
 
-    if key == ("POST", "/api/v1/database/{db_name}/merge/resolve"):
+    if key == ("POST", "/api/v1/databases/{db_name}/merge/resolve"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         body = {"source_branch": ctx.branch_name, "target_branch": "main", "resolutions": []}
         return RequestPlan(op.method, op.path, url, (200, 400, 404), json_body=body)
 
     # ---------- Funnel-backed schema/mapping suggestions ----------
-    if key == ("POST", "/api/v1/database/{db_name}/suggest-schema-from-data"):
+    if key == ("POST", "/api/v1/databases/{db_name}/suggest-schema-from-data"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         body = {
             "class_name": ctx.class_id,
@@ -966,7 +987,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         }
         return RequestPlan(op.method, op.path, url, (200, 400, 422), json_body=body)
 
-    if key == ("POST", "/api/v1/database/{db_name}/suggest-mappings"):
+    if key == ("POST", "/api/v1/databases/{db_name}/suggest-mappings"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         body = {
             "source_schema": [{"name": f"{ctx.class_id.lower()}_id", "type": "xsd:string"}, {"name": "name", "type": "xsd:string"}],
@@ -975,7 +996,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         }
         return RequestPlan(op.method, op.path, url, (200, 400, 422), json_body=body)
 
-    if key == ("POST", "/api/v1/database/{db_name}/suggest-schema-from-excel"):
+    if key == ("POST", "/api/v1/databases/{db_name}/suggest-schema-from-excel"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         excel_bytes = _xlsx_bytes(
             header=[f"{ctx.class_id.lower()}_id", "name"],
@@ -990,7 +1011,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         )
         return RequestPlan(op.method, op.path, url, (200, 400, 422, 501), form=form)
 
-    if key == ("POST", "/api/v1/database/{db_name}/suggest-mappings-from-excel"):
+    if key == ("POST", "/api/v1/databases/{db_name}/suggest-mappings-from-excel"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         excel_bytes = _xlsx_bytes(
             header=[f"{ctx.class_id.lower()}_id", "name"],
@@ -1007,7 +1028,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         params = {"target_class_id": ctx.class_id}
         return RequestPlan(op.method, op.path, url, (200, 400, 422), params=params, form=form)
 
-    if key == ("POST", "/api/v1/database/{db_name}/import-from-excel/dry-run"):
+    if key == ("POST", "/api/v1/databases/{db_name}/import-from-excel/dry-run"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         excel_bytes = _xlsx_bytes(
             header=[f"{ctx.class_id.lower()}_id", "name"],
@@ -1024,7 +1045,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         form.add_field("mappings_json", _mappings_json(ctx))
         return RequestPlan(op.method, op.path, url, (200, 400, 422), form=form)
 
-    if key == ("POST", "/api/v1/database/{db_name}/import-from-excel/commit"):
+    if key == ("POST", "/api/v1/databases/{db_name}/import-from-excel/commit"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         excel_bytes = _xlsx_bytes(
             header=[f"{ctx.class_id.lower()}_id", "name"],
@@ -1047,10 +1068,10 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
 
     # ---------- Google Sheets (no external assumption) ----------
     if key in {
-        ("POST", "/api/v1/database/{db_name}/suggest-schema-from-google-sheets"),
-        ("POST", "/api/v1/database/{db_name}/suggest-mappings-from-google-sheets"),
-        ("POST", "/api/v1/database/{db_name}/import-from-google-sheets/dry-run"),
-        ("POST", "/api/v1/database/{db_name}/import-from-google-sheets/commit"),
+        ("POST", "/api/v1/databases/{db_name}/suggest-schema-from-google-sheets"),
+        ("POST", "/api/v1/databases/{db_name}/suggest-mappings-from-google-sheets"),
+        ("POST", "/api/v1/databases/{db_name}/import-from-google-sheets/dry-run"),
+        ("POST", "/api/v1/databases/{db_name}/import-from-google-sheets/commit"),
         ("POST", "/api/v1/data-connectors/google-sheets/grid"),
         ("POST", "/api/v1/data-connectors/google-sheets/preview"),
     }:
@@ -1157,6 +1178,39 @@ async def test_openapi_stable_contract_smoke():
             assert resp.status == 200, f"Failed to fetch OpenAPI: {resp.status} {await resp.text()}"
             spec = await resp.json()
 
+    spec_paths = set((spec.get("paths") or {}).keys())
+    db_create_path = _pick_spec_path(spec_paths, "/api/v1/databases", "/api/v1/database")
+    db_ontology_path = _pick_spec_path(
+        spec_paths,
+        "/api/v1/databases/{db_name}/ontology",
+        "/api/v1/database/{db_name}/ontology",
+    )
+    db_ontology_advanced_path = _pick_spec_path(
+        spec_paths,
+        "/api/v1/databases/{db_name}/ontology-advanced",
+        "/api/v1/database/{db_name}/ontology-advanced",
+    )
+    db_branches_path = _pick_spec_path(
+        spec_paths,
+        "/api/v1/databases/{db_name}/branches",
+        "/api/v1/database/{db_name}/branches",
+    )
+    db_instance_create_path = _pick_spec_path(
+        spec_paths,
+        "/api/v1/databases/{db_name}/instances/{class_label}/create",
+        "/api/v1/database/{db_name}/instances/{class_label}/create",
+    )
+    db_mappings_import_path = _pick_spec_path(
+        spec_paths,
+        "/api/v1/databases/{db_name}/mappings/import",
+        "/api/v1/database/{db_name}/mappings/import",
+    )
+    db_delete_path = _pick_spec_path(
+        spec_paths,
+        "/api/v1/databases/{db_name}",
+        "/api/v1/database/{db_name}",
+    )
+
     operations: list[Operation] = []
     for path, methods in (spec.get("paths") or {}).items():
         if not isinstance(methods, dict):
@@ -1209,7 +1263,10 @@ async def test_openapi_stable_contract_smoke():
         # ---- Deterministic setup (also counts toward coverage) ----
         try:
             # Create DB (async ES mode) and wait
-            plan = await _build_plan(Operation("POST", "/api/v1/databases", ("Database Management",), "Create Database"), ctx)
+            plan = await _build_plan(
+                Operation("POST", db_create_path, ("Database Management",), "Create Database"),
+                ctx,
+            )
             status, text, payload = await _request(session, plan)
             executed.add((plan.method, plan.path_template))
             if status not in plan.expected_statuses:
@@ -1223,8 +1280,13 @@ async def test_openapi_stable_contract_smoke():
 
             # Create ontology classes (Product + Order)
             for op in [
-                Operation("POST", "/api/v1/database/{db_name}/ontology", ("Ontology Management",), "Create Ontology"),
-                Operation("POST", "/api/v1/database/{db_name}/ontology-advanced", ("Ontology Management",), "Create Ontology Advanced"),
+                Operation("POST", db_ontology_path, ("Ontology Management",), "Create Ontology"),
+                Operation(
+                    "POST",
+                    db_ontology_advanced_path,
+                    ("Ontology Management",),
+                    "Create Ontology Advanced",
+                ),
             ]:
                 plan = await _build_plan(op, ctx)
                 status, text, payload = await _request(session, plan)
@@ -1238,7 +1300,8 @@ async def test_openapi_stable_contract_smoke():
 
             # Create branch (for merge simulate, etc)
             plan = await _build_plan(
-                Operation("POST", "/api/v1/databases/{db_name}/branches", ("Database Management",), "Create Branch"), ctx
+                Operation("POST", db_branches_path, ("Database Management",), "Create Branch"),
+                ctx,
             )
             status, text, _ = await _request(session, plan)
             executed.add((plan.method, plan.path_template))
@@ -1247,7 +1310,12 @@ async def test_openapi_stable_contract_smoke():
 
             # Create one instance (async) and wait
             plan = await _build_plan(
-                Operation("POST", "/api/v1/database/{db_name}/instances/{class_label}/create", ("Async Instance Management",), "Create Instance Async"),
+                Operation(
+                    "POST",
+                    db_instance_create_path,
+                    ("Async Instance Management",),
+                    "Create Instance Async",
+                ),
                 ctx,
             )
             status, text, payload = await _request(session, plan)
@@ -1262,7 +1330,12 @@ async def test_openapi_stable_contract_smoke():
 
             # Import mappings so label-based query can run deterministically
             plan = await _build_plan(
-                Operation("POST", "/api/v1/database/{db_name}/mappings/import", ("Label Mappings",), "Import Mappings"),
+                Operation(
+                    "POST",
+                    db_mappings_import_path,
+                    ("Label Mappings",),
+                    "Import Mappings",
+                ),
                 ctx,
             )
             status, text, _ = await _request(session, plan)
@@ -1305,7 +1378,7 @@ async def test_openapi_stable_contract_smoke():
         # ---- Execute remaining included OpenAPI operations (no early-stop) ----
         # Order matters: avoid deleting shared state until the very end.
         included_non_delete = [op for op in included if op.method != "DELETE"]
-        included_delete = [op for op in included if op.method == "DELETE" and op.path != "/api/v1/databases/{db_name}"]
+        included_delete = [op for op in included if op.method == "DELETE" and op.path != db_delete_path]
 
         for op in sorted(included_non_delete, key=lambda o: (o.path, o.method)):
             op_key = (op.method, op.path)
@@ -1364,7 +1437,10 @@ async def test_openapi_stable_contract_smoke():
 
         # ---- Always attempt cleanup (delete DB) even if some ops failed ----
         try:
-            plan = await _build_plan(Operation("DELETE", "/api/v1/databases/{db_name}", ("Database Management",), "Delete Database"), ctx)
+            plan = await _build_plan(
+                Operation("DELETE", db_delete_path, ("Database Management",), "Delete Database"),
+                ctx,
+            )
             status, text, _ = await _request(session, plan)
             executed.add((plan.method, plan.path_template))
             if status not in plan.expected_statuses and status != 404:

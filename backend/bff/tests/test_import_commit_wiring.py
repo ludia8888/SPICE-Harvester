@@ -48,7 +48,7 @@ def test_google_sheets_import_commit_submits_to_oms(monkeypatch):
     client = TestClient(app)
     try:
         res = client.post(
-            "/api/v1/database/testdb/import-from-google-sheets/commit",
+            "/api/v1/databases/testdb/import-from-google-sheets/commit",
             headers={"X-Admin-Token": "testtoken"},
             json={
                 "sheet_url": "https://docs.google.com/spreadsheets/d/example",
@@ -95,7 +95,7 @@ def test_excel_import_commit_submits_to_oms(monkeypatch):
     client = TestClient(app)
     try:
         res = client.post(
-            "/api/v1/database/testdb/import-from-excel/commit",
+            "/api/v1/databases/testdb/import-from-excel/commit",
             headers={"X-Admin-Token": "testtoken"},
             data={
                 "target_class_id": "Customer",

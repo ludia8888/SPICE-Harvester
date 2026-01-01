@@ -17,6 +17,12 @@ export type DatabaseRecord = {
   dataset_count?: number
   datasetCount?: number
   datasets?: unknown[]
+  owner_id?: string
+  owner_name?: string
+  role?: 'Owner' | 'Editor' | 'Viewer' | string
+  shared?: boolean
+  shared_with?: string[]
+  sharedWith?: string[]
 }
 
 export type DatasetRecord = {
@@ -49,6 +55,70 @@ export type PipelineRecord = {
   updated_at?: string
 }
 
+export type PipelineDefinition = {
+  nodes?: Array<Record<string, unknown>>
+  edges?: Array<Record<string, unknown>>
+  parameters?: unknown[]
+  settings?: Record<string, unknown>
+  dependencies?: unknown[]
+}
+
+export type PipelineDetailRecord = PipelineRecord & {
+  definition_json?: PipelineDefinition
+  version_id?: string | null
+  version?: string | null
+  commit_id?: string | null
+  dependencies?: unknown[]
+}
+
+export type PipelineArtifactRecord = {
+  artifact_id: string
+  pipeline_id: string
+  job_id: string
+  run_id?: string | null
+  mode: string
+  status: string
+  definition_hash?: string | null
+  definition_commit_id?: string | null
+  pipeline_spec_hash?: string | null
+  pipeline_spec_commit_id?: string | null
+  inputs?: Record<string, unknown>
+  lakefs_repository?: string | null
+  lakefs_branch?: string | null
+  lakefs_commit_id?: string | null
+  outputs?: Array<Record<string, unknown>>
+  declared_outputs?: Array<Record<string, unknown>>
+  sampling_strategy?: Record<string, unknown>
+  error?: Record<string, unknown>
+  created_at?: string
+  updated_at?: string
+}
+
+export type PipelineReadinessInput = {
+  node_id?: string | null
+  dataset_id?: string | null
+  dataset_name?: string | null
+  requested_branch?: string | null
+  resolved_branch?: string | null
+  status?: string | null
+  detail?: string | null
+  used_fallback?: boolean
+  latest_commit_id?: string | null
+  latest_version?: string | null
+  artifact_key?: string | null
+}
+
+export type PipelineReadiness = {
+  pipeline_id?: string
+  branch?: string
+  version_id?: string | null
+  commit_id?: string | null
+  version?: string | null
+  status?: string | null
+  inputs?: PipelineReadinessInput[]
+  fallback_branches?: string[]
+}
+
 export type UploadMode = 'structured' | 'media' | 'unstructured' | 'raw'
 
 type DatabaseListPayload = {
@@ -70,11 +140,37 @@ type PipelineCreatePayload = {
   pipeline?: PipelineRecord
 }
 
+type PipelineGetPayload = {
+  pipeline?: PipelineDetailRecord
+}
+
+type PipelineArtifactListPayload = {
+  artifacts?: PipelineArtifactRecord[]
+  count?: number
+}
+
+type PipelineReadinessPayload = {
+  pipeline_id?: string
+  branch?: string
+  version_id?: string | null
+  commit_id?: string | null
+  version?: string | null
+  status?: string | null
+  inputs?: PipelineReadinessInput[]
+  fallback_branches?: string[]
+}
+
 type DatasetUploadPayload = {
   dataset?: DatasetRecord
 }
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''
+const API_TOKEN =
+  (import.meta.env.VITE_BFF_TOKEN as string | undefined) ??
+  (import.meta.env.VITE_ADMIN_TOKEN as string | undefined) ??
+  ''
+const API_USER_ID = (import.meta.env.VITE_USER_ID as string | undefined) ?? ''
+const API_USER_NAME = (import.meta.env.VITE_USER_NAME as string | undefined) ?? ''
 
 const buildUrl = (path: string) => {
   if (!API_BASE) {
@@ -103,10 +199,17 @@ const requestApi = async <T>(
   options?: RequestInit,
   fallbackMessage = 'Request failed',
 ): Promise<T> => {
+  const authHeaders = API_TOKEN ? { Authorization: `Bearer ${API_TOKEN}` } : {}
+  const userHeaders = {
+    ...(API_USER_ID ? { 'X-User-ID': API_USER_ID } : {}),
+    ...(API_USER_NAME ? { 'X-User-Name': API_USER_NAME } : {}),
+  }
   const response = await fetch(buildUrl(path), {
     ...options,
     headers: {
       Accept: 'application/json',
+      ...authHeaders,
+      ...userHeaders,
       ...(options?.headers ?? {}),
     },
   })
@@ -162,10 +265,21 @@ export const createDatabase = async (name: string, description?: string) => {
   return data
 }
 
+export const deleteDatabase = async (name: string) => {
+  const encoded = encodeURIComponent(name)
+  const data = await requestApi(`/api/v1/databases/${encoded}`, { method: 'DELETE' }, 'Failed to delete database')
+  return data
+}
+
 export const listDatasets = async (dbName: string) => {
   const data = await requestApi<DatasetListPayload>(
     `/api/v1/pipelines/datasets?db_name=${encodeURIComponent(dbName)}`,
-    undefined,
+    {
+      headers: {
+        'X-DB-Name': dbName,
+        'X-Project': dbName,
+      },
+    },
     'Failed to load datasets',
   )
   return data.datasets ?? []
@@ -174,10 +288,199 @@ export const listDatasets = async (dbName: string) => {
 export const listPipelines = async (dbName: string) => {
   const data = await requestApi<PipelineListPayload>(
     `/api/v1/pipelines?db_name=${encodeURIComponent(dbName)}`,
-    undefined,
+    {
+      headers: {
+        'X-DB-Name': dbName,
+        'X-Project': dbName,
+      },
+    },
     'Failed to load pipelines',
   )
   return data.pipelines ?? []
+}
+
+export const listPipelineArtifacts = async (
+  pipelineId: string,
+  params?: { mode?: string; limit?: number; dbName?: string },
+) => {
+  const query = new URLSearchParams()
+  if (params?.mode) {
+    query.set('mode', params.mode)
+  }
+  if (params?.limit) {
+    query.set('limit', String(params.limit))
+  }
+  const suffix = query.toString()
+  const path = suffix ? `/api/v1/pipelines/${pipelineId}/artifacts?${suffix}` : `/api/v1/pipelines/${pipelineId}/artifacts`
+  const data = await requestApi<PipelineArtifactListPayload>(
+    path,
+    params?.dbName
+      ? {
+          headers: {
+            'X-DB-Name': params.dbName,
+            'X-Project': params.dbName,
+          },
+        }
+      : undefined,
+    'Failed to load pipeline artifacts',
+  )
+  return data.artifacts ?? []
+}
+
+export const getPipelineReadiness = async (
+  pipelineId: string,
+  params?: { branch?: string; dbName?: string },
+) => {
+  const query = new URLSearchParams()
+  if (params?.branch) {
+    query.set('branch', params.branch)
+  }
+  const suffix = query.toString()
+  const path = suffix
+    ? `/api/v1/pipelines/${pipelineId}/readiness?${suffix}`
+    : `/api/v1/pipelines/${pipelineId}/readiness`
+  const data = await requestApi<PipelineReadinessPayload>(
+    path,
+    params?.dbName
+      ? {
+          headers: {
+            'X-DB-Name': params.dbName,
+            'X-Project': params.dbName,
+          },
+        }
+      : undefined,
+    'Failed to load pipeline readiness',
+  )
+  return data
+}
+
+export const getPipeline = async (
+  pipelineId: string,
+  params?: { branch?: string; previewNodeId?: string; dbName?: string },
+) => {
+  const query = new URLSearchParams()
+  if (params?.branch) {
+    query.set('branch', params.branch)
+  }
+  if (params?.previewNodeId) {
+    query.set('preview_node_id', params.previewNodeId)
+  }
+  const suffix = query.toString()
+  const path = suffix ? `/api/v1/pipelines/${pipelineId}?${suffix}` : `/api/v1/pipelines/${pipelineId}`
+  const data = await requestApi<PipelineGetPayload>(
+    path,
+    params?.dbName
+      ? {
+          headers: {
+            'X-DB-Name': params.dbName,
+            'X-Project': params.dbName,
+          },
+        }
+      : undefined,
+    'Failed to load pipeline',
+  )
+  return data.pipeline
+}
+
+export const updatePipeline = async (
+  pipelineId: string,
+  params: {
+    definition_json?: PipelineDefinition
+    dbName?: string
+  },
+) => {
+  const data = await requestApi<{ pipeline?: PipelineDetailRecord }>(
+    `/api/v1/pipelines/${pipelineId}`,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(params.dbName
+          ? {
+              'X-DB-Name': params.dbName,
+              'X-Project': params.dbName,
+            }
+          : {}),
+      },
+      body: JSON.stringify({
+        definition_json: params.definition_json,
+      }),
+    },
+    'Failed to update pipeline',
+  )
+  return data.pipeline
+}
+
+export const submitPipelineProposal = async (
+  pipelineId: string,
+  params: {
+    title: string
+    description?: string
+    buildJobId?: string
+    mappingSpecIds?: string[]
+    dbName?: string
+  },
+) => {
+  const data = await requestApi<{ proposal?: Record<string, unknown> }>(
+    `/api/v1/pipelines/${pipelineId}/proposals`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(params.dbName
+          ? {
+              'X-DB-Name': params.dbName,
+              'X-Project': params.dbName,
+            }
+          : {}),
+      },
+      body: JSON.stringify({
+        title: params.title,
+        description: params.description,
+        build_job_id: params.buildJobId,
+        mapping_spec_ids: params.mappingSpecIds,
+      }),
+    },
+    'Failed to submit proposal',
+  )
+  return data.proposal ?? null
+}
+
+export const deployPipeline = async (
+  pipelineId: string,
+  params: {
+    promoteBuild: boolean
+    buildJobId?: string
+    artifactId?: string
+    nodeId?: string
+    replayOnDeploy?: boolean
+    dbName?: string
+  },
+) => {
+  const data = await requestApi<Record<string, unknown>>(
+    `/api/v1/pipelines/${pipelineId}/deploy`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(params.dbName
+          ? {
+              'X-DB-Name': params.dbName,
+              'X-Project': params.dbName,
+            }
+          : {}),
+      },
+      body: JSON.stringify({
+        promote_build: params.promoteBuild,
+        build_job_id: params.buildJobId,
+        artifact_id: params.artifactId,
+        node_id: params.nodeId,
+        replay_on_deploy: params.replayOnDeploy,
+      }),
+    },
+    'Failed to deploy pipeline',
+  )
+  return data
 }
 
 export const createPipeline = async (params: {
@@ -192,6 +495,8 @@ export const createPipeline = async (params: {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-DB-Name': params.dbName,
+        'X-Project': params.dbName,
       },
       body: JSON.stringify({
         db_name: params.dbName,
@@ -228,6 +533,7 @@ export const uploadDataset = async (params: { dbName: string; file: File; mode: 
       headers: {
         'Idempotency-Key': createIdempotencyKey(),
         'X-DB-Name': params.dbName,
+        'X-Project': params.dbName,
       },
       body: formData,
     },

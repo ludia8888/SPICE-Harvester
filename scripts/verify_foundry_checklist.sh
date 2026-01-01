@@ -56,7 +56,6 @@ paths = [
     Path("backend/docker-compose.yml"),
     Path("docker-compose.databases.yml"),
     Path("docker-compose.kafka.yml"),
-    Path("docker-compose.terminusdb.yml"),
 ]
 
 names: list[str] = []
@@ -89,7 +88,6 @@ paths = [
     Path("backend/docker-compose.yml"),
     Path("docker-compose.databases.yml"),
     Path("docker-compose.kafka.yml"),
-    Path("docker-compose.terminusdb.yml"),
 ]
 
 names = []

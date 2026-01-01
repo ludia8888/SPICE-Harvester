@@ -4,7 +4,6 @@ Foundry-style 병합 충돌 해결 API
 """
 
 import inspect
-import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -24,6 +23,7 @@ from shared.security.input_sanitizer import (
     validate_branch_name,
     validate_db_name,
 )
+from shared.utils.diff_utils import normalize_diff_changes
 
 # 충돌 변환기 import
 from bff.utils.conflict_converter import ConflictConverter
@@ -31,7 +31,7 @@ from bff.utils.conflict_converter import ConflictConverter
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/database/{db_name}/merge", tags=["Merge Conflict Resolution"])
+router = APIRouter(prefix="/databases/{db_name}/merge", tags=["Merge Conflict Resolution"])
 
 
 async def _await_if_needed(value: Any) -> Any:
@@ -133,35 +133,10 @@ async def simulate_merge(
             logger.warning(f"역방향 diff 분석 실패: {e}")
             reverse_diff_data = {"data": {"changes": []}}
 
-        def _coerce_changes(raw: Any) -> List[Dict[str, Any]]:
-            if raw is None:
-                return []
-            if isinstance(raw, list):
-                return [c for c in raw if isinstance(c, dict)]
-            if isinstance(raw, dict):
-                # Some Terminus versions return {"changes": [...]}.
-                inner = raw.get("changes")
-                if isinstance(inner, list):
-                    return [c for c in inner if isinstance(c, dict)]
-                return []
-            if isinstance(raw, str):
-                text = raw.strip()
-                if not text:
-                    return []
-                if text.lower() in {"matches", "match"}:
-                    return []
-                # Best-effort JSON decode (some endpoints return JSON-encoded strings).
-                try:
-                    parsed = json.loads(text)
-                except Exception:
-                    return []
-                return _coerce_changes(parsed)
-            return []
-
         source_changes_raw = (diff_data.get("data", {}) or {}).get("changes", [])
-        source_changes = _coerce_changes(source_changes_raw)
+        source_changes = normalize_diff_changes(source_changes_raw)
         target_changes_raw = (reverse_diff_data.get("data", {}) or {}).get("changes", [])
-        target_changes = _coerce_changes(target_changes_raw)
+        target_changes = normalize_diff_changes(target_changes_raw)
 
         # 4. 공통 조상 찾기 (Three-way merge를 위한)
         common_ancestor = None

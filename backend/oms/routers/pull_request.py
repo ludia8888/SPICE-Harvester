@@ -19,6 +19,7 @@ from oms.database.postgres import db as postgres_db
 from shared.models.requests import ApiResponse
 from shared.models.base import OptimisticLockError
 from shared.security.input_sanitizer import validate_db_name, validate_branch_name, sanitize_input
+from shared.utils.diff_utils import normalize_diff_response
 from oms.exceptions import DatabaseError
 
 logger = logging.getLogger(__name__)
@@ -358,6 +359,12 @@ async def get_pull_request_diff(
             )
         else:
             diff = pr_data['diff_cache']
+
+        normalized_diff = normalize_diff_response(
+            pr_data['source_branch'],
+            pr_data['target_branch'],
+            diff,
+        )
         
         return ApiResponse.success(
             message="Diff retrieved successfully",
@@ -365,7 +372,7 @@ async def get_pull_request_diff(
                 "pr_id": pr_id,
                 "source_branch": pr_data['source_branch'],
                 "target_branch": pr_data['target_branch'],
-                "diff": diff,
+                "diff": normalized_diff,
                 "from_cache": not refresh and bool(pr_data.get('diff_cache'))
             }
         ).to_dict()

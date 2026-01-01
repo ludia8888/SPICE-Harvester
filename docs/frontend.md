@@ -159,7 +159,7 @@
 
 Graph Query는 ID 기반이므로, UI는 최소한 이 캐시가 필요합니다.
 	•	소스:
-	•	GET /api/v1/database/{db}/ontology/list?branch=...
+	•	GET /api/v1/databases/{db}/ontology/list?branch=...
 	•	보조: GET /api/v1/databases/{db}/classes
 	•	구성(권장):
 	•	ClassRegistryItem
@@ -356,14 +356,14 @@ API
 └──────────────────────────────────────────────────────────────────────────────┘
 
 API (BFF v1 계약)
-	•	목록: GET /api/v1/database/{db}/ontology/list?branch=...
-	•	단건: GET /api/v1/database/{db}/ontology/{class_label}?branch=...
-	•	생성 validate: POST /api/v1/database/{db}/ontology/validate?branch=...
-	•	생성(202): POST /api/v1/database/{db}/ontology?branch=...
-	•	업데이트 validate: POST /api/v1/database/{db}/ontology/{class_label}/validate?branch=...
+	•	목록: GET /api/v1/databases/{db}/ontology/list?branch=...
+	•	단건: GET /api/v1/databases/{db}/ontology/{class_label}?branch=...
+	•	생성 validate: POST /api/v1/databases/{db}/ontology/validate?branch=...
+	•	생성(202): POST /api/v1/databases/{db}/ontology?branch=...
+	•	업데이트 validate: POST /api/v1/databases/{db}/ontology/{class_label}/validate?branch=...
 	•	업데이트(202, OCC): PUT ...?branch=...&expected_seq=...
 	•	삭제(202, OCC): DELETE ...?branch=...&expected_seq=...
-	•	스키마 export: GET /api/v1/database/{db}/ontology/{class_id}/schema?branch=...&format=json|jsonld|owl
+	•	스키마 export: GET /api/v1/databases/{db}/ontology/{class_id}/schema?branch=...&format=json|jsonld|owl
 
 보호 브랜치 가드(필수)
 	•	summary.policy에서 is_protected_branch=true이고 “고위험 변경”이면:
@@ -402,11 +402,11 @@ OCC 처리
 └──────────────────────────────────────────────────────────────────────────────┘
 
 API
-	•	요약: GET /api/v1/database/{db}/mappings/
-	•	export: POST /api/v1/database/{db}/mappings/export → 파일 다운로드
-	•	validate(import 전): POST /api/v1/database/{db}/mappings/validate
+	•	요약: GET /api/v1/databases/{db}/mappings/
+	•	export: POST /api/v1/databases/{db}/mappings/export → 파일 다운로드
+	•	validate(import 전): POST /api/v1/databases/{db}/mappings/validate
 	•	(레퍼런스 기준) multipart/form-data file
-	•	import: POST /api/v1/database/{db}/mappings/import
+	•	import: POST /api/v1/databases/{db}/mappings/import
 	•	multipart/form-data file
 
 파일 다운로드/업로드 구현 포인트
@@ -487,11 +487,11 @@ Prepare → Suggest Mappings → Dry‑run → Commit
 
 API
 	•	suggest mappings:
-	•	POST /api/v1/database/{db}/suggest-mappings-from-google-sheets
+	•	POST /api/v1/databases/{db}/suggest-mappings-from-google-sheets
 	•	dry-run:
-	•	POST /api/v1/database/{db}/import-from-google-sheets/dry-run
+	•	POST /api/v1/databases/{db}/import-from-google-sheets/dry-run
 	•	commit(배치):
-	•	POST /api/v1/database/{db}/import-from-google-sheets/commit
+	•	POST /api/v1/databases/{db}/import-from-google-sheets/commit
 	•	응답: write.commands[] (각 항목 command_id, status_url)
 
 Prepare 단계 구현 디테일(중요)
@@ -540,8 +540,8 @@ Excel 파일 업로드 기반 Dry‑run/Commit (multipart)
 └──────────────────────────────────────────────────────────────────────────────┘
 
 API
-	•	dry-run: POST /api/v1/database/{db}/import-from-excel/dry-run (multipart)
-	•	commit: POST /api/v1/database/{db}/import-from-excel/commit (multipart)
+	•	dry-run: POST /api/v1/databases/{db}/import-from-excel/dry-run (multipart)
+	•	commit: POST /api/v1/databases/{db}/import-from-excel/commit (multipart)
 
 주의
 	•	Sheets와 동일하게 배치 commands[] 추적
@@ -569,12 +569,12 @@ API
 └──────────────────────────────────────────────────────────────────────────────┘
 
 API
-	•	sheets: POST /api/v1/database/{db}/suggest-schema-from-google-sheets
-	•	excel: POST /api/v1/database/{db}/suggest-schema-from-excel (multipart)
-	•	paste: POST /api/v1/database/{db}/suggest-schema-from-data
+	•	sheets: POST /api/v1/databases/{db}/suggest-schema-from-google-sheets
+	•	excel: POST /api/v1/databases/{db}/suggest-schema-from-excel (multipart)
+	•	paste: POST /api/v1/databases/{db}/suggest-schema-from-data
 	•	적용:
-	•	각 클래스별 POST /api/v1/database/{db}/ontology/validate?branch=...
-	•	각 클래스별 POST /api/v1/database/{db}/ontology?branch=... (202)
+	•	각 클래스별 POST /api/v1/databases/{db}/ontology/validate?branch=...
+	•	각 클래스별 POST /api/v1/databases/{db}/ontology?branch=... (202)
 	•	생성 커맨드들을 Tracker에 등록(“Batch group” 표시)
 
 ⸻
@@ -603,19 +603,19 @@ API
  [Tabs: View(JSON) | Edit | Audit Links | Lineage Links]
 
 API
-	•	list: GET /api/v1/database/{db}/class/{class_id}/instances?limit&offset&search
-	•	one: GET /api/v1/database/{db}/class/{class_id}/instance/{instance_id}
-	•	sample-values: GET /api/v1/database/{db}/class/{class_id}/sample-values
+	•	list: GET /api/v1/databases/{db}/class/{class_id}/instances?limit&offset&search
+	•	one: GET /api/v1/databases/{db}/class/{class_id}/instance/{instance_id}
+	•	sample-values: GET /api/v1/databases/{db}/class/{class_id}/sample-values
 
 Create/Bulk Create (비동기)
-	•	create: POST /api/v1/database/{db}/instances/{class_label}/create?branch=...
-	•	bulk: POST /api/v1/database/{db}/instances/{class_label}/bulk-create?branch=...
+	•	create: POST /api/v1/databases/{db}/instances/{class_label}/create?branch=...
+	•	bulk: POST /api/v1/databases/{db}/instances/{class_label}/bulk-create?branch=...
 	•	응답: command_id → Command Tracker 등록
 
 Update/Delete(비동기, OCC) 지원 방식
 	•	API:
-	•	update: PUT /api/v1/database/{db}/instances/{class_label}/{instance_id}/update?branch=...&expected_seq=...
-	•	delete: DELETE /api/v1/database/{db}/instances/{class_label}/{instance_id}/delete?branch=...&expected_seq=...
+	•	update: PUT /api/v1/databases/{db}/instances/{class_label}/{instance_id}/update?branch=...&expected_seq=...
+	•	delete: DELETE /api/v1/databases/{db}/instances/{class_label}/{instance_id}/delete?branch=...&expected_seq=...
 	•	expected_seq 확보 규칙(레퍼런스 근거):
 	•	최신 조회 응답의 version(또는 index_status.event_sequence) 사용
 	•	409 발생 시 actual_seq를 받아 “Use actual_seq” 재시도 버튼 제공
@@ -721,9 +721,9 @@ AI Assist(자연어) — “안전한 방식” 기준
 └──────────────────────────────────────────────────────────────────────────────┘
 
 API
-	•	builder meta: GET /api/v1/database/{db}/query/builder
-	•	run: POST /api/v1/database/{db}/query
-	•	raw(run 제한): POST /api/v1/database/{db}/query/raw
+	•	builder meta: GET /api/v1/databases/{db}/query/builder
+	•	run: POST /api/v1/databases/{db}/query
+	•	raw(run 제한): POST /api/v1/databases/{db}/query/raw
 
 구현 디테일
 	•	operator UI는 /query/builder 값을 표시하되, 전송 시 QueryInput operator(eq/ne/gt/ge/lt/le/like/in/not_in/is_null/is_not_null)로 매핑
@@ -749,8 +749,8 @@ API
 └──────────────────────────────────────────────────────────────────────────────┘
 
 API
-	•	simulate: POST /api/v1/database/{db}/merge/simulate
-	•	resolve: POST /api/v1/database/{db}/merge/resolve
+	•	simulate: POST /api/v1/databases/{db}/merge/simulate
+	•	resolve: POST /api/v1/databases/{db}/merge/resolve
 
 ⸻
 

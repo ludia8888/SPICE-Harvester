@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Standard library imports
+import asyncio
 import json
 import logging
 import os
@@ -62,6 +63,8 @@ from shared.utils.jsonld import JSONToJSONLDConverter
 from shared.utils.label_mapper import LabelMapper
 from oms.services.ontology_deploy_outbox import run_ontology_deploy_outbox_worker
 from oms.services.ontology_deployment_registry import OntologyDeploymentRegistry
+from oms.services.ontology_deployment_registry_v2 import OntologyDeploymentRegistryV2
+from oms.database.postgres import db as postgres_db
 
 # Rate limiting middleware
 from shared.middleware.rate_limiter import rate_limit, RateLimitPresets, RateLimiter
@@ -106,20 +109,23 @@ class OMSServiceContainer:
         
         # 2. Initialize TerminusDB service
         await self._initialize_terminus_service()
-        
-        # 3. Initialize JSON-LD converter
+
+        # 3. Initialize Postgres (MVCC) for proposals/pull-requests
+        await self._initialize_postgres()
+
+        # 4. Initialize JSON-LD converter
         await self._initialize_jsonld_converter()
-        
-        # 4. Initialize Label Mapper
+
+        # 5. Initialize Label Mapper
         await self._initialize_label_mapper()
-        
-        # 5. Initialize Redis and Command Status service
+
+        # 6. Initialize Redis and Command Status service
         await self._initialize_redis_and_command_status()
-        
-        # 6. Initialize Elasticsearch service
+
+        # 7. Initialize Elasticsearch service
         await self._initialize_elasticsearch()
-        
-        # 7. Initialize Rate Limiter
+
+        # 8. Initialize Rate Limiter
         await self._initialize_rate_limiter()
         
         logger.info("OMS services initialized successfully")
@@ -165,9 +171,19 @@ class OMSServiceContainer:
                 # Continue - service can start without initial connection
             
             self._oms_services['terminus_service'] = terminus_service
-            
+
         except Exception as e:
             logger.error(f"TerminusDB service initialization failed: {e}")
+            raise
+
+    async def _initialize_postgres(self) -> None:
+        """Initialize Postgres MVCC pool (required for pull requests/proposals)."""
+        try:
+            await postgres_db.connect()
+            self._oms_services["postgres_db"] = postgres_db
+            logger.info("PostgreSQL MVCC pool initialized for OMS")
+        except Exception as e:
+            logger.error(f"PostgreSQL connection failed: {e}")
             raise
     
     async def _initialize_jsonld_converter(self) -> None:
@@ -281,6 +297,13 @@ class OMSServiceContainer:
                 logger.info("TerminusDB service disconnected")
             except Exception as e:
                 logger.error(f"Error disconnecting TerminusDB service: {e}")
+
+        if 'postgres_db' in self._oms_services and self._oms_services['postgres_db']:
+            try:
+                await self._oms_services['postgres_db'].disconnect()
+                logger.info("PostgreSQL pool disconnected")
+            except Exception as e:
+                logger.error(f"Error disconnecting PostgreSQL pool: {e}")
         
         self._oms_services.clear()
         logger.info("OMS services shutdown completed")
@@ -360,9 +383,10 @@ async def lifespan(app: FastAPI):
         logger.info("OMS Service startup completed successfully")
 
         enable_ontology_outbox = (os.getenv("ENABLE_ONTOLOGY_DEPLOY_OUTBOX_WORKER", "true") or "true").lower() != "false"
+        use_deployments_v2 = (os.getenv("ONTOLOGY_DEPLOYMENTS_V2", "true") or "true").lower() != "false"
         if enable_ontology_outbox:
             ontology_outbox_stop = asyncio.Event()
-            registry = OntologyDeploymentRegistry()
+            registry = OntologyDeploymentRegistryV2() if use_deployments_v2 else OntologyDeploymentRegistry()
             ontology_outbox_task = asyncio.create_task(
                 run_ontology_deploy_outbox_worker(
                     registry=registry,
@@ -645,8 +669,8 @@ if settings.is_development:
 
 # Router registration
 app.include_router(database.router, prefix="/api/v1", tags=["database"])
-app.include_router(ontology.router, prefix="/api/v1", tags=["ontology"])
 app.include_router(ontology_extensions.router, prefix="/api/v1", tags=["ontology"])
+app.include_router(ontology.router, prefix="/api/v1", tags=["ontology"])
 app.include_router(query.router, prefix="/api/v1", tags=["query"])
 app.include_router(instance_async.router, prefix="/api/v1", tags=["async-instance"])
 app.include_router(instance.router, prefix="/api/v1", tags=["instance"])

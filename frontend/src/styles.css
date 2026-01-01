@@ -27,10 +27,12 @@ body {
   flex: 1;
   display: grid;
   grid-template-columns: 60px 1fr;
+  grid-template-rows: 1fr;
   gap: 0;
   transition: grid-template-columns 0.2s ease;
   min-height: 0;
   height: 100%;
+  overflow: hidden;
 }
 
 .app-body.is-expanded {
@@ -41,10 +43,28 @@ body {
   padding: 24px 32px;
   position: relative;
   z-index: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.main.is-files {
+  padding: 0;
+  overflow: hidden;
+  height: 100%;
+  max-height: 100vh;
 }
 
 .main.is-pipeline {
   padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.main.is-ontology {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -88,6 +108,15 @@ body {
   width: 100%;
 }
 
+.rail-item-ai .rail-icon {
+  color: #4cc2ff;
+}
+
+.rail-item-ai:hover .rail-icon,
+.rail-item-ai.is-active .rail-icon {
+  color: #7ad8ff;
+}
+
 .app-body.is-expanded .rail-item {
   justify-content: flex-start;
   gap: 10px;
@@ -124,6 +153,15 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  flex: 1;
+  min-height: 0;
+}
+
+.files-page {
+  min-height: 0;
+  gap: 0;
+  overflow: hidden;
+  height: 100%;
 }
 
 .pipeline-page {
@@ -134,21 +172,44 @@ body {
   background: #11181e;
 }
 
+
 .files-panel {
   background: #11181e;
-  border: 1px solid #293742;
-  border-radius: 10px;
+  border-top: none;
+  border-bottom: none;
+  border-left: none;
+  border-right: none;
+  border-radius: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  min-height: 520px;
+  min-height: 0;
+  flex: 1;
+  margin: 0 -32px;
+  padding-top: 12px;
 }
+
+.main.is-files .files-panel {
+  margin: 0;
+}
+
+.files-projects {
+  background: transparent;
+  padding-top: 0;
+  flex: 1;
+  min-height: 0;
+}
+
+.files-projects .files-panel-body {
+  padding-top: 8px;
+}
+
 
 .files-panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px;
+  padding: 16px 32px;
   border-bottom: 1px solid #293742;
   background: #182026;
 }
@@ -176,9 +237,255 @@ body {
 
 .files-panel-body {
   flex: 1;
-  padding: 24px;
+  padding: 24px 32px 32px;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.files-panel-body > .files-table-header,
+.files-panel-body > .files-table {
+  flex-shrink: 0;
+}
+
+.files-table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.files-explore {
+  padding: 32px 32px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  background: #10161a;
+  flex: 0 0 auto;
+}
+
+.files-explore-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.files-explore-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #f5f8fa;
+}
+
+.files-explore-search {
+  width: min(520px, 100%);
+}
+
+.files-explore-tabs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #293742;
+  padding-bottom: 8px;
+}
+
+.files-explore-tab-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.files-explore-tab {
+  border: none;
+  background: transparent;
+  color: #8a9ba8;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.files-explore-tab.is-active {
+  background: #202b33;
+  color: #f5f8fa;
+}
+
+.files-explore-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.files-explore-actions .bp5-button {
+  background: #1a3a2b;
+  border: 1px solid #2d6b4b;
+  color: #dff2e8;
+}
+
+.files-explore-actions .bp5-button .bp5-button-text,
+.files-explore-actions .bp5-button .bp5-icon {
+  color: inherit;
+}
+
+.files-explore-actions .bp5-button:hover {
+  background: #224b36;
+  border-color: #3a8a62;
+}
+
+.files-explore-actions .bp5-button:active,
+.files-explore-actions .bp5-button.bp5-active {
+  background: #183625;
+  border-color: #2a6344;
+}
+
+.files-explore-link {
+  border: none;
+  background: transparent;
+  color: #8a9ba8;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.files-explore-link:hover {
+  color: #bfccd6;
+}
+
+.files-table {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #293742;
+  border-radius: 0 0 10px 10px;
+  overflow: hidden;
+  margin-top: 0;
+  border-top: none;
+}
+
+.files-table-header,
+.files-table-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  padding: 12px 24px;
+  align-items: center;
+}
+
+.files-table-header {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8a9ba8;
+  background: #182026;
+  border: 1px solid #293742;
+  border-radius: 10px 10px 0 0;
+}
+
+.files-table-row {
+  border-bottom: 1px solid #293742;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  outline: none;
+  box-shadow: none;
+  background: #10161a;
+  color: #f5f8fa;
+  text-align: left;
+  cursor: pointer;
+}
+
+.files-table-row:hover {
+  background: #141d23;
+}
+
+.files-table-row:focus-visible {
+  outline: 2px solid #2b4a5c;
+  outline-offset: -2px;
+}
+
+.files-table-frame {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid #293742;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #10161a;
+}
+
+.files-table-frame .files-table-header {
+  border: none;
+  border-bottom: 1px solid #293742;
+  border-radius: 0;
+}
+
+.files-table-frame .files-table {
+  border: none;
+  border-radius: 0;
+}
+
+.files-table-col.name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.files-table-col {
+  min-width: 0;
+}
+
+.files-table-name-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.files-table-title {
+  font-weight: 600;
+}
+
+.files-table-title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.files-table-favorite-button {
+  border: none;
+  background: transparent;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #8a9ba8;
+  outline: none;
+}
+
+.files-table-favorite-button .bp5-icon {
+  color: inherit;
+}
+
+.files-table-favorite-button:hover {
+  color: #f5f8fa;
+}
+
+.files-table-favorite-button.is-active {
+  color: #f7c453;
+}
+
+.files-table-favorite-icon {
+  color: #8a9ba8;
+}
+
+.files-table-meta {
+  color: #8a9ba8;
+  font-size: 12px;
+}
+
+.files-table-icon {
+  color: #8a9ba8;
 }
 
 .files-grid {
@@ -639,6 +946,317 @@ body {
   border-bottom: 1px solid #293742;
   font-size: 12px;
   color: #bfccd6;
+  position: sticky;
+  top: 0;
+  z-index: 4;
+}
+
+.main.is-files .page-topbar {
+  margin: 0;
+}
+
+.ontology-page {
+  gap: 24px;
+  flex: 1;
+  min-height: 0;
+}
+
+.ontology-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 0;
+  align-items: stretch;
+  margin: -24px -32px 0;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ontology-main {
+  min-width: 0;
+  padding: 24px 32px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.ontology-side-panel {
+  background: #11181e;
+  border-right: 1px solid #293742;
+  padding: 20px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.ontology-side-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ontology-side-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: #8a9ba8;
+  padding: 6px 8px 2px;
+  letter-spacing: 0.04em;
+}
+
+.ontology-side-item {
+  border: none;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: #bfccd6;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  font-size: 13px;
+}
+
+.ontology-side-item:hover,
+.ontology-side-item.is-active {
+  background: #202b33;
+  color: #f5f8fa;
+}
+
+.ontology-side-item-icon {
+  color: #8a9ba8;
+}
+
+.ontology-side-item.is-active .ontology-side-item-icon {
+  color: #f5f8fa;
+}
+
+.ontology-side-item-label {
+  flex: 1;
+}
+
+.ontology-side-item-count {
+  font-size: 11px;
+  color: #8a9ba8;
+  background: #202b33;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.ontology-topbar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 24px;
+  margin: -24px -32px 0;
+  background: #182026;
+  border-bottom: 1px solid #293742;
+}
+
+.ontology-home-label {
+  color: #f5f8fa;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 6px 8px;
+}
+
+.ontology-search {
+  position: relative;
+  width: 520px;
+  max-width: 100%;
+  display: flex;
+  justify-self: center;
+}
+
+.ontology-search-input {
+  width: 100%;
+}
+
+.ontology-search-input .bp5-input {
+  background: #11181e;
+  border: 1px solid #293742;
+  color: #f5f8fa;
+}
+
+.ontology-search-input .bp5-input-group>.bp5-input+.bp5-input-action {
+  margin-right: 6px;
+}
+
+.ontology-search-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: #11181e;
+  border: 1px solid #293742;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 11px;
+  line-height: 1;
+  color: #bfccd6;
+  margin-right: 6px;
+  margin-top: 6px;
+}
+
+.ontology-search-results {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 100%;
+  background: #11181e;
+  border: 1px solid #293742;
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  padding: 8px;
+  z-index: 5;
+}
+
+.ontology-search-result {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #f5f8fa;
+  cursor: pointer;
+  text-align: left;
+}
+
+.ontology-search-result:hover {
+  background: #202b33;
+}
+
+.ontology-search-result-type {
+  font-size: 11px;
+  color: #8a9ba8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ontology-search-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: #8a9ba8;
+  text-align: center;
+}
+
+.ontology-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  justify-self: end;
+}
+
+.ontology-new-button {
+  background: #11181e !important;
+  border: 1px solid #293742 !important;
+  color: #f5f8fa !important;
+}
+
+.ontology-create-popover .bp5-popover-content {
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  border: none;
+  border-radius: 0;
+}
+
+.ontology-create-popover .bp5-popover-arrow {
+  display: none;
+}
+
+.ontology-create-menu {
+  width: 360px;
+  background: #11181e;
+  border: 1px solid #293742;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  outline: none;
+}
+
+.ontology-create-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
+  border: none;
+  background: transparent;
+  color: #f5f8fa;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ontology-create-item:hover {
+  background: #202b33;
+}
+
+.ontology-create-item + .ontology-create-item {
+  border-top: 1px solid #293742;
+}
+
+.ontology-create-item-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: #202b33;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #bfccd6;
+  flex-shrink: 0;
+}
+
+.ontology-create-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ontology-create-item-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ontology-create-item-description {
+  font-size: 12px;
+  color: #8a9ba8;
+}
+
+.ontology-content {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ontology-content-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #f5f8fa;
+}
+
+.ontology-content-description {
+  color: #8a9ba8;
+  font-size: 13px;
+}
+
+.ontology-content-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #bfccd6;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
 }
 
 
@@ -1075,7 +1693,6 @@ body {
   flex: 1;
   display: flex;
   min-height: 0;
-  height: 100%;
   width: 100%;
 }
 

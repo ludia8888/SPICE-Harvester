@@ -197,7 +197,7 @@ dry-run 에러를 사람이 이해할 수 있는 “고치는 방법”으로 �
 - 서버가 스키마/권한/안전 제한을 검증 후 실행한다.
 
 #### 가능한 2가지 경로
-1) 라벨 기반 Query: `POST /api/v1/database/{db_name}/query`
+1) 라벨 기반 Query: `POST /api/v1/databases/{db_name}/query`
 2) Graph 탐색: `POST /api/v1/graph-query/{db_name}` (+ `include_provenance=true`)
 
 #### 입력(LLM)
@@ -350,4 +350,3 @@ LLM을 여기저기에서 직접 호출하면:
 - [금지] LLM이 권한/정책 결정을 대행
 - [금지] LLM이 “삭제/롤백” 같은 위험 작업을 자동 실행
 - [금지] 원본 파일/전체 시트/PII 원문을 LLM에 그대로 전달
-

@@ -78,13 +78,27 @@ from shared.security.input_sanitizer import (
 from shared.middleware.rate_limiter import rate_limit, RateLimitPresets
 from shared.config.rate_limit_config import RateLimitConfig, EndpointCategory
 from shared.security.auth_utils import extract_presented_token, get_expected_token
-from shared.utils.branch_utils import get_protected_branches
+from shared.utils.branch_utils import get_protected_branches, protected_branch_write_message
 
 logger = logging.getLogger(__name__)
 
 
 def _is_protected_branch(branch: str) -> bool:
     return branch in get_protected_branches()
+
+
+def _require_proposal_for_branch(branch: str) -> bool:
+    if not _is_protected_branch(branch):
+        return False
+    return os.getenv("ONTOLOGY_REQUIRE_PROPOSALS", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _reject_direct_write_if_required(branch: str) -> None:
+    if _require_proposal_for_branch(branch):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=protected_branch_write_message(),
+        )
 
 
 _ADMIN_TOKEN_ENV_KEYS = ("OMS_ADMIN_TOKEN", "BFF_ADMIN_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN")
@@ -244,6 +258,7 @@ async def create_ontology(
     try:
         enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
         branch = validate_branch_name(branch)
+        _reject_direct_write_if_required(branch)
         lang = get_accept_language(request)
 
         # 🔥 FIXED: 데이터베이스 존재 확인 (dependency 제거로 인해 수동 처리)
@@ -285,7 +300,7 @@ async def create_ontology(
             abstract=bool(ontology_data.get("abstract", False)),
             properties=list(ontology_request.properties or []),
             relationships=list(ontology_request.relationships or []),
-            config=OntologyLinterConfig.from_env(),
+            config=OntologyLinterConfig.from_env(branch=branch),
         )
         if not lint_report.ok:
             return JSONResponse(
@@ -490,7 +505,7 @@ async def validate_ontology_create(
             abstract=bool(payload.get("abstract", False)),
             properties=list(ontology_request.properties or []),
             relationships=list(ontology_request.relationships or []),
-            config=OntologyLinterConfig.from_env(),
+            config=OntologyLinterConfig.from_env(branch=branch),
         )
         metadata_payload = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
         interface_issues = await _collect_interface_issues(
@@ -564,14 +579,14 @@ async def validate_ontology_update(
             abstract=bool(updated_abstract),
             properties=list(updated_properties or []),
             relationships=list(updated_relationships or []),
-            config=OntologyLinterConfig.from_env(),
+            config=OntologyLinterConfig.from_env(branch=branch),
         )
         diff = lint_ontology_update(
             existing_properties=list(existing.properties or []),
             existing_relationships=list(existing.relationships or []),
             updated_properties=list(updated_properties or []),
             updated_relationships=list(updated_relationships or []),
-            config=OntologyLinterConfig.from_env(),
+            config=OntologyLinterConfig.from_env(branch=branch),
         )
         merged = _merge_lint_reports(baseline, diff)
 
@@ -815,6 +830,7 @@ async def update_ontology(
     try:
         enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
         branch = validate_branch_name(branch)
+        _reject_direct_write_if_required(branch)
         lang = get_accept_language(request)
 
         # 요청 데이터 정화
@@ -860,14 +876,14 @@ async def update_ontology(
             abstract=bool(updated_abstract),
             properties=list(updated_properties or []),
             relationships=list(updated_relationships or []),
-            config=OntologyLinterConfig.from_env(),
+            config=OntologyLinterConfig.from_env(branch=branch),
         )
         diff = lint_ontology_update(
             existing_properties=list(existing.properties or []),
             existing_relationships=list(existing.relationships or []),
             updated_properties=list(updated_properties or []),
             updated_relationships=list(updated_relationships or []),
-            config=OntologyLinterConfig.from_env(),
+            config=OntologyLinterConfig.from_env(branch=branch),
         )
         merged_lint = _merge_lint_reports(baseline, diff)
 
@@ -915,12 +931,12 @@ async def update_ontology(
             if not _extract_change_reason(request):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="X-Change-Reason 헤더가 필요합니다 (protected branch + 고위험 스키마 변경)",
+                    detail=protected_branch_write_message(),
                 )
             if not _admin_authorized(request):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="관리자 토큰이 필요합니다 (protected branch + 고위험 스키마 변경)",
+                    detail=protected_branch_write_message(),
                 )
 
         if enable_event_sourcing:
@@ -1037,18 +1053,19 @@ async def delete_ontology(
     try:
         enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
         branch = validate_branch_name(branch)
+        _reject_direct_write_if_required(branch)
 
         protected_branch = _is_protected_branch(branch)
         if protected_branch:
             if not _extract_change_reason(request):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="X-Change-Reason 헤더가 필요합니다 (protected branch 삭제)",
+                    detail=protected_branch_write_message(),
                 )
             if not _admin_authorized(request):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="관리자 토큰이 필요합니다 (protected branch 삭제)",
+                    detail=protected_branch_write_message(),
                 )
 
         # Best-effort command-side validation:
@@ -1285,6 +1302,7 @@ async def create_ontology_with_advanced_relationships(
             )
         enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
         branch = validate_branch_name(branch)
+        _reject_direct_write_if_required(branch)
         lang = get_accept_language(request)
 
         db_name = validate_db_name(db_name)
@@ -1316,7 +1334,7 @@ async def create_ontology_with_advanced_relationships(
             abstract=bool(ontology_data.get("abstract", False)),
             properties=list(ontology_request.properties or []),
             relationships=list(ontology_request.relationships or []),
-            config=OntologyLinterConfig.from_env(),
+            config=OntologyLinterConfig.from_env(branch=branch),
         )
         if not lint_report.ok:
             return JSONResponse(

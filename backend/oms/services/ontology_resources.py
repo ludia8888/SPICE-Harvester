@@ -18,6 +18,10 @@ RESOURCE_CLASS_ID = "__ontology_resource"
 RESOURCE_DOC_PREFIX = "__ontology_resource"
 
 RESOURCE_TYPE_ALIASES = {
+    "object_type": "object_type",
+    "object_types": "object_type",
+    "object-type": "object_type",
+    "object-types": "object_type",
     "shared_property": "shared_property",
     "shared_properties": "shared_property",
     "shared-property": "shared_property",
@@ -50,7 +54,8 @@ def normalize_resource_type(value: str) -> str:
 
 
 def _resource_doc_id(resource_type: str, resource_id: str) -> str:
-    return f"{RESOURCE_DOC_PREFIX}:{resource_type}:{resource_id}"
+    # TerminusDB expects instance IDs to be under the class prefix path.
+    return f"{RESOURCE_DOC_PREFIX}/{resource_type}:{resource_id}"
 
 
 def _localized_to_string(value: Any) -> Tuple[Optional[str], Optional[Dict[str, str]]]:

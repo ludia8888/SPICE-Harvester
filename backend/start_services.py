@@ -184,8 +184,8 @@ def main():
         print(f"  - Funnel Docs: {protocol}://localhost:8003/docs")
         print("\n💡 Key APIs:")
         print("  - Database Management: POST /api/v1/databases")
-        print("  - Ontology Creation: POST /api/v1/database/{db_name}/ontology")
-        print("  - Schema Suggestion: POST /api/v1/database/{db_name}/suggest-schema-from-data")
+        print("  - Ontology Creation: POST /api/v1/databases/{db_name}/ontology")
+        print("  - Schema Suggestion: POST /api/v1/databases/{db_name}/suggest-schema-from-data")
         print("\nPress Ctrl+C to stop all services...")
         
         # Keep running until interrupted

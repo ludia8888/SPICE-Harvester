@@ -39,8 +39,8 @@ def test_bff_http_exception_detail_localizes_by_lang_param():
 
     client = TestClient(app)
     try:
-        ko = client.get("/api/v1/database/test_db/class/TestClass/instance/nonexistent")
-        en = client.get("/api/v1/database/test_db/class/TestClass/instance/nonexistent?lang=en")
+        ko = client.get("/api/v1/databases/test_db/class/TestClass/instance/nonexistent")
+        en = client.get("/api/v1/databases/test_db/class/TestClass/instance/nonexistent?lang=en")
     finally:
         app.dependency_overrides.clear()
 

@@ -17,6 +17,7 @@ class ObjectifyJob(BaseModel):
     dataset_version_id: Optional[str] = Field(default=None, description="Dataset version id")
     artifact_id: Optional[str] = Field(default=None, description="Pipeline artifact id")
     artifact_output_name: Optional[str] = Field(default=None, description="Artifact output name")
+    dedupe_key: Optional[str] = Field(default=None, description="Stable deduplication key for the job")
     dataset_branch: str = Field(default="main", description="Dataset branch")
     artifact_key: Optional[str] = Field(
         default=None,

@@ -27,6 +27,7 @@ class AppConfig:
     PIPELINE_JOBS_TOPIC = os.getenv("PIPELINE_JOBS_TOPIC", "pipeline-jobs")
     PIPELINE_JOBS_DLQ_TOPIC = os.getenv("PIPELINE_JOBS_DLQ_TOPIC", "pipeline-jobs-dlq")
     PIPELINE_EVENTS_TOPIC = os.getenv("PIPELINE_EVENTS_TOPIC", "pipeline-events")
+    DATASET_INGEST_OUTBOX_DLQ_TOPIC = os.getenv("DATASET_INGEST_OUTBOX_DLQ_TOPIC", "dataset-ingest-outbox-dlq")
     
     # Command Topics (used by workers to consume commands)
     INSTANCE_COMMANDS_TOPIC = "instance_commands"
@@ -139,6 +140,18 @@ class AppConfig:
     # Command 처리 설정
     COMMAND_TIMEOUT_SECONDS = int(os.getenv("COMMAND_TIMEOUT_SECONDS", "300"))  # 5분
     COMMAND_RETRY_COUNT = int(os.getenv("COMMAND_RETRY_COUNT", "3"))
+
+    # ======================
+    # Ontology Writeback Defaults
+    # ======================
+    ONTOLOGY_WRITEBACK_REPO = os.getenv("ONTOLOGY_WRITEBACK_REPO", "ontology_writeback")
+    ONTOLOGY_WRITEBACK_BRANCH_PREFIX = os.getenv("ONTOLOGY_WRITEBACK_BRANCH_PREFIX", "writeback")
+    ONTOLOGY_WRITEBACK_DATASET_ID = (os.getenv("ONTOLOGY_WRITEBACK_DATASET_ID") or "").strip() or None
+
+    @classmethod
+    def get_ontology_writeback_branch(cls, db_name: str) -> str:
+        prefix = cls.ONTOLOGY_WRITEBACK_BRANCH_PREFIX.rstrip("/")
+        return f"{prefix}/{db_name}"
     
     # ======================
     # Cache & TTL Settings
@@ -217,6 +230,7 @@ class AppConfig:
             cls.PIPELINE_JOBS_TOPIC,
             cls.PIPELINE_JOBS_DLQ_TOPIC,
             cls.PIPELINE_EVENTS_TOPIC,
+            cls.DATASET_INGEST_OUTBOX_DLQ_TOPIC,
             cls.INSTANCE_COMMANDS_TOPIC,
             cls.ONTOLOGY_COMMANDS_TOPIC,
             cls.DATABASE_COMMANDS_TOPIC

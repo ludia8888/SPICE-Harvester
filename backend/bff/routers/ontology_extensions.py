@@ -16,7 +16,7 @@ from shared.security.input_sanitizer import sanitize_input, validate_db_name
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/database/{db_name}/ontology", tags=["Ontology Extensions"])
+router = APIRouter(prefix="/databases/{db_name}/ontology", tags=["Ontology Extensions"])
 
 
 def _extract_httpx_detail(exc: httpx.HTTPStatusError) -> Any:
