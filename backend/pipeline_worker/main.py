@@ -270,6 +270,47 @@ def _max_watermark_from_snapshots(
     return max_value
 
 
+def _watermark_values_match(left: Any, right: Any) -> bool:
+    if left == right:
+        return True
+    try:
+        return float(left) == float(right)
+    except Exception:
+        return str(left) == str(right)
+
+
+def _collect_watermark_keys_from_snapshots(
+    input_snapshots: list[dict[str, Any]], *, watermark_column: str, watermark_value: Any
+) -> list[str]:
+    resolved_column = str(watermark_column or "").strip()
+    if not resolved_column or watermark_value is None:
+        return []
+    keys: list[str] = []
+    for snapshot in input_snapshots or []:
+        if not isinstance(snapshot, dict):
+            continue
+        if str(snapshot.get("watermark_column") or "").strip() != resolved_column:
+            continue
+        candidate_value = snapshot.get("watermark_max")
+        if candidate_value is None or not _watermark_values_match(candidate_value, watermark_value):
+            continue
+        raw_keys = snapshot.get("watermark_keys") or snapshot.get("watermarkKeys")
+        if not isinstance(raw_keys, list):
+            continue
+        for item in raw_keys:
+            item_str = str(item or "").strip()
+            if item_str:
+                keys.append(item_str)
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in keys:
+        if item in seen:
+            continue
+        seen.add(item)
+        deduped.append(item)
+    return deduped
+
+
 def _collect_input_commit_map(input_snapshots: list[dict[str, Any]]) -> Dict[str, str]:
     commits: Dict[str, str] = {}
     for snapshot in input_snapshots or []:
@@ -841,6 +882,7 @@ class PipelineWorker:
             metadata=definition.get("settings") if isinstance(definition.get("settings"), dict) else {},
         )
         previous_watermark: Optional[Any] = None
+        previous_watermark_keys: list[str] = []
         previous_input_commits: Dict[str, str] = {}
         if execution_semantics in {"incremental", "streaming"} and resolved_pipeline_id:
             try:
@@ -864,8 +906,17 @@ class PipelineWorker:
                 if watermark_column:
                     if stored_column and stored_column != watermark_column:
                         previous_watermark = None
+                        previous_watermark_keys = []
                     else:
                         previous_watermark = stored_value
+                        stored_keys = None
+                        if isinstance(state, dict):
+                            stored_keys = state.get("watermark_keys") or state.get("watermarkKeys")
+                        if isinstance(stored_keys, list):
+                            for item in stored_keys:
+                                item_str = str(item or "").strip()
+                                if item_str:
+                                    previous_watermark_keys.append(item_str)
                 commits_payload = (
                     state.get("input_commits")
                     if isinstance(state, dict)
@@ -1090,6 +1141,7 @@ class PipelineWorker:
                         use_lakefs_diff=use_lakefs_diff and execution_semantics in {"incremental", "streaming"},
                         watermark_column=watermark_column if execution_semantics in {"incremental", "streaming"} else None,
                         watermark_after=previous_watermark if execution_semantics in {"incremental", "streaming"} else None,
+                        watermark_keys=previous_watermark_keys if execution_semantics in {"incremental", "streaming"} else None,
                     )
                     if is_preview:
                         sampling_strategy = self._resolve_sampling_strategy(metadata, preview_meta)
@@ -1983,6 +2035,15 @@ class PipelineWorker:
                     if watermark_column
                     else None
                 )
+                next_watermark_keys = (
+                    _collect_watermark_keys_from_snapshots(
+                        input_snapshots,
+                        watermark_column=watermark_column,
+                        watermark_value=next_watermark,
+                    )
+                    if watermark_column and next_watermark is not None
+                    else []
+                )
                 input_commit_map = _collect_input_commit_map(input_snapshots)
                 if (next_watermark is not None or input_commit_map) and self.pipeline_registry:
                     watermarks_payload: Dict[str, Any] = {}
@@ -1992,6 +2053,27 @@ class PipelineWorker:
                             watermarks_payload["watermark_value"] = next_watermark
                         elif previous_watermark is not None:
                             watermarks_payload["watermark_value"] = previous_watermark
+                        merged_keys: list[str] = []
+                        if next_watermark is not None:
+                            if (
+                                previous_watermark is not None
+                                and previous_watermark_keys
+                                and _watermark_values_match(previous_watermark, next_watermark)
+                            ):
+                                merged_keys = [*previous_watermark_keys, *next_watermark_keys]
+                            else:
+                                merged_keys = list(next_watermark_keys)
+                        elif previous_watermark is not None and previous_watermark_keys:
+                            merged_keys = list(previous_watermark_keys)
+                        if merged_keys:
+                            deduped_keys: list[str] = []
+                            seen_keys: set[str] = set()
+                            for item in merged_keys:
+                                if item in seen_keys:
+                                    continue
+                                seen_keys.add(item)
+                                deduped_keys.append(item)
+                            watermarks_payload["watermark_keys"] = deduped_keys
                     if input_commit_map:
                         watermarks_payload["input_commits"] = input_commit_map
                     try:
@@ -2210,6 +2292,68 @@ class PipelineWorker:
             shutil.rmtree(temp_dir, ignore_errors=True)
         return build_s3_uri(artifact_bucket, normalized_prefix)
 
+    def _row_hash_expr(self, df: DataFrame) -> Any:
+        columns = sorted(df.columns)
+        if not columns:
+            return F.lit("")
+        parts = [
+            F.concat(
+                F.lit(f"{column}="),
+                F.coalesce(F.col(column).cast("string"), F.lit("__NULL__")),
+            )
+            for column in columns
+        ]
+        return F.sha2(F.concat_ws("||", *parts), 256)
+
+    def _apply_watermark_filter(
+        self,
+        df: DataFrame,
+        *,
+        watermark_column: str,
+        watermark_after: Optional[Any],
+        watermark_keys: Optional[list[str]],
+    ) -> DataFrame:
+        if watermark_after is None:
+            return df
+        if not watermark_keys:
+            return df.filter(F.col(watermark_column) >= F.lit(watermark_after))
+        key_col = "__watermark_key"
+        df = df.withColumn(key_col, self._row_hash_expr(df))
+        df = df.filter(
+            (F.col(watermark_column) > F.lit(watermark_after))
+            | (
+                (F.col(watermark_column) == F.lit(watermark_after))
+                & (~F.col(key_col).isin(watermark_keys))
+            )
+        ).drop(key_col)
+        return df
+
+    def _collect_watermark_keys(
+        self,
+        df: DataFrame,
+        *,
+        watermark_column: str,
+        watermark_value: Any,
+    ) -> list[str]:
+        if watermark_value is None:
+            return []
+        key_col = "__watermark_key"
+        try:
+            rows = (
+                df.filter(F.col(watermark_column) == F.lit(watermark_value))
+                .select(self._row_hash_expr(df).alias(key_col))
+                .distinct()
+                .collect()
+            )
+        except Exception:
+            return []
+        keys: list[str] = []
+        for row in rows:
+            value = row[key_col]
+            if value:
+                keys.append(str(value))
+        return keys
+
     async def _load_input_dataframe(
         self,
         db_name: str,
@@ -2223,6 +2367,7 @@ class PipelineWorker:
         use_lakefs_diff: bool = False,
         watermark_column: Optional[str] = None,
         watermark_after: Optional[Any] = None,
+        watermark_keys: Optional[list[str]] = None,
     ) -> DataFrame:
         if not self.dataset_registry:
             raise RuntimeError("Dataset registry not initialized")
@@ -2308,6 +2453,7 @@ class PipelineWorker:
         bucket, key = parsed
         current_commit_id = str(version.lakefs_commit_id or "").strip()
         artifact_prefix = self._strip_commit_prefix(key, current_commit_id)
+        dataset_branch_for_diff = safe_lakefs_ref(resolved_branch or dataset.branch or requested_branch or "main")
         diff_requested = bool(
             use_lakefs_diff and previous_commit_id and current_commit_id and self.lakefs_client
         )
@@ -2317,7 +2463,7 @@ class PipelineWorker:
             if previous_commit_id != current_commit_id:
                 diff_paths, diff_ok = await self._list_lakefs_diff_paths(
                     repository=bucket,
-                    ref=current_commit_id,
+                    ref=dataset_branch_for_diff,
                     since=previous_commit_id,
                     prefix=artifact_prefix,
                     node_id=node_id,
@@ -2354,8 +2500,12 @@ class PipelineWorker:
                         raise ValueError(
                             f"Input node {node_id} is missing watermark column '{resolved_watermark_column}'"
                         )
-                    if watermark_after is not None:
-                        df = df.filter(F.col(resolved_watermark_column) > F.lit(watermark_after))
+                    df = self._apply_watermark_filter(
+                        df,
+                        watermark_column=resolved_watermark_column,
+                        watermark_after=watermark_after,
+                        watermark_keys=watermark_keys,
+                    )
                     if input_snapshots is not None:
                         snapshot = {
                             "node_id": node_id,
@@ -2387,6 +2537,12 @@ class PipelineWorker:
                         except Exception:
                             watermark_max = None
                         snapshot["watermark_max"] = watermark_max
+                        if watermark_max is not None:
+                            snapshot["watermark_keys"] = self._collect_watermark_keys(
+                                df,
+                                watermark_column=resolved_watermark_column,
+                                watermark_value=watermark_max,
+                            )
                         input_snapshots.append(snapshot)
                 elif input_snapshots is not None:
                     input_snapshots.append(
@@ -2435,13 +2591,23 @@ class PipelineWorker:
                 snapshot["watermark_column"] = resolved_watermark_column
                 if watermark_after is not None:
                     snapshot["watermark_after"] = watermark_after
-            if watermark_after is not None:
-                df = df.filter(F.col(resolved_watermark_column) > F.lit(watermark_after))
+            df = self._apply_watermark_filter(
+                df,
+                watermark_column=resolved_watermark_column,
+                watermark_after=watermark_after,
+                watermark_keys=watermark_keys,
+            )
             watermark_max = df.agg(F.max(F.col(resolved_watermark_column)).alias("watermark_max")).collect()[0][
                 "watermark_max"
             ]
             if snapshot is not None:
                 snapshot["watermark_max"] = watermark_max
+                if watermark_max is not None:
+                    snapshot["watermark_keys"] = self._collect_watermark_keys(
+                        df,
+                        watermark_column=resolved_watermark_column,
+                        watermark_value=watermark_max,
+                    )
 
         if snapshot is not None:
             input_snapshots.append(snapshot)

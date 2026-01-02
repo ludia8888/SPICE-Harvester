@@ -11,7 +11,9 @@ import httpx
 import pytest
 
 from shared.models.pipeline_job import PipelineJob
+from shared.services.lakefs_client import LakeFSClient, LakeFSNotFoundError
 from shared.services.pipeline_job_queue import PipelineJobQueue
+from shared.utils.path_utils import safe_lakefs_ref
 
 
 BFF_URL = (os.getenv("BFF_BASE_URL") or "http://localhost:8002").rstrip("/")
@@ -531,6 +533,135 @@ async def test_incremental_appends_outputs_and_preserves_previous_parts() -> Non
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_incremental_watermark_boundary_includes_equal_timestamp_rows() -> None:
+    """
+    Boundary check: rows with watermark == previous max should still appear in output (no gaps).
+    """
+    suffix = uuid.uuid4().hex[:8]
+    db_name = f"e2e_inc_boundary_{suffix}"
+    headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
+
+    async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
+        create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "boundary"})
+        create_db.raise_for_status()
+        command_id = str(((create_db.json().get("data") or {}) or {}).get("command_id") or "")
+        assert command_id
+        await _wait_for_command(client, command_id, db_name=db_name)
+
+        schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts", "type": "xsd:integer"}]}
+        create_dataset = await client.post(
+            f"{BFF_URL}/api/v1/pipelines/datasets",
+            json={
+                "db_name": db_name,
+                "name": "in_ds",
+                "description": "boundary",
+                "branch": "main",
+                "source_type": "manual",
+                "schema_json": schema_json,
+            },
+        )
+        create_dataset.raise_for_status()
+        dataset = (create_dataset.json().get("data") or {}).get("dataset") or {}
+        dataset_id = str(dataset.get("dataset_id") or "")
+        assert dataset_id
+
+        create_version_1 = await client.post(
+            f"{BFF_URL}/api/v1/pipelines/datasets/{dataset_id}/versions",
+            json={
+                "sample_json": {"rows": [{"id": 1, "ts": 1}, {"id": 2, "ts": 2}, {"id": 3, "ts": 3}]},
+                "schema_json": schema_json,
+            },
+        )
+        create_version_1.raise_for_status()
+
+        definition_json: dict[str, Any] = {
+            "nodes": [
+                {"id": "in1", "type": "input", "metadata": {"datasetId": dataset_id, "datasetName": "in_ds"}},
+                {"id": "out1", "type": "output", "metadata": {"datasetName": "out_ds"}},
+            ],
+            "edges": [{"from": "in1", "to": "out1"}],
+            "parameters": [],
+            "settings": {"engine": "Incremental", "watermarkColumn": "ts"},
+        }
+
+        create_pipeline = await client.post(
+            f"{BFF_URL}/api/v1/pipelines",
+            json={
+                "db_name": db_name,
+                "name": "boundary pipeline",
+                "location": "e2e",
+                "description": "boundary",
+                "branch": "main",
+                "pipeline_type": "incremental",
+                "definition_json": definition_json,
+            },
+        )
+        create_pipeline.raise_for_status()
+        pipeline = (create_pipeline.json().get("data") or {}).get("pipeline") or {}
+        pipeline_id = str(pipeline.get("pipeline_id") or "")
+        assert pipeline_id
+
+        queue = PipelineJobQueue()
+        job_id_1 = f"deploy-inc-boundary-{uuid.uuid4().hex}"
+        await queue.publish(
+            PipelineJob(
+                job_id=job_id_1,
+                pipeline_id=pipeline_id,
+                db_name=db_name,
+                pipeline_type="incremental",
+                definition_json=definition_json,
+                node_id="out1",
+                output_dataset_name="out_ds",
+                mode="deploy",
+                branch="main",
+            )
+        )
+        run1 = await _wait_for_run_terminal(client, pipeline_id=pipeline_id, job_id=job_id_1)
+        assert str(run1.get("status") or "").upper() == "DEPLOYED"
+
+        create_version_2 = await client.post(
+            f"{BFF_URL}/api/v1/pipelines/datasets/{dataset_id}/versions",
+            json={
+                "sample_json": {
+                    "rows": [
+                        {"id": 1, "ts": 1},
+                        {"id": 2, "ts": 2},
+                        {"id": 3, "ts": 3},
+                        {"id": 99, "ts": 3},
+                        {"id": 4, "ts": 4},
+                    ]
+                },
+                "schema_json": schema_json,
+            },
+        )
+        create_version_2.raise_for_status()
+
+        job_id_2 = f"deploy-inc-boundary-{uuid.uuid4().hex}"
+        await queue.publish(
+            PipelineJob(
+                job_id=job_id_2,
+                pipeline_id=pipeline_id,
+                db_name=db_name,
+                pipeline_type="incremental",
+                definition_json=definition_json,
+                node_id="out1",
+                output_dataset_name="out_ds",
+                mode="deploy",
+                branch="main",
+            )
+        )
+        run2 = await _wait_for_run_terminal(client, pipeline_id=pipeline_id, job_id=job_id_2)
+        assert str(run2.get("status") or "").upper() == "DEPLOYED"
+        artifact = _artifact_for_output(run2, node_id="out1")
+        bucket, commit_id, prefix = _commit_and_prefix_from_artifact(artifact)
+        rows = _load_rows_from_artifact(bucket, commit_id=commit_id, artifact_prefix=prefix)
+        ids = [int(row.get("id")) for row in rows if isinstance(row, dict) and row.get("id") is not None]
+        assert len(ids) == len(set(ids)), f"expected no duplicate ids, got {ids}"
+        assert sorted(ids) == [1, 2, 3, 4, 99], f"boundary row should be present, got ids={ids}"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_incremental_empty_diff_noop() -> None:
     """
     Checklist CL-020:
@@ -671,6 +802,332 @@ async def test_incremental_empty_diff_noop() -> None:
         assert out_ds is not None
         commit_id_2 = str(out_ds.get("latest_commit_id") or "")
         assert commit_id_2 == commit_id_1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_incremental_removed_files_noop() -> None:
+    """
+    Checklist CL-021:
+    - Removal-only diffs are treated as no-op (append-only semantics).
+    """
+    suffix = uuid.uuid4().hex[:8]
+    db_name = f"e2e_inc_removed_{suffix}"
+    headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
+
+    async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
+        create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "removed"})
+        create_db.raise_for_status()
+        command_id = str(((create_db.json().get("data") or {}) or {}).get("command_id") or "")
+        assert command_id
+        await _wait_for_command(client, command_id, db_name=db_name)
+
+        schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts", "type": "xsd:integer"}]}
+        create_dataset = await client.post(
+            f"{BFF_URL}/api/v1/pipelines/datasets",
+            json={
+                "db_name": db_name,
+                "name": "in_ds",
+                "description": "removed",
+                "branch": "main",
+                "source_type": "manual",
+                "schema_json": schema_json,
+            },
+        )
+        create_dataset.raise_for_status()
+        dataset = (create_dataset.json().get("data") or {}).get("dataset") or {}
+        dataset_id = str(dataset.get("dataset_id") or "")
+        dataset_branch = safe_lakefs_ref(str(dataset.get("branch") or "main"))
+        assert dataset_id
+
+        create_version_1 = await client.post(
+            f"{BFF_URL}/api/v1/pipelines/datasets/{dataset_id}/versions",
+            json={
+                "sample_json": {"rows": [{"id": 1, "ts": 1}, {"id": 2, "ts": 2}, {"id": 3, "ts": 3}]},
+                "schema_json": schema_json,
+            },
+        )
+        create_version_1.raise_for_status()
+        version_1 = (create_version_1.json().get("data") or {}).get("version") or {}
+        artifact_key_1 = str(version_1.get("artifact_key") or "")
+        commit_id_1 = str(version_1.get("lakefs_commit_id") or "")
+        assert artifact_key_1
+        assert commit_id_1
+
+        definition_json: dict[str, Any] = {
+            "nodes": [
+                {"id": "in1", "type": "input", "metadata": {"datasetId": dataset_id, "datasetName": "in_ds"}},
+                {"id": "out1", "type": "output", "metadata": {"datasetName": "out_ds"}},
+            ],
+            "edges": [{"from": "in1", "to": "out1"}],
+            "parameters": [],
+            "settings": {"engine": "Incremental", "watermarkColumn": "ts"},
+        }
+
+        create_pipeline = await client.post(
+            f"{BFF_URL}/api/v1/pipelines",
+            json={
+                "db_name": db_name,
+                "name": "removed pipeline",
+                "location": "e2e",
+                "description": "removed",
+                "branch": "main",
+                "pipeline_type": "incremental",
+                "definition_json": definition_json,
+            },
+        )
+        create_pipeline.raise_for_status()
+        pipeline = (create_pipeline.json().get("data") or {}).get("pipeline") or {}
+        pipeline_id = str(pipeline.get("pipeline_id") or "")
+        assert pipeline_id
+
+        queue = PipelineJobQueue()
+        job_id_1 = f"deploy-inc-removed-{uuid.uuid4().hex}"
+        await queue.publish(
+            PipelineJob(
+                job_id=job_id_1,
+                pipeline_id=pipeline_id,
+                db_name=db_name,
+                pipeline_type="incremental",
+                definition_json=definition_json,
+                node_id="out1",
+                output_dataset_name="out_ds",
+                mode="deploy",
+                branch="main",
+            )
+        )
+
+        run1 = await _wait_for_run_terminal(client, pipeline_id=pipeline_id, job_id=job_id_1)
+        assert str(run1.get("status") or "").upper() == "DEPLOYED"
+        datasets_resp = await client.get(
+            f"{BFF_URL}/api/v1/pipelines/datasets",
+            params={"db_name": db_name, "branch": "main"},
+        )
+        datasets_resp.raise_for_status()
+        datasets = (datasets_resp.json().get("data") or {}).get("datasets") or []
+        out_ds = next((item for item in datasets if item.get("name") == "out_ds"), None)
+        assert out_ds is not None
+        commit_id_out_1 = str(out_ds.get("latest_commit_id") or "")
+        assert commit_id_out_1
+
+        bucket, key = _parse_s3_uri(artifact_key_1)
+        _, _, key_suffix = key.partition("/")
+        assert key_suffix
+        s3_client = _lakefs_s3_client()
+        s3_client.delete_object(Bucket=bucket, Key=f"{dataset_branch}/{key_suffix}")
+
+        os.environ["LAKEFS_ACCESS_KEY_ID"] = (
+            os.getenv("LAKEFS_ACCESS_KEY_ID")
+            or os.getenv("LAKEFS_INSTALLATION_ACCESS_KEY_ID")
+            or "spice-lakefs-admin"
+        )
+        os.environ["LAKEFS_SECRET_ACCESS_KEY"] = (
+            os.getenv("LAKEFS_SECRET_ACCESS_KEY")
+            or os.getenv("LAKEFS_INSTALLATION_SECRET_ACCESS_KEY")
+            or "spice-lakefs-admin-secret"
+        )
+        lakefs_port = int(os.getenv("LAKEFS_PORT_HOST") or os.getenv("LAKEFS_API_PORT") or "48080")
+        os.environ.setdefault("LAKEFS_API_PORT", str(lakefs_port))
+        os.environ.setdefault("LAKEFS_API_URL", f"http://127.0.0.1:{lakefs_port}")
+        lakefs_client = LakeFSClient()
+        commit_id_2 = await lakefs_client.commit(
+            repository=bucket,
+            branch=dataset_branch,
+            message=f"delete input artifact {dataset_id}",
+        )
+        diff_items = await lakefs_client.list_diff_objects(
+            repository=bucket,
+            ref=dataset_branch,
+            since=commit_id_1,
+            prefix=os.path.dirname(key_suffix),
+        )
+        assert any(
+            str(item.get("type") or item.get("change_type") or "").lower() in {"removed", "deleted"}
+            for item in diff_items
+            if isinstance(item, dict)
+        ), f"expected removed diff item, got {diff_items}"
+
+        create_version_2 = await client.post(
+            f"{BFF_URL}/api/v1/pipelines/datasets/{dataset_id}/versions",
+            json={
+                "sample_json": {"rows": []},
+                "schema_json": schema_json,
+                "artifact_key": f"s3://{bucket}/{commit_id_2}/{key_suffix}",
+                "lakefs_commit_id": commit_id_2,
+            },
+        )
+        create_version_2.raise_for_status()
+
+        job_id_2 = f"deploy-inc-removed-{uuid.uuid4().hex}"
+        await queue.publish(
+            PipelineJob(
+                job_id=job_id_2,
+                pipeline_id=pipeline_id,
+                db_name=db_name,
+                pipeline_type="incremental",
+                definition_json=definition_json,
+                node_id="out1",
+                output_dataset_name="out_ds",
+                mode="deploy",
+                branch="main",
+            )
+        )
+
+        run2 = await _wait_for_run_terminal(client, pipeline_id=pipeline_id, job_id=job_id_2)
+        assert str(run2.get("status") or "").upper() == "DEPLOYED"
+        output_json = run2.get("output_json") or {}
+        assert output_json.get("no_op") is True
+        assert not (output_json.get("outputs") or [])
+        input_snapshots = output_json.get("input_snapshots") or []
+        diff_snapshot = next(
+            (snap for snap in input_snapshots if str(snap.get("node_id") or "") == "in1"),
+            None,
+        )
+        assert diff_snapshot is not None
+        assert diff_snapshot.get("diff_requested") is True
+        assert diff_snapshot.get("diff_ok") is True
+        assert diff_snapshot.get("diff_empty") is True
+
+        datasets_resp = await client.get(
+            f"{BFF_URL}/api/v1/pipelines/datasets",
+            params={"db_name": db_name, "branch": "main"},
+        )
+        datasets_resp.raise_for_status()
+        datasets = (datasets_resp.json().get("data") or {}).get("datasets") or []
+        out_ds = next((item for item in datasets if item.get("name") == "out_ds"), None)
+        assert out_ds is not None
+        commit_id_out_2 = str(out_ds.get("latest_commit_id") or "")
+        assert commit_id_out_2 == commit_id_out_1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_run_branch_conflict_fallback_and_cleanup() -> None:
+    """
+    Retry safety: pre-existing run branch should not block deploy; fallback branch must be used and cleaned up.
+    """
+    suffix = uuid.uuid4().hex[:8]
+    db_name = f"e2e_run_branch_{suffix}"
+    headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
+
+    os.environ.setdefault(
+        "LAKEFS_ACCESS_KEY_ID",
+        os.getenv("LAKEFS_INSTALLATION_ACCESS_KEY_ID") or "spice-lakefs-admin",
+    )
+    os.environ.setdefault(
+        "LAKEFS_SECRET_ACCESS_KEY",
+        os.getenv("LAKEFS_INSTALLATION_SECRET_ACCESS_KEY") or "spice-lakefs-admin-secret",
+    )
+    if not os.getenv("LAKEFS_API_URL"):
+        port = int(os.getenv("LAKEFS_API_PORT") or os.getenv("LAKEFS_PORT_HOST") or "48080")
+        os.environ["LAKEFS_API_URL"] = f"http://127.0.0.1:{port}"
+
+    lakefs_client = LakeFSClient()
+    artifact_repo = (os.getenv("LAKEFS_ARTIFACTS_REPOSITORY") or "pipeline-artifacts").strip()
+
+    async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
+        create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "branch"})
+        create_db.raise_for_status()
+        command_id = str(((create_db.json().get("data") or {}) or {}).get("command_id") or "")
+        assert command_id
+        await _wait_for_command(client, command_id, db_name=db_name)
+
+        schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}]}
+        create_dataset = await client.post(
+            f"{BFF_URL}/api/v1/pipelines/datasets",
+            json={
+                "db_name": db_name,
+                "name": "in_ds",
+                "description": "branch",
+                "branch": "main",
+                "source_type": "manual",
+                "schema_json": schema_json,
+            },
+        )
+        create_dataset.raise_for_status()
+        dataset = (create_dataset.json().get("data") or {}).get("dataset") or {}
+        dataset_id = str(dataset.get("dataset_id") or "")
+        assert dataset_id
+
+        create_version = await client.post(
+            f"{BFF_URL}/api/v1/pipelines/datasets/{dataset_id}/versions",
+            json={
+                "sample_json": {"rows": [{"id": 1}, {"id": 2}]},
+                "schema_json": schema_json,
+            },
+        )
+        create_version.raise_for_status()
+
+        definition_json: dict[str, Any] = {
+            "nodes": [
+                {"id": "in1", "type": "input", "metadata": {"datasetId": dataset_id, "datasetName": "in_ds"}},
+                {"id": "out1", "type": "output", "metadata": {"datasetName": "out_ds"}},
+            ],
+            "edges": [{"from": "in1", "to": "out1"}],
+            "parameters": [],
+            "settings": {"engine": "Batch"},
+        }
+
+        create_pipeline = await client.post(
+            f"{BFF_URL}/api/v1/pipelines",
+            json={
+                "db_name": db_name,
+                "name": "branch pipeline",
+                "location": "e2e",
+                "description": "branch",
+                "branch": "main",
+                "pipeline_type": "batch",
+                "definition_json": definition_json,
+            },
+        )
+        create_pipeline.raise_for_status()
+        pipeline = (create_pipeline.json().get("data") or {}).get("pipeline") or {}
+        pipeline_id = str(pipeline.get("pipeline_id") or "")
+        assert pipeline_id
+
+        queue = PipelineJobQueue()
+        job_id = f"deploy-branch-{uuid.uuid4().hex}"
+        expected_branch = safe_lakefs_ref(f"run/{pipeline_id}/{job_id}")
+        precreated = False
+        try:
+            await lakefs_client.create_branch(repository=artifact_repo, name=expected_branch, source="main")
+            precreated = True
+
+            await queue.publish(
+                PipelineJob(
+                    job_id=job_id,
+                    pipeline_id=pipeline_id,
+                    db_name=db_name,
+                    pipeline_type="batch",
+                    definition_json=definition_json,
+                    node_id="out1",
+                    output_dataset_name="out_ds",
+                    mode="deploy",
+                    branch="main",
+                )
+            )
+            run = await _wait_for_run_terminal(client, pipeline_id=pipeline_id, job_id=job_id)
+            assert str(run.get("status") or "").upper() == "DEPLOYED"
+            output_json = run.get("output_json") or {}
+            lakefs = output_json.get("lakefs") or {}
+            run_branch = str(lakefs.get("run_branch") or "")
+            assert run_branch
+            assert run_branch != expected_branch, f"expected conflict fallback, got run_branch={run_branch}"
+
+            for _ in range(5):
+                try:
+                    await lakefs_client.get_branch_head_commit_id(repository=artifact_repo, branch=run_branch)
+                except LakeFSNotFoundError:
+                    break
+                await asyncio.sleep(1.0)
+            else:
+                raise AssertionError(f"run branch not cleaned up: {run_branch}")
+        finally:
+            if precreated:
+                try:
+                    await lakefs_client.delete_branch(repository=artifact_repo, name=expected_branch)
+                except Exception:
+                    pass
 
 
 @pytest.mark.integration
@@ -1534,3 +1991,116 @@ async def test_incremental_small_files_compaction_metrics() -> None:
         print(perf_message)
 
         assert file_count_n > file_count_1, "expected small files to accumulate over incremental runs"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_composite_pk_unique_perf() -> None:
+    """
+    Perf check: composite PK unique validation should complete without OOM/shuffle failures.
+    Requires RUN_PIPELINE_EXECUTION_E2E_PERF=true to run.
+    """
+    if os.getenv("RUN_PIPELINE_EXECUTION_E2E_PERF", "").strip().lower() not in {"1", "true", "yes", "on"}:
+        pytest.skip("RUN_PIPELINE_EXECUTION_E2E_PERF must be enabled for perf test.")
+
+    rows = int(os.getenv("PIPELINE_COMPOSITE_PK_ROWS", "5000"))
+    assert rows >= 10
+    max_seconds = float(os.getenv("PIPELINE_COMPOSITE_PK_MAX_SECONDS", "0") or 0)
+    suffix = uuid.uuid4().hex[:8]
+    db_name = f"e2e_pk_perf_{suffix}"
+    headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
+
+    async with httpx.AsyncClient(headers=headers, timeout=60.0) as client:
+        create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "pk perf"})
+        create_db.raise_for_status()
+        command_id = str(((create_db.json().get("data") or {}) or {}).get("command_id") or "")
+        assert command_id
+        await _wait_for_command(client, command_id, db_name=db_name, timeout_seconds=120)
+
+        schema_json = {
+            "columns": [
+                {"name": "id", "type": "xsd:integer"},
+                {"name": "sub_id", "type": "xsd:integer"},
+                {"name": "ts", "type": "xsd:integer"},
+            ]
+        }
+        create_dataset = await client.post(
+            f"{BFF_URL}/api/v1/pipelines/datasets",
+            json={
+                "db_name": db_name,
+                "name": "in_ds",
+                "description": "pk perf",
+                "branch": "main",
+                "source_type": "manual",
+                "schema_json": schema_json,
+            },
+        )
+        create_dataset.raise_for_status()
+        dataset = (create_dataset.json().get("data") or {}).get("dataset") or {}
+        dataset_id = str(dataset.get("dataset_id") or "")
+        assert dataset_id
+
+        payload_rows = [{"id": i, "sub_id": i % 97, "ts": i} for i in range(1, rows + 1)]
+        create_version = await client.post(
+            f"{BFF_URL}/api/v1/pipelines/datasets/{dataset_id}/versions",
+            json={"sample_json": {"rows": payload_rows}, "schema_json": schema_json},
+        )
+        create_version.raise_for_status()
+
+        definition_json: dict[str, Any] = {
+            "nodes": [
+                {"id": "in1", "type": "input", "metadata": {"datasetId": dataset_id, "datasetName": "in_ds"}},
+                {
+                    "id": "out1",
+                    "type": "output",
+                    "metadata": {
+                        "datasetName": "out_ds",
+                        "primary_key": ["id", "sub_id"],
+                        "pkSemantics": "append_state",
+                    },
+                },
+            ],
+            "edges": [{"from": "in1", "to": "out1"}],
+            "parameters": [],
+            "settings": {"engine": "Incremental", "watermarkColumn": "ts"},
+        }
+
+        create_pipeline = await client.post(
+            f"{BFF_URL}/api/v1/pipelines",
+            json={
+                "db_name": db_name,
+                "name": "pk perf pipeline",
+                "location": "e2e",
+                "description": "pk perf",
+                "branch": "main",
+                "pipeline_type": "incremental",
+                "definition_json": definition_json,
+            },
+        )
+        create_pipeline.raise_for_status()
+        pipeline = (create_pipeline.json().get("data") or {}).get("pipeline") or {}
+        pipeline_id = str(pipeline.get("pipeline_id") or "")
+        assert pipeline_id
+
+        queue = PipelineJobQueue()
+        job_id = f"deploy-pk-perf-{uuid.uuid4().hex}"
+        start = time.monotonic()
+        await queue.publish(
+            PipelineJob(
+                job_id=job_id,
+                pipeline_id=pipeline_id,
+                db_name=db_name,
+                pipeline_type="incremental",
+                definition_json=definition_json,
+                node_id="out1",
+                output_dataset_name="out_ds",
+                mode="deploy",
+                branch="main",
+            )
+        )
+        run = await _wait_for_run_terminal(client, pipeline_id=pipeline_id, job_id=job_id, timeout_seconds=300)
+        elapsed = time.monotonic() - start
+        assert str(run.get("status") or "").upper() == "DEPLOYED"
+        print(f"[perf] composite_pk rows={rows} elapsed={elapsed:.3f}s")
+        if max_seconds > 0:
+            assert elapsed <= max_seconds, f"composite PK unique took {elapsed:.2f}s > {max_seconds:.2f}s"

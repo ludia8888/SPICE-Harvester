@@ -224,22 +224,33 @@ class LakeFSClient:
         if not since:
             raise ValueError("since is required")
 
-        params: Dict[str, Any] = {"since": since, "amount": max(1, int(amount))}
+        base_params: Dict[str, Any] = {"amount": max(1, int(amount))}
         if prefix:
-            params["prefix"] = str(prefix).strip()
+            base_params["prefix"] = str(prefix).strip()
 
         results: List[Dict[str, Any]] = []
         after: Optional[str] = None
+        endpoint_template = f"/repositories/{repository}/refs/{ref}/diff"
+        alt_template = f"/repositories/{repository}/refs/{since}/diff/{ref}"
+        mode = "ref_since"
         async with self._client() as client:
             while True:
+                params = dict(base_params)
                 if after:
                     params["after"] = after
-                resp = await client.get(
-                    f"/repositories/{repository}/refs/{ref}/diff",
-                    params=params,
-                )
+                if mode == "ref_since":
+                    params["since"] = since
+                    resp = await client.get(endpoint_template, params=params)
+                    if resp.status_code in {404, 500} and "invalid api endpoint" in resp.text.lower():
+                        mode = "ref_ref"
+                        params.pop("since", None)
+                        resp = await client.get(alt_template, params=params)
+                else:
+                    resp = await client.get(alt_template, params=params)
                 if resp.status_code in {401, 403}:
                     raise LakeFSAuthError(resp.text)
+                if resp.status_code in {404, 500} and "invalid api endpoint" in resp.text.lower():
+                    raise LakeFSError(f"lakeFS diff endpoint unsupported: {resp.text}")
                 if resp.status_code == 404:
                     raise LakeFSNotFoundError(resp.text)
                 if not resp.is_success:

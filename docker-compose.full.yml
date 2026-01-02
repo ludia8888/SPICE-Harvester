@@ -36,6 +36,7 @@ services:
     environment:
       - BFF_REQUIRE_AUTH=false
       - ALLOW_INSECURE_BFF_AUTH_DISABLE=true
+      - INPUT_SANITIZER_MAX_LIST_ITEMS=10000
     depends_on:
       - oms
       - funnel
