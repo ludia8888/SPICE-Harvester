@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 
 from shared.config.settings import settings
 from shared.errors.error_types import ErrorCategory, ErrorCode
-from shared.errors.enterprise_catalog import resolve_enterprise_error
+from shared.errors.enterprise_catalog import resolve_enterprise_error, is_external_code
 from shared.observability.tracing import get_tracing_service
 from shared.security.input_sanitizer import SecurityViolationError
 from shared.utils.app_logger import get_logger
@@ -92,6 +92,21 @@ def _extract_upstream_metadata(body: Any) -> Tuple[Optional[ErrorCode], Optional
     return code, category, message
 
 
+def _extract_external_code(detail: Any) -> Optional[str]:
+    if not isinstance(detail, dict):
+        return None
+    code_raw = detail.get("code") or detail.get("error_code")
+    if not isinstance(code_raw, str):
+        code_raw = detail.get("error")
+    if not isinstance(code_raw, str):
+        return None
+    if code_raw in ErrorCode._value2member_map_:
+        return None
+    if not is_external_code(code_raw):
+        return None
+    return code_raw
+
+
 def _classify_upstream_url(url: Optional[str], status_code: Optional[int]) -> Tuple[Optional[ErrorCode], Optional[ErrorCategory]]:
     if not url:
         return None, None
@@ -146,6 +161,7 @@ def _build_payload(
     detail: Optional[str] = None,
     errors: Optional[Any] = None,
     context: Optional[Dict[str, Any]] = None,
+    external_code: Optional[str] = None,
 ) -> Dict[str, Any]:
     tracing = get_tracing_service(service_name)
     trace_id = tracing.get_trace_id()
@@ -155,6 +171,7 @@ def _build_payload(
         category=category,
         status_code=status_code,
         retryable=_is_retryable(status_code),
+        external_code=external_code,
     )
     payload: Dict[str, Any] = {
         "status": "error",
@@ -187,6 +204,7 @@ def _build_response(
     detail: Optional[str] = None,
     errors: Optional[Any] = None,
     context: Optional[Dict[str, Any]] = None,
+    external_code: Optional[str] = None,
 ) -> JSONResponse:
     payload = _build_payload(
         request,
@@ -198,6 +216,7 @@ def _build_response(
         detail=detail,
         errors=errors,
         context=context,
+        external_code=external_code,
     )
     return JSONResponse(status_code=status_code, content=payload)
 
@@ -292,6 +311,7 @@ def install_error_handlers(
             except ValueError:
                 upstream_body = response.text
         upstream_code, upstream_category, upstream_message = _extract_upstream_metadata(upstream_body)
+        external_code = _extract_external_code(upstream_body)
         context = {
             "upstream_status": upstream_status,
             "upstream_url": str(getattr(exc.request, "url", "")),
@@ -311,14 +331,17 @@ def install_error_handlers(
             message=message,
             detail=str(exc),
             context=context,
+            external_code=external_code,
         )
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
         code = None
         category = None
+        external_code = None
         if isinstance(exc.detail, dict):
             code, category, _ = _extract_upstream_metadata(exc.detail)
+            external_code = _extract_external_code(exc.detail)
         if code is None or category is None:
             fallback_category, fallback_code = _STATUS_TO_CATEGORY_CODE.get(
                 exc.status_code, (ErrorCategory.INTERNAL, ErrorCode.HTTP_ERROR)
@@ -338,6 +361,7 @@ def install_error_handlers(
             message=message,
             detail=detail,
             context={"detail": exc.detail} if isinstance(exc.detail, dict) else None,
+            external_code=external_code,
         )
 
     if HAS_ASYNCPG:

@@ -92,3 +92,7 @@ classification across services and workers. The source of truth is
 - `SHV-BFF-INP-VAL-0001` Request validation failed
 - `SHV-OMS-RES-NOT-0001` Resource not found
 - `SHV-OBJ-DAT-VAL-0001` Data validation failed (objectify)
+
+## Full Taxonomy
+
+The full legacy-to-enterprise mapping is listed in `docs/ERROR_TAXONOMY.md`.
