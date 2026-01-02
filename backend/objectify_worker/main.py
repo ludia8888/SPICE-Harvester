@@ -32,6 +32,7 @@ from shared.services.processed_event_registry import ClaimDecision, ProcessedEve
 from shared.services.sheet_import_service import FieldMapping, SheetImportService
 from shared.utils.env_utils import parse_int_env
 from shared.utils.s3_uri import parse_s3_uri
+from shared.errors.enterprise_catalog import resolve_objectify_error
 from shared.security.auth_utils import get_expected_token
 
 logger = logging.getLogger(__name__)
@@ -218,11 +219,15 @@ class ObjectifyWorker:
 
                     if self.objectify_registry and job:
                         try:
+                            report_payload = {"error": err}
+                            enterprise = resolve_objectify_error(err)
+                            if enterprise:
+                                report_payload["enterprise"] = enterprise.to_dict()
                             await self.objectify_registry.update_objectify_job_status(
                                 job_id=job.job_id,
                                 status="FAILED",
                                 error=err[:4000],
-                                report={"error": err},
+                                report=report_payload,
                                 completed_at=datetime.now(timezone.utc),
                             )
                         except Exception:
@@ -277,11 +282,16 @@ class ObjectifyWorker:
             raise RuntimeError("ObjectifyRegistry not initialized")
 
         async def _fail_job(error: str, *, report: Optional[Dict[str, Any]] = None) -> None:
+            report_payload = dict(report or {})
+            report_payload.setdefault("error", error)
+            enterprise = resolve_objectify_error(error)
+            if enterprise:
+                report_payload.setdefault("enterprise", enterprise.to_dict())
             await self.objectify_registry.update_objectify_job_status(
                 job_id=job.job_id,
                 status="FAILED",
                 error=error[:4000],
-                report=report or {"error": error},
+                report=report_payload,
                 completed_at=datetime.now(timezone.utc),
             )
             raise ObjectifyNonRetryableError(error)

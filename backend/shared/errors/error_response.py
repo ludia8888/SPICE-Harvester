@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from shared.config.settings import settings
 from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.errors.enterprise_catalog import resolve_enterprise_error
 from shared.observability.tracing import get_tracing_service
 from shared.security.input_sanitizer import SecurityViolationError
 from shared.utils.app_logger import get_logger
@@ -148,6 +149,13 @@ def _build_payload(
 ) -> Dict[str, Any]:
     tracing = get_tracing_service(service_name)
     trace_id = tracing.get_trace_id()
+    enterprise = resolve_enterprise_error(
+        service_name=service_name,
+        code=code,
+        category=category,
+        status_code=status_code,
+        retryable=_is_retryable(status_code),
+    )
     payload: Dict[str, Any] = {
         "status": "error",
         "message": message,
@@ -156,6 +164,7 @@ def _build_payload(
         "category": category.value,
         "http_status": status_code,
         "retryable": _is_retryable(status_code),
+        "enterprise": enterprise.to_dict(),
         "origin": _get_origin(request, service_name),
         "trace_id": trace_id,
         "request_id": _get_request_id(request),

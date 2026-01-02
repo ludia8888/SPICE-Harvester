@@ -20,6 +20,8 @@ help:
 	@echo "  backend-chaos-lite     Run destructive chaos-lite scenario (requires local stack)"
 	@echo "  backend-perf-k6-smoke  Run k6 async command smoke load (requires local stack)"
 	@echo "  backend-perf-cleanup   Cleanup perf_* DBs (requires Postgres + BFF)"
+	@echo "  backend-methods        Regenerate docs/BACKEND_METHODS.md"
+	@echo "  backend-methods-check  Verify docs/BACKEND_METHODS.md is up to date"
 	@echo "  frontend-check         Install + lint + build frontend"
 	@echo "  ci                     Run backend-unit + frontend-check"
 	@echo "  stack-up               Start full local docker stack"
@@ -59,6 +61,14 @@ backend-perf-k6-smoke:
 .PHONY: backend-perf-cleanup
 backend-perf-cleanup:
 	PYTHONPATH=backend $(PYTHON) backend/perf/cleanup_perf_databases.py --prefix perf_ --yes
+
+.PHONY: backend-methods
+backend-methods:
+	$(PYTHON) scripts/generate_backend_methods.py
+
+.PHONY: backend-methods-check
+backend-methods-check:
+	$(PYTHON) scripts/generate_backend_methods.py --check
 
 .PHONY: frontend-check
 frontend-check:
