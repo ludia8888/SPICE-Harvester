@@ -30,6 +30,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -47,6 +49,18 @@ jobs:
       - name: Run make target
         run: |
           make PYTHON=python ${{ inputs.make-target }}
+
+      - name: Enforce diff coverage on new lines
+        if: ${{ inputs.make-target == 'backend-coverage' }}
+        env:
+          COVERAGE_FILE: ${{ inputs.coverage-file }}
+        run: |
+          BASE_REF="main"
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ] && [ -n "${GITHUB_BASE_REF}" ]; then
+            BASE_REF="${GITHUB_BASE_REF}"
+          fi
+          git fetch origin "${BASE_REF}" --depth=1 || true
+          diff-cover "${COVERAGE_FILE}" --compare-branch "origin/${BASE_REF}" --fail-under=100
 
       - name: Upload coverage artifact
         if: ${{ inputs.upload-coverage && always() }}
