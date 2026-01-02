@@ -9,6 +9,7 @@ NPM ?= npm
 FRONTEND_DIR ?= frontend
 COMPOSE ?= docker compose
 COMPOSE_FULL ?= docker-compose.full.yml
+COVERAGE_MIN ?= 33.9
 
 .PHONY: help
 help:
@@ -39,7 +40,8 @@ backend-coverage:
 	PYTHONPATH=backend $(PYTHON) -m pytest -q -c backend/pytest.ini \
 		backend/tests/unit backend/bff/tests backend/funnel/tests \
 		--cov=backend/bff --cov=backend/oms --cov=backend/funnel --cov=backend/shared --cov=backend/instance_worker \
-		--cov-branch --cov-report=term-missing:skip-covered --cov-report=xml:coverage.xml
+		--cov-branch --cov-report=term-missing:skip-covered --cov-report=xml:coverage.xml \
+		--cov-fail-under=$(COVERAGE_MIN)
 
 .PHONY: backend-prod-quick
 backend-prod-quick:
