@@ -38,16 +38,6 @@ _STATUS_TO_CATEGORY_CODE: Dict[int, Tuple[ErrorCategory, ErrorCode]] = {
 }
 
 
-def _is_retryable(status_code: int) -> bool:
-    return status_code in {
-        status.HTTP_408_REQUEST_TIMEOUT,
-        status.HTTP_429_TOO_MANY_REQUESTS,
-        status.HTTP_502_BAD_GATEWAY,
-        status.HTTP_503_SERVICE_UNAVAILABLE,
-        status.HTTP_504_GATEWAY_TIMEOUT,
-    }
-
-
 def _get_request_id(request: Request) -> Optional[str]:
     return request.headers.get("x-request-id") or request.headers.get("X-Request-ID")
 
@@ -170,7 +160,6 @@ def _build_payload(
         code=code,
         category=category,
         status_code=status_code,
-        retryable=_is_retryable(status_code),
         external_code=external_code,
     )
     payload: Dict[str, Any] = {
@@ -180,7 +169,7 @@ def _build_payload(
         "code": code.value,
         "category": category.value,
         "http_status": status_code,
-        "retryable": _is_retryable(status_code),
+        "retryable": enterprise.retryable,
         "enterprise": enterprise.to_dict(),
         "origin": _get_origin(request, service_name),
         "trace_id": trace_id,

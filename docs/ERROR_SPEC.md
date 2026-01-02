@@ -74,6 +74,8 @@ classification across services and workers. The source of truth is
     "title": "Request validation failed",
     "http_status": 422,
     "retryable": false,
+    "action": "fix_input",
+    "owner": "user",
     "legacy_code": "REQUEST_VALIDATION_FAILED",
     "legacy_category": "input"
   }
@@ -86,6 +88,8 @@ classification across services and workers. The source of truth is
   `backend/shared/errors/enterprise_catalog.py`.
 - Objectify worker hard-gate errors map from error strings like
   `dataset_not_found` or `validation_failed` in the same file.
+- `enterprise.http_status` and `enterprise.retryable` follow taxonomy defaults
+  (not only the raw HTTP response status).
 
 ## Examples
 

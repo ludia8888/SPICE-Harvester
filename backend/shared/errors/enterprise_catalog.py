@@ -47,11 +47,32 @@ class EnterpriseClass(str, Enum):
     INTEGRATION = "integration"
 
 
+class EnterpriseAction(str, Enum):
+    FIX_INPUT = "fix_input"
+    REAUTH = "reauth"
+    REQUEST_ACCESS = "request_access"
+    CHECK_RESOURCE = "check_resource"
+    RESOLVE_CONFLICT = "resolve_conflict"
+    CHECK_STATE = "check_state"
+    WAIT = "wait"
+    RETRY = "retry"
+    CHECK_UPSTREAM = "check_upstream"
+    INVESTIGATE = "investigate"
+
+
+class EnterpriseOwner(str, Enum):
+    USER = "user"
+    SYSTEM = "system"
+    OPERATOR = "operator"
+
+
 class EnterpriseSubsystem(str, Enum):
     BFF = "BFF"
     OMS = "OMS"
     OBJECTIFY = "OBJ"
     PIPELINE = "PIP"
+    PROJECTION = "PRJ"
+    CONNECTOR = "CON"
     SHARED = "SHR"
     GENERIC = "GEN"
 
@@ -64,6 +85,9 @@ class EnterpriseErrorSpec:
     title: str
     severity: EnterpriseSeverity
     default_http_status: Optional[int] = None
+    retryable: Optional[bool] = None
+    action: Optional[EnterpriseAction] = None
+    owner: Optional[EnterpriseOwner] = None
 
 
 @dataclass(frozen=True)
@@ -76,6 +100,8 @@ class EnterpriseError:
     title: str
     http_status: int
     retryable: bool
+    action: EnterpriseAction
+    owner: EnterpriseOwner
     legacy_code: Optional[str] = None
     legacy_category: Optional[str] = None
 
@@ -90,6 +116,8 @@ class EnterpriseError:
             "title": self.title,
             "http_status": self.http_status,
             "retryable": self.retryable,
+            "action": self.action.value,
+            "owner": self.owner.value,
         }
         if self.legacy_code is not None:
             payload["legacy_code"] = self.legacy_code
@@ -108,11 +136,78 @@ def _normalize_subsystem(service_name: Optional[str]) -> EnterpriseSubsystem:
         return EnterpriseSubsystem.OMS
     if name in {"objectify-worker", "objectify"}:
         return EnterpriseSubsystem.OBJECTIFY
+    if name in {"pipeline-scheduler", "pipeline_scheduler"}:
+        return EnterpriseSubsystem.PIPELINE
     if name in {"pipeline-worker", "pipeline"}:
         return EnterpriseSubsystem.PIPELINE
+    if "projection" in name:
+        return EnterpriseSubsystem.PROJECTION
+    if name.startswith("connector-") or name.startswith("connector_") or "connector" in name:
+        return EnterpriseSubsystem.CONNECTOR
     if name in {"shared"}:
         return EnterpriseSubsystem.SHARED
     return EnterpriseSubsystem.GENERIC
+
+
+_DEFAULT_HTTP_STATUS_BY_CLASS: Dict[EnterpriseClass, int] = {
+    EnterpriseClass.VALIDATION: 400,
+    EnterpriseClass.SECURITY: 400,
+    EnterpriseClass.AUTH: 401,
+    EnterpriseClass.PERMISSION: 403,
+    EnterpriseClass.NOT_FOUND: 404,
+    EnterpriseClass.CONFLICT: 409,
+    EnterpriseClass.LIMIT: 429,
+    EnterpriseClass.TIMEOUT: 504,
+    EnterpriseClass.UNAVAILABLE: 503,
+    EnterpriseClass.INTERNAL: 500,
+    EnterpriseClass.STATE: 409,
+    EnterpriseClass.INTEGRATION: 502,
+}
+
+_DEFAULT_RETRYABLE_BY_CLASS: Dict[EnterpriseClass, bool] = {
+    EnterpriseClass.VALIDATION: False,
+    EnterpriseClass.SECURITY: False,
+    EnterpriseClass.AUTH: False,
+    EnterpriseClass.PERMISSION: False,
+    EnterpriseClass.NOT_FOUND: False,
+    EnterpriseClass.CONFLICT: False,
+    EnterpriseClass.STATE: False,
+    EnterpriseClass.LIMIT: True,
+    EnterpriseClass.TIMEOUT: True,
+    EnterpriseClass.UNAVAILABLE: True,
+    EnterpriseClass.INTEGRATION: False,
+    EnterpriseClass.INTERNAL: False,
+}
+
+_DEFAULT_ACTION_BY_CLASS: Dict[EnterpriseClass, EnterpriseAction] = {
+    EnterpriseClass.VALIDATION: EnterpriseAction.FIX_INPUT,
+    EnterpriseClass.SECURITY: EnterpriseAction.FIX_INPUT,
+    EnterpriseClass.AUTH: EnterpriseAction.REAUTH,
+    EnterpriseClass.PERMISSION: EnterpriseAction.REQUEST_ACCESS,
+    EnterpriseClass.NOT_FOUND: EnterpriseAction.CHECK_RESOURCE,
+    EnterpriseClass.CONFLICT: EnterpriseAction.RESOLVE_CONFLICT,
+    EnterpriseClass.STATE: EnterpriseAction.CHECK_STATE,
+    EnterpriseClass.LIMIT: EnterpriseAction.WAIT,
+    EnterpriseClass.TIMEOUT: EnterpriseAction.RETRY,
+    EnterpriseClass.UNAVAILABLE: EnterpriseAction.RETRY,
+    EnterpriseClass.INTEGRATION: EnterpriseAction.CHECK_UPSTREAM,
+    EnterpriseClass.INTERNAL: EnterpriseAction.INVESTIGATE,
+}
+
+_DEFAULT_OWNER_BY_CLASS: Dict[EnterpriseClass, EnterpriseOwner] = {
+    EnterpriseClass.VALIDATION: EnterpriseOwner.USER,
+    EnterpriseClass.SECURITY: EnterpriseOwner.USER,
+    EnterpriseClass.AUTH: EnterpriseOwner.USER,
+    EnterpriseClass.PERMISSION: EnterpriseOwner.USER,
+    EnterpriseClass.NOT_FOUND: EnterpriseOwner.USER,
+    EnterpriseClass.CONFLICT: EnterpriseOwner.USER,
+    EnterpriseClass.STATE: EnterpriseOwner.USER,
+    EnterpriseClass.LIMIT: EnterpriseOwner.SYSTEM,
+    EnterpriseClass.TIMEOUT: EnterpriseOwner.SYSTEM,
+    EnterpriseClass.UNAVAILABLE: EnterpriseOwner.SYSTEM,
+    EnterpriseClass.INTEGRATION: EnterpriseOwner.OPERATOR,
+    EnterpriseClass.INTERNAL: EnterpriseOwner.OPERATOR,
+}
 
 
 _ERROR_CODE_SPECS: Dict[ErrorCode, EnterpriseErrorSpec] = {
@@ -122,6 +217,7 @@ _ERROR_CODE_SPECS: Dict[ErrorCode, EnterpriseErrorSpec] = {
         error_class=EnterpriseClass.VALIDATION,
         title="Request validation failed",
         severity=EnterpriseSeverity.ERROR,
+        default_http_status=422,
     ),
     ErrorCode.JSON_DECODE_ERROR: EnterpriseErrorSpec(
         code_template="SHV-{subsystem}-INP-VAL-0002",
@@ -143,6 +239,7 @@ _ERROR_CODE_SPECS: Dict[ErrorCode, EnterpriseErrorSpec] = {
         error_class=EnterpriseClass.LIMIT,
         title="Payload too large",
         severity=EnterpriseSeverity.ERROR,
+        default_http_status=413,
     ),
     ErrorCode.AUTH_REQUIRED: EnterpriseErrorSpec(
         code_template="SHV-{subsystem}-ACC-AUT-0001",
@@ -201,7 +298,7 @@ _ERROR_CODE_SPECS: Dict[ErrorCode, EnterpriseErrorSpec] = {
         severity=EnterpriseSeverity.ERROR,
     ),
     ErrorCode.UPSTREAM_ERROR: EnterpriseErrorSpec(
-        code_template="SHV-{subsystem}-UPS-INT-0001",
+        code_template="SHV-{subsystem}-UPS-INTG-0001",
         domain=EnterpriseDomain.UPSTREAM,
         error_class=EnterpriseClass.INTEGRATION,
         title="Upstream service error",
@@ -276,6 +373,7 @@ _ERROR_CODE_SPECS: Dict[ErrorCode, EnterpriseErrorSpec] = {
         error_class=EnterpriseClass.INTERNAL,
         title="HTTP error",
         severity=EnterpriseSeverity.ERROR,
+        default_http_status=400,
     ),
     ErrorCode.INTERNAL_ERROR: EnterpriseErrorSpec(
         code_template="SHV-{subsystem}-SYS-INT-0001",
@@ -330,7 +428,7 @@ _CATEGORY_SPECS: Dict[ErrorCategory, EnterpriseErrorSpec] = {
         severity=EnterpriseSeverity.ERROR,
     ),
     ErrorCategory.UPSTREAM: EnterpriseErrorSpec(
-        code_template="SHV-{subsystem}-UPS-INT-0999",
+        code_template="SHV-{subsystem}-UPS-INTG-0999",
         domain=EnterpriseDomain.UPSTREAM,
         error_class=EnterpriseClass.INTEGRATION,
         title="Upstream error",
@@ -1065,14 +1163,40 @@ def is_external_code(value: str) -> bool:
     return value in _EXTERNAL_CODE_SPECS
 
 
+def _resolve_http_status(spec: EnterpriseErrorSpec, status_code: int) -> int:
+    if spec.default_http_status is not None:
+        return spec.default_http_status
+    return _DEFAULT_HTTP_STATUS_BY_CLASS.get(spec.error_class, status_code)
+
+
+def _resolve_retryable(
+    spec: EnterpriseErrorSpec,
+    *,
+    retryable_hint: Optional[bool] = None,
+) -> bool:
+    if spec.retryable is not None:
+        return spec.retryable
+    if retryable_hint is not None:
+        return retryable_hint
+    return _DEFAULT_RETRYABLE_BY_CLASS.get(spec.error_class, False)
+
+
+def _resolve_action(spec: EnterpriseErrorSpec) -> EnterpriseAction:
+    return spec.action or _DEFAULT_ACTION_BY_CLASS.get(spec.error_class, EnterpriseAction.INVESTIGATE)
+
+
+def _resolve_owner(spec: EnterpriseErrorSpec) -> EnterpriseOwner:
+    return spec.owner or _DEFAULT_OWNER_BY_CLASS.get(spec.error_class, EnterpriseOwner.OPERATOR)
+
+
 def resolve_enterprise_error(
     *,
     service_name: str,
     code: Optional[ErrorCode],
     category: Optional[ErrorCategory],
     status_code: int,
-    retryable: bool,
     external_code: Optional[str] = None,
+    retryable_hint: Optional[bool] = None,
 ) -> EnterpriseError:
     spec = _EXTERNAL_CODE_SPECS.get(external_code) if external_code else None
     if spec is None and code is not None:
@@ -1083,7 +1207,10 @@ def resolve_enterprise_error(
         spec = _CATEGORY_SPECS.get(ErrorCategory.INTERNAL)
 
     subsystem = _normalize_subsystem(service_name).value
-    resolved_status = spec.default_http_status or status_code
+    resolved_status = _resolve_http_status(spec, status_code)
+    retryable = _resolve_retryable(spec, retryable_hint=retryable_hint)
+    action = _resolve_action(spec)
+    owner = _resolve_owner(spec)
     legacy_code = external_code or (code.value if isinstance(code, ErrorCode) else None)
     legacy_category = category.value if isinstance(category, ErrorCategory) else None
     return EnterpriseError(
@@ -1095,6 +1222,8 @@ def resolve_enterprise_error(
         title=spec.title,
         http_status=resolved_status,
         retryable=retryable,
+        action=action,
+        owner=owner,
         legacy_code=legacy_code,
         legacy_category=legacy_category,
     )
@@ -1108,7 +1237,9 @@ def resolve_objectify_error(error: str) -> Optional[EnterpriseError]:
     if spec is None:
         return None
     subsystem = EnterpriseSubsystem.OBJECTIFY.value
-    resolved_status = spec.default_http_status or 400
+    resolved_status = _resolve_http_status(spec, 400)
+    action = _resolve_action(spec)
+    owner = _resolve_owner(spec)
     return EnterpriseError(
         code=spec.code_template.format(subsystem=subsystem),
         domain=spec.domain,
@@ -1117,7 +1248,9 @@ def resolve_objectify_error(error: str) -> Optional[EnterpriseError]:
         severity=spec.severity,
         title=spec.title,
         http_status=resolved_status,
-        retryable=False,
+        retryable=_resolve_retryable(spec, retryable_hint=False),
+        action=action,
+        owner=owner,
         legacy_code=error,
         legacy_category="objectify",
     )

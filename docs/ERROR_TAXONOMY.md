@@ -3,7 +3,7 @@
 This file lists all structured error codes currently mapped in
 `backend/shared/errors/enterprise_catalog.py`.
 
-`SUBSYS` values: `BFF`, `OMS`, `OBJ`, `PIP`, `SHR`, `GEN`.
+`SUBSYS` values: `BFF`, `OMS`, `OBJ`, `PIP`, `PRJ`, `CON`, `SHR`, `GEN`.
 
 ## Core API Errors (ErrorCode)
 
