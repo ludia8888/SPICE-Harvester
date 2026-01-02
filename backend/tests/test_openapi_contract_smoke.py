@@ -351,6 +351,8 @@ def _format_path(template: str, ctx: SmokeContext, *, overrides: Optional[Dict[s
         "artifact_id": "00000000-0000-0000-0000-000000000000",
         "dataset_id": ctx.dataset_id or "dataset_smoke",
         "connection_id": ctx.connection_id or "missing_connection",
+        "resource_id": "missing_resource",
+        "proposal_id": "00000000-0000-0000-0000-000000000000",
     }
     if overrides:
         values.update(overrides)
@@ -814,6 +816,47 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_id': ctx.class_id})}"
         body = {"source": "openapi_smoke", "note": "mapping metadata smoke"}
         return RequestPlan(op.method, op.path, url, (200, 400, 404, 422), json_body=body)
+
+    # ---------- Ontology Extensions ----------
+    ontology_resource_collections = {
+        "/api/v1/databases/{db_name}/ontology/action-types",
+        "/api/v1/databases/{db_name}/ontology/functions",
+        "/api/v1/databases/{db_name}/ontology/groups",
+        "/api/v1/databases/{db_name}/ontology/interfaces",
+        "/api/v1/databases/{db_name}/ontology/shared-properties",
+        "/api/v1/databases/{db_name}/ontology/value-types",
+    }
+    ontology_resource_items = {f"{p}/{{resource_id}}" for p in ontology_resource_collections}
+
+    if key[0] == "POST" and key[1] in ontology_resource_collections:
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        # Intentionally invalid (missing required query params like `branch` and `expected_head_commit`)
+        # so we can safely assert contract + wiring without mutating server state.
+        return RequestPlan(op.method, op.path, url, (201, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
+
+    if key[0] == "PUT" and key[1] in ontology_resource_items:
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
+
+    if key[0] == "DELETE" and key[1] in ontology_resource_items:
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (200, 204, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
+
+    if key == ("POST", "/api/v1/databases/{db_name}/ontology/branches"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (201, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
+
+    if key == ("POST", "/api/v1/databases/{db_name}/ontology/proposals"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (201, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
+
+    if key == ("POST", "/api/v1/databases/{db_name}/ontology/proposals/{proposal_id}/approve"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
+
+    if key == ("POST", "/api/v1/databases/{db_name}/ontology/deploy"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
 
     # ---------- Async instances (write-side) ----------
     if key == ("POST", "/api/v1/databases/{db_name}/instances/{class_label}/create"):

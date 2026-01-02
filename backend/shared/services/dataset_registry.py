@@ -17,6 +17,7 @@ from uuid import uuid4
 import asyncpg
 
 from shared.config.service_config import ServiceConfig
+from shared.observability.context_propagation import enrich_metadata_with_current_trace
 from shared.utils.s3_uri import is_s3_uri, parse_s3_uri
 from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
 from shared.utils.time_utils import utcnow
@@ -1299,6 +1300,9 @@ class DatasetRegistry:
                         if not has_outbox:
                             _inject_dataset_version(outbox_entries, dataset_version_id)
                             for entry in outbox_entries:
+                                payload = entry.get("payload") or {}
+                                if isinstance(payload, dict):
+                                    enrich_metadata_with_current_trace(payload)
                                 await conn.execute(
                                     f"""
                                     INSERT INTO {self._schema}.dataset_ingest_outbox (
@@ -1308,7 +1312,7 @@ class DatasetRegistry:
                                     str(uuid4()),
                                     ingest_request_id,
                                     str(entry.get("kind") or "eventstore"),
-                                    normalize_json_payload(entry.get("payload") or {}),
+                                    normalize_json_payload(payload),
                                 )
                     return DatasetVersionRecord(
                         version_id=dataset_version_id,
@@ -1399,6 +1403,9 @@ class DatasetRegistry:
                         if not has_outbox:
                             _inject_dataset_version(outbox_entries, dataset_version_id)
                             for entry in outbox_entries:
+                                payload = entry.get("payload") or {}
+                                if isinstance(payload, dict):
+                                    enrich_metadata_with_current_trace(payload)
                                 await conn.execute(
                                     f"""
                                     INSERT INTO {self._schema}.dataset_ingest_outbox (
@@ -1408,7 +1415,7 @@ class DatasetRegistry:
                                     str(uuid4()),
                                     ingest_request_id,
                                     str(entry.get("kind") or "eventstore"),
-                                    normalize_json_payload(entry.get("payload") or {}),
+                                    normalize_json_payload(payload),
                                 )
                     return DatasetVersionRecord(
                         version_id=dataset_version_id,
@@ -1457,6 +1464,9 @@ class DatasetRegistry:
                 if outbox_entries:
                     _inject_dataset_version(outbox_entries, dataset_version_id)
                     for entry in outbox_entries:
+                        payload = entry.get("payload") or {}
+                        if isinstance(payload, dict):
+                            enrich_metadata_with_current_trace(payload)
                         await conn.execute(
                             f"""
                             INSERT INTO {self._schema}.dataset_ingest_outbox (
@@ -1466,7 +1476,7 @@ class DatasetRegistry:
                             str(uuid4()),
                             ingest_request_id,
                             str(entry.get("kind") or "eventstore"),
-                            normalize_json_payload(entry.get("payload") or {}),
+                            normalize_json_payload(payload),
                         )
                 return DatasetVersionRecord(
                     version_id=dataset_version_id,

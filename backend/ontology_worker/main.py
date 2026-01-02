@@ -50,6 +50,7 @@ from oms.exceptions import DuplicateOntologyError
 # Observability imports
 from shared.observability.tracing import get_tracing_service, trace_endpoint
 from shared.observability.metrics import get_metrics_collector
+from shared.observability.context_propagation import attach_context_from_kafka
 
 # 로깅 설정
 logging.basicConfig(
@@ -337,8 +338,15 @@ class OntologyWorker:
                                 error=str(e),
                                 occurred_at=datetime.now(timezone.utc),
                             )
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.warning(
+                                "Audit log write failed (operation=create status=failure db=%s branch=%s class_id=%s): %s",
+                                db_name,
+                                branch,
+                                payload.get("class_id"),
+                                exc,
+                                exc_info=True,
+                            )
                     raise
 
             class_id = payload.get("class_id")
@@ -361,8 +369,15 @@ class OntologyWorker:
                             "ontology": ontology_version,
                         },
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning(
+                        "Lineage record_link failed (operation=create db=%s branch=%s class_id=%s): %s",
+                        db_name,
+                        branch,
+                        class_id,
+                        exc,
+                        exc_info=True,
+                    )
 
             if command_id and class_id and self.audit_store:
                 try:
@@ -384,8 +399,15 @@ class OntologyWorker:
                         },
                         occurred_at=datetime.now(timezone.utc),
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning(
+                        "Audit log write failed (operation=create status=success db=%s branch=%s class_id=%s): %s",
+                        db_name,
+                        branch,
+                        class_id,
+                        exc,
+                        exc_info=True,
+                    )
             
             
             # 성공 이벤트 생성
@@ -496,8 +518,15 @@ class OntologyWorker:
                                 error=str(e),
                                 occurred_at=datetime.now(timezone.utc),
                             )
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.warning(
+                                "Audit log write failed (operation=update status=failure db=%s branch=%s class_id=%s): %s",
+                                db_name,
+                                branch,
+                                class_id,
+                                exc,
+                                exc_info=True,
+                            )
                     raise
 
             ontology_version = await resolve_ontology_version(
@@ -519,8 +548,15 @@ class OntologyWorker:
                             "ontology": ontology_version,
                         },
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning(
+                        "Lineage record_link failed (operation=update db=%s branch=%s class_id=%s): %s",
+                        db_name,
+                        branch,
+                        class_id,
+                        exc,
+                        exc_info=True,
+                    )
 
             if command_id and class_id and self.audit_store:
                 try:
@@ -542,8 +578,15 @@ class OntologyWorker:
                         },
                         occurred_at=datetime.now(timezone.utc),
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning(
+                        "Audit log write failed (operation=update status=success db=%s branch=%s class_id=%s): %s",
+                        db_name,
+                        branch,
+                        class_id,
+                        exc,
+                        exc_info=True,
+                    )
             
             # 성공 이벤트 생성
             event = OntologyEvent(
@@ -620,8 +663,15 @@ class OntologyWorker:
                                 error="delete_failed",
                                 occurred_at=datetime.now(timezone.utc),
                             )
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.warning(
+                                "Audit log write failed (operation=delete status=failure db=%s branch=%s class_id=%s): %s",
+                                db_name,
+                                branch,
+                                class_id,
+                                exc,
+                                exc_info=True,
+                            )
                     raise Exception(f"Failed to delete ontology class '{class_id}'")
                 logger.info(f"Ontology '{class_id}' already deleted; treating delete as idempotent success")
                 already_missing = True
@@ -646,8 +696,15 @@ class OntologyWorker:
                             "ontology": ontology_version,
                         },
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning(
+                        "Lineage record_link failed (operation=delete db=%s branch=%s class_id=%s): %s",
+                        db_name,
+                        branch,
+                        class_id,
+                        exc,
+                        exc_info=True,
+                    )
 
             if command_id and class_id and self.audit_store:
                 try:
@@ -670,8 +727,15 @@ class OntologyWorker:
                         },
                         occurred_at=datetime.now(timezone.utc),
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning(
+                        "Audit log write failed (operation=delete status=success db=%s branch=%s class_id=%s): %s",
+                        db_name,
+                        branch,
+                        class_id,
+                        exc,
+                        exc_info=True,
+                    )
             
             # 성공 이벤트 생성
             event = OntologyEvent(
@@ -953,64 +1017,85 @@ class OntologyWorker:
                     command_data.setdefault("sequence_number", envelope.sequence_number)
                     logger.info(f"Unwrapped command event: {envelope.event_type}")
 
-                    # Durable idempotency + ordering guard (Postgres)
-                    registry_event_id = command_data.get("event_id") or command_data.get("command_id")
-                    registry_aggregate_id = command_data.get("aggregate_id")
-                    registry_sequence = command_data.get("sequence_number")
-                    if self.processed_event_registry and registry_event_id:
-                        claim = await self.processed_event_registry.claim(
-                            handler="ontology_worker",
-                            event_id=str(registry_event_id),
-                            aggregate_id=str(registry_aggregate_id) if registry_aggregate_id else None,
-                            sequence_number=int(registry_sequence) if registry_sequence is not None else None,
-                        )
-                        if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
-                            logger.info(
-                                f"Skipping {claim.decision.value} command event_id={registry_event_id} "
-                                f"(aggregate_id={registry_aggregate_id}, seq={registry_sequence})"
-                            )
-                            await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
-                            continue
-                        if claim.decision == ClaimDecision.IN_PROGRESS:
-                            logger.info(
-                                f"Command {registry_event_id} is in progress elsewhere; retrying later"
-                            )
-                            await asyncio.sleep(2)
-                            await self._consumer_call(
-                                self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
-                            )
-                            continue
-                        registry_claimed = True
-                        registry_attempt_count = int(claim.attempt_count or 1)
+                    kafka_headers = msg.headers()
+                    with attach_context_from_kafka(
+                        kafka_headers=kafka_headers,
+                        fallback_metadata=envelope.metadata if isinstance(envelope.metadata, dict) else None,
+                        service_name="ontology-worker",
+                    ):
+                        with self.tracing_service.span(
+                            "ontology_worker.process_command",
+                            attributes={
+                                "messaging.system": "kafka",
+                                "messaging.destination": msg.topic(),
+                                "messaging.destination_kind": "topic",
+                                "messaging.kafka.partition": msg.partition(),
+                                "messaging.kafka.offset": msg.offset(),
+                                "command.type": command_data.get("command_type"),
+                                "event.id": command_data.get("event_id") or command_data.get("command_id"),
+                                "event.aggregate_id": command_data.get("aggregate_id"),
+                            },
+                        ):
+                            # Durable idempotency + ordering guard (Postgres)
+                            registry_event_id = command_data.get("event_id") or command_data.get("command_id")
+                            registry_aggregate_id = command_data.get("aggregate_id")
+                            registry_sequence = command_data.get("sequence_number")
+                            if self.processed_event_registry and registry_event_id:
+                                claim = await self.processed_event_registry.claim(
+                                    handler="ontology_worker",
+                                    event_id=str(registry_event_id),
+                                    aggregate_id=str(registry_aggregate_id) if registry_aggregate_id else None,
+                                    sequence_number=int(registry_sequence) if registry_sequence is not None else None,
+                                )
+                                if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
+                                    logger.info(
+                                        f"Skipping {claim.decision.value} command event_id={registry_event_id} "
+                                        f"(aggregate_id={registry_aggregate_id}, seq={registry_sequence})"
+                                    )
+                                    await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
+                                    continue
+                                if claim.decision == ClaimDecision.IN_PROGRESS:
+                                    logger.info(
+                                        f"Command {registry_event_id} is in progress elsewhere; retrying later"
+                                    )
+                                    await asyncio.sleep(2)
+                                    await self._consumer_call(
+                                        self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
+                                    )
+                                    continue
+                                registry_claimed = True
+                                registry_attempt_count = int(claim.attempt_count or 1)
 
-                    heartbeat_task = None
-                    if registry_claimed and self.processed_event_registry and registry_event_id:
-                        heartbeat_task = asyncio.create_task(
-                            self._heartbeat_loop(handler="ontology_worker", event_id=str(registry_event_id))
-                        )
-                    
-                    try:
-                        logger.info(f"Processing command: {command_data.get('command_type')} "
-                                   f"for {command_data.get('aggregate_id')}")
-                        
-                        # Command 처리
-                        await self.process_command(command_data)
+                            heartbeat_task = None
+                            if registry_claimed and self.processed_event_registry and registry_event_id:
+                                heartbeat_task = asyncio.create_task(
+                                    self._heartbeat_loop(handler="ontology_worker", event_id=str(registry_event_id))
+                                )
 
-                        if registry_claimed and self.processed_event_registry and registry_event_id:
-                            await self.processed_event_registry.mark_done(
-                                handler="ontology_worker",
-                                event_id=str(registry_event_id),
-                                aggregate_id=str(registry_aggregate_id) if registry_aggregate_id else None,
-                                sequence_number=int(registry_sequence) if registry_sequence is not None else None,
-                            )
-                        
-                        # 처리 성공 시 오프셋 커밋
-                        await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
-                    finally:
-                        if heartbeat_task:
-                            heartbeat_task.cancel()
-                            with suppress(asyncio.CancelledError):
-                                await heartbeat_task
+                            try:
+                                logger.info(
+                                    f"Processing command: {command_data.get('command_type')} "
+                                    f"for {command_data.get('aggregate_id')}"
+                                )
+
+                                # Command 처리
+                                await self.process_command(command_data)
+
+                                if registry_claimed and self.processed_event_registry and registry_event_id:
+                                    await self.processed_event_registry.mark_done(
+                                        handler="ontology_worker",
+                                        event_id=str(registry_event_id),
+                                        aggregate_id=str(registry_aggregate_id) if registry_aggregate_id else None,
+                                        sequence_number=int(registry_sequence) if registry_sequence is not None else None,
+                                    )
+
+                                # 처리 성공 시 오프셋 커밋
+                                await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
+                            finally:
+                                if heartbeat_task:
+                                    heartbeat_task.cancel()
+                                    with suppress(asyncio.CancelledError):
+                                        await heartbeat_task
                     
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse message: {e}")

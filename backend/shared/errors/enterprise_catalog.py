@@ -134,11 +134,11 @@ def _normalize_subsystem(service_name: Optional[str]) -> EnterpriseSubsystem:
         return EnterpriseSubsystem.BFF
     if name in {"oms", "ontology"}:
         return EnterpriseSubsystem.OMS
-    if name in {"objectify-worker", "objectify"}:
+    if name in {"objectify-worker", "objectify_worker", "objectify"}:
         return EnterpriseSubsystem.OBJECTIFY
     if name in {"pipeline-scheduler", "pipeline_scheduler"}:
         return EnterpriseSubsystem.PIPELINE
-    if name in {"pipeline-worker", "pipeline"}:
+    if name in {"pipeline-worker", "pipeline_worker", "pipeline"}:
         return EnterpriseSubsystem.PIPELINE
     if "projection" in name:
         return EnterpriseSubsystem.PROJECTION
@@ -671,6 +671,61 @@ _EXTERNAL_CODE_SPECS: Dict[str, EnterpriseErrorSpec] = {
         title="Invalid build reference",
         severity=EnterpriseSeverity.ERROR,
     ),
+    "PIPELINE_REQUEST_INVALID": EnterpriseErrorSpec(
+        code_template="SHV-{subsystem}-PIP-VAL-2001",
+        domain=EnterpriseDomain.PIPELINE,
+        error_class=EnterpriseClass.VALIDATION,
+        title="Pipeline request invalid",
+        severity=EnterpriseSeverity.ERROR,
+        default_http_status=422,
+    ),
+    "PIPELINE_DEFINITION_INVALID": EnterpriseErrorSpec(
+        code_template="SHV-{subsystem}-PIP-VAL-2002",
+        domain=EnterpriseDomain.PIPELINE,
+        error_class=EnterpriseClass.VALIDATION,
+        title="Pipeline definition invalid",
+        severity=EnterpriseSeverity.ERROR,
+        default_http_status=422,
+    ),
+    "PIPELINE_SCHEDULE_INVALID": EnterpriseErrorSpec(
+        code_template="SHV-{subsystem}-PIP-VAL-2003",
+        domain=EnterpriseDomain.PIPELINE,
+        error_class=EnterpriseClass.VALIDATION,
+        title="Pipeline schedule configuration invalid",
+        severity=EnterpriseSeverity.ERROR,
+        default_http_status=422,
+    ),
+    "PIPELINE_SCHEMA_CHECK_FAILED": EnterpriseErrorSpec(
+        code_template="SHV-{subsystem}-DAT-VAL-2001",
+        domain=EnterpriseDomain.DATA,
+        error_class=EnterpriseClass.VALIDATION,
+        title="Pipeline schema checks failed",
+        severity=EnterpriseSeverity.ERROR,
+        default_http_status=422,
+    ),
+    "PIPELINE_SCHEMA_CONTRACT_FAILED": EnterpriseErrorSpec(
+        code_template="SHV-{subsystem}-DAT-VAL-2002",
+        domain=EnterpriseDomain.DATA,
+        error_class=EnterpriseClass.VALIDATION,
+        title="Pipeline schema contract failed",
+        severity=EnterpriseSeverity.ERROR,
+        default_http_status=422,
+    ),
+    "PIPELINE_EXPECTATIONS_FAILED": EnterpriseErrorSpec(
+        code_template="SHV-{subsystem}-DAT-VAL-2003",
+        domain=EnterpriseDomain.DATA,
+        error_class=EnterpriseClass.VALIDATION,
+        title="Pipeline expectations failed",
+        severity=EnterpriseSeverity.ERROR,
+        default_http_status=422,
+    ),
+    "PIPELINE_EXECUTION_FAILED": EnterpriseErrorSpec(
+        code_template="SHV-{subsystem}-PIP-INT-2001",
+        domain=EnterpriseDomain.PIPELINE,
+        error_class=EnterpriseClass.INTERNAL,
+        title="Pipeline execution failed",
+        severity=EnterpriseSeverity.ERROR,
+    ),
     "REPLAY_REQUIRED": EnterpriseErrorSpec(
         code_template="SHV-{subsystem}-PIP-STA-1002",
         domain=EnterpriseDomain.PIPELINE,
@@ -1163,7 +1218,14 @@ def is_external_code(value: str) -> bool:
     return value in _EXTERNAL_CODE_SPECS
 
 
-def _resolve_http_status(spec: EnterpriseErrorSpec, status_code: int) -> int:
+def _resolve_http_status(
+    spec: EnterpriseErrorSpec,
+    status_code: int,
+    *,
+    prefer_status_code: bool = False,
+) -> int:
+    if prefer_status_code:
+        return status_code
     if spec.default_http_status is not None:
         return spec.default_http_status
     return _DEFAULT_HTTP_STATUS_BY_CLASS.get(spec.error_class, status_code)
@@ -1197,6 +1259,7 @@ def resolve_enterprise_error(
     status_code: int,
     external_code: Optional[str] = None,
     retryable_hint: Optional[bool] = None,
+    prefer_status_code: bool = False,
 ) -> EnterpriseError:
     spec = _EXTERNAL_CODE_SPECS.get(external_code) if external_code else None
     if spec is None and code is not None:
@@ -1207,7 +1270,7 @@ def resolve_enterprise_error(
         spec = _CATEGORY_SPECS.get(ErrorCategory.INTERNAL)
 
     subsystem = _normalize_subsystem(service_name).value
-    resolved_status = _resolve_http_status(spec, status_code)
+    resolved_status = _resolve_http_status(spec, status_code, prefer_status_code=prefer_status_code)
     retryable = _resolve_retryable(spec, retryable_hint=retryable_hint)
     action = _resolve_action(spec)
     owner = _resolve_owner(spec)

@@ -10,6 +10,12 @@ from typing import Optional
 from confluent_kafka import Producer
 
 from shared.config.service_config import ServiceConfig
+from shared.observability.context_propagation import (
+    attach_context_from_carrier,
+    carrier_from_envelope_metadata,
+    kafka_headers_from_envelope_metadata,
+)
+from shared.observability.tracing import get_tracing_service
 from shared.services.objectify_registry import ObjectifyOutboxItem, ObjectifyRegistry
 from shared.utils.env_utils import parse_int_env
 
@@ -86,12 +92,13 @@ class ObjectifyOutboxPublisher:
                 "request.timeout.ms": request_timeout_ms,
             }
         )
+        self.tracing = get_tracing_service("objectify-outbox")
 
     async def close(self) -> None:
         try:
             await asyncio.to_thread(self.producer.flush, self.flush_timeout_seconds)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Kafka producer flush failed during shutdown: %s", exc, exc_info=True)
 
     def _next_attempt_at(self, attempts: int) -> datetime:
         delay = min(self.backoff_max, self.backoff_base * (2 ** max(0, attempts - 1)))
@@ -109,12 +116,25 @@ class ObjectifyOutboxPublisher:
         for item in batch:
             payload = json.dumps(item.payload, ensure_ascii=False, default=str).encode("utf-8")
             key = item.job_id.encode("utf-8")
-            self.producer.produce(
-                topic=self.topic,
-                value=payload,
-                key=key,
-                on_delivery=lambda err, msg, outbox_id=item.outbox_id: _cb(err, msg, outbox_id),
-            )
+            headers = kafka_headers_from_envelope_metadata(item.payload)
+            carrier = carrier_from_envelope_metadata(item.payload)
+            with attach_context_from_carrier(carrier, service_name="objectify-outbox"):
+                with self.tracing.span(
+                    "objectify_outbox.produce",
+                    attributes={
+                        "messaging.system": "kafka",
+                        "messaging.destination": self.topic,
+                        "messaging.destination_kind": "topic",
+                        "objectify.job_id": item.job_id,
+                    },
+                ):
+                    self.producer.produce(
+                        topic=self.topic,
+                        value=payload,
+                        key=key,
+                        headers=headers or None,
+                        on_delivery=lambda err, msg, outbox_id=item.outbox_id: _cb(err, msg, outbox_id),
+                    )
 
         remaining = await asyncio.to_thread(self.producer.flush, self.flush_timeout_seconds)
         if remaining != 0:

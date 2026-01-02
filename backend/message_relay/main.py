@@ -31,6 +31,12 @@ from confluent_kafka.admin import AdminClient, NewTopic
 from shared.config.service_config import ServiceConfig
 from shared.config.app_config import AppConfig
 from shared.models.event_envelope import EventEnvelope
+from shared.observability.context_propagation import (
+    attach_context_from_carrier,
+    carrier_from_envelope_metadata,
+    kafka_headers_from_envelope_metadata,
+)
+from shared.observability.tracing import get_tracing_service
 
 # 로깅 설정
 logging.basicConfig(
@@ -118,6 +124,7 @@ class EventPublisher:
         self.metrics_log_interval_s = int(os.getenv("EVENT_PUBLISHER_METRICS_LOG_INTERVAL_SECONDS", "30"))
         self.lookback_seconds = int(os.getenv("EVENT_PUBLISHER_LOOKBACK_SECONDS", "600"))
         self.lookback_max_keys = int(os.getenv("EVENT_PUBLISHER_LOOKBACK_MAX_KEYS", "2000"))
+        self.tracing = get_tracing_service("message-relay")
         if self.lookback_seconds < 0:
             self.lookback_seconds = 0
         if self.lookback_max_keys < 0:
@@ -485,8 +492,12 @@ class EventPublisher:
             if isinstance(recent, list):
                 try:
                     self._recent_published_event_ids.load(recent)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to load recent_event_ids from checkpoint; continuing without in-memory dedup: %s",
+                        exc,
+                        exc_info=True,
+                    )
             self._recent_loaded_from_checkpoint = True
 
         index_keys = await self._list_next_index_keys(checkpoint)
@@ -682,14 +693,34 @@ class EventPublisher:
                         continue
 
                     key_bytes = (idx_data.get("aggregate_id") or idx_data.get("event_id") or "").encode("utf-8")
+                    meta_obj: Optional[Dict[str, Any]] = None
+                    if env and isinstance(env.metadata, dict):
+                        meta_obj = env.metadata
+                    elif raw_payload and isinstance(raw_payload, dict):
+                        meta_obj = raw_payload
+
+                    headers = kafka_headers_from_envelope_metadata(meta_obj) if meta_obj else []
+                    carrier = carrier_from_envelope_metadata(meta_obj) if meta_obj else {}
 
                     try:
-                        self.producer.produce(
-                            topic=topic,
-                            value=ev_bytes,
-                            key=key_bytes,
-                            callback=delivery_cb_factory(idx_key),
-                        )
+                        with attach_context_from_carrier(carrier or None, service_name="message-relay"):
+                            with self.tracing.span(
+                                "message_relay.produce",
+                                attributes={
+                                    "messaging.system": "kafka",
+                                    "messaging.destination": topic,
+                                    "messaging.destination_kind": "topic",
+                                    "event.id": event_id or idx_data.get("event_id") or "",
+                                    "event.aggregate_id": idx_data.get("aggregate_id") or "",
+                                },
+                            ):
+                                self.producer.produce(
+                                    topic=topic,
+                                    value=ev_bytes,
+                                    key=key_bytes,
+                                    headers=headers or None,
+                                    callback=delivery_cb_factory(idx_key),
+                                )
                     except BufferError:
                         # Local buffer is full: flush pending messages then retry.
                         self._metrics_total["kafka_produce_buffer_full"] += 1
@@ -701,12 +732,24 @@ class EventPublisher:
                                 raise RuntimeError(
                                     f"kafka delivery timed out while draining buffer (remaining={remaining})"
                                 )
-                        self.producer.produce(
-                            topic=topic,
-                            value=ev_bytes,
-                            key=key_bytes,
-                            callback=delivery_cb_factory(idx_key),
-                        )
+                        with attach_context_from_carrier(carrier or None, service_name="message-relay"):
+                            with self.tracing.span(
+                                "message_relay.produce_retry",
+                                attributes={
+                                    "messaging.system": "kafka",
+                                    "messaging.destination": topic,
+                                    "messaging.destination_kind": "topic",
+                                    "event.id": event_id or idx_data.get("event_id") or "",
+                                    "event.aggregate_id": idx_data.get("aggregate_id") or "",
+                                },
+                            ):
+                                self.producer.produce(
+                                    topic=topic,
+                                    value=ev_bytes,
+                                    key=key_bytes,
+                                    headers=headers or None,
+                                    callback=delivery_cb_factory(idx_key),
+                                )
 
                     self.producer.poll(0)
                     batch.append(
@@ -766,7 +809,10 @@ class EventPublisher:
         self.running = False
         
         if self.producer:
-            self.producer.flush()
+            try:
+                self.producer.flush()
+            except Exception as exc:
+                logger.warning("Kafka producer flush failed during shutdown: %s", exc, exc_info=True)
 
         logger.info("EventPublisher shut down successfully")
 
@@ -777,8 +823,20 @@ async def main():
     
     # 종료 시그널 핸들러
     def signal_handler(sig, frame):
-        logger.info(f"Received signal {sig}")
-        asyncio.create_task(relay.shutdown())
+        logger.info("Received signal %s", sig)
+        try:
+            task = asyncio.create_task(relay.shutdown())
+        except RuntimeError:
+            # No running event loop (best-effort shutdown).
+            return
+
+        def _done(t: asyncio.Task) -> None:
+            try:
+                t.result()
+            except Exception:
+                logger.exception("EventPublisher shutdown task failed")
+
+        task.add_done_callback(_done)
         
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)

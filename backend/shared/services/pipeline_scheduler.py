@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -15,6 +16,8 @@ from shared.services.pipeline_registry import PipelineRegistry
 from shared.models.pipeline_job import PipelineJob
 from shared.services.pipeline_control_plane_events import emit_pipeline_control_plane_event
 from shared.utils.time_utils import utcnow
+from shared.errors.error_envelope import build_error_envelope
+from shared.errors.error_types import ErrorCategory, ErrorCode
 
 logger = logging.getLogger(__name__)
 _utcnow = utcnow
@@ -42,17 +45,31 @@ class PipelineScheduler:
         registry: PipelineRegistry,
         queue: PipelineJobQueue,
         poll_seconds: int = 30,
+        *,
+        tracing: Any = None,
     ) -> None:
         self.registry = registry
         self.queue = queue
         self.poll_seconds = poll_seconds
+        self.tracing = tracing
         self._running = False
 
     async def run(self) -> None:
         self._running = True
         while self._running:
             try:
-                await self._tick()
+                ctx = (
+                    self.tracing.span(
+                        "pipeline_scheduler.tick",
+                        attributes={
+                            "pipeline.poll_seconds": int(self.poll_seconds),
+                        },
+                    )
+                    if self.tracing
+                    else nullcontext()
+                )
+                with ctx:
+                    await self._tick()
             except Exception as exc:
                 logger.error("PipelineScheduler tick failed: %s", exc)
             await asyncio.sleep(self.poll_seconds)
@@ -62,6 +79,11 @@ class PipelineScheduler:
 
     async def _tick(self) -> None:
         pipelines = await self.registry.list_scheduled_pipelines()
+        if self.tracing and hasattr(self.tracing, "set_span_attribute"):
+            try:
+                self.tracing.set_span_attribute("pipeline.scheduled_count", len(pipelines))
+            except Exception:
+                pass
         now = _utcnow()
         for pipeline in pipelines:
             interval = pipeline.get("schedule_interval_seconds")
@@ -210,22 +232,39 @@ class PipelineScheduler:
                 schedule_cron=cron,
                 branch=pipeline.get("branch"),
             )
-            await self.queue.publish(job)
-            await emit_pipeline_control_plane_event(
-                event_type="PIPELINE_SCHEDULE_TRIGGERED",
-                pipeline_id=str(pipeline.get("pipeline_id") or ""),
-                event_id=f"schedule-triggered-{job.job_id}",
-                data={
-                    "pipeline_id": str(pipeline.get("pipeline_id") or ""),
-                    "job_id": job.job_id,
-                    "db_name": pipeline.get("db_name"),
-                    "branch": pipeline.get("branch"),
-                    "trigger": trigger_reason,
-                    "schedule": {"interval_seconds": interval, "cron": cron},
-                    "dependencies": dependency_evaluation.details if dependency_evaluation else None,
-                },
+            ctx = (
+                self.tracing.span(
+                    "pipeline_scheduler.enqueue_job",
+                    attributes={
+                        "messaging.system": "kafka",
+                        "messaging.destination": getattr(self.queue, "topic", "pipeline-jobs"),
+                        "pipeline.id": str(pipeline.get("pipeline_id") or ""),
+                        "pipeline.job_id": job.job_id,
+                        "pipeline.db_name": str(pipeline.get("db_name") or ""),
+                        "pipeline.branch": str(pipeline.get("branch") or ""),
+                        "pipeline.trigger": trigger_reason,
+                    },
+                )
+                if self.tracing
+                else nullcontext()
             )
-            await self.registry.record_schedule_tick(pipeline_id=pipeline["pipeline_id"], scheduled_at=now)
+            with ctx:
+                await self.queue.publish(job)
+                await emit_pipeline_control_plane_event(
+                    event_type="PIPELINE_SCHEDULE_TRIGGERED",
+                    pipeline_id=str(pipeline.get("pipeline_id") or ""),
+                    event_id=f"schedule-triggered-{job.job_id}",
+                    data={
+                        "pipeline_id": str(pipeline.get("pipeline_id") or ""),
+                        "job_id": job.job_id,
+                        "db_name": pipeline.get("db_name"),
+                        "branch": pipeline.get("branch"),
+                        "trigger": trigger_reason,
+                        "schedule": {"interval_seconds": interval, "cron": cron},
+                        "dependencies": dependency_evaluation.details if dependency_evaluation else None,
+                    },
+                )
+                await self.registry.record_schedule_tick(pipeline_id=pipeline["pipeline_id"], scheduled_at=now)
 
     async def _record_scheduler_config_error(
         self,
@@ -240,9 +279,20 @@ class PipelineScheduler:
         if not pipeline_id:
             logger.warning("PipelineScheduler config error (%s) without pipeline_id: %s", error_key, detail)
             return
-        payload: dict[str, Any] = {"error": error_key, "detail": detail}
+        context: dict[str, Any] = {"error_key": error_key, "pipeline_id": pipeline_id}
         if extra:
-            payload["extra"] = extra
+            context["extra"] = extra
+        payload = build_error_envelope(
+            service_name="pipeline-scheduler",
+            message="Pipeline schedule configuration invalid",
+            detail=detail,
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            status_code=422,
+            errors=[detail],
+            context=context,
+            external_code="PIPELINE_SCHEDULE_INVALID",
+        )
         try:
             await self.registry.record_run(
                 pipeline_id=pipeline_id,

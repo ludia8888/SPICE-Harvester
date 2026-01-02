@@ -48,6 +48,7 @@ from shared.utils.language import coerce_localized_text, select_localized_text, 
 # Observability imports
 from shared.observability.tracing import get_tracing_service
 from shared.observability.metrics import get_metrics_collector
+from shared.observability.context_propagation import attach_context_from_kafka, kafka_headers_from_current_context
 
 # 로깅 설정
 logging.basicConfig(
@@ -605,67 +606,86 @@ class ProjectionWorker:
             if kind != "domain":
                 raise ValueError(f"Unexpected envelope kind for projection topic {msg.topic()}: {kind}")
 
-            event_data = envelope.model_dump(mode="json")
-            event_type = envelope.event_type
-            topic = msg.topic()
-            
-            logger.info(f"Processing event: {event_type} from topic: {topic}")
-            
-            # Durable idempotency + ordering guard (Postgres)
-            registry_event_id = envelope.event_id
-            registry_aggregate_id = envelope.aggregate_id
-            registry_sequence = envelope.sequence_number
-            handler = f"projection_worker:{topic}"
+            kafka_headers = msg.headers()
+            with attach_context_from_kafka(
+                kafka_headers=kafka_headers,
+                fallback_metadata=envelope.metadata if isinstance(envelope.metadata, dict) else None,
+                service_name="projection-worker",
+            ):
+                with self.tracing_service.span(
+                    "projection_worker.process_event",
+                    attributes={
+                        "messaging.system": "kafka",
+                        "messaging.destination": msg.topic(),
+                        "messaging.destination_kind": "topic",
+                        "messaging.kafka.partition": msg.partition(),
+                        "messaging.kafka.offset": msg.offset(),
+                        "event.id": str(envelope.event_id),
+                        "event.type": str(envelope.event_type),
+                        "event.aggregate_id": str(envelope.aggregate_id),
+                    },
+                ):
+                    event_data = envelope.model_dump(mode="json")
+                    event_type = envelope.event_type
+                    topic = msg.topic()
 
-            if self.processed_event_registry and registry_event_id:
-                claim = await self.processed_event_registry.claim(
-                    handler=handler,
-                    event_id=str(registry_event_id),
-                    aggregate_id=str(registry_aggregate_id) if registry_aggregate_id else None,
-                    sequence_number=int(registry_sequence) if registry_sequence is not None else None,
-                )
-                if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
-                    logger.info(
-                        f"Skipping {claim.decision.value} event_id={registry_event_id} "
-                        f"(aggregate_id={registry_aggregate_id}, seq={registry_sequence})"
-                    )
-                    return
-                if claim.decision == ClaimDecision.IN_PROGRESS:
-                    raise _InProgressLeaseError(
-                        f"Event {registry_event_id} is already in progress elsewhere (lease not expired)"
-                    )
-                registry_claimed = True
-                maybe_crash("projection_worker:after_claim", logger=logger)
+                    logger.info(f"Processing event: {event_type} from topic: {topic}")
 
-            heartbeat_task = None
-            if registry_claimed and self.processed_event_registry and registry_event_id:
-                heartbeat_task = asyncio.create_task(
-                    self._heartbeat_loop(handler=handler, event_id=str(registry_event_id))
-                )
-            
-            try:
-                maybe_crash("projection_worker:before_side_effect", logger=logger)
-                if topic == AppConfig.INSTANCE_EVENTS_TOPIC:
-                    await self._handle_instance_event(event_data)
-                elif topic == AppConfig.ONTOLOGY_EVENTS_TOPIC:
-                    await self._handle_ontology_event(event_data)
-                else:
-                    logger.warning(f"Unknown topic: {topic}")
-                maybe_crash("projection_worker:after_side_effect", logger=logger)
+                    # Durable idempotency + ordering guard (Postgres)
+                    registry_event_id = envelope.event_id
+                    registry_aggregate_id = envelope.aggregate_id
+                    registry_sequence = envelope.sequence_number
+                    handler = f"projection_worker:{topic}"
 
-                if registry_claimed and self.processed_event_registry and registry_event_id:
-                    maybe_crash("projection_worker:before_mark_done", logger=logger)
-                    await self.processed_event_registry.mark_done(
-                        handler=handler,
-                        event_id=str(registry_event_id),
-                        aggregate_id=str(registry_aggregate_id) if registry_aggregate_id else None,
-                        sequence_number=int(registry_sequence) if registry_sequence is not None else None,
-                    )
-            finally:
-                if heartbeat_task:
-                    heartbeat_task.cancel()
-                    with suppress(asyncio.CancelledError):
-                        await heartbeat_task
+                    if self.processed_event_registry and registry_event_id:
+                        claim = await self.processed_event_registry.claim(
+                            handler=handler,
+                            event_id=str(registry_event_id),
+                            aggregate_id=str(registry_aggregate_id) if registry_aggregate_id else None,
+                            sequence_number=int(registry_sequence) if registry_sequence is not None else None,
+                        )
+                        if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
+                            logger.info(
+                                f"Skipping {claim.decision.value} event_id={registry_event_id} "
+                                f"(aggregate_id={registry_aggregate_id}, seq={registry_sequence})"
+                            )
+                            return
+                        if claim.decision == ClaimDecision.IN_PROGRESS:
+                            raise _InProgressLeaseError(
+                                f"Event {registry_event_id} is already in progress elsewhere (lease not expired)"
+                            )
+                        registry_claimed = True
+                        maybe_crash("projection_worker:after_claim", logger=logger)
+
+                    heartbeat_task = None
+                    if registry_claimed and self.processed_event_registry and registry_event_id:
+                        heartbeat_task = asyncio.create_task(
+                            self._heartbeat_loop(handler=handler, event_id=str(registry_event_id))
+                        )
+
+                    try:
+                        maybe_crash("projection_worker:before_side_effect", logger=logger)
+                        if topic == AppConfig.INSTANCE_EVENTS_TOPIC:
+                            await self._handle_instance_event(event_data)
+                        elif topic == AppConfig.ONTOLOGY_EVENTS_TOPIC:
+                            await self._handle_ontology_event(event_data)
+                        else:
+                            logger.warning(f"Unknown topic: {topic}")
+                        maybe_crash("projection_worker:after_side_effect", logger=logger)
+
+                        if registry_claimed and self.processed_event_registry and registry_event_id:
+                            maybe_crash("projection_worker:before_mark_done", logger=logger)
+                            await self.processed_event_registry.mark_done(
+                                handler=handler,
+                                event_id=str(registry_event_id),
+                                aggregate_id=str(registry_aggregate_id) if registry_aggregate_id else None,
+                                sequence_number=int(registry_sequence) if registry_sequence is not None else None,
+                            )
+                    finally:
+                        if heartbeat_task:
+                            heartbeat_task.cancel()
+                            with suppress(asyncio.CancelledError):
+                                await heartbeat_task
                 
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse event JSON: {e}")
@@ -2402,24 +2422,54 @@ class ProjectionWorker:
     async def _send_to_dlq(self, msg, error):
         """실패한 메시지를 DLQ로 전송"""
         try:
+            if not self.producer:
+                logger.error("DLQ producer not configured; dropping DLQ message: %s", error)
+                return
+
+            fallback_metadata = None
+            try:
+                env = EventEnvelope.model_validate_json(msg.value())
+                if isinstance(env.metadata, dict):
+                    fallback_metadata = env.metadata
+            except Exception:
+                fallback_metadata = None
+
             dlq_message = {
                 'original_topic': msg.topic(),
                 'original_partition': msg.partition(),
                 'original_offset': msg.offset(),
-                'original_value': msg.value().decode('utf-8'),
+                'original_value': msg.value().decode('utf-8', errors='replace') if msg.value() else None,
                 'error': str(error),
                 'timestamp': datetime.now(timezone.utc).isoformat(),
                 'worker': 'projection-worker'
             }
-            
-            self.producer.produce(
-                self.dlq_topic,
-                key=f"{msg.topic()}:{msg.partition()}:{msg.offset()}",
-                value=json.dumps(dlq_message)
-            )
-            self.producer.flush()
-            
-            logger.info(f"Message sent to DLQ: {dlq_message}")
+
+            kafka_headers = msg.headers()
+            with attach_context_from_kafka(
+                kafka_headers=kafka_headers,
+                fallback_metadata=fallback_metadata,
+                service_name="projection-worker",
+            ):
+                headers = kafka_headers_from_current_context()
+                with self.tracing_service.span(
+                    "projection_worker.dlq_produce",
+                    attributes={
+                        "messaging.system": "kafka",
+                        "messaging.destination": self.dlq_topic,
+                        "messaging.destination_kind": "topic",
+                        "messaging.kafka.partition": msg.partition(),
+                        "messaging.kafka.offset": msg.offset(),
+                    },
+                ):
+                    self.producer.produce(
+                        self.dlq_topic,
+                        key=f"{msg.topic()}:{msg.partition()}:{msg.offset()}",
+                        value=json.dumps(dlq_message, ensure_ascii=False, default=str).encode("utf-8"),
+                        headers=headers or None,
+                    )
+                    self.producer.flush()
+
+            logger.info("Message sent to DLQ (topic=%s partition=%s offset=%s)", msg.topic(), msg.partition(), msg.offset())
             
         except Exception as e:
             logger.error(f"Failed to send message to DLQ: {e}")

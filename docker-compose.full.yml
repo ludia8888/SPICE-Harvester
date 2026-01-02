@@ -24,132 +24,202 @@ services:
       service: oms
     environment:
       - ENABLE_PULL_REQUESTS=true
+      # Dev-stack default: allow direct writes on protected branches (smoke/E2E tests + README flow).
+      # Set to true in environments that require proposal workflow on protected branches (main/prod).
+      - ONTOLOGY_REQUIRE_PROPOSALS=false
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORT_OTLP=true
+      - OTEL_ENABLE_TRACING=true
     depends_on:
       - terminusdb
       - postgres
       - minio
+      - otel-collector
       
   bff:
     extends:
       file: backend/docker-compose.yml
       service: bff
     environment:
-      - BFF_REQUIRE_AUTH=false
-      - ALLOW_INSECURE_BFF_AUTH_DISABLE=true
       - INPUT_SANITIZER_MAX_LIST_ITEMS=10000
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORT_OTLP=true
+      - OTEL_ENABLE_TRACING=true
     depends_on:
       - oms
       - funnel
       - postgres
       - lakefs
+      - otel-collector
       
   funnel:
     extends:
       file: backend/docker-compose.yml
       service: funnel
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORT_OTLP=true
+      - OTEL_ENABLE_TRACING=true
+    depends_on:
+      - otel-collector
       
   message-relay:
     extends:
       file: backend/docker-compose.yml
       service: message-relay
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORT_OTLP=true
+      - OTEL_ENABLE_TRACING=true
     depends_on:
       - postgres
       - kafka
       - minio
+      - otel-collector
       
   ontology-worker:
     extends:
       file: backend/docker-compose.yml
       service: ontology-worker
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORT_OTLP=true
+      - OTEL_ENABLE_TRACING=true
     depends_on:
       - terminusdb
       - kafka
       - message-relay
       - postgres
+      - otel-collector
       
   instance-worker:
     extends:
       file: backend/docker-compose.yml
       service: instance-worker
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORT_OTLP=true
+      - OTEL_ENABLE_TRACING=true
     depends_on:
       - terminusdb
       - kafka
       - message-relay
       - postgres
       - minio
+      - otel-collector
       
   projection-worker:
     extends:
       file: backend/docker-compose.yml
       service: projection-worker
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORT_OTLP=true
+      - OTEL_ENABLE_TRACING=true
     depends_on:
       - elasticsearch
       - redis
       - kafka
       - message-relay
       - postgres
+      - otel-collector
 
   search-projection-worker:
     extends:
       file: backend/docker-compose.yml
       service: search-projection-worker
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORT_OTLP=true
+      - OTEL_ENABLE_TRACING=true
     depends_on:
       - elasticsearch
       - kafka
+      - otel-collector
 
   # Foundry-style connector runtime (trigger + sync)
   connector-trigger-service:
     extends:
       file: backend/docker-compose.yml
       service: connector-trigger-service
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORT_OTLP=true
+      - OTEL_ENABLE_TRACING=true
     depends_on:
       - kafka
       - postgres
+      - otel-collector
 
   connector-sync-worker:
     extends:
       file: backend/docker-compose.yml
       service: connector-sync-worker
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORT_OTLP=true
+      - OTEL_ENABLE_TRACING=true
     depends_on:
       - bff
       - kafka
       - postgres
+      - otel-collector
 
   pipeline-worker:
     extends:
       file: backend/docker-compose.yml
       service: pipeline-worker
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORT_OTLP=true
+      - OTEL_ENABLE_TRACING=true
     depends_on:
       - kafka
       - postgres
       - minio
       - lakefs
+      - otel-collector
 
   pipeline-scheduler:
     extends:
       file: backend/docker-compose.yml
       service: pipeline-scheduler
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORT_OTLP=true
+      - OTEL_ENABLE_TRACING=true
     depends_on:
       - kafka
       - postgres
       - lakefs
+      - otel-collector
 
   objectify-worker:
     extends:
       file: backend/docker-compose.yml
       service: objectify-worker
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORT_OTLP=true
+      - OTEL_ENABLE_TRACING=true
     depends_on:
       - kafka
       - postgres
       - lakefs
       - oms
+      - otel-collector
 
   ingest-reconciler-worker:
     extends:
       file: backend/docker-compose.yml
       service: ingest-reconciler-worker
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORT_OTLP=true
+      - OTEL_ENABLE_TRACING=true
     depends_on:
       - postgres
+      - otel-collector
       
   # Database services
   postgres:
@@ -207,6 +277,30 @@ services:
     depends_on:
       - lakefs
       - minio-init
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.53
+    container_name: spice_jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"
+    networks:
+      - spice_network
+
+  otel-collector:
+    image: otel/opentelemetry-collector:0.97.0
+    container_name: spice_otel_collector
+    command: ["--config=/etc/otelcol/config.yml"]
+    volumes:
+      - ./otel-collector-config.yml:/etc/otelcol/config.yml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    depends_on:
+      - jaeger
+    networks:
+      - spice_network
 
 volumes:
   terminusdb_data:

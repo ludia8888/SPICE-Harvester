@@ -38,8 +38,12 @@ from pyspark.sql.types import (
 
 from data_connector.google_sheets.service import GoogleSheetsService
 from shared.config.service_config import ServiceConfig
+from shared.errors.error_envelope import build_error_envelope
+from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.models.event_envelope import EventEnvelope
 from shared.models.pipeline_job import PipelineJob
+from shared.observability.context_propagation import attach_context_from_kafka, kafka_headers_from_current_context
+from shared.observability.tracing import get_tracing_service
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
 from shared.services.lakefs_storage_service import LakeFSStorageService
@@ -426,6 +430,53 @@ class PipelineWorker:
         self.lock_acquire_timeout_seconds = parse_int_env(
             "PIPELINE_LOCK_ACQUIRE_TIMEOUT_SECONDS", 3600, min_value=30, max_value=86_400
         )
+        self.tracing = get_tracing_service("pipeline-worker")
+
+    def _build_error_payload(
+        self,
+        *,
+        message: str,
+        errors: Optional[List[str]] = None,
+        code: ErrorCode,
+        category: ErrorCategory,
+        status_code: int,
+        external_code: Optional[str] = None,
+        stage: Optional[str] = None,
+        job: Optional[PipelineJob] = None,
+        pipeline_id: Optional[str] = None,
+        node_id: Optional[str] = None,
+        mode: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        context_payload: Dict[str, Any] = dict(context or {})
+        if stage:
+            context_payload["stage"] = stage
+        if job:
+            context_payload.setdefault("job_id", job.job_id)
+            context_payload.setdefault("pipeline_id", str(job.pipeline_id))
+            context_payload.setdefault("db_name", job.db_name)
+            context_payload.setdefault("branch", job.branch or "main")
+            context_payload.setdefault("mode", job.mode)
+            context_payload.setdefault("node_id", job.node_id)
+        if pipeline_id:
+            context_payload.setdefault("pipeline_id", pipeline_id)
+        if node_id:
+            context_payload.setdefault("node_id", node_id)
+        if mode:
+            context_payload.setdefault("mode", mode)
+        if not context_payload:
+            context_payload = None
+        return build_error_envelope(
+            service_name=self.pipeline_label or "pipeline-worker",
+            message=message,
+            detail=message,
+            code=code,
+            category=category,
+            status_code=status_code,
+            errors=errors,
+            context=context_payload,
+            external_code=external_code,
+        )
 
     async def initialize(self) -> None:
         self.dataset_registry = DatasetRegistry()
@@ -521,8 +572,8 @@ class PipelineWorker:
         if self.dlq_producer:
             try:
                 self.dlq_producer.flush(5)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("DLQ producer flush failed during shutdown: %s", exc, exc_info=True)
             self.dlq_producer = None
         if self.http:
             await self.http.aclose()
@@ -567,6 +618,7 @@ class PipelineWorker:
                     logger.error("Kafka error: %s", msg.error())
                     continue
 
+                kafka_headers = msg.headers()
                 raw_value: Optional[bytes] = None
                 raw_text: Optional[str] = None
                 payload: Optional[Dict[str, Any]] = None
@@ -619,89 +671,111 @@ class PipelineWorker:
                     )
                     try:
                         await self._best_effort_record_invalid_job(payload, error=str(exc))
-                    except Exception:
-                        pass
+                    except Exception as record_exc:
+                        logger.warning(
+                            "Failed to record invalid pipeline job (best-effort): %s",
+                            record_exc,
+                            exc_info=True,
+                        )
                     if self.consumer:
                         self.consumer.commit(msg)
                     continue
 
-                claim = None
-                heartbeat_task: Optional[asyncio.Task] = None
-                try:
-                    if not self.processed:
-                        raise RuntimeError("ProcessedEventRegistry not available")
-
-                    claim = await self.processed.claim(
-                        handler=self.handler,
-                        event_id=job.job_id,
-                        aggregate_id=job.pipeline_id,
-                    )
-
-                    if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
-                        if self.consumer:
-                            self.consumer.commit(msg)
-                        continue
-
-                    if claim.decision == ClaimDecision.IN_PROGRESS:
-                        await asyncio.sleep(2)
-                        if self.consumer:
-                            self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
-                        continue
-
-                    heartbeat_task = asyncio.create_task(
-                        self._heartbeat_loop(handler=self.handler, event_id=job.job_id)
-                    )
-
-                    await self._execute_job(job)
-                    await self.processed.mark_done(handler=self.handler, event_id=job.job_id)
-                    if self.consumer:
-                        self.consumer.commit(msg)
-                except Exception as exc:
-                    err = str(exc)
-                    attempt_count = int(getattr(claim, "attempt_count", 1) or 1)
-                    if self.processed and job:
+                with attach_context_from_kafka(kafka_headers=kafka_headers, service_name="pipeline-worker"):
+                    with self.tracing.span(
+                        "pipeline_worker.process_job",
+                        attributes={
+                            "messaging.system": "kafka",
+                            "messaging.destination": msg.topic(),
+                            "messaging.destination_kind": "topic",
+                            "messaging.kafka.partition": msg.partition(),
+                            "messaging.kafka.offset": msg.offset(),
+                            "pipeline.job_id": job.job_id,
+                            "pipeline.pipeline_id": job.pipeline_id,
+                            "pipeline.db_name": job.db_name,
+                            "pipeline.branch": job.branch,
+                            "pipeline.mode": getattr(job, "mode", None),
+                        },
+                    ):
+                        claim = None
+                        heartbeat_task: Optional[asyncio.Task] = None
                         try:
-                            await self.processed.mark_failed(handler=self.handler, event_id=job.job_id, error=err)
-                        except Exception as mark_err:
-                            logger.warning("Failed to mark pipeline job failed: %s", mark_err)
+                            if not self.processed:
+                                raise RuntimeError("ProcessedEventRegistry not available")
 
-                    if attempt_count >= self.max_retries:
-                        logger.error(
-                            "Pipeline job max retries exceeded; sending to DLQ (job_id=%s attempt=%s)",
-                            getattr(job, "job_id", None),
-                            attempt_count,
-                        )
-                        await self._send_to_dlq(
-                            msg=msg,
-                            stage="execute",
-                            error=err,
-                            payload_text=raw_text,
-                            payload_obj=payload,
-                            job=job,
-                            attempt_count=attempt_count,
-                        )
-                        if self.consumer:
-                            self.consumer.commit(msg)
-                        continue
+                            claim = await self.processed.claim(
+                                handler=self.handler,
+                                event_id=job.job_id,
+                                aggregate_id=job.pipeline_id,
+                            )
 
-                    backoff_s = min(self.backoff_max, int(self.backoff_base * (2 ** max(0, attempt_count - 1))))
-                    logger.warning(
-                        "Pipeline job failed; will retry (job_id=%s attempt=%s backoff=%ss): %s",
-                        getattr(job, "job_id", None),
-                        attempt_count,
-                        backoff_s,
-                        err,
-                    )
-                    await asyncio.sleep(backoff_s)
-                    if self.consumer:
-                        self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
-                finally:
-                    if heartbeat_task:
-                        heartbeat_task.cancel()
-                        try:
-                            await heartbeat_task
-                        except asyncio.CancelledError:
-                            pass
+                            if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
+                                if self.consumer:
+                                    self.consumer.commit(msg)
+                                continue
+
+                            if claim.decision == ClaimDecision.IN_PROGRESS:
+                                await asyncio.sleep(2)
+                                if self.consumer:
+                                    self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
+                                continue
+
+                            heartbeat_task = asyncio.create_task(
+                                self._heartbeat_loop(handler=self.handler, event_id=job.job_id)
+                            )
+
+                            await self._execute_job(job)
+                            await self.processed.mark_done(handler=self.handler, event_id=job.job_id)
+                            if self.consumer:
+                                self.consumer.commit(msg)
+                        except Exception as exc:
+                            err = str(exc)
+                            attempt_count = int(getattr(claim, "attempt_count", 1) or 1)
+                            if self.processed and job:
+                                try:
+                                    await self.processed.mark_failed(handler=self.handler, event_id=job.job_id, error=err)
+                                except Exception as mark_err:
+                                    logger.warning("Failed to mark pipeline job failed: %s", mark_err)
+
+                            if attempt_count >= self.max_retries:
+                                logger.error(
+                                    "Pipeline job max retries exceeded; sending to DLQ (job_id=%s attempt=%s)",
+                                    getattr(job, "job_id", None),
+                                    attempt_count,
+                                )
+                                await self._send_to_dlq(
+                                    msg=msg,
+                                    stage="execute",
+                                    error=err,
+                                    payload_text=raw_text,
+                                    payload_obj=payload,
+                                    job=job,
+                                    attempt_count=attempt_count,
+                                )
+                                if self.consumer:
+                                    self.consumer.commit(msg)
+                                continue
+
+                            backoff_s = min(self.backoff_max, int(self.backoff_base * (2 ** max(0, attempt_count - 1))))
+                            logger.warning(
+                                "Pipeline job failed; will retry (job_id=%s attempt=%s backoff=%ss): %s",
+                                getattr(job, "job_id", None),
+                                attempt_count,
+                                backoff_s,
+                                err,
+                            )
+                            await asyncio.sleep(backoff_s)
+                            if self.consumer:
+                                self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
+                        finally:
+                            if heartbeat_task:
+                                heartbeat_task.cancel()
+                                try:
+                                    await heartbeat_task
+                                except asyncio.CancelledError:
+                                    pass
+                                except Exception:
+                                    pass
         finally:
             await self.close()
 
@@ -759,7 +833,8 @@ class PipelineWorker:
         try:
             key = f"{msg.topic()}:{msg.partition()}:{msg.offset()}".encode("utf-8")
             value = json.dumps(dlq_message, ensure_ascii=False, default=str).encode("utf-8")
-            self.dlq_producer.produce(self.dlq_topic, key=key, value=value)
+            headers = kafka_headers_from_current_context()
+            self.dlq_producer.produce(self.dlq_topic, key=key, value=value, headers=headers or None)
             self.dlq_producer.flush(10)
             logger.info("Sent message to pipeline DLQ (topic=%s stage=%s)", self.dlq_topic, stage)
         except Exception as exc:
@@ -787,7 +862,18 @@ class PipelineWorker:
         if not resolved_pipeline_id:
             return
 
-        payload_obj = {"errors": [error], "stage": "validate"}
+        payload_obj = self._build_error_payload(
+            message="Pipeline job payload invalid",
+            errors=[error],
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            status_code=422,
+            external_code="PIPELINE_REQUEST_INVALID",
+            stage="validate",
+            pipeline_id=resolved_pipeline_id,
+            mode=mode,
+            context={"job_id": job_id, "db_name": db_name, "branch": branch},
+        )
         try:
             await self.pipeline_registry.record_run(
                 pipeline_id=resolved_pipeline_id,
@@ -1092,26 +1178,41 @@ class PipelineWorker:
             )
         validation_errors.extend(self._validate_required_subgraph(nodes, incoming, required_node_ids))
         if validation_errors:
+            validation_payload = self._build_error_payload(
+                message="Pipeline validation failed",
+                errors=validation_errors,
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                category=ErrorCategory.INPUT,
+                status_code=422,
+                external_code="PIPELINE_DEFINITION_INVALID",
+                stage="validate",
+                job=job,
+                context={
+                    "execution_semantics": execution_semantics,
+                    "pipeline_spec_hash": pipeline_spec_hash,
+                    "pipeline_spec_commit_id": pipeline_spec_commit_id,
+                },
+            )
             if is_preview:
                 await record_preview(
                     status="FAILED",
                     row_count=0,
-                    sample_json={"job_id": job.job_id, "errors": validation_errors},
+                    sample_json=validation_payload,
                     job_id=job.job_id,
                     node_id=job.node_id,
                 )
             elif not is_build:
                 await record_build(
                     status="FAILED",
-                    output_json={"job_id": job.job_id, "errors": validation_errors},
+                    output_json=validation_payload,
                 )
             await record_run(
                 job_id=job.job_id,
                 mode=run_mode,
                 status="FAILED",
                 node_id=job.node_id,
-                sample_json={"errors": validation_errors} if is_preview else None,
-                output_json={"errors": validation_errors} if not is_preview else None,
+                sample_json=validation_payload if is_preview else None,
+                output_json=validation_payload if not is_preview else None,
                 finished_at=utcnow(),
             )
             await record_artifact(status="FAILED", errors=validation_errors)
@@ -1165,26 +1266,38 @@ class PipelineWorker:
 
                 schema_errors = self._validate_schema_checks(df, metadata.get("schemaChecks") or [], node_id)
                 if schema_errors:
+                    schema_payload = self._build_error_payload(
+                        message="Pipeline schema checks failed",
+                        errors=schema_errors,
+                        code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                        category=ErrorCategory.INPUT,
+                        status_code=422,
+                        external_code="PIPELINE_SCHEMA_CHECK_FAILED",
+                        stage="schema_checks",
+                        job=job,
+                        node_id=node_id,
+                        context={"execution_semantics": execution_semantics},
+                    )
                     if is_preview:
                         await record_preview(
                             status="FAILED",
                             row_count=0,
-                            sample_json={"job_id": job.job_id, "errors": schema_errors},
+                            sample_json=schema_payload,
                             job_id=job.job_id,
                             node_id=job.node_id,
                         )
                     elif not is_build:
                         await record_build(
                             status="FAILED",
-                            output_json={"job_id": job.job_id, "errors": schema_errors},
+                            output_json=schema_payload,
                         )
                     await record_run(
                         job_id=job.job_id,
                         mode=run_mode,
                         status="FAILED",
                         node_id=job.node_id,
-                        sample_json={"errors": schema_errors} if is_preview else None,
-                        output_json={"errors": schema_errors} if not is_preview else None,
+                        sample_json=schema_payload if is_preview else None,
+                        output_json=schema_payload if not is_preview else None,
                         finished_at=utcnow(),
                     )
                     await record_artifact(status="FAILED", errors=schema_errors)
@@ -1211,10 +1324,22 @@ class PipelineWorker:
                 schema_contract = definition.get("schemaContract") or definition.get("schema_contract") or []
                 contract_errors = self._validate_schema_contract(output_df, schema_contract)
                 if contract_errors:
+                    contract_payload = self._build_error_payload(
+                        message="Pipeline schema contract failed",
+                        errors=contract_errors,
+                        code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                        category=ErrorCategory.INPUT,
+                        status_code=422,
+                        external_code="PIPELINE_SCHEMA_CONTRACT_FAILED",
+                        stage="schema_contract",
+                        job=job,
+                        node_id=primary_id,
+                        context={"execution_semantics": execution_semantics},
+                    )
                     await record_preview(
                         status="FAILED",
                         row_count=row_count,
-                        sample_json={"job_id": job.job_id, "errors": contract_errors},
+                        sample_json=contract_payload,
                         job_id=job.job_id,
                         node_id=job.node_id,
                     )
@@ -1224,7 +1349,7 @@ class PipelineWorker:
                         status="FAILED",
                         node_id=job.node_id,
                         row_count=row_count,
-                        sample_json={"errors": contract_errors},
+                        sample_json=contract_payload,
                         input_lakefs_commits=input_commit_payload,
                         finished_at=utcnow(),
                     )
@@ -1380,13 +1505,25 @@ class PipelineWorker:
                     schema_contract = definition.get("schemaContract") or definition.get("schema_contract") or []
                     contract_errors = self._validate_schema_contract(output_df, schema_contract)
                     if contract_errors:
+                        contract_payload = self._build_error_payload(
+                            message="Pipeline schema contract failed",
+                            errors=contract_errors,
+                            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                            category=ErrorCategory.INPUT,
+                            status_code=422,
+                            external_code="PIPELINE_SCHEMA_CONTRACT_FAILED",
+                            stage="schema_contract",
+                            job=job,
+                            node_id=node_id,
+                            context={"execution_semantics": execution_semantics},
+                        )
                         await record_run(
                             job_id=job.job_id,
                             mode="build",
                             status="FAILED",
                             node_id=node_id,
                             row_count=delta_row_count,
-                            output_json={"errors": contract_errors},
+                            output_json=contract_payload,
                             input_lakefs_commits=input_commit_payload,
                             finished_at=utcnow(),
                         )
@@ -1445,13 +1582,25 @@ class PipelineWorker:
                         ),
                     )
                     if expectation_errors:
+                        expectation_payload = self._build_error_payload(
+                            message="Pipeline expectations failed",
+                            errors=expectation_errors,
+                            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                            category=ErrorCategory.INPUT,
+                            status_code=422,
+                            external_code="PIPELINE_EXPECTATIONS_FAILED",
+                            stage="expectations",
+                            job=job,
+                            node_id=node_id,
+                            context={"execution_semantics": execution_semantics},
+                        )
                         await record_run(
                             job_id=job.job_id,
                             mode="build",
                             status="FAILED",
                             node_id=node_id,
                             row_count=delta_row_count,
-                            output_json={"errors": expectation_errors},
+                            output_json=expectation_payload,
                             input_lakefs_commits=input_commit_payload,
                             finished_at=utcnow(),
                         )
@@ -1691,9 +1840,21 @@ class PipelineWorker:
                 schema_contract = definition.get("schemaContract") or definition.get("schema_contract") or []
                 contract_errors = self._validate_schema_contract(output_df, schema_contract)
                 if contract_errors:
+                    contract_payload = self._build_error_payload(
+                        message="Pipeline schema contract failed",
+                        errors=contract_errors,
+                        code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                        category=ErrorCategory.INPUT,
+                        status_code=422,
+                        external_code="PIPELINE_SCHEMA_CONTRACT_FAILED",
+                        stage="schema_contract",
+                        job=job,
+                        node_id=node_id,
+                        context={"execution_semantics": execution_semantics},
+                    )
                     await record_build(
                         status="FAILED",
-                        output_json={"job_id": job.job_id, "errors": contract_errors, "node_id": node_id},
+                        output_json=contract_payload,
                     )
                     await record_run(
                         job_id=job.job_id,
@@ -1701,7 +1862,7 @@ class PipelineWorker:
                         status="FAILED",
                         node_id=node_id,
                         row_count=delta_row_count,
-                        output_json={"errors": contract_errors},
+                        output_json=contract_payload,
                         input_lakefs_commits=input_commit_payload,
                         finished_at=utcnow(),
                     )
@@ -1760,9 +1921,21 @@ class PipelineWorker:
                     ),
                 )
                 if expectation_errors:
+                    expectation_payload = self._build_error_payload(
+                        message="Pipeline expectations failed",
+                        errors=expectation_errors,
+                        code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                        category=ErrorCategory.INPUT,
+                        status_code=422,
+                        external_code="PIPELINE_EXPECTATIONS_FAILED",
+                        stage="expectations",
+                        job=job,
+                        node_id=node_id,
+                        context={"execution_semantics": execution_semantics},
+                    )
                     await record_build(
                         status="FAILED",
-                        output_json={"job_id": job.job_id, "errors": expectation_errors, "node_id": node_id},
+                        output_json=expectation_payload,
                     )
                     await record_run(
                         job_id=job.job_id,
@@ -1770,7 +1943,7 @@ class PipelineWorker:
                         status="FAILED",
                         node_id=node_id,
                         row_count=delta_row_count,
-                        output_json={"errors": expectation_errors},
+                        output_json=expectation_payload,
                         input_lakefs_commits=input_commit_payload,
                         finished_at=utcnow(),
                     )
@@ -2130,26 +2303,37 @@ class PipelineWorker:
                 output={"outputs": build_outputs},
             )
         except Exception as exc:
+            execution_payload = self._build_error_payload(
+                message="Pipeline execution failed",
+                errors=[str(exc)],
+                code=ErrorCode.INTERNAL_ERROR,
+                category=ErrorCategory.INTERNAL,
+                status_code=500,
+                external_code="PIPELINE_EXECUTION_FAILED",
+                stage="execution",
+                job=job,
+                context={"exception_type": exc.__class__.__name__},
+            )
             if is_preview:
                 await record_preview(
                     status="FAILED",
                     row_count=0,
-                    sample_json={"job_id": job.job_id, "errors": [str(exc)]},
+                    sample_json=execution_payload,
                     job_id=job.job_id,
                     node_id=job.node_id,
                 )
             elif not is_build:
                 await record_build(
                     status="FAILED",
-                    output_json={"job_id": job.job_id, "errors": [str(exc)]},
+                    output_json=execution_payload,
                 )
             await record_run(
                 job_id=job.job_id,
                 mode=run_mode,
                 status="FAILED",
                 node_id=job.node_id,
-                sample_json={"errors": [str(exc)]} if is_preview else None,
-                output_json={"errors": [str(exc)]} if not is_preview else None,
+                sample_json=execution_payload if is_preview else None,
+                output_json=execution_payload if not is_preview else None,
                 input_lakefs_commits=input_commit_payload,
                 finished_at=utcnow(),
             )

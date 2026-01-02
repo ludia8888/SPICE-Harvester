@@ -24,9 +24,8 @@ Based on Context7 analysis recommendations, we've implemented comprehensive obse
 
 3. **Context Propagation** (`shared/observability/context_propagation.py`)
    - W3C Trace Context standard
-   - Cross-service trace propagation
-   - Baggage for metadata propagation
-   - Correlation ID tracking
+   - Kafka header propagation for `confluent_kafka` (manual)
+   - Durable propagation via envelope/outbox metadata (`traceparent`/`tracestate`/`baggage`)
 
 ## Services Coverage
 
@@ -46,6 +45,10 @@ Based on Context7 analysis recommendations, we've implemented comprehensive obse
   - Schema suggestion metrics
 
 ### Worker Services
+- **Message Relay**
+  - Event publish spans (S3/MinIO → Kafka)
+  - Trace context propagation via Kafka headers
+
 - **Ontology Worker**
   - Command processing traces
   - TerminusDB operation metrics
@@ -58,6 +61,33 @@ Based on Context7 analysis recommendations, we've implemented comprehensive obse
   - Elasticsearch indexing metrics
   - Event projection traces
 
+- **Search Projection Worker**
+  - Elasticsearch index/update spans
+  - Trace context propagation via Kafka headers
+
+- **Connector Trigger Service**
+  - Poll + outbox publish spans
+  - Trace context propagation via Kafka headers (manual)
+
+- **Connector Sync Worker**
+  - Consumer spans + DLQ spans (manual)
+  - Trace context propagation via Kafka headers
+
+- **Pipeline Scheduler**
+  - Tick spans + enqueue spans
+
+- **Pipeline Worker**
+  - Consumer spans + DLQ spans (manual)
+  - Trace context propagation via Kafka headers
+
+- **Objectify Worker**
+  - Consumer spans + DLQ spans (manual)
+  - Trace context propagation via Kafka headers
+
+- **Ingest Reconciler Worker**
+  - Reconcile tick spans (background loop)
+  - HTTPX spans for alert delivery (when enabled)
+
 ## Configuration
 
 ### Environment Variables
@@ -69,7 +99,7 @@ OTEL_SERVICE_VERSION=1.0.0
 OTEL_ENVIRONMENT=production
 
 # Exporter endpoints
-OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 JAEGER_ENDPOINT=localhost:14250
 
 # Sampling configuration
@@ -95,7 +125,10 @@ The following libraries are automatically instrumented:
 - HTTPX (HTTP client)
 - AsyncPG (PostgreSQL)
 - Redis
-- Kafka
+
+Kafka notes:
+- `opentelemetry-instrumentation-kafka` does not cover `confluent_kafka` reliably.
+- This repo therefore implements **manual** Kafka propagation + explicit producer/consumer spans.
 
 ### Manual Instrumentation
 
@@ -135,10 +168,15 @@ async def process_data():
 Trace context is automatically propagated across services:
 
 ```
-BFF Service → OMS Service → Ontology Worker → TerminusDB
-     ↓             ↓              ↓              ↓
-  [Trace ID: abc123] → [Same Trace ID] → [Same Trace ID]
+BFF Service → OMS Service → Event Store(S3) → Message Relay → Kafka → Workers
+     ↓             ↓              ↓              ↓            ↓        ↓
+  [Trace ID: abc123] → [Same Trace ID] → [Same Trace ID] → [Same Trace ID] → ...
 ```
+
+Kafka propagation is done via:
+- Kafka headers: `traceparent` / `tracestate` / `baggage`
+- Stored metadata: the same keys are persisted into `EventEnvelope.metadata` (and outbox payload dicts),
+  so publishers like `message-relay` can keep the original trace context.
 
 ## Metrics
 
@@ -230,27 +268,13 @@ Metrics exporter:
 
 ### Local Development
 
-1. Start Jaeger:
+Use the full compose (includes Jaeger + OTel Collector):
 ```bash
-docker run -d --name jaeger \
-  -p 6831:6831/udp \
-  -p 16686:16686 \
-  -p 14250:14250 \
-  jaegertracing/all-in-one:latest
+docker-compose -f docker-compose.full.yml up -d
 ```
 
-2. Start OTLP Collector:
-```bash
-docker run -d --name otel-collector \
-  -p 4317:4317 \
-  -p 4318:4318 \
-  otel/opentelemetry-collector:latest
-```
-
-3. Access Jaeger UI:
-```
-http://localhost:16686
-```
+Then open Jaeger UI:
+`http://localhost:16686`
 
 ### Production
 

@@ -559,8 +559,14 @@ async def rollback(
                 },
                 error=str(e),
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "Audit log failed: VERSION_ROLLBACK_FAILED (db=%s branch=%s): %s",
+                db_name,
+                branch,
+                exc,
+                exc_info=True,
+            )
 
         if "not found" in str(e).lower():
             raise HTTPException(

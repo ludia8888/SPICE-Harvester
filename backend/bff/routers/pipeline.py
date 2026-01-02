@@ -21,6 +21,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 
 from shared.models.requests import ApiResponse
 from shared.models.event_envelope import EventEnvelope
+from shared.errors.error_envelope import build_error_envelope
+from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.dataset_ingest_outbox import (
     flush_dataset_ingest_outbox,
@@ -2319,11 +2321,28 @@ async def preview_pipeline(
             await pipeline_job_queue.publish(job, require_delivery=False)
         except Exception as exc:
             error = str(exc)
+            error_payload = build_error_envelope(
+                service_name="bff",
+                message="Failed to enqueue pipeline preview job",
+                detail=error,
+                code=ErrorCode.INTERNAL_ERROR,
+                category=ErrorCategory.INTERNAL,
+                status_code=500,
+                errors=[error],
+                context={
+                    "pipeline_id": pipeline_id,
+                    "job_id": job_id,
+                    "node_id": node_id,
+                    "mode": "preview",
+                    "queued": False,
+                },
+                external_code="PIPELINE_EXECUTION_FAILED",
+            )
             await pipeline_registry.record_preview(
                 pipeline_id=pipeline_id,
                 status="FAILED",
                 row_count=0,
-                sample_json={"queued": False, "job_id": job_id, "errors": [error]},
+                sample_json=error_payload,
                 job_id=job_id,
                 node_id=node_id,
             )
@@ -2333,7 +2352,7 @@ async def preview_pipeline(
                 mode="preview",
                 status="FAILED",
                 node_id=node_id,
-                sample_json={"errors": [error]},
+                sample_json=error_payload,
                 finished_at=utcnow(),
             )
             logger.error("Failed to enqueue pipeline preview job %s: %s", job_id, exc)
@@ -2368,11 +2387,22 @@ async def preview_pipeline(
             data={"pipeline_id": pipeline_id, "job_id": job_id, "limit": limit, "sample": sample_payload},
         ).to_dict()
     except ValueError as e:
+        validation_payload = build_error_envelope(
+            service_name="bff",
+            message="Pipeline preview validation failed",
+            detail=str(e),
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            status_code=422,
+            errors=[str(e)],
+            context={"pipeline_id": pipeline_id, "node_id": node_id, "mode": "preview"},
+            external_code="PIPELINE_DEFINITION_INVALID",
+        )
         await pipeline_registry.record_preview(
             pipeline_id=pipeline_id,
             status="FAILED",
             row_count=0,
-            sample_json={"errors": [str(e)]},
+            sample_json=validation_payload,
             node_id=node_id,
         )
         await pipeline_registry.record_run(
@@ -2381,7 +2411,7 @@ async def preview_pipeline(
             mode="preview",
             status="FAILED",
             node_id=node_id,
-            sample_json={"errors": [str(e)]},
+            sample_json=validation_payload,
             finished_at=utcnow(),
         )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -2507,13 +2537,29 @@ async def build_pipeline(
             await pipeline_job_queue.publish(job)
         except Exception as exc:
             error = str(exc)
+            error_payload = build_error_envelope(
+                service_name="bff",
+                message="Failed to enqueue pipeline build job",
+                detail=error,
+                code=ErrorCode.INTERNAL_ERROR,
+                category=ErrorCategory.INTERNAL,
+                status_code=500,
+                errors=[error],
+                context={
+                    "pipeline_id": pipeline_id,
+                    "job_id": job_id,
+                    "node_id": node_id,
+                    "mode": "build",
+                },
+                external_code="PIPELINE_EXECUTION_FAILED",
+            )
             await pipeline_registry.record_run(
                 pipeline_id=pipeline_id,
                 job_id=job_id,
                 mode="build",
                 status="FAILED",
                 node_id=node_id,
-                output_json={"errors": [error]},
+                output_json=error_payload,
                 finished_at=utcnow(),
             )
             logger.error("Failed to enqueue pipeline build job %s: %s", job_id, exc)

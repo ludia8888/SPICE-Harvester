@@ -25,6 +25,13 @@ from confluent_kafka import Producer
 from data_connector.google_sheets.service import GoogleSheetsService
 from data_connector.google_sheets.utils import calculate_data_hash
 from shared.config.service_config import ServiceConfig
+from shared.observability.context_propagation import (
+    attach_context_from_carrier,
+    carrier_from_envelope_metadata,
+    kafka_headers_from_current_context,
+    kafka_headers_from_envelope_metadata,
+)
+from shared.observability.tracing import get_tracing_service
 from shared.services.connector_registry import ConnectorRegistry, ConnectorSource
 from shared.utils.env_utils import parse_int_env
 from shared.utils.time_utils import utcnow
@@ -40,6 +47,7 @@ class ConnectorTriggerService:
         self.tick_seconds = parse_int_env("CONNECTOR_TRIGGER_TICK_SECONDS", 5, min_value=1, max_value=3600)
         self.poll_concurrency = parse_int_env("CONNECTOR_TRIGGER_POLL_CONCURRENCY", 5, min_value=1, max_value=100)
         self.outbox_batch = parse_int_env("CONNECTOR_TRIGGER_OUTBOX_BATCH", 50, min_value=1, max_value=500)
+        self.tracing = get_tracing_service("connector-trigger-service")
 
         self._producer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kafka-producer")
         self.registry: Optional[ConnectorRegistry] = None
@@ -77,19 +85,19 @@ class ConnectorTriggerService:
             try:
                 await self.sheets.close()
             except Exception:
-                pass
+                logger.warning("Failed to close GoogleSheetsService", exc_info=True)
             self.sheets = None
         if self.producer:
             try:
                 await asyncio.get_running_loop().run_in_executor(self._producer_executor, lambda: self.producer.flush(5))
             except Exception:
-                pass
+                logger.warning("Failed to flush Kafka producer", exc_info=True)
             self.producer = None
         if self.registry:
             try:
                 await self.registry.close()
             except Exception:
-                pass
+                logger.warning("Failed to close ConnectorRegistry", exc_info=True)
             self.registry = None
         self._producer_executor.shutdown(wait=False, cancel_futures=True)
 
@@ -177,8 +185,15 @@ class ConnectorTriggerService:
     async def _poll_source(self, source: ConnectorSource, sem: asyncio.Semaphore) -> None:
         async with sem:
             try:
-                if self.source_type == "google_sheets":
-                    await self._poll_google_sheets(source)
+                with self.tracing.span(
+                    "connector_trigger.poll",
+                    attributes={
+                        "connector.source_type": str(source.source_type),
+                        "connector.source_id": str(source.source_id),
+                    },
+                ):
+                    if self.source_type == "google_sheets":
+                        await self._poll_google_sheets(source)
             except Exception as e:
                 logger.error("Polling error (source=%s:%s): %s", source.source_type, source.source_id, e)
 
@@ -212,38 +227,67 @@ class ConnectorTriggerService:
                     await asyncio.sleep(1)
                     continue
 
-                delivery_errors: dict[str, str] = {}
+                with self.tracing.span(
+                    "connector_trigger.outbox_batch",
+                    attributes={
+                        "messaging.system": "kafka",
+                        "messaging.destination": self.topic,
+                        "connector.outbox_batch_limit": self.outbox_batch,
+                        "connector.outbox_count": len(batch),
+                    },
+                ):
 
-                def _cb(err, msg, outbox_id: str):
-                    if err is not None:
-                        delivery_errors[outbox_id] = str(err)
+                    delivery_errors: dict[str, str] = {}
 
-                for item in batch:
-                    value = json.dumps(item.payload, ensure_ascii=False).encode("utf-8")
-                    key = f"{item.source_type}:{item.source_id}".encode("utf-8")
-                    await self._producer_call(
-                        self.producer.produce,
-                        topic=self.topic,
-                        value=value,
-                        key=key,
-                        on_delivery=lambda err, msg, outbox_id=item.outbox_id: _cb(err, msg, outbox_id),
-                    )
+                    def _cb(err, msg, outbox_id: str):
+                        if err is not None:
+                            delivery_errors[outbox_id] = str(err)
 
-                remaining = await self._producer_call(self.producer.flush, 10)
-                if remaining != 0:
-                    logger.warning(f"Producer flush incomplete (remaining={remaining}); will retry outbox")
+                    for item in batch:
+                        carrier = carrier_from_envelope_metadata(item.payload)
+                        with attach_context_from_carrier(carrier or None, service_name="connector-trigger-service"):
+                            attrs = {
+                                "messaging.system": "kafka",
+                                "messaging.destination": self.topic,
+                                "connector.outbox_id": item.outbox_id,
+                                "connector.event_id": item.event_id,
+                                "connector.source_type": item.source_type,
+                                "connector.source_id": item.source_id,
+                            }
+                            if item.sequence_number is not None:
+                                attrs["connector.sequence_number"] = int(item.sequence_number)
 
-                for item in batch:
-                    err = delivery_errors.get(item.outbox_id)
-                    if err:
-                        await self.registry.mark_outbox_failed(outbox_id=item.outbox_id, error=err)
-                    elif remaining == 0:
-                        await self.registry.mark_outbox_published(outbox_id=item.outbox_id)
-                    else:
-                        # Unknown delivery state; keep pending for retry (duplicates are acceptable).
-                        await self.registry.mark_outbox_failed(
-                            outbox_id=item.outbox_id, error="flush incomplete; delivery unknown"
-                        )
+                            with self.tracing.span("connector_trigger.outbox_produce", attributes=attrs):
+                                headers = (
+                                    kafka_headers_from_envelope_metadata(item.payload)
+                                    or kafka_headers_from_current_context()
+                                )
+                                value = json.dumps(item.payload, ensure_ascii=False).encode("utf-8")
+                                key = f"{item.source_type}:{item.source_id}".encode("utf-8")
+                                await self._producer_call(
+                                    self.producer.produce,
+                                    topic=self.topic,
+                                    value=value,
+                                    key=key,
+                                    headers=headers or None,
+                                    on_delivery=lambda err, msg, outbox_id=item.outbox_id: _cb(err, msg, outbox_id),
+                                )
+
+                    remaining = await self._producer_call(self.producer.flush, 10)
+                    if remaining != 0:
+                        logger.warning(f"Producer flush incomplete (remaining={remaining}); will retry outbox")
+
+                    for item in batch:
+                        err = delivery_errors.get(item.outbox_id)
+                        if err:
+                            await self.registry.mark_outbox_failed(outbox_id=item.outbox_id, error=err)
+                        elif remaining == 0:
+                            await self.registry.mark_outbox_published(outbox_id=item.outbox_id)
+                        else:
+                            # Unknown delivery state; keep pending for retry (duplicates are acceptable).
+                            await self.registry.mark_outbox_failed(
+                                outbox_id=item.outbox_id, error="flush incomplete; delivery unknown"
+                            )
 
             except Exception as e:
                 logger.error(f"Outbox publish loop error: {e}")
@@ -261,6 +305,8 @@ class ConnectorTriggerService:
             for t in (poll_task, publish_task):
                 if t and not t.done():
                     t.cancel()
+            # Ensure cancellations are fully processed so we don't leak background tasks.
+            await asyncio.gather(poll_task, publish_task, return_exceptions=True)
 
 
 async def _main() -> None:

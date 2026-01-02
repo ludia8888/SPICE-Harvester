@@ -29,6 +29,7 @@ from typing import Optional
 
 # Third party imports
 from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse
 
 # Centralized configuration and dependency injection
 from shared.config.settings import settings, ApplicationSettings
@@ -56,6 +57,8 @@ from shared.services.redis_service import RedisService
 from shared.services.command_status_service import CommandStatusService
 from shared.services.elasticsearch_service import ElasticsearchService
 from shared.models.requests import ApiResponse
+from shared.errors.error_envelope import build_error_envelope
+from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.utils.jsonld import JSONToJSONLDConverter
 from shared.utils.label_mapper import LabelMapper
 from shared.errors.error_response import install_error_handlers
@@ -466,17 +469,24 @@ async def health_check():
     """헬스 체크 - Modernized version"""
     try:
         if _oms_container is None:
-            error_response = ApiResponse.error(
-                message="OMS 서비스가 초기화되지 않았습니다", 
-                errors=["Container not initialized"]
+            error_payload = build_error_envelope(
+                service_name="oms",
+                message="OMS 서비스가 초기화되지 않았습니다",
+                detail="Container not initialized",
+                code=ErrorCode.INTERNAL_ERROR,
+                category=ErrorCategory.INTERNAL,
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                errors=["Container not initialized"],
+                context={
+                    "service": "OMS",
+                    "version": "1.0.0",
+                    "status": "unhealthy",
+                    "terminus_connected": False,
+                    "environment": settings.environment.value,
+                    "modernized": True,
+                },
             )
-            error_response.data = {
-                "service": "OMS",
-                "version": "1.0.0",
-                "status": "unhealthy",
-                "terminus_connected": False,
-            }
-            return error_response.to_dict()
+            return JSONResponse(status_code=error_payload["http_status"], content=error_payload)
         
         terminus_service = _oms_container.get_terminus_service()
         is_connected = await terminus_service.check_connection()
@@ -496,34 +506,46 @@ async def health_check():
             return health_response.to_dict()
         else:
             # 서비스 비정상 상태 (연결 실패)
-            error_response = ApiResponse.error(
-                message="OMS 서비스에 문제가 있습니다", errors=["TerminusDB 연결 실패"]
+            error_payload = build_error_envelope(
+                service_name="oms",
+                message="OMS 서비스에 문제가 있습니다",
+                detail="TerminusDB 연결 실패",
+                code=ErrorCode.UPSTREAM_UNAVAILABLE,
+                category=ErrorCategory.UPSTREAM,
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                errors=["TerminusDB 연결 실패"],
+                context={
+                    "service": "OMS",
+                    "version": "1.0.0",
+                    "status": "unhealthy",
+                    "terminus_connected": False,
+                    "environment": settings.environment.value,
+                    "modernized": True,
+                },
             )
-            error_response.data = {
+            return JSONResponse(status_code=error_payload["http_status"], content=error_payload)
+
+    except Exception as e:
+        logger.error(f"헬스 체크 실패: {e}")
+
+        error_payload = build_error_envelope(
+            service_name="oms",
+            message="OMS 서비스 헬스 체크 실패",
+            detail=str(e),
+            code=ErrorCode.INTERNAL_ERROR,
+            category=ErrorCategory.INTERNAL,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            errors=[str(e)],
+            context={
                 "service": "OMS",
                 "version": "1.0.0",
                 "status": "unhealthy",
                 "terminus_connected": False,
                 "environment": settings.environment.value,
-                "modernized": True
-            }
-
-            return error_response.to_dict()
-
-    except Exception as e:
-        logger.error(f"헬스 체크 실패: {e}")
-
-        error_response = ApiResponse.error(message="OMS 서비스 헬스 체크 실패", errors=[str(e)])
-        error_response.data = {
-            "service": "OMS",
-            "version": "1.0.0",
-            "status": "unhealthy",
-            "terminus_connected": False,
-            "environment": settings.environment.value,
-            "modernized": True
-        }
-
-        return error_response.to_dict()
+                "modernized": True,
+            },
+        )
+        return JSONResponse(status_code=error_payload["http_status"], content=error_payload)
 
 
 # Health check endpoint that uses the new container system

@@ -30,6 +30,11 @@ from data_connector.google_sheets.service import GoogleSheetsService
 from data_connector.google_sheets.utils import normalize_sheet_data
 from shared.config.service_config import ServiceConfig
 from shared.models.event_envelope import EventEnvelope
+from shared.observability.context_propagation import (
+    attach_context_from_kafka,
+    kafka_headers_from_envelope_metadata,
+)
+from shared.observability.tracing import get_tracing_service
 from shared.services.connector_registry import ConnectorRegistry
 from shared.services.lineage_store import LineageStore
 from shared.services.processed_event_registry import ClaimDecision, ProcessedEventRegistry
@@ -59,6 +64,7 @@ class ConnectorSyncWorker:
         self.max_retries = parse_int_env("CONNECTOR_SYNC_MAX_RETRIES", 5, min_value=1, max_value=100)
         self.backoff_base = parse_int_env("CONNECTOR_SYNC_BACKOFF_BASE_SECONDS", 2, min_value=0, max_value=300)
         self.backoff_max = parse_int_env("CONNECTOR_SYNC_BACKOFF_MAX_SECONDS", 60, min_value=1, max_value=3600)
+        self.tracing = get_tracing_service("connector-sync-worker")
 
         self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kafka-consumer")
         self._producer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kafka-producer")
@@ -154,14 +160,14 @@ class ConnectorSyncWorker:
         if self.consumer:
             try:
                 await self._consumer_call(self.consumer.close)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Kafka consumer close failed during shutdown: %s", exc, exc_info=True)
             self.consumer = None
         if self.dlq_producer:
             try:
                 await self._producer_call(self.dlq_producer.flush, 5)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("DLQ producer flush failed during shutdown: %s", exc, exc_info=True)
             self.dlq_producer = None
 
         self._consumer_executor.shutdown(wait=False, cancel_futures=True)
@@ -196,8 +202,29 @@ class ConnectorSyncWorker:
 
         key = dlq_env.aggregate_id.encode("utf-8")
         value = dlq_env.model_dump_json().encode("utf-8")
-        await self._producer_call(self.dlq_producer.produce, topic=self.dlq_topic, key=key, value=value)
-        await self._producer_call(self.dlq_producer.flush, 10)
+        headers = kafka_headers_from_envelope_metadata(dlq_env.metadata)
+        with attach_context_from_kafka(
+            kafka_headers=headers,
+            fallback_metadata=dlq_env.metadata,
+            service_name="connector-sync-worker",
+        ):
+            with self.tracing.span(
+                "connector_sync.dlq_produce",
+                attributes={
+                    "messaging.system": "kafka",
+                    "messaging.destination": self.dlq_topic,
+                    "messaging.destination_kind": "topic",
+                    "event.id": str(dlq_env.event_id),
+                },
+            ):
+                await self._producer_call(
+                    self.dlq_producer.produce,
+                    topic=self.dlq_topic,
+                    key=key,
+                    value=value,
+                    headers=headers or None,
+                )
+                await self._producer_call(self.dlq_producer.flush, 10)
 
     def _bff_scope_headers(self, *, db_name: str) -> Dict[str, str]:
         scope = (db_name or "").strip()
@@ -449,47 +476,66 @@ class ConnectorSyncWorker:
                 raw = msg.value().decode("utf-8")
                 payload = json.loads(raw)
                 envelope = EventEnvelope.model_validate(payload)
+                kafka_headers = msg.headers()
 
-                claim = await self.processed.claim(
-                    handler=self.handler,
-                    event_id=str(envelope.event_id),
-                    aggregate_id=str(envelope.aggregate_id),
-                    sequence_number=envelope.sequence_number,
-                )
+                with attach_context_from_kafka(
+                    kafka_headers=kafka_headers,
+                    fallback_metadata=envelope.metadata if isinstance(envelope.metadata, dict) else None,
+                    service_name="connector-sync-worker",
+                ):
+                    with self.tracing.span(
+                        "connector_sync.process_event",
+                        attributes={
+                            "messaging.system": "kafka",
+                            "messaging.destination": msg.topic(),
+                            "messaging.destination_kind": "topic",
+                            "messaging.kafka.partition": msg.partition(),
+                            "messaging.kafka.offset": msg.offset(),
+                            "event.id": str(envelope.event_id),
+                            "event.type": str(envelope.event_type),
+                            "event.aggregate_id": str(envelope.aggregate_id),
+                        },
+                    ):
+                        claim = await self.processed.claim(
+                            handler=self.handler,
+                            event_id=str(envelope.event_id),
+                            aggregate_id=str(envelope.aggregate_id),
+                            sequence_number=envelope.sequence_number,
+                        )
 
-                if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
-                    await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
-                    continue
+                        if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
+                            await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
+                            continue
 
-                if claim.decision == ClaimDecision.IN_PROGRESS:
-                    # Another worker holds the lease; do not commit to avoid losing the event.
-                    await asyncio.sleep(1)
-                    continue
+                        if claim.decision == ClaimDecision.IN_PROGRESS:
+                            # Another worker holds the lease; do not commit to avoid losing the event.
+                            await asyncio.sleep(1)
+                            continue
 
-                heartbeat_task = asyncio.create_task(
-                    self._heartbeat_loop(handler=self.handler, event_id=str(envelope.event_id))
-                )
+                        heartbeat_task = asyncio.create_task(
+                            self._heartbeat_loop(handler=self.handler, event_id=str(envelope.event_id))
+                        )
 
-                command_id = await self._handle_envelope(envelope)
+                        command_id = await self._handle_envelope(envelope)
 
-                # Best-effort sync outcome tracking for ops/UI.
-                try:
-                    await self.registry.record_sync_outcome(
-                        source_type=str((envelope.data or {}).get("source_type") or ""),
-                        source_id=str((envelope.data or {}).get("source_id") or ""),
-                        success=True,
-                        command_id=command_id,
-                    )
-                except Exception:
-                    pass
+                        # Best-effort sync outcome tracking for ops/UI.
+                        try:
+                            await self.registry.record_sync_outcome(
+                                source_type=str((envelope.data or {}).get("source_type") or ""),
+                                source_id=str((envelope.data or {}).get("source_id") or ""),
+                                success=True,
+                                command_id=command_id,
+                            )
+                        except Exception as exc:
+                            logger.warning("Best-effort record_sync_outcome failed: %s", exc, exc_info=True)
 
-                await self.processed.mark_done(
-                    handler=self.handler,
-                    event_id=str(envelope.event_id),
-                    aggregate_id=str(envelope.aggregate_id),
-                    sequence_number=envelope.sequence_number,
-                )
-                await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
+                        await self.processed.mark_done(
+                            handler=self.handler,
+                            event_id=str(envelope.event_id),
+                            aggregate_id=str(envelope.aggregate_id),
+                            sequence_number=envelope.sequence_number,
+                        )
+                        await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
 
             except json.JSONDecodeError as e:
                 logger.error(f"Invalid JSON in connector-updates (dropping): {e}")
@@ -514,8 +560,8 @@ class ConnectorSyncWorker:
                             error=err,
                             next_retry_at=utcnow() + timedelta(seconds=backoff_s),
                         )
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.warning("Best-effort record_sync_outcome failed: %s", exc, exc_info=True)
 
                     if attempt_count >= self.max_retries:
                         logger.error(f"Max retries exceeded; sending to DLQ (event_id={envelope.event_id})")
@@ -531,8 +577,13 @@ class ConnectorSyncWorker:
                                 aggregate_id=str(envelope.aggregate_id),
                                 sequence_number=envelope.sequence_number,
                             )
-                        except Exception:
-                            pass
+                        except Exception as mark_done_err:
+                            logger.error(
+                                "Failed to mark processed event done after DLQ; event may be stuck (event_id=%s): %s",
+                                envelope.event_id,
+                                mark_done_err,
+                                exc_info=True,
+                            )
                         await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
                         continue
 

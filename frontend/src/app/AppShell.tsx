@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { SidebarRail } from '../components/SidebarRail'
-import { useAppStore } from '../state/store'
+import { useAppStore, type NavKey } from '../state/store'
 import { HomePage } from '../pages/HomePage'
 import { DatasetsPage } from '../pages/DatasetsPage'
 import { GraphPage } from '../pages/GraphPage'
@@ -10,7 +10,7 @@ import { PlaceholderPage } from '../pages/PlaceholderPage'
 type NavItem = {
   icon: string
   label: string
-  key: string
+  key: NavKey
 }
 
 const navItems: NavItem[] = [

@@ -359,20 +359,22 @@ const buildFlowFromDefinition = (definition: PipelineDetailRecord['definition_js
   const rawEdges = Array.isArray(definition.edges) ? definition.edges : []
 
   const nodes = rawNodes
-    .map((node, index) => {
+    .map((node, index): FlowNode | null => {
       if (!isRecord(node) || typeof node.id !== 'string') {
         return null
       }
       const typedNode = node as DefinitionNode
-      const reactFlowType = typedNode.type === 'input' || typedNode.type === 'output' ? typedNode.type : undefined
-      return {
-        id: typedNode.id,
-        type: reactFlowType,
+      const flowNode: FlowNode = {
+        id: node.id,
         data: { label: buildNodeLabel(typedNode) },
         position: { x: 0, y: index * 120 },
-      } satisfies FlowNode
+      }
+      if (typedNode.type === 'input' || typedNode.type === 'output') {
+        flowNode.type = typedNode.type
+      }
+      return flowNode
     })
-    .filter((node): node is FlowNode => Boolean(node))
+    .filter((node): node is FlowNode => node !== null)
 
   const nodeIds = new Set(nodes.map((node) => node.id))
   const edges = rawEdges

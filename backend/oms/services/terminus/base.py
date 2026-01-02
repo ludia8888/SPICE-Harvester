@@ -217,7 +217,7 @@ class BaseTerminusService:
                 try:
                     error_data = response.json()
                     error_msg += f" - {error_data}"
-                except:
+                except Exception:
                     error_msg += f" - {response.text}"
                 
                 logger.error(error_msg)

@@ -72,6 +72,13 @@ This file lists all structured error codes currently mapped in
 | BUILD_NOT_SUCCESS | SHV-{SUBSYS}-PIP-STA-1001 | pipeline | state | error | Build not successful |
 | INVALID_BUILD_REPOSITORY | SHV-{SUBSYS}-PIP-VAL-1002 | pipeline | validation | error | Invalid build repository |
 | INVALID_BUILD_REF | SHV-{SUBSYS}-PIP-VAL-1003 | pipeline | validation | error | Invalid build reference |
+| PIPELINE_REQUEST_INVALID | SHV-{SUBSYS}-PIP-VAL-2001 | pipeline | validation | error | Pipeline request invalid |
+| PIPELINE_DEFINITION_INVALID | SHV-{SUBSYS}-PIP-VAL-2002 | pipeline | validation | error | Pipeline definition invalid |
+| PIPELINE_SCHEDULE_INVALID | SHV-{SUBSYS}-PIP-VAL-2003 | pipeline | validation | error | Pipeline schedule configuration invalid |
+| PIPELINE_SCHEMA_CHECK_FAILED | SHV-{SUBSYS}-DAT-VAL-2001 | data | validation | error | Pipeline schema checks failed |
+| PIPELINE_SCHEMA_CONTRACT_FAILED | SHV-{SUBSYS}-DAT-VAL-2002 | data | validation | error | Pipeline schema contract failed |
+| PIPELINE_EXPECTATIONS_FAILED | SHV-{SUBSYS}-DAT-VAL-2003 | data | validation | error | Pipeline expectations failed |
+| PIPELINE_EXECUTION_FAILED | SHV-{SUBSYS}-PIP-INT-2001 | pipeline | internal | error | Pipeline execution failed |
 | REPLAY_REQUIRED | SHV-{SUBSYS}-PIP-STA-1002 | pipeline | state | error | Pipeline replay required |
 | LAKEFS_MERGE_CONFLICT | SHV-{SUBSYS}-PIP-CON-1007 | pipeline | conflict | error | LakeFS merge conflict |
 | LAKEFS_MERGE_FAILED | SHV-{SUBSYS}-PIP-INTG-1001 | pipeline | integration | error | LakeFS merge failed |

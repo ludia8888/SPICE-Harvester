@@ -16,6 +16,7 @@ from confluent_kafka import Producer
 
 from shared.config.service_config import ServiceConfig
 from shared.models.pipeline_job import PipelineJob
+from shared.observability.context_propagation import kafka_headers_from_current_context
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ class PipelineJobQueue:
         payload = job.model_dump(mode="json")
         key = job.pipeline_id.encode("utf-8")
         value = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
+        headers = kafka_headers_from_current_context()
 
         loop = asyncio.get_running_loop()
 
@@ -60,9 +62,15 @@ class PipelineJobQueue:
                             delivery_error.append(RuntimeError(str(err)))
                         delivery_done.set()
 
-                    producer.produce(topic=self.topic, key=key, value=value, on_delivery=_on_delivery)
+                    producer.produce(
+                        topic=self.topic,
+                        key=key,
+                        value=value,
+                        headers=headers or None,
+                        on_delivery=_on_delivery,
+                    )
                 else:
-                    producer.produce(topic=self.topic, key=key, value=value)
+                    producer.produce(topic=self.topic, key=key, value=value, headers=headers or None)
             except Exception as exc:
                 raise RuntimeError(f"Kafka produce failed for pipeline job {job.job_id}: {exc}") from exc
 

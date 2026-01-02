@@ -4,7 +4,15 @@ SHELL := /usr/bin/env bash
 # Best-effort: load local compose port overrides / tokens (ignored in CI if missing).
 -include .env
 
-PYTHON ?= python3
+PYTHON ?= $(shell \
+	if command -v python3 >/dev/null 2>&1 && python3 -m pytest --version >/dev/null 2>&1; then \
+		echo python3; \
+	elif command -v python >/dev/null 2>&1 && python -m pytest --version >/dev/null 2>&1; then \
+		echo python; \
+	else \
+		echo python3; \
+	fi \
+)
 NPM ?= npm
 FRONTEND_DIR ?= frontend
 COMPOSE ?= docker compose

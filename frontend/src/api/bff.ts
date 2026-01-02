@@ -199,19 +199,21 @@ const requestApi = async <T>(
   options?: RequestInit,
   fallbackMessage = 'Request failed',
 ): Promise<T> => {
-  const authHeaders = API_TOKEN ? { Authorization: `Bearer ${API_TOKEN}` } : {}
-  const userHeaders = {
-    ...(API_USER_ID ? { 'X-User-ID': API_USER_ID } : {}),
-    ...(API_USER_NAME ? { 'X-User-Name': API_USER_NAME } : {}),
+  const headers = new Headers()
+  headers.set('Accept', 'application/json')
+  if (API_TOKEN) {
+    headers.set('Authorization', `Bearer ${API_TOKEN}`)
   }
+  if (API_USER_ID) {
+    headers.set('X-User-ID', API_USER_ID)
+  }
+  if (API_USER_NAME) {
+    headers.set('X-User-Name', API_USER_NAME)
+  }
+  new Headers(options?.headers).forEach((value, key) => headers.set(key, value))
   const response = await fetch(buildUrl(path), {
     ...options,
-    headers: {
-      Accept: 'application/json',
-      ...authHeaders,
-      ...userHeaders,
-      ...(options?.headers ?? {}),
-    },
+    headers,
   })
 
   const payload = await response.json().catch(() => null)

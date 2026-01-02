@@ -781,7 +781,7 @@ export const DatasetsPage = () => {
   const breadcrumbSegments: BreadcrumbSegment[] = [
     {
       label: 'Root',
-      icon: 'root-folder',
+      icon: 'root-folder' as IconName,
       onClick: () => {
         setActiveFolderId(null)
         setActiveFileId(null)
@@ -791,7 +791,7 @@ export const DatasetsPage = () => {
       ? [
           {
             label: activeFolder.name,
-            icon: 'folder-close',
+            icon: 'folder-close' as IconName,
             onClick: () => setActiveFileId(null),
           },
         ]
@@ -800,7 +800,7 @@ export const DatasetsPage = () => {
       ? [
           {
             label: activeFile.name,
-            icon: 'document',
+            icon: 'document' as IconName,
           },
         ]
       : []),
@@ -1045,7 +1045,7 @@ export const DatasetsPage = () => {
             )}
           </div>
         </section>
-      ) : (
+      ) : activeFile ? (
         <div className="grid">
           <Card className="card">
             <Text className="card-title">{activeFile.datasetName}</Text>
@@ -1054,7 +1054,7 @@ export const DatasetsPage = () => {
             <Text className="card-meta">Updated: {activeFile.updatedLabel || activeFile.updatedAt}</Text>
           </Card>
         </div>
-      )}
+      ) : null}
       <Dialog
         isOpen={isUploadOpen}
         onClose={handleCloseUploadDialog}

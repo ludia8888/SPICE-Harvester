@@ -17,6 +17,7 @@ import asyncpg
 from asyncpg.exceptions import UniqueViolationError
 
 from shared.config.service_config import ServiceConfig
+from shared.observability.context_propagation import enrich_metadata_with_current_trace
 
 from shared.models.objectify_job import ObjectifyJob
 from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
@@ -792,6 +793,8 @@ class ObjectifyRegistry:
 
     async def enqueue_objectify_job(self, *, job: ObjectifyJob) -> ObjectifyJobRecord:
         payload = job.model_dump(mode="json")
+        if isinstance(payload, dict):
+            enrich_metadata_with_current_trace(payload)
         dedupe_key = job.dedupe_key or self.build_dedupe_key(
             dataset_id=job.dataset_id,
             dataset_branch=job.dataset_branch,

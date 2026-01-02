@@ -27,6 +27,7 @@ from uuid import uuid4, uuid5, NAMESPACE_URL
 from confluent_kafka import Consumer, Producer, KafkaError, TopicPartition
 import redis
 import boto3
+from botocore.exceptions import ClientError
 
 from shared.config.service_config import ServiceConfig
 from shared.config.app_config import AppConfig
@@ -37,6 +38,8 @@ from shared.services.command_status_service import (
 )
 from shared.config.settings import ApplicationSettings
 from shared.models.event_envelope import EventEnvelope
+from shared.observability.context_propagation import attach_context_from_kafka
+from shared.observability.tracing import get_tracing_service
 from shared.security.input_sanitizer import validate_branch_name, validate_class_id, validate_instance_id
 from shared.services.processed_event_registry import (
     ClaimDecision,
@@ -91,6 +94,7 @@ class StrictPalantirInstanceWorker:
         self.lineage_store: Optional[LineageStore] = None
         self.audit_store: Optional[AuditLogStore] = None
         self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="instance-worker-kafka")
+        self.tracing = get_tracing_service("instance-worker")
         
         # PALANTIR PRINCIPLE: Only business concepts in graph
         # No system fields or storage details
@@ -149,8 +153,23 @@ class StrictPalantirInstanceWorker:
         # Ensure bucket exists
         try:
             await self._s3_call(self.s3_client.head_bucket, Bucket=self.instance_bucket)
-        except:
-            await self._s3_call(self.s3_client.create_bucket, Bucket=self.instance_bucket)
+        except ClientError as e:
+            code = (e.response.get("Error") or {}).get("Code", "")
+            if str(code) not in {"404", "NoSuchBucket", "NotFound"}:
+                logger.error("S3 head_bucket failed (bucket=%s code=%s)", self.instance_bucket, code, exc_info=True)
+                raise
+            try:
+                await self._s3_call(self.s3_client.create_bucket, Bucket=self.instance_bucket)
+            except ClientError as create_err:
+                create_code = (create_err.response.get("Error") or {}).get("Code", "")
+                if str(create_code) not in {"BucketAlreadyOwnedByYou", "BucketAlreadyExists"}:
+                    logger.error(
+                        "S3 create_bucket failed (bucket=%s code=%s)",
+                        self.instance_bucket,
+                        create_code,
+                        exc_info=True,
+                    )
+                    raise
         
         # TerminusDB
         connection_info = ConnectionConfig(
@@ -705,8 +724,11 @@ class StrictPalantirInstanceWorker:
                             },
                             error=str(e),
                         )
-                    except Exception:
-                        pass
+                    except Exception as audit_err:
+                        logger.debug(
+                            f"Audit record failed while handling Terminus write failure (non-fatal): {audit_err}",
+                            exc_info=True,
+                        )
                 raise
 
         # 4) Store/publish domain event (Event Sourcing: S3/MinIO -> EventPublisher -> Kafka)
@@ -1025,8 +1047,11 @@ class StrictPalantirInstanceWorker:
                                 },
                                 error=str(e),
                             )
-                        except Exception:
-                            pass
+                        except Exception as audit_err:
+                            logger.debug(
+                                f"Audit record failed while handling Terminus write failure (non-fatal): {audit_err}",
+                                exc_info=True,
+                            )
                     # TerminusDB is the graph authority; if we cannot write it, we must retry.
                     raise
             
@@ -1540,8 +1565,8 @@ class StrictPalantirInstanceWorker:
                         },
                         error=str(e),
                     )
-                except Exception:
-                    pass
+                except Exception as audit_err:
+                    logger.debug(f"Audit record failed (non-fatal): {audit_err}", exc_info=True)
 
         # Update lightweight node (relationships + required scalar fields)
         relationships = await self.extract_relationships(db_name, class_id, merged_payload, branch=branch)
@@ -1626,8 +1651,8 @@ class StrictPalantirInstanceWorker:
                         },
                         error=str(e),
                     )
-                except Exception:
-                    pass
+                except Exception as audit_err:
+                    logger.debug(f"Audit record failed (non-fatal): {audit_err}", exc_info=True)
             # TerminusDB is the graph authority; retry until it is updated.
             raise
 
@@ -1845,8 +1870,8 @@ class StrictPalantirInstanceWorker:
                         },
                         error=str(e),
                     )
-                except Exception:
-                    pass
+                except Exception as audit_err:
+                    logger.debug(f"Audit record failed (non-fatal): {audit_err}", exc_info=True)
 
         if command_id and s3_written and self.lineage_store:
             try:
@@ -1948,8 +1973,10 @@ class StrictPalantirInstanceWorker:
                         payload={},
                         user_id=None,
                     )
-            except Exception:
-                pass
+            except Exception as status_err:
+                logger.debug(
+                    f"Failed to create minimal command status entry (continuing): {status_err}", exc_info=True
+                )
 
             if status_norm == "processing":
                 await self.command_status_service.start_processing(
@@ -2082,86 +2109,108 @@ class StrictPalantirInstanceWorker:
                     await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
                     continue
 
-                command_type = command.get("command_type")
+                kafka_headers = msg.headers()
+                fallback_metadata = raw_message.get("metadata") if isinstance(raw_message, dict) else None
+                with attach_context_from_kafka(
+                    kafka_headers=kafka_headers,
+                    fallback_metadata=fallback_metadata if isinstance(fallback_metadata, dict) else None,
+                    service_name="instance-worker",
+                ):
+                    with self.tracing.span(
+                        "instance_worker.process_command",
+                        attributes={
+                            "messaging.system": "kafka",
+                            "messaging.destination": msg.topic(),
+                            "messaging.destination_kind": "topic",
+                            "messaging.kafka.partition": msg.partition(),
+                            "messaging.kafka.offset": msg.offset(),
+                        },
+                    ):
+                        command_type = command.get("command_type")
+                        self.tracing.set_span_attribute("command.type", command_type)
 
-                # Idempotency guard: if this command is already completed, skip processing.
-                command_id = command.get("command_id")
-                if self.redis_client and command_id:
-                    try:
-                        status_key = AppConfig.get_command_status_key(str(command_id))
-                        status_raw = await self.redis_client.get(status_key)
-                        if status_raw:
-                            status_data = json.loads(status_raw)
-                            if str(status_data.get("status", "")).upper() == "COMPLETED":
-                                logger.info(f"Skipping already completed command {command_id}")
+                        # Idempotency guard: if this command is already completed, skip processing.
+                        command_id = command.get("command_id")
+                        self.tracing.set_span_attribute("command.id", command_id)
+                        if self.redis_client and command_id:
+                            try:
+                                status_key = AppConfig.get_command_status_key(str(command_id))
+                                status_raw = await self.redis_client.get(status_key)
+                                if status_raw:
+                                    status_data = json.loads(status_raw)
+                                    if str(status_data.get("status", "")).upper() == "COMPLETED":
+                                        logger.info(f"Skipping already completed command {command_id}")
+                                        await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
+                                        continue
+                            except Exception as e:
+                                logger.warning(f"Failed to read command status for {command_id}: {e}")
+
+                        # Durable idempotency + ordering guard (Postgres)
+                        registry_event_id = command.get("event_id") or command.get("command_id")
+                        registry_aggregate_id = command.get("aggregate_id")
+                        registry_sequence = command.get("sequence_number")
+                        self.tracing.set_span_attribute("event.id", registry_event_id)
+                        self.tracing.set_span_attribute("event.aggregate_id", registry_aggregate_id)
+
+                        # Bulk commands are not state-overwriting operations on a single aggregate.
+                        # Disabling the sequence guard prevents "out-of-order => skipped_stale" data loss.
+                        if command_type and str(command_type).startswith("BULK_"):
+                            registry_sequence = None
+                        if self.processed_event_registry and registry_event_id:
+                            claim = await self.processed_event_registry.claim(
+                                handler="instance_worker",
+                                event_id=str(registry_event_id),
+                                aggregate_id=str(registry_aggregate_id) if registry_aggregate_id else None,
+                                sequence_number=int(registry_sequence) if registry_sequence is not None else None,
+                            )
+                            registry_attempt_count = int(claim.attempt_count or 1)
+                            if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
+                                logger.info(
+                                    f"Skipping {claim.decision.value} command event_id={registry_event_id} "
+                                    f"(aggregate_id={registry_aggregate_id}, seq={registry_sequence})"
+                                )
                                 await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
                                 continue
-                    except Exception as e:
-                        logger.warning(f"Failed to read command status for {command_id}: {e}")
+                            if claim.decision == ClaimDecision.IN_PROGRESS:
+                                logger.info(f"Command {registry_event_id} is in progress elsewhere; retrying later")
+                                await asyncio.sleep(2)
+                                await self._consumer_call(
+                                    self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
+                                )
+                                continue
+                            registry_claimed = True
+                            maybe_crash("instance_worker:after_claim", logger=logger)
 
-                # Durable idempotency + ordering guard (Postgres)
-                registry_event_id = command.get("event_id") or command.get("command_id")
-                registry_aggregate_id = command.get("aggregate_id")
-                registry_sequence = command.get("sequence_number")
-                # Bulk commands are not state-overwriting operations on a single aggregate.
-                # Disabling the sequence guard prevents "out-of-order => skipped_stale" data loss.
-                if command_type and str(command_type).startswith("BULK_"):
-                    registry_sequence = None
-                if self.processed_event_registry and registry_event_id:
-                    claim = await self.processed_event_registry.claim(
-                        handler="instance_worker",
-                        event_id=str(registry_event_id),
-                        aggregate_id=str(registry_aggregate_id) if registry_aggregate_id else None,
-                        sequence_number=int(registry_sequence) if registry_sequence is not None else None,
-                    )
-                    registry_attempt_count = int(claim.attempt_count or 1)
-                    if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
-                        logger.info(
-                            f"Skipping {claim.decision.value} command event_id={registry_event_id} "
-                            f"(aggregate_id={registry_aggregate_id}, seq={registry_sequence})"
-                        )
+                        if registry_claimed and self.processed_event_registry and registry_event_id:
+                            heartbeat_task = asyncio.create_task(
+                                self._heartbeat_loop(handler="instance_worker", event_id=str(registry_event_id))
+                            )
+
+                        logger.info(f"Processing command: {command_type}")
+                        logger.info(f"  Database: {command.get('db_name')}")
+                        logger.info(f"  Class: {command.get('class_id')}")
+
+                        if command_type == "CREATE_INSTANCE":
+                            await self.process_create_instance(command)
+                        elif command_type == "BULK_CREATE_INSTANCES":
+                            await self.process_bulk_create_instances(command)
+                        elif command_type == "UPDATE_INSTANCE":
+                            await self.process_update_instance(command)
+                        elif command_type == "DELETE_INSTANCE":
+                            await self.process_delete_instance(command)
+                        else:
+                            raise ValueError(f"Unknown command type: {command_type}")
+
+                        if registry_claimed and self.processed_event_registry and registry_event_id:
+                            maybe_crash("instance_worker:before_mark_done", logger=logger)
+                            await self.processed_event_registry.mark_done(
+                                handler="instance_worker",
+                                event_id=str(registry_event_id),
+                                aggregate_id=str(registry_aggregate_id) if registry_aggregate_id else None,
+                                sequence_number=int(registry_sequence) if registry_sequence is not None else None,
+                            )
+
                         await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
-                        continue
-                    if claim.decision == ClaimDecision.IN_PROGRESS:
-                        logger.info(f"Command {registry_event_id} is in progress elsewhere; retrying later")
-                        await asyncio.sleep(2)
-                        await self._consumer_call(
-                            self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
-                        )
-                        continue
-                    registry_claimed = True
-                    maybe_crash("instance_worker:after_claim", logger=logger)
-
-                if registry_claimed and self.processed_event_registry and registry_event_id:
-                    heartbeat_task = asyncio.create_task(
-                        self._heartbeat_loop(handler="instance_worker", event_id=str(registry_event_id))
-                    )
-
-                logger.info(f"Processing command: {command_type}")
-                logger.info(f"  Database: {command.get('db_name')}")
-                logger.info(f"  Class: {command.get('class_id')}")
-
-                if command_type == "CREATE_INSTANCE":
-                    await self.process_create_instance(command)
-                elif command_type == "BULK_CREATE_INSTANCES":
-                    await self.process_bulk_create_instances(command)
-                elif command_type == "UPDATE_INSTANCE":
-                    await self.process_update_instance(command)
-                elif command_type == "DELETE_INSTANCE":
-                    await self.process_delete_instance(command)
-                else:
-                    raise ValueError(f"Unknown command type: {command_type}")
-
-                if registry_claimed and self.processed_event_registry and registry_event_id:
-                    maybe_crash("instance_worker:before_mark_done", logger=logger)
-                    await self.processed_event_registry.mark_done(
-                        handler="instance_worker",
-                        event_id=str(registry_event_id),
-                        aggregate_id=str(registry_aggregate_id) if registry_aggregate_id else None,
-                        sequence_number=int(registry_sequence) if registry_sequence is not None else None,
-                    )
-
-                await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
 
             except Exception as e:
                 logger.error(f"Error processing command: {e}")
@@ -2186,8 +2235,11 @@ class StrictPalantirInstanceWorker:
                             "retrying",
                             {"error": str(e), "attempt": attempt_count, "max_attempts": max_attempts},
                         )
-                    except Exception:
-                        pass
+                    except Exception as status_err:
+                        logger.warning(
+                            f"Failed to set command status to retrying for {command_id}: {status_err}",
+                            exc_info=True,
+                        )
                     backoff_s = min(2 ** max(attempt_count - 1, 0), 60)
                     logger.warning(
                         f"Retrying command event_id={registry_event_id} in {backoff_s}s "
@@ -2201,8 +2253,11 @@ class StrictPalantirInstanceWorker:
 
                 try:
                     await self.set_command_status(command_id, "failed", {"error": str(e)})
-                except Exception:
-                    pass
+                except Exception as status_err:
+                    logger.warning(
+                        f"Failed to set command status to failed for {command_id}: {status_err}",
+                        exc_info=True,
+                    )
 
                 logger.error(
                     f"Skipping failed command event_id={registry_event_id} after {attempt_count} attempts "

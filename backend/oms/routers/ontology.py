@@ -53,6 +53,8 @@ from shared.utils.jsonld import JSONToJSONLDConverter
 from shared.utils.label_mapper import LabelMapper
 from shared.models.common import BaseResponse
 from shared.models.requests import ApiResponse
+from shared.errors.error_envelope import build_error_envelope
+from shared.errors.error_types import ErrorCategory, ErrorCode
 
 # shared 모델 import
 from shared.models.ontology import (
@@ -303,13 +305,20 @@ async def create_ontology(
             config=OntologyLinterConfig.from_env(branch=branch),
         )
         if not lint_report.ok:
+            lint_errors = [issue.message for issue in lint_report.errors]
+            error_payload = build_error_envelope(
+                service_name="oms",
+                message="온톨로지 스키마 검증에 실패했습니다",
+                detail="Ontology schema validation failed",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                category=ErrorCategory.INPUT,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                errors=lint_errors,
+                context={"lint_report": lint_report.model_dump()},
+            )
             return JSONResponse(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                content=ApiResponse.error(
-                    message="온톨로지 스키마 검증에 실패했습니다",
-                    errors=[issue.message for issue in lint_report.errors],
-                ).to_dict()
-                | {"data": {"lint_report": lint_report.model_dump()}},
+                status_code=error_payload["http_status"],
+                content=error_payload,
             )
 
         metadata_payload = (
@@ -327,13 +336,20 @@ async def create_ontology(
             relationships=list(ontology_request.relationships or []),
         )
         if interface_issues:
+            issue_messages = [issue.get("message") for issue in interface_issues]
+            error_payload = build_error_envelope(
+                service_name="oms",
+                message="온톨로지 인터페이스 계약 검증에 실패했습니다",
+                detail="Ontology interface contract validation failed",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                category=ErrorCategory.INPUT,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                errors=issue_messages,
+                context={"interface_issues": interface_issues},
+            )
             return JSONResponse(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                content=ApiResponse.error(
-                    message="온톨로지 인터페이스 계약 검증에 실패했습니다",
-                    errors=[issue.get("message") for issue in interface_issues],
-                ).to_dict()
-                | {"data": {"interface_issues": interface_issues}},
+                status_code=error_payload["http_status"],
+                content=error_payload,
             )
 
         if enable_event_sourcing:
@@ -888,13 +904,20 @@ async def update_ontology(
         merged_lint = _merge_lint_reports(baseline, diff)
 
         if not merged_lint.ok:
+            lint_errors = [issue.message for issue in merged_lint.errors]
+            error_payload = build_error_envelope(
+                service_name="oms",
+                message="온톨로지 스키마 검증에 실패했습니다",
+                detail="Ontology schema validation failed",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                category=ErrorCategory.INPUT,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                errors=lint_errors,
+                context={"lint_report": merged_lint.model_dump()},
+            )
             return JSONResponse(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                content=ApiResponse.error(
-                    message="온톨로지 스키마 검증에 실패했습니다",
-                    errors=[issue.message for issue in merged_lint.errors],
-                ).to_dict()
-                | {"data": {"lint_report": merged_lint.model_dump()}},
+                status_code=error_payload["http_status"],
+                content=error_payload,
             )
 
         if "metadata" in sanitized_data:
@@ -916,13 +939,20 @@ async def update_ontology(
             relationships=list(updated_relationships or []),
         )
         if interface_issues:
+            issue_messages = [issue.get("message") for issue in interface_issues]
+            error_payload = build_error_envelope(
+                service_name="oms",
+                message="온톨로지 인터페이스 계약 검증에 실패했습니다",
+                detail="Ontology interface contract validation failed",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                category=ErrorCategory.INPUT,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                errors=issue_messages,
+                context={"interface_issues": interface_issues},
+            )
             return JSONResponse(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                content=ApiResponse.error(
-                    message="온톨로지 인터페이스 계약 검증에 실패했습니다",
-                    errors=[issue.get("message") for issue in interface_issues],
-                ).to_dict()
-                | {"data": {"interface_issues": interface_issues}},
+                status_code=error_payload["http_status"],
+                content=error_payload,
             )
 
         protected_branch = _is_protected_branch(branch)
@@ -1337,13 +1367,20 @@ async def create_ontology_with_advanced_relationships(
             config=OntologyLinterConfig.from_env(branch=branch),
         )
         if not lint_report.ok:
+            lint_errors = [issue.message for issue in lint_report.errors]
+            error_payload = build_error_envelope(
+                service_name="oms",
+                message="온톨로지 스키마 검증에 실패했습니다",
+                detail="Ontology schema validation failed",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                category=ErrorCategory.INPUT,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                errors=lint_errors,
+                context={"lint_report": lint_report.model_dump()},
+            )
             return JSONResponse(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                content=ApiResponse.error(
-                    message="온톨로지 스키마 검증에 실패했습니다",
-                    errors=[issue.message for issue in lint_report.errors],
-                ).to_dict()
-                | {"data": {"lint_report": lint_report.model_dump()}},
+                status_code=error_payload["http_status"],
+                content=error_payload,
             )
 
         metadata_payload = (
@@ -1361,13 +1398,20 @@ async def create_ontology_with_advanced_relationships(
             relationships=list(ontology_request.relationships or []),
         )
         if interface_issues:
+            issue_messages = [issue.get("message") for issue in interface_issues]
+            error_payload = build_error_envelope(
+                service_name="oms",
+                message="온톨로지 인터페이스 계약 검증에 실패했습니다",
+                detail="Ontology interface contract validation failed",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                category=ErrorCategory.INPUT,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                errors=issue_messages,
+                context={"interface_issues": interface_issues},
+            )
             return JSONResponse(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                content=ApiResponse.error(
-                    message="온톨로지 인터페이스 계약 검증에 실패했습니다",
-                    errors=[issue.get("message") for issue in interface_issues],
-                ).to_dict()
-                | {"data": {"interface_issues": interface_issues}},
+                status_code=error_payload["http_status"],
+                content=error_payload,
             )
 
         if enable_event_sourcing:

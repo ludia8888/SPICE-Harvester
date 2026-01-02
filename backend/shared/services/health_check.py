@@ -204,13 +204,13 @@ class RedisHealthCheck(HealthCheckInterface):
             }
             
             # Try to get additional Redis info if available
-            if hasattr(self.redis_service, 'info'):
-                try:
-                    info = await self.redis_service.info()
-                    details["memory_usage"] = info.get("used_memory_human", "unknown")
-                    details["connected_clients"] = info.get("connected_clients", "unknown")
-                except:
-                    pass  # Info not available, continue without it
+                if hasattr(self.redis_service, 'info'):
+                    try:
+                        info = await self.redis_service.info()
+                        details["memory_usage"] = info.get("used_memory_human", "unknown")
+                        details["connected_clients"] = info.get("connected_clients", "unknown")
+                    except Exception:
+                        pass  # Info not available, continue without it
             
             return HealthCheckResult(
                 status=HealthStatus.HEALTHY,
@@ -406,7 +406,7 @@ class TerminusDBHealthCheck(HealthCheckInterface):
                         db_count = len(databases) if databases else 0
                     else:
                         db_count = "unknown"
-                except:
+                except Exception:
                     db_count = "error"
                 
                 return HealthCheckResult(

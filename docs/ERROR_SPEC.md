@@ -19,6 +19,8 @@ classification across services and workers. The source of truth is
 - `OMS` - Ontology Management Service
 - `OBJ` - Objectify worker
 - `PIP` - Pipeline worker
+- `PRJ` - Projection workers
+- `CON` - Connector workers
 - `SHR` - Shared services
 - `GEN` - Generic/unknown
 

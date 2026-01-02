@@ -760,8 +760,15 @@ async def _recompute_projection_task(
             },
             occurred_at=started_at,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning(
+            "Audit log failed: RECOMPUTE_PROJECTION_STARTED (db=%s projection=%s new_index=%s): %s",
+            db_name,
+            projection,
+            new_index,
+            exc,
+            exc_info=True,
+        )
 
     mapping = _load_projection_mapping(projection=projection)
     settings_payload = dict(mapping.get("settings", {}) or {})
@@ -874,8 +881,15 @@ async def _recompute_projection_task(
                                 "ontology_commit": ontology_commit,
                             },
                         )
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.warning(
+                            "Lineage record_link failed (recompute projection, event_id=%s index=%s doc_id=%s): %s",
+                            str(envelope.event_id),
+                            new_index,
+                            doc_id,
+                            exc,
+                            exc_info=True,
+                        )
                 continue
 
             if envelope.event_type == "INSTANCE_DELETED":
@@ -982,8 +996,15 @@ async def _recompute_projection_task(
                             "ontology_commit": ontology_commit,
                         },
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning(
+                        "Lineage record_link failed (recompute projection, event_id=%s index=%s doc_id=%s): %s",
+                        str(envelope.event_id),
+                        new_index,
+                        doc_id,
+                        exc,
+                        exc_info=True,
+                    )
             continue
 
         if envelope.event_type == "ONTOLOGY_CLASS_DELETED":
@@ -1099,8 +1120,15 @@ async def _recompute_projection_task(
             metadata=result,
             occurred_at=completed_at,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning(
+            "Audit log failed: RECOMPUTE_PROJECTION_COMPLETED (db=%s task_id=%s new_index=%s): %s",
+            db_name,
+            task_id,
+            new_index,
+            exc,
+            exc_info=True,
+        )
 
 
 @router.post("/cleanup-old-replays")

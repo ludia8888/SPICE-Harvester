@@ -18,6 +18,11 @@ from elasticsearch.exceptions import ApiError as ElasticsearchException, Request
 from shared.config.app_config import AppConfig
 from shared.config.service_config import ServiceConfig
 from shared.models.event_envelope import EventEnvelope
+from shared.observability.context_propagation import (
+    attach_context_from_kafka,
+    kafka_headers_from_envelope_metadata,
+)
+from shared.observability.tracing import get_tracing_service
 from shared.services.elasticsearch_service import create_elasticsearch_service_legacy
 from shared.services.processed_event_registry import ClaimDecision, ProcessedEventRegistry
 from shared.utils.env_utils import parse_bool_env, parse_int_env
@@ -43,6 +48,7 @@ class SearchProjectionWorker:
         self.dlq_producer: Optional[Producer] = None
         self.processed: Optional[ProcessedEventRegistry] = None
         self.es = None
+        self.tracing = get_tracing_service("search-projection-worker")
 
     async def initialize(self) -> None:
         if not self.enabled:
@@ -90,8 +96,8 @@ class SearchProjectionWorker:
         if self.dlq_producer:
             try:
                 self.dlq_producer.flush(5)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("DLQ producer flush failed during shutdown: %s", exc, exc_info=True)
             self.dlq_producer = None
         if self.processed:
             await self.processed.close()
@@ -136,33 +142,53 @@ class SearchProjectionWorker:
                     if not self.processed:
                         raise RuntimeError("ProcessedEventRegistry not initialized")
 
-                    claim = await self.processed.claim(
-                        handler=self.handler,
-                        event_id=str(envelope.event_id),
-                        aggregate_id=str(envelope.aggregate_id or ""),
-                        sequence_number=envelope.sequence_number,
-                    )
-                    if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
-                        self.consumer.commit(message=msg, asynchronous=False)
-                        continue
-                    if claim.decision == ClaimDecision.IN_PROGRESS:
-                        await asyncio.sleep(2)
-                        self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
-                        continue
+                    kafka_headers = msg.headers()
+                    with attach_context_from_kafka(
+                        kafka_headers=kafka_headers,
+                        fallback_metadata=envelope.metadata if isinstance(envelope.metadata, dict) else None,
+                        service_name="search-projection-worker",
+                    ):
+                        with self.tracing.span(
+                            "search_projection.process_event",
+                            attributes={
+                                "messaging.system": "kafka",
+                                "messaging.destination": msg.topic(),
+                                "messaging.destination_kind": "topic",
+                                "messaging.kafka.partition": msg.partition(),
+                                "messaging.kafka.offset": msg.offset(),
+                                "event.id": str(envelope.event_id),
+                                "event.type": str(envelope.event_type),
+                                "event.aggregate_type": str(envelope.aggregate_type),
+                                "event.aggregate_id": str(envelope.aggregate_id or ""),
+                            },
+                        ):
+                            claim = await self.processed.claim(
+                                handler=self.handler,
+                                event_id=str(envelope.event_id),
+                                aggregate_id=str(envelope.aggregate_id or ""),
+                                sequence_number=envelope.sequence_number,
+                            )
+                            if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
+                                self.consumer.commit(message=msg, asynchronous=False)
+                                continue
+                            if claim.decision == ClaimDecision.IN_PROGRESS:
+                                await asyncio.sleep(2)
+                                self.consumer.seek(TopicPartition(msg.topic(), msg.partition(), msg.offset()))
+                                continue
 
-                    heartbeat_task = asyncio.create_task(
-                        self._heartbeat_loop(handler=self.handler, event_id=str(envelope.event_id))
-                    )
+                            heartbeat_task = asyncio.create_task(
+                                self._heartbeat_loop(handler=self.handler, event_id=str(envelope.event_id))
+                            )
 
-                    await self._index_event(envelope)
-                    if self.processed:
-                        await self.processed.mark_done(
-                            handler=self.handler,
-                            event_id=str(envelope.event_id),
-                            aggregate_id=str(envelope.aggregate_id or ""),
-                            sequence_number=envelope.sequence_number,
-                        )
-                    self.consumer.commit(message=msg, asynchronous=False)
+                            await self._index_event(envelope)
+                            if self.processed:
+                                await self.processed.mark_done(
+                                    handler=self.handler,
+                                    event_id=str(envelope.event_id),
+                                    aggregate_id=str(envelope.aggregate_id or ""),
+                                    sequence_number=envelope.sequence_number,
+                                )
+                            self.consumer.commit(message=msg, asynchronous=False)
                 except Exception as exc:
                     err = str(exc)
                     retryable = self._is_retryable_error(exc)
@@ -281,8 +307,24 @@ class SearchProjectionWorker:
             key = b"search_projection"
             value = json.dumps(payload, ensure_ascii=True).encode("utf-8")
 
-        self.dlq_producer.produce(self.dlq_topic, key=key, value=value)
-        self.dlq_producer.flush(10)
+        dlq_metadata = dlq_env.metadata if envelope else None
+        headers = kafka_headers_from_envelope_metadata(dlq_metadata) if isinstance(dlq_metadata, dict) else []
+        with attach_context_from_kafka(
+            kafka_headers=headers,
+            fallback_metadata=dlq_metadata if isinstance(dlq_metadata, dict) else None,
+            service_name="search-projection-worker",
+        ):
+            with self.tracing.span(
+                "search_projection.dlq_produce",
+                attributes={
+                    "messaging.system": "kafka",
+                    "messaging.destination": self.dlq_topic,
+                    "messaging.destination_kind": "topic",
+                    "event.id": str(envelope.event_id) if envelope else None,
+                },
+            ):
+                self.dlq_producer.produce(self.dlq_topic, key=key, value=value, headers=headers or None)
+                self.dlq_producer.flush(10)
 
     @staticmethod
     def _is_retryable_error(exc: Exception) -> bool:

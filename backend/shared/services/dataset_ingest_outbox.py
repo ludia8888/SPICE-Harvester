@@ -11,6 +11,12 @@ from confluent_kafka import Producer
 
 from shared.config.app_config import AppConfig
 from shared.config.service_config import ServiceConfig
+from shared.observability.context_propagation import (
+    attach_context_from_carrier,
+    carrier_from_envelope_metadata,
+    kafka_headers_from_envelope_metadata,
+)
+from shared.observability.tracing import get_tracing_service
 from shared.services.dataset_registry import DatasetRegistry, DatasetIngestOutboxItem
 from shared.services.event_store import event_store
 from shared.services.lineage_store import LineageStore
@@ -57,6 +63,7 @@ class DatasetIngestOutboxPublisher:
         self.enable_dlq = parse_bool_env("ENABLE_DATASET_INGEST_OUTBOX_DLQ", True)
         self.dlq_topic = (AppConfig.DATASET_INGEST_OUTBOX_DLQ_TOPIC or "").strip() or "dataset-ingest-outbox-dlq"
         self.dlq_producer: Optional[Producer] = None
+        self.tracing = get_tracing_service("dataset-ingest-outbox")
         if self.enable_dlq:
             max_in_flight = parse_int_env("DATASET_INGEST_OUTBOX_MAX_IN_FLIGHT", 5, min_value=1, max_value=5)
             delivery_timeout_ms = parse_int_env(
@@ -94,8 +101,8 @@ class DatasetIngestOutboxPublisher:
         if self.dlq_producer:
             try:
                 await asyncio.to_thread(self.dlq_producer.flush, self.flush_timeout_seconds)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("DLQ producer flush failed during shutdown: %s", exc, exc_info=True)
 
     def _next_attempt_at(self, attempts: int) -> datetime:
         delay = min(self.backoff_max, self.backoff_base * (2 ** max(0, attempts - 1)))
@@ -119,7 +126,20 @@ class DatasetIngestOutboxPublisher:
         encoded = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
         key = item.ingest_request_id.encode("utf-8")
         try:
-            self.dlq_producer.produce(topic=self.dlq_topic, value=encoded, key=key)
+            headers = kafka_headers_from_envelope_metadata(item.payload)
+            carrier = carrier_from_envelope_metadata(item.payload)
+            with attach_context_from_carrier(carrier, service_name="dataset-ingest-outbox"):
+                with self.tracing.span(
+                    "dataset_ingest_outbox.dlq_produce",
+                    attributes={
+                        "messaging.system": "kafka",
+                        "messaging.destination": self.dlq_topic,
+                        "messaging.destination_kind": "topic",
+                        "dataset.ingest_request_id": item.ingest_request_id,
+                        "dataset.outbox_id": item.outbox_id,
+                    },
+                ):
+                    self.dlq_producer.produce(topic=self.dlq_topic, value=encoded, key=key, headers=headers or None)
             remaining = await asyncio.to_thread(self.dlq_producer.flush, self.flush_timeout_seconds)
             if remaining != 0:
                 logger.warning("Dataset ingest DLQ flush incomplete (remaining=%s)", remaining)
@@ -151,22 +171,31 @@ class DatasetIngestOutboxPublisher:
     async def _publish_item(self, item: DatasetIngestOutboxItem) -> None:
         if item.kind == "eventstore":
             payload = item.payload or {}
-            event = EventEnvelope(
-                event_id=str(payload.get("event_id") or ""),
-                event_type=str(payload.get("event_type") or ""),
-                aggregate_type=str(payload.get("aggregate_type") or ""),
-                aggregate_id=str(payload.get("aggregate_id") or ""),
-                occurred_at=payload.get("occurred_at") or datetime.now(timezone.utc),
-                actor=payload.get("actor"),
-                data=payload.get("data") or {},
-                metadata={
-                    "kind": "command",
-                    "command_type": payload.get("command_type"),
-                    "command_id": str(payload.get("event_id") or ""),
-                },
-            )
-            event.metadata["kafka_topic"] = AppConfig.PIPELINE_EVENTS_TOPIC
-            await event_store.append_event(event)
+            carrier = carrier_from_envelope_metadata(payload)
+            with attach_context_from_carrier(carrier, service_name="dataset-ingest-outbox"):
+                with self.tracing.span(
+                    "dataset_ingest_outbox.append_event",
+                    attributes={
+                        "dataset.ingest_request_id": item.ingest_request_id,
+                        "dataset.outbox_id": item.outbox_id,
+                    },
+                ):
+                    event = EventEnvelope(
+                        event_id=str(payload.get("event_id") or ""),
+                        event_type=str(payload.get("event_type") or ""),
+                        aggregate_type=str(payload.get("aggregate_type") or ""),
+                        aggregate_id=str(payload.get("aggregate_id") or ""),
+                        occurred_at=payload.get("occurred_at") or datetime.now(timezone.utc),
+                        actor=payload.get("actor"),
+                        data=payload.get("data") or {},
+                        metadata={
+                            "kind": "command",
+                            "command_type": payload.get("command_type"),
+                            "command_id": str(payload.get("event_id") or ""),
+                        },
+                    )
+                    event.metadata["kafka_topic"] = AppConfig.PIPELINE_EVENTS_TOPIC
+                    await event_store.append_event(event)
             await self.registry.mark_ingest_outbox_published(outbox_id=item.outbox_id)
             return
 

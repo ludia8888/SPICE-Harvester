@@ -28,6 +28,7 @@ from botocore.exceptions import ClientError
 
 from shared.config.service_config import ServiceConfig
 from shared.models.event_envelope import EventEnvelope
+from shared.observability.context_propagation import enrich_metadata_with_current_trace
 from shared.services.aggregate_sequence_allocator import AggregateSequenceAllocator
 from shared.utils.ontology_version import extract_ontology_version
 import logging
@@ -447,6 +448,12 @@ class EventStore:
             # Allow lazy usage in workers/tests
             self.session = aioboto3.Session()
 
+        # Best-effort: persist trace context alongside the event so downstream
+        # Kafka consumers can continue the distributed trace even when using
+        # confluent_kafka (manual propagation).
+        if isinstance(event.metadata, dict):
+            enrich_metadata_with_current_trace(event.metadata)
+
         # Build S3 key path (legacy layout). NOTE: append idempotency MUST NOT rely
         # on occurred_at, because retries/replays may re-materialize the same
         # event_id with a different timestamp. We therefore also maintain a
@@ -601,8 +608,13 @@ class EventStore:
             logger.error(f"Failed to store event in S3/MinIO: {e}")
             try:
                 await self._record_audit_failure(event, error=str(e))
-            except Exception:
-                pass
+            except Exception as audit_err:
+                logger.warning(
+                    "Failed to record audit failure (event_id=%s): %s",
+                    getattr(event, "event_id", None),
+                    audit_err,
+                    exc_info=True,
+                )
             raise
 
     def _enforce_idempotency_contract(self, existing: EventEnvelope, incoming: EventEnvelope, *, source: str) -> None:
@@ -654,6 +666,10 @@ class EventStore:
         if isinstance(metadata, dict):
             # kafka_topic may be backfilled for older writers; ignore for idempotency compare.
             metadata.pop("kafka_topic", None)
+            # Trace context may differ across retries/replays; ignore for idempotency compare.
+            metadata.pop("traceparent", None)
+            metadata.pop("tracestate", None)
+            metadata.pop("baggage", None)
         return doc
 
     @staticmethod

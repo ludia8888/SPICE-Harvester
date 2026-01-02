@@ -10,8 +10,8 @@ from fastapi.responses import JSONResponse
 
 from shared.config.settings import settings
 from shared.errors.error_types import ErrorCategory, ErrorCode
-from shared.errors.enterprise_catalog import resolve_enterprise_error, is_external_code
-from shared.observability.tracing import get_tracing_service
+from shared.errors.enterprise_catalog import is_external_code
+from shared.errors.error_envelope import build_error_envelope
 from shared.security.input_sanitizer import SecurityViolationError
 from shared.utils.app_logger import get_logger
 
@@ -153,33 +153,20 @@ def _build_payload(
     context: Optional[Dict[str, Any]] = None,
     external_code: Optional[str] = None,
 ) -> Dict[str, Any]:
-    tracing = get_tracing_service(service_name)
-    trace_id = tracing.get_trace_id()
-    enterprise = resolve_enterprise_error(
+    return build_error_envelope(
         service_name=service_name,
+        message=message,
+        detail=detail,
         code=code,
         category=category,
         status_code=status_code,
+        errors=errors,
+        context=context,
         external_code=external_code,
+        origin=_get_origin(request, service_name),
+        request_id=_get_request_id(request),
+        prefer_status_code=True,
     )
-    payload: Dict[str, Any] = {
-        "status": "error",
-        "message": message,
-        "detail": detail or message,
-        "code": code.value,
-        "category": category.value,
-        "http_status": status_code,
-        "retryable": enterprise.retryable,
-        "enterprise": enterprise.to_dict(),
-        "origin": _get_origin(request, service_name),
-        "trace_id": trace_id,
-        "request_id": _get_request_id(request),
-    }
-    if errors:
-        payload["errors"] = errors
-    if context:
-        payload["context"] = context
-    return payload
 
 
 def _build_response(
@@ -207,7 +194,7 @@ def _build_response(
         context=context,
         external_code=external_code,
     )
-    return JSONResponse(status_code=status_code, content=payload)
+    return JSONResponse(status_code=payload.get("http_status", status_code), content=payload)
 
 
 def _resolve_validation_error(exc: RequestValidationError) -> Tuple[ErrorCode, str]:
@@ -332,9 +319,15 @@ def install_error_handlers(
             code, category, _ = _extract_upstream_metadata(exc.detail)
             external_code = _extract_external_code(exc.detail)
         if code is None or category is None:
-            fallback_category, fallback_code = _STATUS_TO_CATEGORY_CODE.get(
-                exc.status_code, (ErrorCategory.INTERNAL, ErrorCode.HTTP_ERROR)
-            )
+            fallback = _STATUS_TO_CATEGORY_CODE.get(exc.status_code)
+            if fallback is None:
+                if exc.status_code >= 500:
+                    fallback = (ErrorCategory.INTERNAL, ErrorCode.INTERNAL_ERROR)
+                elif exc.status_code >= 400:
+                    fallback = (ErrorCategory.INPUT, ErrorCode.HTTP_ERROR)
+                else:
+                    fallback = (ErrorCategory.INTERNAL, ErrorCode.HTTP_ERROR)
+            fallback_category, fallback_code = fallback
             category = category or fallback_category
             code = code or fallback_code
         message = _normalize_message(exc.detail)

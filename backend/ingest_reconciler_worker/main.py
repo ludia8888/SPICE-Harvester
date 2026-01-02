@@ -17,6 +17,7 @@ import httpx
 from fastapi import FastAPI
 
 from shared.observability.metrics import get_metrics_collector
+from shared.observability.tracing import get_tracing_service
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.service_factory import ServiceInfo, create_fastapi_service
 from shared.utils.env_utils import parse_bool_env, parse_int_env
@@ -60,6 +61,7 @@ class IngestReconcilerWorker:
         self.dataset_registry: Optional[DatasetRegistry] = None
         self.http: Optional[httpx.AsyncClient] = None
         self.metrics = get_metrics_collector("ingest-reconciler-worker")
+        self.tracing = get_tracing_service("ingest-reconciler-worker")
         self.running = False
         self._last_alert_at = 0.0
 
@@ -137,38 +139,51 @@ class IngestReconcilerWorker:
         while not stop_event.is_set():
             started_at = time.monotonic()
             result: Optional[Dict[str, int]] = None
-            try:
-                result = await self.dataset_registry.reconcile_ingest_state(
-                    stale_after_seconds=self.stale_after_seconds,
-                    limit=self.limit,
-                )
-                if result is not None:
-                    self._record_metrics(result)
-                    if self._should_alert(result):
+            with self.tracing.span(
+                "ingest_reconciler.tick",
+                attributes={
+                    "ingest.stale_after_seconds": int(self.stale_after_seconds),
+                    "ingest.limit": int(self.limit),
+                    "ingest.poll_interval_seconds": int(self.poll_interval_seconds),
+                },
+            ):
+                try:
+                    result = await self.dataset_registry.reconcile_ingest_state(
+                        stale_after_seconds=self.stale_after_seconds,
+                        limit=self.limit,
+                    )
+                    if result is not None:
+                        self._record_metrics(result)
+                        self.tracing.set_span_attribute("ingest.published", int(result.get("published", 0)))
+                        self.tracing.set_span_attribute("ingest.aborted", int(result.get("aborted", 0)))
+                        self.tracing.set_span_attribute("ingest.committed_tx", int(result.get("committed_tx", 0)))
+                        self.tracing.set_span_attribute("ingest.skipped", int(result.get("skipped", 0)))
+                        if self._should_alert(result):
+                            await self._emit_alert(
+                                {
+                                    "kind": "dataset_ingest_reconcile",
+                                    "status": "warning",
+                                    "result": result,
+                                    "stale_after_seconds": self.stale_after_seconds,
+                                    "limit": self.limit,
+                                    "timestamp": utcnow().isoformat(),
+                                }
+                            )
+                except Exception as exc:
+                    self.tracing.record_exception(exc)
+                    self._record_error_metric()
+                    if self.alert_on_error:
                         await self._emit_alert(
                             {
                                 "kind": "dataset_ingest_reconcile",
-                                "status": "warning",
-                                "result": result,
+                                "status": "error",
+                                "error": str(exc),
                                 "stale_after_seconds": self.stale_after_seconds,
                                 "limit": self.limit,
                                 "timestamp": utcnow().isoformat(),
                             }
                         )
-            except Exception as exc:
-                self._record_error_metric()
-                if self.alert_on_error:
-                    await self._emit_alert(
-                        {
-                            "kind": "dataset_ingest_reconcile",
-                            "status": "error",
-                            "error": str(exc),
-                            "stale_after_seconds": self.stale_after_seconds,
-                            "limit": self.limit,
-                            "timestamp": utcnow().isoformat(),
-                        }
-                    )
-                logger.warning("Ingest reconciler loop failed: %s", exc)
+                    logger.warning("Ingest reconciler loop failed: %s", exc)
 
             elapsed = time.monotonic() - started_at
             self.metrics.record_business_metric("ingest_reconciler_duration_seconds", elapsed)
