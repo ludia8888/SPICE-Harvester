@@ -22,7 +22,6 @@ load_dotenv()
 
 # Standard library imports
 import asyncio
-import json
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -30,8 +29,6 @@ from typing import Optional
 
 # Third party imports
 from fastapi import FastAPI, Request, status
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
 
 # Centralized configuration and dependency injection
 from shared.config.settings import settings, ApplicationSettings
@@ -61,6 +58,7 @@ from shared.services.elasticsearch_service import ElasticsearchService
 from shared.models.requests import ApiResponse
 from shared.utils.jsonld import JSONToJSONLDConverter
 from shared.utils.label_mapper import LabelMapper
+from shared.errors.error_response import install_error_handlers
 from oms.services.ontology_deploy_outbox import run_ontology_deploy_outbox_worker
 from oms.services.ontology_deployment_registry import OntologyDeploymentRegistry
 from oms.services.ontology_deployment_registry_v2 import OntologyDeploymentRegistryV2
@@ -432,58 +430,7 @@ app = create_fastapi_service(
     include_logging_middleware=True
 )
 install_oms_auth_middleware(app)
-
-
-# Error handlers (unchanged from original)
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """FastAPI validation error를 400으로 변환"""
-    logger.warning(f"Validation error: {exc}")
-
-    # JSON parsing 오류인지 확인
-    body_errors = [error for error in exc.errors() if error.get("type") == "json_invalid"]
-    if body_errors:
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={
-                "status": "error",
-                "message": "잘못된 JSON 형식입니다",
-                "detail": "Invalid JSON format",
-            },
-        )
-
-    # 기타 validation 오류는 400으로 변환
-    return JSONResponse(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        content={"status": "error", "message": "입력 데이터 검증 실패", "detail": str(exc)},
-    )
-
-
-@app.exception_handler(json.JSONDecodeError)
-async def json_decode_error_handler(request: Request, exc: json.JSONDecodeError):
-    """JSON decode 오류를 400으로 처리"""
-    logger.warning(f"JSON decode error: {exc}")
-    return JSONResponse(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        content={
-            "status": "error",
-            "message": "잘못된 JSON 형식입니다",
-            "detail": f"JSON parsing failed: {str(exc)}",
-        },
-    )
-
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    logger.error(f"예상치 못한 오류 발생: {exc}")
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "status": "error",
-            "message": "내부 서버 오류가 발생했습니다",
-            "detail": "서버에서 처리 중 오류가 발생했습니다"
-        },
-    )
+install_error_handlers(app, service_name="oms", validation_status=status.HTTP_400_BAD_REQUEST)
 
 
 # Modern dependency injection functions

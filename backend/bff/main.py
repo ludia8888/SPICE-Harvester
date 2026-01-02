@@ -22,7 +22,6 @@ load_dotenv()
 
 # Standard library imports
 import asyncio
-import json
 import os
 import logging
 from contextlib import asynccontextmanager
@@ -84,6 +83,7 @@ from shared.security.input_sanitizer import (
     validate_class_id,
     validate_db_name,
 )
+from shared.errors.error_response import install_error_handlers
 from shared.utils.label_mapper import LabelMapper
 from shared.dependencies import configure_type_inference_service
 from shared.services.redis_service import create_redis_service
@@ -650,6 +650,7 @@ app = create_fastapi_service(
     include_logging_middleware=True
 )
 install_bff_auth_middleware(app)
+install_error_handlers(app, service_name="bff")
 
 
 # Modern dependency injection functions
