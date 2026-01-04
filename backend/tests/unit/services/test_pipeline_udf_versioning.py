@@ -58,6 +58,7 @@ class _DatasetRegistry:
         return self.versions_by_dataset_id.get(dataset_id)
 
 
+@pytest.mark.requires_infra
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_udf_can_be_created_reused_and_version_upgraded() -> None:
@@ -148,4 +149,3 @@ def transform(row):
             async with registry._pool.acquire() as conn:
                 await conn.execute(f"DROP SCHEMA IF EXISTS {TEST_SCHEMA} CASCADE")
         await registry.close()
-

@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-01-04T12:52:21.923989Z
+> Generated: 2026-01-04T17:27:51.356870Z
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## add_palantir_system_fields.py
@@ -712,20 +712,39 @@
 
 ### `backend/bff/tests/test_dataset_ingest_idempotency.py`
 - **Functions**
-  - `async _noop_flush_outbox(*args, **kwargs)` (line 44): no docstring
-  - `test_csv_upload_idempotency_key_reuses_version(monkeypatch)` (line 48): no docstring
+  - `async _noop_flush_outbox(*args, **kwargs)` (line 257): no docstring
+  - `_build_upload(content)` (line 261): no docstring
+  - `async test_csv_upload_idempotency_key_reuses_version(monkeypatch)` (line 270): no docstring
 - **Classes**
-  - `_FakeLakeFSStorage` (line 12): no docstring
-    - `async save_bytes(self, *args, **kwargs)` (line 13): no docstring
-    - `async save_json(self, *args, **kwargs)` (line 16): no docstring
-  - `_FakeLakeFSClient` (line 20): no docstring
-    - `__init__(self)` (line 21): no docstring
-    - `async commit(self, *args, **kwargs)` (line 24): no docstring
-    - `async create_branch(self, *args, **kwargs)` (line 28): no docstring
-  - `_FakePipelineRegistry` (line 32): no docstring
-    - `__init__(self)` (line 33): no docstring
-    - `async get_lakefs_storage(self, *args, **kwargs)` (line 37): no docstring
-    - `async get_lakefs_client(self, *args, **kwargs)` (line 40): no docstring
+  - `_FakeLakeFSStorage` (line 16): no docstring
+    - `async save_bytes(self, *args, **kwargs)` (line 17): no docstring
+    - `async save_json(self, *args, **kwargs)` (line 20): no docstring
+  - `_FakeLakeFSClient` (line 24): no docstring
+    - `__init__(self)` (line 25): no docstring
+    - `async commit(self, *args, **kwargs)` (line 28): no docstring
+    - `async create_branch(self, *args, **kwargs)` (line 32): no docstring
+  - `_FakePipelineRegistry` (line 36): no docstring
+    - `__init__(self)` (line 37): no docstring
+    - `async get_lakefs_storage(self, *args, **kwargs)` (line 41): no docstring
+    - `async get_lakefs_client(self, *args, **kwargs)` (line 44): no docstring
+  - `_Request` (line 49): no docstring
+  - `_Dataset` (line 54): no docstring
+  - `_IngestRequest` (line 63): no docstring
+  - `_IngestTransaction` (line 81): no docstring
+  - `_DatasetVersion` (line 91): no docstring
+  - `_FakeDatasetRegistry` (line 102): no docstring
+    - `__init__(self)` (line 103): no docstring
+    - `async get_dataset_by_name(self, db_name, name, branch)` (line 110): no docstring
+    - `async create_dataset(self, db_name, name, description, source_type, source_ref, schema_json, branch)` (line 113): no docstring
+    - `async create_ingest_request(self, dataset_id, db_name, branch, idempotency_key, request_fingerprint, schema_json, sample_json, row_count, source_metadata)` (line 134): no docstring
+    - `async get_ingest_transaction(self, ingest_request_id)` (line 168): no docstring
+    - `async create_ingest_transaction(self, ingest_request_id)` (line 171): no docstring
+    - `async mark_ingest_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 179): no docstring
+    - `async mark_ingest_transaction_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 191): no docstring
+    - `async get_version_by_ingest_request(self, ingest_request_id)` (line 205): no docstring
+    - `async publish_ingest_request(self, ingest_request_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, schema_json, outbox_entries)` (line 208): no docstring
+    - `async mark_ingest_failed(self, ingest_request_id, error)` (line 244): no docstring
+    - `async mark_ingest_transaction_aborted(self, ingest_request_id, error)` (line 250): no docstring
 
 ### `backend/bff/tests/test_funnel_client_structure_selection.py`
 - **Classes**
@@ -893,64 +912,79 @@
 
 ### `backend/bff/tests/test_pipeline_promotion_semantics.py`
 - **Functions**
-  - `lakefs_merge_stub(monkeypatch)` (line 246): no docstring
-  - `async test_build_enqueues_job_and_records_run()` (line 251): no docstring
-  - `async test_preview_enqueues_job_with_node_id_and_records_preview_and_run(monkeypatch)` (line 292): no docstring
-  - `async test_promote_build_merges_build_branch_to_main_and_registers_version(lakefs_merge_stub)` (line 346): no docstring
-  - `async test_promote_build_rejects_non_staged_artifact_key()` (line 415): no docstring
-  - `async test_promote_build_surfaces_build_errors_when_build_failed()` (line 467): no docstring
-  - `async test_promote_build_blocks_deploy_when_expectations_failed()` (line 505): no docstring
-  - `async test_promote_build_requires_replay_for_breaking_schema_changes(lakefs_merge_stub)` (line 542): no docstring
-  - `async test_promote_build_allows_breaking_schema_changes_with_replay_flag(lakefs_merge_stub)` (line 605): no docstring
+  - `async _noop_publish_lock(*args, **kwargs)` (line 46): no docstring
+  - `async _noop_emit_event(*args, **kwargs)` (line 50): no docstring
+  - `lakefs_merge_stub(monkeypatch)` (line 255): no docstring
+  - `async test_build_enqueues_job_and_records_run()` (line 260): no docstring
+  - `async test_preview_enqueues_job_with_node_id_and_records_preview_and_run(monkeypatch)` (line 301): no docstring
+  - `async test_promote_build_merges_build_branch_to_main_and_registers_version(lakefs_merge_stub, monkeypatch)` (line 355): no docstring
+  - `async test_promote_build_rejects_non_staged_artifact_key()` (line 427): no docstring
+  - `async test_promote_build_surfaces_build_errors_when_build_failed()` (line 479): no docstring
+  - `async test_promote_build_blocks_deploy_when_expectations_failed()` (line 517): no docstring
+  - `async test_promote_build_requires_replay_for_breaking_schema_changes(lakefs_merge_stub)` (line 554): no docstring
+  - `async test_promote_build_allows_breaking_schema_changes_with_replay_flag(lakefs_merge_stub, monkeypatch)` (line 617): no docstring
 - **Classes**
-  - `_Request` (line 15): no docstring
-  - `_Pipeline` (line 20): no docstring
-  - `_Dataset` (line 29): no docstring
-  - `_DatasetVersion` (line 38): no docstring
-  - `_PipelineRegistry` (line 45): no docstring
-    - `__init__(self, pipeline, build_run, lakefs_merge_calls)` (line 46): no docstring
-    - `async get_pipeline(self, pipeline_id)` (line 63): no docstring
-    - `async get_pipeline_branch(self, db_name, branch)` (line 68): no docstring
-    - `async get_latest_version(self, pipeline_id, branch)` (line 71): no docstring
-    - `async get_run(self, pipeline_id, job_id)` (line 78): no docstring
-    - `async has_any_permissions(self, pipeline_id)` (line 83): no docstring
-    - `async has_permission(self, pipeline_id, principal_type, principal_id, required_role)` (line 86): no docstring
-    - `async record_run(self, pipeline_id, job_id, mode, status, output_json, sample_json, finished_at, **kwargs)` (line 89): no docstring
-    - `async record_build(self, pipeline_id, status, output_json, deployed_commit_id, **kwargs)` (line 113): no docstring
-    - `async record_preview(self, **kwargs)` (line 131): no docstring
-    - `async replace_dependencies(self, **kwargs)` (line 135): no docstring
-    - `async update_pipeline(self, **kwargs)` (line 138): no docstring
-    - `async get_lakefs_client(self, user_id)` (line 141): no docstring
-    - `async get_artifact_by_job(self, pipeline_id, job_id, mode)` (line 151): no docstring
-    - `async record_promotion_manifest(self, **kwargs)` (line 154): no docstring
-  - `_PipelineJobQueue` (line 159): no docstring
-    - `__init__(self)` (line 160): no docstring
-    - `async publish(self, job, **kwargs)` (line 163): no docstring
-  - `_DatasetRegistry` (line 168): no docstring
+  - `_Request` (line 16): no docstring
+  - `_Pipeline` (line 21): no docstring
+  - `_Dataset` (line 30): no docstring
+  - `_DatasetVersion` (line 39): no docstring
+  - `_PipelineRegistry` (line 54): no docstring
+    - `__init__(self, pipeline, build_run, lakefs_merge_calls)` (line 55): no docstring
+    - `async get_pipeline(self, pipeline_id)` (line 72): no docstring
+    - `async get_pipeline_branch(self, db_name, branch)` (line 77): no docstring
+    - `async get_latest_version(self, pipeline_id, branch)` (line 80): no docstring
+    - `async get_run(self, pipeline_id, job_id)` (line 87): no docstring
+    - `async has_any_permissions(self, pipeline_id)` (line 92): no docstring
+    - `async has_permission(self, pipeline_id, principal_type, principal_id, required_role)` (line 95): no docstring
+    - `async record_run(self, pipeline_id, job_id, mode, status, output_json, sample_json, finished_at, **kwargs)` (line 98): no docstring
+    - `async record_build(self, pipeline_id, status, output_json, deployed_commit_id, **kwargs)` (line 122): no docstring
+    - `async record_preview(self, **kwargs)` (line 140): no docstring
+    - `async replace_dependencies(self, **kwargs)` (line 144): no docstring
+    - `async update_pipeline(self, **kwargs)` (line 147): no docstring
+    - `async get_lakefs_client(self, user_id)` (line 150): no docstring
+    - `async get_artifact_by_job(self, pipeline_id, job_id, mode)` (line 160): no docstring
+    - `async record_promotion_manifest(self, **kwargs)` (line 163): no docstring
+  - `_PipelineJobQueue` (line 168): no docstring
     - `__init__(self)` (line 169): no docstring
-    - `async get_dataset_by_name(self, db_name, name, branch)` (line 173): no docstring
-    - `async create_dataset(self, db_name, name, description, source_type, source_ref, schema_json, branch)` (line 176): no docstring
-    - `async add_version(self, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, schema_json, promoted_from_artifact_id)` (line 187): no docstring
-  - `_ObjectifyRegistry` (line 216): no docstring
-    - `async get_active_mapping_spec(self, dataset_id, dataset_branch, target_class_id, artifact_output_name, schema_hash)` (line 217): no docstring
-  - `_OMSClient` (line 229): no docstring
-    - `__init__(self, head_commit_id)` (line 230): no docstring
-    - `async get_version_head(self, db_name, branch)` (line 233): no docstring
-  - `_AuditStore` (line 237): no docstring
-    - `__init__(self)` (line 238): no docstring
-    - `async log(self, **kwargs)` (line 241): no docstring
+    - `async publish(self, job, **kwargs)` (line 172): no docstring
+  - `_DatasetRegistry` (line 177): no docstring
+    - `__init__(self)` (line 178): no docstring
+    - `async get_dataset_by_name(self, db_name, name, branch)` (line 182): no docstring
+    - `async create_dataset(self, db_name, name, description, source_type, source_ref, schema_json, branch)` (line 185): no docstring
+    - `async add_version(self, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, schema_json, promoted_from_artifact_id)` (line 196): no docstring
+  - `_ObjectifyRegistry` (line 225): no docstring
+    - `async get_active_mapping_spec(self, dataset_id, dataset_branch, target_class_id, artifact_output_name, schema_hash)` (line 226): no docstring
+  - `_OMSClient` (line 238): no docstring
+    - `__init__(self, head_commit_id)` (line 239): no docstring
+    - `async get_version_head(self, db_name, branch)` (line 242): no docstring
+  - `_AuditStore` (line 246): no docstring
+    - `__init__(self)` (line 247): no docstring
+    - `async log(self, **kwargs)` (line 250): no docstring
 
 ### `backend/bff/tests/test_pipeline_proposal_governance.py`
 - **Functions**
-  - `async test_pipeline_proposal_submit_and_approve_flow(monkeypatch)` (line 34): no docstring
-  - `async test_pipeline_proposal_requires_approve_role()` (line 113): no docstring
-  - `async test_pipeline_proposal_requires_pending_status(monkeypatch)` (line 156): no docstring
+  - `async test_pipeline_proposal_submit_and_approve_flow()` (line 171): no docstring
+  - `async test_pipeline_proposal_requires_approve_role()` (line 232): no docstring
+  - `async test_pipeline_proposal_requires_pending_status()` (line 270): no docstring
 - **Classes**
-  - `_Request` (line 19): no docstring
-  - `_LakeFSClient` (line 23): no docstring
-    - `async merge(self, **kwargs)` (line 24): no docstring
-  - `_LakeFSStorage` (line 28): no docstring
-    - `async load_json(self, **kwargs)` (line 29): no docstring
+  - `_Request` (line 14): no docstring
+  - `_ProposalRecord` (line 19): no docstring
+  - `_PipelineRecord` (line 28): no docstring
+  - `_FakeAuditStore` (line 43): no docstring
+    - `__init__(self)` (line 44): no docstring
+    - `async log(self, **kwargs)` (line 47): no docstring
+  - `_FakePipelineRegistry` (line 51): no docstring
+    - `__init__(self)` (line 52): no docstring
+    - `async create_pipeline(self, db_name, name, description, pipeline_type, location, status, branch, proposal_status, proposal_title)` (line 56): no docstring
+    - `async get_pipeline(self, pipeline_id)` (line 85): no docstring
+    - `async grant_permission(self, pipeline_id, principal_type, principal_id, role)` (line 88): no docstring
+    - `async has_any_permissions(self, pipeline_id)` (line 98): no docstring
+    - `async has_permission(self, pipeline_id, principal_type, principal_id, required_role)` (line 101): no docstring
+    - `async submit_proposal(self, pipeline_id, title, description, proposal_bundle)` (line 115): no docstring
+    - `async review_proposal(self, pipeline_id, status, review_comment)` (line 136): no docstring
+    - `async merge_branch(self, pipeline_id, from_branch, to_branch)` (line 156): no docstring
+  - `_FakeDatasetRegistry` (line 162): no docstring
+  - `_FakeObjectifyRegistry` (line 166): no docstring
 
 ### `backend/bff/tests/test_security_information_leakage.py`
 - **Classes**
@@ -5684,7 +5718,7 @@
 ### `backend/tests/unit/services/test_pipeline_udf_versioning.py`
 - **Functions**
   - `_get_postgres_url_candidates()` (line 13): no docstring
-  - `async test_udf_can_be_created_reused_and_version_upgraded()` (line 63): Checklist CL-011:
+  - `async test_udf_can_be_created_reused_and_version_upgraded()` (line 64): Checklist CL-011:
 - **Classes**
   - `_Dataset` (line 28): no docstring
   - `_Version` (line 37): no docstring

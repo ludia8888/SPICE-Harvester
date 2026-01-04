@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 import pytest
 from fastapi import HTTPException, status
 
+import bff.routers.pipeline as pipeline_router
 from bff.routers.pipeline import build_pipeline, deploy_pipeline, preview_pipeline
 
 PIPELINE_ID = "00000000-0000-0000-0000-000000000004"
@@ -40,6 +41,14 @@ class _DatasetVersion:
     dataset_id: str
     lakefs_commit_id: str
     artifact_key: str
+
+
+async def _noop_publish_lock(*args: Any, **kwargs: Any) -> None:
+    return None
+
+
+async def _noop_emit_event(*args: Any, **kwargs: Any) -> None:
+    return None
 
 
 class _PipelineRegistry:
@@ -345,7 +354,10 @@ async def test_preview_enqueues_job_with_node_id_and_records_preview_and_run(mon
 @pytest.mark.asyncio
 async def test_promote_build_merges_build_branch_to_main_and_registers_version(
     lakefs_merge_stub: list[dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(pipeline_router, "_acquire_pipeline_publish_lock", _noop_publish_lock)
+    monkeypatch.setattr(pipeline_router, "emit_pipeline_control_plane_event", _noop_emit_event)
     pipeline = _Pipeline(pipeline_id=PIPELINE_ID, db_name="testdb", branch="main")
     build_job_id = "build-p-123"
     node_id = "node-1"
@@ -604,7 +616,10 @@ async def test_promote_build_requires_replay_for_breaking_schema_changes(
 @pytest.mark.asyncio
 async def test_promote_build_allows_breaking_schema_changes_with_replay_flag(
     lakefs_merge_stub: list[dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(pipeline_router, "_acquire_pipeline_publish_lock", _noop_publish_lock)
+    monkeypatch.setattr(pipeline_router, "emit_pipeline_control_plane_event", _noop_emit_event)
     pipeline = _Pipeline(pipeline_id=PIPELINE_ID, db_name="testdb", branch="main")
     build_job_id = "build-p-breaking-allow"
     node_id = "node-1"
