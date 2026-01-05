@@ -17,7 +17,7 @@ NPM ?= npm
 FRONTEND_DIR ?= frontend
 COMPOSE ?= docker compose
 COMPOSE_FULL ?= docker-compose.full.yml
-COVERAGE_MIN ?= 32.0
+COVERAGE_MIN ?= 90.0
 
 .PHONY: help
 help:
@@ -32,7 +32,8 @@ help:
 	@echo "  backend-methods        Regenerate docs/BACKEND_METHODS.md"
 	@echo "  backend-methods-check  Verify docs/BACKEND_METHODS.md is up to date"
 	@echo "  frontend-check         Install + lint + build frontend"
-	@echo "  ci                     Run backend-unit + frontend-check"
+	@echo "  frontend-coverage      Run frontend tests + coverage gate"
+	@echo "  ci                     Run backend-coverage + frontend-check + frontend-coverage"
 	@echo "  stack-up               Start full local docker stack"
 	@echo "  stack-up-build         Start stack (with --build)"
 	@echo "  stack-down             Stop full local docker stack"
@@ -47,7 +48,7 @@ backend-coverage:
 	rm -f coverage.xml || true
 	PYTHONPATH=backend $(PYTHON) -m pytest -q -c backend/pytest.ini -m "not requires_infra" \
 		backend/tests/unit backend/bff/tests backend/funnel/tests \
-		--cov=backend/bff --cov=backend/oms --cov=backend/funnel --cov=backend/shared --cov=backend/instance_worker \
+		--cov=backend --cov-config=backend/.coveragerc \
 		--cov-branch --cov-report=term-missing:skip-covered --cov-report=xml:coverage.xml \
 		--cov-fail-under=$(COVERAGE_MIN)
 
@@ -86,8 +87,13 @@ frontend-check:
 	cd $(FRONTEND_DIR) && $(NPM) run lint
 	cd $(FRONTEND_DIR) && $(NPM) run build
 
+.PHONY: frontend-coverage
+frontend-coverage:
+	cd $(FRONTEND_DIR) && $(NPM) ci
+	cd $(FRONTEND_DIR) && $(NPM) run test
+
 .PHONY: ci
-ci: backend-unit frontend-check
+ci: backend-coverage frontend-check frontend-coverage
 
 .PHONY: stack-up
 stack-up:

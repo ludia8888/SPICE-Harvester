@@ -1045,16 +1045,18 @@ export const DatasetsPage = () => {
             )}
           </div>
         </section>
-      ) : activeFile ? (
-        <div className="grid">
-          <Card className="card">
-            <Text className="card-title">{activeFile.datasetName}</Text>
-            <Text className="card-meta">File: {activeFile.name}</Text>
-            <Text className="card-meta">Source: {activeFile.source}</Text>
-            <Text className="card-meta">Updated: {activeFile.updatedLabel || activeFile.updatedAt}</Text>
-          </Card>
-        </div>
-      ) : null}
+      ) : (
+        activeFile && (
+          <div className="grid">
+            <Card className="card">
+              <Text className="card-title">{activeFile.datasetName}</Text>
+              <Text className="card-meta">File: {activeFile.name}</Text>
+              <Text className="card-meta">Source: {activeFile.source}</Text>
+              <Text className="card-meta">Updated: {activeFile.updatedLabel || activeFile.updatedAt}</Text>
+            </Card>
+          </div>
+        )
+      )}
       <Dialog
         isOpen={isUploadOpen}
         onClose={handleCloseUploadDialog}
@@ -1065,33 +1067,31 @@ export const DatasetsPage = () => {
         <div className="upload-dialog-body">
           {isUploading ? (
             <div className="upload-progress-view">
-              {uploadFiles.length > 0 ? (
-                <div className="upload-file-list is-progress">
-                  {uploadFiles.map((uploadFile) => {
-                    const status = getUploadStatus(uploadFile)
-                    return (
-                      <div key={uploadFile.id} className="upload-file-row">
-                        <div className="upload-file-meta">
-                          <span className={`upload-status ${status}`}>
-                            {status === 'complete' ? (
-                              <Icon icon="tick" size={12} />
-                            ) : status === 'error' ? (
-                              <Icon icon="error" size={12} />
-                            ) : status === 'active' ? (
-                              <span className="upload-status-dot" />
-                            ) : null}
-                          </span>
-                          <Icon icon="document" className="upload-file-icon" />
-                          <Text className="upload-file-name">{uploadFile.file.name}</Text>
-                        </div>
-                        <div className="upload-file-actions">
-                          <Text className="upload-file-size">{formatFileSize(uploadFile.file.size)}</Text>
-                        </div>
+              <div className="upload-file-list is-progress">
+                {uploadFiles.map((uploadFile) => {
+                  const status = getUploadStatus(uploadFile)
+                  return (
+                    <div key={uploadFile.id} className="upload-file-row">
+                      <div className="upload-file-meta">
+                        <span className={`upload-status ${status}`}>
+                          {status === 'complete' ? (
+                            <Icon icon="tick" size={12} />
+                          ) : status === 'error' ? (
+                            <Icon icon="error" size={12} />
+                          ) : (
+                            <span className="upload-status-dot" />
+                          )}
+                        </span>
+                        <Icon icon="document" className="upload-file-icon" />
+                        <Text className="upload-file-name">{uploadFile.file.name}</Text>
                       </div>
-                    )
-                  })}
-                </div>
-              ) : null}
+                      <div className="upload-file-actions">
+                        <Text className="upload-file-size">{formatFileSize(uploadFile.file.size)}</Text>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
               <div className="upload-progress">
                 <div className="upload-progress-bar">
                   <span className="upload-progress-fill" style={{ width: `${uploadProgressPercent}%` }} />

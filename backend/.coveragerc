@@ -1,0 +1,22 @@
+[run]
+branch = True
+source =
+    backend
+omit =
+    backend/tests/*
+    backend/**/tests/*
+    backend/**/tests/**
+    backend/**/test_*.py
+    backend/**/conftest.py
+    backend/scripts/*
+    backend/perf/*
+    backend/examples/*
+    backend/*.py
+    backend/**/__pycache__/*
+    backend/**/migrations/*
+    backend/**/generated/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
