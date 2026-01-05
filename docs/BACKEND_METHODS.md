@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-01-05T04:00:16.806674Z
+> Generated: 2026-01-05T04:25:24.348983Z
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## add_palantir_system_fields.py
@@ -239,22 +239,23 @@
   - `_coerce_db_entry(entry)` (line 66): no docstring
   - `_enrich_db_entry(entry, actor_id, actor_name)` (line 80): no docstring
   - `async _fetch_database_access(db_names)` (line 109): no docstring
-  - `async _upsert_database_owner(db_name, principal_type, principal_id, principal_name)` (line 138): no docstring
-  - `_resolve_actor(request)` (line 169): no docstring
-  - `_enrich_db_entry(entry, actor_type, actor_id, actor_name, access_rows)` (line 181): no docstring
-  - `async list_databases(request, oms)` (line 228): 데이터베이스 목록 조회
-  - `async create_database(request, http_request, oms)` (line 279): 데이터베이스 생성
-  - `async delete_database(db_name, http_request, expected_seq, oms)` (line 386): 데이터베이스 삭제
-  - `async get_branch_info(db_name, branch_name, oms)` (line 482): 브랜치 정보 조회 (프론트엔드용 BFF 래핑)
-  - `async delete_branch(db_name, branch_name, force, oms)` (line 505): 브랜치 삭제 (프론트엔드용 BFF 래핑)
-  - `async get_database(db_name, oms)` (line 544): 데이터베이스 정보 조회
-  - `async get_database_expected_seq(db_name)` (line 576): Resolve the current `expected_seq` for database (aggregate) operations.
-  - `async list_classes(db_name, type, limit, oms)` (line 602): 데이터베이스의 클래스 목록 조회
-  - `async create_class(db_name, class_data, oms)` (line 641): 데이터베이스에 새 클래스 생성
-  - `async get_class(db_name, class_id, request, oms)` (line 684): 특정 클래스 조회
-  - `async list_branches(db_name, oms)` (line 712): 브랜치 목록 조회
-  - `async create_branch(db_name, branch_data, oms)` (line 747): 새 브랜치 생성
-  - `async get_versions(db_name, oms)` (line 803): 버전 히스토리 조회
+  - `async _upsert_database_owner(db_name, principal_type, principal_id, principal_name)` (line 142): no docstring
+  - `async _ensure_database_access_table(conn)` (line 192): no docstring
+  - `_resolve_actor(request)` (line 227): no docstring
+  - `_enrich_db_entry(entry, actor_type, actor_id, actor_name, access_rows)` (line 239): no docstring
+  - `async list_databases(request, oms)` (line 286): 데이터베이스 목록 조회
+  - `async create_database(request, http_request, oms)` (line 337): 데이터베이스 생성
+  - `async delete_database(db_name, http_request, expected_seq, oms)` (line 444): 데이터베이스 삭제
+  - `async get_branch_info(db_name, branch_name, oms)` (line 540): 브랜치 정보 조회 (프론트엔드용 BFF 래핑)
+  - `async delete_branch(db_name, branch_name, force, oms)` (line 563): 브랜치 삭제 (프론트엔드용 BFF 래핑)
+  - `async get_database(db_name, oms)` (line 602): 데이터베이스 정보 조회
+  - `async get_database_expected_seq(db_name)` (line 634): Resolve the current `expected_seq` for database (aggregate) operations.
+  - `async list_classes(db_name, type, limit, oms)` (line 660): 데이터베이스의 클래스 목록 조회
+  - `async create_class(db_name, class_data, oms)` (line 699): 데이터베이스에 새 클래스 생성
+  - `async get_class(db_name, class_id, request, oms)` (line 742): 특정 클래스 조회
+  - `async list_branches(db_name, oms)` (line 770): 브랜치 목록 조회
+  - `async create_branch(db_name, branch_data, oms)` (line 805): 새 브랜치 생성
+  - `async get_versions(db_name, oms)` (line 861): 버전 히스토리 조회
 
 ### `backend/bff/routers/graph.py`
 - **Functions**
