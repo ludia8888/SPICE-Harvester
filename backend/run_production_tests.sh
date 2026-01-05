@@ -66,7 +66,7 @@ POSTGRES_PORT_HOST="${POSTGRES_PORT_HOST:-5433}"
 REDIS_PORT_HOST="${REDIS_PORT_HOST:-6379}"
 MINIO_PORT_HOST="${MINIO_PORT_HOST:-9000}"
 ELASTICSEARCH_PORT_HOST="${ELASTICSEARCH_PORT_HOST:-9200}"
-KAFKA_PORT_HOST="${KAFKA_PORT_HOST:-9092}"
+KAFKA_PORT_HOST="${KAFKA_PORT_HOST:-39092}"
 
 export POSTGRES_URL="${POSTGRES_URL:-postgresql://spiceadmin:spicepass123@localhost:${POSTGRES_PORT_HOST}/spicedb}"
 REDIS_PASSWORD="${REDIS_PASSWORD:-spicepass123}"
@@ -99,7 +99,7 @@ Notes:
 - Tests live under `backend/tests/` (run from `backend/`).
 - Full suite expects local ports from docker compose:
   OMS 8000, BFF 8002, Funnel 8003, TerminusDB 6363.
-  Infra ports default to: Postgres 5433, MinIO 9000, Elasticsearch 9200, Kafka 9092.
+  Infra ports default to: Postgres 5433, MinIO 9000, Elasticsearch 9200, Kafka 39092.
   If you use repo root `.env` port overrides (recommended), this script will auto-detect them.
 USAGE
 }
@@ -208,12 +208,56 @@ wait_for_url() {
   return 1
 }
 
+wait_for_port() {
+  local name="$1"
+  local host="$2"
+  local port="$3"
+  local timeout_s="$4"
+
+  local deadline
+  deadline="$(( $(date +%s) + timeout_s ))"
+
+  while [[ "$(date +%s)" -lt "$deadline" ]]; do
+    if "$PYTHON_BIN" - <<PY >/dev/null 2>&1
+import socket, sys
+host = "$host"
+port = int("$port")
+try:
+    with socket.create_connection((host, port), timeout=1):
+        pass
+except Exception:
+    sys.exit(1)
+sys.exit(0)
+PY
+    then
+      echo "✅ $name reachable: $host:$port"
+      return 0
+    fi
+    sleep 2
+  done
+
+  echo "❌ Timed out waiting for $name: $host:$port (timeout=${timeout_s}s)" >&2
+  return 1
+}
+
 if [[ "$WAIT_FOR_SERVICES" == "true" && "$MODE" == "full" ]]; then
   echo "⏳ Waiting for services (timeout=${TIMEOUT_SECONDS}s)..."
   wait_for_url "MinIO" "${MINIO_URL}/minio/health/live" "$TIMEOUT_SECONDS"
   wait_for_url "OMS" "${OMS_URL}/health" "$TIMEOUT_SECONDS"
   wait_for_url "BFF" "${BFF_URL}/api/v1/health" "$TIMEOUT_SECONDS"
   wait_for_url "Funnel" "${FUNNEL_URL}/health" "$TIMEOUT_SECONDS"
+
+  kafka_bootstrap="${KAFKA_BOOTSTRAP_SERVERS%%,*}"
+  kafka_bootstrap="${kafka_bootstrap#*://}"
+  kafka_host="${kafka_bootstrap%%:*}"
+  kafka_port="${kafka_bootstrap##*:}"
+  if [[ "$kafka_host" == "$kafka_bootstrap" || -z "$kafka_host" ]]; then
+    kafka_host="localhost"
+  fi
+  if [[ "$kafka_port" == "$kafka_bootstrap" || -z "$kafka_port" ]]; then
+    kafka_port="$KAFKA_PORT_HOST"
+  fi
+  wait_for_port "Kafka" "$kafka_host" "$kafka_port" "$TIMEOUT_SECONDS"
 fi
 
 echo "🧪 Running tests (mode=$MODE)..."
