@@ -111,14 +111,18 @@ async def _fetch_database_access(db_names: List[str]) -> Dict[str, List[Dict[str
         return {}
     conn = await asyncpg.connect(ServiceConfig.get_postgres_url())
     try:
-        rows = await conn.fetch(
-            """
-            SELECT db_name, principal_type, principal_id, principal_name, role
-            FROM database_access
-            WHERE db_name = ANY($1)
-            """,
-            db_names,
-        )
+        try:
+            rows = await conn.fetch(
+                """
+                SELECT db_name, principal_type, principal_id, principal_name, role
+                FROM database_access
+                WHERE db_name = ANY($1)
+                """,
+                db_names,
+            )
+        except asyncpg.UndefinedTableError:
+            await _ensure_database_access_table(conn)
+            rows = []
     finally:
         await conn.close()
 
@@ -146,24 +150,78 @@ async def _upsert_database_owner(
         return
     conn = await asyncpg.connect(ServiceConfig.get_postgres_url())
     try:
-        await conn.execute(
-            """
-            INSERT INTO database_access (
-                db_name, principal_type, principal_id, principal_name, role, created_at, updated_at
-            ) VALUES ($1, $2, $3, $4, 'Owner', NOW(), NOW())
-            ON CONFLICT (db_name, principal_type, principal_id)
-            DO UPDATE SET
-                principal_name = EXCLUDED.principal_name,
-                role = EXCLUDED.role,
-                updated_at = NOW()
-            """,
-            db_name,
-            principal_type,
-            principal_id,
-            principal_name,
-        )
+        try:
+            await conn.execute(
+                """
+                INSERT INTO database_access (
+                    db_name, principal_type, principal_id, principal_name, role, created_at, updated_at
+                ) VALUES ($1, $2, $3, $4, 'Owner', NOW(), NOW())
+                ON CONFLICT (db_name, principal_type, principal_id)
+                DO UPDATE SET
+                    principal_name = EXCLUDED.principal_name,
+                    role = EXCLUDED.role,
+                    updated_at = NOW()
+                """,
+                db_name,
+                principal_type,
+                principal_id,
+                principal_name,
+            )
+        except asyncpg.UndefinedTableError:
+            await _ensure_database_access_table(conn)
+            await conn.execute(
+                """
+                INSERT INTO database_access (
+                    db_name, principal_type, principal_id, principal_name, role, created_at, updated_at
+                ) VALUES ($1, $2, $3, $4, 'Owner', NOW(), NOW())
+                ON CONFLICT (db_name, principal_type, principal_id)
+                DO UPDATE SET
+                    principal_name = EXCLUDED.principal_name,
+                    role = EXCLUDED.role,
+                    updated_at = NOW()
+                """,
+                db_name,
+                principal_type,
+                principal_id,
+                principal_name,
+            )
     finally:
         await conn.close()
+
+
+async def _ensure_database_access_table(conn: asyncpg.Connection) -> None:
+    await conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS database_access (
+            db_name TEXT NOT NULL,
+            principal_type TEXT NOT NULL,
+            principal_id TEXT NOT NULL,
+            principal_name TEXT,
+            role TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (db_name, principal_type, principal_id)
+        )
+        """
+    )
+    await conn.execute(
+        """
+        DO $$
+        BEGIN
+            ALTER TABLE database_access
+                ADD CONSTRAINT database_access_role_check
+                CHECK (role IN ('Owner', 'Editor', 'Viewer'));
+        EXCEPTION
+            WHEN duplicate_object THEN NULL;
+        END $$;
+        """
+    )
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_database_access_db_name ON database_access(db_name)"
+    )
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_database_access_principal ON database_access(principal_type, principal_id)"
+    )
 
 
 def _resolve_actor(request: Request) -> tuple[str, str, str]:
