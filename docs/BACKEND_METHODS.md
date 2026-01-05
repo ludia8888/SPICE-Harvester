@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-01-04T17:27:51.356870Z
+> Generated: 2026-01-05T04:00:16.806674Z
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## add_palantir_system_fields.py
@@ -986,6 +986,47 @@
   - `_FakeDatasetRegistry` (line 162): no docstring
   - `_FakeObjectifyRegistry` (line 166): no docstring
 
+### `backend/bff/tests/test_pipeline_router_uploads.py`
+- **Functions**
+  - `_build_request(headers)` (line 248): no docstring
+  - `test_pipeline_helpers_normalize_inputs(monkeypatch)` (line 258): no docstring
+  - `async test_upload_csv_dataset_creates_version(monkeypatch)` (line 287): no docstring
+  - `async test_upload_excel_dataset_commits_preview(monkeypatch)` (line 331): no docstring
+  - `async test_upload_media_dataset_stores_files(monkeypatch)` (line 377): no docstring
+  - `async test_maybe_enqueue_objectify_job()` (line 415): no docstring
+- **Classes**
+  - `_FakeLakeFSStorage` (line 19): no docstring
+    - `__init__(self)` (line 20): no docstring
+    - `async save_fileobj(self, repo, key, fileobj, content_type, metadata, checksum)` (line 23): no docstring
+    - `async save_bytes(self, repo, key, content, content_type, metadata)` (line 36): no docstring
+  - `_FakeLakeFSClient` (line 48): no docstring
+    - `__init__(self)` (line 49): no docstring
+    - `async commit(self, repository, branch, message, metadata)` (line 53): no docstring
+    - `async create_branch(self, repository, name, source)` (line 66): no docstring
+  - `_FakePipelineRegistry` (line 70): no docstring
+    - `__init__(self)` (line 71): no docstring
+    - `async get_lakefs_storage(self, user_id)` (line 75): no docstring
+    - `async get_lakefs_client(self, user_id)` (line 78): no docstring
+  - `_FakeDatasetRegistry` (line 82): no docstring
+    - `__init__(self, ingest_status)` (line 83): no docstring
+    - `async get_dataset_by_name(self, db_name, name, branch)` (line 90): no docstring
+    - `async create_dataset(self, db_name, name, description, source_type, source_ref, schema_json, branch)` (line 93): no docstring
+    - `async create_ingest_request(self, dataset_id, db_name, branch, idempotency_key, request_fingerprint, schema_json, sample_json, row_count, source_metadata)` (line 110): no docstring
+    - `async get_version_by_ingest_request(self, ingest_request_id)` (line 146): no docstring
+    - `async get_ingest_transaction(self, ingest_request_id)` (line 149): no docstring
+    - `async create_ingest_transaction(self, ingest_request_id)` (line 152): no docstring
+    - `async mark_ingest_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 169): no docstring
+    - `async mark_ingest_transaction_committed(self, ingest_request_id, lakefs_commit_id, artifact_key)` (line 175): no docstring
+    - `async update_ingest_request_payload(self, ingest_request_id, sample_json, row_count)` (line 181): no docstring
+    - `async publish_ingest_request(self, ingest_request_id, dataset_id, lakefs_commit_id, artifact_key, row_count, sample_json, schema_json, outbox_entries)` (line 187): no docstring
+    - `async mark_ingest_failed(self, ingest_request_id, error)` (line 216): no docstring
+    - `async mark_ingest_transaction_aborted(self, ingest_request_id, error)` (line 221): no docstring
+  - `_FakeFunnelClient` (line 227): no docstring
+    - `async __aenter__(self)` (line 228): no docstring
+    - `async __aexit__(self, exc_type, exc, tb)` (line 231): no docstring
+    - `async analyze_dataset(self, payload)` (line 234): no docstring
+    - `async excel_to_structure_preview_stream(self, *args, **kwargs)` (line 237): no docstring
+
 ### `backend/bff/tests/test_security_information_leakage.py`
 - **Classes**
   - `TestInformationLeakagePrevention` (line 22): Test suite to verify BFF APIs don't leak internal architecture information
@@ -1509,6 +1550,32 @@
 
 ### `backend/funnel/tests/__init__.py`
 
+### `backend/funnel/tests/test_data_processor.py`
+- **Functions**
+  - `async test_data_processor_analyze_dataset_metadata()` (line 36): no docstring
+  - `test_generate_schema_suggestion_handles_confidence()` (line 51): no docstring
+  - `async test_process_google_sheets_preview_success(monkeypatch)` (line 85): no docstring
+  - `async test_process_google_sheets_preview_failure(monkeypatch)` (line 114): no docstring
+- **Classes**
+  - `_FakeResponse` (line 9): no docstring
+    - `__init__(self, payload, status_code)` (line 10): no docstring
+    - `json(self)` (line 15): no docstring
+  - `_FakeClient` (line 19): no docstring
+    - `__init__(self, response)` (line 20): no docstring
+    - `async __aenter__(self)` (line 24): no docstring
+    - `async __aexit__(self, exc_type, exc, tb)` (line 27): no docstring
+    - `async post(self, url, json)` (line 30): no docstring
+
+### `backend/funnel/tests/test_funnel_main.py`
+- **Functions**
+  - `async test_funnel_root_and_health()` (line 21): no docstring
+  - `async test_funnel_lifespan_initializes_rate_limiter(monkeypatch)` (line 32): no docstring
+- **Classes**
+  - `_FakeRateLimiter` (line 8): no docstring
+    - `__init__(self)` (line 9): no docstring
+    - `async initialize(self)` (line 13): no docstring
+    - `async close(self)` (line 16): no docstring
+
 ### `backend/funnel/tests/test_sheet_grid_parser.py`
 - **Classes**
   - `TestSheetGridParser` (line 10): no docstring
@@ -1564,6 +1631,26 @@
     - `test_coordinate_detection(self)` (line 349): 좌표(coordinate) 타입 감지 테스트
     - `test_phone_suggested_region(self)` (line 360): 전화번호 기본 지역 제안(defaultRegion) 테스트
     - `test_ambiguous_date_detection_sets_metadata(self)` (line 374): 모호한 날짜(DD/MM vs MM/DD) 감지 시 메타데이터/신뢰도 페널티 테스트
+
+### `backend/funnel/tests/test_type_inference_router.py`
+- **Functions**
+  - `async test_analyze_dataset_success_and_error()` (line 64): no docstring
+  - `async test_analyze_sheet_structure_applies_patch(monkeypatch)` (line 74): no docstring
+  - `async test_analyze_excel_structure_happy_path(monkeypatch)` (line 101): no docstring
+  - `async test_analyze_excel_structure_errors()` (line 124): no docstring
+  - `async test_analyze_google_sheets_structure(monkeypatch)` (line 135): no docstring
+  - `async test_structure_patch_endpoints(monkeypatch)` (line 192): no docstring
+  - `async test_preview_and_suggest_schema()` (line 212): no docstring
+  - `async test_router_health_check()` (line 242): no docstring
+- **Classes**
+  - `_FakeProcessor` (line 23): no docstring
+    - `async analyze_dataset(self, request)` (line 24): no docstring
+    - `async process_google_sheets_preview(self, **kwargs)` (line 38): no docstring
+    - `generate_schema_suggestion(self, analysis_results, class_name)` (line 48): no docstring
+  - `_FailingProcessor` (line 52): no docstring
+    - `async analyze_dataset(self, request)` (line 53): no docstring
+    - `async process_google_sheets_preview(self, **kwargs)` (line 56): no docstring
+    - `generate_schema_suggestion(self, analysis_results, class_name)` (line 59): no docstring
 
 ## implement_lightweight_schema.py
 
@@ -5744,6 +5831,28 @@
   - `async test_load_input_dataframe_fallback_on_diff_failure(monkeypatch)` (line 42): no docstring
   - `async test_load_input_dataframe_removed_only_diff_returns_empty(monkeypatch)` (line 88): no docstring
 
+### `backend/tests/unit/services/test_schema_versioning.py`
+- **Functions**
+  - `test_schema_version_parsing_and_comparison()` (line 13): no docstring
+  - `test_schema_registry_register_and_migrate()` (line 28): no docstring
+  - `test_schema_versioning_service_event_helpers()` (line 54): no docstring
+
+### `backend/tests/unit/services/test_sequence_service.py`
+- **Functions**
+  - `async test_sequence_service_increments_and_caches()` (line 58): no docstring
+  - `async test_sequence_service_set_reset_and_batch()` (line 73): no docstring
+  - `async test_sequence_service_lists_sequences()` (line 89): no docstring
+- **Classes**
+  - `_FakeRedis` (line 10): no docstring
+    - `__init__(self)` (line 11): no docstring
+    - `_coerce_key(self, key)` (line 14): no docstring
+    - `async incr(self, key)` (line 19): no docstring
+    - `async get(self, key)` (line 24): no docstring
+    - `async eval(self, _script, _numkeys, key, sequence)` (line 31): no docstring
+    - `async delete(self, key)` (line 39): no docstring
+    - `async incrby(self, key, count)` (line 46): no docstring
+    - `async scan_iter(self, match)` (line 51): no docstring
+
 ### `backend/tests/unit/utils/__init__.py`
 
 ### `backend/tests/unit/utils/test_label_mapper_i18n.py`
@@ -5752,7 +5861,94 @@
   - `async test_label_mapper_supports_language_map_and_reverse_lookup(tmp_path)` (line 22): no docstring
   - `async test_label_mapper_batch_fallback_returns_best_available(tmp_path)` (line 42): no docstring
 
+### `backend/tests/unit/utils/test_utils_core.py`
+- **Functions**
+  - `test_parse_bool_env_and_int_env(monkeypatch)` (line 6): no docstring
+  - `test_safe_path_helpers()` (line 20): no docstring
+  - `test_s3_uri_helpers()` (line 27): no docstring
+  - `test_branch_utils_defaults(monkeypatch)` (line 35): no docstring
+
 ### `backend/tests/unit/workers/__init__.py`
+
+### `backend/tests/unit/workers/test_connector_sync_worker.py`
+- **Functions**
+  - `async test_sync_worker_bff_scope_headers()` (line 155): no docstring
+  - `async test_sync_worker_fetch_schema_and_target_types(monkeypatch)` (line 162): no docstring
+  - `async test_sync_worker_process_google_sheets_update(monkeypatch)` (line 178): no docstring
+  - `async test_sync_worker_handle_envelope_rejects_unknown()` (line 238): no docstring
+  - `async test_sync_worker_run_processes_message(monkeypatch)` (line 252): no docstring
+  - `async test_sync_worker_heartbeat_loop_stops(monkeypatch)` (line 281): no docstring
+- **Classes**
+  - `_FakeTracing` (line 17): no docstring
+    - `span(self, *args, **kwargs)` (line 18): no docstring
+  - `_FakeRegistry` (line 22): no docstring
+    - `__init__(self)` (line 23): no docstring
+    - `async get_source(self, source_type, source_id)` (line 29): no docstring
+    - `async get_mapping(self, source_type, source_id)` (line 32): no docstring
+    - `async upsert_source(self, source_type, source_id, enabled, config_json)` (line 35): no docstring
+    - `async record_sync_outcome(self, **kwargs)` (line 38): no docstring
+  - `_FakeProcessed` (line 42): no docstring
+    - `__init__(self)` (line 43): no docstring
+    - `async claim(self, **kwargs)` (line 49): no docstring
+    - `async mark_done(self, **kwargs)` (line 53): no docstring
+    - `async mark_failed(self, **kwargs)` (line 56): no docstring
+    - `async heartbeat(self, **kwargs)` (line 59): no docstring
+  - `_FakeSheets` (line 64): no docstring
+    - `__init__(self)` (line 65): no docstring
+    - `async fetch_sheet_values(self, *args, **kwargs)` (line 68): no docstring
+  - `_FakeResponse` (line 72): no docstring
+    - `__init__(self, payload)` (line 73): no docstring
+    - `raise_for_status(self)` (line 76): no docstring
+    - `json(self)` (line 79): no docstring
+  - `_FakeHttp` (line 83): no docstring
+    - `__init__(self)` (line 84): no docstring
+    - `async get(self, url, **kwargs)` (line 88): no docstring
+    - `async post(self, url, **kwargs)` (line 99): no docstring
+  - `_FakeLineage` (line 104): no docstring
+    - `__init__(self)` (line 105): no docstring
+    - `node_event(self, value)` (line 108): no docstring
+    - `async record_link(self, **kwargs)` (line 111): no docstring
+  - `_FakeMessage` (line 115): no docstring
+    - `__init__(self, payload)` (line 116): no docstring
+    - `error(self)` (line 119): no docstring
+    - `value(self)` (line 122): no docstring
+    - `headers(self)` (line 125): no docstring
+    - `topic(self)` (line 128): no docstring
+    - `partition(self)` (line 131): no docstring
+    - `offset(self)` (line 134): no docstring
+  - `_FakeConsumer` (line 138): no docstring
+    - `__init__(self, worker)` (line 139): no docstring
+    - `poll(self, timeout)` (line 144): no docstring
+    - `commit(self, msg, asynchronous)` (line 149): no docstring
+
+### `backend/tests/unit/workers/test_connector_trigger_service.py`
+- **Functions**
+  - `async test_trigger_service_initialize_and_close(monkeypatch)` (line 93): no docstring
+  - `async test_trigger_service_is_due(monkeypatch)` (line 118): no docstring
+  - `async test_trigger_service_poll_google_sheets_refreshes_token(monkeypatch)` (line 155): no docstring
+  - `async test_trigger_service_publish_outbox(monkeypatch)` (line 198): no docstring
+- **Classes**
+  - `_FakeTracing` (line 15): no docstring
+    - `span(self, *args, **kwargs)` (line 16): no docstring
+  - `_FakeRegistry` (line 20): no docstring
+    - `__init__(self)` (line 21): no docstring
+    - `async initialize(self)` (line 33): no docstring
+    - `async close(self)` (line 36): no docstring
+    - `async get_sync_state(self, source_type, source_id)` (line 39): no docstring
+    - `async list_sources(self, source_type, enabled, limit)` (line 42): no docstring
+    - `async record_poll_result(self, **kwargs)` (line 45): no docstring
+    - `async claim_outbox_batch(self, limit)` (line 48): no docstring
+    - `async mark_outbox_published(self, outbox_id)` (line 55): no docstring
+    - `async mark_outbox_failed(self, outbox_id, error)` (line 58): no docstring
+    - `async upsert_source(self, source_type, source_id, enabled, config_json)` (line 61): no docstring
+  - `_FakeSheets` (line 65): no docstring
+    - `__init__(self, api_key)` (line 66): no docstring
+    - `async close(self)` (line 71): no docstring
+    - `async fetch_sheet_values(self, *args, **kwargs)` (line 74): no docstring
+  - `_FakeProducer` (line 78): no docstring
+    - `__init__(self, config)` (line 79): no docstring
+    - `produce(self, **kwargs)` (line 84): no docstring
+    - `flush(self, timeout)` (line 87): no docstring
 
 ### `backend/tests/unit/workers/test_instance_worker_s3.py`
 - **Functions**
