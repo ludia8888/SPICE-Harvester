@@ -67,6 +67,7 @@ REDIS_PORT_HOST="${REDIS_PORT_HOST:-6379}"
 MINIO_PORT_HOST="${MINIO_PORT_HOST:-9000}"
 ELASTICSEARCH_PORT_HOST="${ELASTICSEARCH_PORT_HOST:-9200}"
 KAFKA_PORT_HOST="${KAFKA_PORT_HOST:-39092}"
+LAKEFS_PORT_HOST="${LAKEFS_PORT_HOST:-48080}"
 
 export POSTGRES_URL="${POSTGRES_URL:-postgresql://spiceadmin:spicepass123@localhost:${POSTGRES_PORT_HOST}/spicedb}"
 REDIS_PASSWORD="${REDIS_PASSWORD:-spicepass123}"
@@ -76,6 +77,7 @@ export ELASTICSEARCH_URL="${ELASTICSEARCH_URL:-http://localhost:${ELASTICSEARCH_
 export KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-localhost:${KAFKA_PORT_HOST}}"
 
 MINIO_URL="$(trim_trailing_slash "${MINIO_ENDPOINT_URL}")"
+LAKEFS_URL="$(trim_trailing_slash "${LAKEFS_URL:-http://localhost:${LAKEFS_PORT_HOST}}")"
 
 usage() {
   cat <<'USAGE'
@@ -243,6 +245,7 @@ PY
 if [[ "$WAIT_FOR_SERVICES" == "true" && "$MODE" == "full" ]]; then
   echo "⏳ Waiting for services (timeout=${TIMEOUT_SECONDS}s)..."
   wait_for_url "MinIO" "${MINIO_URL}/minio/health/live" "$TIMEOUT_SECONDS"
+  wait_for_url "lakeFS" "${LAKEFS_URL}/healthcheck" "$TIMEOUT_SECONDS"
   wait_for_url "OMS" "${OMS_URL}/health" "$TIMEOUT_SECONDS"
   wait_for_url "BFF" "${BFF_URL}/api/v1/health" "$TIMEOUT_SECONDS"
   wait_for_url "Funnel" "${FUNNEL_URL}/health" "$TIMEOUT_SECONDS"
