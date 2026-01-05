@@ -711,7 +711,14 @@ async def get_pipeline_registry() -> PipelineRegistry:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="BFF services not initialized"
         )
-    return _bff_container.get_pipeline_registry()
+    try:
+        return _bff_container.get_pipeline_registry()
+    except RuntimeError:
+        # Lazy init fallback: pipeline registry may fail during startup if Postgres isn't ready yet.
+        registry = PipelineRegistry()
+        await registry.initialize()
+        _bff_container._bff_services["pipeline_registry"] = registry
+        return registry
 
 
 async def get_objectify_registry() -> ObjectifyRegistry:
