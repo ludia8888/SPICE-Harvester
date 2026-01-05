@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-01-05T04:25:24.348983Z
+> Generated: 2026-01-05T10:15:01.826369Z
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## add_palantir_system_fields.py
@@ -88,8 +88,8 @@
   - `async get_connector_registry()` (line 687): Get ConnectorRegistry from BFF container
   - `async get_dataset_registry()` (line 697): Get DatasetRegistry from BFF container
   - `async get_pipeline_registry()` (line 707): Get PipelineRegistry from BFF container
-  - `async get_objectify_registry()` (line 717): no docstring
-  - `async get_pipeline_executor()` (line 723): Get PipelineExecutor from BFF container
+  - `async get_objectify_registry()` (line 724): no docstring
+  - `async get_pipeline_executor()` (line 730): Get PipelineExecutor from BFF container
 - **Classes**
   - `BFFServiceContainer` (line 122): BFF-specific service container to manage BFF services
     - `__init__(self, container, settings)` (line 130): no docstring
