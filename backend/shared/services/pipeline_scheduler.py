@@ -15,6 +15,7 @@ from shared.services.pipeline_job_queue import PipelineJobQueue
 from shared.services.pipeline_registry import PipelineRegistry
 from shared.models.pipeline_job import PipelineJob
 from shared.services.pipeline_control_plane_events import emit_pipeline_control_plane_event
+from shared.services.pipeline_dependency_utils import normalize_dependency_entries
 from shared.utils.time_utils import utcnow
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode
@@ -424,23 +425,7 @@ def _cron_field_matches(field: str, value: int) -> bool:
 
 
 def _normalize_dependencies(raw: object) -> tuple[list[dict[str, str]], int]:
-    if raw is None:
-        return [], 0
-    if not isinstance(raw, list):
-        return [], 1
-    output: list[dict[str, str]] = []
-    invalid = 0
-    for item in raw:
-        if not isinstance(item, dict):
-            invalid += 1
-            continue
-        pipeline_id = str(item.get("pipeline_id") or item.get("pipelineId") or "").strip()
-        status = str(item.get("status") or "DEPLOYED").strip().upper()
-        if not pipeline_id:
-            invalid += 1
-            continue
-        output.append({"pipeline_id": pipeline_id, "status": status})
-    return output, invalid
+    return normalize_dependency_entries(raw, strict=False)
 
 
 async def _dependencies_satisfied(

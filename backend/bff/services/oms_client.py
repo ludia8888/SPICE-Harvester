@@ -36,9 +36,10 @@ class OMSClient:
         auth_token = self._get_auth_token()
         if auth_token:
             headers["X-Admin-Token"] = auth_token
+        timeout_seconds = float(os.getenv("OMS_CLIENT_TIMEOUT_SECONDS", "60") or "60")
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
-            timeout=30.0,
+            timeout=timeout_seconds,
             headers=headers,
             verify=ssl_config.get("verify", True),
         )

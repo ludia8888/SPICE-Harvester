@@ -275,7 +275,7 @@ async def test_csv_upload_idempotency_key_reuses_version(monkeypatch: pytest.Mon
     pipeline_registry = _FakePipelineRegistry()
 
     key = f"idem-csv-{uuid4().hex}"
-    request = _Request(headers={"X-Admin-Token": "testtoken", "Idempotency-Key": key})
+    request = _Request(headers={"X-Admin-Token": "testtoken", "Idempotency-Key": key, "X-DB-Name": "testdb"})
     file_content = b"id,name\n1,A\n2,B\n"
 
     res1 = await upload_csv_dataset(

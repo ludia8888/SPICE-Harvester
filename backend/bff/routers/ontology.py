@@ -26,6 +26,7 @@ from shared.models.structure_analysis import BoundingBox
 
 # Add shared path for common utilities
 from shared.utils.language import get_accept_language
+from shared.utils.id_generator import generate_simple_id
 
 # Security validation imports
 from shared.security.input_sanitizer import (
@@ -149,6 +150,66 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/databases/{db_name}", tags=["Ontology Management"])
 
 
+def _localized_to_string(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        # Prefer English for IDs (domain-neutral), then Korean, then any translation.
+        return (
+            str(value.get("en") or "").strip()
+            or str(value.get("ko") or "").strip()
+            or next((str(v).strip() for v in value.values() if v and str(v).strip()), "")
+        )
+    return str(value).strip() if value is not None else ""
+
+
+def _transform_properties_for_oms(data: Dict[str, Any], *, log_conversions: bool = False) -> None:
+    properties = data.get("properties")
+    if not isinstance(properties, list):
+        return
+
+    for prop in properties:
+        if not isinstance(prop, dict):
+            continue
+
+        if "name" not in prop and "label" in prop:
+            prop["name"] = generate_simple_id(
+                _localized_to_string(prop.get("label")),
+                use_timestamp_for_korean=False,
+            )
+
+        if prop.get("type") == "STRING":
+            prop["type"] = "xsd:string"
+        elif prop.get("type") == "INTEGER":
+            prop["type"] = "xsd:integer"
+        elif prop.get("type") == "DECIMAL":
+            prop["type"] = "xsd:decimal"
+        elif prop.get("type") == "BOOLEAN":
+            prop["type"] = "xsd:boolean"
+        elif prop.get("type") == "DATETIME":
+            prop["type"] = "xsd:dateTime"
+
+        if prop.get("type") == "link" and "target" in prop:
+            prop["linkTarget"] = prop.pop("target")
+            if log_conversions:
+                logger.info(
+                    "🔧 Converted property '%s' target -> linkTarget: %s",
+                    prop.get("name"),
+                    prop.get("linkTarget"),
+                )
+
+        if prop.get("type") == "array" and "items" in prop:
+            items = prop["items"]
+            if isinstance(items, dict) and items.get("type") == "link" and "target" in items:
+                items["linkTarget"] = items.pop("target")
+                if log_conversions:
+                    logger.info(
+                        "🔧 Converted array property '%s' items target -> linkTarget: %s",
+                        prop.get("name"),
+                        items.get("linkTarget"),
+                    )
+
+
 @router.post(
     "/ontology",
     response_model=ApiResponse,
@@ -164,8 +225,7 @@ async def create_ontology(
     ontology: OntologyCreateRequestBFF,  # 🔥 FIXED: Use proper Pydantic validation
     branch: str = Query("main", description="Target branch (default: main)"),
     mapper: LabelMapper = LabelMapperDep,
-    terminus: TerminusService = TerminusServiceDep,
-    jsonld_conv: JSONToJSONLDConverter = JSONLDConverterDep,
+    oms_client: OMSClient = OMSClientDep,
 ):
     """
     온톨로지 생성
@@ -177,20 +237,6 @@ async def create_ontology(
         # 입력 데이터 보안 검증
         db_name = validate_db_name(db_name)
         branch = validate_branch_name(branch)
-
-        from shared.utils.id_generator import generate_simple_id
-
-        def _localized_to_string(value: Any) -> str:
-            if isinstance(value, str):
-                return value
-            if isinstance(value, dict):
-                # Prefer English for IDs (domain-neutral), then Korean, then any translation.
-                return (
-                    str(value.get("en") or "").strip()
-                    or str(value.get("ko") or "").strip()
-                    or next((str(v).strip() for v in value.values() if v and str(v).strip()), "")
-                )
-            return str(value).strip() if value is not None else ""
         
         # 입력 데이터 처리 (Pydantic model에서 dict로 변환)
         ontology_dict = ontology.model_dump(exclude_unset=True)  # Convert Pydantic model to dict
@@ -212,78 +258,14 @@ async def create_ontology(
 
         ontology_dict["id"] = class_id
 
-        # 🔥 THINK ULTRA! Transform properties for OMS compatibility
-        # Convert 'target' to 'linkTarget' for link-type properties
-        def transform_properties_for_oms(data):
-            if 'properties' in data and isinstance(data['properties'], list):
-                for i, prop in enumerate(data['properties']):
-                    if isinstance(prop, dict):
-                        # Generate property name from label if missing
-                        if 'name' not in prop and 'label' in prop:
-                            prop['name'] = generate_simple_id(
-                                _localized_to_string(prop.get("label")),
-                                use_timestamp_for_korean=False,
-                            )
-                        
-                        # Convert generic types to XSD types for OMS compatibility
-                        if prop.get('type') == 'STRING':
-                            prop['type'] = 'xsd:string'
-                        elif prop.get('type') == 'INTEGER':
-                            prop['type'] = 'xsd:integer'
-                        elif prop.get('type') == 'DECIMAL':
-                            prop['type'] = 'xsd:decimal'
-                        elif prop.get('type') == 'BOOLEAN':
-                            prop['type'] = 'xsd:boolean'
-                        elif prop.get('type') == 'DATETIME':
-                            prop['type'] = 'xsd:dateTime'
-                        
-                        # Convert target to linkTarget for link type properties
-                        if prop.get('type') == 'link' and 'target' in prop:
-                            prop['linkTarget'] = prop.pop('target')
-                            logger.info(f"🔧 Converted property '{prop.get('name')}' target -> linkTarget: {prop.get('linkTarget')}")
-                        
-                        # Handle array properties with link items
-                        if prop.get('type') == 'array' and 'items' in prop:
-                            items = prop['items']
-                            if isinstance(items, dict) and items.get('type') == 'link' and 'target' in items:
-                                items['linkTarget'] = items.pop('target')
-                                logger.info(f"🔧 Converted array property '{prop.get('name')}' items target -> linkTarget: {items.get('linkTarget')}")
-            
-            # Relationships: keep localized labels as-is; only structural transformations belong here.
-        
-        # Apply transformation
-        transform_properties_for_oms(ontology_dict)
+        _transform_properties_for_oms(ontology_dict, log_conversions=True)
         
         # Log ontology creation request
         logger.info(f"Creating ontology '{ontology_dict.get('id')}' in database '{db_name}'")
         
         # 온톨로지 생성 - OMS API를 통해 생성
-        import aiohttp
-        from shared.config.service_config import ServiceConfig
-        
-        oms_url = ServiceConfig.get_oms_url()
-        headers = {"Content-Type": "application/json"}
-        auth_token = OMSClient._get_auth_token()
-        if auth_token:
-            headers["X-Admin-Token"] = auth_token
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{oms_url}/api/v1/database/{db_name}/ontology",
-                json=ontology_dict,
-                params={"branch": branch},
-                headers=headers,
-            ) as response:
-                if response.status in [200, 202]:  # Accept both 200 (direct) and 202 (Event Sourcing)
-                    result = await response.json()
-                    logger.info(f"OMS create result (status {response.status}): {result}")
-                else:
-                    error_text = await response.text()
-                    logger.error(f"OMS API failed with status {response.status}: {error_text}")
-                    raise HTTPException(
-                        status_code=response.status,
-                        detail=f"OMS API failed: {error_text}"
-                    )
+        result = await oms_client.create_ontology(db_name, ontology_dict, branch=branch)
+        logger.info("OMS create result: %s", result)
 
         # 레이블 매핑 등록
         await mapper.register_class(db_name, class_id, ontology_dict.get('label', ''), ontology_dict.get('description'))
@@ -323,6 +305,16 @@ async def create_ontology(
             ).to_dict(),
         )
 
+    except httpx.HTTPStatusError as he:
+        detail: Any
+        try:
+            detail = he.response.json()
+        except Exception:
+            detail = he.response.text or str(he)
+        if isinstance(detail, dict):
+            detail = detail.get("detail") or detail.get("message") or detail.get("error") or detail
+        logger.error("OMS API failed with status %s: %s", he.response.status_code, detail)
+        raise HTTPException(status_code=he.response.status_code, detail=detail)
     except HTTPException as he:
         # 🔥 ULTRA! Properly propagate HTTP exceptions with correct status codes
         logger.error(f"HTTP exception in create_ontology: {he.status_code} - {he.detail}")
@@ -633,6 +625,16 @@ async def update_ontology(
 
     except HTTPException:
         raise
+    except httpx.HTTPStatusError as he:
+        detail: Any
+        try:
+            detail = he.response.json()
+        except Exception:
+            detail = he.response.text or str(he)
+        if isinstance(detail, dict):
+            detail = detail.get("detail") or detail.get("message") or detail.get("error") or detail
+        logger.error("Failed to update ontology (status %s): %s", he.response.status_code, detail)
+        raise HTTPException(status_code=he.response.status_code, detail=detail) from he
     except Exception as e:
         logger.error(f"Failed to update ontology: {e}")
         raise HTTPException(
@@ -843,19 +845,6 @@ async def create_ontology_with_relationship_validation(
         db_name = validate_db_name(db_name)
         branch = validate_branch_name(branch)
 
-        from shared.utils.id_generator import generate_simple_id
-
-        def _localized_to_string(value: Any) -> str:
-            if isinstance(value, str):
-                return value
-            if isinstance(value, dict):
-                return (
-                    str(value.get("en") or "").strip()
-                    or str(value.get("ko") or "").strip()
-                    or next((str(v).strip() for v in value.values() if v and str(v).strip()), "")
-                )
-            return str(value).strip() if value is not None else ""
-
         ontology_dict = ontology.model_dump(exclude_unset=True)
         ontology_dict = sanitize_input(ontology_dict)
 
@@ -879,39 +868,7 @@ async def create_ontology_with_relationship_validation(
                 if mapped:
                     rel["target"] = mapped
 
-        # Reuse the same OMS compatibility transformations as `/ontology`.
-        def transform_properties_for_oms(data: Dict[str, Any]) -> None:
-            if 'properties' in data and isinstance(data['properties'], list):
-                for prop in data['properties']:
-                    if not isinstance(prop, dict):
-                        continue
-
-                    if 'name' not in prop and 'label' in prop:
-                        prop['name'] = generate_simple_id(
-                            _localized_to_string(prop.get("label")),
-                            use_timestamp_for_korean=False,
-                        )
-
-                    if prop.get('type') == 'STRING':
-                        prop['type'] = 'xsd:string'
-                    elif prop.get('type') == 'INTEGER':
-                        prop['type'] = 'xsd:integer'
-                    elif prop.get('type') == 'DECIMAL':
-                        prop['type'] = 'xsd:decimal'
-                    elif prop.get('type') == 'BOOLEAN':
-                        prop['type'] = 'xsd:boolean'
-                    elif prop.get('type') == 'DATETIME':
-                        prop['type'] = 'xsd:dateTime'
-
-                    if prop.get('type') == 'link' and 'target' in prop:
-                        prop['linkTarget'] = prop.pop('target')
-
-                    if prop.get('type') == 'array' and 'items' in prop:
-                        items = prop['items']
-                        if isinstance(items, dict) and items.get('type') == 'link' and 'target' in items:
-                            items['linkTarget'] = items.pop('target')
-
-        transform_properties_for_oms(ontology_dict)
+        _transform_properties_for_oms(ontology_dict)
 
         forward_headers: Dict[str, str] = {}
         for key in ("X-Admin-Token", "X-Change-Reason", "X-Admin-Actor", "X-Actor", "Authorization"):

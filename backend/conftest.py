@@ -63,7 +63,7 @@ def _ensure_test_env() -> None:
     lakefs_access = _env_or_dotenv(dotenv, "LAKEFS_ACCESS_KEY_ID", "")
     lakefs_secret = _env_or_dotenv(dotenv, "LAKEFS_SECRET_ACCESS_KEY", "")
 
-    os.environ.setdefault("KAFKA_BOOTSTRAP_SERVERS", f"localhost:{kafka_port}")
+    os.environ.setdefault("KAFKA_BOOTSTRAP_SERVERS", f"127.0.0.1:{kafka_port}")
     os.environ.setdefault(
         "POSTGRES_URL",
         f"postgresql://spiceadmin:spicepass123@localhost:{postgres_port}/spicedb",
@@ -75,12 +75,15 @@ def _ensure_test_env() -> None:
     os.environ.setdefault("ELASTICSEARCH_HOST", es_host)
     os.environ.setdefault("ELASTICSEARCH_PORT", es_port)
     os.environ.setdefault("LAKEFS_PORT_HOST", lakefs_port)
+    os.environ.setdefault("LAKEFS_API_PORT", lakefs_port)
     if lakefs_access:
         os.environ.setdefault("LAKEFS_INSTALLATION_ACCESS_KEY_ID", lakefs_access)
     if lakefs_secret:
         os.environ.setdefault("LAKEFS_INSTALLATION_SECRET_ACCESS_KEY", lakefs_secret)
     if "ELASTICSEARCH_URL" not in os.environ:
         os.environ["ELASTICSEARCH_URL"] = f"http://{es_host}:{es_port}"
+    if "LAKEFS_API_URL" not in os.environ:
+        os.environ["LAKEFS_API_URL"] = f"http://127.0.0.1:{lakefs_port}"
     os.environ.setdefault("MINIO_ACCESS_KEY", "minioadmin")
     os.environ.setdefault("MINIO_SECRET_KEY", "minioadmin123")
 

@@ -219,7 +219,7 @@ async def test_redis_down_rate_limit_and_command_status_fallback():
     ) as session:
         await _wait_for_ok(session, f"{BFF_URL}/api/v1/health")
 
-        db_name = f"redis_down_{uuid.uuid4().hex[:8]}"
+        db_name = f"redis_down_{uuid.uuid4().hex[:12]}"
         async with session.post(
             f"{BFF_URL}/api/v1/databases",
             json={"name": db_name, "description": "redis fallback test"},
@@ -277,7 +277,7 @@ async def test_command_status_dual_outage_returns_503():
     ) as session:
         await _wait_for_ok(session, f"{BFF_URL}/api/v1/health")
 
-        db_name = f"dual_outage_{uuid.uuid4().hex[:8]}"
+        db_name = f"dual_outage_{uuid.uuid4().hex[:12]}"
         async with session.post(
             f"{BFF_URL}/api/v1/databases",
             json={"name": db_name, "description": "dual outage test"},

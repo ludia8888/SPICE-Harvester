@@ -17,15 +17,39 @@ def _admin_headers() -> dict:
     admin_token = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "test-token").strip()
     return {"X-Admin-Token": admin_token}
 
+
+async def _post_with_retry(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    json_payload: dict,
+    headers: dict,
+    retries: int = 3,
+    retry_sleep: float = 2.0,
+) -> httpx.Response:
+    last_exc: Exception | None = None
+    for attempt in range(retries):
+        try:
+            return await client.post(url, json=json_payload, headers=headers)
+        except httpx.HTTPError as exc:
+            last_exc = exc
+            if attempt + 1 >= retries:
+                raise
+            await asyncio.sleep(retry_sleep)
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("request failed without exception")
+
 async def create_simple_schema(db_name: str):
     """Create schema using OMS ontology endpoints."""
     headers = _admin_headers()
     print(f"Creating schema for {db_name} via OMS...")
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        db_response = await client.post(
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        db_response = await _post_with_retry(
+            client,
             f"{OMS_URL}/api/v1/database/create",
-            json={"name": db_name, "description": f"Test database for {db_name}"},
+            json_payload={"name": db_name, "description": f"Test database for {db_name}"},
             headers=headers,
         )
         if db_response.status_code in [200, 201, 202, 409]:
@@ -79,9 +103,10 @@ async def create_simple_schema(db_name: str):
         }
 
         for ontology in (client_ontology, product_ontology):
-            response = await client.post(
+            response = await _post_with_retry(
+                client,
                 f"{OMS_URL}/api/v1/database/{db_name}/ontology",
-                json=ontology,
+                json_payload=ontology,
                 headers=headers,
             )
             if response.status_code in [200, 201, 202, 409]:
@@ -116,7 +141,7 @@ async def test_create_instance(db_name: str):
         "owned_by": "Client/CL_001"
     }
     
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(
             f"{OMS_URL}/api/v1/instances/{db_name}/async/Product/create",
             json={"data": instance_data},

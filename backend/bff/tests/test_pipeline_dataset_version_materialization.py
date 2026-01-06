@@ -124,7 +124,7 @@ async def test_create_dataset_version_materializes_manual_sample_to_artifact(mon
             "sample_json": sample_json,
             "schema_json": {"columns": sample_json["columns"]},
         },
-        request=_Request(headers={}),
+        request=_Request(headers={"X-DB-Name": "testdb"}),
         pipeline_registry=pipeline_registry,  # type: ignore[arg-type]
         dataset_registry=registry,
     )

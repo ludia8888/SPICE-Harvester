@@ -68,6 +68,7 @@ services:
       - xpack.security.enrollment.enabled=false
       - xpack.security.http.ssl.enabled=false
       - xpack.security.transport.ssl.enabled=false
+      - xpack.ml.enabled=false
     ulimits:
       memlock:
         soft: -1

@@ -39,25 +39,97 @@ async def _wait_for_command_completed(
     deadline = time.monotonic() + timeout_seconds
     last = None
     while time.monotonic() < deadline:
-        async with session.get(f"{OMS_URL}/api/v1/commands/{command_id}/status") as resp:
-            if resp.status != 200:
-                last = {"status": resp.status, "body": await resp.text()}
-                await asyncio.sleep(poll_interval_seconds)
-                continue
-            last = await resp.json()
+        try:
+            async with session.get(f"{OMS_URL}/api/v1/commands/{command_id}/status") as resp:
+                if resp.status != 200:
+                    last = {"status": resp.status, "body": await resp.text()}
+                    await asyncio.sleep(poll_interval_seconds)
+                    continue
+                last = await resp.json()
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            last = {"error": str(exc)}
+            await asyncio.sleep(poll_interval_seconds)
+            continue
         status_value = str(last.get("status") or "").upper()
         if status_value in {"COMPLETED", "FAILED", "CANCELLED"}:
             if status_value != "COMPLETED":
                 raise AssertionError(f"Command {command_id} ended in {status_value}: {last}")
             return
         if db_name:
-            async with session.get(f"{OMS_URL}/api/v1/database/exists/{db_name}") as resp:
-                if resp.status == 200:
-                    payload = await resp.json()
-                    if (payload.get("data") or {}).get("exists") is True:
-                        return
+            try:
+                async with session.get(f"{OMS_URL}/api/v1/database/exists/{db_name}") as resp:
+                    if resp.status == 200:
+                        payload = await resp.json()
+                        if (payload.get("data") or {}).get("exists") is True:
+                            return
+            except (aiohttp.ClientError, asyncio.TimeoutError):
+                pass
         await asyncio.sleep(poll_interval_seconds)
     raise AssertionError(f"Timed out waiting for command completion (command_id={command_id}, last={last})")
+
+
+async def _request_json(
+    session: aiohttp.ClientSession,
+    method: str,
+    url: str,
+    *,
+    retries: int = 3,
+    retry_sleep: float = 1.0,
+    **kwargs: object,
+) -> tuple[int, object | None, str]:
+    last_exc: Exception | None = None
+    for attempt in range(retries):
+        try:
+            async with session.request(method, url, **kwargs) as resp:
+                text = await resp.text()
+                data = None
+                if text:
+                    try:
+                        data = json.loads(text)
+                    except json.JSONDecodeError:
+                        data = None
+                return resp.status, data, text
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            last_exc = exc
+            if attempt + 1 >= retries:
+                raise
+            await asyncio.sleep(retry_sleep)
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("request failed without exception")
+
+
+def _extract_command_id(result: dict | None) -> str:
+    payload = result or {}
+    return str((payload.get("data") or {}).get("command_id") or payload.get("command_id") or "")
+
+
+async def _wait_for_bff_query(
+    session: aiohttp.ClientSession,
+    url: str,
+    payload: dict,
+    *,
+    timeout_seconds: float = 90.0,
+) -> tuple[dict, str]:
+    deadline = time.monotonic() + timeout_seconds
+    attempt = 0
+    last_error = None
+    while time.monotonic() < deadline:
+        status, result, text = await _request_json(
+            session,
+            "POST",
+            url,
+            json=payload,
+        )
+        if status == 200:
+            return (result or {}), text
+        if status in {400, 401, 403, 404}:
+            raise AssertionError(f"Query failed: {status} {text[:200]}")
+        last_error = f"{status} {text[:200]}"
+        attempt += 1
+        await asyncio.sleep(min(2.0 + attempt, 10.0))
+    raise AssertionError(f"Query failed after waiting: {last_error}")
+
 
 @pytest.mark.integration
 @pytest.mark.asyncio
@@ -80,18 +152,20 @@ async def test_full_api_integration():
         
         # 1.1 Create database via OMS API (Event Sourcing)
         print("\n1️⃣ Creating database via OMS API...")
-        async with session.post(
+        status, result, text = await _request_json(
+            session,
+            "POST",
             f"{OMS_URL}/api/v1/database/create",
             json={
                 'name': db_name,
                 'description': 'Full API Integration Test'
-            }
-        ) as resp:
-            assert resp.status in (200, 201, 202), f"Expected 200/201/202, got {resp.status}"
-            result = await resp.json()
-            db_command_id = result.get('data', {}).get('command_id') or result.get('command_id')
-            print(f"   ✅ Database creation accepted: {db_command_id}")
-            print(f"   📝 Mode: {result.get('data', {}).get('mode') or result.get('mode')}")
+            },
+        )
+        assert status in (200, 201, 202), f"Expected 200/201/202, got {status}"
+        result = result or {}
+        db_command_id = result.get('data', {}).get('command_id') or result.get('command_id')
+        print(f"   ✅ Database creation accepted: {db_command_id}")
+        print(f"   📝 Mode: {result.get('data', {}).get('mode') or result.get('mode')}")
         
         # Wait for async processing
         await asyncio.sleep(5)  # More time for Event Sourcing
@@ -106,15 +180,17 @@ async def test_full_api_integration():
         
         # 1.2 Verify database exists
         print("\n2️⃣ Verifying database creation...")
-        async with session.get(
+        status, result, text = await _request_json(
+            session,
+            "GET",
             f"{OMS_URL}/api/v1/database/exists/{db_name}",
             headers=headers,
-        ) as resp:
-            assert resp.status == 200
-            result = await resp.json()
-            exists = result.get('data', {}).get('exists')
-            assert exists is True, f"Database {db_name} not ready"
-            print(f"   ✅ Database exists: {exists}")
+        )
+        assert status == 200
+        result = result or {}
+        exists = result.get('data', {}).get('exists')
+        assert exists is True, f"Database {db_name} not ready"
+        print(f"   ✅ Database exists: {exists}")
         
         # 1.3 Create ontologies with relationships
         print("\n3️⃣ Creating ontologies with relationships...")
@@ -131,16 +207,20 @@ async def test_full_api_integration():
             ]
         }
         
-        async with session.post(
+        status, result, text = await _request_json(
+            session,
+            "POST",
             f"{OMS_URL}/api/v1/database/{db_name}/ontology",
-            json=client_ontology
-        ) as resp:
-            if resp.status in (200, 201, 202):
-                result = await resp.json()
-                print(f"   ✅ Client ontology accepted: {result.get('data', {}).get('command_id') or result.get('command_id')}")
-            else:
-                text = await resp.text()
-                raise AssertionError(f"Client ontology failed: {resp.status} {text[:200]}")
+            json=client_ontology,
+        )
+        if status in (200, 201, 202):
+            result = result or {}
+            command_id = _extract_command_id(result)
+            print(f"   ✅ Client ontology accepted: {command_id or 'sync'}")
+            if command_id:
+                await _wait_for_command_completed(session, command_id=command_id, timeout_seconds=180)
+        else:
+            raise AssertionError(f"Client ontology failed: {status} {text[:200]}")
         
         await asyncio.sleep(2)
         
@@ -166,16 +246,20 @@ async def test_full_api_integration():
             ]
         }
         
-        async with session.post(
+        status, result, text = await _request_json(
+            session,
+            "POST",
             f"{OMS_URL}/api/v1/database/{db_name}/ontology",
-            json=product_ontology
-        ) as resp:
-            if resp.status in (200, 201, 202):
-                result = await resp.json()
-                print(f"   ✅ Product ontology accepted: {result.get('data', {}).get('command_id') or result.get('command_id')}")
-            else:
-                text = await resp.text()
-                raise AssertionError(f"Product ontology failed: {resp.status} {text[:200]}")
+            json=product_ontology,
+        )
+        if status in (200, 201, 202):
+            result = result or {}
+            command_id = _extract_command_id(result)
+            print(f"   ✅ Product ontology accepted: {command_id or 'sync'}")
+            if command_id:
+                await _wait_for_command_completed(session, command_id=command_id, timeout_seconds=180)
+        else:
+            raise AssertionError(f"Product ontology failed: {status} {text[:200]}")
         
         await asyncio.sleep(2)
         
@@ -205,16 +289,20 @@ async def test_full_api_integration():
             ]
         }
         
-        async with session.post(
+        status, result, text = await _request_json(
+            session,
+            "POST",
             f"{OMS_URL}/api/v1/database/{db_name}/ontology",
-            json=order_ontology
-        ) as resp:
-            if resp.status in (200, 201, 202):
-                result = await resp.json()
-                print(f"   ✅ Order ontology accepted: {result.get('data', {}).get('command_id') or result.get('command_id')}")
-            else:
-                text = await resp.text()
-                raise AssertionError(f"Order ontology failed: {resp.status} {text[:200]}")
+            json=order_ontology,
+        )
+        if status in (200, 201, 202):
+            result = result or {}
+            command_id = _extract_command_id(result)
+            print(f"   ✅ Order ontology accepted: {command_id or 'sync'}")
+            if command_id:
+                await _wait_for_command_completed(session, command_id=command_id, timeout_seconds=180)
+        else:
+            raise AssertionError(f"Order ontology failed: {status} {text[:200]}")
         
         await asyncio.sleep(3)
         
@@ -233,19 +321,20 @@ async def test_full_api_integration():
         ]
         
         for client_data in clients:
-            async with session.post(
+            status, result, text = await _request_json(
+                session,
+                "POST",
                 f"{OMS_URL}/api/v1/instances/{db_name}/async/Client/create",
-                json={'data': client_data}
-            ) as resp:
-                if resp.status in (200, 201, 202):
-                    result = await resp.json()
-                    command_id = result.get('command_id')
-                    print(f"   ✅ Client {client_data['client_id']} accepted: {command_id}")
-                    if command_id:
-                        await _wait_for_command_completed(session, command_id=command_id)
-                else:
-                    text = await resp.text()
-                    raise AssertionError(f"Client {client_data['client_id']} failed: {resp.status} {text[:200]}")
+                json={'data': client_data},
+            )
+            if status in (200, 201, 202):
+                result = result or {}
+                command_id = result.get('command_id')
+                print(f"   ✅ Client {client_data['client_id']} accepted: {command_id}")
+                if command_id:
+                    await _wait_for_command_completed(session, command_id=command_id)
+            else:
+                raise AssertionError(f"Client {client_data['client_id']} failed: {status} {text[:200]}")
         
         await asyncio.sleep(3)
         
@@ -276,20 +365,21 @@ async def test_full_api_integration():
         ]
         
         for product_data in products:
-            async with session.post(
+            status, result, text = await _request_json(
+                session,
+                "POST",
                 f"{OMS_URL}/api/v1/instances/{db_name}/async/Product/create",
-                json={'data': product_data}
-            ) as resp:
-                if resp.status in (200, 201, 202):
-                    result = await resp.json()
-                    command_id = result.get('command_id')
-                    print(f"   ✅ Product {product_data['product_id']} accepted")
-                    print(f"      → owned_by: {product_data['owned_by']}")
-                    if command_id:
-                        await _wait_for_command_completed(session, command_id=command_id)
-                else:
-                    text = await resp.text()
-                    raise AssertionError(f"Product {product_data['product_id']} failed: {resp.status} {text[:200]}")
+                json={'data': product_data},
+            )
+            if status in (200, 201, 202):
+                result = result or {}
+                command_id = result.get('command_id')
+                print(f"   ✅ Product {product_data['product_id']} accepted")
+                print(f"      → owned_by: {product_data['owned_by']}")
+                if command_id:
+                    await _wait_for_command_completed(session, command_id=command_id)
+            else:
+                raise AssertionError(f"Product {product_data['product_id']} failed: {status} {text[:200]}")
         
         await asyncio.sleep(3)
         
@@ -313,21 +403,22 @@ async def test_full_api_integration():
         ]
         
         for order_data in orders:
-            async with session.post(
+            status, result, text = await _request_json(
+                session,
+                "POST",
                 f"{OMS_URL}/api/v1/instances/{db_name}/async/Order/create",
-                json={'data': order_data}
-            ) as resp:
-                if resp.status in (200, 201, 202):
-                    result = await resp.json()
-                    command_id = result.get('command_id')
-                    print(f"   ✅ Order {order_data['order_id']} accepted")
-                    print(f"      → ordered_by: {order_data['ordered_by']}")
-                    print(f"      → contains: {order_data['contains']}")
-                    if command_id:
-                        await _wait_for_command_completed(session, command_id=command_id)
-                else:
-                    text = await resp.text()
-                    raise AssertionError(f"Order {order_data['order_id']} failed: {resp.status} {text[:200]}")
+                json={'data': order_data},
+            )
+            if status in (200, 201, 202):
+                result = result or {}
+                command_id = result.get('command_id')
+                print(f"   ✅ Order {order_data['order_id']} accepted")
+                print(f"      → ordered_by: {order_data['ordered_by']}")
+                print(f"      → contains: {order_data['contains']}")
+                if command_id:
+                    await _wait_for_command_completed(session, command_id=command_id)
+            else:
+                raise AssertionError(f"Order {order_data['order_id']} failed: {status} {text[:200]}")
         
         await asyncio.sleep(5)  # Wait for all processing
         
@@ -340,53 +431,52 @@ async def test_full_api_integration():
         # 3.1 Query via OMS API (Direct ES query)
         print("\n1️⃣ Simple query via OMS API...")
         query_payload = {'query': 'SELECT * FROM Product WHERE category = "Software"'}
-        query_retries = 3
-        for attempt in range(query_retries):
-            try:
-                async with session.post(
-                    f"{OMS_URL}/api/v1/query/{db_name}",
-                    json=query_payload,
-                    headers=headers,
-                ) as resp:
-                    if resp.status == 200:
-                        result = await resp.json()
-                        data = result.get('data', [])
-                        print(f"   ✅ Found {len(data)} products in Software category")
-                        for item in data:
-                            print(f"      • {item.get('product_id')}: {item.get('name')}")
-                        break
-                    text = await resp.text()
-                    if attempt == query_retries - 1:
-                        raise AssertionError(f"Query failed: {resp.status} {text[:200]}")
-            except (aiohttp.ClientConnectionError, aiohttp.ServerDisconnectedError) as exc:
-                if attempt == query_retries - 1:
-                    raise AssertionError(f"Query failed due to connection error: {exc}") from exc
-            await asyncio.sleep(2)
+        query_deadline = time.monotonic() + float(os.getenv("OMS_QUERY_WAIT_SECONDS", "60") or 60)
+        attempt = 0
+        last_error = None
+        while time.monotonic() < query_deadline:
+            status, result, text = await _request_json(
+                session,
+                "POST",
+                f"{OMS_URL}/api/v1/query/{db_name}",
+                json=query_payload,
+                headers=headers,
+            )
+            if status == 200:
+                result = result or {}
+                data = result.get('data', [])
+                print(f"   ✅ Found {len(data)} products in Software category")
+                for item in data:
+                    print(f"      • {item.get('product_id')}: {item.get('name')}")
+                break
+            if status in {400, 401, 403, 404}:
+                raise AssertionError(f"Query failed: {status} {text[:200]}")
+            last_error = f"{status} {text[:200]}"
+            attempt += 1
+            await asyncio.sleep(min(2.0 + attempt, 10.0))
+        else:
+            raise AssertionError(f"Query failed after waiting: {last_error}")
         
         # 3.2 Federation query via BFF (Graph + ES)
         print("\n2️⃣ Federation query via BFF API...")
-        async with session.post(
+        result, _ = await _wait_for_bff_query(
+            session,
             f"{BFF_URL}/api/v1/graph-query/{db_name}/simple",
-            json={
+            {
                 'class_name': 'Product',
                 'include_documents': True,
                 'limit': 10
-            }
-        ) as resp:
-            if resp.status == 200:
-                result = await resp.json()
-                nodes = result.get('data', {}).get('nodes', [])
-                print(f"   ✅ Federation returned {len(nodes)} nodes")
-                for node in nodes[:3]:
-                    has_terminus_id = 'terminus_id' in node
-                    has_data = 'data' in node and node['data'] is not None
-                    print(f"      • Node: terminus_id={has_terminus_id}, data={has_data}")
-                    if has_data and 'data' in node['data']:
-                        prod_data = node['data']['data']
-                        print(f"        Product: {prod_data.get('product_id')} - {prod_data.get('name')}")
-            else:
-                text = await resp.text()
-                raise AssertionError(f"Federation failed: {resp.status} {text[:200]}")
+            },
+        )
+        nodes = result.get('data', {}).get('nodes', [])
+        print(f"   ✅ Federation returned {len(nodes)} nodes")
+        for node in nodes[:3]:
+            has_terminus_id = 'terminus_id' in node
+            has_data = 'data' in node and node['data'] is not None
+            print(f"      • Node: terminus_id={has_terminus_id}, data={has_data}")
+            if has_data and 'data' in node['data']:
+                prod_data = node['data']['data']
+                print(f"        Product: {prod_data.get('product_id')} - {prod_data.get('name')}")
         
         # ========================================================================
         # PHASE 4: MULTI-HOP QUERIES
@@ -396,61 +486,53 @@ async def test_full_api_integration():
         
         # 4.1 Find all Products owned by a specific Client
         print("\n1️⃣ Single-hop: Products owned by Acme Corp...")
-        async with session.post(
+        result, _ = await _wait_for_bff_query(
+            session,
             f"{BFF_URL}/api/v1/graph-query/{db_name}/multi-hop",
-            json={
+            {
                 'start_class': 'Product',
                 'hops': [('owned_by', 'Client')],
                 'filters': {'client_id': 'CL-001'},
                 'include_documents': True
-            }
-        ) as resp:
-            if resp.status == 200:
-                result = await resp.json()
-                nodes = result.get('data', {}).get('nodes', [])
-                edges = result.get('data', {}).get('edges', [])
-                print(f"   ✅ Found {len(nodes)} nodes, {len(edges)} edges")
-                
-                # Group by type
-                products = [n for n in nodes if n.get('type') == 'Product']
-                clients = [n for n in nodes if n.get('type') == 'Client']
-                print(f"      • Products: {len(products)}")
-                print(f"      • Clients: {len(clients)}")
-            else:
-                error = await resp.text()
-                raise AssertionError(f"Multi-hop failed: {resp.status} {error[:200]}")
+            },
+        )
+        nodes = result.get('data', {}).get('nodes', [])
+        edges = result.get('data', {}).get('edges', [])
+        print(f"   ✅ Found {len(nodes)} nodes, {len(edges)} edges")
+
+        # Group by type
+        products = [n for n in nodes if n.get('type') == 'Product']
+        clients = [n for n in nodes if n.get('type') == 'Client']
+        print(f"      • Products: {len(products)}")
+        print(f"      • Clients: {len(clients)}")
         
         # 4.2 Two-hop query: Orders → Products → Client
         print("\n2️⃣ Two-hop: Orders → Products → Client...")
-        async with session.post(
+        result, _ = await _wait_for_bff_query(
+            session,
             f"{BFF_URL}/api/v1/graph-query/{db_name}/multi-hop",
-            json={
+            {
                 'start_class': 'Order',
                 'hops': [
                     ('contains', 'Product'),
                     ('owned_by', 'Client')
                 ],
                 'include_documents': True
-            }
-        ) as resp:
-            if resp.status == 200:
-                result = await resp.json()
-                nodes = result.get('data', {}).get('nodes', [])
-                edges = result.get('data', {}).get('edges', [])
-                print(f"   ✅ Found {len(nodes)} nodes, {len(edges)} edges")
-                
-                # Analyze graph structure
-                orders = [n for n in nodes if n.get('type') == 'Order']
-                products = [n for n in nodes if n.get('type') == 'Product']
-                clients = [n for n in nodes if n.get('type') == 'Client']
-                
-                print(f"      • Orders: {len(orders)}")
-                print(f"      • Products: {len(products)}")
-                print(f"      • Clients: {len(clients)}")
-                print(f"      • Graph traversal successful!")
-            else:
-                text = await resp.text()
-                raise AssertionError(f"Two-hop query failed: {resp.status} {text[:200]}")
+            },
+        )
+        nodes = result.get('data', {}).get('nodes', [])
+        edges = result.get('data', {}).get('edges', [])
+        print(f"   ✅ Found {len(nodes)} nodes, {len(edges)} edges")
+
+        # Analyze graph structure
+        orders = [n for n in nodes if n.get('type') == 'Order']
+        products = [n for n in nodes if n.get('type') == 'Product']
+        clients = [n for n in nodes if n.get('type') == 'Client']
+
+        print(f"      • Orders: {len(orders)}")
+        print(f"      • Products: {len(products)}")
+        print(f"      • Clients: {len(clients)}")
+        print(f"      • Graph traversal successful!")
         
         # ========================================================================
         # PHASE 5: EVENT SOURCING VERIFICATION
@@ -478,75 +560,77 @@ async def test_full_api_integration():
         }
         es_retries = 15
         for attempt in range(es_retries):
-            async with session.post(
+            status, result, text = await _request_json(
+                session,
+                "POST",
                 f"{ELASTICSEARCH_URL}/{index_name}/_search",
                 json=es_query_payload,
-            ) as resp:
-                if resp.status == 200:
-                    result = await resp.json()
-                    total = result.get('hits', {}).get('total', {}).get('value', 0)
-                    buckets = result.get('aggregations', {}).get('by_class', {}).get('buckets', [])
+            )
+            if status == 200:
+                result = result or {}
+                total = result.get('hits', {}).get('total', {}).get('value', 0)
+                buckets = result.get('aggregations', {}).get('by_class', {}).get('buckets', [])
 
-                    if total < expected_total and attempt < es_retries - 1:
-                        print(
-                            f"   ⏳ Waiting for ES projections ({total}/{expected_total})..."
-                        )
-                        await asyncio.sleep(2)
-                        continue
-
-                    print(f"   ✅ Total documents in ES: {total}")
-                    for bucket in buckets:
-                        print(f"      • {bucket['key']}: {bucket['doc_count']} documents")
-
-                    # Check for terminus_id in documents
-                    hits = result.get('hits', {}).get('hits', [])
-                    if hits:
-                        sample = hits[0]['_source']
-                        has_terminus_id = 'terminus_id' in sample
-                        has_data = 'data' in sample
-                        has_relationships = 'relationships' in sample
-
-                        print(f"   📊 Document structure validation:")
-                        print(f"      • terminus_id: {'✅' if has_terminus_id else '❌'}")
-                        print(f"      • data: {'✅' if has_data else '❌'}")
-                        print(f"      • relationships: {'✅' if has_relationships else '❌'}")
-                    break
-                if resp.status == 404 and attempt < es_retries - 1:
+                if total < expected_total and attempt < es_retries - 1:
+                    print(
+                        f"   ⏳ Waiting for ES projections ({total}/{expected_total})..."
+                    )
                     await asyncio.sleep(2)
                     continue
-                text = await resp.text()
-                raise AssertionError(f"Elasticsearch query failed with status {resp.status}: {text[:200]}")
+
+                print(f"   ✅ Total documents in ES: {total}")
+                for bucket in buckets:
+                    print(f"      • {bucket['key']}: {bucket['doc_count']} documents")
+
+                # Check for terminus_id in documents
+                hits = result.get('hits', {}).get('hits', [])
+                if hits:
+                    sample = hits[0]['_source']
+                    has_terminus_id = 'terminus_id' in sample
+                    has_data = 'data' in sample
+                    has_relationships = 'relationships' in sample
+
+                    print(f"   📊 Document structure validation:")
+                    print(f"      • terminus_id: {'✅' if has_terminus_id else '❌'}")
+                    print(f"      • data: {'✅' if has_data else '❌'}")
+                    print(f"      • relationships: {'✅' if has_relationships else '❌'}")
+                break
+            if status == 404 and attempt < es_retries - 1:
+                await asyncio.sleep(2)
+                continue
+            raise AssertionError(f"Elasticsearch query failed with status {status}: {text[:200]}")
         
         # 5.3 Check TerminusDB for lightweight nodes
         print("\n3️⃣ Verifying TerminusDB lightweight nodes...")
-        async with session.get(
+        status, result, text = await _request_json(
+            session,
+            "GET",
             f"{OMS_URL}/api/v1/database/{db_name}/ontology",
             headers=headers,
-        ) as resp:
-            if resp.status == 200:
-                result = await resp.json()
-                ontologies = result.get('data', {}).get('ontologies', result.get('data', []))
-                
-                print(f"   ✅ Found {len(ontologies)} ontologies")
-                
-                # Check for system fields (should NOT exist)
-                for ont in ontologies:
-                    if isinstance(ont, dict):
-                        class_id = ont.get('id')
-                        properties = ont.get('properties', [])
-                        prop_names = [p.get('name') for p in properties if isinstance(p, dict)]
-                        
-                        # Check for forbidden system fields
-                        system_fields = ['es_doc_id', 's3_uri', 'created_at']
-                        violations = [f for f in system_fields if f in prop_names]
-                        
-                        if violations:
-                            print(f"      ❌ {class_id}: HAS SYSTEM FIELDS: {violations}")
-                        else:
-                            print(f"      ✅ {class_id}: Clean (no system fields)")
-            else:
-                text = await resp.text()
-                raise AssertionError(f"Ontology list failed: {resp.status} {text[:200]}")
+        )
+        if status == 200:
+            result = result or {}
+            ontologies = result.get('data', {}).get('ontologies', result.get('data', []))
+
+            print(f"   ✅ Found {len(ontologies)} ontologies")
+
+            # Check for system fields (should NOT exist)
+            for ont in ontologies:
+                if isinstance(ont, dict):
+                    class_id = ont.get('id')
+                    properties = ont.get('properties', [])
+                    prop_names = [p.get('name') for p in properties if isinstance(p, dict)]
+
+                    # Check for forbidden system fields
+                    system_fields = ['es_doc_id', 's3_uri', 'created_at']
+                    violations = [f for f in system_fields if f in prop_names]
+
+                    if violations:
+                        print(f"      ❌ {class_id}: HAS SYSTEM FIELDS: {violations}")
+                    else:
+                        print(f"      ✅ {class_id}: Clean (no system fields)")
+        else:
+            raise AssertionError(f"Ontology list failed: {status} {text[:200]}")
         
         # ========================================================================
         # PHASE 6: CONSISTENCY VERIFICATION
@@ -571,32 +655,33 @@ async def test_full_api_integration():
                 }
             }
             for attempt in range(20):
-                async with session.post(
+                status, result, text = await _request_json(
+                    session,
+                    "POST",
                     f"{ELASTICSEARCH_URL}/{index_name}/_count",
                     json=count_payload,
-                ) as resp:
-                    if resp.status == 200:
-                        result = await resp.json()
-                        actual = result.get('count', 0)
-                        if actual != expected and attempt < 19:
-                            print(
-                                f"   ⏳ Waiting for {class_name} projections ({actual}/{expected})..."
-                            )
-                            await asyncio.sleep(2)
-                            continue
-                        is_consistent = actual == expected
-                        all_consistent = all_consistent and is_consistent
-
-                        status = '✅' if is_consistent else '❌'
-                        print(f"   {status} {class_name}: Expected {expected}, Got {actual}")
-                        break
-                    if resp.status == 404 and attempt < 15:
+                )
+                if status == 200:
+                    result = result or {}
+                    actual = result.get('count', 0)
+                    if actual != expected and attempt < 19:
+                        print(
+                            f"   ⏳ Waiting for {class_name} projections ({actual}/{expected})..."
+                        )
                         await asyncio.sleep(2)
                         continue
-                    text = await resp.text()
-                    raise AssertionError(
-                        f"ES count query failed for {class_name}: {resp.status} {text[:200]}"
-                    )
+                    is_consistent = actual == expected
+                    all_consistent = all_consistent and is_consistent
+
+                    status_icon = '✅' if is_consistent else '❌'
+                    print(f"   {status_icon} {class_name}: Expected {expected}, Got {actual}")
+                    break
+                if status == 404 and attempt < 15:
+                    await asyncio.sleep(2)
+                    continue
+                raise AssertionError(
+                    f"ES count query failed for {class_name}: {status} {text[:200]}"
+                )
         
         # ========================================================================
         # FINAL SUMMARY
@@ -626,12 +711,14 @@ async def test_full_api_integration():
         assert all_consistent, "ES counts did not match expected values"
 
         # Cleanup database
-        async with session.delete(
+        status, _, _ = await _request_json(
+            session,
+            "DELETE",
             f"{OMS_URL}/api/v1/database/{db_name}",
             headers=headers,
-        ) as resp:
-            if resp.status in (200, 202):
-                print("\n🧹 Cleaned up test database")
+        )
+        if status in (200, 202):
+            print("\n🧹 Cleaned up test database")
 
         print("\n🎯 CONCLUSION: Full API integration working perfectly!")
 

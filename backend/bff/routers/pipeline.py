@@ -42,6 +42,12 @@ from shared.dependencies.providers import AuditLogStoreDep, LineageStoreDep
 from shared.services.pipeline_artifact_store import PipelineArtifactStore
 from shared.services.pipeline_profiler import compute_column_stats
 from shared.services.pipeline_schema_utils import normalize_schema_type
+from shared.services.pipeline_dataset_utils import (
+    normalize_dataset_selection,
+    resolve_dataset_version,
+    resolve_fallback_branches,
+)
+from shared.services.pipeline_dependency_utils import normalize_dependency_entries
 from shared.services.pipeline_scheduler import _is_valid_cron_expression
 from shared.services.redis_service import create_redis_service_legacy
 from shared.utils.env_utils import parse_bool_env, parse_int_env
@@ -492,22 +498,22 @@ def _detect_breaking_schema_changes(*, previous_schema: Any, next_columns: Any) 
 
 
 def _normalize_dependencies_payload(raw: Any) -> list[dict[str, str]]:
-    if raw is None:
-        return []
-    if not isinstance(raw, list):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dependencies must be a list")
+    try:
+        entries, _ = normalize_dependency_entries(raw, strict=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     normalized: dict[str, str] = {}
-    for item in raw:
-        if not isinstance(item, dict):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dependencies items must be objects")
-        pipeline_id = str(item.get("pipeline_id") or item.get("pipelineId") or item.get("pipelineID") or "").strip()
-        status_value = str(item.get("status") or item.get("required_status") or "DEPLOYED").strip().upper()
-        if not pipeline_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dependencies pipeline_id is required")
+    for item in entries:
+        pipeline_id = item["pipeline_id"]
+        status_value = item["status"]
         try:
             UUID(pipeline_id)
         except Exception:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"dependency pipeline_id must be UUID: {pipeline_id}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"dependency pipeline_id must be UUID: {pipeline_id}",
+            )
         if status_value not in _DEPENDENCY_STATUS_ALLOWLIST:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1675,10 +1681,7 @@ async def get_pipeline_readiness(
         if not isinstance(nodes, list):
             nodes = []
 
-        fallback_raw = os.getenv("PIPELINE_FALLBACK_BRANCHES", "main")
-        fallback_candidates = [b.strip() for b in fallback_raw.split(",") if b.strip()]
-        if "main" not in fallback_candidates:
-            fallback_candidates.append("main")
+        fallback_candidates = resolve_fallback_branches()
 
         inputs: list[dict[str, Any]] = []
         overall_blocked = False
@@ -1691,13 +1694,8 @@ async def get_pipeline_readiness(
                 continue
             node_id = str(node.get("id") or "").strip() or None
             metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
-            dataset_id = str(metadata.get("datasetId") or metadata.get("dataset_id") or "").strip() or None
-            dataset_name = str(metadata.get("datasetName") or metadata.get("dataset_name") or "").strip() or None
-            requested_dataset_branch = str(
-                metadata.get("datasetBranch") or metadata.get("dataset_branch") or resolved_branch
-            ).strip() or resolved_branch
-
-            if not dataset_id and not dataset_name:
+            selection = normalize_dataset_selection(metadata, default_branch=resolved_branch)
+            if not selection.dataset_id and not selection.dataset_name:
                 overall_blocked = True
                 inputs.append(
                     {
@@ -1707,51 +1705,23 @@ async def get_pipeline_readiness(
                     }
                 )
                 continue
-
-            candidates: list[str] = []
-            for candidate in [requested_dataset_branch, *fallback_candidates]:
-                if candidate and candidate not in candidates:
-                    candidates.append(candidate)
-
-            dataset = None
-            version_rec = None
-            resolved_dataset_branch = None
-
-            if dataset_id:
-                dataset = await dataset_registry.get_dataset(dataset_id=str(dataset_id))
-                if dataset:
-                    version_rec = await dataset_registry.get_latest_version(dataset_id=dataset.dataset_id)
-                    dataset_name = dataset_name or dataset.name
-                    resolved_dataset_branch = dataset.branch
-
-            if (not dataset or not version_rec) and dataset_name:
-                dataset = None
-                version_rec = None
-                resolved_dataset_branch = None
-                for candidate_branch in candidates:
-                    found = await dataset_registry.get_dataset_by_name(
-                        db_name=pipeline.db_name,
-                        name=dataset_name,
-                        branch=candidate_branch,
-                    )
-                    if not found:
-                        continue
-                    found_version = await dataset_registry.get_latest_version(dataset_id=found.dataset_id)
-                    if not found_version:
-                        continue
-                    dataset = found
-                    version_rec = found_version
-                    resolved_dataset_branch = candidate_branch
-                    break
+            resolution = await resolve_dataset_version(
+                dataset_registry,
+                db_name=pipeline.db_name,
+                selection=selection,
+            )
+            dataset = resolution.dataset
+            version_rec = resolution.version
+            resolved_dataset_branch = resolution.resolved_branch or (dataset.branch if dataset else None)
 
             if not dataset:
                 overall_blocked = True
                 inputs.append(
                     {
                         "node_id": node_id,
-                        "dataset_id": dataset_id,
-                        "dataset_name": dataset_name,
-                        "requested_branch": requested_dataset_branch,
+                        "dataset_id": selection.dataset_id,
+                        "dataset_name": selection.dataset_name,
+                        "requested_branch": selection.requested_branch,
                         "status": "MISSING_DATASET",
                         "detail": "dataset not found in requested/fallback branches",
                     }
@@ -1765,7 +1735,7 @@ async def get_pipeline_readiness(
                         "node_id": node_id,
                         "dataset_id": dataset.dataset_id,
                         "dataset_name": dataset.name,
-                        "requested_branch": requested_dataset_branch,
+                        "requested_branch": selection.requested_branch,
                         "resolved_branch": resolved_dataset_branch or dataset.branch,
                         "status": "NO_VERSIONS",
                         "detail": "dataset has no versions in requested/fallback branches",
@@ -1773,15 +1743,14 @@ async def get_pipeline_readiness(
                 )
                 continue
 
-            used_fallback = bool((resolved_dataset_branch or dataset.branch) != requested_dataset_branch)
             inputs.append(
                 {
                     "node_id": node_id,
                     "dataset_id": dataset.dataset_id,
                     "dataset_name": dataset.name,
-                    "requested_branch": requested_dataset_branch,
+                    "requested_branch": selection.requested_branch,
                     "resolved_branch": resolved_dataset_branch or dataset.branch,
-                    "used_fallback": used_fallback,
+                    "used_fallback": resolution.used_fallback,
                     "status": "READY",
                     "latest_commit_id": version_rec.lakefs_commit_id,
                     "latest_version": version_rec.lakefs_commit_id,

@@ -331,9 +331,9 @@ def install_error_handlers(
             category = category or fallback_category
             code = code or fallback_code
         message = _normalize_message(exc.detail)
-        detail = message
+        detail: Any = message
         if isinstance(exc.detail, dict):
-            detail = json.dumps(exc.detail, ensure_ascii=False)
+            detail = exc.detail
         return _build_response(
             request,
             service_name=service_name,

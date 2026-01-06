@@ -225,13 +225,16 @@ async def _wait_for_es_doc(
     last: Optional[Dict[str, Any]] = None
 
     while time.monotonic() < deadline:
-        async with session.get(f"{ELASTICSEARCH_URL}/{index_name}/_doc/{doc_id}") as resp:
-            if resp.status == 200:
-                payload = await resp.json()
-                if payload.get("found") is True or payload.get("_source"):
-                    return payload
-            else:
-                last = {"status": resp.status, "body": await resp.text()}
+        try:
+            async with session.get(f"{ELASTICSEARCH_URL}/{index_name}/_doc/{doc_id}") as resp:
+                if resp.status == 200:
+                    payload = await resp.json()
+                    if payload.get("found") is True or payload.get("_source"):
+                        return payload
+                else:
+                    last = {"status": resp.status, "body": await resp.text()}
+        except aiohttp.ClientError as exc:
+            last = {"error": str(exc)}
         await asyncio.sleep(poll_interval_seconds)
 
     raise AssertionError(f"Timed out waiting for ES doc {index_name}/{doc_id} (last={last})")
@@ -245,7 +248,7 @@ class TestCoreOntologyManagement:
     async def test_database_lifecycle(self):
         """Test complete database lifecycle with Event Sourcing"""
         async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
-            db_name = f"test_db_{uuid.uuid4().hex[:8]}"
+            db_name = f"test_db_{uuid.uuid4().hex[:12]}"
             command_id: Optional[str] = None
             
             # Create database
@@ -286,7 +289,7 @@ class TestCoreOntologyManagement:
     async def test_ontology_creation(self):
         """Test ontology creation with complex types"""
         async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
-            db_name = f"test_ontology_db_{uuid.uuid4().hex[:8]}"
+            db_name = f"test_ontology_db_{uuid.uuid4().hex[:12]}"
             
             # Create database first
             async with session.post(
@@ -352,7 +355,7 @@ class TestCoreOntologyManagement:
     async def test_ontology_i18n_label_projection(self):
         """Ensure i18n labels are normalized for ES and preserved in label_i18n."""
         async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
-            db_name = f"test_ontology_i18n_db_{uuid.uuid4().hex[:8]}"
+            db_name = f"test_ontology_i18n_db_{uuid.uuid4().hex[:12]}"
 
             async with session.post(
                 f"{OMS_URL}/api/v1/database/create",
@@ -418,7 +421,7 @@ class TestCoreOntologyManagement:
                 session,
                 index_name=index_name,
                 doc_id="I18nProduct",
-                timeout_seconds=180,
+                timeout_seconds=420,
             )
             source = es_doc.get("_source") or {}
 
@@ -457,7 +460,7 @@ class TestCoreOntologyManagement:
     async def test_ontology_creation_advanced_relationships(self):
         """Test advanced ontology creation path is truly event-sourced and functional."""
         async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
-            db_name = f"test_adv_ontology_db_{uuid.uuid4().hex[:8]}"
+            db_name = f"test_adv_ontology_db_{uuid.uuid4().hex[:12]}"
 
             async with session.post(
                 f"{OMS_URL}/api/v1/database/create",

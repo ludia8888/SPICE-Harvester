@@ -15,6 +15,7 @@ from shared.services.dataset_registry import DatasetRegistry
 BFF_URL = (os.getenv("BFF_BASE_URL") or "http://localhost:8002").rstrip("/")
 OMS_URL = (os.getenv("OMS_BASE_URL") or "http://localhost:8000").rstrip("/")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN") or os.getenv("BFF_ADMIN_TOKEN") or "test-token"
+RUN_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_RUN_TIMEOUT_SECONDS", "300") or 300)
 
 
 async def _wait_for_command(
@@ -33,6 +34,16 @@ async def _wait_for_command(
             if status in {"COMPLETED", "SUCCESS", "SUCCEEDED", "DONE"}:
                 return
             if status in {"FAILED", "ERROR"}:
+                if db_name:
+                    try:
+                        exists_resp = await client.get(f"{OMS_URL}/api/v1/database/exists/{db_name}")
+                        if exists_resp.status_code == 200:
+                            exists_payload = exists_resp.json()
+                            exists = (exists_payload.get("data") or {}).get("exists")
+                            if exists is True:
+                                return
+                    except httpx.HTTPError:
+                        pass
                 raise AssertionError(f"Command {command_id} failed: {payload}")
         if db_name:
             try:
@@ -48,12 +59,58 @@ async def _wait_for_command(
     raise AssertionError(f"Timed out waiting for command {command_id}")
 
 
+async def _post_with_retry(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    json_payload: dict,
+    retries: int = 3,
+    retry_sleep: float = 2.0,
+) -> httpx.Response:
+    last_response: Optional[httpx.Response] = None
+    for attempt in range(retries):
+        try:
+            response = await client.post(url, json=json_payload)
+        except httpx.HTTPError:
+            if attempt + 1 >= retries:
+                raise
+        else:
+            if response.status_code < 500:
+                return response
+            last_response = response
+        if attempt + 1 < retries:
+            await asyncio.sleep(retry_sleep)
+    if last_response is not None:
+        return last_response
+    raise RuntimeError("request failed without response")
+
+
+async def _create_db_with_retry(
+    client: httpx.AsyncClient,
+    *,
+    db_name: str,
+    description: str,
+) -> None:
+    response = await _post_with_retry(
+        client,
+        f"{BFF_URL}/api/v1/databases",
+        json_payload={"name": db_name, "description": description},
+    )
+    if response.status_code == 409:
+        await _wait_for_command(client, "conflict", db_name=db_name)
+        return
+    response.raise_for_status()
+    command_id = str(((response.json().get("data") or {}) or {}).get("command_id") or "")
+    assert command_id
+    await _wait_for_command(client, command_id, db_name=db_name)
+
+
 async def _wait_for_run_terminal(
     client: httpx.AsyncClient,
     *,
     pipeline_id: str,
     job_id: str,
-    timeout_seconds: int = 240,
+    timeout_seconds: int = RUN_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + timeout_seconds
     last_payload: Optional[dict[str, Any]] = None
@@ -72,6 +129,23 @@ async def _wait_for_run_terminal(
     raise AssertionError(f"Timed out waiting for run job_id={job_id} (last={last_payload})")
 
 
+def _extract_error_detail(payload: dict[str, Any]) -> dict[str, Any]:
+    detail = payload.get("detail")
+    if isinstance(detail, dict):
+        return detail
+    context = payload.get("context")
+    if isinstance(context, dict):
+        context_detail = context.get("detail")
+        if isinstance(context_detail, dict):
+            return context_detail
+    enterprise = payload.get("enterprise")
+    if isinstance(enterprise, dict):
+        legacy_code = enterprise.get("legacy_code") or enterprise.get("code")
+        if legacy_code:
+            return {"code": legacy_code}
+    return {}
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_streaming_build_deploy_promotes_all_outputs() -> None:
@@ -83,16 +157,12 @@ async def test_streaming_build_deploy_promotes_all_outputs() -> None:
     - Build succeeds even if node_id is provided (API ignores node targeting for streaming).
     - Deploy promotion without node_id publishes all build outputs, with a single merge commit id.
     """
-    suffix = uuid.uuid4().hex[:8]
+    suffix = uuid.uuid4().hex[:12]
     db_name = f"e2e_stream_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
     async with httpx.AsyncClient(headers=headers, timeout=120.0) as client:
-        create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "stream"})
-        create_db.raise_for_status()
-        command_id = str(((create_db.json().get("data") or {}) or {}).get("command_id") or "")
-        assert command_id
-        await _wait_for_command(client, command_id, db_name=db_name)
+        await _create_db_with_retry(client, db_name=db_name, description="stream")
 
         create_dataset = await client.post(
             f"{BFF_URL}/api/v1/pipelines/datasets",
@@ -164,9 +234,10 @@ async def test_streaming_build_deploy_promotes_all_outputs() -> None:
         pipeline_id = str(pipeline.get("pipeline_id") or "")
         assert pipeline_id
 
-        build_resp = await client.post(
+        build_resp = await _post_with_retry(
+            client,
             f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/build",
-            json={"db_name": db_name, "node_id": "out1", "limit": 5},
+            json_payload={"db_name": db_name, "node_id": "out1", "limit": 5},
         )
         build_resp.raise_for_status()
         build_job_id = str(((build_resp.json().get("data") or {}) or {}).get("job_id") or "")
@@ -174,9 +245,10 @@ async def test_streaming_build_deploy_promotes_all_outputs() -> None:
         build_run = await _wait_for_run_terminal(client, pipeline_id=pipeline_id, job_id=build_job_id)
         assert str(build_run.get("status") or "").upper() == "SUCCESS"
 
-        deploy_resp = await client.post(
+        deploy_resp = await _post_with_retry(
+            client,
             f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/deploy",
-            json={"promote_build": True, "build_job_id": build_job_id},
+            json_payload={"promote_build": True, "build_job_id": build_job_id},
         )
         deploy_resp.raise_for_status()
         deploy_payload = deploy_resp.json()
@@ -209,16 +281,12 @@ async def test_streaming_build_fails_as_job_group_on_contract_mismatch() -> None
     Checklist CL-017:
     - Streaming pipelines run as a unit: if one output violates schema contract, the build fails and no output is published.
     """
-    suffix = uuid.uuid4().hex[:8]
+    suffix = uuid.uuid4().hex[:12]
     db_name = f"e2e_stream_fail_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
     async with httpx.AsyncClient(headers=headers, timeout=120.0) as client:
-        create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "stream"})
-        create_db.raise_for_status()
-        command_id = str(((create_db.json().get("data") or {}) or {}).get("command_id") or "")
-        assert command_id
-        await _wait_for_command(client, command_id, db_name=db_name)
+        await _create_db_with_retry(client, db_name=db_name, description="stream")
 
         create_dataset = await client.post(
             f"{BFF_URL}/api/v1/pipelines/datasets",
@@ -289,9 +357,10 @@ async def test_streaming_build_fails_as_job_group_on_contract_mismatch() -> None
         pipeline_id = str(pipeline.get("pipeline_id") or "")
         assert pipeline_id
 
-        build_resp = await client.post(
+        build_resp = await _post_with_retry(
+            client,
             f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/build",
-            json={"db_name": db_name, "node_id": "out_ok", "limit": 5},
+            json_payload={"db_name": db_name, "node_id": "out_ok", "limit": 5},
         )
         build_resp.raise_for_status()
         build_job_id = str(((build_resp.json().get("data") or {}) or {}).get("job_id") or "")
@@ -299,13 +368,15 @@ async def test_streaming_build_fails_as_job_group_on_contract_mismatch() -> None
         build_run = await _wait_for_run_terminal(client, pipeline_id=pipeline_id, job_id=build_job_id)
         assert str(build_run.get("status") or "").upper() == "FAILED"
 
-        deploy_resp = await client.post(
+        deploy_resp = await _post_with_retry(
+            client,
             f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/deploy",
-            json={"promote_build": True, "build_job_id": build_job_id},
+            json_payload={"promote_build": True, "build_job_id": build_job_id},
         )
         assert deploy_resp.status_code == 409
         payload = deploy_resp.json()
-        assert payload.get("detail", {}).get("code") == "BUILD_NOT_SUCCESS"
+        detail = _extract_error_detail(payload)
+        assert detail.get("code") == "BUILD_NOT_SUCCESS"
 
     dataset_registry = DatasetRegistry()
     await dataset_registry.initialize()

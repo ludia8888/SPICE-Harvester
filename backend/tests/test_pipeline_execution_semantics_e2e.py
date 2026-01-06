@@ -18,6 +18,8 @@ from shared.utils.path_utils import safe_lakefs_ref
 
 BFF_URL = (os.getenv("BFF_BASE_URL") or "http://localhost:8002").rstrip("/")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN") or os.getenv("BFF_ADMIN_TOKEN") or "test-token"
+HTTPX_TIMEOUT = float(os.getenv("PIPELINE_HTTP_TIMEOUT", "120") or 120)
+RUN_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_RUN_TIMEOUT_SECONDS", "300") or 300)
 
 if os.getenv("RUN_PIPELINE_EXECUTION_E2E", "").strip().lower() not in {"1", "true", "yes", "on"}:
     pytest.skip(
@@ -192,21 +194,40 @@ async def _wait_for_command(
     db_name: Optional[str] = None,
 ) -> None:
     deadline = time.monotonic() + timeout_seconds
+    last_error: Optional[str] = None
     while time.monotonic() < deadline:
-        resp = await client.get(f"{BFF_URL}/api/v1/commands/{command_id}/status")
+        try:
+            resp = await client.get(f"{BFF_URL}/api/v1/commands/{command_id}/status")
+        except httpx.HTTPError as exc:
+            last_error = str(exc)
+            await asyncio.sleep(0.5)
+            continue
         if resp.status_code == 200:
             payload = resp.json()
             status = str(payload.get("status") or (payload.get("data") or {}).get("status") or "").upper()
             if status in {"COMPLETED", "SUCCESS", "SUCCEEDED", "DONE"}:
                 return
             if status in {"FAILED", "ERROR"}:
+                if db_name:
+                    try:
+                        db_resp = await client.get(f"{BFF_URL}/api/v1/databases/{db_name}")
+                    except httpx.HTTPError as exc:
+                        last_error = str(exc)
+                    else:
+                        if db_resp.status_code == 200:
+                            return
                 raise AssertionError(f"Command {command_id} failed: {payload}")
         if db_name:
-            db_resp = await client.get(f"{BFF_URL}/api/v1/databases/{db_name}")
-            if db_resp.status_code == 200:
-                return
+            try:
+                db_resp = await client.get(f"{BFF_URL}/api/v1/databases/{db_name}")
+            except httpx.HTTPError as exc:
+                last_error = str(exc)
+            else:
+                if db_resp.status_code == 200:
+                    return
         await asyncio.sleep(0.5)
-    raise AssertionError(f"Timed out waiting for command {command_id}")
+    suffix = f" last_error={last_error}" if last_error else ""
+    raise AssertionError(f"Timed out waiting for command {command_id}{suffix}")
 
 
 async def _wait_for_run_terminal(
@@ -214,13 +235,22 @@ async def _wait_for_run_terminal(
     *,
     pipeline_id: str,
     job_id: str,
-    timeout_seconds: int = 180,
+    timeout_seconds: int = RUN_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + timeout_seconds
     last_payload: Optional[dict[str, Any]] = None
+    last_error: Optional[str] = None
     while time.monotonic() < deadline:
-        resp = await client.get(f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/runs", params={"limit": 200})
-        resp.raise_for_status()
+        try:
+            resp = await client.get(f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/runs", params={"limit": 200})
+        except httpx.HTTPError as exc:
+            last_error = str(exc)
+            await asyncio.sleep(1.0)
+            continue
+        if resp.status_code != 200:
+            last_error = f"status={resp.status_code}"
+            await asyncio.sleep(1.0)
+            continue
         payload = resp.json()
         last_payload = payload
         runs = (payload.get("data") or {}).get("runs") or []
@@ -230,7 +260,132 @@ async def _wait_for_run_terminal(
             if status in {"SUCCESS", "FAILED", "DEPLOYED", "IGNORED"}:
                 return run
         await asyncio.sleep(1.0)
-    raise AssertionError(f"Timed out waiting for run job_id={job_id} (last={last_payload})")
+    suffix = f" last_error={last_error}" if last_error else ""
+    raise AssertionError(f"Timed out waiting for run job_id={job_id} (last={last_payload}){suffix}")
+
+
+async def _wait_for_output_artifact(
+    client: httpx.AsyncClient,
+    *,
+    pipeline_id: str,
+    job_id: str,
+    node_id: str,
+    timeout_seconds: int = 120,
+) -> str:
+    deadline = time.monotonic() + timeout_seconds
+    last_payload: Optional[dict[str, Any]] = None
+    last_error: Optional[str] = None
+    while time.monotonic() < deadline:
+        try:
+            resp = await client.get(f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/runs", params={"limit": 200})
+        except httpx.HTTPError as exc:
+            last_error = str(exc)
+            await asyncio.sleep(1.0)
+            continue
+        if resp.status_code != 200:
+            last_error = f"status={resp.status_code}"
+            await asyncio.sleep(1.0)
+            continue
+        payload = resp.json()
+        last_payload = payload
+        runs = (payload.get("data") or {}).get("runs") or []
+        run = next((item for item in runs if item.get("job_id") == job_id), None)
+        if run:
+            output_json = run.get("output_json")
+            outputs = output_json.get("outputs") if isinstance(output_json, dict) else None
+            if isinstance(outputs, list):
+                match = next((item for item in outputs if str(item.get("node_id") or "") == node_id), None)
+                if match:
+                    artifact_key = str(match.get("artifact_key") or "")
+                    if artifact_key.startswith("s3://"):
+                        return artifact_key
+        await asyncio.sleep(1.0)
+    suffix = f" last_error={last_error}" if last_error else ""
+    raise AssertionError(
+        f"Timed out waiting for output artifact job_id={job_id} node_id={node_id} (last={last_payload}){suffix}"
+    )
+
+
+async def _wait_for_run_errors(
+    client: httpx.AsyncClient,
+    *,
+    pipeline_id: str,
+    job_id: str,
+    timeout_seconds: int = 30,
+) -> list[Any]:
+    deadline = time.monotonic() + timeout_seconds
+    last_payload: Optional[dict[str, Any]] = None
+    last_error: Optional[str] = None
+    while time.monotonic() < deadline:
+        try:
+            resp = await client.get(f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/runs", params={"limit": 200})
+        except httpx.HTTPError as exc:
+            last_error = str(exc)
+            await asyncio.sleep(1.0)
+            continue
+        if resp.status_code != 200:
+            last_error = f"status={resp.status_code}"
+            await asyncio.sleep(1.0)
+            continue
+        payload = resp.json()
+        last_payload = payload
+        runs = (payload.get("data") or {}).get("runs") or []
+        run = next((item for item in runs if item.get("job_id") == job_id), None)
+        if run:
+            output_json = run.get("output_json") or {}
+            if isinstance(output_json, dict):
+                errors = output_json.get("errors") or []
+                if errors:
+                    return errors
+        await asyncio.sleep(1.0)
+    suffix = f" last_error={last_error}" if last_error else ""
+    raise AssertionError(f"Timed out waiting for run errors job_id={job_id} (last={last_payload}){suffix}")
+
+
+async def _post_with_retry(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    json_payload: dict,
+    retries: int = 5,
+    retry_sleep: float = 3.0,
+) -> httpx.Response:
+    last_response: Optional[httpx.Response] = None
+    for attempt in range(retries):
+        try:
+            response = await client.post(url, json=json_payload)
+        except httpx.HTTPError:
+            if attempt + 1 >= retries:
+                raise
+        else:
+            if response.status_code < 500:
+                return response
+            last_response = response
+        if attempt + 1 < retries:
+            await asyncio.sleep(retry_sleep)
+    if last_response is not None:
+        return last_response
+    raise RuntimeError("request failed without response")
+
+
+async def _create_db_with_retry(
+    client: httpx.AsyncClient,
+    *,
+    db_name: str,
+    description: str,
+) -> None:
+    response = await _post_with_retry(
+        client,
+        f"{BFF_URL}/api/v1/databases",
+        json_payload={"name": db_name, "description": description},
+    )
+    if response.status_code == 409:
+        await _wait_for_command(client, "conflict", db_name=db_name)
+        return
+    response.raise_for_status()
+    command_id = str(((response.json().get("data") or {}) or {}).get("command_id") or "")
+    assert command_id
+    await _wait_for_command(client, command_id, db_name=db_name)
 
 
 def _artifact_for_output(run: dict[str, Any], *, node_id: str) -> str:
@@ -271,12 +426,8 @@ async def test_snapshot_overwrites_outputs_across_runs() -> None:
     db_name = f"e2e_snap_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
-        create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "snap"})
-        create_db.raise_for_status()
-        command_id = str(((create_db.json().get("data") or {}) or {}).get("command_id") or "")
-        assert command_id
-        await _wait_for_command(client, command_id, db_name=db_name)
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+        await _create_db_with_retry(client, db_name=db_name, description="snap")
 
         create_dataset = await client.post(
             f"{BFF_URL}/api/v1/pipelines/datasets",
@@ -395,16 +546,12 @@ async def test_incremental_appends_outputs_and_preserves_previous_parts() -> Non
     - After appending new input rows and running again, the new commit must contain all previous part keys
       plus at least one new part key (append semantics).
     """
-    suffix = uuid.uuid4().hex[:8]
+    suffix = uuid.uuid4().hex[:12]
     db_name = f"e2e_inc_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
-        create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "inc"})
-        create_db.raise_for_status()
-        command_id = str(((create_db.json().get("data") or {}) or {}).get("command_id") or "")
-        assert command_id
-        await _wait_for_command(client, command_id, db_name=db_name)
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+        await _create_db_with_retry(client, db_name=db_name, description="inc")
 
         schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts", "type": "xsd:integer"}]}
         create_dataset = await client.post(
@@ -537,16 +684,12 @@ async def test_incremental_watermark_boundary_includes_equal_timestamp_rows() ->
     """
     Boundary check: rows with watermark == previous max should still appear in output (no gaps).
     """
-    suffix = uuid.uuid4().hex[:8]
+    suffix = uuid.uuid4().hex[:12]
     db_name = f"e2e_inc_boundary_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
-        create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "boundary"})
-        create_db.raise_for_status()
-        command_id = str(((create_db.json().get("data") or {}) or {}).get("command_id") or "")
-        assert command_id
-        await _wait_for_command(client, command_id, db_name=db_name)
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+        await _create_db_with_retry(client, db_name=db_name, description="boundary")
 
         schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts", "type": "xsd:integer"}]}
         create_dataset = await client.post(
@@ -667,16 +810,12 @@ async def test_incremental_empty_diff_noop() -> None:
     Checklist CL-020:
     - Empty diff should no-op (no new dataset version, no output rows).
     """
-    suffix = uuid.uuid4().hex[:8]
+    suffix = uuid.uuid4().hex[:12]
     db_name = f"e2e_inc_noop_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
-        create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "noop"})
-        create_db.raise_for_status()
-        command_id = str(((create_db.json().get("data") or {}) or {}).get("command_id") or "")
-        assert command_id
-        await _wait_for_command(client, command_id, db_name=db_name)
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+        await _create_db_with_retry(client, db_name=db_name, description="noop")
 
         schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts", "type": "xsd:integer"}]}
         create_dataset = await client.post(
@@ -811,16 +950,12 @@ async def test_incremental_removed_files_noop() -> None:
     Checklist CL-021:
     - Removal-only diffs are treated as no-op (append-only semantics).
     """
-    suffix = uuid.uuid4().hex[:8]
+    suffix = uuid.uuid4().hex[:12]
     db_name = f"e2e_inc_removed_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
-        create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "removed"})
-        create_db.raise_for_status()
-        command_id = str(((create_db.json().get("data") or {}) or {}).get("command_id") or "")
-        assert command_id
-        await _wait_for_command(client, command_id, db_name=db_name)
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+        await _create_db_with_retry(client, db_name=db_name, description="removed")
 
         schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts", "type": "xsd:integer"}]}
         create_dataset = await client.post(
@@ -1006,7 +1141,7 @@ async def test_run_branch_conflict_fallback_and_cleanup() -> None:
     """
     Retry safety: pre-existing run branch should not block deploy; fallback branch must be used and cleaned up.
     """
-    suffix = uuid.uuid4().hex[:8]
+    suffix = uuid.uuid4().hex[:12]
     db_name = f"e2e_run_branch_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
@@ -1025,12 +1160,8 @@ async def test_run_branch_conflict_fallback_and_cleanup() -> None:
     lakefs_client = LakeFSClient()
     artifact_repo = (os.getenv("LAKEFS_ARTIFACTS_REPOSITORY") or "pipeline-artifacts").strip()
 
-    async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
-        create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "branch"})
-        create_db.raise_for_status()
-        command_id = str(((create_db.json().get("data") or {}) or {}).get("command_id") or "")
-        assert command_id
-        await _wait_for_command(client, command_id, db_name=db_name)
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+        await _create_db_with_retry(client, db_name=db_name, description="branch")
 
         schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}]}
         create_dataset = await client.post(
@@ -1137,16 +1268,12 @@ async def test_partition_column_special_chars_roundtrip() -> None:
     Checklist CL-021:
     - Partition column values with special characters round-trip through output storage.
     """
-    suffix = uuid.uuid4().hex[:8]
+    suffix = uuid.uuid4().hex[:12]
     db_name = f"e2e_part_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=120.0) as client:
-        create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "part"})
-        create_db.raise_for_status()
-        command_id = str(((create_db.json().get("data") or {}) or {}).get("command_id") or "")
-        assert command_id
-        await _wait_for_command(client, command_id, db_name=db_name)
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+        await _create_db_with_retry(client, db_name=db_name, description="part")
 
         schema_json = {
             "columns": [
@@ -1249,16 +1376,12 @@ async def test_pk_semantics_append_log_allows_duplicate_ids() -> None:
     """
     P0-3: append_log should not enforce unique PK.
     """
-    suffix = uuid.uuid4().hex[:8]
+    suffix = uuid.uuid4().hex[:12]
     db_name = f"e2e_pk_log_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
-        create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "pk log"})
-        create_db.raise_for_status()
-        command_id = str(((create_db.json().get("data") or {}) or {}).get("command_id") or "")
-        assert command_id
-        await _wait_for_command(client, command_id, db_name=db_name)
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+        await _create_db_with_retry(client, db_name=db_name, description="pk log")
 
         schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts", "type": "xsd:integer"}]}
         create_dataset = await client.post(
@@ -1380,16 +1503,12 @@ async def test_pk_semantics_append_state_blocks_duplicate_ids() -> None:
     """
     P0-3: append_state must enforce unique PK and fail on duplicates.
     """
-    suffix = uuid.uuid4().hex[:8]
+    suffix = uuid.uuid4().hex[:12]
     db_name = f"e2e_pk_state_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
-        create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "pk state"})
-        create_db.raise_for_status()
-        command_id = str(((create_db.json().get("data") or {}) or {}).get("command_id") or "")
-        assert command_id
-        await _wait_for_command(client, command_id, db_name=db_name)
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+        await _create_db_with_retry(client, db_name=db_name, description="pk state")
 
         schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts", "type": "xsd:integer"}]}
         create_dataset = await client.post(
@@ -1512,16 +1631,12 @@ async def test_pk_semantics_remove_requires_delete_column() -> None:
     """
     P0-3: remove semantics must enforce deleteColumn.
     """
-    suffix = uuid.uuid4().hex[:8]
+    suffix = uuid.uuid4().hex[:12]
     db_name = f"e2e_pk_remove_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
-        create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "pk remove"})
-        create_db.raise_for_status()
-        command_id = str(((create_db.json().get("data") or {}) or {}).get("command_id") or "")
-        assert command_id
-        await _wait_for_command(client, command_id, db_name=db_name)
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+        await _create_db_with_retry(client, db_name=db_name, description="pk remove")
 
         schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts", "type": "xsd:integer"}]}
         create_dataset = await client.post(
@@ -1612,16 +1727,12 @@ async def test_schema_contract_breach_blocks_deploy() -> None:
     """
     Schema contract should fail when required columns or types mismatch.
     """
-    suffix = uuid.uuid4().hex[:8]
+    suffix = uuid.uuid4().hex[:12]
     db_name = f"e2e_schema_contract_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
-        create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "schema"})
-        create_db.raise_for_status()
-        command_id = str(((create_db.json().get("data") or {}) or {}).get("command_id") or "")
-        assert command_id
-        await _wait_for_command(client, command_id, db_name=db_name)
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+        await _create_db_with_retry(client, db_name=db_name, description="schema")
 
         schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "name", "type": "xsd:string"}]}
         create_dataset = await client.post(
@@ -1695,6 +1806,8 @@ async def test_schema_contract_breach_blocks_deploy() -> None:
         assert str(run.get("status") or "").upper() == "FAILED"
         output_json = run.get("output_json") or {}
         errors = output_json.get("errors") or []
+        if not errors:
+            errors = await _wait_for_run_errors(client, pipeline_id=pipeline_id, job_id=job_id)
         assert any("schema contract missing column: missing_col" in str(item) for item in errors)
 
 
@@ -1754,15 +1867,11 @@ async def test_executor_vs_worker_validation_consistency() -> None:
     assert executor_error is not None
     assert "unique failed: id" in executor_error
 
-    suffix = uuid.uuid4().hex[:8]
+    suffix = uuid.uuid4().hex[:12]
     db_name = f"e2e_consistency_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
-    async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
-        create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "consistency"})
-        create_db.raise_for_status()
-        command_id = str(((create_db.json().get("data") or {}) or {}).get("command_id") or "")
-        assert command_id
-        await _wait_for_command(client, command_id, db_name=db_name)
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+        await _create_db_with_retry(client, db_name=db_name, description="consistency")
 
         schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts", "type": "xsd:integer"}]}
         create_dataset = await client.post(
@@ -1857,17 +1966,16 @@ async def test_incremental_small_files_compaction_metrics() -> None:
         pytest.skip("RUN_PIPELINE_EXECUTION_E2E_PERF must be enabled for perf test.")
 
     iterations = int(os.getenv("PIPELINE_SMALL_FILES_ITERATIONS", "100"))
+    max_attempts = max(1, int(os.getenv("PIPELINE_PERF_DEPLOY_RETRIES", "2")))
+    retry_sleep = float(os.getenv("PIPELINE_PERF_DEPLOY_RETRY_SLEEP_SECONDS", "2"))
+    run_timeout = max(60, int(os.getenv("PIPELINE_PERF_DEPLOY_TIMEOUT_SECONDS", "300")))
     assert iterations >= 1
-    suffix = uuid.uuid4().hex[:8]
+    suffix = uuid.uuid4().hex[:12]
     db_name = f"e2e_perf_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=60.0) as client:
-        create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "perf"})
-        create_db.raise_for_status()
-        command_id = str(((create_db.json().get("data") or {}) or {}).get("command_id") or "")
-        assert command_id
-        await _wait_for_command(client, command_id, db_name=db_name, timeout_seconds=120)
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+        await _create_db_with_retry(client, db_name=db_name, description="perf")
 
         schema_json = {"columns": [{"name": "id", "type": "xsd:integer"}, {"name": "ts", "type": "xsd:integer"}]}
         create_dataset = await client.post(
@@ -1932,35 +2040,65 @@ async def test_incremental_small_files_compaction_metrics() -> None:
             has_pyarrow = False
 
         for idx in range(1, iterations + 1):
-            create_version = await client.post(
+            create_version = await _post_with_retry(
+                client,
                 f"{BFF_URL}/api/v1/pipelines/datasets/{dataset_id}/versions",
-                json={
+                json_payload={
                     "sample_json": {"rows": [{"id": idx, "ts": idx}]},
                     "schema_json": schema_json,
                 },
             )
             create_version.raise_for_status()
 
-            job_id = f"deploy-perf-{uuid.uuid4().hex}"
-            start = time.monotonic()
-            await queue.publish(
-                PipelineJob(
-                    job_id=job_id,
-                    pipeline_id=pipeline_id,
-                    db_name=db_name,
-                    pipeline_type="incremental",
-                    definition_json=definition_json,
-                    node_id="out1",
-                    output_dataset_name="out_ds",
-                    mode="deploy",
-                    branch="main",
+            run: Optional[dict[str, Any]] = None
+            job_id = ""
+            for attempt in range(1, max_attempts + 1):
+                job_id = f"deploy-perf-{uuid.uuid4().hex}"
+                start = time.monotonic()
+                await queue.publish(
+                    PipelineJob(
+                        job_id=job_id,
+                        pipeline_id=pipeline_id,
+                        db_name=db_name,
+                        pipeline_type="incremental",
+                        definition_json=definition_json,
+                        node_id="out1",
+                        output_dataset_name="out_ds",
+                        mode="deploy",
+                        branch="main",
+                    )
                 )
-            )
-            run = await _wait_for_run_terminal(client, pipeline_id=pipeline_id, job_id=job_id, timeout_seconds=180)
-            elapsed = time.monotonic() - start
-            run_times.append(elapsed)
-            assert str(run.get("status") or "").upper() == "DEPLOYED"
-            artifact = _artifact_for_output(run, node_id="out1")
+                run = await _wait_for_run_terminal(
+                    client,
+                    pipeline_id=pipeline_id,
+                    job_id=job_id,
+                    timeout_seconds=run_timeout,
+                )
+                elapsed = time.monotonic() - start
+                status = str(run.get("status") or "").upper()
+                if status == "DEPLOYED":
+                    run_times.append(elapsed)
+                    break
+                output_json = run.get("output_json")
+                errors = (output_json or {}).get("errors") if isinstance(output_json, dict) else []
+                if attempt < max_attempts:
+                    print(f"[perf] deploy attempt {attempt} failed status={status} errors={errors}")
+                    await asyncio.sleep(retry_sleep)
+                    continue
+                raise AssertionError(
+                    f"Deploy failed after {max_attempts} attempts: status={status} errors={errors} run={run}"
+                )
+            assert run is not None
+            try:
+                artifact = _artifact_for_output(run, node_id="out1")
+            except AssertionError:
+                artifact = await _wait_for_output_artifact(
+                    client,
+                    pipeline_id=pipeline_id,
+                    job_id=job_id,
+                    node_id="out1",
+                    timeout_seconds=30,
+                )
             bucket, commit_id, prefix = _commit_and_prefix_from_artifact(artifact)
             artifact_prefix = prefix
             last_commit = commit_id
@@ -2006,16 +2144,12 @@ async def test_composite_pk_unique_perf() -> None:
     rows = int(os.getenv("PIPELINE_COMPOSITE_PK_ROWS", "5000"))
     assert rows >= 10
     max_seconds = float(os.getenv("PIPELINE_COMPOSITE_PK_MAX_SECONDS", "0") or 0)
-    suffix = uuid.uuid4().hex[:8]
+    suffix = uuid.uuid4().hex[:12]
     db_name = f"e2e_pk_perf_{suffix}"
     headers = {"X-Admin-Token": ADMIN_TOKEN, "X-DB-Name": db_name}
 
-    async with httpx.AsyncClient(headers=headers, timeout=60.0) as client:
-        create_db = await client.post(f"{BFF_URL}/api/v1/databases", json={"name": db_name, "description": "pk perf"})
-        create_db.raise_for_status()
-        command_id = str(((create_db.json().get("data") or {}) or {}).get("command_id") or "")
-        assert command_id
-        await _wait_for_command(client, command_id, db_name=db_name, timeout_seconds=120)
+    async with httpx.AsyncClient(headers=headers, timeout=HTTPX_TIMEOUT) as client:
+        await _create_db_with_retry(client, db_name=db_name, description="pk perf")
 
         schema_json = {
             "columns": [

@@ -99,8 +99,11 @@ class LakeFSClient:
     - This client is intentionally "dumb": it does not auto-create repositories.
     """
 
-    def __init__(self, *, config: Optional[LakeFSConfig] = None, timeout_seconds: int = 30) -> None:
+    def __init__(self, *, config: Optional[LakeFSConfig] = None, timeout_seconds: Optional[float] = None) -> None:
         self._config = config or LakeFSConfig.from_env()
+        if timeout_seconds is None:
+            timeout_env = os.getenv("LAKEFS_CLIENT_TIMEOUT_SECONDS") or os.getenv("LAKEFS_TIMEOUT_SECONDS")
+            timeout_seconds = float(timeout_env) if timeout_env else 120.0
         self._timeout = float(timeout_seconds)
 
     def _client(self) -> httpx.AsyncClient:

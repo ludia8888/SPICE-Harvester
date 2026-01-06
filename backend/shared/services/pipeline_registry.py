@@ -48,18 +48,17 @@ def _ensure_json_string(value: Any) -> str:
         return normalized
     return json.dumps(normalized, default=str)
 
-
-    def _normalize_output_list(value: Optional[List[Dict[str, Any]]], *, field_name: str) -> List[Dict[str, Any]]:
-        if value is None:
-            return []
-        if not isinstance(value, list):
-            raise ValueError(f"{field_name} must be a list")
-        normalized: List[Dict[str, Any]] = []
-        for item in value:
-            if not isinstance(item, dict):
-                raise ValueError(f"{field_name} items must be objects")
-            normalized.append(item)
-        return normalized
+def _normalize_output_list(value: Optional[List[Dict[str, Any]]], *, field_name: str) -> List[Dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"{field_name} must be a list")
+    normalized: List[Dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError(f"{field_name} items must be objects")
+        normalized.append(item)
+    return normalized
 
 
 def _is_production_env() -> bool:

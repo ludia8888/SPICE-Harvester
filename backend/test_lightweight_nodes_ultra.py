@@ -20,6 +20,34 @@ ELASTICSEARCH_URL = (
     or f"http://{os.getenv('ELASTICSEARCH_HOST', 'localhost')}:{os.getenv('ELASTICSEARCH_PORT', '9200')}"
 ).rstrip("/")
 
+
+async def _post_json_with_retry(
+    session: aiohttp.ClientSession,
+    url: str,
+    payload: dict,
+    *,
+    timeout_seconds: float = 60.0,
+    retry_sleep: float = 2.0,
+) -> tuple[int, dict | None, str]:
+    deadline = time.monotonic() + timeout_seconds
+    last_error = None
+    while time.monotonic() < deadline:
+        try:
+            async with session.post(url, json=payload) as resp:
+                text = await resp.text()
+                data = None
+                if text:
+                    try:
+                        data = json.loads(text)
+                    except json.JSONDecodeError:
+                        data = None
+                return resp.status, data, text
+        except aiohttp.ClientError as exc:
+            last_error = str(exc)
+            await asyncio.sleep(retry_sleep)
+    raise AssertionError(f"POST {url} failed after waiting: {last_error}")
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_lightweight_architecture():
@@ -158,56 +186,56 @@ async def test_lightweight_architecture():
         print("\n5️⃣ Verifying Elasticsearch has full data...")
         
         index_name = f"{db_name.replace('-', '_')}_instances"
-        async with session.post(
+        status, result, text = await _post_json_with_retry(
+            session,
             f"{ELASTICSEARCH_URL}/{index_name}/_search",
-            json={'query': {'match_all': {}}, 'size': 10},
-        ) as resp:
-            if resp.status in (200, 201, 202):
-                result = await resp.json()
-                hits = result.get('hits', {}).get('hits', [])
-                print(f"   📊 Elasticsearch documents: {len(hits)}")
-                
-                for hit in hits:
-                    doc = hit['_source']
-                    has_terminus_id = 'terminus_id' in doc
-                    has_data = 'data' in doc
-                    print(f"      • {doc.get('class_id')}/{doc.get('instance_id')}")
-                    print(f"        - terminus_id: {'✅' if has_terminus_id else '❌'}")
-                    print(f"        - domain data: {'✅' if has_data else '❌'}")
-            else:
-                text = await resp.text()
-                print(f"   ❌ Elasticsearch query failed: {resp.status}")
-                print(f"      {text[:200]}")
+            {'query': {'match_all': {}}, 'size': 10},
+        )
+        if status in (200, 201, 202):
+            result = result or {}
+            hits = result.get('hits', {}).get('hits', [])
+            print(f"   📊 Elasticsearch documents: {len(hits)}")
+
+            for hit in hits:
+                doc = hit['_source']
+                has_terminus_id = 'terminus_id' in doc
+                has_data = 'data' in doc
+                print(f"      • {doc.get('class_id')}/{doc.get('instance_id')}")
+                print(f"        - terminus_id: {'✅' if has_terminus_id else '❌'}")
+                print(f"        - domain data: {'✅' if has_data else '❌'}")
+        else:
+            print(f"   ❌ Elasticsearch query failed: {status}")
+            print(f"      {text[:200]}")
                     
         # 6. TEST Federation query
         print("\n6️⃣ Testing Federation query...")
         
-        async with session.post(
+        status, result, text = await _post_json_with_retry(
+            session,
             f"{BFF_URL}/api/v1/graph-query/{db_name}/simple",
-            json={
+            {
                 'class_name': 'Product',
                 'include_documents': True,
                 'limit': 10
-            }
-        ) as resp:
-            if resp.status in (200, 201, 202):
-                result = await resp.json()
-                count = result.get('count', 0)
-                docs = result.get('documents', [])
-                
-                if count > 0:
-                    print(f"   🎉 FEDERATION WORKS! Found {count} nodes")
-                    for doc in docs:
-                        print(f"      • ID: {doc.get('id')}")
-                        if doc.get('data'):
-                            print(f"        Data: {list(doc['data'].keys())}")
-                else:
-                    print(f"   ❌ FEDERATION FAILED: No nodes returned")
-                    print("      This means TerminusDB doesn't have lightweight nodes!")
+            },
+        )
+        if status in (200, 201, 202):
+            result = result or {}
+            count = result.get('count', 0)
+            docs = result.get('documents', [])
+
+            if count > 0:
+                print(f"   🎉 FEDERATION WORKS! Found {count} nodes")
+                for doc in docs:
+                    print(f"      • ID: {doc.get('id')}")
+                    if doc.get('data'):
+                        print(f"        Data: {list(doc['data'].keys())}")
             else:
-                text = await resp.text()
-                print(f"   ❌ Federation query failed: {resp.status}")
-                print(f"      {text[:200]}")
+                print(f"   ❌ FEDERATION FAILED: No nodes returned")
+                print("      This means TerminusDB doesn't have lightweight nodes!")
+        else:
+            print(f"   ❌ Federation query failed: {status}")
+            print(f"      {text[:200]}")
                 
         # 7. ANALYSIS
         print("\n" + "=" * 70)

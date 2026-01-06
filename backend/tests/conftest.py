@@ -1,6 +1,30 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+
+
+def _load_repo_dotenv() -> dict[str, str]:
+    repo_root = Path(__file__).resolve().parents[2]
+    env_path = repo_root / ".env"
+    if not env_path.exists():
+        return {}
+
+    values: dict[str, str] = {}
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("'").strip('"')
+        if key:
+            values[key] = value
+    return values
+
+
+def _env_or_dotenv(dotenv: dict[str, str], key: str, default: str) -> str:
+    return (os.getenv(key) or dotenv.get(key) or default).strip()
 
 
 def pytest_configure() -> None:
@@ -19,13 +43,18 @@ def pytest_configure() -> None:
     if docker_env in {"1", "true", "yes", "on"}:
         os.environ["DOCKER_CONTAINER"] = "false"
 
+    dotenv = _load_repo_dotenv()
     if "ELASTICSEARCH_PORT" not in os.environ:
         os.environ["ELASTICSEARCH_PORT"] = os.getenv("ELASTICSEARCH_PORT_HOST", "9200")
-    kafka_port = os.getenv("KAFKA_PORT_HOST", "39092").strip()
-    postgres_port = os.getenv("POSTGRES_PORT_HOST", "55433").strip()
-    redis_port = os.getenv("REDIS_PORT_HOST", "6380").strip()
+    kafka_port = _env_or_dotenv(dotenv, "KAFKA_PORT_HOST", "39092")
+    postgres_port = _env_or_dotenv(dotenv, "POSTGRES_PORT_HOST", "55433")
+    redis_port = _env_or_dotenv(dotenv, "REDIS_PORT_HOST", "6380")
+    minio_port = _env_or_dotenv(dotenv, "MINIO_PORT_HOST", "9002")
+    lakefs_port = _env_or_dotenv(dotenv, "LAKEFS_PORT_HOST", "48080")
+    lakefs_access = _env_or_dotenv(dotenv, "LAKEFS_ACCESS_KEY_ID", "")
+    lakefs_secret = _env_or_dotenv(dotenv, "LAKEFS_SECRET_ACCESS_KEY", "")
 
-    os.environ.setdefault("KAFKA_BOOTSTRAP_SERVERS", f"localhost:{kafka_port}")
+    os.environ.setdefault("KAFKA_BOOTSTRAP_SERVERS", f"127.0.0.1:{kafka_port}")
     os.environ.setdefault(
         "POSTGRES_URL",
         f"postgresql://spiceadmin:spicepass123@localhost:{postgres_port}/spicedb",
@@ -34,6 +63,15 @@ def pytest_configure() -> None:
     os.environ.setdefault("REDIS_HOST", "localhost")
     os.environ.setdefault("REDIS_PORT", redis_port)
     # MinIO host port is intentionally not 9000 to avoid clashing with any local MinIO.
-    os.environ.setdefault("MINIO_ENDPOINT_URL", "http://localhost:9002")
+    os.environ.setdefault("MINIO_ENDPOINT_URL", f"http://localhost:{minio_port}")
     os.environ.setdefault("MINIO_ACCESS_KEY", "minioadmin")
     os.environ.setdefault("MINIO_SECRET_KEY", "minioadmin123")
+    os.environ.setdefault("LAKEFS_PORT_HOST", lakefs_port)
+    os.environ.setdefault("LAKEFS_API_PORT", lakefs_port)
+    if lakefs_access:
+        os.environ.setdefault("LAKEFS_INSTALLATION_ACCESS_KEY_ID", lakefs_access)
+    if lakefs_secret:
+        os.environ.setdefault("LAKEFS_INSTALLATION_SECRET_ACCESS_KEY", lakefs_secret)
+    if "LAKEFS_API_URL" not in os.environ:
+        os.environ["LAKEFS_API_URL"] = f"http://127.0.0.1:{lakefs_port}"
+    os.environ.setdefault("PIPELINE_JOB_QUEUE_FLUSH_TIMEOUT_SECONDS", "20")

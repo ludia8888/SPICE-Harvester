@@ -118,6 +118,14 @@ async def get_command_status(
                 except Exception:
                     parsed_status = CommandStatus.PENDING
 
+                if parsed_status in {CommandStatus.PENDING, CommandStatus.RETRYING}:
+                    fallback, _ = await _fallback_from_registry(
+                        command_uuid=command_uuid,
+                        registry=processed_event_registry,
+                    )
+                    if fallback and fallback.status != CommandStatus.PENDING:
+                        return fallback
+
                 return CommandResult(
                     command_id=command_uuid,
                     status=parsed_status,

@@ -23,6 +23,37 @@ ELASTICSEARCH_URL = (
     or f"http://{os.getenv('ELASTICSEARCH_HOST', 'localhost')}:{os.getenv('ELASTICSEARCH_PORT', '9200')}"
 ).rstrip("/")
 
+
+async def _request_json(
+    session: aiohttp.ClientSession,
+    method: str,
+    url: str,
+    *,
+    retries: int = 3,
+    retry_sleep: float = 1.0,
+    **kwargs: object,
+) -> tuple[int, object | None, str]:
+    last_exc: Exception | None = None
+    for attempt in range(retries):
+        try:
+            async with session.request(method, url, **kwargs) as resp:
+                text = await resp.text()
+                data = None
+                if text:
+                    try:
+                        data = json.loads(text)
+                    except json.JSONDecodeError:
+                        data = None
+                return resp.status, data, text
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            last_exc = exc
+            if attempt + 1 >= retries:
+                raise
+            await asyncio.sleep(retry_sleep)
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("request failed without exception")
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_palantir_federation():
@@ -39,15 +70,17 @@ async def test_palantir_federation():
         
         # 1. Create test database
         print(f"\n1️⃣ Creating test database: {db_name}")
-        async with session.post(
+        status, _, _ = await _request_json(
+            session,
+            "POST",
             f"{OMS_URL}/api/v1/database/create",
-            json={'name': db_name, 'description': 'Palantir Federation Test'}
-        ) as resp:
-            if resp.status in (200, 201, 202):
-                print("   ✅ Database creation accepted")
-            else:
-                print(f"   ❌ Failed: {resp.status}")
-                return
+            json={'name': db_name, 'description': 'Palantir Federation Test'},
+        )
+        if status in (200, 201, 202):
+            print("   ✅ Database creation accepted")
+        else:
+            print(f"   ❌ Failed: {status}")
+            return
         
         await asyncio.sleep(3)
         
@@ -72,15 +105,16 @@ async def test_palantir_federation():
             ]
         }
         
-        async with session.post(
+        status, _, text = await _request_json(
+            session,
+            "POST",
             f"{OMS_URL}/api/v1/database/{db_name}/ontology",
-            json=ontology_data
-        ) as resp:
-            if resp.status in (200, 201, 202):
-                print("   ✅ Ontology creation accepted (no system fields)")
-            else:
-                text = await resp.text()
-                print(f"   ❌ Failed: {resp.status} - {text[:100]}")
+            json=ontology_data,
+        )
+        if status in (200, 201, 202):
+            print("   ✅ Ontology creation accepted (no system fields)")
+        else:
+            print(f"   ❌ Failed: {status} - {text[:100]}")
         
         await asyncio.sleep(3)
         
@@ -94,79 +128,85 @@ async def test_palantir_federation():
             }
         }
         
-        async with session.post(
+        status, result, _ = await _request_json(
+            session,
+            "POST",
             f"{OMS_URL}/api/v1/instances/{db_name}/async/Product/create",
-            json=product_data
-        ) as resp:
-            if resp.status in (200, 201, 202):
-                result = await resp.json()
-                command_id = result.get('command_id')
-                print(f"   ✅ Instance creation accepted: {command_id}")
-            else:
-                print(f"   ❌ Failed: {resp.status}")
-                return
+            json=product_data,
+        )
+        if status in (200, 201, 202):
+            result = result or {}
+            command_id = result.get('command_id')
+            print(f"   ✅ Instance creation accepted: {command_id}")
+        else:
+            print(f"   ❌ Failed: {status}")
+            return
         
         # Wait for processing
         await asyncio.sleep(5)
         
         # 4. Check TerminusDB schema (should have NO system fields)
         print("\n4️⃣ Verifying TerminusDB schema purity")
-        async with session.get(
-            f"{OMS_URL}/api/v1/database/{db_name}/ontology"
-        ) as resp:
-            if resp.status in (200, 201, 202):
-                result = await resp.json()
-                ontologies = result.get('data', [])
-                
-                for ont in ontologies:
-                    # Handle both string and dict formats
-                    if isinstance(ont, str):
-                        continue
-                    if ont.get('id') == 'Product':
-                        properties = ont.get('properties', [])
-                        prop_names = [p.get('name') for p in properties]
-                        
-                        # Check for forbidden system fields
-                        system_fields = ['es_doc_id', 's3_uri', 'created_at']
-                        violations = [f for f in system_fields if f in prop_names]
-                        
-                        if violations:
-                            print(f"   ❌ VIOLATION: System fields in schema: {violations}")
-                        else:
-                            print(f"   ✅ Schema is PURE: Only business fields {prop_names}")
+        status, result, _ = await _request_json(
+            session,
+            "GET",
+            f"{OMS_URL}/api/v1/database/{db_name}/ontology",
+        )
+        if status in (200, 201, 202):
+            result = result or {}
+            ontologies = result.get('data', [])
+
+            for ont in ontologies:
+                # Handle both string and dict formats
+                if isinstance(ont, str):
+                    continue
+                if ont.get('id') == 'Product':
+                    properties = ont.get('properties', [])
+                    prop_names = [p.get('name') for p in properties]
+
+                    # Check for forbidden system fields
+                    system_fields = ['es_doc_id', 's3_uri', 'created_at']
+                    violations = [f for f in system_fields if f in prop_names]
+
+                    if violations:
+                        print(f"   ❌ VIOLATION: System fields in schema: {violations}")
+                    else:
+                        print(f"   ✅ Schema is PURE: Only business fields {prop_names}")
                             
         # 5. Check Elasticsearch document (should have terminus_id)
         print("\n5️⃣ Verifying Elasticsearch document")
         index_name = f"{db_name.replace('-', '_')}_instances"
         
-        async with session.post(
+        status, result, _ = await _request_json(
+            session,
+            "POST",
             f"{ELASTICSEARCH_URL}/{index_name}/_search",
             json={
                 'query': {'match_all': {}},
                 'size': 1
             },
-        ) as resp:
-            if resp.status in (200, 201, 202):
-                result = await resp.json()
-                hits = result.get('hits', {}).get('hits', [])
-                
-                if hits:
-                    doc = hits[0]['_source']
-                    
-                    # Check for terminus_id
-                    if 'terminus_id' in doc:
-                        print(f"   ✅ Has terminus_id: {doc['terminus_id']}")
-                    else:
-                        print("   ❌ Missing terminus_id field!")
-                    
-                    # Check for data
-                    if 'data' in doc:
-                        print(f"   ✅ Has full data: {list(doc['data'].keys())}")
-                    
-                    # Check document structure
-                    print(f"   📊 Document fields: {list(doc.keys())}")
+        )
+        if status in (200, 201, 202):
+            result = result or {}
+            hits = result.get('hits', {}).get('hits', [])
+
+            if hits:
+                doc = hits[0]['_source']
+
+                # Check for terminus_id
+                if 'terminus_id' in doc:
+                    print(f"   ✅ Has terminus_id: {doc['terminus_id']}")
                 else:
-                    print("   ⚠️ No documents found in ES")
+                    print("   ❌ Missing terminus_id field!")
+
+                # Check for data
+                if 'data' in doc:
+                    print(f"   ✅ Has full data: {list(doc['data'].keys())}")
+
+                # Check document structure
+                print(f"   📊 Document fields: {list(doc.keys())}")
+            else:
+                print("   ⚠️ No documents found in ES")
         
         # 6. Test Federation query
         print("\n6️⃣ Testing Federation query (WOQL → ES)")
@@ -176,31 +216,32 @@ async def test_palantir_federation():
             'limit': 10
         }
         
-        async with session.post(
+        status, result, text = await _request_json(
+            session,
+            "POST",
             f"{BFF_URL}/api/v1/graph-query/{db_name}/simple",
-            json=federation_query
-        ) as resp:
-            if resp.status in (200, 201, 202):
-                result = await resp.json()
-                nodes = result.get('data', {}).get('nodes', [])
-                
-                if nodes:
-                    node = nodes[0]
-                    has_terminus_id = 'terminus_id' in node
-                    has_data = 'data' in node
-                    
-                    print(f"   ✅ Federation successful!")
-                    print(f"      • Has terminus_id: {has_terminus_id}")
-                    print(f"      • Has ES data: {has_data}")
-                    
-                    if has_data and node['data']:
-                        print(f"      • Data fields: {list(node['data'].get('data', {}).keys())}")
-                else:
-                    print("   ⚠️ No nodes returned from Federation")
+            json=federation_query,
+        )
+        if status in (200, 201, 202):
+            result = result or {}
+            nodes = result.get('data', {}).get('nodes', [])
+
+            if nodes:
+                node = nodes[0]
+                has_terminus_id = 'terminus_id' in node
+                has_data = 'data' in node
+
+                print(f"   ✅ Federation successful!")
+                print(f"      • Has terminus_id: {has_terminus_id}")
+                print(f"      • Has ES data: {has_data}")
+
+                if has_data and node['data']:
+                    print(f"      • Data fields: {list(node['data'].get('data', {}).keys())}")
             else:
-                text = await resp.text()
-                print(f"   ❌ Federation failed: {resp.status}")
-                print(f"      {text[:200]}")
+                print("   ⚠️ No nodes returned from Federation")
+        else:
+            print(f"   ❌ Federation failed: {status}")
+            print(f"      {text[:200]}")
         
         # 7. Summary
         print("\n7️⃣ ARCHITECTURE VERIFICATION SUMMARY")

@@ -71,7 +71,7 @@ def _ensure_test_tokens() -> None:
     es_host = _env_or_dotenv(dotenv, "ELASTICSEARCH_HOST", "localhost")
     es_port = _env_or_dotenv(dotenv, "ELASTICSEARCH_PORT", _env_or_dotenv(dotenv, "ELASTICSEARCH_PORT_HOST", "9200"))
 
-    os.environ.setdefault("KAFKA_BOOTSTRAP_SERVERS", f"localhost:{kafka_port}")
+    os.environ.setdefault("KAFKA_BOOTSTRAP_SERVERS", f"127.0.0.1:{kafka_port}")
     os.environ.setdefault(
         "POSTGRES_URL",
         f"postgresql://spiceadmin:spicepass123@localhost:{postgres_port}/spicedb",

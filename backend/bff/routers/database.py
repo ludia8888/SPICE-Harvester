@@ -77,35 +77,6 @@ def _coerce_db_entry(entry: Any) -> Dict[str, Any]:
     return payload
 
 
-def _enrich_db_entry(entry: Any, actor_id: str, actor_name: str) -> Dict[str, Any]:
-    payload = _coerce_db_entry(entry)
-    owner_id = payload.get("owner_id") or payload.get("ownerId") or actor_id
-    owner_name = payload.get("owner_name") or payload.get("ownerName") or actor_name or owner_id
-    role = payload.get("role")
-    shared = payload.get("shared")
-    shared_with = payload.get("shared_with") or payload.get("sharedWith")
-
-    if role is None:
-        role = "Owner" if owner_id == actor_id else "Viewer"
-    if shared is None:
-        shared = owner_id != actor_id
-    if shared_with is None:
-        shared_with = [actor_id] if shared and actor_id else []
-    elif isinstance(shared_with, str):
-        shared_with = [shared_with]
-
-    payload.update(
-        {
-            "owner_id": owner_id,
-            "owner_name": owner_name,
-            "role": role,
-            "shared": shared,
-            "shared_with": shared_with,
-        }
-    )
-    return payload
-
-
 async def _fetch_database_access(db_names: List[str]) -> Dict[str, List[Dict[str, Any]]]:
     if not db_names:
         return {}
