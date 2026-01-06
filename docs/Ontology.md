@@ -425,3 +425,35 @@ Foundry의 SDK 문서에서는 액션 적용 후 Object Storage V1의 변경은 
 
 Action type = “입력(Parameters) + 변경 규칙(Rules) + 제출 게이트(Submission criteria/Permissions) + 부수효과(Side effects)”로 구성된, 온톨로지 기반 업무 트랜잭션 템플릿입니다.  ￼
 
+⸻
+
+부록) 문서 대비 코드 구현 현황 (크로스체크)
+
+표기 규칙
+	•	[구현됨] 모델/CRUD/검증 또는 게이트가 코드로 확인됨
+	•	[부분] 리소스/검증 일부만 존재(자동 적용/실행/게이트 일부 없음)
+	•	[미구현] 관련 모델/검증/실행 로직 확인되지 않음
+
+1) Ontology 타입
+	•	[구현됨] Object type: OntologyBase/요청/응답 모델이 properties/relationships 포함
+	•	[부분] Primary key: Property.primary_key + linter 게이트 존재(별도 object_type pk_spec 리소스)
+	•	[미구현] Title key: 모델/검증 없음
+	•	[구현됨] Property: name/type/label/required/constraints 제공(검증은 기본 scalar 중심)
+	•	[부분] Shared property: 리소스 CRUD/검증 존재, object type 자동 합성 없음
+	•	[부분] Link type: 별도 LinkType 리소스 없음, class reference property → relationship 자동 변환
+	•	[부분] Action type: 리소스 저장/검증만, 실행/Submission criteria/side effects 엔진 없음
+	•	[부분] Interfaces: 리소스 + OMS create/update 계약 검증 게이트, UI/검색 통합 미확인
+	•	[부분] Object type groups: 리소스 CRUD만, UX 통합 미확인
+	•	[부분] Value types: 리소스/검증만, property에서 강제/버전 불변성 없음
+	•	[구현됨] (문서 범위 밖) Function 리소스 정의/검증 존재
+
+2) Base types/제약
+	•	[부분] 기본 scalar 검증만 수행(string/int/bool + min/max/pattern)
+	•	[미구현] Array/Struct 제약, Geopoint/Geoshape/Cipher/Vector 등 문서상 포맷/중첩 제약
+
+3) 거버넌스/게이트
+	•	[구현됨] Primary key 게이트(ontology linter)
+	•	[구현됨] Interface 계약 게이트(OMS create/update 422)
+	•	[부분] Object type 계약(pk_spec/backing_source) 리소스 검증 + health 이슈(ontology 생성 하드 게이트 아님)
+	•	[부분] Relationship 검증기는 health/리포트용(생성 차단 아님)
+	•	[미구현] Action submission criteria/side effects 실행 게이트

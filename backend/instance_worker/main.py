@@ -261,7 +261,13 @@ class StrictPalantirInstanceWorker:
         command.setdefault("sequence_number", envelope.sequence_number)
         return command
     
-    def get_primary_key_value(self, class_id: str, payload: Dict[str, Any]) -> str:
+    def get_primary_key_value(
+        self,
+        class_id: str,
+        payload: Dict[str, Any],
+        *,
+        allow_generate: bool = True,
+    ) -> str:
         """
         Extract primary key value dynamically based on class naming convention
         Pattern: {class_name.lower()}_id
@@ -269,19 +275,31 @@ class StrictPalantirInstanceWorker:
         # Standard pattern: class_name_id (e.g., product_id, client_id, order_id)
         expected_key = f"{class_id.lower()}_id"
         
-        if expected_key in payload:
+        if expected_key in payload and payload.get(expected_key) is not None and str(payload.get(expected_key)).strip():
             return str(payload[expected_key])
         
         # Fallback: Look for any field ending with _id
         for key, value in payload.items():
-            if key.endswith('_id') and value:
+            if key.endswith('_id') and value is not None and str(value).strip():
                 logger.info(f"Using fallback primary key: {key} = {value}")
                 return str(value)
         
         # Last resort: Generate a unique ID
+        if not allow_generate:
+            raise ValueError(f"Primary key '{expected_key}' is required for {class_id}")
         generated_id = f"{class_id.lower()}_{uuid4().hex[:8]}"
         logger.warning(f"No primary key found for {class_id}, generated: {generated_id}")
         return generated_id
+
+    @staticmethod
+    def _is_objectify_command(command: Dict[str, Any]) -> bool:
+        meta = command.get("metadata")
+        if not isinstance(meta, dict):
+            return False
+        for key in ("objectify_job_id", "mapping_spec_id", "mapping_spec_version"):
+            if meta.get(key):
+                return True
+        return False
     
     async def extract_relationships(
         self,
@@ -290,6 +308,7 @@ class StrictPalantirInstanceWorker:
         payload: Dict[str, Any],
         *,
         branch: str = "main",
+        allow_pattern_fallback: bool = True,
     ) -> Dict[str, Union[str, List[str]]]:
         """
         Extract ONLY relationship fields from payload
@@ -443,6 +462,9 @@ class StrictPalantirInstanceWorker:
         except Exception as e:
             logger.warning(f"Could not get ontology for relationship extraction: {e}")
             
+        if not allow_pattern_fallback:
+            return relationships
+
         # FALLBACK: Always check for common relationship patterns
         # This ensures relationships work even without schema
         for key, value in payload.items():
@@ -531,6 +553,7 @@ class StrictPalantirInstanceWorker:
         command_log: Dict[str, Any],
         ontology_version: Dict[str, str],
         created_by: str,
+        allow_pattern_fallback: bool = True,
     ) -> Dict[str, Any]:
         """
         Apply the create-instance side-effects without touching command status.
@@ -618,7 +641,13 @@ class StrictPalantirInstanceWorker:
                 logger.debug(f"Audit record failed (non-fatal): {e}")
 
         # 2) Extract ONLY relationships for graph
-        relationships = await self.extract_relationships(db_name, class_id, payload, branch=branch)
+        relationships = await self.extract_relationships(
+            db_name,
+            class_id,
+            payload,
+            branch=branch,
+            allow_pattern_fallback=allow_pattern_fallback,
+        )
 
         # 3) Store lightweight node in TerminusDB for graph traversal
         primary_key_value = instance_id
@@ -785,6 +814,7 @@ class StrictPalantirInstanceWorker:
         command_id = command.get('command_id')
         branch = validate_branch_name(command.get("branch") or "main")
         payload = command.get('payload', {}) or {}
+        is_objectify = self._is_objectify_command(command)
 
         # Set command status early (202 already returned to user).
         await self.set_command_status(command_id, 'processing')
@@ -813,7 +843,9 @@ class StrictPalantirInstanceWorker:
                     )
             else:
                 # Extract primary key value dynamically
-                instance_id = self.get_primary_key_value(class_id, payload)
+                instance_id = self.get_primary_key_value(
+                    class_id, payload, allow_generate=not is_objectify
+                )
                 validate_instance_id(instance_id)
 
             # Ensure downstream uses the resolved instance_id consistently
@@ -925,7 +957,13 @@ class StrictPalantirInstanceWorker:
                     logger.debug(f"Audit record failed (non-fatal): {e}")
             
             # 2. Extract ONLY relationships for graph
-            relationships = await self.extract_relationships(db_name, class_id, payload, branch=branch)
+            relationships = await self.extract_relationships(
+                db_name,
+                class_id,
+                payload,
+                branch=branch,
+                allow_pattern_fallback=not is_objectify,
+            )
             
             # 3. Create PURE lightweight node for TerminusDB (NO system fields!)
             graph_node = {
@@ -1118,6 +1156,7 @@ class StrictPalantirInstanceWorker:
         command_id = command.get("command_id")
         branch = validate_branch_name(command.get("branch") or "main")
         payload = command.get("payload", {}) or {}
+        is_objectify = self._is_objectify_command(command)
 
         await self.set_command_status(command_id, "processing")
 
@@ -1186,6 +1225,8 @@ class StrictPalantirInstanceWorker:
                             instance_id = str(value)
                             break
                     if not instance_id:
+                        if is_objectify:
+                            raise ValueError(f"Primary key is required for objectify bulk create ({class_id})")
                         suffix = uuid5(NAMESPACE_URL, f"bulk:{command_id}:{idx}").hex[:12]
                         instance_id = f"{class_id.lower()}_{suffix}"
                         inst_payload[expected_key] = instance_id
@@ -1215,6 +1256,7 @@ class StrictPalantirInstanceWorker:
                     command_log=command_log,
                     ontology_version=ontology_version,
                     created_by=created_by,
+                    allow_pattern_fallback=not is_objectify,
                 )
 
                 created_count += 1
@@ -1569,7 +1611,13 @@ class StrictPalantirInstanceWorker:
                     logger.debug(f"Audit record failed (non-fatal): {audit_err}", exc_info=True)
 
         # Update lightweight node (relationships + required scalar fields)
-        relationships = await self.extract_relationships(db_name, class_id, merged_payload, branch=branch)
+        relationships = await self.extract_relationships(
+            db_name,
+            class_id,
+            merged_payload,
+            branch=branch,
+            allow_pattern_fallback=not is_objectify,
+        )
         terminus_id = f"{class_id}/{instance_id}"
         graph_node: Dict[str, Any] = {
             "@id": terminus_id,

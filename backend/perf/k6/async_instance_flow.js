@@ -148,7 +148,7 @@ export function setup() {
   };
 
   const createOntRes = http.post(
-    api(`/database/${dbName}/ontology?branch=${encodeURIComponent(BRANCH)}`),
+    api(`/databases/${dbName}/ontology?branch=${encodeURIComponent(BRANCH)}`),
     JSON.stringify(ontology),
     { headers }
   );

@@ -19,8 +19,11 @@ from shared.services.dataset_registry import DatasetRegistry
 from shared.services.objectify_registry import ObjectifyRegistry
 from shared.services.objectify_job_queue import ObjectifyJobQueue
 from shared.services.pipeline_registry import PipelineRegistry
+from shared.utils.import_type_normalization import normalize_import_target_type
 from shared.utils.s3_uri import parse_s3_uri
 from shared.utils.schema_hash import compute_schema_hash
+from bff.dependencies import OMSClientDep
+from bff.services.oms_client import OMSClient
 
 logger = logging.getLogger(__name__)
 
@@ -104,12 +107,115 @@ def _compute_schema_hash_from_sample(sample_json: Any) -> Optional[str]:
     return compute_schema_hash(columns)
 
 
+def _extract_schema_columns(schema: Any) -> List[str]:
+    if not isinstance(schema, dict):
+        return []
+    columns = schema.get("columns")
+    if isinstance(columns, list):
+        names: List[str] = []
+        for col in columns:
+            if isinstance(col, dict):
+                name = str(col.get("name") or col.get("column") or "").strip()
+            else:
+                name = str(col).strip()
+            if name:
+                names.append(name)
+        return names
+    fields = schema.get("fields")
+    if isinstance(fields, list):
+        names = []
+        for col in fields:
+            if not isinstance(col, dict):
+                continue
+            name = str(col.get("name") or "").strip()
+            if name:
+                names.append(name)
+        return names
+    props = schema.get("properties")
+    if isinstance(props, dict):
+        return [str(key).strip() for key in props.keys() if str(key).strip()]
+    return []
+
+
+def _normalize_ontology_payload(payload: Any) -> Dict[str, Any]:
+    if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+        return payload["data"]
+    if isinstance(payload, dict):
+        return payload
+    return {}
+
+
+def _extract_ontology_fields(payload: Any) -> tuple[Dict[str, Dict[str, Any]], set[str]]:
+    data = _normalize_ontology_payload(payload)
+    properties = data.get("properties") if isinstance(data, dict) else None
+    relationships = data.get("relationships") if isinstance(data, dict) else None
+
+    prop_map: Dict[str, Dict[str, Any]] = {}
+    if isinstance(properties, list):
+        for prop in properties:
+            if not isinstance(prop, dict):
+                continue
+            name = str(prop.get("name") or "").strip()
+            if not name:
+                continue
+            prop_map[name] = prop
+
+    rel_names: set[str] = set()
+    if isinstance(relationships, list):
+        for rel in relationships:
+            if not isinstance(rel, dict):
+                continue
+            predicate = str(rel.get("predicate") or rel.get("name") or "").strip()
+            if predicate:
+                rel_names.add(predicate)
+
+    return prop_map, rel_names
+
+
+def _resolve_import_type(raw_type: Any) -> Optional[str]:
+    if not raw_type:
+        return None
+    raw = str(raw_type).strip()
+    if not raw:
+        return None
+    lowered = raw.lower()
+    if lowered.startswith("xsd:"):
+        return raw
+    supported = {
+        "string",
+        "text",
+        "integer",
+        "int",
+        "long",
+        "decimal",
+        "number",
+        "float",
+        "double",
+        "boolean",
+        "bool",
+        "date",
+        "datetime",
+        "timestamp",
+        "email",
+        "url",
+        "uri",
+        "uuid",
+        "ip",
+        "phone",
+        "json",
+    }
+    if lowered not in supported:
+        return None
+    return normalize_import_target_type(lowered)
+
+
 @router.post("/mapping-specs", response_model=Dict[str, Any], status_code=status.HTTP_201_CREATED)
 async def create_mapping_spec(
     body: CreateMappingSpecRequest,
     request: Request,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
+    oms_client: OMSClient = OMSClientDep,
 ):
     try:
         payload = sanitize_input(body.model_dump())
@@ -135,6 +241,17 @@ async def create_mapping_spec(
                 schema_hash = _compute_schema_hash_from_sample(dataset.schema_json)
         if not schema_hash:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="schema_hash is required for mapping spec")
+        latest_version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
+        schema_columns = _extract_schema_columns(
+            latest_version.sample_json if latest_version else dataset.schema_json
+        )
+        if not schema_columns:
+            schema_columns = _extract_schema_columns(dataset.schema_json)
+        if not schema_columns:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Dataset schema columns are required for mapping spec validation",
+            )
         mappings = payload.get("mappings") or []
         if not isinstance(mappings, list) or not mappings:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mappings is required")
@@ -143,6 +260,141 @@ async def create_mapping_spec(
         options = payload.get("options") if isinstance(payload.get("options"), dict) else None
         status_value = str(payload.get("status") or "ACTIVE").strip().upper()
         auto_sync = bool(payload.get("auto_sync", True))
+
+        missing_sources: List[str] = []
+        mapped_targets: List[str] = []
+        for item in mappings:
+            if not isinstance(item, dict):
+                continue
+            source_field = str(item.get("source_field") or "").strip()
+            target_field = str(item.get("target_field") or "").strip()
+            if source_field and source_field not in schema_columns:
+                missing_sources.append(source_field)
+            if target_field:
+                mapped_targets.append(target_field)
+        if missing_sources:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "MAPPING_SPEC_SOURCE_MISSING", "missing_sources": sorted(set(missing_sources))},
+            )
+
+        ontology_branch = str((options or {}).get("ontology_branch") or dataset.branch or "main").strip() or "main"
+        ontology_payload = await oms_client.get_ontology(
+            dataset.db_name, target_class_id, branch=ontology_branch
+        )
+        prop_map, rel_names = _extract_ontology_fields(ontology_payload)
+        if not prop_map:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Target ontology class schema is required for mapping spec validation",
+            )
+
+        unknown_targets = [t for t in mapped_targets if t not in prop_map]
+        relationship_targets = [t for t in mapped_targets if t in rel_names]
+        if unknown_targets:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "MAPPING_SPEC_TARGET_UNKNOWN", "missing_targets": sorted(set(unknown_targets))},
+            )
+        if relationship_targets:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "MAPPING_SPEC_RELATIONSHIP_TARGET",
+                    "targets": sorted(set(relationship_targets)),
+                },
+            )
+
+        required_fields = {
+            name
+            for name, meta in prop_map.items()
+            if bool(meta.get("required"))
+        }
+        explicit_pk = {
+            name
+            for name, meta in prop_map.items()
+            if bool(meta.get("primary_key") or meta.get("primaryKey"))
+        }
+        if not explicit_pk:
+            expected_pk = f"{target_class_id.lower()}_id"
+            if expected_pk in prop_map:
+                explicit_pk.add(expected_pk)
+
+        options = options or {}
+        pk_targets = options.get("primary_key_targets") or options.get("target_primary_keys")
+        if isinstance(pk_targets, str):
+            pk_targets = [pk.strip() for pk in pk_targets.split(",") if pk.strip()]
+        if isinstance(pk_targets, list):
+            pk_targets = [str(pk).strip() for pk in pk_targets if str(pk).strip()]
+        else:
+            pk_targets = None
+        if not pk_targets:
+            pk_targets = sorted(explicit_pk)
+
+        missing_required = sorted(required_fields - set(mapped_targets))
+        if missing_required:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "MAPPING_SPEC_REQUIRED_MISSING", "missing_targets": missing_required},
+            )
+        if not pk_targets:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="primary_key_targets is required when no primary_key is defined on target class",
+            )
+        missing_pk = sorted(set(pk_targets) - set(mapped_targets))
+        if missing_pk:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "MAPPING_SPEC_PRIMARY_KEY_MISSING", "missing_targets": missing_pk},
+            )
+
+        resolved_field_types: Dict[str, str] = {}
+        unsupported_types: List[str] = []
+        for target in mapped_targets:
+            prop = prop_map.get(target) or {}
+            raw_type = prop.get("type") or prop.get("data_type") or prop.get("datatype")
+            if raw_type in {"link", "array"}:
+                unsupported_types.append(target)
+                continue
+            import_type = _resolve_import_type(raw_type)
+            if not import_type:
+                unsupported_types.append(target)
+                continue
+            resolved_field_types[target] = import_type
+        if unsupported_types:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "MAPPING_SPEC_UNSUPPORTED_TYPES", "targets": sorted(set(unsupported_types))},
+            )
+
+        if target_field_types:
+            mismatches: List[Dict[str, Any]] = []
+            for target in mapped_targets:
+                provided = target_field_types.get(target)
+                expected = resolved_field_types.get(target)
+                if not provided:
+                    mismatches.append(
+                        {"target_field": target, "reason": "missing", "expected": expected}
+                    )
+                else:
+                    normalized = normalize_import_target_type(provided)
+                    if expected and normalized != expected:
+                        mismatches.append(
+                            {
+                                "target_field": target,
+                                "reason": "mismatch",
+                                "expected": expected,
+                                "provided": provided,
+                            }
+                        )
+            if mismatches:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={"code": "MAPPING_SPEC_TARGET_TYPE_MISMATCH", "mismatches": mismatches},
+                )
+
+        target_field_types = resolved_field_types
 
         record = await objectify_registry.create_mapping_spec(
             dataset_id=dataset_id,

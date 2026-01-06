@@ -33,9 +33,12 @@ from shared.services.lineage_store import LineageStore
 from shared.services.processed_event_registry import ClaimDecision, ProcessedEventRegistry
 from shared.services.sheet_import_service import FieldMapping, SheetImportService
 from shared.utils.env_utils import parse_int_env
+from shared.utils.import_type_normalization import normalize_import_target_type
 from shared.utils.s3_uri import parse_s3_uri
 from shared.errors.error_envelope import build_error_envelope
 from shared.security.auth_utils import get_expected_token
+from shared.validators import get_validator
+from shared.validators.constraint_validator import ConstraintValidator
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,23 @@ class ObjectifyNonRetryableError(RuntimeError):
 
 
 class ObjectifyWorker:
+    P0_ERROR_CODES = {
+        "SOURCE_FIELD_MISSING",
+        "SOURCE_FIELD_UNKNOWN",
+        "TARGET_FIELD_UNKNOWN",
+        "UNSUPPORTED_TARGET_TYPE",
+        "TYPE_COERCION_FAILED",
+        "MAPPING_SPEC_TARGET_UNKNOWN",
+        "MAPPING_SPEC_RELATIONSHIP_TARGET",
+        "MAPPING_SPEC_UNSUPPORTED_TYPE",
+        "MAPPING_SPEC_REQUIRED_MISSING",
+        "MAPPING_SPEC_PRIMARY_KEY_MISSING",
+        "MAPPING_SPEC_TARGET_TYPE_MISMATCH",
+        "PRIMARY_KEY_MISSING",
+        "PRIMARY_KEY_DUPLICATE",
+        "REQUIRED_FIELD_MISSING",
+        "VALUE_CONSTRAINT_FAILED",
+    }
     def __init__(self) -> None:
         self.running = False
         self.topic = (os.getenv("OBJECTIFY_JOBS_TOPIC") or "objectify-jobs").strip() or "objectify-jobs"
@@ -111,6 +131,195 @@ class ObjectifyWorker:
             objectify_error=error,
             context=context_payload,
         )
+
+    @staticmethod
+    def _normalize_ontology_payload(payload: Any) -> Dict[str, Any]:
+        if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+            return payload["data"]
+        if isinstance(payload, dict):
+            return payload
+        return {}
+
+    @classmethod
+    def _extract_ontology_fields(cls, payload: Any) -> Tuple[Dict[str, Dict[str, Any]], set[str]]:
+        data = cls._normalize_ontology_payload(payload)
+        properties = data.get("properties") if isinstance(data, dict) else None
+        relationships = data.get("relationships") if isinstance(data, dict) else None
+
+        prop_map: Dict[str, Dict[str, Any]] = {}
+        if isinstance(properties, list):
+            for prop in properties:
+                if not isinstance(prop, dict):
+                    continue
+                name = str(prop.get("name") or "").strip()
+                if not name:
+                    continue
+                prop_map[name] = prop
+
+        rel_names: set[str] = set()
+        if isinstance(relationships, list):
+            for rel in relationships:
+                if not isinstance(rel, dict):
+                    continue
+                predicate = str(rel.get("predicate") or rel.get("name") or "").strip()
+                if predicate:
+                    rel_names.add(predicate)
+
+        return prop_map, rel_names
+
+    @staticmethod
+    def _is_blank(value: Any) -> bool:
+        if value is None:
+            return True
+        return str(value).strip() == ""
+
+    @staticmethod
+    def _normalize_constraints(
+        constraints: Any, *, raw_type: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        if not isinstance(constraints, dict):
+            constraints = {}
+        normalized = dict(constraints)
+
+        if "min" in normalized and "minimum" not in normalized:
+            normalized["minimum"] = normalized["min"]
+        if "max" in normalized and "maximum" not in normalized:
+            normalized["maximum"] = normalized["max"]
+        if "min_length" in normalized and "minLength" not in normalized:
+            normalized["minLength"] = normalized["min_length"]
+        if "max_length" in normalized and "maxLength" not in normalized:
+            normalized["maxLength"] = normalized["max_length"]
+        if "min_items" in normalized and "minItems" not in normalized:
+            normalized["minItems"] = normalized["min_items"]
+        if "max_items" in normalized and "maxItems" not in normalized:
+            normalized["maxItems"] = normalized["max_items"]
+        if "unique_items" in normalized and "uniqueItems" not in normalized:
+            normalized["uniqueItems"] = normalized["unique_items"]
+        if "enum_values" in normalized and "enum" not in normalized:
+            normalized["enum"] = normalized["enum_values"]
+        if "enumValues" in normalized and "enum" not in normalized:
+            normalized["enum"] = normalized["enumValues"]
+        if "regex" in normalized and "pattern" not in normalized:
+            normalized["pattern"] = normalized["regex"]
+
+        type_hint = str(raw_type or "").strip().lower()
+        if type_hint.startswith("xsd:"):
+            type_hint = type_hint[4:]
+        if "format" not in normalized:
+            if type_hint == "email":
+                normalized["format"] = "email"
+            elif type_hint in {"url", "uri"}:
+                normalized["format"] = "uri"
+            elif type_hint == "uuid":
+                normalized["format"] = "uuid"
+
+        normalized.pop("required", None)
+        normalized.pop("nullable", None)
+        return normalized
+
+    @staticmethod
+    def _resolve_import_type(raw_type: Any) -> Optional[str]:
+        if not raw_type:
+            return None
+        raw = str(raw_type).strip()
+        if not raw:
+            return None
+        lowered = raw.lower()
+        if lowered.startswith("xsd:"):
+            return raw
+        supported = {
+            "string",
+            "text",
+            "integer",
+            "int",
+            "long",
+            "decimal",
+            "number",
+            "float",
+            "double",
+            "boolean",
+            "bool",
+            "date",
+            "datetime",
+            "timestamp",
+            "email",
+            "url",
+            "uri",
+            "uuid",
+            "ip",
+            "phone",
+            "json",
+        }
+        if lowered not in supported:
+            return None
+        return normalize_import_target_type(lowered)
+
+    def _validate_value_constraints(
+        self,
+        value: Any,
+        *,
+        constraints: Dict[str, Any],
+        raw_type: Optional[Any],
+    ) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = self._normalize_constraints(constraints, raw_type=raw_type)
+
+        enum_values = normalized.get("enum")
+        if enum_values is not None:
+            if not isinstance(enum_values, list):
+                enum_values = list(enum_values) if isinstance(enum_values, (set, tuple)) else [enum_values]
+            if value not in enum_values:
+                return f"Value must be one of: {enum_values}"
+
+        type_hint = str(raw_type or "").strip().lower()
+        if type_hint.startswith("xsd:"):
+            type_hint = type_hint[4:]
+        format_hint = str(normalized.get("format") or "").strip().lower()
+
+        validator_key = None
+        if type_hint in {"email", "url", "uri", "uuid", "ip", "phone"}:
+            validator_key = "url" if type_hint in {"url", "uri"} else type_hint
+        elif format_hint in {"email", "uuid", "uri", "url", "ipv4", "ipv6"}:
+            validator_key = "url" if format_hint in {"uri", "url"} else format_hint
+            if validator_key in {"ipv4", "ipv6"}:
+                validator_key = "ip"
+                normalized = dict(normalized)
+                normalized.setdefault("version", "4" if format_hint == "ipv4" else "6")
+
+        if validator_key:
+            validator = get_validator(validator_key)
+            if validator:
+                result = validator.validate(value, normalized)
+                if not result.is_valid:
+                    return result.message
+                if "format" in normalized:
+                    normalized = dict(normalized)
+                    normalized.pop("format", None)
+
+        if normalized:
+            result = ConstraintValidator.validate_constraints(value, "unknown", normalized)
+            if not result.is_valid:
+                return result.message
+        return None
+
+    @staticmethod
+    def _map_mappings_by_target(mappings: List[FieldMapping]) -> Dict[str, List[str]]:
+        mapping: Dict[str, List[str]] = {}
+        for item in mappings:
+            target = str(item.target_field or "").strip()
+            source = str(item.source_field or "").strip()
+            if not target or not source:
+                continue
+            mapping.setdefault(target, []).append(source)
+        return mapping
+
+    def _has_p0_errors(self, errors: List[Dict[str, Any]]) -> bool:
+        for err in errors:
+            code = err.get("code") if isinstance(err, dict) else None
+            if not code or code in self.P0_ERROR_CODES:
+                return True
+        return False
 
     async def initialize(self) -> None:
         self.dataset_registry = DatasetRegistry()
@@ -439,21 +648,99 @@ class ObjectifyWorker:
         row_batch_size = max(1, min(row_batch_size, 50000))
         allow_partial = bool(job.allow_partial)
 
-        target_field_types = mapping_spec.target_field_types or {}
-        if not target_field_types:
-            target_field_types = await self._fetch_target_field_types(job)
-        else:
-            expected_id_key = f"{job.target_class_id.lower()}_id"
-            if expected_id_key not in target_field_types:
-                fetched_field_types = await self._fetch_target_field_types(job)
-                for key, dtype in fetched_field_types.items():
-                    target_field_types.setdefault(key, dtype)
-
         mappings = [
             FieldMapping(source_field=str(m.get("source_field") or ""), target_field=str(m.get("target_field") or ""))
             for m in mapping_spec.mappings
             if isinstance(m, dict)
         ]
+        mapping_sources: List[str] = []
+        mapping_targets: List[str] = []
+        for m in mappings:
+            if m.source_field:
+                mapping_sources.append(m.source_field)
+            if m.target_field:
+                mapping_targets.append(m.target_field)
+        mapping_sources = sorted({s for s in mapping_sources if s})
+        mapping_targets = sorted({t for t in mapping_targets if t})
+        sources_by_target = self._map_mappings_by_target(mappings)
+
+        ontology_payload = await self._fetch_class_schema(job)
+        prop_map, rel_names = self._extract_ontology_fields(ontology_payload)
+        if not prop_map:
+            await _fail_job("validation_failed", report={"errors": [{"code": "ONTOLOGY_SCHEMA_MISSING"}]})
+
+        unknown_targets = [t for t in mapping_targets if t not in prop_map]
+        if unknown_targets:
+            await _fail_job(
+                "validation_failed",
+                report={
+                    "errors": [
+                        {
+                            "code": "MAPPING_SPEC_TARGET_UNKNOWN",
+                            "targets": unknown_targets,
+                            "message": "Mapping targets missing from ontology schema",
+                        }
+                    ]
+                },
+            )
+        relationship_targets = [t for t in mapping_targets if t in rel_names]
+        if relationship_targets:
+            await _fail_job(
+                "validation_failed",
+                report={
+                    "errors": [
+                        {
+                            "code": "MAPPING_SPEC_RELATIONSHIP_TARGET",
+                            "targets": relationship_targets,
+                            "message": "Mapping targets may not reference relationships",
+                        }
+                    ]
+                },
+            )
+
+        resolved_field_types: Dict[str, str] = {}
+        field_constraints: Dict[str, Dict[str, Any]] = {}
+        field_raw_types: Dict[str, Optional[Any]] = {}
+        required_targets: set[str] = set()
+        explicit_pk_targets: set[str] = set()
+        unsupported_targets: List[str] = []
+        for name, meta in prop_map.items():
+            raw_type = meta.get("type") or meta.get("data_type") or meta.get("datatype")
+            field_raw_types[name] = raw_type
+            if raw_type in {"link", "array"}:
+                unsupported_targets.append(name)
+                continue
+            import_type = self._resolve_import_type(raw_type)
+            if not import_type:
+                unsupported_targets.append(name)
+                continue
+            resolved_field_types[name] = import_type
+            field_constraints[name] = self._normalize_constraints(meta.get("constraints"), raw_type=raw_type)
+            if bool(meta.get("required")):
+                required_targets.add(name)
+            if bool(meta.get("primary_key") or meta.get("primaryKey")):
+                explicit_pk_targets.add(name)
+
+        if not explicit_pk_targets:
+            expected_pk = f"{job.target_class_id.lower()}_id"
+            if expected_pk in prop_map:
+                explicit_pk_targets.add(expected_pk)
+
+        unsupported_mapped = [t for t in mapping_targets if t in unsupported_targets or t not in resolved_field_types]
+        if unsupported_mapped:
+            await _fail_job(
+                "validation_failed",
+                report={
+                    "errors": [
+                        {
+                            "code": "MAPPING_SPEC_UNSUPPORTED_TYPE",
+                            "targets": unsupported_mapped,
+                            "message": "Mapping targets include unsupported property types",
+                        }
+                    ]
+                },
+            )
+
         pk_fields = self._normalize_pk_fields(
             options.get("primary_key_fields")
             or options.get("primary_keys")
@@ -465,6 +752,85 @@ class ObjectifyWorker:
         pk_targets = self._normalize_pk_fields(
             options.get("primary_key_targets") or options.get("target_primary_keys")
         )
+        if not pk_targets:
+            pk_targets = sorted(explicit_pk_targets)
+
+        missing_required = sorted(required_targets - set(mapping_targets))
+        if missing_required:
+            await _fail_job(
+                "validation_failed",
+                report={
+                    "errors": [
+                        {
+                            "code": "MAPPING_SPEC_REQUIRED_MISSING",
+                            "targets": missing_required,
+                            "message": "Required ontology fields are not mapped",
+                        }
+                    ]
+                },
+            )
+        if not pk_targets:
+            await _fail_job(
+                "validation_failed",
+                report={
+                    "errors": [
+                        {
+                            "code": "MAPPING_SPEC_PRIMARY_KEY_MISSING",
+                            "message": "primary_key_targets is required when no primary key is defined on target class",
+                        }
+                    ]
+                },
+            )
+        missing_pk_targets = sorted(set(pk_targets) - set(mapping_targets))
+        if missing_pk_targets:
+            await _fail_job(
+                "validation_failed",
+                report={
+                    "errors": [
+                        {
+                            "code": "MAPPING_SPEC_PRIMARY_KEY_MISSING",
+                            "targets": missing_pk_targets,
+                            "message": "Primary key targets are not mapped",
+                        }
+                    ]
+                },
+            )
+
+        target_field_types = {target: resolved_field_types[target] for target in mapping_targets}
+        existing_field_types = mapping_spec.target_field_types or {}
+        if existing_field_types:
+            mismatches: List[Dict[str, Any]] = []
+            for target in mapping_targets:
+                expected = resolved_field_types.get(target)
+                provided = existing_field_types.get(target)
+                if not provided:
+                    mismatches.append(
+                        {"target_field": target, "reason": "missing", "expected": expected}
+                    )
+                else:
+                    normalized = normalize_import_target_type(provided)
+                    if expected and normalized != expected:
+                        mismatches.append(
+                            {
+                                "target_field": target,
+                                "reason": "mismatch",
+                                "expected": expected,
+                                "provided": provided,
+                            }
+                        )
+            if mismatches:
+                await _fail_job(
+                    "validation_failed",
+                    report={
+                        "errors": [
+                            {
+                                "code": "MAPPING_SPEC_TARGET_TYPE_MISMATCH",
+                                "mismatches": mismatches,
+                                "message": "Mapping spec target types do not match ontology",
+                            }
+                        ]
+                    },
+                )
 
         ontology_version = await self._fetch_ontology_version(job)
         job_node_id = await self._record_lineage_header(
@@ -491,6 +857,13 @@ class ObjectifyWorker:
                 options=options,
                 mappings=mappings,
                 target_field_types=target_field_types,
+                mapping_sources=mapping_sources,
+                sources_by_target=sources_by_target,
+                required_targets=required_targets,
+                pk_targets=pk_targets,
+                pk_fields=pk_fields,
+                field_constraints=field_constraints,
+                field_raw_types=field_raw_types,
                 row_batch_size=row_batch_size,
                 max_rows=max_rows,
             )
@@ -513,6 +886,7 @@ class ObjectifyWorker:
         errors: List[Dict[str, Any]] = []
         total_rows_seen = 0
         lineage_remaining = self.lineage_max_links
+        seen_row_keys: set[str] = set()
 
         async for columns, rows, row_offset in self._iter_dataset_batches(
             job=job,
@@ -523,20 +897,25 @@ class ObjectifyWorker:
             if not rows:
                 continue
             total_rows_seen += len(rows)
-            build = SheetImportService.build_instances(
+            batch = self._build_instances_with_validation(
                 columns=columns,
                 rows=rows,
+                row_offset=row_offset,
                 mappings=mappings,
                 target_field_types=target_field_types,
+                mapping_sources=mapping_sources,
+                sources_by_target=sources_by_target,
+                required_targets=required_targets,
+                pk_targets=pk_targets,
+                pk_fields=pk_fields,
+                field_constraints=field_constraints,
+                field_raw_types=field_raw_types,
+                seen_row_keys=seen_row_keys,
             )
-            batch_errors = build.get("errors") or []
+            batch_errors = batch.get("errors") or []
             if batch_errors:
-                for err in batch_errors:
-                    if isinstance(err, dict) and "row_index" in err:
-                        try:
-                            err["row_index"] = int(err["row_index"]) + int(row_offset)
-                        except Exception:
-                            pass
+                if self._has_p0_errors(batch_errors):
+                    await _fail_job("validation_failed", report={"errors": batch_errors[:200]})
                 if allow_partial:
                     remaining = max(0, 200 - len(errors))
                     if remaining:
@@ -544,45 +923,45 @@ class ObjectifyWorker:
                 else:
                     await _fail_job("validation_failed", report={"errors": batch_errors[:200]})
 
-            instances = build.get("instances") or []
-            instance_row_indices = build.get("instance_row_indices") or []
-            error_row_indices = set(build.get("error_row_indices") or [])
+            instances = batch.get("instances") or []
+            instance_row_indices = batch.get("instance_row_indices") or []
+            row_keys = batch.get("row_keys") or []
+            error_row_indices = set(batch.get("error_row_indices") or [])
 
             if error_row_indices:
                 for idx in sorted(error_row_indices):
-                    try:
-                        error_rows.append(int(row_offset) + int(idx))
-                    except Exception:
-                        continue
+                    error_rows.append(int(idx))
                 if allow_partial:
                     filtered_instances = []
                     filtered_indices = []
-                    for inst, row_idx in zip(instances, instance_row_indices):
-                        if row_idx in error_row_indices:
+                    filtered_row_keys = []
+                    for inst, row_idx, row_key in zip(instances, instance_row_indices, row_keys):
+                        absolute_idx = int(row_offset) + int(row_idx)
+                        if absolute_idx in error_row_indices:
                             continue
                         filtered_instances.append(inst)
                         filtered_indices.append(row_idx)
+                        filtered_row_keys.append(row_key)
                     instances = filtered_instances
                     instance_row_indices = filtered_indices
+                    row_keys = filtered_row_keys
                 else:
                     await _fail_job("validation_failed", report={"errors": batch_errors[:200]})
 
             if not instances:
                 continue
 
-            col_index = SheetImportService.build_column_index(columns)
-            row_keys: List[str] = []
-            for inst, row_idx in zip(instances, instance_row_indices):
-                row = rows[row_idx] if row_idx < len(rows) else None
-                row_keys.append(
-                    self._derive_row_key(
-                        columns=columns,
-                        col_index=col_index,
-                        row=row,
-                        instance=inst,
-                        pk_fields=pk_fields,
-                        pk_targets=pk_targets,
-                    )
+            if any(not key for key in row_keys):
+                await _fail_job(
+                    "validation_failed",
+                    report={
+                        "errors": [
+                            {
+                                "code": "PRIMARY_KEY_MISSING",
+                                "message": "Row key cannot be derived from primary key values",
+                            }
+                        ]
+                    },
                 )
 
             instance_id_field = None
@@ -738,6 +1117,19 @@ class ObjectifyWorker:
         return artifact_key, output_name
 
     async def _fetch_target_field_types(self, job: ObjectifyJob) -> Dict[str, str]:
+        payload = await self._fetch_class_schema(job)
+        prop_map, _ = self._extract_ontology_fields(payload)
+        field_types: Dict[str, str] = {}
+        for name, meta in prop_map.items():
+            raw_type = meta.get("type") or meta.get("data_type") or meta.get("datatype")
+            if raw_type in {"link", "array"}:
+                continue
+            import_type = self._resolve_import_type(raw_type)
+            if import_type:
+                field_types[name] = import_type
+        return field_types
+
+    async def _fetch_class_schema(self, job: ObjectifyJob) -> Dict[str, Any]:
         if not self.http:
             return {}
         branch = job.ontology_branch or job.dataset_branch or "main"
@@ -746,21 +1138,7 @@ class ObjectifyWorker:
             params={"branch": branch},
         )
         resp.raise_for_status()
-        payload = resp.json() if resp.text else {}
-        data = payload.get("data") if isinstance(payload, dict) else {}
-        properties = data.get("properties") if isinstance(data, dict) else []
-        field_types: Dict[str, str] = {}
-        if isinstance(properties, list):
-            for prop in properties:
-                if not isinstance(prop, dict):
-                    continue
-                name = str(prop.get("name") or "").strip()
-                if not name:
-                    continue
-                dtype = prop.get("type") or prop.get("data_type") or prop.get("datatype")
-                dtype = str(dtype).strip() if dtype is not None else "xsd:string"
-                field_types[name] = dtype or "xsd:string"
-        return field_types
+        return resp.json() if resp.text else {}
 
     async def _fetch_ontology_version(self, job: ObjectifyJob) -> Dict[str, str]:
         if not self.http:
@@ -806,27 +1184,26 @@ class ObjectifyWorker:
         instance: Dict[str, Any],
         pk_fields: List[str],
         pk_targets: List[str],
-    ) -> str:
+    ) -> Optional[str]:
         if pk_targets:
-            if all(field in instance and instance.get(field) is not None for field in pk_targets):
+            if all(field in instance and not self._is_blank(instance.get(field)) for field in pk_targets):
                 values = [str(instance.get(field)) for field in pk_targets]
                 return f"target:{'|'.join(values)}"
         if pk_fields:
-            if all(field in instance and instance.get(field) is not None for field in pk_fields):
+            if all(field in instance and not self._is_blank(instance.get(field)) for field in pk_fields):
                 values = [str(instance.get(field)) for field in pk_fields]
                 return f"target:{'|'.join(values)}"
             if row is not None and all(field in col_index for field in pk_fields):
                 values = []
                 for field in pk_fields:
                     idx = col_index.get(field)
-                    values.append(str(row[idx]) if idx is not None and idx < len(row) else "")
+                    raw = row[idx] if idx is not None and idx < len(row) else None
+                    if self._is_blank(raw):
+                        return None
+                    values.append(str(raw))
                 return f"source:{'|'.join(values)}"
 
-        if row is not None and columns:
-            payload = {str(columns[i]): row[i] if i < len(row) else None for i in range(len(columns))}
-        else:
-            payload = instance or {}
-        return f"hash:{self._hash_payload(payload)}"
+        return None
 
     async def _iter_dataset_batches(
         self,
@@ -1016,6 +1393,184 @@ class ObjectifyWorker:
         if rows:
             yield columns, rows, row_offset
 
+    def _build_instances_with_validation(
+        self,
+        *,
+        columns: List[Any],
+        rows: List[List[Any]],
+        row_offset: int,
+        mappings: List[FieldMapping],
+        target_field_types: Dict[str, str],
+        mapping_sources: List[str],
+        sources_by_target: Dict[str, List[str]],
+        required_targets: set[str],
+        pk_targets: List[str],
+        pk_fields: List[str],
+        field_constraints: Dict[str, Dict[str, Any]],
+        field_raw_types: Dict[str, Optional[Any]],
+        seen_row_keys: Optional[set[str]] = None,
+    ) -> Dict[str, Any]:
+        col_index = SheetImportService.build_column_index(columns)
+        missing_sources = sorted({s for s in mapping_sources if s and s not in col_index})
+        if missing_sources:
+            return {
+                "instances": [],
+                "instance_row_indices": [],
+                "errors": [
+                    {
+                        "code": "SOURCE_FIELD_MISSING",
+                        "missing_sources": missing_sources,
+                        "message": "Mapping source fields missing from dataset schema",
+                    }
+                ],
+                "error_row_indices": [],
+                "row_keys": [],
+                "fatal": True,
+            }
+
+        build = SheetImportService.build_instances(
+            columns=columns,
+            rows=rows,
+            mappings=mappings,
+            target_field_types=target_field_types,
+        )
+        raw_errors = build.get("errors") or []
+        errors: List[Dict[str, Any]] = []
+        error_row_indices: set[int] = set()
+        for err in raw_errors:
+            if isinstance(err, dict):
+                adjusted = dict(err)
+            else:
+                adjusted = {"message": str(err)}
+            row_index = adjusted.get("row_index")
+            if row_index is not None:
+                try:
+                    row_index = int(row_index) + int(row_offset)
+                except Exception:
+                    row_index = None
+                adjusted["row_index"] = row_index
+            errors.append(adjusted)
+            if row_index is not None:
+                error_row_indices.add(row_index)
+
+        for idx in build.get("error_row_indices") or []:
+            try:
+                error_row_indices.add(int(row_offset) + int(idx))
+            except Exception:
+                continue
+
+        instances = build.get("instances") or []
+        instance_row_indices = build.get("instance_row_indices") or []
+
+        mapping_sources_set = {s for s in mapping_sources if s}
+        required_union = set(required_targets) | set(pk_targets)
+        for row_idx, row in enumerate(rows):
+            if not mapping_sources_set:
+                break
+            row_has_value = False
+            for source in mapping_sources_set:
+                idx = col_index.get(source)
+                if idx is None or idx >= len(row):
+                    continue
+                if not self._is_blank(row[idx]):
+                    row_has_value = True
+                    break
+            if not row_has_value:
+                continue
+            absolute_idx = int(row_offset) + int(row_idx)
+            for target in required_union:
+                sources = sources_by_target.get(target) or []
+                if not sources:
+                    continue
+                present = False
+                for source in sources:
+                    idx = col_index.get(source)
+                    if idx is None or idx >= len(row):
+                        continue
+                    if not self._is_blank(row[idx]):
+                        present = True
+                        break
+                if not present:
+                    code = "PRIMARY_KEY_MISSING" if target in pk_targets else "REQUIRED_FIELD_MISSING"
+                    errors.append(
+                        {
+                            "row_index": absolute_idx,
+                            "target_field": target,
+                            "code": code,
+                            "message": f"Missing required field '{target}'",
+                        }
+                    )
+                    error_row_indices.add(absolute_idx)
+
+        for inst, row_idx in zip(instances, instance_row_indices):
+            absolute_idx = int(row_offset) + int(row_idx)
+            if not isinstance(inst, dict):
+                continue
+            for field, value in inst.items():
+                constraints = field_constraints.get(field) or {}
+                if not constraints:
+                    continue
+                raw_type = field_raw_types.get(field)
+                message = self._validate_value_constraints(value, constraints=constraints, raw_type=raw_type)
+                if message:
+                    errors.append(
+                        {
+                            "row_index": absolute_idx,
+                            "target_field": field,
+                            "code": "VALUE_CONSTRAINT_FAILED",
+                            "message": message,
+                        }
+                    )
+                    error_row_indices.add(absolute_idx)
+
+        row_keys: List[Optional[str]] = []
+        for inst, row_idx in zip(instances, instance_row_indices):
+            row = rows[row_idx] if row_idx < len(rows) else None
+            row_key = self._derive_row_key(
+                columns=columns,
+                col_index=col_index,
+                row=row,
+                instance=inst,
+                pk_fields=pk_fields,
+                pk_targets=pk_targets,
+            )
+            row_keys.append(row_key)
+
+        if seen_row_keys is not None:
+            for row_key, row_idx in zip(row_keys, instance_row_indices):
+                absolute_idx = int(row_offset) + int(row_idx)
+                if not row_key:
+                    errors.append(
+                        {
+                            "row_index": absolute_idx,
+                            "code": "PRIMARY_KEY_MISSING",
+                            "message": "Row key cannot be derived from primary key values",
+                        }
+                    )
+                    error_row_indices.add(absolute_idx)
+                    continue
+                if row_key in seen_row_keys:
+                    errors.append(
+                        {
+                            "row_index": absolute_idx,
+                            "code": "PRIMARY_KEY_DUPLICATE",
+                            "row_key": row_key,
+                            "message": "Duplicate primary key detected in job batch",
+                        }
+                    )
+                    error_row_indices.add(absolute_idx)
+                    continue
+                seen_row_keys.add(row_key)
+
+        return {
+            "instances": instances,
+            "instance_row_indices": instance_row_indices,
+            "errors": errors,
+            "error_row_indices": sorted(error_row_indices),
+            "row_keys": row_keys,
+            "fatal": False,
+        }
+
     async def _validate_batches(
         self,
         *,
@@ -1023,6 +1578,13 @@ class ObjectifyWorker:
         options: Dict[str, Any],
         mappings: List[FieldMapping],
         target_field_types: Dict[str, str],
+        mapping_sources: List[str],
+        sources_by_target: Dict[str, List[str]],
+        required_targets: set[str],
+        pk_targets: List[str],
+        pk_fields: List[str],
+        field_constraints: Dict[str, Dict[str, Any]],
+        field_raw_types: Dict[str, Optional[Any]],
         row_batch_size: int,
         max_rows: Optional[int],
     ) -> Tuple[int, List[Dict[str, Any]], List[int], Dict[str, Any]]:
@@ -1030,6 +1592,7 @@ class ObjectifyWorker:
         error_row_indices: List[int] = []
         total_rows = 0
         error_count = 0
+        seen_row_keys: set[str] = set()
 
         async for columns, rows, row_offset in self._iter_dataset_batches(
             job=job,
@@ -1040,29 +1603,31 @@ class ObjectifyWorker:
             if not rows:
                 continue
             total_rows += len(rows)
-            build = SheetImportService.build_instances(
+            batch = self._build_instances_with_validation(
                 columns=columns,
                 rows=rows,
+                row_offset=row_offset,
                 mappings=mappings,
                 target_field_types=target_field_types,
+                mapping_sources=mapping_sources,
+                sources_by_target=sources_by_target,
+                required_targets=required_targets,
+                pk_targets=pk_targets,
+                pk_fields=pk_fields,
+                field_constraints=field_constraints,
+                field_raw_types=field_raw_types,
+                seen_row_keys=seen_row_keys,
             )
-            batch_errors = build.get("errors") or []
+            batch_errors = batch.get("errors") or []
             for err in batch_errors:
-                if isinstance(err, dict) and "row_index" in err:
-                    try:
-                        err["row_index"] = int(err["row_index"]) + int(row_offset)
-                    except Exception:
-                        pass
                 if len(errors) < 200:
                     errors.append(err)
-            batch_error_rows = build.get("error_row_indices") or []
-            for idx in batch_error_rows:
-                try:
-                    error_row_indices.append(int(row_offset) + int(idx))
-                except Exception:
-                    continue
+            error_row_indices.extend(batch.get("error_row_indices") or [])
             error_count += len(batch_errors)
+            if batch_errors and batch.get("fatal"):
+                break
 
+        error_row_indices = sorted(set(error_row_indices))
         stats = {
             "input_rows": total_rows,
             "error_rows": len(error_row_indices),
@@ -1092,7 +1657,9 @@ class ObjectifyWorker:
                         candidate = value
                         break
             if not candidate:
-                row_key = row_keys[idx] if row_keys and idx < len(row_keys) else str(idx)
+                if not row_keys or idx >= len(row_keys) or not row_keys[idx]:
+                    raise ValueError("row_key is required to derive instance id")
+                row_key = row_keys[idx]
                 seed = f"{stable_seed}:{mapping_spec_version}:{row_key}"
                 suffix = uuid5(NAMESPACE_URL, f"objectify:{seed}").hex[:12]
                 candidate = f"{class_id.lower()}_{suffix}"

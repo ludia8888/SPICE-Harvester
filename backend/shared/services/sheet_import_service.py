@@ -278,6 +278,7 @@ class SheetImportService:
                             "row_index": row_idx,
                             "source_field": source_name,
                             "target_field": target_name,
+                            "code": "TARGET_FIELD_UNKNOWN",
                             "message": f"Unknown target_field '{target_name}'",
                         }
                     )
@@ -290,6 +291,7 @@ class SheetImportService:
                             "row_index": row_idx,
                             "source_field": source_name,
                             "target_field": target_name,
+                            "code": "SOURCE_FIELD_UNKNOWN",
                             "message": f"Unknown source_field '{source_name}'",
                         }
                     )
@@ -298,14 +300,21 @@ class SheetImportService:
 
                 idx = col_index[source_name]
                 raw = row[idx] if idx < len(row) else None
-                coerced, err = cls.coerce_value(raw, target_type=target_field_types[target_name])
+                target_type = target_field_types[target_name]
+                coerced, err = cls.coerce_value(raw, target_type=target_type)
                 if err:
+                    code = (
+                        "UNSUPPORTED_TARGET_TYPE"
+                        if target_type == "link" or not str(target_type).startswith("xsd:")
+                        else "TYPE_COERCION_FAILED"
+                    )
                     errors.append(
                         {
                             "row_index": row_idx,
                             "source_field": source_name,
                             "target_field": target_name,
                             "raw_value": raw,
+                            "code": code,
                             "message": err,
                         }
                     )
