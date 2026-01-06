@@ -179,8 +179,25 @@ class _DatasetRegistry:
         self.datasets: dict[tuple[str, str, str], _Dataset] = {}
         self.versions: list[dict[str, Any]] = []
 
+    async def get_dataset(self, *, dataset_id: str) -> Optional[_Dataset]:
+        for dataset in self.datasets.values():
+            if dataset.dataset_id == dataset_id:
+                return dataset
+        return None
+
     async def get_dataset_by_name(self, *, db_name: str, name: str, branch: str) -> Optional[_Dataset]:
         return self.datasets.get((db_name, name, branch))
+
+    async def get_latest_version(self, *, dataset_id: str) -> Optional[_DatasetVersion]:
+        for record in reversed(self.versions):
+            if record.get("dataset_id") == dataset_id:
+                return _DatasetVersion(
+                    version_id="latest",
+                    dataset_id=dataset_id,
+                    lakefs_commit_id=record.get("lakefs_commit_id") or "",
+                    artifact_key=record.get("artifact_key") or "",
+                )
+        return None
 
     async def create_dataset(self, *, db_name: str, name: str, description: Any, source_type: str, source_ref: str, schema_json: dict[str, Any], branch: str) -> _Dataset:
         dataset = _Dataset(
@@ -271,6 +288,7 @@ async def test_build_enqueues_job_and_records_run() -> None:
         },
         pipeline_registry=registry,
         pipeline_job_queue=queue,
+        dataset_registry=_DatasetRegistry(),
         oms_client=_OMSClient(head_commit_id="c-main"),
         audit_store=_AuditStore(),
     )
@@ -324,6 +342,7 @@ async def test_preview_enqueues_job_with_node_id_and_records_preview_and_run(mon
         },
         pipeline_registry=registry,
         pipeline_job_queue=queue,
+        dataset_registry=_DatasetRegistry(),
         audit_store=_AuditStore(),
     )
 

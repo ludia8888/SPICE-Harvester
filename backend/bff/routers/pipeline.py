@@ -49,6 +49,7 @@ from shared.services.pipeline_dataset_utils import (
 )
 from shared.services.pipeline_dependency_utils import normalize_dependency_entries
 from shared.services.pipeline_scheduler import _is_valid_cron_expression
+from shared.services.pipeline_preflight_utils import compute_pipeline_preflight
 from shared.services.redis_service import create_redis_service_legacy
 from shared.utils.env_utils import parse_bool_env, parse_int_env
 from shared.utils.schema_hash import compute_schema_hash
@@ -323,6 +324,35 @@ async def _ensure_ingest_transaction(
     return await dataset_registry.create_ingest_transaction(
         ingest_request_id=ingest_request_id,
     )
+
+
+async def _run_pipeline_preflight(
+    *,
+    definition_json: Dict[str, Any],
+    db_name: str,
+    branch: Optional[str],
+    dataset_registry: DatasetRegistry,
+) -> Dict[str, Any]:
+    try:
+        return await compute_pipeline_preflight(
+            definition=definition_json,
+            db_name=db_name,
+            dataset_registry=dataset_registry,
+            branch=branch,
+        )
+    except Exception as exc:
+        logger.warning("Pipeline preflight failed: %s", exc)
+        return {
+            "issues": [
+                {
+                    "kind": "preflight_error",
+                    "severity": "warning",
+                    "message": f"preflight failed: {exc}",
+                }
+            ],
+            "blocking_errors": [],
+            "has_blocking_errors": False,
+        }
 
 
 async def _maybe_enqueue_objectify_job(
@@ -2163,6 +2193,7 @@ async def preview_pipeline(
     audit_store: AuditLogStoreDep,
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
     pipeline_job_queue: PipelineJobQueue = Depends(get_pipeline_job_queue),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     request: Request = None,
 ) -> ApiResponse:
     try:
@@ -2216,6 +2247,13 @@ async def preview_pipeline(
         if schema_contract is not None:
             definition_json = {**definition_json, "schemaContract": schema_contract}
 
+        preflight = await _run_pipeline_preflight(
+            definition_json=definition_json,
+            db_name=db_name,
+            branch=branch or pipeline.branch,
+            dataset_registry=dataset_registry,
+        )
+
         definition_hash = _stable_definition_hash(definition_json)
         definition_commit_id = _resolve_definition_commit_id(definition_json, latest, definition_hash)
         node_key = (node_id or "pipeline").replace("node-", "").replace("/", "-").replace(" ", "-")
@@ -2236,6 +2274,7 @@ async def preview_pipeline(
                         "pipeline_id": pipeline_id,
                         "job_id": job_id,
                         "limit": limit,
+                        "preflight": preflight,
                         "sample": sample_json_existing,
                     },
                 ).to_dict()
@@ -2245,6 +2284,7 @@ async def preview_pipeline(
                     "pipeline_id": pipeline_id,
                     "job_id": job_id,
                     "limit": limit,
+                    "preflight": preflight,
                     "sample": {"queued": True, "limit": limit, "job_id": job_id},
                 },
             ).to_dict()
@@ -2353,7 +2393,13 @@ async def preview_pipeline(
 
         return ApiResponse.success(
             message="Preview queued",
-            data={"pipeline_id": pipeline_id, "job_id": job_id, "limit": limit, "sample": sample_payload},
+            data={
+                "pipeline_id": pipeline_id,
+                "job_id": job_id,
+                "limit": limit,
+                "preflight": preflight,
+                "sample": sample_payload,
+            },
         ).to_dict()
     except ValueError as e:
         validation_payload = build_error_envelope(
@@ -2407,6 +2453,7 @@ async def build_pipeline(
     audit_store: AuditLogStoreDep,
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
     pipeline_job_queue: PipelineJobQueue = Depends(get_pipeline_job_queue),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     oms_client: OMSClient = Depends(get_oms_client),
     request: Request = None,
 ) -> ApiResponse:
@@ -2459,6 +2506,22 @@ async def build_pipeline(
             definition_json = {**definition_json, "expectations": expectations}
         if schema_contract is not None:
             definition_json = {**definition_json, "schemaContract": schema_contract}
+
+        preflight = await _run_pipeline_preflight(
+            definition_json=definition_json,
+            db_name=db_name,
+            branch=branch or pipeline.branch,
+            dataset_registry=dataset_registry,
+        )
+        if preflight.get("has_blocking_errors"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "PIPELINE_PREFLIGHT_FAILED",
+                    "message": "Pipeline preflight checks failed",
+                    "preflight": preflight,
+                },
+            )
 
         definition_hash = _stable_definition_hash(definition_json)
         definition_commit_id = _resolve_definition_commit_id(definition_json, latest, definition_hash)
@@ -2564,7 +2627,7 @@ async def build_pipeline(
 
         return ApiResponse.success(
             message="Build queued",
-            data={"pipeline_id": pipeline_id, "job_id": job_id, "limit": limit},
+            data={"pipeline_id": pipeline_id, "job_id": job_id, "limit": limit, "preflight": preflight},
         ).to_dict()
     except HTTPException:
         raise
