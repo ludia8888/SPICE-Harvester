@@ -315,3 +315,113 @@ Pipeline Builder에서 logical type cast로 지정해 objects target에 쓸 때�
 	•	Action type: “업무 트랜잭션”을 스키마로 정의하고, submission criteria로 게이트를 걸 수 있음  ￼
 	•	Value type: primitive 위에 “의미+검증”을 얹고, 버전에서 base/constraint는 불변이라 의미 안정성을 보장  ￼
 	•	Array/Struct 제약: OSv2에서 nested array 불가, array null 불가, struct nesting 불가/fields array 불가 → 모델링을 분해해야 하는 강제 조건  ￼
+알겠습니다, 시현님. **Action type(액션 타입)**은 Foundry Ontology에서 “사용자가 버튼 한 번으로 일으키는 업무 트랜잭션”을 정의(설계)하는 타입입니다. 단순히 “속성 하나 수정”이 아니라, 여러 객체/속성/링크를 한 번에 바꾸고 + 제출 시 부수효과까지 포함하는 것이 핵심입니다.  ￼
+
+아래는 Action type을 구성요소 → 실행 순서 → 운영상 함정까지 최대한 촘촘하게 풀어쓴 설명입니다.
+
+⸻
+
+1) Action vs Action type: 먼저 용어를 분리
+	•	Action type: “어떤 입력을 받고(파라미터), 어떤 규칙으로 바꾸고(룰), 어떤 검증/권한을 통과해야 하고(Submission criteria/permissions), 어떤 부수효과를 낼지(side effects)”를 정의한 설계도  ￼
+	•	Action(실행): 사용자가 UI(Workshop/Slate/Object View 등)에서 실제로 제출해 발생하는 단일 트랜잭션(한 번의 실행)  ￼
+
+즉, “액션 타입은 PRD, 액션은 실제 배포/실행”에 가까운 관계입니다.
+
+⸻
+
+2) Action type의 4대 구성요소
+
+(1) Parameters: 액션의 입력(폼 필드)
+
+Parameters는 Action type의 입력값이고, Rules와 앱(Workshop/Slate/Object Views 등) 사이를 잇는 “인터페이스”라고 문서가 명시합니다.  ￼
+	•	파라미터는 “변수”처럼 동작하며, 타입(type) 이 있어 어떤 값이 들어올 수 있는지 결정됩니다.  ￼
+	•	실전에서 가장 중요한 포인트는: Object 파라미터(“현재 보고 있는 Ticket 객체”) 같은 입력을 받는다는 점입니다. 이게 있으면 “어떤 객체를 바꿀지”가 파라미터로 결정됩니다. (Object View에서 특히 중요)
+
+UI 관점 디테일:
+Object View에 Action을 붙이면 기본적으로 파라미터가 폼에 다 노출되는데, “현재 객체를 자동 주입하고 사용자가 못 바꾸게” 하려면 폼에서 숨기고 default value로 현재 객체를 설정하라고 문서가 구체적으로 안내합니다.  ￼
+→ 이게 없으면 사용자가 다른 객체를 골라서 엉뚱한 레코드를 수정할 수 있습니다(거버넌스 사고 포인트).
+
+⸻
+
+(2) Rules: 실제로 무엇을 어떻게 바꾸는가
+
+Foundry 문서는 “Ontology rule은 Ontology의 특정 요소를 바꾸며, 기존 타입의 objects/links를 생성·수정·삭제할 수 있다”고 못 박습니다.  ￼
+
+여기서 중요한 세부 규칙이 하나 있습니다:
+	•	1:1 또는 1:N 링크를 생성/삭제하려면 “link rule만으로 끝나는 게 아니라”, object rule로 ‘foreign key property’를 수정해야 한다고 명시합니다.  ￼
+
+이 문장 하나가 굉장히 실무적입니다.
+즉, Foundry에서 “관계(link)”는 그냥 선을 그리는 게 아니라, 데이터 모델 상 FK(키) 갱신과 결합된 방식으로 안전하게 관리됩니다.
+
+⸻
+
+(3) Submission criteria & Permissions: “제출”을 통과시키는 게이트
+
+Action은 아무나 못 누르게 만들 수 있어야 합니다. 문서는 submission criteria가 “누가 액션을 실행할 수 있는지에 대한 fine-grained control”이라고 설명합니다.  ￼
+
+특히 submission criteria는 단순 권한 체크가 아니라:
+	•	**현재 사용자(Current User)**의 속성(사용자 ID, 그룹 ID, 기타 멀티패스 속성 등)을 기준으로 조건을 걸 수 있고  ￼
+	•	파라미터에 들어온 값(예: “승인자 ID 파라미터”)과도 조합해서 조건을 만들 수 있다고 문서가 말합니다.  ￼
+
+실무적으로는 “이 액션은 특정 그룹만 가능”, “이 액션은 요청자가 아닌 승인자만 가능” 같은 정책을 여기에 넣습니다.
+
+⸻
+
+(4) Side effects: 제출 이후 외부/부수 동작(웹훅 등)
+
+Action type은 “제출 시 함께 발생하는 side effect behavior”까지 포함한다고 공식 Overview에 명시돼 있습니다.  ￼
+
+한국어 문서(웹훅)에는 실행 순서도 나옵니다:
+	•	웹훅을 writeback으로 설정하면 “다른 모든 규칙 평가 전에 실행”  ￼
+	•	웹훅을 부작용(side effect) 으로 설정하면 “규칙 평가 후 실행”, 사용자에게는 Foundry 오브젝트 수정 후 성공 메시지가 먼저 보일 수 있고, 부작용은 그 뒤에 실행될 수도 있다고 설명합니다.  ￼
+
+즉, side effect는 “트랜잭션 내부 동작”이냐 “트랜잭션 이후 비동기 후처리”냐를 구분해서 설계해야 합니다.
+
+⸻
+
+3) “Writeback”과 Action type: 어디에 기록되나?
+
+Action은 결국 “사용자가 데이터를 편집하는 행위”인데, Foundry는 이를 원본 backing dataset에 바로 쓰지 않고 별도의 writeback dataset으로 적재하는 구조를 권장/강제합니다.  ￼
+
+문서가 매우 명확히 말합니다:
+	•	사용자가 action을 수행하려면 writeback dataset이 필요하고  ￼
+	•	편집 내용은 backing dataset이 아니라 writeback dataset에 기록되며  ￼
+	•	이렇게 하면 사용자는 분석에서 원본 데이터와 편집된 데이터를 모두 접근할 수 있어 안전하다고 설명합니다.  ￼
+
+이게 “의미론적 시스템의 안전장치”인 이유는 간단합니다:
+	•	원본 데이터(수집/정산/회계 등)는 보호
+	•	사용자 운영 편집(현업 수정)은 별도 레이어로 누적
+	•	최신 상태는 Ontology가 “원본+편집”을 결합해 보여주는 구조로 갑니다  ￼
+
+⸻
+
+4) Function-backed Actions: 룰로 표현이 안 되면 “함수 기반 액션”
+
+문서에서 “많은 액션은 단순 rules로 충분하지만, 어떤 경우엔 rules만으로는 부족하고 function-backed actions가 필요하다”고 분리합니다.  ￼
+
+이건 보통 이런 상황입니다:
+	•	외부 시스템 호출/복잡한 계산/다단계 로직/조건 분기 폭발
+	•	단순히 “필드 바꾸기”가 아니라 “정책 엔진/최적화/추천/워크플로우”를 태워야 하는 경우
+
+(문서는 “rules가 충분하지 않을 수 있다”는 프레이밍까지는 명시하지만, 구체 케이스는 조직 구현에 따라 달라집니다.)  ￼
+
+⸻
+
+5) 어디서 실행되나: Workshop/Slate/Object Views 등
+	•	Workshop 문서: Actions는 사용자가 객체 데이터를 편집/생성/삭제/링크할 수 있게 해주며, 이는 “action types(룰셋)”로 정의된다고 명시합니다.  ￼
+	•	Slate 문서: interactive app에서 writeback을 할 때 Ontology Actions가 권장 방식이라고 말합니다.  ￼
+	•	Object Views: 액션 폼과 파라미터 기본값/숨김 설정 같은 UX가 구체적으로 문서화돼 있습니다.  ￼
+
+⸻
+
+6) (중요) 일관성/반영 타이밍: “즉시 보이냐?” 문제
+
+Foundry의 SDK 문서에서는 액션 적용 후 Object Storage V1의 변경은 eventually consistent일 수 있어 반영에 시간이 걸릴 수 있다고 명시합니다.  ￼
+→ 운영 UX에서 “눌렀는데 왜 아직 안 바뀌지?”가 발생할 수 있는 지점이라, 사용자 피드백/로딩/재조회 정책이 중요해집니다.
+
+⸻
+
+7) 시현님 스타일로 한 줄 정의
+
+Action type = “입력(Parameters) + 변경 규칙(Rules) + 제출 게이트(Submission criteria/Permissions) + 부수효과(Side effects)”로 구성된, 온톨로지 기반 업무 트랜잭션 템플릿입니다.  ￼
+
