@@ -63,6 +63,9 @@ class DatasetIngestRequestRecord:
     lakefs_commit_id: Optional[str]
     artifact_key: Optional[str]
     schema_json: Dict[str, Any]
+    schema_status: str
+    schema_approved_at: Optional[datetime]
+    schema_approved_by: Optional[str]
     sample_json: Dict[str, Any]
     row_count: Optional[int]
     source_metadata: Dict[str, Any]
@@ -332,6 +335,9 @@ class DatasetRegistry:
                     lakefs_commit_id TEXT,
                     artifact_key TEXT,
                     schema_json JSONB,
+                    schema_status TEXT NOT NULL DEFAULT 'PENDING',
+                    schema_approved_at TIMESTAMPTZ,
+                    schema_approved_by TEXT,
                     sample_json JSONB,
                     row_count INTEGER,
                     source_metadata JSONB,
@@ -361,6 +367,24 @@ class DatasetRegistry:
             await conn.execute(
                 f"""
                 ALTER TABLE {self._schema}.dataset_ingest_requests
+                    ADD COLUMN IF NOT EXISTS schema_status TEXT NOT NULL DEFAULT 'PENDING'
+                """
+            )
+            await conn.execute(
+                f"""
+                ALTER TABLE {self._schema}.dataset_ingest_requests
+                    ADD COLUMN IF NOT EXISTS schema_approved_at TIMESTAMPTZ
+                """
+            )
+            await conn.execute(
+                f"""
+                ALTER TABLE {self._schema}.dataset_ingest_requests
+                    ADD COLUMN IF NOT EXISTS schema_approved_by TEXT
+                """
+            )
+            await conn.execute(
+                f"""
+                ALTER TABLE {self._schema}.dataset_ingest_requests
                     ADD COLUMN IF NOT EXISTS sample_json JSONB
                 """
             )
@@ -374,6 +398,13 @@ class DatasetRegistry:
                 f"""
                 ALTER TABLE {self._schema}.dataset_ingest_requests
                     ADD COLUMN IF NOT EXISTS source_metadata JSONB
+                """
+            )
+            await conn.execute(
+                f"""
+                UPDATE {self._schema}.dataset_ingest_requests
+                SET schema_status = 'PENDING'
+                WHERE schema_status IS NULL
                 """
             )
             await conn.execute(
@@ -849,8 +880,9 @@ class DatasetRegistry:
             row = await conn.fetchrow(
                 f"""
                 SELECT ingest_request_id, dataset_id, db_name, branch, idempotency_key, request_fingerprint,
-                       status, lakefs_commit_id, artifact_key, schema_json, sample_json, row_count,
-                       source_metadata, error, created_at, updated_at, published_at
+                       status, lakefs_commit_id, artifact_key, schema_json, schema_status,
+                       schema_approved_at, schema_approved_by,
+                       sample_json, row_count, source_metadata, error, created_at, updated_at, published_at
                 FROM {self._schema}.dataset_ingest_requests
                 WHERE idempotency_key = $1
                 """,
@@ -869,6 +901,53 @@ class DatasetRegistry:
                 lakefs_commit_id=row["lakefs_commit_id"],
                 artifact_key=row["artifact_key"],
                 schema_json=coerce_json_dataset(row["schema_json"]) or {},
+                schema_status=str(row["schema_status"] or "PENDING"),
+                schema_approved_at=row["schema_approved_at"],
+                schema_approved_by=row["schema_approved_by"],
+                sample_json=coerce_json_dataset(row["sample_json"]) or {},
+                row_count=row["row_count"],
+                source_metadata=coerce_json_dataset(row["source_metadata"]) or {},
+                error=row["error"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+                published_at=row["published_at"],
+            )
+
+    async def get_ingest_request(
+        self,
+        *,
+        ingest_request_id: str,
+    ) -> Optional[DatasetIngestRequestRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT ingest_request_id, dataset_id, db_name, branch, idempotency_key, request_fingerprint,
+                       status, lakefs_commit_id, artifact_key, schema_json, schema_status,
+                       schema_approved_at, schema_approved_by,
+                       sample_json, row_count, source_metadata, error, created_at, updated_at, published_at
+                FROM {self._schema}.dataset_ingest_requests
+                WHERE ingest_request_id = $1::uuid
+                """,
+                ingest_request_id,
+            )
+            if not row:
+                return None
+            return DatasetIngestRequestRecord(
+                ingest_request_id=str(row["ingest_request_id"]),
+                dataset_id=str(row["dataset_id"]),
+                db_name=row["db_name"],
+                branch=row["branch"],
+                idempotency_key=row["idempotency_key"],
+                request_fingerprint=row["request_fingerprint"],
+                status=row["status"],
+                lakefs_commit_id=row["lakefs_commit_id"],
+                artifact_key=row["artifact_key"],
+                schema_json=coerce_json_dataset(row["schema_json"]) or {},
+                schema_status=str(row["schema_status"] or "PENDING"),
+                schema_approved_at=row["schema_approved_at"],
+                schema_approved_by=row["schema_approved_by"],
                 sample_json=coerce_json_dataset(row["sample_json"]) or {},
                 row_count=row["row_count"],
                 source_metadata=coerce_json_dataset(row["source_metadata"]) or {},
@@ -911,8 +990,9 @@ class DatasetRegistry:
                     row_count = COALESCE(EXCLUDED.row_count, {self._schema}.dataset_ingest_requests.row_count),
                     source_metadata = COALESCE(EXCLUDED.source_metadata, {self._schema}.dataset_ingest_requests.source_metadata)
                 RETURNING ingest_request_id, dataset_id, db_name, branch, idempotency_key, request_fingerprint,
-                          status, lakefs_commit_id, artifact_key, schema_json, sample_json, row_count,
-                          source_metadata, error, created_at, updated_at, published_at
+                          status, lakefs_commit_id, artifact_key, schema_json, schema_status,
+                          schema_approved_at, schema_approved_by,
+                          sample_json, row_count, source_metadata, error, created_at, updated_at, published_at
                 """,
                 ingest_request_id,
                 dataset_id,
@@ -938,6 +1018,9 @@ class DatasetRegistry:
                 lakefs_commit_id=row["lakefs_commit_id"],
                 artifact_key=row["artifact_key"],
                 schema_json=coerce_json_dataset(row["schema_json"]) or {},
+                schema_status=str(row["schema_status"] or "PENDING"),
+                schema_approved_at=row["schema_approved_at"],
+                schema_approved_by=row["schema_approved_by"],
                 sample_json=coerce_json_dataset(row["sample_json"]) or {},
                 row_count=row["row_count"],
                 source_metadata=coerce_json_dataset(row["source_metadata"]) or {},
@@ -1119,8 +1202,9 @@ class DatasetRegistry:
                 WHERE ingest_request_id = $1::uuid
                   AND (lakefs_commit_id IS NULL OR lakefs_commit_id = '')
                 RETURNING ingest_request_id, dataset_id, db_name, branch, idempotency_key, request_fingerprint,
-                          status, lakefs_commit_id, artifact_key, schema_json, sample_json, row_count,
-                          source_metadata, error, created_at, updated_at, published_at
+                          status, lakefs_commit_id, artifact_key, schema_json, schema_status,
+                          schema_approved_at, schema_approved_by,
+                          sample_json, row_count, source_metadata, error, created_at, updated_at, published_at
                 """,
                 ingest_request_id,
                 lakefs_commit_id,
@@ -1130,8 +1214,9 @@ class DatasetRegistry:
                 row = await conn.fetchrow(
                     f"""
                     SELECT ingest_request_id, dataset_id, db_name, branch, idempotency_key, request_fingerprint,
-                           status, lakefs_commit_id, artifact_key, schema_json, sample_json, row_count,
-                           source_metadata, error, created_at, updated_at, published_at
+                           status, lakefs_commit_id, artifact_key, schema_json, schema_status,
+                           schema_approved_at, schema_approved_by,
+                           sample_json, row_count, source_metadata, error, created_at, updated_at, published_at
                     FROM {self._schema}.dataset_ingest_requests
                     WHERE ingest_request_id = $1::uuid
                     """,
@@ -1150,6 +1235,9 @@ class DatasetRegistry:
                 lakefs_commit_id=row["lakefs_commit_id"],
                 artifact_key=row["artifact_key"],
                 schema_json=coerce_json_dataset(row["schema_json"]) or {},
+                schema_status=str(row["schema_status"] or "PENDING"),
+                schema_approved_at=row["schema_approved_at"],
+                schema_approved_by=row["schema_approved_by"],
                 sample_json=coerce_json_dataset(row["sample_json"]) or {},
                 row_count=row["row_count"],
                 source_metadata=coerce_json_dataset(row["source_metadata"]) or {},
@@ -1224,6 +1312,113 @@ class DatasetRegistry:
                 source_payload,
             )
 
+    async def approve_ingest_schema(
+        self,
+        *,
+        ingest_request_id: str,
+        schema_json: Optional[Dict[str, Any]] = None,
+        approved_by: Optional[str] = None,
+    ) -> tuple[DatasetRecord, DatasetIngestRequestRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        schema_payload = normalize_json_payload(schema_json) if schema_json is not None else None
+        approved_at = utcnow()
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    f"""
+                    SELECT ingest_request_id, dataset_id, db_name, branch, idempotency_key, request_fingerprint,
+                           status, lakefs_commit_id, artifact_key, schema_json, schema_status,
+                           schema_approved_at, schema_approved_by,
+                           sample_json, row_count, source_metadata, error, created_at, updated_at, published_at
+                    FROM {self._schema}.dataset_ingest_requests
+                    WHERE ingest_request_id = $1::uuid
+                    FOR UPDATE
+                    """,
+                    ingest_request_id,
+                )
+                if not row:
+                    raise RuntimeError("Ingest request not found")
+                payload = schema_payload if schema_payload is not None else coerce_json_dataset(row["schema_json"])
+                payload = payload or {}
+                if not isinstance(payload, dict):
+                    raise ValueError("schema_json must be an object")
+                if not payload:
+                    raise ValueError("schema_json is required to approve")
+
+                dataset_id = str(row["dataset_id"])
+                await conn.execute(
+                    f"""
+                    UPDATE {self._schema}.datasets
+                    SET schema_json = $2::jsonb, updated_at = NOW()
+                    WHERE dataset_id = $1::uuid
+                    """,
+                    dataset_id,
+                    payload,
+                )
+                await conn.execute(
+                    f"""
+                    UPDATE {self._schema}.dataset_ingest_requests
+                    SET schema_json = $2::jsonb,
+                        schema_status = 'APPROVED',
+                        schema_approved_at = $4,
+                        schema_approved_by = $3,
+                        updated_at = NOW()
+                    WHERE ingest_request_id = $1::uuid
+                    """,
+                    ingest_request_id,
+                    payload,
+                    approved_by,
+                    approved_at,
+                )
+                dataset_row = await conn.fetchrow(
+                    f"""
+                    SELECT dataset_id, db_name, name, description, source_type,
+                           source_ref, branch, schema_json, created_at, updated_at
+                    FROM {self._schema}.datasets
+                    WHERE dataset_id = $1::uuid
+                    """,
+                    dataset_id,
+                )
+                if not dataset_row:
+                    raise RuntimeError("Dataset not found for ingest request")
+
+        dataset_record = DatasetRecord(
+            dataset_id=str(dataset_row["dataset_id"]),
+            db_name=str(dataset_row["db_name"]),
+            name=str(dataset_row["name"]),
+            description=dataset_row["description"],
+            source_type=str(dataset_row["source_type"]),
+            source_ref=dataset_row["source_ref"],
+            branch=str(dataset_row["branch"]),
+            schema_json=coerce_json_dataset(dataset_row["schema_json"]),
+            created_at=dataset_row["created_at"],
+            updated_at=dataset_row["updated_at"],
+        )
+        updated_request = DatasetIngestRequestRecord(
+            ingest_request_id=str(row["ingest_request_id"]),
+            dataset_id=str(row["dataset_id"]),
+            db_name=row["db_name"],
+            branch=row["branch"],
+            idempotency_key=row["idempotency_key"],
+            request_fingerprint=row["request_fingerprint"],
+            status=row["status"],
+            lakefs_commit_id=row["lakefs_commit_id"],
+            artifact_key=row["artifact_key"],
+            schema_json=payload,
+            schema_status="APPROVED",
+            schema_approved_at=approved_at,
+            schema_approved_by=approved_by,
+            sample_json=coerce_json_dataset(row["sample_json"]) or {},
+            row_count=row["row_count"],
+            source_metadata=coerce_json_dataset(row["source_metadata"]) or {},
+            error=row["error"],
+            created_at=row["created_at"],
+            updated_at=dataset_row["updated_at"],
+            published_at=row["published_at"],
+        )
+        return dataset_record, updated_request
+
     async def publish_ingest_request(
         self,
         *,
@@ -1234,6 +1429,7 @@ class DatasetRegistry:
         row_count: Optional[int],
         sample_json: Optional[Dict[str, Any]],
         schema_json: Optional[Dict[str, Any]],
+        apply_schema: bool = True,
         outbox_entries: Optional[List[Dict[str, Any]]] = None,
     ) -> DatasetVersionRecord:
         if not self._pool:
@@ -1246,7 +1442,7 @@ class DatasetRegistry:
 
         async with self._pool.acquire() as conn:
             async with conn.transaction():
-                if schema_payload is not None:
+                if schema_payload is not None and apply_schema:
                     await conn.execute(
                         f"""
                         UPDATE {self._schema}.datasets

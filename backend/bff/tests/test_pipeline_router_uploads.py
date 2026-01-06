@@ -82,6 +82,7 @@ class _FakePipelineRegistry:
 class _FakeDatasetRegistry:
     def __init__(self, *, ingest_status: str = "CREATED") -> None:
         self._datasets: dict[tuple[str, str, str], DatasetRecord] = {}
+        self._datasets_by_id: dict[str, DatasetRecord] = {}
         self._ingest_requests: dict[str, DatasetIngestRequestRecord] = {}
         self._ingest_transactions: dict[str, DatasetIngestTransactionRecord] = {}
         self._versions: dict[str, DatasetVersionRecord] = {}
@@ -105,6 +106,7 @@ class _FakeDatasetRegistry:
             updated_at=now,
         )
         self._datasets[(db_name, name, branch)] = record
+        self._datasets_by_id[record.dataset_id] = record
         return record
 
     async def create_ingest_request(
@@ -132,6 +134,9 @@ class _FakeDatasetRegistry:
             lakefs_commit_id=None,
             artifact_key=None,
             schema_json=schema_json,
+            schema_status="PENDING",
+            schema_approved_at=None,
+            schema_approved_by=None,
             sample_json=sample_json,
             row_count=row_count,
             source_metadata=source_metadata,
@@ -142,6 +147,34 @@ class _FakeDatasetRegistry:
         )
         self._ingest_requests[record.ingest_request_id] = record
         return record, True
+
+    async def get_ingest_request(self, *, ingest_request_id: str):
+        return self._ingest_requests.get(ingest_request_id)
+
+    async def approve_ingest_schema(self, *, ingest_request_id: str, schema_json=None, approved_by=None):
+        record = self._ingest_requests.get(ingest_request_id)
+        if not record:
+            raise RuntimeError("Ingest request not found")
+        payload = schema_json if schema_json is not None else record.schema_json
+        if not isinstance(payload, dict) or not payload:
+            raise ValueError("schema_json is required to approve")
+        dataset = self._datasets_by_id.get(record.dataset_id)
+        if not dataset:
+            raise RuntimeError("Dataset not found for ingest request")
+        now = datetime.now(timezone.utc)
+        updated_dataset = replace(dataset, schema_json=payload, updated_at=now)
+        self._datasets_by_id[dataset.dataset_id] = updated_dataset
+        self._datasets[(dataset.db_name, dataset.name, dataset.branch)] = updated_dataset
+        updated_request = replace(
+            record,
+            schema_json=payload,
+            schema_status="APPROVED",
+            schema_approved_at=now,
+            schema_approved_by=approved_by,
+            updated_at=now,
+        )
+        self._ingest_requests[ingest_request_id] = updated_request
+        return updated_dataset, updated_request
 
     async def get_version_by_ingest_request(self, *, ingest_request_id: str):
         return self._versions.get(ingest_request_id)
@@ -194,6 +227,7 @@ class _FakeDatasetRegistry:
         row_count,
         sample_json,
         schema_json,
+        apply_schema=True,
         outbox_entries,
     ):
         now = datetime.now(timezone.utc)
@@ -211,6 +245,12 @@ class _FakeDatasetRegistry:
         self._versions[ingest_request_id] = version
         record = self._ingest_requests[ingest_request_id]
         self._ingest_requests[ingest_request_id] = replace(record, status="PUBLISHED")
+        if apply_schema and isinstance(schema_json, dict):
+            dataset = self._datasets_by_id.get(dataset_id)
+            if dataset:
+                updated_dataset = replace(dataset, schema_json=schema_json, updated_at=now)
+                self._datasets_by_id[dataset_id] = updated_dataset
+                self._datasets[(dataset.db_name, dataset.name, dataset.branch)] = updated_dataset
         return version
 
     async def mark_ingest_failed(self, *, ingest_request_id, error):
@@ -371,6 +411,44 @@ async def test_upload_excel_dataset_commits_preview(monkeypatch):
     assert response["status"] == "success"
     assert response["data"]["dataset"]["name"] == "excel-data"
     assert [col["name"] for col in response["data"]["preview"]["columns"]] == ["id", "name"]
+
+
+@pytest.mark.asyncio
+async def test_approve_dataset_schema_updates_dataset():
+    dataset_registry = _FakeDatasetRegistry()
+    dataset = await dataset_registry.create_dataset(
+        db_name="core-db",
+        name="incoming",
+        description=None,
+        source_type="csv_upload",
+        source_ref="upload.csv",
+        schema_json={},
+        branch="main",
+    )
+    ingest_request, _ = await dataset_registry.create_ingest_request(
+        dataset_id=dataset.dataset_id,
+        db_name=dataset.db_name,
+        branch=dataset.branch,
+        idempotency_key="idem-approve",
+        request_fingerprint="fingerprint",
+        schema_json={"columns": [{"name": "id", "type": "xsd:integer"}]},
+        sample_json={"columns": ["id"], "rows": [[1]]},
+        row_count=1,
+        source_metadata={"source_type": "csv"},
+    )
+    request = _build_request({"X-DB-Name": "core-db", "X-User-ID": "user-approve"})
+
+    response = await pipeline_router.approve_dataset_schema(
+        ingest_request_id=ingest_request.ingest_request_id,
+        payload={},
+        request=request,
+        dataset_registry=dataset_registry,
+    )
+
+    assert response["status"] == "success"
+    assert response["data"]["dataset"]["schema_json"]["columns"][0]["name"] == "id"
+    assert response["data"]["ingest_request"]["schema_status"] == "APPROVED"
+    assert response["data"]["ingest_request"]["schema_approved_by"] == "user-approve"
 
 
 @pytest.mark.asyncio

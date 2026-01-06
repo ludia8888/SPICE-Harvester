@@ -71,6 +71,9 @@ class _IngestRequest:
     lakefs_commit_id: Optional[str] = None
     artifact_key: Optional[str] = None
     schema_json: dict[str, Any] = field(default_factory=dict)
+    schema_status: str = "PENDING"
+    schema_approved_at: Optional[Any] = None
+    schema_approved_by: Optional[str] = None
     sample_json: dict[str, Any] = field(default_factory=dict)
     row_count: Optional[int] = None
     source_metadata: dict[str, Any] = field(default_factory=dict)
@@ -157,6 +160,9 @@ class _FakeDatasetRegistry:
             request_fingerprint=request_fingerprint,
             status="RECEIVED",
             schema_json=schema_json or {},
+            schema_status="PENDING",
+            schema_approved_at=None,
+            schema_approved_by=None,
             sample_json=sample_json or {},
             row_count=row_count,
             source_metadata=source_metadata or {},
@@ -215,6 +221,7 @@ class _FakeDatasetRegistry:
         row_count: Optional[int],
         sample_json: Optional[dict[str, Any]],
         schema_json: Optional[dict[str, Any]],
+        apply_schema: bool = True,
         outbox_entries: Optional[list[dict[str, Any]]] = None,
     ) -> _DatasetVersion:
         existing = self.versions_by_request.get(ingest_request_id)

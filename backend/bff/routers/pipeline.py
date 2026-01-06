@@ -3934,7 +3934,7 @@ async def upload_excel_dataset(
                 description=description.strip() if description else None,
                 source_type="excel_upload",
                 source_ref=filename,
-                schema_json=schema_json,
+                schema_json={},
                 branch=dataset_branch,
             )
             created_dataset = True
@@ -3990,6 +3990,8 @@ async def upload_excel_dataset(
                         "version": existing_version.__dict__,
                         "preview": {"columns": _columns_from_schema(schema_columns), "rows": sample_rows},
                         "source": preview.get("source_metadata"),
+                        "schema_status": getattr(ingest_request, "schema_status", "PENDING"),
+                        "schema_suggestion": schema_json,
                     },
                 ).to_dict()
 
@@ -4129,6 +4131,7 @@ async def upload_excel_dataset(
                 row_count=row_count,
                 sample_json={"columns": _columns_from_schema(schema_columns), "rows": sample_rows},
                 schema_json=schema_json,
+                apply_schema=False,
                 outbox_entries=outbox_entries,
             )
         except ValueError as exc:
@@ -4155,6 +4158,8 @@ async def upload_excel_dataset(
                 "objectify_job_id": objectify_job_id,
                 "preview": {"columns": _columns_from_schema(schema_columns), "rows": sample_rows},
                 "source": preview.get("source_metadata"),
+                "schema_status": getattr(ingest_request, "schema_status", "PENDING"),
+                "schema_suggestion": schema_json,
             },
         ).to_dict()
     except HTTPException:
@@ -4272,7 +4277,7 @@ async def upload_csv_dataset(
                 description=description.strip() if description else None,
                 source_type="csv_upload",
                 source_ref=filename,
-                schema_json=schema_json,
+                schema_json={},
                 branch=dataset_branch,
             )
             created_dataset = True
@@ -4337,6 +4342,8 @@ async def upload_csv_dataset(
                             "delimiter": resolved_delimiter,
                             "has_header": has_header,
                         },
+                        "schema_status": getattr(ingest_request, "schema_status", "PENDING"),
+                        "schema_suggestion": schema_json,
                     },
                 ).to_dict()
 
@@ -4494,6 +4501,7 @@ async def upload_csv_dataset(
                 row_count=row_count,
                 sample_json={"columns": _columns_from_schema(schema_columns), "rows": sample_rows},
                 schema_json=schema_json,
+                apply_schema=False,
                 outbox_entries=outbox_entries,
             )
         except ValueError as exc:
@@ -4525,6 +4533,8 @@ async def upload_csv_dataset(
                     "delimiter": resolved_delimiter,
                     "has_header": has_header,
                 },
+                "schema_status": getattr(ingest_request, "schema_status", "PENDING"),
+                "schema_suggestion": schema_json,
             },
         ).to_dict()
     except HTTPException:
@@ -4543,6 +4553,44 @@ async def upload_csv_dataset(
             except Exception as exc:
                 logger.warning("Failed to mark csv ingest request failed: %s", exc)
         logger.exception("Failed to upload csv dataset")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/datasets/ingest-requests/{ingest_request_id}/schema/approve", response_model=ApiResponse)
+@trace_endpoint("approve_dataset_schema")
+async def approve_dataset_schema(
+    ingest_request_id: str,
+    payload: Optional[Dict[str, Any]] = None,
+    request: Request = None,
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+) -> ApiResponse:
+    try:
+        ingest_request = await dataset_registry.get_ingest_request(ingest_request_id=ingest_request_id)
+        if not ingest_request:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingest request not found")
+        try:
+            enforce_db_scope(request.headers, db_name=ingest_request.db_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+        sanitized = sanitize_input(payload or {})
+        schema_json = sanitized.get("schema_json")
+        actor_user_id = (request.headers.get("X-User-ID") or "").strip() if request else ""
+        actor_user_id = actor_user_id or None
+        dataset, updated_request = await dataset_registry.approve_ingest_schema(
+            ingest_request_id=ingest_request_id,
+            schema_json=schema_json if isinstance(schema_json, dict) else None,
+            approved_by=actor_user_id,
+        )
+        return ApiResponse.success(
+            message="Schema approved",
+            data={"dataset": dataset.__dict__, "ingest_request": updated_request.__dict__},
+        ).to_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to approve dataset schema: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
