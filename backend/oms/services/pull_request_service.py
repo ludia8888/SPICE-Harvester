@@ -23,6 +23,7 @@ from oms.database.decorators import with_mvcc_retry, with_optimistic_lock
 from shared.models.base import OptimisticLockError
 from oms.exceptions import DatabaseError
 from shared.utils.commit_utils import coerce_commit_id
+from shared.utils.terminus_branch import encode_branch_name
 from shared.utils.diff_utils import normalize_diff_response
 
 logger = logging.getLogger(__name__)
@@ -225,11 +226,14 @@ class PullRequestService(BaseTerminusService):
         """
         try:
             # Try a dry-run rebase to detect conflicts
-            endpoint = f"/api/rebase/{self.connection_info.account}/{db_name}"
+            encoded_source = encode_branch_name(source_branch)
+            encoded_target = encode_branch_name(target_branch)
+            endpoint = (
+                f"/api/rebase/{self.connection_info.account}/{db_name}/local/branch/{encoded_target}"
+            )
             
             rebase_data = {
-                "rebase_from": f"{self.connection_info.account}/{db_name}/local/branch/{source_branch}",
-                "rebase_to": f"{self.connection_info.account}/{db_name}/local/branch/{target_branch}",
+                "rebase_from": f"{self.connection_info.account}/{db_name}/local/branch/{encoded_source}",
                 "author": "system",
                 "dry_run": True  # Just check, don't actually rebase
             }
@@ -300,11 +304,16 @@ class PullRequestService(BaseTerminusService):
                         )
                 
                 # Perform rebase in TerminusDB
-                endpoint = f"/api/rebase/{self.connection_info.account}/{pr_data['db_name']}"
+                encoded_source = encode_branch_name(pr_data["source_branch"])
+                encoded_target = encode_branch_name(pr_data["target_branch"])
+                endpoint = (
+                    f"/api/rebase/{self.connection_info.account}/{pr_data['db_name']}/local/branch/{encoded_target}"
+                )
                 
                 rebase_data = {
-                    "rebase_from": f"{self.connection_info.account}/{pr_data['db_name']}/local/branch/{pr_data['source_branch']}",
-                    "rebase_to": f"{self.connection_info.account}/{pr_data['db_name']}/local/branch/{pr_data['target_branch']}",
+                    "rebase_from": (
+                        f"{self.connection_info.account}/{pr_data['db_name']}/local/branch/{encoded_source}"
+                    ),
                     "author": author,
                     "message": merge_message or f"Merge PR: {pr_data['title']}"
                 }

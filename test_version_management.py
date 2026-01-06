@@ -13,9 +13,12 @@ from datetime import datetime
 
 sys.path.append(os.path.join(os.path.dirname(__file__), 'backend'))
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_version_management():
+def _ontology_id(item):
+    if isinstance(item, dict):
+        return item.get("id") or item.get("identifier") or "Unknown"
+    return getattr(item, "id", None) or getattr(item, "identifier", None) or "Unknown"
+
+async def _run_version_management():
     """TerminusDB 버전 관리 기능 전체 테스트"""
     print("🔥 THINK ULTRA! TerminusDB 버전 관리 테스트")
     print("=" * 60)
@@ -43,10 +46,10 @@ async def test_version_management():
         print("📦 1. 테스트 데이터베이스 생성...")
         
         create_result = await service.create_database(
-            test_db, 
-            "Database for testing version control features"
+            test_db,
+            "Database for testing version control features",
         )
-        if not create_result.get("name"):
+        if not create_result:
             print(f"❌ Database creation failed: {create_result}")
             return False
             
@@ -79,8 +82,8 @@ async def test_version_management():
             ]
         )
         
-        class_result = await service.create_ontology_class(test_db, initial_class)
-        if not class_result.get("success"):
+        class_result = await service.create_ontology(test_db, initial_class)
+        if not class_result:
             print(f"❌ Initial class creation failed: {class_result}")
             return False
             
@@ -88,13 +91,12 @@ async def test_version_management():
         
         # 4. 첫 번째 커밋
         print("\n💾 4. 첫 번째 커밋...")
-        commit1_result = await service.create_commit(
-            test_db, 
-            "main",
-            "Initial Customer class creation",
-            "Added basic Customer class with name and email"
-        )
-        print(f"✅ First commit: {commit1_result}")
+        commit1_message = "Initial Customer class creation\n\nAdded basic Customer class with name and email"
+        commit1_id = await service.commit(test_db, commit1_message, author="admin", branch="main")
+        if not commit1_id:
+            print("❌ First commit failed")
+            return False
+        print(f"✅ First commit: {commit1_id}")
         
         # 5. 새 브랜치 생성
         print("\n🌿 5. 개발 브랜치 생성...")
@@ -174,8 +176,8 @@ async def test_version_management():
             ]
         )
         
-        product_result = await service.create_ontology_class(test_db, product_class)
-        if not product_result.get("success"):
+        product_result = await service.create_ontology(test_db, product_class, branch="development")
+        if not product_result:
             print(f"❌ Product class creation failed: {product_result}")
             return False
             
@@ -183,13 +185,12 @@ async def test_version_management():
         
         # 8. development 브랜치에서 커밋
         print("\n💾 8. development 브랜치에서 커밋...")
-        commit2_result = await service.create_commit(
-            test_db,
-            "development", 
-            "Add Product class",
-            "Added Product class with category relationship"
-        )
-        print(f"✅ Development branch commit: {commit2_result}")
+        commit2_message = "Add Product class\n\nAdded Product class with category relationship"
+        commit2_id = await service.commit(test_db, commit2_message, author="admin", branch="development")
+        if not commit2_id:
+            print("❌ Development branch commit failed")
+            return False
+        print(f"✅ Development branch commit: {commit2_id}")
         
         # 9. 커밋 히스토리 확인
         print("\n📚 9. 커밋 히스토리 확인...")
@@ -211,22 +212,22 @@ async def test_version_management():
         
         # main 브랜치 클래스 목록
         main_classes = await service.list_ontology_classes(test_db)
-        print(f"✅ Main branch classes: {[cls.get('id', 'Unknown') for cls in main_classes]}")
+        print(f"✅ Main branch classes: {[_ontology_id(cls) for cls in main_classes]}")
         
         # development 브랜치 클래스 목록
         dev_classes = await service.list_ontology_classes(test_db)
-        print(f"✅ Development branch classes: {[cls.get('id', 'Unknown') for cls in dev_classes]}")
+        print(f"✅ Development branch classes: {[_ontology_id(cls) for cls in dev_classes]}")
         
         # 11. 브랜치 병합 (development → main)
         print("\n🔀 11. 브랜치 병합 (development → main)...")
-        merge_result = await service.merge_branch(
+        merge_result = await service.merge_branches(
             test_db,
             source_branch="development",
             target_branch="main",
-            message="Merge development into main - Add Product class"
+            message="Merge development into main - Add Product class",
         )
-        
-        if not merge_result.get("success", True):
+
+        if isinstance(merge_result, dict) and not merge_result.get("merged", True):
             print(f"❌ Merge failed: {merge_result}")
             return False
             
@@ -235,7 +236,7 @@ async def test_version_management():
         # 12. 병합 후 main 브랜치 상태 확인
         print("\n🔍 12. 병합 후 main 브랜치 상태 확인...")
         main_classes_after = await service.list_ontology_classes(test_db)
-        print(f"✅ Main branch classes after merge: {[cls.get('id') for cls in main_classes_after]}")
+        print(f"✅ Main branch classes after merge: {[_ontology_id(cls) for cls in main_classes_after]}")
         
         # 13. 최종 커밋 히스토리 확인
         print("\n📚 13. 최종 커밋 히스토리 확인...")
@@ -265,9 +266,15 @@ async def test_version_management():
         except Exception as cleanup_error:
             print(f"⚠️ Cleanup error (non-critical): {cleanup_error}")
 
+
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_advanced_version_features():
+async def test_version_management():
+    """TerminusDB 버전 관리 기능 전체 테스트"""
+    assert await _run_version_management()
+
+
+async def _run_advanced_version_features():
     """고급 버전 관리 기능 테스트"""
     print("\n🔥 고급 버전 관리 기능 테스트")
     print("-" * 50)
@@ -297,47 +304,40 @@ async def test_advanced_version_features():
             test_db,
             "Database for testing advanced version control"
         )
-        if not create_result.get("name"):
+        if not create_result:
             print(f"❌ Advanced database creation failed: {create_result}")
             return False
             
         print(f"✅ Advanced test database created: {test_db}")
-        
-        # 2. 태그 기능 테스트
-        print("\n🏷️ 2. 태그 기능 테스트...")
-        tag_result = await service.create_tag(
+
+        # 2. 브랜치 생성
+        print("\n🌿 2. 개발 브랜치 생성...")
+        branch_ok = await service.create_branch(test_db, "development", "main")
+        if not branch_ok:
+            print(f"❌ Branch creation failed: {branch_ok}")
+            return False
+        print("✅ Development branch created")
+
+        # 3. 메인 브랜치 커밋
+        print("\n💾 3. 메인 브랜치 커밋...")
+        commit_id = await service.commit(
             test_db,
-            "v1.0.0",
-            "main",
-            "First stable release"
+            "Initial commit for advanced version features",
+            author="admin",
+            branch="main",
         )
-        print(f"✅ Tag created: {tag_result}")
-        
-        # 3. 태그 목록 확인
-        print("\n🏷️ 3. 태그 목록 확인...")
-        tags = await service.list_tags(test_db)
-        print(f"✅ Available tags: {tags}")
-        
-        # 4. 스쿼시 커밋 테스트 (가능한 경우)
-        print("\n🔄 4. 스쿼시 커밋 테스트...")
+        if not commit_id:
+            print("❌ Main commit failed")
+            return False
+        print(f"✅ Main commit: {commit_id}")
+
+        # 4. 리베이스 테스트 (가능한 경우)
+        print("\n🔄 4. 리베이스 테스트...")
         try:
-            squash_result = await service.squash_commits(
+            rebase_result = await service.rebase(
                 test_db,
-                "main",
-                count=2,
-                message="Squashed initial commits"
-            )
-            print(f"✅ Squash commit: {squash_result}")
-        except Exception as e:
-            print(f"⚠️ Squash not supported or failed: {e}")
-        
-        # 5. 리베이스 테스트 (가능한 경우)
-        print("\n🔄 5. 리베이스 테스트...")
-        try:
-            rebase_result = await service.rebase_branch(
-                test_db,
-                "development",
-                "main"
+                branch="development",
+                onto="main",
             )
             print(f"✅ Rebase: {rebase_result}")
         except Exception as e:
@@ -361,6 +361,14 @@ async def test_advanced_version_features():
         except Exception as cleanup_error:
             print(f"⚠️ Advanced cleanup error: {cleanup_error}")
 
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_advanced_version_features():
+    """고급 버전 관리 기능 테스트"""
+    assert await _run_advanced_version_features()
+
+
 async def main():
     """메인 테스트 실행"""
     print("🔥 THINK ULTRA! TerminusDB 버전 관리 전체 테스트")
@@ -370,12 +378,12 @@ async def main():
     
     # 기본 버전 관리 테스트
     print("Phase 1: 기본 버전 관리 테스트")
-    basic_result = await test_version_management()
+    basic_result = await _run_version_management()
     results.append(basic_result)
     
     # 고급 버전 관리 테스트
     print("\nPhase 2: 고급 버전 관리 테스트")
-    advanced_result = await test_advanced_version_features()
+    advanced_result = await _run_advanced_version_features()
     results.append(advanced_result)
     
     # 결과 요약

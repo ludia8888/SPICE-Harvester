@@ -5,6 +5,7 @@ Version Control Service for TerminusDB
 
 import asyncio
 import logging
+import uuid
 import os
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
@@ -79,6 +80,44 @@ class VersionControlService(BaseTerminusService):
             or "TerminusDB API error: 500" in message
             or "TerminusDB API error: 503" in message
         )
+
+    @staticmethod
+    def _is_merge_endpoint_missing_error(exc: Exception) -> bool:
+        message = str(exc)
+        if "/api/merge" not in message:
+            return False
+        return (
+            "Path not found" in message
+            or "api:not_found" in message
+            or "Illegal HTTP request" in message
+            or "TerminusDB API error: 404" in message
+        )
+
+    async def _get_branch_head(self, db_name: str, branch_name: str) -> Optional[str]:
+        try:
+            branches = await self.list_branches(db_name)
+            for branch in branches:
+                if branch.get("name") == branch_name:
+                    head = branch.get("head")
+                    if head:
+                        return head
+        except Exception:
+            pass
+
+        commits = await self.get_commits(db_name, branch_name=branch_name, limit=1, offset=0)
+        if commits:
+            return commits[0].get("id") or commits[0].get("identifier")
+        return None
+
+    async def _get_branch_head_with_retries(
+        self, db_name: str, branch_name: str, max_attempts: int = 5
+    ) -> Optional[str]:
+        for attempt in range(1, max_attempts + 1):
+            head = await self._get_branch_head(db_name, branch_name)
+            if head:
+                return head
+            await asyncio.sleep(0.15 * attempt)
+        return None
     
     async def list_branches(self, db_name: str) -> List[Dict[str, Any]]:
         """
@@ -268,14 +307,22 @@ class VersionControlService(BaseTerminusService):
         """
         try:
             encoded_branch = self._encode_branch_name(branch_name)
-            endpoint = f"/api/reset/{self.connection_info.account}/{db_name}/branch/{encoded_branch}"
-            
-            data = {
-                "commit": commit_id,
-                "author": self.connection_info.user,
-                "message": f"Reset branch {branch_name} to commit {commit_id}"
-            }
-            
+            endpoint = (
+                f"/api/reset/{self.connection_info.account}/{db_name}/local/branch/{encoded_branch}"
+            )
+
+            if "/commit/" in commit_id:
+                commit_descriptor = commit_id
+            else:
+                raw_commit = commit_id
+                if raw_commit.startswith("ValidCommit/") or raw_commit.startswith("InitialCommit/"):
+                    raw_commit = raw_commit.split("/", 1)[1]
+                commit_descriptor = (
+                    f"{self.connection_info.account}/{db_name}/local/commit/{raw_commit}"
+                )
+
+            data = {"commit_descriptor": commit_descriptor}
+
             await self._make_request("POST", endpoint, data)
             
             logger.info(f"Branch '{branch_name}' reset to commit '{commit_id}'")
@@ -384,10 +431,18 @@ class VersionControlService(BaseTerminusService):
             endpoint = f"/api/woql/{self.connection_info.account}/{db_name}/local/branch/{encoded_branch}"
             
             # 빈 WOQL 쿼리로 커밋 생성
+            marker_id = f"@base:commit_marker_{uuid.uuid4().hex}"
             data = {
-                "query": {"@type": "True"},  # 빈 쿼리
-                "author": author or self.connection_info.user,
-                "message": message
+                "commit_info": {
+                    "author": author or self.connection_info.user,
+                    "message": message,
+                },
+                "query": {
+                    "@type": "AddTriple",
+                    "subject": {"@type": "NodeValue", "node": marker_id},
+                    "predicate": {"@type": "NodeValue", "node": "rdf:type"},
+                    "object": {"@type": "Value", "node": "@schema:CommitMarker"},
+                },
             }
             
             result = await self._make_request("POST", endpoint, data)
@@ -407,6 +462,14 @@ class VersionControlService(BaseTerminusService):
                     first = result["@graph"][0]
                     if isinstance(first, dict):
                         commit_id = first.get("identifier") or first.get("@id")
+
+            if not commit_id:
+                try:
+                    commits = await self.get_commits(db_name, branch_name=branch_name, limit=1, offset=0)
+                    if commits:
+                        commit_id = commits[0].get("id") or commits[0].get("identifier")
+                except Exception as e:
+                    logger.warning(f"Failed to resolve commit id from history: {e}")
             
             logger.info(f"Commit created in branch '{branch_name}' of database '{db_name}'")
             
@@ -442,14 +505,17 @@ class VersionControlService(BaseTerminusService):
             리베이스 결과
         """
         try:
-            endpoint = f"/api/rebase/{self.connection_info.account}/{db_name}"
-
             encoded_branch = self._encode_branch_name(branch_name)
             encoded_target = self._encode_branch_name(target_branch)
 
+            endpoint = (
+                f"/api/rebase/{self.connection_info.account}/{db_name}/local/branch/{encoded_target}"
+            )
+
             data = {
-                "rebase_from": f"{self.connection_info.account}/{db_name}/branch/{encoded_branch}",
-                "rebase_to": f"{self.connection_info.account}/{db_name}/branch/{encoded_target}",
+                "rebase_from": (
+                    f"{self.connection_info.account}/{db_name}/local/branch/{encoded_branch}"
+                ),
                 "author": self.connection_info.user,
                 "message": message or f"Rebase {branch_name} onto {target_branch}"
             }
@@ -638,6 +704,7 @@ class VersionControlService(BaseTerminusService):
         ]
 
         last_error: Optional[Exception] = None
+        endpoint_missing = False
         for payload in candidates:
             try:
                 result = await self._make_request("POST", endpoint, payload)
@@ -651,7 +718,30 @@ class VersionControlService(BaseTerminusService):
                 return {"merged": True, "conflicts": [], "raw": result}
             except Exception as e:
                 last_error = e
+                if self._is_merge_endpoint_missing_error(e):
+                    endpoint_missing = True
+                    break
                 continue
+
+        if last_error and (endpoint_missing or self._is_merge_endpoint_missing_error(last_error)):
+            try:
+                # /api/merge may leave unread request bodies on unsupported servers; reopen the client before rebase.
+                await self.disconnect()
+                await self.rebase_branch(
+                    db_name, branch_name=source_branch, target_branch=target_branch, message=message
+                )
+                source_head = await self._get_branch_head_with_retries(db_name, source_branch)
+                if not source_head:
+                    raise DatabaseError("소스 브랜치 헤드 커밋을 찾을 수 없습니다")
+
+                await self.reset_branch(db_name, target_branch, source_head)
+                return {
+                    "merged": True,
+                    "conflicts": [],
+                    "raw": {"strategy": "rebase", "commit_id": source_head},
+                }
+            except Exception as e:
+                raise DatabaseError(f"브랜치 머지 실패: {e}")
 
         raise DatabaseError(f"브랜치 머지 실패: {last_error}")
     

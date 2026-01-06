@@ -8,7 +8,7 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), 'backend'))
 
-def test_link_type():
+def _check_link_type():
     """type="link" 구조 테스트"""
     print("🔍 Test 1: type='link' 구조")
     
@@ -36,7 +36,12 @@ def test_link_type():
     
     return rel_data["target"] == "Customer" and rel_data["cardinality"] == "n:1"
 
-def test_array_relationship():
+
+def test_link_type():
+    """type="link" 구조 테스트"""
+    assert _check_link_type()
+
+def _check_array_relationship():
     """배열 관계 구조 테스트"""
     print(f"\n🔍 Test 2: 배열 관계 구조")
     
@@ -66,7 +71,12 @@ def test_array_relationship():
     
     return rel_data["target"] == "Product" and rel_data["cardinality"] == "1:n"
 
-def test_backward_compatibility():
+
+def test_array_relationship():
+    """배열 관계 구조 테스트"""
+    assert _check_array_relationship()
+
+def _check_backward_compatibility():
     """기존 방식 호환성 테스트"""
     print(f"\n🔍 Test 3: 기존 방식 호환성")
     
@@ -92,7 +102,12 @@ def test_backward_compatibility():
     
     return rel_data["target"] == "Category"
 
-def test_complete_order_example():
+
+def test_backward_compatibility():
+    """기존 방식 호환성 테스트"""
+    assert _check_backward_compatibility()
+
+def _check_complete_order_example():
     """완전한 Order 예시 테스트"""
     print(f"\n🔍 Test 4: 완전한 Order 클래스 예시")
     
@@ -166,15 +181,20 @@ def test_complete_order_example():
     
     return success
 
+
+def test_complete_order_example():
+    """완전한 Order 예시 테스트"""
+    assert _check_complete_order_example()
+
 if __name__ == "__main__":
     print("🔥 THINK ULTRA! 개선된 구조 완전 테스트")
     print("=" * 60)
     
     results = []
-    results.append(test_link_type())
-    results.append(test_array_relationship())
-    results.append(test_backward_compatibility())
-    results.append(test_complete_order_example())
+    results.append(_check_link_type())
+    results.append(_check_array_relationship())
+    results.append(_check_backward_compatibility())
+    results.append(_check_complete_order_example())
     
     passed = sum(results)
     total = len(results)

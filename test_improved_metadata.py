@@ -6,12 +6,16 @@
 - 제약조건, 기본값
 - 복잡한 타입 지원
 """
-import requests
 import json
 import os
+import time
+import uuid
+
+import pytest
+import requests
 
 BASE_URL = "http://localhost:8000/api/v1"
-DB_NAME = "spice_metadata_test"
+DB_NAME = f"spice_metadata_test_{uuid.uuid4().hex[:8]}"
 ADMIN_TOKEN = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "").strip()
 HEADERS = {"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}
 if not ADMIN_TOKEN:
@@ -19,17 +23,48 @@ if not ADMIN_TOKEN:
 
 def setup_database():
     """테스트용 데이터베이스 생성"""
-    try:
-        requests.delete(f"{BASE_URL}/database/{DB_NAME}", headers=HEADERS)
-    except:
-        pass
-    
     response = requests.post(
         f"{BASE_URL}/database/create",
         json={"name": DB_NAME},
         headers=HEADERS,
     )
     print(f"데이터베이스 생성: {response.status_code}")
+    if response.status_code not in (200, 202, 409):
+        return False
+
+    for _ in range(15):
+        check_resp = requests.get(f"{BASE_URL}/database/exists/{DB_NAME}", headers=HEADERS)
+        if check_resp.status_code == 200:
+            exists = check_resp.json().get("data", {}).get("exists")
+            if exists:
+                return True
+        time.sleep(1)
+    return False
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _ensure_database():
+    assert setup_database()
+
+
+def _wait_for_class(class_id: str, timeout_seconds: int = 15):
+    for _ in range(timeout_seconds):
+        response = requests.get(f"{BASE_URL}/database/{DB_NAME}/ontology/{class_id}", headers=HEADERS)
+        if response.status_code == 200:
+            data = response.json()
+            return data.get("data", data)
+        time.sleep(1)
+    return None
+
+
+def _label_text(value):
+    if isinstance(value, dict):
+        return (
+            str(value.get("ko") or "").strip()
+            or str(value.get("en") or "").strip()
+            or next((str(v).strip() for v in value.values() if v), "")
+        )
+    return str(value or "").strip()
 
 def test_full_metadata_support():
     """전체 메타데이터 지원 테스트"""
@@ -48,6 +83,7 @@ def test_full_metadata_support():
                 "label": {"en": "Order ID", "ko": "주문 번호"},
                 "description": {"en": "Unique identifier for the order", "ko": "주문의 고유 식별자"},
                 "required": True,
+                "primaryKey": True,
                 "constraints": {
                     "minLength": 5,
                     "maxLength": 20,
@@ -112,6 +148,13 @@ def test_full_metadata_support():
         "label": {"en": "Customer", "ko": "고객"},
         "properties": [
             {
+                "name": "customer_id",
+                "type": "STRING",
+                "label": {"en": "Customer ID", "ko": "고객 ID"},
+                "required": True,
+                "primaryKey": True,
+            },
+            {
                 "name": "name",
                 "type": "STRING",
                 "label": {"en": "Name", "ko": "이름"},
@@ -127,6 +170,13 @@ def test_full_metadata_support():
         "label": {"en": "Order Item", "ko": "주문 항목"},
         "properties": [
             {
+                "name": "order_item_id",
+                "type": "STRING",
+                "label": {"en": "Order Item ID", "ko": "주문 항목 ID"},
+                "required": True,
+                "primaryKey": True,
+            },
+            {
                 "name": "quantity",
                 "type": "INTEGER",
                 "label": {"en": "Quantity", "ko": "수량"},
@@ -140,29 +190,33 @@ def test_full_metadata_support():
         ]
     }
     
-    # 클래스 생성
-    for class_data, class_name in [(customer_data, "Customer"), (order_item_data, "OrderItem"), (order_data, "Order")]:
+    # Customer, OrderItem 클래스 생성
+    for class_data, class_name in [(customer_data, "Customer"), (order_item_data, "OrderItem")]:
         response = requests.post(
             f"{BASE_URL}/database/{DB_NAME}/ontology",
             json=class_data,
             headers=HEADERS,
         )
         print(f"\n{class_name} 클래스 생성: {response.status_code}")
-        if response.status_code != 200:
-            print(f"오류: {response.text}")
+        if response.status_code not in (200, 202):
+            pytest.fail(f"{class_name} 생성 실패: {response.status_code} {response.text}")
+        if not _wait_for_class(class_name):
+            pytest.fail(f"{class_name} 클래스가 준비되지 않았습니다")
+
+    # Order 클래스 생성 (관계 대상 클래스가 준비된 뒤)
+    response = requests.post(
+        f"{BASE_URL}/database/{DB_NAME}/ontology",
+        json=order_data,
+        headers=HEADERS,
+    )
+    print(f"\nOrder 클래스 생성: {response.status_code}")
+    if response.status_code not in (200, 202):
+        pytest.fail(f"Order 생성 실패: {response.status_code} {response.text}")
     
     # 2. 생성된 클래스 조회 및 검증
     print("\n=== Order 클래스 조회 및 검증 ===")
-    response = requests.get(f"{BASE_URL}/database/{DB_NAME}/ontology/Order", headers=HEADERS)
-    
-    if response.status_code == 200:
-        data = response.json()
-        
-        # API 응답 구조 확인
-        if "data" in data:
-            order_class = data["data"]
-        else:
-            order_class = data
+    order_class = _wait_for_class("Order")
+    if order_class:
             
         print(f"\n전체 응답:")
         print(json.dumps(order_class, indent=2, ensure_ascii=False))
@@ -171,13 +225,13 @@ def test_full_metadata_support():
         print("\n=== 검증 결과 ===")
         
         # 1. 다국어 label 검증
-        if order_class.get("label", {}).get("ko") == "주문":
+        if _label_text(order_class.get("label")) == "주문":
             print("✅ 클래스 다국어 label 정상")
         else:
             print("❌ 클래스 다국어 label 누락")
             
         # 2. 다국어 description 검증
-        if order_class.get("description", {}).get("ko") == "구매 주문을 나타냅니다":
+        if _label_text(order_class.get("description")) == "구매 주문을 나타냅니다":
             print("✅ 클래스 다국어 description 정상")
         else:
             print("❌ 클래스 다국어 description 누락")
@@ -186,7 +240,7 @@ def test_full_metadata_support():
         properties = order_class.get("properties", [])
         for prop in properties:
             if prop.get("name") == "order_id":
-                if prop.get("label", {}).get("ko") == "주문 번호":
+                if _label_text(prop.get("label")) == "주문 번호":
                     print("✅ order_id 속성 label 정상")
                 else:
                     print("❌ order_id 속성 label 누락")
@@ -206,7 +260,7 @@ def test_full_metadata_support():
         relationships = order_class.get("relationships", [])
         for rel in relationships:
             if rel.get("predicate") == "customer":
-                if rel.get("label", {}).get("ko") == "고객":
+                if _label_text(rel.get("label")) == "고객":
                     print("✅ customer 관계 label 정상")
                 else:
                     print("❌ customer 관계 label 누락")
@@ -227,7 +281,7 @@ def test_full_metadata_support():
             print("❌ customer property → relationship 변환 실패")
             
     else:
-        print(f"클래스 조회 실패: {response.text}")
+        pytest.fail("Order 클래스 조회 실패")
 
 def test_complex_types():
     """복잡한 타입 테스트"""
@@ -238,6 +292,13 @@ def test_complex_types():
         "type": "Class",
         "label": {"en": "Complex Types Test"},
         "properties": [
+            {
+                "name": "complex_types_id",
+                "type": "STRING",
+                "label": {"en": "Complex Types ID"},
+                "required": True,
+                "primaryKey": True,
+            },
             {
                 "name": "tags",
                 "type": "ARRAY",
@@ -272,16 +333,12 @@ def test_complex_types():
         headers=HEADERS,
     )
     print(f"ComplexTypes 클래스 생성: {response.status_code}")
+    if response.status_code not in (200, 202):
+        pytest.fail(f"ComplexTypes 생성 실패: {response.status_code} {response.text}")
     
     # 조회 및 검증
-    response = requests.get(f"{BASE_URL}/database/{DB_NAME}/ontology/ComplexTypes", headers=HEADERS)
-    if response.status_code == 200:
-        data = response.json()
-        if "data" in data:
-            complex_class = data["data"]
-        else:
-            complex_class = data
-            
+    complex_class = _wait_for_class("ComplexTypes")
+    if complex_class:
         print("\n복잡한 타입 속성들:")
         for prop in complex_class.get("properties", []):
             print(f"- {prop.get('name')}: {prop.get('type')}")
@@ -289,6 +346,8 @@ def test_complex_types():
                 print(f"  제약조건: {prop.get('constraints')}")
             if prop.get("default") is not None:
                 print(f"  기본값: {prop.get('default')}")
+    else:
+        pytest.fail("ComplexTypes 클래스 조회 실패")
 
 if __name__ == "__main__":
     print("🔥 THINK ULTRA! 개선된 메타데이터 시스템 테스트")

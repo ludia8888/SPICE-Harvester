@@ -7,7 +7,7 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), 'backend'))
 
-def test_property_model():
+def _check_property_model():
     """Test Property model with simple strings"""
     print("🔍 Testing Property model...")
     
@@ -47,7 +47,12 @@ def test_property_model():
         traceback.print_exc()
         return False
 
-def test_relationship_model():
+
+def test_property_model():
+    """Test Property model with simple strings"""
+    assert _check_property_model()
+
+def _check_relationship_model():
     """Test Relationship model with simple strings"""
     print("\n🔍 Testing Relationship model...")
     
@@ -74,7 +79,12 @@ def test_relationship_model():
         traceback.print_exc()
         return False
 
-def test_ontology_request():
+
+def test_relationship_model():
+    """Test Relationship model with simple strings"""
+    assert _check_relationship_model()
+
+def _check_ontology_request():
     """Test OntologyCreateRequest with simple strings"""
     print("\n🔍 Testing OntologyCreateRequest...")
     
@@ -116,7 +126,12 @@ def test_ontology_request():
         traceback.print_exc()
         return False
 
-def test_converter():
+
+def test_ontology_request():
+    """Test OntologyCreateRequest with simple strings"""
+    assert _check_ontology_request()
+
+def _check_converter():
     """Test PropertyToRelationshipConverter with new models"""
     print("\n🔍 Testing PropertyToRelationshipConverter...")
     
@@ -168,15 +183,20 @@ def test_converter():
         traceback.print_exc()
         return False
 
+
+def test_converter():
+    """Test PropertyToRelationshipConverter with new models"""
+    assert _check_converter()
+
 if __name__ == "__main__":
     print("🔥 THINK ULTRA! Model Changes Test")
     print("=" * 50)
     
     results = []
-    results.append(test_property_model())
-    results.append(test_relationship_model()) 
-    results.append(test_ontology_request())
-    results.append(test_converter())
+    results.append(_check_property_model())
+    results.append(_check_relationship_model())
+    results.append(_check_ontology_request())
+    results.append(_check_converter())
     
     passed = sum(results)
     total = len(results)

@@ -49,6 +49,7 @@ from oms.services.ontology_interface_contract import (
     strip_interface_prefix,
 )
 from oms.services.ontology_resources import OntologyResourceService
+from oms.services.property_to_relationship_converter import PropertyToRelationshipConverter
 from shared.utils.jsonld import JSONToJSONLDConverter
 from shared.utils.label_mapper import LabelMapper
 from shared.models.common import BaseResponse
@@ -83,6 +84,7 @@ from shared.security.auth_utils import extract_presented_token, get_expected_tok
 from shared.utils.branch_utils import get_protected_branches, protected_branch_write_message
 
 logger = logging.getLogger(__name__)
+_PROPERTY_CONVERTER = PropertyToRelationshipConverter()
 
 
 def _is_protected_branch(branch: str) -> bool:
@@ -350,6 +352,15 @@ async def create_ontology(
             return JSONResponse(
                 status_code=error_payload["http_status"],
                 content=error_payload,
+            )
+
+        try:
+            ontology_data = _PROPERTY_CONVERTER.process_class_data(ontology_data)
+        except Exception as e:
+            logger.error("Property→relationship conversion failed: %s", e)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to convert properties to relationships: {e}",
             )
 
         if enable_event_sourcing:
@@ -1412,6 +1423,15 @@ async def create_ontology_with_advanced_relationships(
             return JSONResponse(
                 status_code=error_payload["http_status"],
                 content=error_payload,
+            )
+
+        try:
+            ontology_data = _PROPERTY_CONVERTER.process_class_data(ontology_data)
+        except Exception as e:
+            logger.error("Property→relationship conversion failed: %s", e)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to convert properties to relationships: {e}",
             )
 
         if enable_event_sourcing:

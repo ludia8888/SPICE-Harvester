@@ -3,12 +3,16 @@
 🔥 THINK ULTRA! 메타데이터 시스템 직접 테스트
 스키마 문제를 우회하여 핵심 로직 검증
 """
-import requests
 import json
 import os
+import time
+import uuid
+
+import pytest
+import requests
 
 BASE_URL = "http://localhost:8000/api/v1"
-DB_NAME = "spice_metadata_bypass_test"
+DB_NAME = f"spice_metadata_bypass_test_{uuid.uuid4().hex[:8]}"
 ADMIN_TOKEN = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "").strip()
 HEADERS = {"X-Admin-Token": ADMIN_TOKEN} if ADMIN_TOKEN else {}
 if not ADMIN_TOKEN:
@@ -16,20 +20,50 @@ if not ADMIN_TOKEN:
 
 def setup_database():
     """새로운 테스트용 데이터베이스 생성"""
-    try:
-        requests.delete(f"{BASE_URL}/database/{DB_NAME}", headers=HEADERS)
-    except:
-        pass
-    
     response = requests.post(
         f"{BASE_URL}/database/create",
         json={"name": DB_NAME},
         headers=HEADERS,
     )
     print(f"데이터베이스 생성: {response.status_code}")
-    return response.status_code == 200
+    if response.status_code not in (200, 202, 409):
+        return False
 
-def test_simple_class_with_basic_metadata():
+    for _ in range(15):
+        check_resp = requests.get(f"{BASE_URL}/database/exists/{DB_NAME}", headers=HEADERS)
+        if check_resp.status_code == 200:
+            exists = check_resp.json().get("data", {}).get("exists")
+            if exists:
+                return True
+        time.sleep(1)
+    return False
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _ensure_database():
+    assert setup_database()
+
+
+def _wait_for_class(class_id: str, timeout_seconds: int = 15):
+    for _ in range(timeout_seconds):
+        response = requests.get(f"{BASE_URL}/database/{DB_NAME}/ontology/{class_id}", headers=HEADERS)
+        if response.status_code == 200:
+            data = response.json()
+            return data.get("data", data)
+        time.sleep(1)
+    return None
+
+
+def _label_text(value):
+    if isinstance(value, dict):
+        return (
+            str(value.get("ko") or "").strip()
+            or str(value.get("en") or "").strip()
+            or next((str(v).strip() for v in value.values() if v), "")
+        )
+    return str(value or "").strip()
+
+def _run_simple_class_with_basic_metadata():
     """기본 메타데이터로 간단한 클래스 테스트"""
     print("\n=== 기본 메타데이터 테스트 ===")
     
@@ -40,6 +74,13 @@ def test_simple_class_with_basic_metadata():
         "label": {"en": "Simple Test", "ko": "간단한 테스트"},
         "description": {"en": "A simple test class", "ko": "간단한 테스트 클래스"},
         "properties": [
+            {
+                "name": "simpletest_id",
+                "type": "STRING",
+                "label": {"en": "Simple Test ID", "ko": "간단한 테스트 ID"},
+                "required": True,
+                "primaryKey": True,
+            },
             {
                 "name": "test_field",
                 "type": "STRING",
@@ -62,22 +103,14 @@ def test_simple_class_with_basic_metadata():
     )
     
     print(f"클래스 생성 응답: {response.status_code}")
-    if response.status_code != 200:
+    if response.status_code not in (200, 202):
         print(f"생성 오류: {response.text}")
         return False
     
     # 생성된 클래스 조회
     print("생성된 클래스 조회 중...")
-    get_response = requests.get(f"{BASE_URL}/database/{DB_NAME}/ontology/SimpleTest", headers=HEADERS)
-    
-    if get_response.status_code == 200:
-        data = get_response.json()
-        
-        # API 응답 구조 확인
-        if "data" in data:
-            class_data = data["data"]
-        else:
-            class_data = data
+    class_data = _wait_for_class("SimpleTest")
+    if class_data:
             
         print(f"\n조회 응답:")
         print(json.dumps(class_data, indent=2, ensure_ascii=False))
@@ -86,33 +119,33 @@ def test_simple_class_with_basic_metadata():
         print("\n=== 메타데이터 검증 ===")
         
         # 1. 클래스 레벨 다국어 지원
-        label = class_data.get("label", {})
-        if label.get("ko") == "간단한 테스트":
+        label_text = _label_text(class_data.get("label"))
+        if label_text == "간단한 테스트":
             print("✅ 클래스 한국어 label 정상")
         else:
-            print(f"❌ 클래스 한국어 label 문제: {label}")
+            print(f"❌ 클래스 한국어 label 문제: {label_text}")
             
-        desc = class_data.get("description", {})
-        if desc.get("ko") == "간단한 테스트 클래스":
+        desc_text = _label_text(class_data.get("description"))
+        if desc_text == "간단한 테스트 클래스":
             print("✅ 클래스 한국어 description 정상")
         else:
-            print(f"❌ 클래스 한국어 description 문제: {desc}")
+            print(f"❌ 클래스 한국어 description 문제: {desc_text}")
         
         # 2. 속성 레벨 메타데이터
         properties = class_data.get("properties", [])
         for prop in properties:
             if prop.get("name") == "test_field":
-                prop_label = prop.get("label", {})
-                if prop_label.get("ko") == "테스트 필드":
+                prop_label_text = _label_text(prop.get("label"))
+                if prop_label_text == "테스트 필드":
                     print("✅ 속성 한국어 label 정상")
                 else:
-                    print(f"❌ 속성 한국어 label 문제: {prop_label}")
+                    print(f"❌ 속성 한국어 label 문제: {prop_label_text}")
                     
-                prop_desc = prop.get("description", {})
-                if prop_desc.get("ko") == "테스트 필드입니다":
+                prop_desc_text = _label_text(prop.get("description"))
+                if prop_desc_text == "테스트 필드입니다":
                     print("✅ 속성 한국어 description 정상")
                 else:
-                    print(f"❌ 속성 한국어 description 문제: {prop_desc}")
+                    print(f"❌ 속성 한국어 description 문제: {prop_desc_text}")
                     
                 constraints = prop.get("constraints", {})
                 if constraints.get("minLength") == 1 and constraints.get("maxLength") == 100:
@@ -121,12 +154,17 @@ def test_simple_class_with_basic_metadata():
                     print(f"❌ 속성 제약조건 문제: {constraints}")
         
         return True
-    else:
-        print(f"클래스 조회 실패: {get_response.status_code}")
-        print(f"오류: {get_response.text}")
-        return False
 
-def test_relationship_conversion():
+    print("클래스 조회 실패: SimpleTest class not available")
+    return False
+
+
+def test_simple_class_with_basic_metadata():
+    """기본 메타데이터로 간단한 클래스 테스트"""
+    assert _run_simple_class_with_basic_metadata()
+
+
+def _run_relationship_conversion():
     """Property → Relationship 변환 테스트"""
     print("\n=== Property → Relationship 변환 테스트 ===")
     
@@ -136,6 +174,13 @@ def test_relationship_conversion():
         "type": "Class",
         "label": {"en": "Category", "ko": "카테고리"},
         "properties": [
+            {
+                "name": "category_id",
+                "type": "STRING",
+                "label": {"en": "Category ID", "ko": "카테고리 ID"},
+                "required": True,
+                "primaryKey": True,
+            },
             {
                 "name": "name",
                 "type": "STRING",
@@ -152,6 +197,12 @@ def test_relationship_conversion():
         headers=HEADERS,
     )
     print(f"Category 생성: {response.status_code}")
+    if response.status_code not in (200, 202):
+        print(f"Category 생성 오류: {response.text}")
+        return False
+    if not _wait_for_class("Category"):
+        print("Category 클래스가 준비되지 않았습니다")
+        return False
     
     # 클래스 참조가 포함된 클래스 생성
     product_class = {
@@ -159,6 +210,13 @@ def test_relationship_conversion():
         "type": "Class",
         "label": {"en": "Product", "ko": "제품"},
         "properties": [
+            {
+                "name": "product_id",
+                "type": "STRING",
+                "label": {"en": "Product ID", "ko": "제품 ID"},
+                "required": True,
+                "primaryKey": True,
+            },
             {
                 "name": "name",
                 "type": "STRING",
@@ -184,21 +242,15 @@ def test_relationship_conversion():
         headers=HEADERS,
     )
     print(f"Product 생성: {response.status_code}")
-    
-    if response.status_code != 200:
+
+    if response.status_code not in (200, 202):
         print(f"생성 오류: {response.text}")
         return False
     
     # 변환 결과 확인
     print("Product 클래스 조회하여 변환 결과 확인...")
-    get_response = requests.get(f"{BASE_URL}/database/{DB_NAME}/ontology/Product", headers=HEADERS)
-    
-    if get_response.status_code == 200:
-        data = get_response.json()
-        if "data" in data:
-            product_data = data["data"]
-        else:
-            product_data = data
+    product_data = _wait_for_class("Product")
+    if product_data:
             
         print(f"\nProduct 클래스 구조:")
         print(json.dumps(product_data, indent=2, ensure_ascii=False))
@@ -226,16 +278,21 @@ def test_relationship_conversion():
                 else:
                     print(f"❌ relationship target 문제: {rel.get('target')}")
                     
-                rel_label = rel.get("label", {})
-                if rel_label.get("ko") == "카테고리":
+                rel_label_text = _label_text(rel.get("label"))
+                if rel_label_text == "카테고리":
                     print("✅ relationship 한국어 label 정상")
                 else:
-                    print(f"❌ relationship 한국어 label 문제: {rel_label}")
+                    print(f"❌ relationship 한국어 label 문제: {rel_label_text}")
         
         return True
-    else:
-        print(f"Product 클래스 조회 실패: {get_response.status_code}")
-        return False
+
+    print("Product 클래스 조회 실패: Product class not available")
+    return False
+
+
+def test_relationship_conversion():
+    """Property → Relationship 변환 테스트"""
+    assert _run_relationship_conversion()
 
 if __name__ == "__main__":
     print("🔥 THINK ULTRA! 메타데이터 시스템 직접 테스트")
@@ -245,13 +302,13 @@ if __name__ == "__main__":
         print("✅ 데이터베이스 준비 완료")
         
         # 기본 메타데이터 테스트
-        if test_simple_class_with_basic_metadata():
+        if _run_simple_class_with_basic_metadata():
             print("✅ 기본 메타데이터 테스트 통과")
         else:
             print("❌ 기본 메타데이터 테스트 실패")
         
         # 관계 변환 테스트
-        if test_relationship_conversion():
+        if _run_relationship_conversion():
             print("✅ 관계 변환 테스트 통과")
         else:
             print("❌ 관계 변환 테스트 실패")
