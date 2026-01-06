@@ -43,6 +43,24 @@ export type DatasetRecord = {
   version_created_at?: string
 }
 
+export type DatasetIngestRequestRecord = {
+  ingest_request_id: string
+  dataset_id: string
+  db_name: string
+  branch?: string
+  status?: string
+  schema_json?: Record<string, unknown>
+  schema_status?: string
+  schema_approved_at?: string
+  schema_approved_by?: string
+  sample_json?: Record<string, unknown>
+  row_count?: number
+  source_metadata?: Record<string, unknown>
+  created_at?: string
+  updated_at?: string
+  published_at?: string | null
+}
+
 export type PipelineRecord = {
   pipeline_id: string
   db_name: string
@@ -162,6 +180,21 @@ type PipelineReadinessPayload = {
 
 type DatasetUploadPayload = {
   dataset?: DatasetRecord
+  ingest_request_id?: string
+  schema_status?: string
+  schema_suggestion?: Record<string, unknown>
+}
+
+export type DatasetUploadResult = {
+  dataset: DatasetRecord
+  ingest_request_id?: string
+  schema_status?: string
+  schema_suggestion?: Record<string, unknown>
+}
+
+type DatasetSchemaApprovalPayload = {
+  dataset?: DatasetRecord
+  ingest_request?: DatasetIngestRequestRecord
 }
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''
@@ -545,5 +578,31 @@ export const uploadDataset = async (params: { dbName: string; file: File; mode: 
   if (!data.dataset) {
     throw new Error('Dataset upload returned no dataset information.')
   }
-  return data.dataset
+  return {
+    dataset: data.dataset,
+    ingest_request_id: data.ingest_request_id,
+    schema_status: data.schema_status,
+    schema_suggestion: data.schema_suggestion,
+  }
+}
+
+export const approveDatasetSchema = async (params: {
+  ingestRequestId: string
+  dbName: string
+  schemaJson?: Record<string, unknown>
+}) => {
+  const data = await requestApi<DatasetSchemaApprovalPayload>(
+    `/api/v1/pipelines/datasets/ingest-requests/${encodeURIComponent(params.ingestRequestId)}/schema/approve`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-DB-Name': params.dbName,
+        'X-Project': params.dbName,
+      },
+      body: JSON.stringify(params.schemaJson ? { schema_json: params.schemaJson } : {}),
+    },
+    'Failed to approve dataset schema',
+  )
+  return data
 }

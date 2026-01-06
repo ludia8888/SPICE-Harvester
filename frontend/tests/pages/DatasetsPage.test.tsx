@@ -152,7 +152,11 @@ describe('DatasetsPage', () => {
   })
 
   it('uploads files and shows completion state', async () => {
-    apiMocks.uploadDataset.mockResolvedValue({ dataset_id: 'ds-2', name: 'report' })
+    apiMocks.uploadDataset.mockResolvedValue({
+      dataset: { dataset_id: 'ds-2', name: 'report' },
+      ingest_request_id: 'ingest-2',
+      schema_status: 'PENDING',
+    })
     const user = userEvent.setup()
 
     renderWithClient(<DatasetsPage />)
@@ -239,8 +243,8 @@ describe('DatasetsPage', () => {
   })
 
   it('shows upload progress state while files are uploading', async () => {
-    let resolveUpload: (value: { dataset_id: string; name: string }) => void
-    const uploadPromise = new Promise<{ dataset_id: string; name: string }>((resolve) => {
+    let resolveUpload: (value: { dataset: { dataset_id: string; name: string } }) => void
+    const uploadPromise = new Promise<{ dataset: { dataset_id: string; name: string } }>((resolve) => {
       resolveUpload = resolve
     })
     apiMocks.uploadDataset.mockReturnValue(uploadPromise)
@@ -269,7 +273,7 @@ describe('DatasetsPage', () => {
     expect(await screen.findByText('progress.csv')).toBeInTheDocument()
     expect(document.querySelector('.upload-status-dot')).not.toBeNull()
 
-    resolveUpload!({ dataset_id: 'ds-3', name: 'progress' })
+    resolveUpload!({ dataset: { dataset_id: 'ds-3', name: 'progress' } })
     expect(await screen.findByText(/Upload finished/i)).toBeInTheDocument()
   })
 

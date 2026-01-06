@@ -25,9 +25,11 @@ import {
   deleteDatabase,
   listDatabases,
   listDatasets,
+  approveDatasetSchema,
   uploadDataset,
   type DatabaseRecord,
   type DatasetRecord,
+  type DatasetUploadResult,
   type UploadMode,
 } from '../api/bff'
 
@@ -60,6 +62,11 @@ type UploadFile = {
   status: UploadStatus
   datasetName?: string
   error?: string
+  ingestRequestId?: string
+  schemaStatus?: string
+  schemaSuggestion?: Record<string, unknown>
+  approvalStatus?: 'idle' | 'pending' | 'error'
+  approvalError?: string
 }
 
 type UploadStatus = 'queued' | 'active' | 'complete' | 'error'
@@ -267,6 +274,30 @@ const parseTimestamp = (value?: string) => {
   return Number.isNaN(parsed) ? 0 : parsed
 }
 
+const getSchemaStatusLabel = (status?: string) => {
+  if (!status) {
+    return null
+  }
+  const normalized = status.toUpperCase()
+  if (normalized === 'APPROVED') {
+    return 'Schema approved'
+  }
+  if (normalized === 'PENDING') {
+    return 'Schema pending approval'
+  }
+  if (normalized === 'REJECTED') {
+    return 'Schema rejected'
+  }
+  return `Schema ${normalized.toLowerCase()}`
+}
+
+const getSchemaStatusClass = (status?: string) => {
+  if (!status) {
+    return ''
+  }
+  return `is-${status.toLowerCase()}`
+}
+
 const mapDatasetToFile = (dataset: DatasetRecord): DatasetFile => ({
   id: dataset.dataset_id,
   name: dataset.name,
@@ -331,6 +362,71 @@ export const DatasetsPage = () => {
 
   const databaseErrorMessage = databasesQuery.error instanceof Error ? databasesQuery.error.message : null
   const datasetErrorMessage = datasetsQuery.error instanceof Error ? datasetsQuery.error.message : null
+
+  const applyUploadResult = (uploadFile: UploadFile, result: DatasetUploadResult) => {
+    return {
+      ...uploadFile,
+      status: 'complete' as const,
+      datasetName: result.dataset.name,
+      ingestRequestId: result.ingest_request_id,
+      schemaStatus: result.schema_status,
+      schemaSuggestion: result.schema_suggestion,
+      approvalStatus: 'idle' as const,
+      approvalError: undefined,
+    }
+  }
+
+  const handleApproveSchema = async (uploadFile: UploadFile) => {
+    if (!activeFolder || !uploadFile.ingestRequestId) {
+      return
+    }
+    setUploadFiles((current) =>
+      current.map((item) =>
+        item.id === uploadFile.id
+          ? {
+              ...item,
+              approvalStatus: 'pending',
+              approvalError: undefined,
+            }
+          : item,
+      ),
+    )
+    try {
+      const response = await approveDatasetSchema({
+        ingestRequestId: uploadFile.ingestRequestId,
+        dbName: activeFolder.id,
+        schemaJson:
+          uploadFile.schemaSuggestion && typeof uploadFile.schemaSuggestion === 'object'
+            ? uploadFile.schemaSuggestion
+            : undefined,
+      })
+      const updatedStatus = response.ingest_request?.schema_status ?? 'APPROVED'
+      setUploadFiles((current) =>
+        current.map((item) =>
+          item.id === uploadFile.id
+            ? {
+                ...item,
+                schemaStatus: updatedStatus,
+                approvalStatus: 'idle',
+              }
+            : item,
+        ),
+      )
+      await queryClient.invalidateQueries({ queryKey: ['datasets', activeFolder.id] })
+    } catch (error) {
+      setUploadFiles((current) =>
+        current.map((item) =>
+          item.id === uploadFile.id
+            ? {
+                ...item,
+                approvalStatus: 'error',
+                approvalError: error instanceof Error ? error.message : 'Schema approval failed',
+              }
+            : item,
+        ),
+      )
+    }
+  }
 
   useEffect(() => {
     if (!activeFolderId) {
@@ -475,6 +571,7 @@ export const DatasetsPage = () => {
           id: `${file.name}-${file.size}-${file.lastModified}`,
           file,
           status: 'queued' as const,
+          approvalStatus: 'idle' as const,
         }))
         .filter((entry) => !existingIds.has(entry.id))
       return [...current, ...additions]
@@ -675,19 +772,17 @@ export const DatasetsPage = () => {
             ),
           )
           try {
-            const dataset = await uploadDataset({
+            const result = await uploadDataset({
               dbName: activeFolder.id,
               file: uploadFile.file,
               mode: uploadMode,
             })
             setUploadFiles((current) =>
               current.map((item) =>
-                item.id === uploadFile.id
-                  ? { ...item, status: 'complete', datasetName: dataset.name }
-                  : item,
+                item.id === uploadFile.id ? applyUploadResult(item, result) : item,
               ),
             )
-            return dataset
+            return result.dataset
           } catch (error) {
             setUploadFiles((current) =>
               current.map((item) =>
@@ -1114,6 +1209,37 @@ export const DatasetsPage = () => {
                       <Text className="upload-complete-name">
                         {uploadFile.datasetName || getResourceName(uploadFile.file.name)}
                       </Text>
+                      <div className="upload-complete-actions">
+                        {getSchemaStatusLabel(uploadFile.schemaStatus) ? (
+                          <span
+                            className={`upload-schema-status ${getSchemaStatusClass(
+                              uploadFile.schemaStatus,
+                            )}`}
+                          >
+                            {getSchemaStatusLabel(uploadFile.schemaStatus)}
+                          </span>
+                        ) : null}
+                        {uploadFile.schemaStatus?.toUpperCase() === 'PENDING' &&
+                        uploadFile.ingestRequestId ? (
+                          <Button
+                            minimal
+                            small
+                            icon="endorsed"
+                            text={
+                              uploadFile.approvalStatus === 'pending'
+                                ? 'Approving...'
+                                : 'Approve schema'
+                            }
+                            onClick={() => {
+                              void handleApproveSchema(uploadFile)
+                            }}
+                            disabled={uploadFile.approvalStatus === 'pending'}
+                          />
+                        ) : null}
+                      </div>
+                      {uploadFile.approvalError ? (
+                        <Text className="upload-approval-error">{uploadFile.approvalError}</Text>
+                      ) : null}
                     </div>
                   ))}
               </div>

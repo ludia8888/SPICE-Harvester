@@ -74,6 +74,8 @@ describe('bff api helpers', () => {
         status: 'success',
         data: {
           dataset: { dataset_id: 'ds-1', name: 'orders' },
+          ingest_request_id: 'ingest-1',
+          schema_status: 'PENDING',
         },
       }),
     )
@@ -81,7 +83,8 @@ describe('bff api helpers', () => {
     const file = new File(['id,name\n1,A'], 'orders.csv', { type: 'text/csv' })
     const result = await uploadDataset({ dbName: 'core', file, mode: 'structured' })
 
-    expect(result.dataset_id).toBe('ds-1')
+    expect(result.dataset.dataset_id).toBe('ds-1')
+    expect(result.schema_status).toBe('PENDING')
     const headers = fetchMock.mock.calls[0][1]?.headers as Headers
     expect(headers.get('Idempotency-Key')).toBe('uuid-123')
   })
@@ -100,6 +103,27 @@ describe('bff api helpers', () => {
     await uploadDataset({ dbName: 'core', file, mode: 'media' })
 
     expect(fetchMock.mock.calls[0][0]).toContain('/api/v1/pipelines/datasets/media-upload')
+  })
+
+  it('approves dataset schema with project headers', async () => {
+    const { approveDatasetSchema } = await loadModule()
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>
+    fetchMock.mockResolvedValue(
+      makeResponse({
+        status: 'success',
+        data: {
+          dataset: { dataset_id: 'ds-1', name: 'orders' },
+          ingest_request: { ingest_request_id: 'ingest-1', schema_status: 'APPROVED' },
+        },
+      }),
+    )
+
+    await approveDatasetSchema({ ingestRequestId: 'ingest-1', dbName: 'core' })
+
+    expect(fetchMock.mock.calls[0][0]).toContain('/api/v1/pipelines/datasets/ingest-requests/ingest-1/schema/approve')
+    const headers = fetchMock.mock.calls[0][1]?.headers as Headers
+    expect(headers.get('X-DB-Name')).toBe('core')
+    expect(headers.get('X-Project')).toBe('core')
   })
 
   it('calls dataset and pipeline endpoints with project headers', async () => {
