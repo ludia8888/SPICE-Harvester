@@ -109,6 +109,9 @@ class _FakeDatasetRegistry:
         self._datasets_by_id[record.dataset_id] = record
         return record
 
+    async def get_dataset(self, *, dataset_id: str):
+        return self._datasets_by_id.get(dataset_id)
+
     async def create_ingest_request(
         self,
         *,
@@ -178,6 +181,12 @@ class _FakeDatasetRegistry:
 
     async def get_version_by_ingest_request(self, *, ingest_request_id: str):
         return self._versions.get(ingest_request_id)
+
+    async def get_version(self, *, version_id: str):
+        for version in self._versions.values():
+            if version.version_id == version_id:
+                return version
+        return None
 
     async def get_ingest_transaction(self, *, ingest_request_id: str):
         return self._ingest_transactions.get(ingest_request_id)
@@ -253,6 +262,39 @@ class _FakeDatasetRegistry:
                 self._datasets[(dataset.db_name, dataset.name, dataset.branch)] = updated_dataset
         return version
 
+    async def add_version(
+        self,
+        *,
+        dataset_id,
+        lakefs_commit_id,
+        artifact_key,
+        row_count,
+        sample_json=None,
+        schema_json=None,
+        version_id=None,
+        ingest_request_id=None,
+        promoted_from_artifact_id=None,
+    ):
+        now = datetime.now(timezone.utc)
+        record = DatasetVersionRecord(
+            version_id=version_id or f"ver-{len(self._versions) + 1}",
+            dataset_id=dataset_id,
+            lakefs_commit_id=lakefs_commit_id,
+            artifact_key=artifact_key,
+            row_count=row_count,
+            sample_json=sample_json or {},
+            ingest_request_id=ingest_request_id,
+            promoted_from_artifact_id=promoted_from_artifact_id,
+            created_at=now,
+        )
+        self._versions[record.ingest_request_id or record.version_id] = record
+        if schema_json and dataset_id in self._datasets_by_id:
+            dataset = self._datasets_by_id[dataset_id]
+            updated_dataset = replace(dataset, schema_json=schema_json, updated_at=now)
+            self._datasets_by_id[dataset_id] = updated_dataset
+            self._datasets[(dataset.db_name, dataset.name, dataset.branch)] = updated_dataset
+        return record
+
     async def mark_ingest_failed(self, *, ingest_request_id, error):
         record = self._ingest_requests.get(ingest_request_id)
         if record:
@@ -272,7 +314,25 @@ class _FakeFunnelClient:
         return False
 
     async def analyze_dataset(self, payload):
-        return {"columns": [{"name": "id", "type": "int"}]}
+        return {
+            "columns": [
+                {
+                    "column_name": "id",
+                    "inferred_type": {
+                        "type": "xsd:integer",
+                        "confidence": 0.9,
+                        "reason": "ok",
+                    },
+                    "total_count": len(payload.get("data") or []),
+                    "non_empty_count": len(payload.get("data") or []),
+                    "sample_values": ["1"],
+                    "null_count": 0,
+                    "unique_count": 1,
+                    "null_ratio": 0.0,
+                    "unique_ratio": 1.0,
+                }
+            ]
+        }
 
     async def excel_to_structure_preview_stream(self, *args, **kwargs):
         preview = {
@@ -449,6 +509,84 @@ async def test_approve_dataset_schema_updates_dataset():
     assert response["data"]["dataset"]["schema_json"]["columns"][0]["name"] == "id"
     assert response["data"]["ingest_request"]["schema_status"] == "APPROVED"
     assert response["data"]["ingest_request"]["schema_approved_by"] == "user-approve"
+
+
+@pytest.mark.asyncio
+async def test_get_ingest_request_includes_funnel_analysis(monkeypatch):
+    import bff.services.funnel_client as funnel_client
+
+    monkeypatch.setattr(funnel_client, "FunnelClient", _FakeFunnelClient)
+
+    dataset_registry = _FakeDatasetRegistry()
+    dataset = await dataset_registry.create_dataset(
+        db_name="core-db",
+        name="incoming",
+        description=None,
+        source_type="csv_upload",
+        source_ref="upload.csv",
+        schema_json={},
+        branch="main",
+    )
+    ingest_request, _ = await dataset_registry.create_ingest_request(
+        dataset_id=dataset.dataset_id,
+        db_name=dataset.db_name,
+        branch=dataset.branch,
+        idempotency_key="idem-read",
+        request_fingerprint="fingerprint",
+        schema_json={"columns": [{"name": "id", "type": "xsd:integer"}]},
+        sample_json={"columns": [{"name": "id"}], "rows": [{"id": 1}]},
+        row_count=1,
+        source_metadata={"source_type": "csv"},
+    )
+    request = _build_request({"X-DB-Name": "core-db"})
+
+    response = await pipeline_router.get_dataset_ingest_request(
+        ingest_request_id=ingest_request.ingest_request_id,
+        request=request,
+        dataset_registry=dataset_registry,
+    )
+
+    assert response["status"] == "success"
+    assert response["data"]["ingest_request"]["ingest_request_id"] == ingest_request.ingest_request_id
+    assert response["data"]["funnel_analysis"]["risk_policy"]["suggestion_only"] is True
+
+
+@pytest.mark.asyncio
+async def test_reanalyze_dataset_version_returns_funnel_analysis(monkeypatch):
+    import bff.services.funnel_client as funnel_client
+
+    monkeypatch.setattr(funnel_client, "FunnelClient", _FakeFunnelClient)
+
+    dataset_registry = _FakeDatasetRegistry()
+    dataset = await dataset_registry.create_dataset(
+        db_name="core-db",
+        name="incoming",
+        description=None,
+        source_type="csv_upload",
+        source_ref="upload.csv",
+        schema_json={},
+        branch="main",
+    )
+    version = await dataset_registry.add_version(
+        dataset_id=dataset.dataset_id,
+        lakefs_commit_id="commit-1",
+        artifact_key="s3://bucket/key",
+        row_count=1,
+        sample_json={"columns": [{"name": "id"}], "rows": [{"id": 1}]},
+        schema_json={"columns": [{"name": "id", "type": "xsd:integer"}]},
+    )
+    request = _build_request({"X-DB-Name": "core-db"})
+
+    response = await pipeline_router.reanalyze_dataset_version(
+        dataset_id=dataset.dataset_id,
+        version_id=version.version_id,
+        request=request,
+        dataset_registry=dataset_registry,
+    )
+
+    assert response["status"] == "success"
+    assert response["data"]["version"]["version_id"] == version.version_id
+    assert response["data"]["funnel_analysis"]["risk_policy"]["suggestion_only"] is True
 
 
 @pytest.mark.asyncio

@@ -206,6 +206,7 @@ class PatternBasedTypeDetector:
             )
             candidates.append(cls._check_enum_enhanced(str_values, adaptive_thresholds, name_hints))
 
+        candidate_summary = cls._summarize_candidates(candidates, adaptive_thresholds, name_hints)
         best = cls._select_best_candidate(candidates, adaptive_thresholds, name_hints)
         if best is not None:
             semantic_label, unit = cls._infer_semantic_label_and_unit(
@@ -214,6 +215,11 @@ class PatternBasedTypeDetector:
                 inferred=best,
             )
             meta = dict(best.metadata or {})
+            if candidate_summary:
+                meta["candidate_summary"] = candidate_summary.get("candidates", [])
+                gap = candidate_summary.get("confidence_gap")
+                if gap is not None:
+                    meta["confidence_gap"] = gap
             if semantic_label:
                 meta["semantic_label"] = semantic_label
             if unit:
@@ -237,6 +243,11 @@ class PatternBasedTypeDetector:
             inferred=fallback,
         )
         meta: Dict[str, Any] = {}
+        if candidate_summary:
+            meta["candidate_summary"] = candidate_summary.get("candidates", [])
+            gap = candidate_summary.get("confidence_gap")
+            if gap is not None:
+                meta["confidence_gap"] = gap
         if semantic_label:
             meta["semantic_label"] = semantic_label
         if unit:
@@ -557,6 +568,37 @@ class PatternBasedTypeDetector:
 
         eligible.sort(reverse=True, key=lambda t: (t[0], t[1]))
         return eligible[0][2]
+
+    @classmethod
+    def _summarize_candidates(
+        cls,
+        candidates: List[TypeInferenceResult],
+        thresholds: Dict[str, float],
+        name_hints: Dict[str, float],
+    ) -> Dict[str, Any]:
+        if not candidates:
+            return {}
+
+        sorted_candidates = sorted(
+            candidates,
+            key=lambda cand: (cand.confidence, -cls._type_priority(cand.type)),
+            reverse=True,
+        )
+        summary = []
+        for cand in sorted_candidates[:3]:
+            min_conf = cls._min_confidence_for_type(cand.type, thresholds, name_hints)
+            summary.append(
+                {
+                    "type": cand.type,
+                    "confidence": cand.confidence,
+                    "meets_threshold": cand.confidence >= min_conf,
+                }
+            )
+        gap = None
+        if len(sorted_candidates) > 1:
+            gap = max(0.0, sorted_candidates[0].confidence - sorted_candidates[1].confidence)
+
+        return {"candidates": summary, "confidence_gap": gap}
 
     @classmethod
     def _check_complex_types_enhanced(

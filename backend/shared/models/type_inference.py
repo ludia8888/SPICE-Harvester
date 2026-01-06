@@ -10,6 +10,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from shared.models.common import DataType
 
 
+def _default_risk_policy() -> Dict[str, Any]:
+    return {"stage": "funnel", "suggestion_only": True, "hard_gate": False}
+
+
 class TypeInferenceResult(BaseModel):
     """Type inference result with confidence and reasoning"""
 
@@ -17,6 +21,29 @@ class TypeInferenceResult(BaseModel):
     confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score (0.0-1.0)")
     reason: str = Field(..., description="Reasoning for the inference")
     metadata: Optional[Dict[str, Any]] = Field(default=None, description="Additional metadata")
+
+
+class FunnelRiskItem(BaseModel):
+    """Risk signal emitted by Funnel (suggestion-only)."""
+
+    code: str = Field(..., description="Machine-readable risk identifier")
+    severity: str = Field(..., description="info | warning (suggestion-only)")
+    message: str = Field(..., description="Human-readable risk summary")
+    column: Optional[str] = Field(default=None, description="Column name when applicable")
+    evidence: Dict[str, Any] = Field(default_factory=dict, description="Structured context")
+    suggested_actions: List[str] = Field(
+        default_factory=list, description="Recommended follow-up actions"
+    )
+    is_suggestion: bool = Field(default=True, description="Funnel signals are suggestions only")
+    stage: str = Field(default="funnel", description="Origin stage for the risk signal")
+
+
+class ColumnProfile(BaseModel):
+    """Lightweight column profiling summary (sample-based)."""
+
+    length_stats: Optional[Dict[str, float]] = Field(default=None, description="String length stats")
+    numeric_stats: Optional[Dict[str, float]] = Field(default=None, description="Numeric stats")
+    format_stats: Optional[Dict[str, Any]] = Field(default=None, description="Format-related hints")
 
 
 class ColumnAnalysisResult(BaseModel):
@@ -57,6 +84,18 @@ class ColumnAnalysisResult(BaseModel):
     unique_ratio: float = Field(
         default=0.0, ge=0.0, le=1.0, description="Unique/non-empty ratio"
     )
+    profile: Optional[ColumnProfile] = Field(default=None, description="Sample-based profile")
+    risk_flags: List[FunnelRiskItem] = Field(
+        default_factory=list, description="Suggestion-only risk signals"
+    )
+
+
+class FunnelAnalysisPayload(BaseModel):
+    """Funnel analysis payload (suggestion-only)."""
+
+    columns: List[ColumnAnalysisResult] = Field(default_factory=list)
+    risk_summary: List[FunnelRiskItem] = Field(default_factory=list)
+    risk_policy: Dict[str, Any] = Field(default_factory=_default_risk_policy)
 
 
 class DatasetAnalysisRequest(BaseModel):
@@ -74,6 +113,12 @@ class DatasetAnalysisResponse(BaseModel):
     columns: List[ColumnAnalysisResult]
     analysis_metadata: Dict[str, Any] = Field(default_factory=dict)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    risk_summary: List[FunnelRiskItem] = Field(
+        default_factory=list, description="Dataset-level risk signals"
+    )
+    risk_policy: Dict[str, Any] = Field(
+        default_factory=_default_risk_policy, description="Risk signal policy metadata"
+    )
 
 
 class SchemaGenerationRequest(BaseModel):
@@ -113,6 +158,12 @@ class FunnelPreviewResponse(BaseModel):
     inferred_schema: Optional[List[ColumnAnalysisResult]] = None
     total_rows: int
     preview_rows: int
+    risk_summary: List[FunnelRiskItem] = Field(
+        default_factory=list, description="Dataset-level risk signals"
+    )
+    risk_policy: Dict[str, Any] = Field(
+        default_factory=_default_risk_policy, description="Risk signal policy metadata"
+    )
 
 
 class TypeMappingRequest(BaseModel):

@@ -909,6 +909,7 @@ async def start_pipelining_google_sheet(
         }
 
         inferred_schema: list[Dict[str, Any]] = []
+        analysis_payload: Optional[Dict[str, Any]] = None
         try:
             from bff.services.funnel_client import FunnelClient
 
@@ -921,9 +922,22 @@ async def start_pipelining_google_sheet(
                         "include_complex_types": True,
                     }
                 )
-            inferred_schema = analysis.get("columns") or []
+            analysis_payload = analysis if isinstance(analysis, dict) else None
+            inferred_schema = (analysis_payload or {}).get("columns") or []
         except Exception as exc:
             logger.warning(f"Google Sheets type inference failed: {exc}")
+
+        funnel_analysis = dict(analysis_payload or {})
+        if "columns" not in funnel_analysis and inferred_schema:
+            funnel_analysis["columns"] = inferred_schema
+        if "risk_summary" not in funnel_analysis:
+            funnel_analysis["risk_summary"] = []
+        if "risk_policy" not in funnel_analysis:
+            funnel_analysis["risk_policy"] = {
+                "stage": "funnel",
+                "suggestion_only": True,
+                "hard_gate": False,
+            }
 
         schema_columns = []
         for column in columns or []:
@@ -1069,6 +1083,7 @@ async def start_pipelining_google_sheet(
                     "columns": schema_columns,
                     "rows": sample_rows,
                 },
+                "funnel_analysis": funnel_analysis,
             },
         ).to_dict()
     except HTTPException:

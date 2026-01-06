@@ -10,6 +10,8 @@ import httpx
 
 from shared.models.google_sheets import GoogleSheetPreviewRequest, GoogleSheetPreviewResponse
 
+from funnel.services.risk_assessor import assess_dataset_risks
+from funnel.services.schema_utils import normalize_property_name
 from funnel.services.type_inference import FunnelTypeInferenceService
 from shared.config.service_config import ServiceConfig
 from shared.models.type_inference import (
@@ -78,13 +80,21 @@ class FunnelDataProcessor:
 
         # 2. 타입 추론 수행
         inferred_schema = None
+        risk_summary: List[Any] = []
         if infer_types and sheets_preview.sample_rows:
             analysis_results = self.type_inference_service.analyze_dataset(
                 data=sheets_preview.sample_rows,
                 columns=sheets_preview.columns,
                 include_complex_types=include_complex_types,
             )
-            inferred_schema = analysis_results
+            risk_summary, column_risks, column_profiles = assess_dataset_risks(
+                sheets_preview.sample_rows,
+                sheets_preview.columns,
+                analysis_results,
+            )
+            inferred_schema = _attach_risks_and_profiles(
+                analysis_results, column_risks, column_profiles
+            )
 
         # 3. Funnel response 생성
         return FunnelPreviewResponse(
@@ -99,6 +109,7 @@ class FunnelDataProcessor:
             inferred_schema=inferred_schema,
             total_rows=sheets_preview.total_rows,
             preview_rows=len(sheets_preview.sample_rows),
+            risk_summary=risk_summary,
         )
 
     async def analyze_dataset(self, request: DatasetAnalysisRequest) -> DatasetAnalysisResponse:
@@ -119,6 +130,13 @@ class FunnelDataProcessor:
             include_complex_types=request.include_complex_types,
         )
 
+        risk_summary, column_risks, column_profiles = assess_dataset_risks(
+            request.data, request.columns, analysis_results
+        )
+        analysis_results = _attach_risks_and_profiles(
+            analysis_results, column_risks, column_profiles
+        )
+
         # 메타데이터 생성
         metadata = {
             "total_columns": len(request.columns),
@@ -128,7 +146,10 @@ class FunnelDataProcessor:
         }
 
         return DatasetAnalysisResponse(
-            columns=analysis_results, analysis_metadata=metadata, timestamp=datetime.now(timezone.utc)
+            columns=analysis_results,
+            analysis_metadata=metadata,
+            timestamp=datetime.now(timezone.utc),
+            risk_summary=risk_summary,
         )
 
     def generate_schema_suggestion(
@@ -154,7 +175,7 @@ class FunnelDataProcessor:
                 data_type = "xsd:string"  # 기본값
 
             property_def = {
-                "name": self._normalize_property_name(result.column_name),
+                "name": normalize_property_name(result.column_name),
                 "type": data_type,
                 "label": {"ko": result.column_name},
                 "description": {
@@ -232,22 +253,35 @@ class FunnelDataProcessor:
 
     def _normalize_property_name(self, column_name: str) -> str:
         """컬럼 이름을 속성 이름으로 정규화"""
-        # 공백을 언더스코어로 변환
-        normalized = column_name.replace(" ", "_").replace("-", "_")
-        # 특수문자 제거
-        normalized = "".join(c for c in normalized if c.isalnum() or c == "_")
-        # 소문자로 변환
-        normalized = normalized.lower()
-        # 숫자로 시작하면 앞에 'col_' 추가
-        if normalized and normalized[0].isdigit():
-            normalized = "col_" + normalized
-        # 빈 문자열이면 기본값
-        if not normalized:
-            normalized = "column"
-        return normalized
+        return normalize_property_name(column_name)
 
     def _generate_class_id(self, class_name: str) -> str:
         """클래스 ID 생성"""
         # CamelCase로 변환
         parts = class_name.replace("_", " ").replace("-", " ").split()
         return "".join(word.capitalize() for word in parts)
+
+
+def _attach_risks_and_profiles(
+    results: List[ColumnAnalysisResult],
+    column_risks: Dict[str, List[Any]],
+    column_profiles: Dict[str, Any],
+) -> List[ColumnAnalysisResult]:
+    enriched: List[ColumnAnalysisResult] = []
+    for result in results:
+        update: Dict[str, Any] = {}
+        if result.column_name in column_profiles:
+            update["profile"] = column_profiles[result.column_name]
+        if result.column_name in column_risks:
+            update["risk_flags"] = column_risks[result.column_name]
+        if update:
+            enriched.append(_copy_model(result, update))
+        else:
+            enriched.append(result)
+    return enriched
+
+
+def _copy_model(model: Any, update: Dict[str, Any]) -> Any:
+    if hasattr(model, "model_copy"):
+        return model.model_copy(update=update)
+    return model.copy(update=update)

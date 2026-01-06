@@ -13,13 +13,15 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from pydantic import BaseModel, Field
 
 from shared.models.requests import ApiResponse
+from shared.models.type_inference import FunnelAnalysisPayload
 from shared.models.event_envelope import EventEnvelope
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode
@@ -71,6 +73,20 @@ router = APIRouter(prefix="/pipelines", tags=["Pipeline Builder"])
 
 _DEPENDENCY_STATUS_ALLOWLIST = {"DEPLOYED", "SUCCESS"}
 _utcnow = utcnow
+
+
+class FunnelAnalysisData(BaseModel):
+    dataset: Optional[Dict[str, Any]] = Field(default=None)
+    ingest_request: Optional[Dict[str, Any]] = Field(default=None)
+    version: Optional[Dict[str, Any]] = Field(default=None)
+    funnel_analysis: FunnelAnalysisPayload
+
+
+class FunnelAnalysisApiResponse(BaseModel):
+    status: str
+    message: str
+    data: FunnelAnalysisData
+    errors: Optional[List[str]] = None
 
 
 def _resolve_pipeline_protected_branches() -> set[str]:
@@ -847,6 +863,108 @@ def _rows_from_preview(columns: list[str], sample_rows: list[list[Any]]) -> list
             payload[str(col)] = row[index] if index < len(row) else None
         rows.append(payload)
     return rows
+
+
+FUNNEL_RISK_POLICY = {"stage": "funnel", "suggestion_only": True, "hard_gate": False}
+
+
+def _build_funnel_analysis_payload(
+    analysis: Optional[Dict[str, Any]], inferred_schema: list[Dict[str, Any]]
+) -> Dict[str, Any]:
+    payload = dict(analysis or {})
+    if "columns" not in payload and inferred_schema:
+        payload["columns"] = inferred_schema
+    if "risk_summary" not in payload:
+        payload["risk_summary"] = []
+    if "risk_policy" not in payload:
+        payload["risk_policy"] = FUNNEL_RISK_POLICY
+    return payload
+
+
+def _extract_sample_columns(sample_json: Any) -> List[str]:
+    if not isinstance(sample_json, dict):
+        return []
+    raw_columns = sample_json.get("columns")
+    if isinstance(raw_columns, list):
+        columns: List[str] = []
+        for col in raw_columns:
+            if isinstance(col, dict):
+                name = str(col.get("name") or col.get("column") or "").strip()
+                if name:
+                    columns.append(name)
+            else:
+                name = str(col).strip()
+                if name:
+                    columns.append(name)
+        if columns:
+            return columns
+    raw_fields = sample_json.get("fields")
+    if isinstance(raw_fields, list):
+        columns = []
+        for col in raw_fields:
+            if isinstance(col, dict) and col.get("name"):
+                columns.append(str(col.get("name")))
+        if columns:
+            return columns
+    raw_props = sample_json.get("properties")
+    if isinstance(raw_props, dict):
+        return [str(key) for key in raw_props.keys() if str(key)]
+    return []
+
+
+def _extract_sample_rows(sample_json: Any, columns: List[str]) -> List[List[Any]]:
+    if not isinstance(sample_json, dict):
+        return []
+    rows = sample_json.get("rows")
+    if rows is None:
+        rows = sample_json.get("data")
+    if not isinstance(rows, list):
+        return []
+    if rows and isinstance(rows[0], dict):
+        if not columns:
+            seen: set[str] = set()
+            ordered: List[str] = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                for key in row.keys():
+                    key_str = str(key)
+                    if key_str and key_str not in seen:
+                        seen.add(key_str)
+                        ordered.append(key_str)
+            columns[:] = ordered
+        return [[row.get(col) for col in columns] for row in rows if isinstance(row, dict)]
+    if rows and isinstance(rows[0], list):
+        list_rows = [row for row in rows if isinstance(row, list)]
+        if not columns and list_rows:
+            columns[:] = [f"col_{idx}" for idx in range(len(list_rows[0]))]
+        return list_rows
+    return []
+
+
+async def _compute_funnel_analysis_from_sample(sample_json: Any) -> Dict[str, Any]:
+    columns = _extract_sample_columns(sample_json)
+    rows = _extract_sample_rows(sample_json, columns)
+    if not columns and not rows:
+        return _build_funnel_analysis_payload(None, [])
+    try:
+        from bff.services.funnel_client import FunnelClient
+
+        async with FunnelClient() as funnel_client:
+            analysis = await funnel_client.analyze_dataset(
+                {
+                    "data": rows,
+                    "columns": columns,
+                    "sample_size": min(len(rows), 500) if rows else 0,
+                    "include_complex_types": True,
+                }
+            )
+        analysis_payload = analysis if isinstance(analysis, dict) else None
+        inferred_schema = (analysis_payload or {}).get("columns") or []
+        return _build_funnel_analysis_payload(analysis_payload, inferred_schema)
+    except Exception as exc:
+        logger.warning("Funnel analysis failed: %s", exc)
+        return _build_funnel_analysis_payload(None, [])
 
 
 def _detect_csv_delimiter(sample: str) -> str:
@@ -3893,6 +4011,44 @@ async def create_dataset_version(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@router.post(
+    "/datasets/{dataset_id}/versions/{version_id}/funnel-analysis",
+    response_model=FunnelAnalysisApiResponse,
+)
+@trace_endpoint("reanalyze_dataset_version")
+async def reanalyze_dataset_version(
+    dataset_id: str,
+    version_id: str,
+    request: Request,
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+) -> ApiResponse:
+    try:
+        dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
+        if not dataset:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+        try:
+            enforce_db_scope(request.headers, db_name=dataset.db_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+        version = await dataset_registry.get_version(version_id=version_id)
+        if not version or version.dataset_id != dataset.dataset_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset version not found")
+        funnel_analysis = await _compute_funnel_analysis_from_sample(version.sample_json)
+        return ApiResponse.success(
+            message="Funnel analysis refreshed",
+            data={
+                "dataset": dataset.__dict__,
+                "version": version.__dict__,
+                "funnel_analysis": funnel_analysis,
+            },
+        ).to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to reanalyze dataset version: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
 @router.post("/datasets/excel-upload", response_model=ApiResponse)
 @trace_endpoint("upload_excel_dataset")
 async def upload_excel_dataset(
@@ -3961,6 +4117,13 @@ async def upload_excel_dataset(
 
         from bff.services.funnel_client import FunnelClient
 
+        preview: Dict[str, Any] = {}
+        content_hash = ""
+        columns: list[str] = []
+        preview_rows: list[list[Any]] = []
+        inferred_schema: list[Dict[str, Any]] = []
+        analysis_payload: Optional[Dict[str, Any]] = None
+
         async with FunnelClient() as funnel_client:
             result, content_hash = await funnel_client.excel_to_structure_preview_stream(
                 fileobj=file.file,
@@ -3970,17 +4133,32 @@ async def upload_excel_dataset(
                 table_bbox=bbox,
                 include_complex_types=True,
             )
-
-        preview = result.get("preview") or {}
-        columns = [str(col) for col in (preview.get("columns") or []) if str(col)]
-        inferred_schema = preview.get("inferred_schema") or []
+            preview = result.get("preview") or {}
+            columns = [str(col) for col in (preview.get("columns") or []) if str(col)]
+            preview_rows = preview.get("sample_data") or []
+            inferred_schema = preview.get("inferred_schema") or []
+            if columns and preview_rows:
+                try:
+                    analysis = await funnel_client.analyze_dataset(
+                        {
+                            "data": preview_rows,
+                            "columns": columns,
+                            "sample_size": min(len(preview_rows), 500),
+                            "include_complex_types": True,
+                        }
+                    )
+                    analysis_payload = analysis if isinstance(analysis, dict) else None
+                except Exception as exc:
+                    logger.warning(f"Excel type inference risk assessment failed: {exc}")
         schema_columns = _build_schema_columns(columns, inferred_schema)
         schema_json = {"columns": schema_columns}
-        sample_rows = _rows_from_preview(columns, preview.get("sample_data") or [])
+        sample_rows = _rows_from_preview(columns, preview_rows)
         total_rows = preview.get("total_rows")
         row_count = int(total_rows) if isinstance(total_rows, int) else None
         if row_count is None and sample_rows:
             row_count = len(sample_rows)
+
+        funnel_analysis = _build_funnel_analysis_payload(analysis_payload, inferred_schema)
 
         dataset_branch = (branch or "main").strip() or "main"
         dataset_branch = safe_lakefs_ref(dataset_branch)
@@ -4053,6 +4231,7 @@ async def upload_excel_dataset(
                         "version": existing_version.__dict__,
                         "preview": {"columns": _columns_from_schema(schema_columns), "rows": sample_rows},
                         "source": preview.get("source_metadata"),
+                        "funnel_analysis": funnel_analysis,
                         "ingest_request_id": ingest_request.ingest_request_id,
                         "schema_status": getattr(ingest_request, "schema_status", "PENDING"),
                         "schema_suggestion": schema_json,
@@ -4222,6 +4401,7 @@ async def upload_excel_dataset(
                 "objectify_job_id": objectify_job_id,
                 "preview": {"columns": _columns_from_schema(schema_columns), "rows": sample_rows},
                 "source": preview.get("source_metadata"),
+                "funnel_analysis": funnel_analysis,
                 "ingest_request_id": ingest_request.ingest_request_id,
                 "schema_status": getattr(ingest_request, "schema_status", "PENDING"),
                 "schema_suggestion": schema_json,
@@ -4306,6 +4486,7 @@ async def upload_csv_dataset(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No columns detected")
 
         inferred_schema: list[Dict[str, Any]] = []
+        analysis_payload: Optional[Dict[str, Any]] = None
         try:
             from bff.services.funnel_client import FunnelClient
 
@@ -4318,10 +4499,12 @@ async def upload_csv_dataset(
                         "include_complex_types": True,
                     }
                 )
-            inferred_schema = analysis.get("columns") or []
+            analysis_payload = analysis if isinstance(analysis, dict) else None
+            inferred_schema = (analysis_payload or {}).get("columns") or []
         except Exception as exc:
             logger.warning(f"CSV type inference failed: {exc}")
 
+        funnel_analysis = _build_funnel_analysis_payload(analysis_payload, inferred_schema)
         schema_columns = _build_schema_columns(columns, inferred_schema)
         schema_json = {"columns": schema_columns}
         sample_rows = _rows_from_preview(columns, preview_rows)
@@ -4407,6 +4590,7 @@ async def upload_csv_dataset(
                             "delimiter": resolved_delimiter,
                             "has_header": has_header,
                         },
+                        "funnel_analysis": funnel_analysis,
                         "ingest_request_id": ingest_request.ingest_request_id,
                         "schema_status": getattr(ingest_request, "schema_status", "PENDING"),
                         "schema_suggestion": schema_json,
@@ -4599,6 +4783,7 @@ async def upload_csv_dataset(
                     "delimiter": resolved_delimiter,
                     "has_header": has_header,
                 },
+                "funnel_analysis": funnel_analysis,
                 "ingest_request_id": ingest_request.ingest_request_id,
                 "schema_status": getattr(ingest_request, "schema_status", "PENDING"),
                 "schema_suggestion": schema_json,
@@ -4620,6 +4805,38 @@ async def upload_csv_dataset(
             except Exception as exc:
                 logger.warning("Failed to mark csv ingest request failed: %s", exc)
         logger.exception("Failed to upload csv dataset")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/datasets/ingest-requests/{ingest_request_id}", response_model=FunnelAnalysisApiResponse)
+@trace_endpoint("get_dataset_ingest_request")
+async def get_dataset_ingest_request(
+    ingest_request_id: str,
+    request: Request = None,
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+) -> ApiResponse:
+    try:
+        ingest_request = await dataset_registry.get_ingest_request(ingest_request_id=ingest_request_id)
+        if not ingest_request:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ingest request not found")
+        try:
+            enforce_db_scope(request.headers, db_name=ingest_request.db_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+        dataset = await dataset_registry.get_dataset(dataset_id=ingest_request.dataset_id)
+        funnel_analysis = await _compute_funnel_analysis_from_sample(ingest_request.sample_json)
+        return ApiResponse.success(
+            message="Ingest request fetched",
+            data={
+                "dataset": dataset.__dict__ if dataset else None,
+                "ingest_request": ingest_request.__dict__,
+                "funnel_analysis": funnel_analysis,
+            },
+        ).to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get ingest request: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
