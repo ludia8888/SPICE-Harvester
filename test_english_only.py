@@ -218,6 +218,7 @@ def _run_explicit_relationships():
                 "label": "Order ID",
                 "required": True,
                 "primaryKey": True,
+                "titleKey": True,
             }
         ],
         "relationships": [
@@ -248,7 +249,8 @@ def _run_explicit_relationships():
                 "name": "name",
                 "type": "STRING",
                 "label": "Customer Name",
-                "required": True
+                "required": True,
+                "titleKey": True,
             }
         ]
     }

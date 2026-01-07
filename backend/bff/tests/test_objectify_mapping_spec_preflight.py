@@ -8,15 +8,71 @@ from bff.routers import objectify as objectify_router
 
 
 class _FakeDatasetRegistry:
-    def __init__(self, dataset, latest_version):
+    def __init__(self, dataset, latest_version, *, key_spec=None):
         self._dataset = dataset
         self._latest_version = latest_version
+        self._key_spec = key_spec
+        self._backing = SimpleNamespace(
+            backing_id="backing-1",
+            dataset_id=dataset.dataset_id,
+            db_name=dataset.db_name,
+            name=dataset.name,
+            description=None,
+            source_type="dataset",
+            source_ref=None,
+            branch=dataset.branch,
+            status="ACTIVE",
+            created_at=None,
+            updated_at=None,
+        )
+        self._backing_version = None
 
     async def get_dataset(self, *, dataset_id: str):
         return self._dataset
 
     async def get_latest_version(self, *, dataset_id: str):
         return self._latest_version
+
+    async def get_backing_datasource(self, *, backing_id: str):
+        if backing_id == self._backing.backing_id:
+            return self._backing
+        return None
+
+    async def get_backing_datasource_version(self, *, version_id: str):
+        if self._backing_version and version_id == self._backing_version.version_id:
+            return self._backing_version
+        return None
+
+    async def get_or_create_backing_datasource(self, *, dataset, source_type: str, source_ref: str):
+        return self._backing
+
+    async def get_or_create_backing_datasource_version(
+        self,
+        *,
+        backing_id: str,
+        dataset_version_id: str,
+        schema_hash: str,
+        metadata: dict | None = None,
+    ):
+        if self._backing_version and self._backing_version.dataset_version_id == dataset_version_id:
+            return self._backing_version
+        self._backing_version = SimpleNamespace(
+            version_id="backing-version-1",
+            backing_id=backing_id,
+            dataset_version_id=dataset_version_id,
+            schema_hash=schema_hash,
+            artifact_key=None,
+            metadata=metadata or {},
+            status="ACTIVE",
+            created_at=None,
+        )
+        return self._backing_version
+
+    async def get_key_spec_for_dataset(self, *, dataset_id: str, dataset_version_id: str | None = None):
+        return self._key_spec
+
+    async def record_gate_result(self, **kwargs):
+        return None
 
 
 class _FakeObjectifyRegistry:
@@ -25,34 +81,88 @@ class _FakeObjectifyRegistry:
 
 
 class _FakeOMSClient:
-    def __init__(self, payload):
+    def __init__(self, payload, object_type_resource):
         self._payload = payload
+        self._object_type = object_type_resource
 
     async def get_ontology(self, db_name, class_id, *, branch="main"):
         return self._payload
 
+    async def get_ontology_resource(self, db_name, *, resource_type, resource_id, branch="main"):
+        if resource_type == "object_type":
+            return self._object_type
+        raise AssertionError(f"Unexpected resource_type: {resource_type}")
 
-def _make_dataset(schema_columns):
-    schema_json = {"columns": [{"name": name} for name in schema_columns]}
+
+def _make_dataset(schema_columns, schema_types=None):
+    schema_types = schema_types or {}
+    schema_json = {
+        "columns": [
+            {"name": name, "type": schema_types.get(name, "string")} for name in schema_columns
+        ]
+    }
     return SimpleNamespace(
         dataset_id="ds-1",
         db_name="test_db",
         branch="main",
         name="Dataset",
+        source_type="dataset",
+        source_ref=None,
         schema_json=schema_json,
     )
 
 
-def _make_latest(schema_columns):
-    return SimpleNamespace(sample_json={"columns": [{"name": name} for name in schema_columns]})
+def _make_latest(schema_columns, schema_types=None):
+    schema_types = schema_types or {}
+    return SimpleNamespace(
+        version_id="ver-1",
+        dataset_id="ds-1",
+        sample_json={
+            "columns": [{"name": name, "type": schema_types.get(name, "string")} for name in schema_columns]
+        },
+    )
 
 
-def _post_mapping_spec(body, *, schema_columns, ontology_payload):
-    dataset = _make_dataset(schema_columns)
-    latest_version = _make_latest(schema_columns)
-    dataset_registry = _FakeDatasetRegistry(dataset, latest_version)
+def _build_object_type_resource(ontology_payload):
+    props = []
+    if isinstance(ontology_payload, dict):
+        props = ontology_payload.get("properties") or []
+    prop_names = [p.get("name") for p in props if isinstance(p, dict) and p.get("name")]
+    primary_keys = [p.get("name") for p in props if isinstance(p, dict) and p.get("primary_key")]
+    if not primary_keys and prop_names:
+        primary_keys = [prop_names[0]]
+    title_key = [prop_names[0]] if prop_names else []
+    if not title_key and primary_keys:
+        title_key = primary_keys[:1]
+    return {
+        "spec": {
+            "pk_spec": {"primary_key": primary_keys, "title_key": title_key},
+            "backing_source": {
+                "kind": "backing_datasource",
+                "ref": "backing-1",
+                "schema_hash": "schema-hash",
+                "version_id": "backing-version-1",
+            },
+            "status": "ACTIVE",
+        }
+    }
+
+
+def _post_mapping_spec(
+    body,
+    *,
+    schema_columns,
+    ontology_payload,
+    key_spec=None,
+    object_type_resource=None,
+    schema_types=None,
+):
+    dataset = _make_dataset(schema_columns, schema_types=schema_types)
+    latest_version = _make_latest(schema_columns, schema_types=schema_types)
+    dataset_registry = _FakeDatasetRegistry(dataset, latest_version, key_spec=key_spec)
     objectify_registry = _FakeObjectifyRegistry()
-    oms_client = _FakeOMSClient(ontology_payload)
+    object_type_resource = object_type_resource or _build_object_type_resource(ontology_payload)
+    oms_client = _FakeOMSClient(ontology_payload, object_type_resource)
 
     app.dependency_overrides[objectify_router.get_dataset_registry] = lambda: dataset_registry
     app.dependency_overrides[objectify_router.get_objectify_registry] = lambda: objectify_registry
@@ -116,15 +226,43 @@ def test_mapping_spec_relationship_target_is_rejected():
     )
     ontology_payload = {
         "properties": [{"name": "owner", "type": "xsd:string"}],
-        "relationships": [{"predicate": "owner"}],
+        "relationships": [{"predicate": "owner", "cardinality": "1:n"}],
     }
 
     res = _post_mapping_spec(payload, schema_columns=["owner_id"], ontology_payload=ontology_payload)
 
     assert res.status_code == 400
     detail = res.json()["detail"]
-    assert detail["code"] == "MAPPING_SPEC_RELATIONSHIP_TARGET"
+    assert detail["code"] == "MAPPING_SPEC_RELATIONSHIP_CARDINALITY_UNSUPPORTED"
     assert detail["targets"] == ["owner"]
+
+
+def test_mapping_spec_dataset_pk_target_mismatch_is_rejected():
+    payload = _base_payload(
+        [
+            {"source_field": "id", "target_field": "name"},
+            {"source_field": "code", "target_field": "id"},
+        ],
+    )
+    ontology_payload = {
+        "properties": [
+            {"name": "id", "type": "xsd:string", "primary_key": True},
+            {"name": "name", "type": "xsd:string"},
+        ],
+        "relationships": [],
+    }
+    key_spec = SimpleNamespace(key_spec_id="ks-1", spec={"primary_key": ["id"]})
+
+    res = _post_mapping_spec(
+        payload,
+        schema_columns=["id", "code", "name"],
+        ontology_payload=ontology_payload,
+        key_spec=key_spec,
+    )
+
+    assert res.status_code == 400
+    detail = res.json()["detail"]
+    assert detail["code"] == "MAPPING_SPEC_DATASET_PK_TARGET_MISMATCH"
 
 
 def test_mapping_spec_required_missing_is_rejected():
@@ -163,7 +301,7 @@ def test_mapping_spec_primary_key_missing_is_rejected():
 
     assert res.status_code == 400
     detail = res.json()["detail"]
-    assert detail["code"] == "MAPPING_SPEC_PRIMARY_KEY_MISSING"
+    assert detail["code"] == "MAPPING_SPEC_TITLE_KEY_MISSING"
     assert detail["missing_targets"] == ["id"]
 
 
@@ -209,3 +347,45 @@ def test_mapping_spec_target_type_mismatch_is_rejected():
     detail = res.json()["detail"]
     assert detail["code"] == "MAPPING_SPEC_TARGET_TYPE_MISMATCH"
     assert detail["mismatches"][0]["target_field"] == "name"
+
+
+def test_mapping_spec_source_type_incompatible_is_rejected():
+    payload = _base_payload(
+        [{"source_field": "amount", "target_field": "amount"}],
+    )
+    ontology_payload = {
+        "properties": [{"name": "amount", "type": "xsd:decimal"}],
+        "relationships": [],
+    }
+
+    res = _post_mapping_spec(
+        payload,
+        schema_columns=["amount"],
+        schema_types={"amount": "string"},
+        ontology_payload=ontology_payload,
+    )
+
+    assert res.status_code == 400
+    detail = res.json()["detail"]
+    assert detail["code"] == "MAPPING_SPEC_TYPE_INCOMPATIBLE"
+
+
+def test_mapping_spec_source_type_unsupported_is_rejected():
+    payload = _base_payload(
+        [{"source_field": "payload", "target_field": "payload"}],
+    )
+    ontology_payload = {
+        "properties": [{"name": "payload", "type": "xsd:string"}],
+        "relationships": [],
+    }
+
+    res = _post_mapping_spec(
+        payload,
+        schema_columns=["payload"],
+        schema_types={"payload": "struct"},
+        ontology_payload=ontology_payload,
+    )
+
+    assert res.status_code == 400
+    detail = res.json()["detail"]
+    assert detail["code"] == "MAPPING_SPEC_SOURCE_TYPE_UNSUPPORTED"

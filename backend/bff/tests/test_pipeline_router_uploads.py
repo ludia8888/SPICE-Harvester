@@ -657,6 +657,10 @@ async def test_maybe_enqueue_objectify_job():
         async def publish(self, job, *, require_delivery: bool = True):
             self.jobs.append(job)
 
+    class FakeDatasetRegistry:
+        async def record_gate_result(self, **kwargs):
+            return None
+
     dataset = SimpleNamespace(
         dataset_id="ds-1",
         db_name="core-db",
@@ -671,12 +675,14 @@ async def test_maybe_enqueue_objectify_job():
     )
     registry = FakeObjectifyRegistry()
     queue = FakeObjectifyJobQueue()
+    dataset_registry = FakeDatasetRegistry()
 
     job_id = await pipeline_router._maybe_enqueue_objectify_job(
         dataset=dataset,
         version=version,
         objectify_registry=registry,
         job_queue=queue,
+        dataset_registry=dataset_registry,
         actor_user_id="user-1",
     )
 

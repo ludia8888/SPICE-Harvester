@@ -84,6 +84,7 @@ def test_full_metadata_support():
                 "description": {"en": "Unique identifier for the order", "ko": "주문의 고유 식별자"},
                 "required": True,
                 "primaryKey": True,
+                "titleKey": True,
                 "constraints": {
                     "minLength": 5,
                     "maxLength": 20,
@@ -158,7 +159,8 @@ def test_full_metadata_support():
                 "name": "name",
                 "type": "STRING",
                 "label": {"en": "Name", "ko": "이름"},
-                "required": True
+                "required": True,
+                "titleKey": True
             }
         ]
     }
@@ -175,6 +177,7 @@ def test_full_metadata_support():
                 "label": {"en": "Order Item ID", "ko": "주문 항목 ID"},
                 "required": True,
                 "primaryKey": True,
+                "titleKey": True,
             },
             {
                 "name": "quantity",
@@ -298,6 +301,7 @@ def test_complex_types():
                 "label": {"en": "Complex Types ID"},
                 "required": True,
                 "primaryKey": True,
+                "titleKey": True,
             },
             {
                 "name": "tags",

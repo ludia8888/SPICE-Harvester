@@ -45,7 +45,7 @@ from shared.services.lineage_store import LineageStore
 from shared.services.audit_log_store import AuditLogStore
 from shared.security.input_sanitizer import validate_branch_name
 from shared.utils.ontology_version import resolve_ontology_version
-from oms.exceptions import DuplicateOntologyError
+from oms.exceptions import DuplicateOntologyError, DatabaseError
 
 # Observability imports
 from shared.observability.tracing import get_tracing_service, trace_endpoint
@@ -793,6 +793,11 @@ class OntologyWorker:
             except DuplicateOntologyError:
                 # Already exists -> treat as idempotent success
                 created = False
+            except DatabaseError as exc:
+                if "already exists" in str(exc).lower():
+                    created = False
+                else:
+                    raise
 
             if not created:
                 exists = await self.terminus_service.database_exists(db_name)

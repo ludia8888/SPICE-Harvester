@@ -201,8 +201,8 @@ async def test_full_api_integration():
             'label': 'Client',
             'description': 'Client entity',
             'properties': [
-                {'name': 'client_id', 'type': 'string', 'label': 'Client ID', 'required': True},
-                {'name': 'name', 'type': 'string', 'label': 'Name', 'required': False},  # Made optional
+                {'name': 'client_id', 'type': 'string', 'label': 'Client ID', 'required': True, 'primaryKey': True},
+                {'name': 'name', 'type': 'string', 'label': 'Name', 'required': False, 'titleKey': True},  # Made optional
                 {'name': 'region', 'type': 'string', 'label': 'Region', 'required': False}
             ]
         }
@@ -230,8 +230,8 @@ async def test_full_api_integration():
             'label': 'Product',
             'description': 'Product entity',
             'properties': [
-                {'name': 'product_id', 'type': 'string', 'label': 'Product ID', 'required': True},
-                {'name': 'name', 'type': 'string', 'label': 'Name', 'required': False},  # Made optional
+                {'name': 'product_id', 'type': 'string', 'label': 'Product ID', 'required': True, 'primaryKey': True},
+                {'name': 'name', 'type': 'string', 'label': 'Name', 'required': False, 'titleKey': True},  # Made optional
                 {'name': 'price', 'type': 'decimal', 'label': 'Price', 'required': False},
                 {'name': 'category', 'type': 'string', 'label': 'Category', 'required': False}
             ],
@@ -269,7 +269,7 @@ async def test_full_api_integration():
             'label': 'Order',
             'description': 'Order entity',
             'properties': [
-                {'name': 'order_id', 'type': 'string', 'label': 'Order ID', 'required': True},
+                {'name': 'order_id', 'type': 'string', 'label': 'Order ID', 'required': True, 'primaryKey': True, 'titleKey': True},
                 {'name': 'total_amount', 'type': 'decimal', 'label': 'Total Amount', 'required': False},
                 {'name': 'status', 'type': 'string', 'label': 'Status', 'required': False}
             ],

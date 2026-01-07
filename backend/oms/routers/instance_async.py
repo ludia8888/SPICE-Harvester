@@ -141,6 +141,12 @@ class BulkInstanceCreateRequest(BaseModel):
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="메타데이터")
 
 
+class BulkInstanceUpdateRequest(BaseModel):
+    """대량 인스턴스 수정 요청"""
+    instances: List[Dict[str, Any]] = Field(..., description="instance_id + data payloads")
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="메타데이터")
+
+
 @router.post("/{class_id}/create", response_model=CommandResult, status_code=status.HTTP_202_ACCEPTED)
 async def create_instance_async(
     db_name: str = Depends(ensure_database_exists),
@@ -608,6 +614,120 @@ async def bulk_create_instances_async(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create bulk instance command: {str(e)}"
+        )
+
+
+@router.post("/{class_id}/bulk-update", response_model=CommandResult, status_code=status.HTTP_202_ACCEPTED)
+async def bulk_update_instances_async(
+    db_name: str = Depends(ensure_database_exists),
+    class_id: str = Depends(ValidatedClassId),
+    branch: str = Query("main", description="Target branch (default: main)"),
+    request: BulkInstanceUpdateRequest = ...,
+    terminus=TerminusServiceDep,
+    command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
+    event_store=EventStoreDep,
+    user_id: Optional[str] = None,
+):
+    """
+    대량 인스턴스 수정 명령을 비동기로 처리
+    """
+    try:
+        branch = validate_branch_name(branch)
+        sanitized_instances: List[Dict[str, Any]] = []
+
+        for idx, inst in enumerate(request.instances):
+            if not isinstance(inst, dict):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"instances[{idx}] must be object")
+            instance_id = inst.get("instance_id")
+            if not instance_id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="instance_id is required")
+            instance_id = str(instance_id)
+            validate_instance_id(instance_id)
+            data = inst.get("data")
+            if not isinstance(data, dict):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="data must be object")
+            sanitized_instances.append(
+                {
+                    "instance_id": instance_id,
+                    "data": sanitize_input(data),
+                }
+            )
+
+        ontology_version = merge_ontology_stamp(
+            (request.metadata or {}).get("ontology"),
+            await resolve_ontology_version(terminus, db_name=db_name, branch=branch, logger=logger),
+        )
+
+        command = InstanceCommand(
+            command_type=CommandType.BULK_UPDATE_INSTANCES,
+            db_name=db_name,
+            class_id=class_id,
+            branch=branch,
+            payload={
+                "instances": sanitized_instances,
+                "count": len(sanitized_instances),
+            },
+            metadata={
+                **(request.metadata or {}),
+                "user_id": user_id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "ontology": ontology_version,
+            },
+            created_by=user_id,
+        )
+
+        try:
+            await _append_command_event(
+                command,
+                event_store=event_store,
+                topic=AppConfig.INSTANCE_COMMANDS_TOPIC,
+                actor=user_id,
+            )
+        except OptimisticConcurrencyError as e:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "optimistic_concurrency_conflict",
+                    "aggregate_id": e.aggregate_id,
+                    "expected_seq": e.expected_last_sequence,
+                    "actual_seq": e.actual_last_sequence,
+                },
+            )
+
+        if command_status_service:
+            try:
+                await command_status_service.set_command_status(
+                    command_id=str(command.command_id),
+                    status=CommandStatus.PENDING,
+                    metadata={
+                        "command_type": command.command_type,
+                        "db_name": db_name,
+                        "class_id": class_id,
+                        "branch": branch,
+                        "count": len(sanitized_instances),
+                    },
+                )
+            except Exception as e:
+                logger.warning(f"Redis status update failed for bulk update: {e}")
+
+        return CommandResult(
+            command_id=command.command_id,
+            status=CommandStatus.PENDING,
+            result={
+                "message": f"Bulk update accepted for {len(sanitized_instances)} instances",
+                "count": len(sanitized_instances),
+                "db_name": db_name,
+                "class_id": class_id,
+                "branch": branch,
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating bulk update command: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create bulk update command: {str(e)}"
         )
 
 

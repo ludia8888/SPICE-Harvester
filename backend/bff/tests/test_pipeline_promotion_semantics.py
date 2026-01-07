@@ -238,6 +238,12 @@ class _DatasetRegistry:
             artifact_key=artifact_key,
         )
 
+    async def get_key_spec_for_dataset(self, *, dataset_id: str, dataset_version_id: str | None = None) -> Any:
+        return None
+
+    async def create_key_spec(self, **kwargs: Any) -> Any:  # pragma: no cover
+        return None
+
 
 class _ObjectifyRegistry:
     async def get_active_mapping_spec(

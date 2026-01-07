@@ -66,7 +66,7 @@ def measure_import_performance(import_func, description):
 def test_direct_import():
     """직접 경로 import 테스트 (개선된 방식)"""
     from shared.services.elasticsearch_service import ElasticsearchService
-    return ElasticsearchService
+    assert ElasticsearchService is not None
 
 def test_bulk_import_simulation():
     """Bulk import 시뮬레이션 (이전 방식)"""
@@ -90,8 +90,8 @@ def test_bulk_import_simulation():
         run_service
     )
     
-    # 하나만 반환하지만 모든 서비스가 로드됨
-    return ElasticsearchService
+    # 하나만 사용하지만 모든 서비스가 로드됨
+    assert ElasticsearchService is not None
 
 def test_single_service_need():
     """실제 서비스에서 ElasticsearchService 하나만 필요한 경우"""
@@ -104,7 +104,7 @@ def test_single_service_need():
         username="elastic",
         password="test",
     )
-    return service
+    assert service is not None
 
 def main():
     """메인 테스트 실행"""

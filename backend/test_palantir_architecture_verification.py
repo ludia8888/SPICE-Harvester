@@ -80,7 +80,7 @@ async def test_complete_user_flow():
                     {"name": "product_id", "type": "string", "label": "제품 ID", "required": True},
                     {"name": "name", "type": "string", "label": "제품명", "required": True},
                     {"name": "category", "type": "string", "label": "카테고리"},
-                    {"name": "price", "type": "number", "label": "가격"}
+                    {"name": "price", "type": "DECIMAL", "label": "가격"}
                 ],
                 "relationships": [
                     {
@@ -98,7 +98,7 @@ async def test_complete_user_flow():
                 "properties": [
                     {"name": "order_id", "type": "string", "label": "주문 ID", "required": True},
                     {"name": "order_date", "type": "date", "label": "주문일"},
-                    {"name": "total_amount", "type": "number", "label": "총액"}
+                    {"name": "total_amount", "type": "DECIMAL", "label": "총액"}
                 ],
                 "relationships": [
                     {

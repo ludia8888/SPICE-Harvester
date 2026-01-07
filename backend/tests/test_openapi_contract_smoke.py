@@ -666,7 +666,87 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
             ],
             "auto_sync": False,
         }
-        return RequestPlan(op.method, op.path, url, (201, 400, 404), json_body=body, headers=headers)
+        return RequestPlan(op.method, op.path, url, (201, 400, 404, 409), json_body=body, headers=headers)
+
+    if key == ("POST", "/api/v1/backing-datasources"):
+        url = f"{BFF_URL}{op.path}"
+        headers = {"X-DB-Name": ctx.db_name}
+        body = {"dataset_id": ctx.dataset_id or "00000000-0000-0000-0000-000000000001"}
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409), json_body=body, headers=headers)
+
+    if key == ("GET", "/api/v1/backing-datasources"):
+        url = f"{BFF_URL}{op.path}"
+        params = {"dataset_id": ctx.dataset_id or "00000000-0000-0000-0000-000000000001"}
+        headers = {"X-DB-Name": ctx.db_name}
+        return RequestPlan(op.method, op.path, url, (200, 400, 404), params=params, headers=headers)
+
+    if key == ("GET", "/api/v1/backing-datasources/{backing_id}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'backing_id': '00000000-0000-0000-0000-000000000001'})}"
+        headers = {"X-DB-Name": ctx.db_name}
+        return RequestPlan(op.method, op.path, url, (200, 404), headers=headers)
+
+    if key == ("POST", "/api/v1/backing-datasources/{backing_id}/versions"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'backing_id': '00000000-0000-0000-0000-000000000001'})}"
+        headers = {"X-DB-Name": ctx.db_name}
+        body = {"dataset_version_id": ctx.dataset_version_id or "00000000-0000-0000-0000-000000000001"}
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409), json_body=body, headers=headers)
+
+    if key == ("GET", "/api/v1/backing-datasources/{backing_id}/versions"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'backing_id': '00000000-0000-0000-0000-000000000001'})}"
+        headers = {"X-DB-Name": ctx.db_name}
+        return RequestPlan(op.method, op.path, url, (200, 404), headers=headers)
+
+    if key == ("GET", "/api/v1/backing-datasource-versions/{version_id}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'version_id': '00000000-0000-0000-0000-000000000001'})}"
+        headers = {"X-DB-Name": ctx.db_name}
+        return RequestPlan(op.method, op.path, url, (200, 404), headers=headers)
+
+    if key == ("POST", "/api/v1/key-specs"):
+        url = f"{BFF_URL}{op.path}"
+        headers = {"X-DB-Name": ctx.db_name}
+        body = {
+            "dataset_id": ctx.dataset_id or "00000000-0000-0000-0000-000000000001",
+            "primary_key": [f"{ctx.class_id.lower()}_id"],
+        }
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409), json_body=body, headers=headers)
+
+    if key == ("GET", "/api/v1/key-specs"):
+        url = f"{BFF_URL}{op.path}"
+        params = {"dataset_id": ctx.dataset_id or "00000000-0000-0000-0000-000000000001"}
+        headers = {"X-DB-Name": ctx.db_name}
+        return RequestPlan(op.method, op.path, url, (200, 400, 404), params=params, headers=headers)
+
+    if key == ("GET", "/api/v1/key-specs/{key_spec_id}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'key_spec_id': '00000000-0000-0000-0000-000000000001'})}"
+        headers = {"X-DB-Name": ctx.db_name}
+        return RequestPlan(op.method, op.path, url, (200, 404), headers=headers)
+
+    if key == ("POST", "/api/v1/gate-policies"):
+        url = f"{BFF_URL}{op.path}"
+        body = {"scope": "objectify_preflight", "name": "default"}
+        return RequestPlan(op.method, op.path, url, (200, 400), json_body=body)
+
+    if key == ("GET", "/api/v1/gate-policies"):
+        url = f"{BFF_URL}{op.path}"
+        return RequestPlan(op.method, op.path, url, (200,))
+
+    if key == ("GET", "/api/v1/gate-results"):
+        url = f"{BFF_URL}{op.path}"
+        return RequestPlan(op.method, op.path, url, (200,))
+
+    if key == ("POST", "/api/v1/access-policies"):
+        url = f"{BFF_URL}{op.path}"
+        body = {
+            "db_name": ctx.db_name,
+            "subject_type": "object_type",
+            "subject_id": ctx.class_id,
+            "policy": {"mask_columns": ["name"]},
+        }
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409, 422), json_body=body)
+
+    if key == ("GET", "/api/v1/access-policies"):
+        url = f"{BFF_URL}{op.path}"
+        return RequestPlan(op.method, op.path, url, (200,), params={"db_name": ctx.db_name})
 
     if key == ("POST", "/api/v1/objectify/datasets/{dataset_id}/run"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
@@ -845,6 +925,18 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_id': ctx.class_id})}"
         body = {"source": "openapi_smoke", "note": "mapping metadata smoke"}
         return RequestPlan(op.method, op.path, url, (200, 400, 404, 422), json_body=body)
+
+    if key == ("POST", "/api/v1/databases/{db_name}/ontology/object-types"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (201, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
+
+    if key == ("GET", "/api/v1/databases/{db_name}/ontology/object-types/{class_id}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_id': ctx.class_id})}"
+        return RequestPlan(op.method, op.path, url, (200, 404))
+
+    if key == ("PUT", "/api/v1/databases/{db_name}/ontology/object-types/{class_id}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_id': ctx.class_id})}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
 
     # ---------- Ontology Extensions ----------
     ontology_resource_collections = {

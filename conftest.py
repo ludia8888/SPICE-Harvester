@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import warnings
 from pathlib import Path
 
 
@@ -85,3 +86,21 @@ def _ensure_test_tokens() -> None:
 
 
 _ensure_test_tokens()
+
+
+def pytest_configure(config) -> None:
+    warnings.filterwarnings(
+        "ignore",
+        message=r"pkg_resources is deprecated as an API.*",
+        category=UserWarning,
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message=r"Deprecated call to `pkg_resources\.declare_namespace\\('google.*",
+        category=DeprecationWarning,
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message=r"Deprecated call to `pkg_resources\.declare_namespace\\('sphinxcontrib'\\).*",
+        category=DeprecationWarning,
+    )

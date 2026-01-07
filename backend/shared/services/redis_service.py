@@ -87,7 +87,10 @@ class RedisService:
             if self._pubsub:
                 await self._pubsub.close()
             if self._client:
-                await self._client.close()
+                if hasattr(self._client, "aclose"):
+                    await self._client.aclose()
+                else:
+                    await self._client.close()
             await self.pool.disconnect()
             logger.info("Disconnected from Redis")
         except Exception as e:

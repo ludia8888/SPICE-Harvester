@@ -24,6 +24,9 @@ from . import ai
 from . import summary
 from . import pipeline
 from . import objectify
+from . import governance
+from . import object_types
+from . import link_types
 
 __all__ = [
     "database",
@@ -46,4 +49,7 @@ __all__ = [
     "summary",
     "pipeline",
     "objectify",
+    "governance",
+    "object_types",
+    "link_types",
 ]

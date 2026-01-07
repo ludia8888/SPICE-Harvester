@@ -87,6 +87,7 @@ def _run_simple_class_with_basic_metadata():
                 "label": {"en": "Test Field", "ko": "테스트 필드"},
                 "description": {"en": "A test field", "ko": "테스트 필드입니다"},
                 "required": True,
+                "titleKey": True,
                 "constraints": {
                     "minLength": 1,
                     "maxLength": 100
@@ -185,7 +186,8 @@ def _run_relationship_conversion():
                 "name": "name",
                 "type": "STRING",
                 "label": {"en": "Name", "ko": "이름"},
-                "required": True
+                "required": True,
+                "titleKey": True
             }
         ]
     }
@@ -221,7 +223,8 @@ def _run_relationship_conversion():
                 "name": "name",
                 "type": "STRING",
                 "label": {"en": "Product Name", "ko": "제품명"},
-                "required": True
+                "required": True,
+                "titleKey": True
             },
             # 클래스 참조 - 자동으로 relationship으로 변환되어야 함
             {

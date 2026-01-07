@@ -24,10 +24,14 @@ from data_connector.google_sheets.models import (
 from shared.models.google_sheets import GoogleSheetPreviewRequest, GoogleSheetPreviewResponse
 from shared.models.requests import ApiResponse
 from shared.models.sheet_grid import GoogleSheetGridRequest, SheetGrid
+from shared.models.objectify_job import ObjectifyJob
 from shared.middleware.rate_limiter import rate_limit, RateLimitPresets
 from shared.observability.tracing import trace_endpoint
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.services.sheet_grid_parser import SheetGridParseOptions, SheetGridParser
+from shared.services.objectify_job_queue import ObjectifyJobQueue
+from shared.services.objectify_registry import ObjectifyRegistry
+from shared.utils.schema_hash import compute_schema_hash
 from shared.services.connector_registry import ConnectorRegistry
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.pipeline_registry import PipelineRegistry
@@ -74,6 +78,19 @@ async def get_pipeline_registry() -> PipelineRegistry:
     from bff.main import get_pipeline_registry as _get_pipeline_registry
 
     return await _get_pipeline_registry()
+
+
+async def get_objectify_registry() -> ObjectifyRegistry:
+    """Import here to avoid circular dependency"""
+    from bff.main import get_objectify_registry as _get_objectify_registry
+
+    return await _get_objectify_registry()
+
+
+async def get_objectify_job_queue(
+    objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
+) -> ObjectifyJobQueue:
+    return ObjectifyJobQueue(objectify_registry=objectify_registry)
 
 
 def _build_google_oauth_client() -> GoogleOAuth2Client:
@@ -840,6 +857,8 @@ async def start_pipelining_google_sheet(
     connector_registry: ConnectorRegistry = Depends(get_connector_registry),
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
+    objectify_job_queue: ObjectifyJobQueue = Depends(get_objectify_job_queue),
     *,
     lineage_store: LineageStoreDep,
 ) -> Dict[str, Any]:
@@ -1021,6 +1040,7 @@ async def start_pipelining_google_sheet(
         )
         artifact_key = build_s3_uri(repo, f"{commit_id}/{object_key}")
 
+        objectify_job_id = None
         if rows:
             version = await dataset_registry.add_version(
                 dataset_id=dataset.dataset_id,
@@ -1030,6 +1050,79 @@ async def start_pipelining_google_sheet(
                 sample_json={"columns": schema_columns, "rows": sample_rows},
                 schema_json={"columns": schema_columns},
             )
+            try:
+                schema_hash = compute_schema_hash(schema_columns)
+                mapping_spec = await objectify_registry.get_active_mapping_spec(
+                    dataset_id=dataset.dataset_id,
+                    dataset_branch=dataset.branch,
+                    artifact_output_name=dataset.name,
+                    schema_hash=schema_hash,
+                )
+                if not mapping_spec or not mapping_spec.auto_sync:
+                    try:
+                        candidates = await objectify_registry.list_mapping_specs(dataset_id=dataset.dataset_id)
+                        mismatched = [
+                            spec.schema_hash
+                            for spec in candidates
+                            if spec.artifact_output_name == dataset.name and spec.schema_hash != schema_hash
+                        ]
+                        if mismatched:
+                            await dataset_registry.record_gate_result(
+                                scope="objectify_schema",
+                                subject_type="dataset_version",
+                                subject_id=version.version_id,
+                                status="FAIL",
+                                details={
+                                    "dataset_id": dataset.dataset_id,
+                                    "dataset_version_id": version.version_id,
+                                    "observed_schema_hash": schema_hash,
+                                    "expected_schema_hashes": sorted(set(mismatched)),
+                                    "message": "Schema hash mismatch; migration required",
+                                },
+                            )
+                    except Exception as exc:
+                        logger.warning("Failed to record schema gate: %s", exc)
+                if mapping_spec and mapping_spec.auto_sync:
+                    dedupe_key = objectify_registry.build_dedupe_key(
+                        dataset_id=dataset.dataset_id,
+                        dataset_branch=dataset.branch,
+                        mapping_spec_id=mapping_spec.mapping_spec_id,
+                        mapping_spec_version=mapping_spec.version,
+                        dataset_version_id=version.version_id,
+                        artifact_id=None,
+                        artifact_output_name=dataset.name,
+                    )
+                    existing = await objectify_registry.get_objectify_job_by_dedupe_key(dedupe_key=dedupe_key)
+                    if existing:
+                        objectify_job_id = existing.job_id
+                    else:
+                        job_id = str(uuid4())
+                        options = dict(mapping_spec.options or {})
+                        job = ObjectifyJob(
+                            job_id=job_id,
+                            db_name=dataset.db_name,
+                            dataset_id=dataset.dataset_id,
+                            dataset_version_id=version.version_id,
+                            artifact_output_name=dataset.name,
+                            dedupe_key=dedupe_key,
+                            dataset_branch=dataset.branch,
+                            artifact_key=version.artifact_key or "",
+                            mapping_spec_id=mapping_spec.mapping_spec_id,
+                            mapping_spec_version=mapping_spec.version,
+                            target_class_id=mapping_spec.target_class_id,
+                            ontology_branch=options.get("ontology_branch"),
+                            max_rows=options.get("max_rows"),
+                            batch_size=options.get("batch_size"),
+                            allow_partial=bool(options.get("allow_partial")),
+                            options={
+                                **options,
+                                "actor_user_id": actor_user_id,
+                            },
+                        )
+                        await objectify_job_queue.publish(job, require_delivery=False)
+                        objectify_job_id = job_id
+            except Exception as exc:
+                logger.warning("Failed to enqueue objectify job for connector dataset: %s", exc)
 
             event = build_command_event(
                 event_type="DATASET_VERSION_CREATED",
@@ -1084,6 +1177,7 @@ async def start_pipelining_google_sheet(
                     "rows": sample_rows,
                 },
                 "funnel_analysis": funnel_analysis,
+                "objectify_job_id": objectify_job_id,
             },
         ).to_dict()
     except HTTPException:

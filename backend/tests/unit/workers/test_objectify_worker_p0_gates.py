@@ -19,6 +19,8 @@ def _build_instances(
     field_constraints=None,
     field_raw_types=None,
     seen_row_keys=None,
+    relationship_mappings=None,
+    relationship_meta=None,
 ):
     if target_field_types is None:
         target_field_types = {m.target_field: "xsd:string" for m in mappings}
@@ -36,11 +38,17 @@ def _build_instances(
         field_constraints = {}
     if field_raw_types is None:
         field_raw_types = {}
+    if relationship_mappings is None:
+        relationship_mappings = []
+    if relationship_meta is None:
+        relationship_meta = {}
     return worker._build_instances_with_validation(
         columns=columns,
         rows=rows,
         row_offset=0,
         mappings=mappings,
+        relationship_mappings=relationship_mappings,
+        relationship_meta=relationship_meta,
         target_field_types=target_field_types,
         mapping_sources=mapping_sources,
         sources_by_target=sources_by_target,

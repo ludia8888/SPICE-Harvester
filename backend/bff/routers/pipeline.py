@@ -38,12 +38,14 @@ from shared.services.pipeline_job_queue import PipelineJobQueue
 from shared.models.pipeline_job import PipelineJob
 from shared.models.objectify_job import ObjectifyJob
 from shared.services.pipeline_executor import PipelineExecutor
+from shared.services.pipeline_definition_utils import resolve_pk_columns
 from shared.services.event_store import event_store
 from shared.services.pipeline_control_plane_events import emit_pipeline_control_plane_event
 from shared.dependencies.providers import AuditLogStoreDep, LineageStoreDep
 from shared.services.pipeline_artifact_store import PipelineArtifactStore
 from shared.services.pipeline_profiler import compute_column_stats
 from shared.services.pipeline_schema_utils import normalize_schema_type
+from shared.services.pipeline_graph_utils import normalize_nodes
 from shared.services.pipeline_dataset_utils import (
     normalize_dataset_selection,
     resolve_dataset_version,
@@ -59,6 +61,7 @@ from shared.utils.s3_uri import build_s3_uri, parse_s3_uri
 from shared.utils.event_utils import build_command_event
 from shared.utils.path_utils import safe_lakefs_ref, safe_path_segment
 from shared.utils.time_utils import utcnow
+from shared.utils.key_spec import normalize_key_spec
 from shared.utils.branch_utils import protected_branch_write_message
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.security.auth_utils import enforce_db_scope
@@ -377,6 +380,7 @@ async def _maybe_enqueue_objectify_job(
     version,
     objectify_registry: Optional[ObjectifyRegistry],
     job_queue: Optional[ObjectifyJobQueue],
+    dataset_registry: Optional[DatasetRegistry],
     actor_user_id: Optional[str],
 ) -> Optional[str]:
     if not objectify_registry or not job_queue:
@@ -394,6 +398,30 @@ async def _maybe_enqueue_objectify_job(
         schema_hash=schema_hash,
     )
     if not mapping_spec or not mapping_spec.auto_sync:
+        if dataset_registry and objectify_registry and schema_hash:
+            try:
+                candidates = await objectify_registry.list_mapping_specs(dataset_id=dataset.dataset_id)
+                mismatched = [
+                    spec.schema_hash
+                    for spec in candidates
+                    if spec.artifact_output_name == resolved_output_name and spec.schema_hash != schema_hash
+                ]
+                if mismatched:
+                    await dataset_registry.record_gate_result(
+                        scope="objectify_schema",
+                        subject_type="dataset_version",
+                        subject_id=version.version_id,
+                        status="FAIL",
+                        details={
+                            "dataset_id": dataset.dataset_id,
+                            "dataset_version_id": version.version_id,
+                            "observed_schema_hash": schema_hash,
+                            "expected_schema_hashes": sorted(set(mismatched)),
+                            "message": "Schema hash mismatch; migration required",
+                        },
+                    )
+            except Exception as exc:
+                logger.warning("Failed to record schema gate: %s", exc)
         return None
     dedupe_key = objectify_registry.build_dedupe_key(
         dataset_id=dataset.dataset_id,
@@ -754,6 +782,29 @@ def _extract_edge_ids(definition_json: Optional[Dict[str, Any]]) -> set[str]:
         if edge_id:
             output.add(edge_id)
     return output
+
+
+def _resolve_output_pk_columns(
+    *,
+    definition_json: Dict[str, Any],
+    node_id: Optional[str],
+    output_name: Optional[str],
+) -> List[str]:
+    if not isinstance(definition_json, dict):
+        return []
+    nodes = normalize_nodes(definition_json.get("nodes"))
+    node = nodes.get(node_id or "")
+    output_metadata = node.get("metadata") if isinstance(node, dict) else {}
+    if not isinstance(output_metadata, dict):
+        output_metadata = {}
+    declared_outputs = definition_json.get("outputs") if isinstance(definition_json.get("outputs"), list) else []
+    return resolve_pk_columns(
+        definition=definition_json,
+        output_metadata=output_metadata,
+        output_name=output_name,
+        output_node_id=node_id,
+        declared_outputs=declared_outputs,
+    )
 
 
 def _definition_diff(
@@ -3454,6 +3505,59 @@ async def deploy_pipeline(
                     promoted_from_artifact_id=(artifact_record.artifact_id if artifact_record else None),
                 )
 
+                pk_columns = _resolve_output_pk_columns(
+                    definition_json=definition_json or {},
+                    node_id=str(item.get("node_id") or "").strip() or None,
+                    output_name=staged_dataset_name,
+                )
+                existing_key_spec = await dataset_registry.get_key_spec_for_dataset(
+                    dataset_id=dataset.dataset_id
+                )
+                if pk_columns or existing_key_spec:
+                    if existing_key_spec:
+                        normalized_spec = normalize_key_spec(existing_key_spec.spec)
+                        existing_pk = normalized_spec.get("primary_key") or []
+                        if existing_pk and not pk_columns:
+                            raise HTTPException(
+                                status_code=status.HTTP_409_CONFLICT,
+                                detail={
+                                    "code": "KEY_SPEC_MISSING",
+                                    "message": "Pipeline output is missing declared primary key columns",
+                                    "dataset_id": dataset.dataset_id,
+                                    "expected_primary_key": existing_pk,
+                                },
+                            )
+                        if pk_columns and set(existing_pk) and set(existing_pk) != set(pk_columns):
+                            raise HTTPException(
+                                status_code=status.HTTP_409_CONFLICT,
+                                detail={
+                                    "code": "KEY_SPEC_MISMATCH",
+                                    "message": "Pipeline output primary key does not match key spec",
+                                    "dataset_id": dataset.dataset_id,
+                                    "expected_primary_key": existing_pk,
+                                    "observed_primary_key": pk_columns,
+                                },
+                            )
+                        if pk_columns and not existing_pk:
+                            raise HTTPException(
+                                status_code=status.HTTP_409_CONFLICT,
+                                detail={
+                                    "code": "KEY_SPEC_MISMATCH",
+                                    "message": "Pipeline output declares primary key but key spec is empty",
+                                    "dataset_id": dataset.dataset_id,
+                                    "observed_primary_key": pk_columns,
+                                },
+                            )
+                    elif pk_columns:
+                        await dataset_registry.create_key_spec(
+                            dataset_id=dataset.dataset_id,
+                            spec={
+                                "primary_key": pk_columns,
+                                "source": "pipeline",
+                                "node_id": str(item.get("node_id") or "").strip() or None,
+                            },
+                        )
+
                 mapping_spec_id = None
                 mapping_spec_version = None
                 mapping_spec_target_class_id = None
@@ -3980,6 +4084,7 @@ async def create_dataset_version(
             version=version,
             objectify_registry=objectify_registry,
             job_queue=objectify_job_queue,
+            dataset_registry=dataset_registry,
             actor_user_id=actor_user_id,
         )
 
@@ -4385,6 +4490,7 @@ async def upload_excel_dataset(
             version=version,
             objectify_registry=objectify_registry,
             job_queue=objectify_job_queue,
+            dataset_registry=dataset_registry,
             actor_user_id=actor_user_id,
         )
 
@@ -4762,6 +4868,7 @@ async def upload_csv_dataset(
             version=version,
             objectify_registry=objectify_registry,
             job_queue=objectify_job_queue,
+            dataset_registry=dataset_registry,
             actor_user_id=actor_user_id,
         )
 
@@ -5210,6 +5317,7 @@ async def upload_media_dataset(
             version=version,
             objectify_registry=objectify_registry,
             job_queue=objectify_job_queue,
+            dataset_registry=dataset_registry,
             actor_user_id=actor_user_id,
         )
 

@@ -10,6 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from bff.dependencies import LabelMapper, TerminusService, get_label_mapper, get_terminus_service
 from shared.models.ontology import QueryInput, QueryResponse
+from shared.services.dataset_registry import DatasetRegistry
+from shared.utils.access_policy import apply_access_policy
 
 # Security validation imports
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
@@ -22,6 +24,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/databases/{db_name}", tags=["Query"])
 
 
+async def get_dataset_registry() -> DatasetRegistry:
+    from bff.main import get_dataset_registry as _get_dataset_registry
+
+    return await _get_dataset_registry()
+
+
 @router.post("/query", response_model=QueryResponse)
 async def execute_query(
     db_name: str,
@@ -29,6 +37,7 @@ async def execute_query(
     request: Request,
     mapper: LabelMapper = Depends(get_label_mapper),
     terminus: TerminusService = Depends(get_terminus_service),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
 ):
     """
     온톨로지 쿼리 실행
@@ -65,11 +74,26 @@ async def execute_query(
         result = await terminus.query_database(db_name, internal_query)
 
         raw_results = result.get("data", []) if isinstance(result, dict) else []
+        access_filtered = False
+        if isinstance(raw_results, list):
+            class_id = str(internal_query.get("class_id") or "").strip()
+            if class_id:
+                policy = await dataset_registry.get_access_policy(
+                    db_name=db_name,
+                    scope="data_access",
+                    subject_type="object_type",
+                    subject_id=class_id,
+                )
+                if policy:
+                    raw_results, _ = apply_access_policy(raw_results, policy=policy.policy)
+                    access_filtered = True
         labeled_results = await mapper.convert_to_display_batch(db_name, raw_results, lang)
 
         return {
             "results": labeled_results,
-            "total": (result.get("count") if isinstance(result, dict) else None) or len(labeled_results),
+            "total": len(labeled_results)
+            if access_filtered
+            else ((result.get("count") if isinstance(result, dict) else None) or len(labeled_results)),
             "query": query_dict,
         }
 
@@ -85,7 +109,10 @@ async def execute_query(
 
 @router.post("/query/raw")
 async def execute_raw_query(
-    db_name: str, query: Dict[str, Any], terminus: TerminusService = Depends(get_terminus_service)
+    db_name: str,
+    query: Dict[str, Any],
+    terminus: TerminusService = Depends(get_terminus_service),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
 ):
     """
     원시 쿼리 실행 (제한적 접근)
@@ -112,6 +139,19 @@ async def execute_raw_query(
 
         # 쿼리 실행 (OMS를 통해)
         result = await terminus.query_database(validated_db_name, sanitized_query)
+
+        if isinstance(result, dict) and isinstance(result.get("data"), list):
+            class_id = str(sanitized_query.get("class_id") or "").strip()
+            if class_id:
+                policy = await dataset_registry.get_access_policy(
+                    db_name=validated_db_name,
+                    scope="data_access",
+                    subject_type="object_type",
+                    subject_id=class_id,
+                )
+                if policy:
+                    filtered, _ = apply_access_policy(result["data"], policy=policy.policy)
+                    result["data"] = filtered
 
         return result
 

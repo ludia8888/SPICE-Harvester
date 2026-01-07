@@ -73,8 +73,8 @@ async def create_simple_schema(db_name: str):
             "label": "Client",
             "description": "Client entity",
             "properties": [
-                {"name": "client_id", "type": "string", "label": "Client ID", "required": True},
-                {"name": "name", "type": "string", "label": "Name"},
+                {"name": "client_id", "type": "string", "label": "Client ID", "required": True, "primaryKey": True},
+                {"name": "name", "type": "string", "label": "Name", "titleKey": True},
                 {"name": "email", "type": "string", "label": "Email"},
             ],
         }
@@ -83,9 +83,9 @@ async def create_simple_schema(db_name: str):
             "label": "Product",
             "description": "Product with system fields",
             "properties": [
-                {"name": "product_id", "type": "string", "label": "Product ID", "required": True},
-                {"name": "name", "type": "string", "label": "Name"},
-                {"name": "unit_price", "type": "number", "label": "Unit Price"},
+                {"name": "product_id", "type": "string", "label": "Product ID", "required": True, "primaryKey": True},
+                {"name": "name", "type": "string", "label": "Name", "titleKey": True},
+                {"name": "unit_price", "type": "DECIMAL", "label": "Unit Price"},
                 {"name": "category", "type": "string", "label": "Category"},
                 {"name": "es_doc_id", "type": "string", "label": "ES Document ID"},
                 {"name": "s3_uri", "type": "string", "label": "S3 URI"},

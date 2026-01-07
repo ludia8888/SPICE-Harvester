@@ -65,7 +65,7 @@ async def quick_production_test():
                         "primaryKey": True,
                     },
                     {"name": "test_field", "label": "Test Field", "type": "string", "required": True},
-                    {"name": "score", "label": "Score", "type": "number", "required": True},
+                    {"name": "score", "label": "Score", "type": "DECIMAL", "required": True},
                 ]
             }
             

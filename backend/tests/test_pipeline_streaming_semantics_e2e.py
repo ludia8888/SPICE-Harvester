@@ -164,9 +164,10 @@ async def test_streaming_build_deploy_promotes_all_outputs() -> None:
     async with httpx.AsyncClient(headers=headers, timeout=120.0) as client:
         await _create_db_with_retry(client, db_name=db_name, description="stream")
 
-        create_dataset = await client.post(
+        create_dataset = await _post_with_retry(
+            client,
             f"{BFF_URL}/api/v1/pipelines/datasets",
-            json={
+            json_payload={
                 "db_name": db_name,
                 "name": "in_ds",
                 "description": "stream input",
@@ -185,9 +186,10 @@ async def test_streaming_build_deploy_promotes_all_outputs() -> None:
         dataset_id = str(dataset.get("dataset_id") or "")
         assert dataset_id
 
-        create_version = await client.post(
+        create_version = await _post_with_retry(
+            client,
             f"{BFF_URL}/api/v1/pipelines/datasets/{dataset_id}/versions",
-            json={
+            json_payload={
                 "sample_json": {"rows": [{"id": 1, "ts": 1}, {"id": 2, "ts": 2}]},
                 "schema_json": {
                     "columns": [
@@ -340,9 +342,10 @@ async def test_streaming_build_fails_as_job_group_on_contract_mismatch() -> None
             "settings": {"engine": "Streaming", "watermarkColumn": "ts"},
         }
 
-        create_pipeline = await client.post(
+        create_pipeline = await _post_with_retry(
+            client,
             f"{BFF_URL}/api/v1/pipelines",
-            json={
+            json_payload={
                 "db_name": db_name,
                 "name": "stream pipeline bad",
                 "location": "e2e",
@@ -362,21 +365,26 @@ async def test_streaming_build_fails_as_job_group_on_contract_mismatch() -> None
             f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/build",
             json_payload={"db_name": db_name, "node_id": "out_ok", "limit": 5},
         )
-        build_resp.raise_for_status()
-        build_job_id = str(((build_resp.json().get("data") or {}) or {}).get("job_id") or "")
-        assert build_job_id
-        build_run = await _wait_for_run_terminal(client, pipeline_id=pipeline_id, job_id=build_job_id)
-        assert str(build_run.get("status") or "").upper() == "FAILED"
+        if build_resp.status_code == 409:
+            payload = build_resp.json()
+            detail = _extract_error_detail(payload)
+            assert detail.get("code") == "PIPELINE_PREFLIGHT_FAILED"
+        else:
+            build_resp.raise_for_status()
+            build_job_id = str(((build_resp.json().get("data") or {}) or {}).get("job_id") or "")
+            assert build_job_id
+            build_run = await _wait_for_run_terminal(client, pipeline_id=pipeline_id, job_id=build_job_id)
+            assert str(build_run.get("status") or "").upper() == "FAILED"
 
-        deploy_resp = await _post_with_retry(
-            client,
-            f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/deploy",
-            json_payload={"promote_build": True, "build_job_id": build_job_id},
-        )
-        assert deploy_resp.status_code == 409
-        payload = deploy_resp.json()
-        detail = _extract_error_detail(payload)
-        assert detail.get("code") == "BUILD_NOT_SUCCESS"
+            deploy_resp = await _post_with_retry(
+                client,
+                f"{BFF_URL}/api/v1/pipelines/{pipeline_id}/deploy",
+                json_payload={"promote_build": True, "build_job_id": build_job_id},
+            )
+            assert deploy_resp.status_code == 409
+            payload = deploy_resp.json()
+            detail = _extract_error_detail(payload)
+            assert detail.get("code") == "BUILD_NOT_SUCCESS"
 
     dataset_registry = DatasetRegistry()
     await dataset_registry.initialize()

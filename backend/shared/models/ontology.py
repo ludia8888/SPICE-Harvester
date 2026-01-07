@@ -298,7 +298,8 @@ class Property(BaseModel):
             
         # type이 기본 데이터 타입이 아닌 경우 (클래스명일 가능성)
         basic_types = {
-            "STRING", "INTEGER", "DECIMAL", "BOOLEAN", "DATE", "DATETIME", "TIME", "FLOAT", "DOUBLE", "LONG", "TEXT",
+            "STRING", "INTEGER", "DECIMAL", "NUMBER", "NUMERIC", "INT",
+            "BOOLEAN", "DATE", "DATETIME", "TIME", "FLOAT", "DOUBLE", "LONG", "TEXT",
             "ARRAY", "OBJECT", "ENUM", "EMAIL", "PHONE", "URL", "MONEY", "IP", "UUID",
             "COORDINATE", "ADDRESS", "NAME", "IMAGE", "FILE", "LINK", "SET", "LIST",  # LINK 추가
             "JSON", "STRUCT", "VECTOR", "GEOPOINT", "GEOSHAPE", "MARKING", "CIPHER",

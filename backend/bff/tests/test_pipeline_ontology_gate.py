@@ -68,6 +68,12 @@ class _DatasetRegistry:
     async def get_dataset_by_name(self, *, db_name: str, name: str, branch: str) -> Any:  # pragma: no cover
         return None
 
+    async def get_key_spec_for_dataset(self, *, dataset_id: str, dataset_version_id: str | None = None) -> Any:
+        return None
+
+    async def create_key_spec(self, **kwargs: Any) -> Any:  # pragma: no cover
+        return None
+
 
 class _ObjectifyRegistry:
     async def get_active_mapping_spec(

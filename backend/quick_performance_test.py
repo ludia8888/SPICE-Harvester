@@ -70,7 +70,7 @@ async def test_event_sourcing_complete():
                 {
                     "name": "price",
                     "label": "Product Price",
-                    "type": "number",
+                    "type": "DECIMAL",
                     "required": True
                 }
             ]

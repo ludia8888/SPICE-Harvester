@@ -26,6 +26,8 @@ def test_object_type_requires_pk_spec_and_backing_source():
     issues = check_required_fields("object_type", {})
     missing = {field for issue in issues for field in issue["details"]["missing_fields"]}
     assert "pk_spec" in missing
+    assert "pk_spec.primary_key" in missing
+    assert "pk_spec.title_key" in missing
     assert "backing_source" in missing
 
 

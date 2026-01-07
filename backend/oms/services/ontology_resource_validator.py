@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from oms.services.async_terminus import AsyncTerminusService
 from oms.services.ontology_resources import OntologyResourceService, normalize_resource_type
+from shared.utils.key_spec import normalize_key_spec
 
 logger = logging.getLogger(__name__)
 
@@ -248,6 +249,68 @@ def _collect_link_type_issues(spec: Dict[str, Any]) -> List[Dict[str, Any]]:
     return issues
 
 
+def _collect_relationship_spec_issues(spec: Dict[str, Any]) -> List[Dict[str, Any]]:
+    issues: List[Dict[str, Any]] = []
+    rel_spec = spec.get("relationship_spec")
+    if not isinstance(rel_spec, dict) or not rel_spec:
+        _append_spec_issue(
+            issues,
+            message="link_type requires relationship_spec",
+            missing_fields=["relationship_spec"],
+        )
+        return issues
+
+    rel_type = str(rel_spec.get("type") or rel_spec.get("spec_type") or "").strip().lower()
+    if rel_type not in {"foreign_key", "join_table", "object_backed"}:
+        _append_spec_issue(
+            issues,
+            message="relationship_spec.type must be foreign_key, join_table, or object_backed",
+            invalid_fields=["relationship_spec.type"],
+        )
+        return issues
+
+    if not str(rel_spec.get("relationship_spec_id") or "").strip():
+        _append_spec_issue(
+            issues,
+            message="relationship_spec_id is required",
+            missing_fields=["relationship_spec.relationship_spec_id"],
+        )
+
+    if rel_type == "foreign_key":
+        if not str(rel_spec.get("fk_column") or "").strip():
+            _append_spec_issue(
+                issues,
+                message="relationship_spec.fk_column is required",
+                missing_fields=["relationship_spec.fk_column"],
+            )
+        if not str(rel_spec.get("target_pk_field") or "").strip():
+            _append_spec_issue(
+                issues,
+                message="relationship_spec.target_pk_field is required",
+                missing_fields=["relationship_spec.target_pk_field"],
+            )
+    else:
+        if not str(rel_spec.get("join_dataset_id") or "").strip():
+            _append_spec_issue(
+                issues,
+                message="relationship_spec.join_dataset_id is required",
+                missing_fields=["relationship_spec.join_dataset_id"],
+            )
+        if not str(rel_spec.get("source_key_column") or "").strip():
+            _append_spec_issue(
+                issues,
+                message="relationship_spec.source_key_column is required",
+                missing_fields=["relationship_spec.source_key_column"],
+            )
+        if not str(rel_spec.get("target_key_column") or "").strip():
+            _append_spec_issue(
+                issues,
+                message="relationship_spec.target_key_column is required",
+                missing_fields=["relationship_spec.target_key_column"],
+            )
+    return issues
+
+
 async def _find_missing_link_type_refs(
     *,
     terminus: AsyncTerminusService,
@@ -311,12 +374,39 @@ def _collect_required_field_issues(resource_type: str, spec: Dict[str, Any]) -> 
                     message="object_type backing_source requires ref",
                     missing_fields=["backing_source.ref"],
                 )
-            if not str(backing_source.get("schema_hash") or "").strip():
+            schema_hash = backing_source.get("schema_hash") or backing_source.get("schemaHash")
+            if not str(schema_hash or "").strip():
                 _append_spec_issue(
                     issues,
                     message="object_type backing_source requires schema_hash",
                     missing_fields=["backing_source.schema_hash"],
                 )
+            status_value = str(spec.get("status") or "ACTIVE").strip().upper()
+            if status_value == "ACTIVE":
+                version_id = (
+                    backing_source.get("version_id")
+                    or backing_source.get("versionId")
+                    or backing_source.get("backing_version_id")
+                )
+                if not str(version_id or "").strip():
+                    _append_spec_issue(
+                        issues,
+                        message="object_type backing_source requires version_id when ACTIVE",
+                        missing_fields=["backing_source.version_id"],
+                    )
+        normalized_pk = normalize_key_spec(pk_spec if isinstance(pk_spec, dict) else {})
+        if not normalized_pk.get("primary_key"):
+            _append_spec_issue(
+                issues,
+                message="object_type pk_spec requires primary_key",
+                missing_fields=["pk_spec.primary_key"],
+            )
+        if not normalized_pk.get("title_key"):
+            _append_spec_issue(
+                issues,
+                message="object_type pk_spec requires title_key",
+                missing_fields=["pk_spec.title_key"],
+            )
     elif resource_type == "function":
         expr = spec.get("expression") or spec.get("dsl")
         if not isinstance(expr, str) or not expr.strip():
@@ -449,6 +539,7 @@ def _collect_required_field_issues(resource_type: str, spec: Dict[str, Any]) -> 
                 message="link_type requires cardinality",
                 missing_fields=["cardinality"],
             )
+        issues.extend(_collect_relationship_spec_issues(spec))
     elif resource_type == "group":
         return issues
     else:

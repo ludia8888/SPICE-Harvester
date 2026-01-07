@@ -20,6 +20,7 @@ from shared.config.service_config import ServiceConfig
 from shared.observability.context_propagation import enrich_metadata_with_current_trace
 from shared.utils.s3_uri import is_s3_uri, parse_s3_uri
 from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
+from shared.utils.schema_hash import compute_schema_hash
 from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,114 @@ class DatasetIngestOutboxItem:
     updated_at: datetime
 
 
+@dataclass(frozen=True)
+class BackingDatasourceRecord:
+    backing_id: str
+    dataset_id: str
+    db_name: str
+    name: str
+    description: Optional[str]
+    source_type: str
+    source_ref: Optional[str]
+    branch: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class BackingDatasourceVersionRecord:
+    version_id: str
+    backing_id: str
+    dataset_version_id: str
+    schema_hash: str
+    artifact_key: Optional[str]
+    metadata: Dict[str, Any]
+    status: str
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class KeySpecRecord:
+    key_spec_id: str
+    dataset_id: str
+    dataset_version_id: Optional[str]
+    spec: Dict[str, Any]
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class GatePolicyRecord:
+    policy_id: str
+    scope: str
+    name: str
+    description: Optional[str]
+    rules: Dict[str, Any]
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class GateResultRecord:
+    result_id: str
+    policy_id: str
+    scope: str
+    subject_type: str
+    subject_id: str
+    status: str
+    details: Dict[str, Any]
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class AccessPolicyRecord:
+    policy_id: str
+    db_name: str
+    scope: str
+    subject_type: str
+    subject_id: str
+    policy: Dict[str, Any]
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class InstanceEditRecord:
+    edit_id: str
+    db_name: str
+    class_id: str
+    instance_id: str
+    edit_type: str
+    metadata: Dict[str, Any]
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class RelationshipSpecRecord:
+    relationship_spec_id: str
+    link_type_id: str
+    db_name: str
+    source_object_type: str
+    target_object_type: str
+    predicate: str
+    spec_type: str
+    dataset_id: str
+    dataset_version_id: Optional[str]
+    mapping_spec_id: str
+    mapping_spec_version: int
+    spec: Dict[str, Any]
+    status: str
+    auto_sync: bool
+    last_index_status: Optional[str]
+    last_indexed_at: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime
+
+
 def _inject_dataset_version(outbox_entries: List[Dict[str, Any]], dataset_version_id: str) -> None:
     """
     Ensure dataset_version_id is propagated into outbox payloads that depend on it.
@@ -141,6 +250,39 @@ def _inject_dataset_version(outbox_entries: List[Dict[str, Any]], dataset_versio
             entry["payload"] = payload
 
 
+def _extract_schema_columns(schema: Any) -> List[Dict[str, Any]]:
+    if isinstance(schema, dict):
+        columns = schema.get("columns")
+        if isinstance(columns, list):
+            normalized: List[Dict[str, Any]] = []
+            for item in columns:
+                if isinstance(item, dict):
+                    normalized.append(dict(item))
+                else:
+                    name = str(item).strip()
+                    if name:
+                        normalized.append({"name": name})
+            return normalized
+    if isinstance(schema, list):
+        normalized = []
+        for item in schema:
+            if isinstance(item, dict):
+                normalized.append(dict(item))
+            else:
+                name = str(item).strip()
+                if name:
+                    normalized.append({"name": name})
+        return normalized
+    return []
+
+
+def _compute_schema_hash_from_payload(payload: Any) -> Optional[str]:
+    columns = _extract_schema_columns(payload)
+    if not columns:
+        return None
+    return compute_schema_hash(columns)
+
+
 class DatasetRegistry:
     def __init__(
         self,
@@ -155,6 +297,122 @@ class DatasetRegistry:
         self._pool: Optional[asyncpg.Pool] = None
         self._pool_min = int(os.getenv("DATASET_REGISTRY_PG_POOL_MIN", str(pool_min or 1)))
         self._pool_max = int(os.getenv("DATASET_REGISTRY_PG_POOL_MAX", str(pool_max or 5)))
+
+    @staticmethod
+    def _row_to_backing(row: asyncpg.Record) -> BackingDatasourceRecord:
+        return BackingDatasourceRecord(
+            backing_id=str(row["backing_id"]),
+            dataset_id=str(row["dataset_id"]),
+            db_name=row["db_name"],
+            name=row["name"],
+            description=row["description"],
+            source_type=row["source_type"],
+            source_ref=row["source_ref"],
+            branch=row["branch"],
+            status=row["status"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    @staticmethod
+    def _row_to_backing_version(row: asyncpg.Record) -> BackingDatasourceVersionRecord:
+        return BackingDatasourceVersionRecord(
+            version_id=str(row["backing_version_id"]),
+            backing_id=str(row["backing_id"]),
+            dataset_version_id=str(row["dataset_version_id"]),
+            schema_hash=row["schema_hash"],
+            artifact_key=row["artifact_key"],
+            metadata=coerce_json_dataset(row["metadata"]) or {},
+            status=row["status"],
+            created_at=row["created_at"],
+        )
+
+    @staticmethod
+    def _row_to_key_spec(row: asyncpg.Record) -> KeySpecRecord:
+        return KeySpecRecord(
+            key_spec_id=str(row["key_spec_id"]),
+            dataset_id=str(row["dataset_id"]),
+            dataset_version_id=(str(row["dataset_version_id"]) if row["dataset_version_id"] else None),
+            spec=coerce_json_dataset(row["spec"]) or {},
+            status=row["status"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    @staticmethod
+    def _row_to_gate_policy(row: asyncpg.Record) -> GatePolicyRecord:
+        return GatePolicyRecord(
+            policy_id=str(row["policy_id"]),
+            scope=row["scope"],
+            name=row["name"],
+            description=row["description"],
+            rules=coerce_json_dataset(row["rules"]) or {},
+            status=row["status"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    @staticmethod
+    def _row_to_gate_result(row: asyncpg.Record) -> GateResultRecord:
+        return GateResultRecord(
+            result_id=str(row["result_id"]),
+            policy_id=str(row["policy_id"]),
+            scope=row["scope"],
+            subject_type=row["subject_type"],
+            subject_id=row["subject_id"],
+            status=row["status"],
+            details=coerce_json_dataset(row["details"]) or {},
+            created_at=row["created_at"],
+        )
+
+    @staticmethod
+    def _row_to_access_policy(row: asyncpg.Record) -> AccessPolicyRecord:
+        return AccessPolicyRecord(
+            policy_id=str(row["policy_id"]),
+            db_name=row["db_name"],
+            scope=row["scope"],
+            subject_type=row["subject_type"],
+            subject_id=row["subject_id"],
+            policy=coerce_json_dataset(row["policy"]) or {},
+            status=row["status"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    @staticmethod
+    def _row_to_instance_edit(row: asyncpg.Record) -> InstanceEditRecord:
+        return InstanceEditRecord(
+            edit_id=str(row["edit_id"]),
+            db_name=row["db_name"],
+            class_id=row["class_id"],
+            instance_id=row["instance_id"],
+            edit_type=row["edit_type"],
+            metadata=coerce_json_dataset(row["metadata"]) or {},
+            created_at=row["created_at"],
+        )
+
+    @staticmethod
+    def _row_to_relationship_spec(row: asyncpg.Record) -> RelationshipSpecRecord:
+        return RelationshipSpecRecord(
+            relationship_spec_id=str(row["relationship_spec_id"]),
+            link_type_id=str(row["link_type_id"]),
+            db_name=row["db_name"],
+            source_object_type=row["source_object_type"],
+            target_object_type=row["target_object_type"],
+            predicate=row["predicate"],
+            spec_type=row["spec_type"],
+            dataset_id=str(row["dataset_id"]),
+            dataset_version_id=str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
+            mapping_spec_id=str(row["mapping_spec_id"]),
+            mapping_spec_version=int(row["mapping_spec_version"]),
+            spec=coerce_json_dataset(row["spec"]) or {},
+            status=row["status"],
+            auto_sync=bool(row["auto_sync"]),
+            last_index_status=row["last_index_status"],
+            last_indexed_at=row["last_indexed_at"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
 
     async def initialize(self) -> None:
         await self.connect()
@@ -494,6 +752,222 @@ class DatasetRegistry:
                 """
             )
 
+            await conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self._schema}.backing_datasources (
+                    backing_id UUID PRIMARY KEY,
+                    dataset_id UUID NOT NULL,
+                    db_name TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    source_type TEXT NOT NULL DEFAULT 'dataset',
+                    source_ref TEXT,
+                    branch TEXT NOT NULL DEFAULT 'main',
+                    status TEXT NOT NULL DEFAULT 'ACTIVE',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE (dataset_id, branch),
+                    UNIQUE (db_name, name, branch),
+                    FOREIGN KEY (dataset_id)
+                        REFERENCES {self._schema}.datasets(dataset_id)
+                        ON DELETE CASCADE
+                )
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_backing_datasources_dataset
+                ON {self._schema}.backing_datasources(dataset_id, branch)
+                """
+            )
+
+            await conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self._schema}.backing_datasource_versions (
+                    backing_version_id UUID PRIMARY KEY,
+                    backing_id UUID NOT NULL,
+                    dataset_version_id UUID NOT NULL,
+                    schema_hash TEXT NOT NULL,
+                    artifact_key TEXT,
+                    metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    status TEXT NOT NULL DEFAULT 'ACTIVE',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE (backing_id, dataset_version_id),
+                    FOREIGN KEY (backing_id)
+                        REFERENCES {self._schema}.backing_datasources(backing_id)
+                        ON DELETE CASCADE,
+                    FOREIGN KEY (dataset_version_id)
+                        REFERENCES {self._schema}.dataset_versions(version_id)
+                        ON DELETE CASCADE
+                )
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_backing_versions_dataset_version
+                ON {self._schema}.backing_datasource_versions(dataset_version_id)
+                """
+            )
+
+            await conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self._schema}.key_specs (
+                    key_spec_id UUID PRIMARY KEY,
+                    dataset_id UUID NOT NULL,
+                    dataset_version_id UUID,
+                    spec JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    status TEXT NOT NULL DEFAULT 'ACTIVE',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE (dataset_id, dataset_version_id),
+                    FOREIGN KEY (dataset_id)
+                        REFERENCES {self._schema}.datasets(dataset_id)
+                        ON DELETE CASCADE,
+                    FOREIGN KEY (dataset_version_id)
+                        REFERENCES {self._schema}.dataset_versions(version_id)
+                        ON DELETE SET NULL
+                )
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_key_specs_dataset
+                ON {self._schema}.key_specs(dataset_id)
+                """
+            )
+
+            await conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self._schema}.gate_policies (
+                    policy_id UUID PRIMARY KEY,
+                    scope TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    rules JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    status TEXT NOT NULL DEFAULT 'ACTIVE',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE (scope, name)
+                )
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self._schema}.gate_results (
+                    result_id UUID PRIMARY KEY,
+                    policy_id UUID NOT NULL,
+                    scope TEXT NOT NULL,
+                    subject_type TEXT NOT NULL,
+                    subject_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    details JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    FOREIGN KEY (policy_id)
+                        REFERENCES {self._schema}.gate_policies(policy_id)
+                        ON DELETE CASCADE
+                )
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_gate_results_subject
+                ON {self._schema}.gate_results(scope, subject_type, subject_id)
+                """
+            )
+
+            await conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self._schema}.access_policies (
+                    policy_id UUID PRIMARY KEY,
+                    db_name TEXT NOT NULL,
+                    scope TEXT NOT NULL,
+                    subject_type TEXT NOT NULL,
+                    subject_id TEXT NOT NULL,
+                    policy JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    status TEXT NOT NULL DEFAULT 'ACTIVE',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE (db_name, scope, subject_type, subject_id)
+                )
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_access_policies_subject
+                ON {self._schema}.access_policies(db_name, subject_type, subject_id)
+                """
+            )
+
+            await conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self._schema}.instance_edits (
+                    edit_id UUID PRIMARY KEY,
+                    db_name TEXT NOT NULL,
+                    class_id TEXT NOT NULL,
+                    instance_id TEXT NOT NULL,
+                    edit_type TEXT NOT NULL,
+                    metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_instance_edits_class
+                ON {self._schema}.instance_edits(db_name, class_id)
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_instance_edits_instance
+                ON {self._schema}.instance_edits(db_name, class_id, instance_id)
+                """
+            )
+
+            await conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self._schema}.relationship_specs (
+                    relationship_spec_id UUID PRIMARY KEY,
+                    link_type_id TEXT NOT NULL,
+                    db_name TEXT NOT NULL,
+                    source_object_type TEXT NOT NULL,
+                    target_object_type TEXT NOT NULL,
+                    predicate TEXT NOT NULL,
+                    spec_type TEXT NOT NULL,
+                    dataset_id UUID NOT NULL,
+                    dataset_version_id UUID,
+                    mapping_spec_id UUID NOT NULL,
+                    mapping_spec_version INTEGER NOT NULL DEFAULT 1,
+                    spec JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    status TEXT NOT NULL DEFAULT 'ACTIVE',
+                    auto_sync BOOLEAN NOT NULL DEFAULT TRUE,
+                    last_index_status TEXT,
+                    last_indexed_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE (link_type_id),
+                    FOREIGN KEY (dataset_id)
+                        REFERENCES {self._schema}.datasets(dataset_id)
+                        ON DELETE CASCADE,
+                    FOREIGN KEY (dataset_version_id)
+                        REFERENCES {self._schema}.dataset_versions(version_id)
+                        ON DELETE SET NULL
+                )
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_relationship_specs_dataset
+                ON {self._schema}.relationship_specs(dataset_id, status)
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_relationship_specs_db
+                ON {self._schema}.relationship_specs(db_name, status)
+                """
+            )
+
     async def create_dataset(
         self,
         *,
@@ -762,7 +1236,7 @@ class DatasetRegistry:
             )
             if not row:
                 raise RuntimeError("Failed to create dataset version")
-            return DatasetVersionRecord(
+            record = DatasetVersionRecord(
                 version_id=str(row["version_id"]),
                 dataset_id=str(row["dataset_id"]),
                 lakefs_commit_id=str(row["lakefs_commit_id"]),
@@ -775,6 +1249,26 @@ class DatasetRegistry:
                 ),
                 created_at=row["created_at"],
             )
+
+        try:
+            backing = await self.get_backing_datasource_by_dataset(dataset_id=dataset_id)
+            if backing:
+                schema_hash = None
+                if isinstance(sample_json, dict) and isinstance(sample_json.get("columns"), list):
+                    schema_hash = compute_schema_hash(sample_json.get("columns") or [])
+                elif isinstance(schema_json, dict) and isinstance(schema_json.get("columns"), list):
+                    schema_hash = compute_schema_hash(schema_json.get("columns") or [])
+                if schema_hash:
+                    await self.get_or_create_backing_datasource_version(
+                        backing_id=backing.backing_id,
+                        dataset_version_id=record.version_id,
+                        schema_hash=schema_hash,
+                        metadata={"artifact_key": record.artifact_key} if record.artifact_key else None,
+                    )
+        except Exception as exc:
+            logger.warning("Failed to create backing datasource version: %s", exc)
+
+        return record
 
     async def get_latest_version(self, *, dataset_id: str) -> Optional[DatasetVersionRecord]:
         if not self._pool:
@@ -868,6 +1362,926 @@ class DatasetRegistry:
                 ),
                 created_at=row["created_at"],
             )
+
+    async def create_backing_datasource(
+        self,
+        *,
+        dataset_id: str,
+        db_name: str,
+        name: str,
+        branch: str = "main",
+        description: Optional[str] = None,
+        source_type: str = "dataset",
+        source_ref: Optional[str] = None,
+        backing_id: Optional[str] = None,
+    ) -> BackingDatasourceRecord:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        backing_id = backing_id or str(uuid4())
+        branch = branch or "main"
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                INSERT INTO {self._schema}.backing_datasources (
+                    backing_id, dataset_id, db_name, name, description, source_type, source_ref, branch
+                ) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8)
+                RETURNING backing_id, dataset_id, db_name, name, description, source_type, source_ref,
+                          branch, status, created_at, updated_at
+                """,
+                backing_id,
+                dataset_id,
+                db_name,
+                name,
+                description,
+                source_type,
+                source_ref,
+                branch,
+            )
+            if not row:
+                raise RuntimeError("Failed to create backing datasource")
+            return self._row_to_backing(row)
+
+    async def get_backing_datasource(self, *, backing_id: str) -> Optional[BackingDatasourceRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT backing_id, dataset_id, db_name, name, description, source_type, source_ref,
+                       branch, status, created_at, updated_at
+                FROM {self._schema}.backing_datasources
+                WHERE backing_id = $1::uuid
+                """,
+                backing_id,
+            )
+            if not row:
+                return None
+            return self._row_to_backing(row)
+
+    async def get_backing_datasource_by_dataset(
+        self,
+        *,
+        dataset_id: str,
+        branch: Optional[str] = None,
+    ) -> Optional[BackingDatasourceRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT backing_id, dataset_id, db_name, name, description, source_type, source_ref,
+                       branch, status, created_at, updated_at
+                FROM {self._schema}.backing_datasources
+                WHERE dataset_id = $1::uuid
+                  AND ($2::text IS NULL OR branch = $2)
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                dataset_id,
+                branch,
+            )
+            if not row:
+                return None
+            return self._row_to_backing(row)
+
+    async def list_backing_datasources(
+        self,
+        *,
+        db_name: str,
+        branch: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[BackingDatasourceRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT backing_id, dataset_id, db_name, name, description, source_type, source_ref,
+                       branch, status, created_at, updated_at
+                FROM {self._schema}.backing_datasources
+                WHERE db_name = $1
+                  AND ($2::text IS NULL OR branch = $2)
+                ORDER BY created_at DESC
+                LIMIT $3
+                """,
+                db_name,
+                branch,
+                limit,
+            )
+            return [self._row_to_backing(row) for row in rows]
+
+    async def get_or_create_backing_datasource(
+        self,
+        *,
+        dataset: DatasetRecord,
+        source_type: str = "dataset",
+        source_ref: Optional[str] = None,
+    ) -> BackingDatasourceRecord:
+        existing = await self.get_backing_datasource_by_dataset(
+            dataset_id=dataset.dataset_id,
+            branch=dataset.branch,
+        )
+        if existing:
+            return existing
+        return await self.create_backing_datasource(
+            dataset_id=dataset.dataset_id,
+            db_name=dataset.db_name,
+            name=dataset.name,
+            description=dataset.description,
+            source_type=source_type,
+            source_ref=source_ref,
+            branch=dataset.branch,
+        )
+
+    async def create_backing_datasource_version(
+        self,
+        *,
+        backing_id: str,
+        dataset_version_id: str,
+        schema_hash: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> BackingDatasourceVersionRecord:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        backing = await self.get_backing_datasource(backing_id=backing_id)
+        if not backing:
+            raise RuntimeError("Backing datasource not found")
+        version = await self.get_version(version_id=dataset_version_id)
+        if not version or version.dataset_id != backing.dataset_id:
+            raise RuntimeError("Dataset version mismatch")
+        if not schema_hash:
+            schema_hash = _compute_schema_hash_from_payload(version.sample_json)
+            if not schema_hash:
+                dataset = await self.get_dataset(dataset_id=backing.dataset_id)
+                schema_hash = _compute_schema_hash_from_payload(
+                    dataset.schema_json if dataset else {}
+                )
+        if not schema_hash:
+            raise RuntimeError("schema_hash is required for backing datasource version")
+        metadata_payload = normalize_json_payload(metadata or {})
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                INSERT INTO {self._schema}.backing_datasource_versions (
+                    backing_version_id, backing_id, dataset_version_id, schema_hash, artifact_key, metadata
+                ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::jsonb)
+                RETURNING backing_version_id, backing_id, dataset_version_id, schema_hash, artifact_key,
+                          metadata, status, created_at
+                """,
+                str(uuid4()),
+                backing_id,
+                dataset_version_id,
+                schema_hash,
+                version.artifact_key,
+                metadata_payload,
+            )
+            if not row:
+                raise RuntimeError("Failed to create backing datasource version")
+            return self._row_to_backing_version(row)
+
+    async def get_backing_datasource_version(
+        self,
+        *,
+        version_id: str,
+    ) -> Optional[BackingDatasourceVersionRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT backing_version_id, backing_id, dataset_version_id, schema_hash, artifact_key,
+                       metadata, status, created_at
+                FROM {self._schema}.backing_datasource_versions
+                WHERE backing_version_id = $1::uuid
+                """,
+                version_id,
+            )
+            if not row:
+                return None
+            return self._row_to_backing_version(row)
+
+    async def get_backing_datasource_version_by_dataset_version(
+        self,
+        *,
+        dataset_version_id: str,
+    ) -> Optional[BackingDatasourceVersionRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT backing_version_id, backing_id, dataset_version_id, schema_hash, artifact_key,
+                       metadata, status, created_at
+                FROM {self._schema}.backing_datasource_versions
+                WHERE dataset_version_id = $1::uuid
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                dataset_version_id,
+            )
+            if not row:
+                return None
+            return self._row_to_backing_version(row)
+
+    async def list_backing_datasource_versions(
+        self,
+        *,
+        backing_id: str,
+        limit: int = 200,
+    ) -> List[BackingDatasourceVersionRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT backing_version_id, backing_id, dataset_version_id, schema_hash, artifact_key,
+                       metadata, status, created_at
+                FROM {self._schema}.backing_datasource_versions
+                WHERE backing_id = $1::uuid
+                ORDER BY created_at DESC
+                LIMIT $2
+                """,
+                backing_id,
+                limit,
+            )
+            return [self._row_to_backing_version(row) for row in rows]
+
+    async def get_or_create_backing_datasource_version(
+        self,
+        *,
+        backing_id: str,
+        dataset_version_id: str,
+        schema_hash: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> BackingDatasourceVersionRecord:
+        existing = await self.get_backing_datasource_version_by_dataset_version(
+            dataset_version_id=dataset_version_id,
+        )
+        if existing and existing.backing_id == backing_id:
+            return existing
+        return await self.create_backing_datasource_version(
+            backing_id=backing_id,
+            dataset_version_id=dataset_version_id,
+            schema_hash=schema_hash,
+            metadata=metadata,
+        )
+
+    async def create_key_spec(
+        self,
+        *,
+        dataset_id: str,
+        spec: Dict[str, Any],
+        dataset_version_id: Optional[str] = None,
+        status: str = "ACTIVE",
+        key_spec_id: Optional[str] = None,
+    ) -> KeySpecRecord:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        key_spec_id = key_spec_id or str(uuid4())
+        payload = normalize_json_payload(spec or {})
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                INSERT INTO {self._schema}.key_specs (
+                    key_spec_id, dataset_id, dataset_version_id, spec, status
+                ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::jsonb, $5)
+                RETURNING key_spec_id, dataset_id, dataset_version_id, spec, status, created_at, updated_at
+                """,
+                key_spec_id,
+                dataset_id,
+                dataset_version_id,
+                payload,
+                status,
+            )
+            if not row:
+                raise RuntimeError("Failed to create key spec")
+            return self._row_to_key_spec(row)
+
+    async def get_key_spec(self, *, key_spec_id: str) -> Optional[KeySpecRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT key_spec_id, dataset_id, dataset_version_id, spec, status, created_at, updated_at
+                FROM {self._schema}.key_specs
+                WHERE key_spec_id = $1::uuid
+                """,
+                key_spec_id,
+            )
+            if not row:
+                return None
+            return self._row_to_key_spec(row)
+
+    async def get_key_spec_for_dataset(
+        self,
+        *,
+        dataset_id: str,
+        dataset_version_id: Optional[str] = None,
+    ) -> Optional[KeySpecRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            if dataset_version_id:
+                row = await conn.fetchrow(
+                    f"""
+                    SELECT key_spec_id, dataset_id, dataset_version_id, spec, status, created_at, updated_at
+                    FROM {self._schema}.key_specs
+                    WHERE dataset_id = $1::uuid
+                      AND dataset_version_id = $2::uuid
+                      AND status = 'ACTIVE'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    dataset_id,
+                    dataset_version_id,
+                )
+                if row:
+                    return self._row_to_key_spec(row)
+            row = await conn.fetchrow(
+                f"""
+                SELECT key_spec_id, dataset_id, dataset_version_id, spec, status, created_at, updated_at
+                FROM {self._schema}.key_specs
+                WHERE dataset_id = $1::uuid
+                  AND dataset_version_id IS NULL
+                  AND status = 'ACTIVE'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                dataset_id,
+            )
+            if not row:
+                return None
+            return self._row_to_key_spec(row)
+
+    async def list_key_specs(
+        self,
+        *,
+        dataset_id: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[KeySpecRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT key_spec_id, dataset_id, dataset_version_id, spec, status, created_at, updated_at
+                FROM {self._schema}.key_specs
+                WHERE ($1::uuid IS NULL OR dataset_id = $1::uuid)
+                ORDER BY created_at DESC
+                LIMIT $2
+                """,
+                dataset_id,
+                limit,
+            )
+            return [self._row_to_key_spec(row) for row in rows]
+
+    async def upsert_gate_policy(
+        self,
+        *,
+        scope: str,
+        name: str,
+        description: Optional[str] = None,
+        rules: Optional[Dict[str, Any]] = None,
+        status: str = "ACTIVE",
+    ) -> GatePolicyRecord:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        rules_payload = normalize_json_payload(rules or {})
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                INSERT INTO {self._schema}.gate_policies (
+                    policy_id, scope, name, description, rules, status
+                ) VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6)
+                ON CONFLICT (scope, name)
+                DO UPDATE SET description = EXCLUDED.description,
+                              rules = EXCLUDED.rules,
+                              status = EXCLUDED.status,
+                              updated_at = NOW()
+                RETURNING policy_id, scope, name, description, rules, status, created_at, updated_at
+                """,
+                str(uuid4()),
+                scope,
+                name,
+                description,
+                rules_payload,
+                status,
+            )
+            if not row:
+                raise RuntimeError("Failed to upsert gate policy")
+            return self._row_to_gate_policy(row)
+
+    async def get_gate_policy(
+        self,
+        *,
+        scope: str,
+        name: str,
+    ) -> Optional[GatePolicyRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT policy_id, scope, name, description, rules, status, created_at, updated_at
+                FROM {self._schema}.gate_policies
+                WHERE scope = $1 AND name = $2
+                """,
+                scope,
+                name,
+            )
+            if not row:
+                return None
+            return self._row_to_gate_policy(row)
+
+    async def list_gate_policies(
+        self,
+        *,
+        scope: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[GatePolicyRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT policy_id, scope, name, description, rules, status, created_at, updated_at
+                FROM {self._schema}.gate_policies
+                WHERE ($1::text IS NULL OR scope = $1)
+                ORDER BY created_at DESC
+                LIMIT $2
+                """,
+                scope,
+                limit,
+            )
+            return [self._row_to_gate_policy(row) for row in rows]
+
+    async def record_gate_result(
+        self,
+        *,
+        scope: str,
+        subject_type: str,
+        subject_id: str,
+        status: str,
+        details: Optional[Dict[str, Any]] = None,
+        policy_name: str = "default",
+    ) -> GateResultRecord:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        policy = await self.get_gate_policy(scope=scope, name=policy_name)
+        if not policy:
+            policy = await self.upsert_gate_policy(
+                scope=scope,
+                name=policy_name,
+                description=f"Default gate policy for {scope}",
+                rules={},
+                status="ACTIVE",
+            )
+        payload = normalize_json_payload(details or {})
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                INSERT INTO {self._schema}.gate_results (
+                    result_id, policy_id, scope, subject_type, subject_id, status, details
+                ) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7::jsonb)
+                RETURNING result_id, policy_id, scope, subject_type, subject_id, status, details, created_at
+                """,
+                str(uuid4()),
+                policy.policy_id,
+                scope,
+                subject_type,
+                subject_id,
+                status,
+                payload,
+            )
+            if not row:
+                raise RuntimeError("Failed to record gate result")
+            return self._row_to_gate_result(row)
+
+    async def list_gate_results(
+        self,
+        *,
+        scope: Optional[str] = None,
+        subject_type: Optional[str] = None,
+        subject_id: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[GateResultRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT result_id, policy_id, scope, subject_type, subject_id, status, details, created_at
+                FROM {self._schema}.gate_results
+                WHERE ($1::text IS NULL OR scope = $1)
+                  AND ($2::text IS NULL OR subject_type = $2)
+                  AND ($3::text IS NULL OR subject_id = $3)
+                ORDER BY created_at DESC
+                LIMIT $4
+                """,
+                scope,
+                subject_type,
+                subject_id,
+                limit,
+            )
+            return [self._row_to_gate_result(row) for row in rows]
+
+    async def upsert_access_policy(
+        self,
+        *,
+        db_name: str,
+        scope: str,
+        subject_type: str,
+        subject_id: str,
+        policy: Optional[Dict[str, Any]] = None,
+        status: str = "ACTIVE",
+    ) -> AccessPolicyRecord:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        policy_payload = normalize_json_payload(policy or {})
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                INSERT INTO {self._schema}.access_policies (
+                    policy_id, db_name, scope, subject_type, subject_id, policy, status
+                ) VALUES ($1::uuid, $2, $3, $4, $5, $6::jsonb, $7)
+                ON CONFLICT (db_name, scope, subject_type, subject_id)
+                DO UPDATE SET policy = EXCLUDED.policy,
+                              status = EXCLUDED.status,
+                              updated_at = NOW()
+                RETURNING policy_id, db_name, scope, subject_type, subject_id, policy, status, created_at, updated_at
+                """,
+                str(uuid4()),
+                db_name,
+                scope,
+                subject_type,
+                subject_id,
+                policy_payload,
+                status,
+            )
+            if not row:
+                raise RuntimeError("Failed to upsert access policy")
+            return self._row_to_access_policy(row)
+
+    async def get_access_policy(
+        self,
+        *,
+        db_name: str,
+        scope: str,
+        subject_type: str,
+        subject_id: str,
+        status: Optional[str] = "ACTIVE",
+    ) -> Optional[AccessPolicyRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT policy_id, db_name, scope, subject_type, subject_id, policy, status, created_at, updated_at
+                FROM {self._schema}.access_policies
+                WHERE db_name = $1 AND scope = $2 AND subject_type = $3 AND subject_id = $4
+                  AND ($5::text IS NULL OR status = $5)
+                """,
+                db_name,
+                scope,
+                subject_type,
+                subject_id,
+                status,
+            )
+            if not row:
+                return None
+            return self._row_to_access_policy(row)
+
+    async def list_access_policies(
+        self,
+        *,
+        db_name: Optional[str] = None,
+        scope: Optional[str] = None,
+        subject_type: Optional[str] = None,
+        subject_id: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[AccessPolicyRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT policy_id, db_name, scope, subject_type, subject_id, policy, status, created_at, updated_at
+                FROM {self._schema}.access_policies
+                WHERE ($1::text IS NULL OR db_name = $1)
+                  AND ($2::text IS NULL OR scope = $2)
+                  AND ($3::text IS NULL OR subject_type = $3)
+                  AND ($4::text IS NULL OR subject_id = $4)
+                  AND ($5::text IS NULL OR status = $5)
+                ORDER BY created_at DESC
+                LIMIT $6
+                """,
+                db_name,
+                scope,
+                subject_type,
+                subject_id,
+                status,
+                limit,
+            )
+            return [self._row_to_access_policy(row) for row in rows]
+
+    async def record_instance_edit(
+        self,
+        *,
+        db_name: str,
+        class_id: str,
+        instance_id: str,
+        edit_type: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> InstanceEditRecord:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        payload = normalize_json_payload(metadata or {})
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                INSERT INTO {self._schema}.instance_edits (
+                    edit_id, db_name, class_id, instance_id, edit_type, metadata
+                ) VALUES ($1::uuid, $2, $3, $4, $5, $6::jsonb)
+                RETURNING edit_id, db_name, class_id, instance_id, edit_type, metadata, created_at
+                """,
+                str(uuid4()),
+                db_name,
+                class_id,
+                instance_id,
+                edit_type,
+                payload,
+            )
+            if not row:
+                raise RuntimeError("Failed to record instance edit")
+            return self._row_to_instance_edit(row)
+
+    async def count_instance_edits(
+        self,
+        *,
+        db_name: str,
+        class_id: str,
+    ) -> int:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            value = await conn.fetchval(
+                f"""
+                SELECT COUNT(*)
+                FROM {self._schema}.instance_edits
+                WHERE db_name = $1 AND class_id = $2
+                """,
+                db_name,
+                class_id,
+            )
+            return int(value or 0)
+
+    async def list_instance_edits(
+        self,
+        *,
+        db_name: str,
+        class_id: Optional[str] = None,
+        instance_id: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[InstanceEditRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT edit_id, db_name, class_id, instance_id, edit_type, metadata, created_at
+                FROM {self._schema}.instance_edits
+                WHERE db_name = $1
+                  AND ($2::text IS NULL OR class_id = $2)
+                  AND ($3::text IS NULL OR instance_id = $3)
+                ORDER BY created_at DESC
+                LIMIT $4
+                """,
+                db_name,
+                class_id,
+                instance_id,
+                limit,
+            )
+            return [self._row_to_instance_edit(row) for row in rows]
+
+    async def clear_instance_edits(
+        self,
+        *,
+        db_name: str,
+        class_id: str,
+    ) -> int:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                f"""
+                DELETE FROM {self._schema}.instance_edits
+                WHERE db_name = $1 AND class_id = $2
+                """,
+                db_name,
+                class_id,
+            )
+            try:
+                return int(str(result).split()[-1])
+            except Exception:
+                return 0
+
+    async def create_relationship_spec(
+        self,
+        *,
+        link_type_id: str,
+        db_name: str,
+        source_object_type: str,
+        target_object_type: str,
+        predicate: str,
+        spec_type: str,
+        dataset_id: str,
+        mapping_spec_id: str,
+        mapping_spec_version: int,
+        spec: Dict[str, Any],
+        dataset_version_id: Optional[str] = None,
+        status: str = "ACTIVE",
+        auto_sync: bool = True,
+        relationship_spec_id: Optional[str] = None,
+    ) -> RelationshipSpecRecord:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        relationship_spec_id = relationship_spec_id or str(uuid4())
+        payload = normalize_json_payload(spec or {})
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                INSERT INTO {self._schema}.relationship_specs (
+                    relationship_spec_id, link_type_id, db_name, source_object_type, target_object_type,
+                    predicate, spec_type, dataset_id, dataset_version_id, mapping_spec_id, mapping_spec_version,
+                    spec, status, auto_sync
+                ) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::uuid, $9::uuid, $10::uuid, $11, $12::jsonb, $13, $14)
+                RETURNING relationship_spec_id, link_type_id, db_name, source_object_type, target_object_type,
+                          predicate, spec_type, dataset_id, dataset_version_id, mapping_spec_id, mapping_spec_version,
+                          spec, status, auto_sync, last_index_status, last_indexed_at, created_at, updated_at
+                """,
+                relationship_spec_id,
+                link_type_id,
+                db_name,
+                source_object_type,
+                target_object_type,
+                predicate,
+                spec_type,
+                dataset_id,
+                dataset_version_id,
+                mapping_spec_id,
+                mapping_spec_version,
+                payload,
+                status,
+                auto_sync,
+            )
+            if not row:
+                raise RuntimeError("Failed to create relationship spec")
+            return self._row_to_relationship_spec(row)
+
+    async def update_relationship_spec(
+        self,
+        *,
+        relationship_spec_id: str,
+        status: Optional[str] = None,
+        spec: Optional[Dict[str, Any]] = None,
+        auto_sync: Optional[bool] = None,
+        dataset_id: Optional[str] = None,
+        dataset_version_id: Optional[str] = None,
+        mapping_spec_id: Optional[str] = None,
+        mapping_spec_version: Optional[int] = None,
+    ) -> Optional[RelationshipSpecRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        updates: List[str] = []
+        values: List[Any] = []
+        if status is not None:
+            updates.append("status = $%s" % (len(values) + 1))
+            values.append(status)
+        if spec is not None:
+            updates.append("spec = $%s::jsonb" % (len(values) + 1))
+            values.append(normalize_json_payload(spec))
+        if auto_sync is not None:
+            updates.append("auto_sync = $%s" % (len(values) + 1))
+            values.append(auto_sync)
+        if dataset_id is not None:
+            updates.append("dataset_id = $%s::uuid" % (len(values) + 1))
+            values.append(dataset_id)
+        if dataset_version_id is not None:
+            updates.append("dataset_version_id = $%s::uuid" % (len(values) + 1))
+            values.append(dataset_version_id)
+        if mapping_spec_id is not None:
+            updates.append("mapping_spec_id = $%s::uuid" % (len(values) + 1))
+            values.append(mapping_spec_id)
+        if mapping_spec_version is not None:
+            updates.append("mapping_spec_version = $%s" % (len(values) + 1))
+            values.append(mapping_spec_version)
+        if not updates:
+            return await self.get_relationship_spec(relationship_spec_id=relationship_spec_id)
+        values.append(relationship_spec_id)
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                UPDATE {self._schema}.relationship_specs
+                SET {", ".join(updates)}, updated_at = NOW()
+                WHERE relationship_spec_id = ${len(values)}::uuid
+                RETURNING relationship_spec_id, link_type_id, db_name, source_object_type, target_object_type,
+                          predicate, spec_type, dataset_id, dataset_version_id, mapping_spec_id, mapping_spec_version,
+                          spec, status, auto_sync, last_index_status, last_indexed_at, created_at, updated_at
+                """,
+                *values,
+            )
+            if not row:
+                return None
+            return self._row_to_relationship_spec(row)
+
+    async def record_relationship_index_result(
+        self,
+        *,
+        relationship_spec_id: str,
+        status: str,
+        indexed_at: Optional[datetime] = None,
+    ) -> Optional[RelationshipSpecRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        indexed_at = indexed_at or utcnow()
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                UPDATE {self._schema}.relationship_specs
+                SET last_index_status = $1, last_indexed_at = $2, updated_at = NOW()
+                WHERE relationship_spec_id = $3::uuid
+                RETURNING relationship_spec_id, link_type_id, db_name, source_object_type, target_object_type,
+                          predicate, spec_type, dataset_id, dataset_version_id, mapping_spec_id, mapping_spec_version,
+                          spec, status, auto_sync, last_index_status, last_indexed_at, created_at, updated_at
+                """,
+                status,
+                indexed_at,
+                relationship_spec_id,
+            )
+            if not row:
+                return None
+            return self._row_to_relationship_spec(row)
+
+    async def get_relationship_spec(
+        self,
+        *,
+        relationship_spec_id: Optional[str] = None,
+        link_type_id: Optional[str] = None,
+    ) -> Optional[RelationshipSpecRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        if not relationship_spec_id and not link_type_id:
+            raise ValueError("relationship_spec_id or link_type_id is required")
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT relationship_spec_id, link_type_id, db_name, source_object_type, target_object_type,
+                       predicate, spec_type, dataset_id, dataset_version_id, mapping_spec_id, mapping_spec_version,
+                       spec, status, auto_sync, last_index_status, last_indexed_at, created_at, updated_at
+                FROM {self._schema}.relationship_specs
+                WHERE ($1::uuid IS NULL OR relationship_spec_id = $1::uuid)
+                  AND ($2::text IS NULL OR link_type_id = $2)
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                relationship_spec_id,
+                link_type_id,
+            )
+            if not row:
+                return None
+            return self._row_to_relationship_spec(row)
+
+    async def list_relationship_specs(
+        self,
+        *,
+        db_name: Optional[str] = None,
+        dataset_id: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[RelationshipSpecRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT relationship_spec_id, link_type_id, db_name, source_object_type, target_object_type,
+                       predicate, spec_type, dataset_id, dataset_version_id, mapping_spec_id, mapping_spec_version,
+                       spec, status, auto_sync, last_index_status, last_indexed_at, created_at, updated_at
+                FROM {self._schema}.relationship_specs
+                WHERE ($1::text IS NULL OR db_name = $1)
+                  AND ($2::uuid IS NULL OR dataset_id = $2::uuid)
+                  AND ($3::text IS NULL OR status = $3)
+                ORDER BY created_at DESC
+                LIMIT $4
+                """,
+                db_name,
+                dataset_id,
+                status,
+                limit,
+            )
+            return [self._row_to_relationship_spec(row) for row in rows]
 
     async def get_ingest_request_by_key(
         self,

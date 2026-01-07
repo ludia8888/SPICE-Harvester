@@ -2059,6 +2059,10 @@ class PipelineWorker:
                     dataset=dataset,
                     version=version,
                 )
+                relationship_job_ids = await self._maybe_enqueue_relationship_jobs(
+                    dataset=dataset,
+                    version=version,
+                )
 
                 build_outputs.append(
                     {
@@ -2070,6 +2074,7 @@ class PipelineWorker:
                         "lakefs_commit_id": merge_commit_id,
                         "lakefs_branch": base_branch,
                         "objectify_job_id": objectify_job_id,
+                        "relationship_job_ids": relationship_job_ids,
                     }
                 )
 
@@ -2281,6 +2286,59 @@ class PipelineWorker:
             schema_hash=schema_hash,
         )
         if not mapping_spec or not mapping_spec.auto_sync:
+            if self.dataset_registry and schema_hash:
+                try:
+                    candidates = await self.objectify_registry.list_mapping_specs(dataset_id=dataset.dataset_id)
+                    mismatched = [
+                        spec.schema_hash
+                        for spec in candidates
+                        if spec.artifact_output_name == resolved_output_name and spec.schema_hash != schema_hash
+                    ]
+                    if mismatched:
+                        current_columns: List[Dict[str, Any]] = []
+                        if isinstance(getattr(version, "sample_json", None), dict):
+                            current_columns = version.sample_json.get("columns") or []
+                        if not current_columns and isinstance(getattr(dataset, "schema_json", None), dict):
+                            current_columns = dataset.schema_json.get("columns") or []
+
+                        expected_columns: List[Dict[str, Any]] = []
+                        latest_spec = None
+                        if candidates:
+                            latest_spec = max(candidates, key=lambda spec: spec.created_at or datetime.min)
+                        if latest_spec and latest_spec.backing_datasource_version_id:
+                            backing_version = await self.dataset_registry.get_backing_datasource_version(
+                                version_id=latest_spec.backing_datasource_version_id
+                            )
+                            if backing_version:
+                                expected_version = await self.dataset_registry.get_version(
+                                    version_id=backing_version.dataset_version_id
+                                )
+                                if expected_version and isinstance(expected_version.sample_json, dict):
+                                    expected_columns = expected_version.sample_json.get("columns") or []
+                                if not expected_columns and expected_version and isinstance(expected_version.schema_json, dict):
+                                    expected_columns = expected_version.schema_json.get("columns") or []
+
+                        schema_diff = (
+                            _schema_diff(current_columns=current_columns, expected_columns=expected_columns)
+                            if current_columns and expected_columns
+                            else None
+                        )
+                        await self.dataset_registry.record_gate_result(
+                            scope="objectify_schema",
+                            subject_type="dataset_version",
+                            subject_id=version.version_id,
+                            status="FAIL",
+                            details={
+                                "dataset_id": dataset.dataset_id,
+                                "dataset_version_id": version.version_id,
+                                "observed_schema_hash": schema_hash,
+                                "expected_schema_hashes": sorted(set(mismatched)),
+                                "schema_diff": schema_diff,
+                                "message": "Schema hash mismatch; migration required",
+                            },
+                        )
+                except Exception as exc:
+                    logger.warning("Failed to record schema gate: %s", exc)
             return None
         dedupe_key = self.objectify_registry.build_dedupe_key(
             dataset_id=dataset.dataset_id,
@@ -2320,6 +2378,120 @@ class PipelineWorker:
         except Exception as exc:
             logger.warning("Failed to enqueue objectify job %s: %s", job_id, exc)
         return job_id
+
+    async def _maybe_enqueue_relationship_jobs(self, *, dataset, version) -> List[str]:
+        if not self.objectify_registry or not self.dataset_registry:
+            return []
+        if not getattr(version, "artifact_key", None):
+            return []
+        try:
+            specs = await self.dataset_registry.list_relationship_specs(
+                dataset_id=dataset.dataset_id,
+                status="ACTIVE",
+            )
+        except Exception as exc:
+            logger.warning("Failed to load relationship specs: %s", exc)
+            return []
+
+        job_ids: List[str] = []
+        schema_hash = compute_schema_hash(version.sample_json.get("columns")) if isinstance(getattr(version, "sample_json", None), dict) else None
+        if not schema_hash and isinstance(getattr(dataset, "schema_json", None), dict):
+            schema_hash = compute_schema_hash(dataset.schema_json.get("columns") or [])
+
+        for spec in specs:
+            if not spec.auto_sync:
+                continue
+            if spec.dataset_version_id and spec.dataset_version_id != version.version_id:
+                continue
+            mapping_spec = await self.objectify_registry.get_mapping_spec(mapping_spec_id=spec.mapping_spec_id)
+            if not mapping_spec or not mapping_spec.auto_sync:
+                continue
+            if schema_hash and mapping_spec.schema_hash and mapping_spec.schema_hash != schema_hash:
+                try:
+                    current_columns: List[Dict[str, Any]] = []
+                    if isinstance(getattr(version, "sample_json", None), dict):
+                        current_columns = version.sample_json.get("columns") or []
+                    if not current_columns and isinstance(getattr(dataset, "schema_json", None), dict):
+                        current_columns = dataset.schema_json.get("columns") or []
+
+                    expected_columns: List[Dict[str, Any]] = []
+                    if mapping_spec.backing_datasource_version_id:
+                        backing_version = await self.dataset_registry.get_backing_datasource_version(
+                            version_id=mapping_spec.backing_datasource_version_id
+                        )
+                        if backing_version:
+                            expected_version = await self.dataset_registry.get_version(
+                                version_id=backing_version.dataset_version_id
+                            )
+                            if expected_version and isinstance(expected_version.sample_json, dict):
+                                expected_columns = expected_version.sample_json.get("columns") or []
+                            if not expected_columns and expected_version and isinstance(expected_version.schema_json, dict):
+                                expected_columns = expected_version.schema_json.get("columns") or []
+
+                    schema_diff = (
+                        _schema_diff(current_columns=current_columns, expected_columns=expected_columns)
+                        if current_columns and expected_columns
+                        else None
+                    )
+                    await self.dataset_registry.record_gate_result(
+                        scope="relationship_schema",
+                        subject_type="dataset_version",
+                        subject_id=version.version_id,
+                        status="FAIL",
+                        details={
+                            "dataset_id": dataset.dataset_id,
+                            "dataset_version_id": version.version_id,
+                            "relationship_spec_id": spec.relationship_spec_id,
+                            "observed_schema_hash": schema_hash,
+                            "expected_schema_hash": mapping_spec.schema_hash,
+                            "schema_diff": schema_diff,
+                            "message": "Relationship mapping schema hash mismatch",
+                        },
+                    )
+                except Exception as exc:
+                    logger.warning("Failed to record relationship schema gate: %s", exc)
+                continue
+            dedupe_key = self.objectify_registry.build_dedupe_key(
+                dataset_id=dataset.dataset_id,
+                dataset_branch=dataset.branch,
+                mapping_spec_id=mapping_spec.mapping_spec_id,
+                mapping_spec_version=spec.mapping_spec_version,
+                dataset_version_id=version.version_id,
+                artifact_id=None,
+                artifact_output_name=dataset.name,
+            )
+            existing = await self.objectify_registry.get_objectify_job_by_dedupe_key(dedupe_key=dedupe_key)
+            if existing:
+                job_ids.append(existing.job_id)
+                continue
+            job_id = str(uuid4())
+            options = dict(mapping_spec.options or {})
+            job = ObjectifyJob(
+                job_id=job_id,
+                db_name=dataset.db_name,
+                dataset_id=dataset.dataset_id,
+                dataset_version_id=version.version_id,
+                artifact_output_name=dataset.name,
+                dedupe_key=dedupe_key,
+                dataset_branch=dataset.branch,
+                artifact_key=version.artifact_key or "",
+                mapping_spec_id=mapping_spec.mapping_spec_id,
+                mapping_spec_version=spec.mapping_spec_version,
+                target_class_id=mapping_spec.target_class_id,
+                ontology_branch=options.get("ontology_branch"),
+                max_rows=options.get("max_rows"),
+                batch_size=options.get("batch_size"),
+                allow_partial=bool(options.get("allow_partial")),
+                options=options,
+            )
+            try:
+                if self.objectify_job_queue:
+                    await self.objectify_job_queue.publish(job, require_delivery=False)
+                job_ids.append(job_id)
+            except Exception as exc:
+                logger.warning("Failed to enqueue relationship job %s: %s", job_id, exc)
+
+        return job_ids
 
     async def _materialize_output_dataframe(
         self,
@@ -3522,6 +3694,42 @@ def _schema_from_dataframe(frame: DataFrame) -> List[Dict[str, str]]:
 def _hash_schema_columns(columns: List[Dict[str, Any]]) -> str:
     return compute_schema_hash(columns)
 
+
+def _schema_columns_map(columns: List[Dict[str, Any]]) -> Dict[str, str]:
+    output: Dict[str, str] = {}
+    for col in columns or []:
+        if not isinstance(col, dict):
+            continue
+        name = str(col.get("name") or col.get("column") or "").strip()
+        raw_type = col.get("type") or col.get("data_type") or col.get("datatype")
+        if not name:
+            continue
+        output[name] = str(raw_type).strip().lower() if raw_type is not None else ""
+    return output
+
+
+def _schema_diff(
+    *,
+    current_columns: List[Dict[str, Any]],
+    expected_columns: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    current_map = _schema_columns_map(current_columns)
+    expected_map = _schema_columns_map(expected_columns)
+    current_keys = set(current_map.keys())
+    expected_keys = set(expected_map.keys())
+    removed = sorted(expected_keys - current_keys)
+    added = sorted(current_keys - expected_keys)
+    type_changed = []
+    for key in sorted(current_keys & expected_keys):
+        cur = current_map.get(key)
+        exp = expected_map.get(key)
+        if exp and cur and exp != cur:
+            type_changed.append({"column": key, "expected": exp, "observed": cur})
+    return {
+        "removed_columns": removed,
+        "added_columns": added,
+        "type_changes": type_changed,
+    }
 
 def _list_part_files(path: str, *, extensions: Optional[set[str]] = None) -> List[str]:
     if extensions is None:

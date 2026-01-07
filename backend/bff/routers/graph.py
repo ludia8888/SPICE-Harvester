@@ -13,6 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 from pydantic import BaseModel
 
 from bff.dependencies import get_oms_client
+from shared.services.dataset_registry import DatasetRegistry
+from shared.utils.access_policy import apply_access_policy
 from shared.security.input_sanitizer import validate_branch_name, validate_db_name
 from shared.utils.language import get_accept_language
 from shared.services.graph_federation_service_woql import GraphFederationServiceWOQL
@@ -33,6 +35,86 @@ import os
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["Graph"])
+
+
+async def get_dataset_registry() -> DatasetRegistry:
+    from bff.main import get_dataset_registry as _get_dataset_registry
+
+    return await _get_dataset_registry()
+
+
+async def _load_access_policies(
+    dataset_registry: DatasetRegistry,
+    *,
+    db_name: str,
+    class_ids: List[str],
+) -> Dict[str, Dict[str, Any]]:
+    policies: Dict[str, Dict[str, Any]] = {}
+    for class_id in sorted({c for c in class_ids if c}):
+        record = await dataset_registry.get_access_policy(
+            db_name=db_name,
+            scope="data_access",
+            subject_type="object_type",
+            subject_id=class_id,
+        )
+        if record:
+            policies[class_id] = record.policy
+    return policies
+
+
+def _apply_access_policies_to_nodes(
+    nodes: List[Dict[str, Any]],
+    *,
+    policies: Dict[str, Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], set[str]]:
+    filtered_nodes: List[Dict[str, Any]] = []
+    allowed_ids: set[str] = set()
+    for node in nodes:
+        class_id = str(node.get("type") or "")
+        policy = policies.get(class_id)
+        if not policy:
+            filtered_nodes.append(node)
+            allowed_ids.add(str(node.get("id")))
+            continue
+        data = node.get("data")
+        if data is None:
+            filters = policy.get("row_filters") or policy.get("filters") or []
+            if filters:
+                continue
+            filtered_nodes.append(node)
+            allowed_ids.add(str(node.get("id")))
+            continue
+        filtered_rows, _ = apply_access_policy([data], policy=policy)
+        if not filtered_rows:
+            continue
+        node["data"] = filtered_rows[0]
+        filtered_nodes.append(node)
+        allowed_ids.add(str(node.get("id")))
+    return filtered_nodes, allowed_ids
+
+
+def _apply_access_policies_to_documents(
+    documents: List[Dict[str, Any]],
+    *,
+    policy: Optional[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    if not policy:
+        return documents
+    output: List[Dict[str, Any]] = []
+    for doc in documents:
+        if not isinstance(doc, dict):
+            continue
+        data = doc.get("data")
+        if data is None:
+            output.append(doc)
+            continue
+        filtered_rows, _ = apply_access_policy([data], policy=policy)
+        if not filtered_rows:
+            continue
+        next_doc = dict(doc)
+        next_doc["data"] = filtered_rows[0]
+        output.append(next_doc)
+    return output
 
 
 # Import needed dependencies
@@ -87,6 +169,7 @@ async def execute_graph_query(
     request: Request,
     lineage_store: LineageStoreDep,
     graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     branch: str = Query("main", description="Target branch (default: main)"),
 ):
     """
@@ -139,6 +222,21 @@ async def execute_graph_query(
         )
         
         raw_nodes = list(result.get("nodes", []) or [])
+        policies = await _load_access_policies(
+            dataset_registry,
+            db_name=db_name,
+            class_ids=[str(node.get("type") or "") for node in raw_nodes],
+        )
+        filtered_nodes, allowed_ids = _apply_access_policies_to_nodes(raw_nodes, policies=policies)
+        raw_edges = list(result.get("edges", []) or [])
+        if allowed_ids:
+            raw_edges = [
+                edge
+                for edge in raw_edges
+                if str(edge.get("from") or "") in allowed_ids and str(edge.get("to") or "") in allowed_ids
+            ]
+        else:
+            raw_edges = []
 
         terminus_latest: Dict[str, Dict[str, Any]] = {}
         es_latest: Dict[str, Dict[str, Any]] = {}
@@ -180,7 +278,7 @@ async def execute_graph_query(
 
         # Convert result to response model (include data_status + display for UX stability)
         nodes: List[GraphNode] = []
-        for node in raw_nodes:
+        for node in filtered_nodes:
             terminus_id = str(node.get("terminus_id") or node.get("id") or "")
             es_doc_id = node.get("es_doc_id") or terminus_id or node.get("id")
             es_ref = node.get("es_ref") or {
@@ -243,7 +341,7 @@ async def execute_graph_query(
             )
         
         edges: List[GraphEdge] = []
-        for edge in result.get("edges", []) or []:
+        for edge in raw_edges:
             edge_prov: Optional[Dict[str, Any]] = None
             if query.include_provenance:
                 # Relationships come from the source node's Terminus document; attribute to its last write event.
@@ -323,6 +421,7 @@ async def execute_simple_graph_query(
     query: SimpleGraphQueryRequest,
     request: Request,
     graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     branch: str = Query("main", description="Target branch (default: main)"),
 ):
     """
@@ -354,6 +453,20 @@ async def execute_simple_graph_query(
             class_name=query.class_name,
             filters=query.filters
         )
+
+        policy = await dataset_registry.get_access_policy(
+            db_name=db_name,
+            scope="data_access",
+            subject_type="object_type",
+            subject_id=str(query.class_name),
+        )
+        documents = result.get("documents") or []
+        if isinstance(documents, list):
+            result["documents"] = _apply_access_policies_to_documents(
+                documents,
+                policy=policy.policy if policy else None,
+            )
+            result["count"] = len(result["documents"])
         
         logger.info(f"✅ Simple query complete: {result.get('count', 0)} documents")
         
@@ -379,6 +492,7 @@ async def execute_multi_hop_query(
     query: Dict[str, Any],
     request: Request,
     graph_service: GraphFederationServiceWOQL = Depends(get_graph_federation_service),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     branch: str = Query("main", description="Target branch (default: main)"),
 ):
     """
@@ -423,6 +537,29 @@ async def execute_multi_hop_query(
             include_documents=include_documents,
             include_audit=include_audit
         )
+
+        raw_nodes = list(result.get("nodes", []) or [])
+        policies = await _load_access_policies(
+            dataset_registry,
+            db_name=db_name,
+            class_ids=[str(node.get("type") or "") for node in raw_nodes],
+        )
+        filtered_nodes, allowed_ids = _apply_access_policies_to_nodes(
+            raw_nodes,
+            policies=policies,
+        )
+        raw_edges = list(result.get("edges", []) or [])
+        if allowed_ids:
+            raw_edges = [
+                edge
+                for edge in raw_edges
+                if str(edge.get("from") or "") in allowed_ids and str(edge.get("to") or "") in allowed_ids
+            ]
+        else:
+            raw_edges = []
+        result["nodes"] = filtered_nodes
+        result["edges"] = raw_edges
+        result["count"] = len(filtered_nodes)
         
         return {
             "status": "success",

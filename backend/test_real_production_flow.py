@@ -221,17 +221,19 @@ class ProductionFlowTest:
                     "name": "product_id",
                     "type": "string",
                     "label": "Product ID",
-                    "required": True
+                    "required": True,
+                    "primaryKey": True
                 },
                 {
                     "name": "name",
                     "type": "string",
                     "label": "Product Name",
-                    "required": True
+                    "required": True,
+                    "titleKey": True
                 },
                 {
                     "name": "price",
-                    "type": "number",
+                    "type": "DECIMAL",
                     "label": "Price"
                 }
             ]

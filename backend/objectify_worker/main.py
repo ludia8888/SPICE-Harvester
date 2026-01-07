@@ -34,6 +34,7 @@ from shared.services.processed_event_registry import ClaimDecision, ProcessedEve
 from shared.services.sheet_import_service import FieldMapping, SheetImportService
 from shared.utils.env_utils import parse_int_env
 from shared.utils.import_type_normalization import normalize_import_target_type
+from shared.utils.key_spec import normalize_key_spec
 from shared.utils.ontology_type_normalization import normalize_ontology_base_type
 from shared.utils.s3_uri import parse_s3_uri
 from shared.errors.error_envelope import build_error_envelope
@@ -56,13 +57,24 @@ class ObjectifyWorker:
         "UNSUPPORTED_TARGET_TYPE",
         "TYPE_COERCION_FAILED",
         "MAPPING_SPEC_TARGET_UNKNOWN",
-        "MAPPING_SPEC_RELATIONSHIP_TARGET",
+        "MAPPING_SPEC_RELATIONSHIP_CARDINALITY_UNSUPPORTED",
         "MAPPING_SPEC_UNSUPPORTED_TYPE",
         "MAPPING_SPEC_REQUIRED_MISSING",
         "MAPPING_SPEC_PRIMARY_KEY_MISSING",
+        "MAPPING_SPEC_TITLE_KEY_MISSING",
+        "MAPPING_SPEC_UNIQUE_KEY_MISSING",
         "MAPPING_SPEC_TARGET_TYPE_MISMATCH",
+        "OBJECT_TYPE_CONTRACT_MISSING",
+        "OBJECT_TYPE_INACTIVE",
+        "OBJECT_TYPE_PRIMARY_KEY_MISSING",
+        "OBJECT_TYPE_TITLE_KEY_MISSING",
+        "OBJECT_TYPE_PRIMARY_KEY_MISMATCH",
+        "OBJECT_TYPE_KEY_FIELDS_MISSING",
+        "KEY_SPEC_PRIMARY_KEY_MISSING",
+        "KEY_SPEC_PRIMARY_KEY_TARGET_MISMATCH",
         "PRIMARY_KEY_MISSING",
         "PRIMARY_KEY_DUPLICATE",
+        "UNIQUE_KEY_DUPLICATE",
         "REQUIRED_FIELD_MISSING",
         "VALUE_CONSTRAINT_FAILED",
     }
@@ -86,6 +98,12 @@ class ObjectifyWorker:
 
         self.batch_size_default = parse_int_env("OBJECTIFY_BATCH_SIZE", 500, min_value=1, max_value=5000)
         self.row_batch_size_default = parse_int_env("OBJECTIFY_ROW_BATCH_SIZE", 1000, min_value=1, max_value=50000)
+        self.bulk_update_batch_size = parse_int_env(
+            "OBJECTIFY_BULK_UPDATE_BATCH_SIZE",
+            self.batch_size_default,
+            min_value=1,
+            max_value=5000,
+        )
         self.list_page_size = parse_int_env("OBJECTIFY_LIST_PAGE_SIZE", 1000, min_value=10, max_value=10000)
         self.max_rows_default = parse_int_env("OBJECTIFY_MAX_ROWS", 0, min_value=0, max_value=10_000_000)
         self.lineage_max_links = parse_int_env("OBJECTIFY_LINEAGE_MAX_LINKS", 1000, min_value=0, max_value=100_000)
@@ -133,6 +151,92 @@ class ObjectifyWorker:
             context=context_payload,
         )
 
+    async def _record_gate_result(
+        self,
+        *,
+        job: ObjectifyJob,
+        status: str,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not self.dataset_registry:
+            return
+        try:
+            await self.dataset_registry.record_gate_result(
+                scope="objectify_job",
+                subject_type="objectify_job",
+                subject_id=job.job_id,
+                status=status,
+                details={
+                    "job_id": job.job_id,
+                    "dataset_id": job.dataset_id,
+                    "dataset_version_id": job.dataset_version_id,
+                    "mapping_spec_id": job.mapping_spec_id,
+                    "mapping_spec_version": job.mapping_spec_version,
+                    "target_class_id": job.target_class_id,
+                    "details": details or {},
+                },
+            )
+        except Exception as exc:
+            logger.warning("Failed to record objectify gate result: %s", exc)
+
+    async def _update_object_type_active_version(
+        self,
+        *,
+        job: ObjectifyJob,
+        mapping_spec: Any,
+    ) -> None:
+        if not self.http or not self.dataset_registry:
+            return
+        try:
+            resource_payload = await self._fetch_object_type_contract(job)
+            resource = resource_payload.get("data") if isinstance(resource_payload, dict) else None
+            if not isinstance(resource, dict):
+                resource = resource_payload if isinstance(resource_payload, dict) else {}
+            if not resource:
+                return
+            spec = resource.get("spec") if isinstance(resource.get("spec"), dict) else {}
+            if not isinstance(spec, dict):
+                spec = {}
+            backing_source = spec.get("backing_source") if isinstance(spec.get("backing_source"), dict) else {}
+            if not backing_source:
+                return
+
+            backing_version_id = mapping_spec.backing_datasource_version_id if mapping_spec else None
+            if not backing_version_id and job.dataset_version_id:
+                backing_version = await self.dataset_registry.get_backing_datasource_version_by_dataset_version(
+                    dataset_version_id=job.dataset_version_id
+                )
+                if backing_version:
+                    backing_version_id = backing_version.version_id
+                    backing_source.setdefault("schema_hash", backing_version.schema_hash)
+                    backing_source.setdefault("ref", backing_version.backing_id)
+            if not backing_version_id:
+                return
+
+            backing_source["version_id"] = backing_version_id
+            if job.dataset_version_id:
+                backing_source["dataset_version_id"] = job.dataset_version_id
+            spec["backing_source"] = backing_source
+            resource["spec"] = spec
+
+            expected_head = await self._fetch_ontology_head_commit(job)
+            if not expected_head:
+                return
+            branch = job.ontology_branch or job.dataset_branch or "main"
+            resp = await self.http.put(
+                f"/api/v1/database/{job.db_name}/ontology/resources/object_type/{job.target_class_id}",
+                params={"branch": branch, "expected_head_commit": expected_head},
+                json=resource,
+            )
+            if resp.status_code >= 400:
+                logger.warning(
+                    "Failed to update object_type active version (status=%s): %s",
+                    resp.status_code,
+                    resp.text,
+                )
+        except Exception as exc:
+            logger.warning("Failed to update object_type active version: %s", exc)
+
     @staticmethod
     def _normalize_ontology_payload(payload: Any) -> Dict[str, Any]:
         if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
@@ -142,7 +246,7 @@ class ObjectifyWorker:
         return {}
 
     @classmethod
-    def _extract_ontology_fields(cls, payload: Any) -> Tuple[Dict[str, Dict[str, Any]], set[str]]:
+    def _extract_ontology_fields(cls, payload: Any) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
         data = cls._normalize_ontology_payload(payload)
         properties = data.get("properties") if isinstance(data, dict) else None
         relationships = data.get("relationships") if isinstance(data, dict) else None
@@ -157,22 +261,46 @@ class ObjectifyWorker:
                     continue
                 prop_map[name] = prop
 
-        rel_names: set[str] = set()
+        rel_map: Dict[str, Dict[str, Any]] = {}
         if isinstance(relationships, list):
             for rel in relationships:
                 if not isinstance(rel, dict):
                     continue
                 predicate = str(rel.get("predicate") or rel.get("name") or "").strip()
                 if predicate:
-                    rel_names.add(predicate)
+                    rel_map[predicate] = rel
 
-        return prop_map, rel_names
+        return prop_map, rel_map
 
     @staticmethod
     def _is_blank(value: Any) -> bool:
         if value is None:
             return True
         return str(value).strip() == ""
+
+    @staticmethod
+    def _normalize_relationship_ref(value: Any, *, target_class: str) -> str:
+        if isinstance(value, dict):
+            candidate = value.get("@id") or value.get("id")
+            if candidate is not None:
+                value = candidate
+        if isinstance(value, list):
+            raise ValueError("Relationship value must be a scalar")
+        if value is None:
+            raise ValueError("Relationship value is empty")
+        raw = str(value).strip()
+        if not raw:
+            raise ValueError("Relationship value is empty")
+        if "/" in raw:
+            target, instance_id = raw.split("/", 1)
+            if target != target_class:
+                raise ValueError(
+                    f"Relationship target mismatch: expected {target_class}, got {target}"
+                )
+            if not instance_id.strip():
+                raise ValueError("Relationship instance id is empty")
+            return f"{target}/{instance_id}"
+        return f"{target_class}/{raw}"
 
     @staticmethod
     def _normalize_constraints(
@@ -613,6 +741,12 @@ class ObjectifyWorker:
 
         async def _fail_job(error: str, *, report: Optional[Dict[str, Any]] = None) -> None:
             report_payload = self._build_error_report(error=error, report=report, job=job)
+            if error.startswith("validation_failed"):
+                await self._record_gate_result(
+                    job=job,
+                    status="FAIL",
+                    details=report_payload,
+                )
             await self.objectify_registry.update_objectify_job_status(
                 job_id=job.job_id,
                 status="FAILED",
@@ -671,6 +805,18 @@ class ObjectifyWorker:
             await _fail_job(
                 f"mapping_spec_version_mismatch(job={job.mapping_spec_version} spec={mapping_spec.version})"
             )
+        if mapping_spec.backing_datasource_version_id:
+            if job.artifact_id:
+                await _fail_job("backing_datasource_version_conflict")
+            backing_version = await self.dataset_registry.get_backing_datasource_version(
+                version_id=mapping_spec.backing_datasource_version_id
+            )
+            if not backing_version:
+                await _fail_job("backing_datasource_version_missing")
+            if not job.dataset_version_id:
+                await _fail_job("backing_datasource_version_required")
+            if backing_version.dataset_version_id != job.dataset_version_id:
+                await _fail_job("backing_datasource_version_mismatch")
 
         await self.objectify_registry.update_objectify_job_status(
             job_id=job.job_id,
@@ -680,6 +826,7 @@ class ObjectifyWorker:
         options: Dict[str, Any] = dict(mapping_spec.options or {})
         if isinstance(job.options, dict):
             options.update(job.options)
+        link_index_mode = str(options.get("mode") or options.get("job_type") or "").strip().lower() == "link_index"
 
         max_rows = job.max_rows if job.max_rows is not None else options.get("max_rows")
         if max_rows is None:
@@ -714,11 +861,11 @@ class ObjectifyWorker:
         sources_by_target = self._map_mappings_by_target(mappings)
 
         ontology_payload = await self._fetch_class_schema(job)
-        prop_map, rel_names = self._extract_ontology_fields(ontology_payload)
+        prop_map, rel_map = self._extract_ontology_fields(ontology_payload)
         if not prop_map:
             await _fail_job("validation_failed", report={"errors": [{"code": "ONTOLOGY_SCHEMA_MISSING"}]})
 
-        unknown_targets = [t for t in mapping_targets if t not in prop_map]
+        unknown_targets = [t for t in mapping_targets if t not in prop_map and t not in rel_map]
         if unknown_targets:
             await _fail_job(
                 "validation_failed",
@@ -732,20 +879,65 @@ class ObjectifyWorker:
                     ]
                 },
             )
-        relationship_targets = [t for t in mapping_targets if t in rel_names]
-        if relationship_targets:
+        relationship_targets = [t for t in mapping_targets if t in rel_map]
+        relationship_meta_override = options.get("relationship_meta") if isinstance(options.get("relationship_meta"), dict) else {}
+        if link_index_mode and relationship_meta_override:
+            relationship_targets.extend([t for t in mapping_targets if t in relationship_meta_override])
+        relationship_targets = sorted(set(relationship_targets))
+        if not link_index_mode:
+            unsupported_relationships: List[str] = []
+            for target in relationship_targets:
+                rel = rel_map.get(target) or {}
+                cardinality = str(rel.get("cardinality") or "").strip().lower()
+                if cardinality.endswith(":n") or cardinality.endswith(":m"):
+                    unsupported_relationships.append(target)
+            if unsupported_relationships:
+                await _fail_job(
+                    "validation_failed",
+                    report={
+                        "errors": [
+                            {
+                                "code": "MAPPING_SPEC_RELATIONSHIP_CARDINALITY_UNSUPPORTED",
+                                "targets": unsupported_relationships,
+                                "message": "Relationship cardinality requires join-table mapping",
+                            }
+                        ]
+                    },
+                )
+        elif not relationship_targets:
             await _fail_job(
                 "validation_failed",
                 report={
                     "errors": [
                         {
-                            "code": "MAPPING_SPEC_RELATIONSHIP_TARGET",
-                            "targets": relationship_targets,
-                            "message": "Mapping targets may not reference relationships",
+                            "code": "MAPPING_SPEC_RELATIONSHIP_REQUIRED",
+                            "message": "link_index requires relationship targets",
                         }
                     ]
                 },
             )
+
+        property_mappings = [m for m in mappings if m.target_field in prop_map]
+        relationship_target_set = set(relationship_targets)
+        relationship_mappings = [m for m in mappings if m.target_field in relationship_target_set]
+
+        if link_index_mode:
+            await self._run_link_index_job(
+                job=job,
+                mapping_spec=mapping_spec,
+                options=options,
+                mappings=mappings,
+                mapping_sources=mapping_sources,
+                mapping_targets=mapping_targets,
+                sources_by_target=sources_by_target,
+                prop_map=prop_map,
+                rel_map=rel_map,
+                relationship_mappings=relationship_mappings,
+                stable_seed=stable_seed or job.job_id,
+                row_batch_size=row_batch_size,
+                max_rows=max_rows,
+            )
+            return
 
         value_type_refs = {
             str(meta.get("value_type_ref") or meta.get("valueTypeRef") or "").strip()
@@ -835,7 +1027,97 @@ class ObjectifyWorker:
             if expected_pk in prop_map:
                 explicit_pk_targets.add(expected_pk)
 
-        unsupported_mapped = [t for t in mapping_targets if t in unsupported_targets or t not in resolved_field_types]
+        object_type_resource = await self._fetch_object_type_contract(job)
+        object_type_data = object_type_resource.get("data") if isinstance(object_type_resource, dict) else None
+        if not isinstance(object_type_data, dict):
+            object_type_data = object_type_resource if isinstance(object_type_resource, dict) else {}
+        object_type_spec = object_type_data.get("spec") if isinstance(object_type_data.get("spec"), dict) else {}
+        if not object_type_spec:
+            await _fail_job(
+                "validation_failed",
+                report={
+                    "errors": [
+                        {
+                            "code": "OBJECT_TYPE_CONTRACT_MISSING",
+                            "message": "Object type contract is required for objectify",
+                        }
+                    ]
+                },
+            )
+        status_value = str(object_type_spec.get("status") or "ACTIVE").strip().upper()
+        if status_value != "ACTIVE":
+            await _fail_job(
+                "validation_failed",
+                report={
+                    "errors": [
+                        {
+                            "code": "OBJECT_TYPE_INACTIVE",
+                            "status": status_value,
+                            "message": "Object type contract is not active",
+                        }
+                    ]
+                },
+            )
+        object_type_key_spec = normalize_key_spec(object_type_spec.get("pk_spec") or {}, columns=list(prop_map.keys()))
+        object_type_pk_targets = [str(v).strip() for v in object_type_key_spec.get("primary_key") or [] if str(v).strip()]
+        object_type_title_targets = [str(v).strip() for v in object_type_key_spec.get("title_key") or [] if str(v).strip()]
+        object_type_unique_keys = [
+            [str(v).strip() for v in key if str(v).strip()]
+            for key in object_type_key_spec.get("unique_keys") or []
+            if isinstance(key, list)
+        ]
+        object_type_required_fields = [str(v).strip() for v in object_type_key_spec.get("required_fields") or [] if str(v).strip()]
+        object_type_nullable_fields = {str(v).strip() for v in object_type_key_spec.get("nullable_fields") or [] if str(v).strip()}
+
+        if not object_type_pk_targets:
+            await _fail_job(
+                "validation_failed",
+                report={
+                    "errors": [
+                        {
+                            "code": "OBJECT_TYPE_PRIMARY_KEY_MISSING",
+                            "message": "Object type pk_spec.primary_key is required",
+                        }
+                    ]
+                },
+            )
+        if not object_type_title_targets:
+            await _fail_job(
+                "validation_failed",
+                report={
+                    "errors": [
+                        {
+                            "code": "OBJECT_TYPE_TITLE_KEY_MISSING",
+                            "message": "Object type pk_spec.title_key is required",
+                        }
+                    ]
+                },
+            )
+
+        missing_contract_fields = sorted(
+            {
+                *object_type_pk_targets,
+                *object_type_title_targets,
+                *object_type_required_fields,
+            }
+            - set(prop_map.keys())
+        )
+        if missing_contract_fields:
+            await _fail_job(
+                "validation_failed",
+                report={
+                    "errors": [
+                        {
+                            "code": "OBJECT_TYPE_KEY_FIELDS_MISSING",
+                            "fields": missing_contract_fields,
+                            "message": "Object type key spec fields missing from ontology schema",
+                        }
+                    ]
+                },
+            )
+
+        property_targets = [t for t in mapping_targets if t in prop_map]
+        unsupported_mapped = [t for t in property_targets if t in unsupported_targets or t not in resolved_field_types]
         if unsupported_mapped:
             await _fail_job(
                 "validation_failed",
@@ -861,8 +1143,76 @@ class ObjectifyWorker:
         pk_targets = self._normalize_pk_fields(
             options.get("primary_key_targets") or options.get("target_primary_keys")
         )
+        if pk_targets and set(pk_targets) != set(object_type_pk_targets):
+            await _fail_job(
+                "validation_failed",
+                report={
+                    "errors": [
+                        {
+                            "code": "OBJECT_TYPE_PRIMARY_KEY_MISMATCH",
+                            "expected": object_type_pk_targets,
+                            "observed": pk_targets,
+                            "message": "Object type primary key does not match mapping spec options",
+                        }
+                    ]
+                },
+            )
         if not pk_targets:
-            pk_targets = sorted(explicit_pk_targets)
+            pk_targets = object_type_pk_targets or sorted(explicit_pk_targets)
+
+        key_spec = await self.dataset_registry.get_key_spec_for_dataset(
+            dataset_id=job.dataset_id,
+            dataset_version_id=job.dataset_version_id,
+        )
+        if key_spec:
+            normalized_spec = normalize_key_spec(key_spec.spec, columns=mapping_sources)
+            key_pk_sources = set(normalized_spec.get("primary_key") or [])
+            mapping_source_set = {src for src in mapping_sources if src}
+            if key_pk_sources:
+                missing_pk_sources = sorted(key_pk_sources - mapping_source_set)
+                if missing_pk_sources:
+                    await _fail_job(
+                        "validation_failed",
+                        report={
+                            "errors": [
+                                {
+                                    "code": "KEY_SPEC_PRIMARY_KEY_MISSING",
+                                    "sources": missing_pk_sources,
+                                    "message": "Key spec primary key columns are not mapped",
+                                }
+                            ]
+                        },
+                    )
+                invalid_pk_targets = sorted(
+                    {
+                        m.target_field
+                        for m in mappings
+                        if m.source_field in key_pk_sources and m.target_field not in set(pk_targets or [])
+                    }
+                )
+                if invalid_pk_targets:
+                    await _fail_job(
+                        "validation_failed",
+                        report={
+                            "errors": [
+                                {
+                                    "code": "KEY_SPEC_PRIMARY_KEY_TARGET_MISMATCH",
+                                    "targets": invalid_pk_targets,
+                                    "message": "Key spec primary key sources must map to ontology primary keys",
+                                }
+                            ]
+                        },
+                    )
+            required_sources = set(normalized_spec.get("required_fields") or [])
+            if required_sources:
+                for mapping in mappings:
+                    if mapping.source_field in required_sources:
+                        required_targets.add(mapping.target_field)
+            options.setdefault("key_spec_id", key_spec.key_spec_id)
+
+        title_required_targets = {t for t in object_type_title_targets if t not in object_type_nullable_fields}
+        required_targets.update(object_type_required_fields)
+        required_targets.update(title_required_targets)
 
         missing_required = sorted(required_targets - set(mapping_targets))
         if missing_required:
@@ -874,6 +1224,35 @@ class ObjectifyWorker:
                             "code": "MAPPING_SPEC_REQUIRED_MISSING",
                             "targets": missing_required,
                             "message": "Required ontology fields are not mapped",
+                        }
+                    ]
+                },
+            )
+        missing_title_targets = sorted(title_required_targets - set(mapping_targets))
+        if missing_title_targets:
+            await _fail_job(
+                "validation_failed",
+                report={
+                    "errors": [
+                        {
+                            "code": "MAPPING_SPEC_TITLE_KEY_MISSING",
+                            "targets": missing_title_targets,
+                            "message": "Title key targets are not mapped",
+                        }
+                    ]
+                },
+            )
+        unique_key_fields = sorted({field for keys in object_type_unique_keys for field in keys if field})
+        missing_unique_targets = sorted(set(unique_key_fields) - set(mapping_targets))
+        if missing_unique_targets:
+            await _fail_job(
+                "validation_failed",
+                report={
+                    "errors": [
+                        {
+                            "code": "MAPPING_SPEC_UNIQUE_KEY_MISSING",
+                            "targets": missing_unique_targets,
+                            "message": "Unique key targets are not mapped",
                         }
                     ]
                 },
@@ -905,11 +1284,11 @@ class ObjectifyWorker:
                 },
             )
 
-        target_field_types = {target: resolved_field_types[target] for target in mapping_targets}
+        target_field_types = {target: resolved_field_types[target] for target in property_targets}
         existing_field_types = mapping_spec.target_field_types or {}
         if existing_field_types:
             mismatches: List[Dict[str, Any]] = []
-            for target in mapping_targets:
+            for target in property_targets:
                 expected = resolved_field_types.get(target)
                 provided = existing_field_types.get(target)
                 if not provided:
@@ -950,6 +1329,37 @@ class ObjectifyWorker:
             artifact_output_name=resolved_output_name,
         )
 
+        (
+            key_scan_total_rows,
+            key_scan_errors,
+            key_scan_error_rows,
+            key_scan_stats,
+        ) = await self._scan_key_constraints(
+            job=job,
+            options=options,
+            mappings=property_mappings,
+            relationship_meta=rel_map,
+            target_field_types=target_field_types,
+            sources_by_target=sources_by_target,
+            required_targets=required_targets,
+            pk_targets=pk_targets,
+            pk_fields=pk_fields,
+            unique_keys=object_type_unique_keys,
+            row_batch_size=row_batch_size,
+            max_rows=max_rows,
+        )
+        if key_scan_total_rows == 0:
+            await _fail_job("no_rows_loaded")
+        if key_scan_errors:
+            await _fail_job(
+                "validation_failed",
+                report={
+                    "errors": key_scan_errors[:200],
+                    "stats": key_scan_stats,
+                    "error_row_indices": key_scan_error_rows[:200],
+                },
+            )
+
         validation_errors: List[Dict[str, Any]] = []
         validation_error_rows: List[int] = []
         validation_stats: Dict[str, Any] = {}
@@ -964,7 +1374,9 @@ class ObjectifyWorker:
             ) = await self._validate_batches(
                 job=job,
                 options=options,
-                mappings=mappings,
+                mappings=property_mappings,
+                relationship_mappings=relationship_mappings,
+                relationship_meta=rel_map,
                 target_field_types=target_field_types,
                 mapping_sources=mapping_sources,
                 sources_by_target=sources_by_target,
@@ -1010,7 +1422,9 @@ class ObjectifyWorker:
                 columns=columns,
                 rows=rows,
                 row_offset=row_offset,
-                mappings=mappings,
+                mappings=property_mappings,
+                relationship_mappings=relationship_mappings,
+                relationship_meta=rel_map,
                 target_field_types=target_field_types,
                 mapping_sources=mapping_sources,
                 sources_by_target=sources_by_target,
@@ -1144,6 +1558,17 @@ class ObjectifyWorker:
             },
             completed_at=datetime.now(timezone.utc),
         )
+        await self._record_gate_result(
+            job=job,
+            status="PASS",
+            details={
+                "total_rows": total_rows,
+                "prepared_instances": prepared_instances,
+                "command_ids": command_ids,
+                "error_count": len(errors or validation_errors or []),
+            },
+        )
+        await self._update_object_type_active_version(job=job, mapping_spec=mapping_spec)
 
     async def _bulk_create_instances(
         self,
@@ -1172,6 +1597,42 @@ class ObjectifyWorker:
             params={"branch": branch},
             json={
                 "instances": instances,
+                "metadata": metadata,
+            },
+        )
+        resp.raise_for_status()
+        if not resp.text:
+            return {}
+        return resp.json()
+
+    async def _bulk_update_instances(
+        self,
+        job: ObjectifyJob,
+        updates: List[Dict[str, Any]],
+        *,
+        ontology_version: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        if not self.http:
+            raise RuntimeError("OMS client not initialized")
+        branch = job.ontology_branch or job.dataset_branch or "main"
+        metadata = {
+            "objectify_job_id": job.job_id,
+            "mapping_spec_id": job.mapping_spec_id,
+            "mapping_spec_version": job.mapping_spec_version,
+            "dataset_id": job.dataset_id,
+            "dataset_version_id": job.dataset_version_id,
+            "artifact_id": job.artifact_id,
+            "artifact_output_name": job.artifact_output_name,
+            "options": job.options,
+            "link_index": True,
+        }
+        if ontology_version:
+            metadata["ontology"] = ontology_version
+        resp = await self.http.post(
+            f"/api/v1/instances/{job.db_name}/async/{job.target_class_id}/bulk-update",
+            params={"branch": branch},
+            json={
+                "instances": updates,
                 "metadata": metadata,
             },
         )
@@ -1260,6 +1721,19 @@ class ObjectifyWorker:
         resp.raise_for_status()
         return resp.json() if resp.text else {}
 
+    async def _fetch_object_type_contract(self, job: ObjectifyJob) -> Dict[str, Any]:
+        if not self.http:
+            return {}
+        branch = job.ontology_branch or job.dataset_branch or "main"
+        resp = await self.http.get(
+            f"/api/v1/database/{job.db_name}/ontology/resources/object_type/{job.target_class_id}",
+            params={"branch": branch},
+        )
+        if resp.status_code == 404:
+            return {}
+        resp.raise_for_status()
+        return resp.json() if resp.text else {}
+
     async def _fetch_value_type_defs(
         self,
         job: ObjectifyJob,
@@ -1315,6 +1789,23 @@ class ObjectifyWorker:
             return {"ref": f"branch:{branch}", "commit": str(head_commit)}
         return {"ref": f"branch:{branch}"}
 
+    async def _fetch_ontology_head_commit(self, job: ObjectifyJob) -> Optional[str]:
+        if not self.http:
+            return None
+        branch = job.ontology_branch or job.dataset_branch or "main"
+        resp = await self.http.get(
+            f"/api/v1/version/{job.db_name}/head",
+            params={"branch": branch},
+        )
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        payload = resp.json() if resp.text else {}
+        data = payload.get("data") if isinstance(payload, dict) else {}
+        if isinstance(data, dict):
+            return data.get("head_commit_id") or data.get("commit") or data.get("head_commit")
+        return None
+
     @staticmethod
     def _normalize_pk_fields(value: Any) -> List[str]:
         if value is None:
@@ -1359,6 +1850,14 @@ class ObjectifyWorker:
                 return f"source:{'|'.join(values)}"
 
         return None
+
+    def _derive_unique_key(self, instance: Dict[str, Any], key_fields: List[str]) -> Optional[str]:
+        values: List[str] = []
+        for field in key_fields:
+            if field not in instance or self._is_blank(instance.get(field)):
+                return None
+            values.append(str(instance.get(field)))
+        return "|".join(values) if values else None
 
     async def _iter_dataset_batches(
         self,
@@ -1555,6 +2054,8 @@ class ObjectifyWorker:
         rows: List[List[Any]],
         row_offset: int,
         mappings: List[FieldMapping],
+        relationship_mappings: List[FieldMapping],
+        relationship_meta: Dict[str, Dict[str, Any]],
         target_field_types: Dict[str, str],
         mapping_sources: List[str],
         sources_by_target: Dict[str, List[str]],
@@ -1616,6 +2117,53 @@ class ObjectifyWorker:
 
         instances = build.get("instances") or []
         instance_row_indices = build.get("instance_row_indices") or []
+
+        if relationship_mappings:
+            for inst, row_idx in zip(instances, instance_row_indices):
+                if not isinstance(inst, dict):
+                    continue
+                if row_idx >= len(rows):
+                    continue
+                row = rows[row_idx]
+                for mapping in relationship_mappings:
+                    source_name = mapping.source_field
+                    target_name = mapping.target_field
+                    idx = col_index.get(source_name)
+                    if idx is None or idx >= len(row):
+                        continue
+                    raw = row[idx]
+                    if self._is_blank(raw):
+                        continue
+                    rel_meta = relationship_meta.get(target_name) or {}
+                    target_class = str(rel_meta.get("target") or rel_meta.get("linkTarget") or "").strip()
+                    if not target_class:
+                        errors.append(
+                            {
+                                "row_index": int(row_offset) + int(row_idx),
+                                "source_field": source_name,
+                                "target_field": target_name,
+                                "code": "RELATIONSHIP_TARGET_MISSING",
+                                "message": "Relationship target class missing from ontology",
+                            }
+                        )
+                        error_row_indices.add(int(row_offset) + int(row_idx))
+                        continue
+                    try:
+                        ref = self._normalize_relationship_ref(raw, target_class=target_class)
+                    except ValueError as exc:
+                        errors.append(
+                            {
+                                "row_index": int(row_offset) + int(row_idx),
+                                "source_field": source_name,
+                                "target_field": target_name,
+                                "raw_value": raw,
+                                "code": "RELATIONSHIP_REF_INVALID",
+                                "message": str(exc),
+                            }
+                        )
+                        error_row_indices.add(int(row_offset) + int(row_idx))
+                        continue
+                    inst[target_name] = ref
 
         mapping_sources_set = {s for s in mapping_sources if s}
         required_union = set(required_targets) | set(pk_targets)
@@ -1726,12 +2274,340 @@ class ObjectifyWorker:
             "fatal": False,
         }
 
+    async def _run_link_index_job(
+        self,
+        *,
+        job: ObjectifyJob,
+        mapping_spec: Any,
+        options: Dict[str, Any],
+        mappings: List[FieldMapping],
+        mapping_sources: List[str],
+        mapping_targets: List[str],
+        sources_by_target: Dict[str, List[str]],
+        prop_map: Dict[str, Dict[str, Any]],
+        rel_map: Dict[str, Dict[str, Any]],
+        relationship_mappings: List[FieldMapping],
+        stable_seed: str,
+        row_batch_size: int,
+        max_rows: Optional[int],
+    ) -> None:
+        async def _fail_link(errors: List[Dict[str, Any]], stats: Dict[str, Any]) -> None:
+            await self._record_gate_result(
+                job=job,
+                status="FAIL",
+                details={"errors": errors[:200], "stats": stats},
+            )
+            relationship_spec_id = str(options.get("relationship_spec_id") or "").strip()
+            if relationship_spec_id and self.dataset_registry:
+                try:
+                    await self.dataset_registry.record_relationship_index_result(
+                        relationship_spec_id=relationship_spec_id,
+                        status="FAIL",
+                    )
+                except Exception as exc:
+                    logger.warning("Failed to update relationship index status: %s", exc)
+            await self.objectify_registry.update_objectify_job_status(
+                job_id=job.job_id,
+                status="FAILED",
+                error="validation_failed",
+                report={"errors": errors[:200], "stats": stats},
+                completed_at=datetime.now(timezone.utc),
+            )
+            raise ObjectifyNonRetryableError("validation_failed")
+
+        if not relationship_mappings:
+            await _fail_link(
+                [{"code": "RELATIONSHIP_MAPPING_MISSING", "message": "No relationship mappings provided"}],
+                {"input_rows": 0},
+            )
+
+        object_type_resource = await self._fetch_object_type_contract(job)
+        object_type_data = object_type_resource.get("data") if isinstance(object_type_resource, dict) else None
+        if not isinstance(object_type_data, dict):
+            object_type_data = object_type_resource if isinstance(object_type_resource, dict) else {}
+        object_type_spec = object_type_data.get("spec") if isinstance(object_type_data.get("spec"), dict) else {}
+        if not object_type_spec:
+            await _fail_link(
+                [{"code": "OBJECT_TYPE_CONTRACT_MISSING", "message": "Object type contract is required"}],
+                {"input_rows": 0},
+            )
+
+        status_value = str(object_type_spec.get("status") or "ACTIVE").strip().upper()
+        if status_value != "ACTIVE":
+            await _fail_link(
+                [{"code": "OBJECT_TYPE_INACTIVE", "status": status_value}],
+                {"input_rows": 0},
+            )
+
+        object_type_key_spec = normalize_key_spec(object_type_spec.get("pk_spec") or {}, columns=list(prop_map.keys()))
+        pk_targets = [str(v).strip() for v in object_type_key_spec.get("primary_key") or [] if str(v).strip()]
+        if not pk_targets:
+            await _fail_link(
+                [{"code": "OBJECT_TYPE_PRIMARY_KEY_MISSING", "message": "pk_spec.primary_key is required"}],
+                {"input_rows": 0},
+            )
+
+        pk_source_fields: List[str] = []
+        pk_source_map: Dict[str, str] = {}
+        for target in pk_targets:
+            sources = sources_by_target.get(target) or []
+            unique_sources = [s for s in sources if s]
+            if len(unique_sources) != 1:
+                await _fail_link(
+                    [
+                        {
+                            "code": "PRIMARY_KEY_MAPPING_INVALID",
+                            "target": target,
+                            "sources": unique_sources,
+                        }
+                    ],
+                    {"input_rows": 0},
+                )
+            pk_source_map[target] = unique_sources[0]
+            pk_source_fields.append(unique_sources[0])
+
+        relationship_meta = {m.target_field: rel_map.get(m.target_field) or {} for m in relationship_mappings}
+        relationship_meta_override = options.get("relationship_meta") if isinstance(options.get("relationship_meta"), dict) else {}
+        if relationship_meta_override:
+            for target_field, meta in relationship_meta_override.items():
+                if not isinstance(meta, dict):
+                    continue
+                existing = relationship_meta.get(target_field) or {}
+                relationship_meta[target_field] = {**existing, **meta}
+        rel_cardinality: Dict[str, str] = {}
+        for target, meta in relationship_meta.items():
+            cardinality = str(meta.get("cardinality") or "").strip().lower()
+            rel_cardinality[target] = cardinality
+
+        dangling_policy = str(options.get("dangling_policy") or "FAIL").strip().upper() or "FAIL"
+        if dangling_policy not in {"FAIL", "WARN"}:
+            dangling_policy = "FAIL"
+        dedupe_policy = str(options.get("dedupe_policy") or "DEDUP").strip().upper() or "DEDUP"
+
+        total_rows = 0
+        error_rows: List[int] = []
+        errors: List[Dict[str, Any]] = []
+        dangling_count = 0
+        duplicate_count = 0
+
+        updates_by_instance: Dict[str, Dict[str, List[str]]] = {}
+        row_keys_seen: set[str] = set()
+
+        async for columns, rows, row_offset in self._iter_dataset_batches(
+            job=job,
+            options=options,
+            row_batch_size=row_batch_size,
+            max_rows=max_rows,
+        ):
+            if not rows:
+                continue
+            col_index = SheetImportService.build_column_index(columns)
+            missing_sources = sorted({s for s in mapping_sources if s and s not in col_index})
+            if missing_sources:
+                await _fail_link(
+                    [{"code": "SOURCE_FIELD_MISSING", "missing_sources": missing_sources}],
+                    {"input_rows": total_rows},
+                )
+            for idx, row in enumerate(rows):
+                total_rows += 1
+                absolute_idx = int(row_offset) + int(idx)
+                instance_payload: Dict[str, Any] = {}
+                missing_pk = False
+                for target, source_field in pk_source_map.items():
+                    raw = row[col_index[source_field]] if source_field in col_index else None
+                    if self._is_blank(raw):
+                        missing_pk = True
+                        break
+                    instance_payload[target] = str(raw)
+                if missing_pk:
+                    error_rows.append(absolute_idx)
+                    errors.append(
+                        {
+                            "row_index": absolute_idx,
+                            "code": "PRIMARY_KEY_MISSING",
+                            "message": "Primary key value is missing",
+                        }
+                    )
+                    continue
+
+                row_key = self._derive_row_key(
+                    columns=columns,
+                    col_index=col_index,
+                    row=row,
+                    instance=instance_payload,
+                    pk_fields=pk_source_fields,
+                    pk_targets=pk_targets,
+                )
+                if not row_key:
+                    error_rows.append(absolute_idx)
+                    errors.append(
+                        {
+                            "row_index": absolute_idx,
+                            "code": "ROW_KEY_MISSING",
+                            "message": "Row key could not be derived",
+                        }
+                    )
+                    continue
+
+                if row_key in row_keys_seen and dedupe_policy == "FAIL":
+                    error_rows.append(absolute_idx)
+                    errors.append(
+                        {
+                            "row_index": absolute_idx,
+                            "code": "DUPLICATE_ROW_KEY",
+                            "row_key": row_key,
+                        }
+                    )
+                    continue
+                row_keys_seen.add(row_key)
+
+                inst_list, inst_ids = self._ensure_instance_ids(
+                    [instance_payload],
+                    class_id=job.target_class_id,
+                    stable_seed=stable_seed,
+                    mapping_spec_version=mapping_spec.version,
+                    row_keys=[row_key],
+                )
+                instance_id = inst_ids[0]
+
+                for mapping in relationship_mappings:
+                    source_field = mapping.source_field
+                    target_field = mapping.target_field
+                    rel_meta = relationship_meta.get(target_field) or {}
+                    target_class = str(rel_meta.get("target") or rel_meta.get("linkTarget") or "").strip()
+                    if not target_class:
+                        error_rows.append(absolute_idx)
+                        errors.append(
+                            {
+                                "row_index": absolute_idx,
+                                "code": "RELATIONSHIP_TARGET_MISSING",
+                                "target_field": target_field,
+                            }
+                        )
+                        continue
+                    raw = row[col_index[source_field]] if source_field in col_index else None
+                    if self._is_blank(raw):
+                        dangling_count += 1
+                        if dangling_policy == "FAIL":
+                            error_rows.append(absolute_idx)
+                            errors.append(
+                                {
+                                    "row_index": absolute_idx,
+                                    "code": "RELATIONSHIP_VALUE_MISSING",
+                                    "target_field": target_field,
+                                }
+                            )
+                        continue
+                    try:
+                        ref = self._normalize_relationship_ref(raw, target_class=target_class)
+                    except Exception as exc:
+                        dangling_count += 1
+                        if dangling_policy == "FAIL":
+                            error_rows.append(absolute_idx)
+                            errors.append(
+                                {
+                                    "row_index": absolute_idx,
+                                    "code": "RELATIONSHIP_VALUE_INVALID",
+                                    "target_field": target_field,
+                                    "error": str(exc),
+                                }
+                            )
+                        continue
+                    entry = updates_by_instance.setdefault(instance_id, {})
+                    bucket = entry.setdefault(target_field, [])
+                    if ref not in bucket:
+                        bucket.append(ref)
+                    else:
+                        duplicate_count += 1
+
+        stats = {
+            "input_rows": total_rows,
+            "error_rows": len(error_rows),
+            "dangling_count": dangling_count,
+            "duplicate_count": duplicate_count,
+        }
+
+        if errors and dangling_policy == "FAIL":
+            await _fail_link(errors, stats)
+
+        updates: List[Dict[str, Any]] = []
+        for instance_id, rel_values in updates_by_instance.items():
+            payload: Dict[str, Any] = {}
+            for field, refs in rel_values.items():
+                cardinality = rel_cardinality.get(field) or ""
+                allow_multiple = any(token in cardinality for token in (":n", ":m", "many"))
+                if not allow_multiple:
+                    if len(refs) > 1:
+                        errors.append(
+                            {
+                                "code": "RELATIONSHIP_CARDINALITY_VIOLATION",
+                                "instance_id": instance_id,
+                                "field": field,
+                                "count": len(refs),
+                            }
+                        )
+                        continue
+                    payload[field] = refs[0]
+                else:
+                    payload[field] = refs
+            if payload:
+                updates.append({"instance_id": instance_id, "data": payload})
+
+        if errors and dangling_policy == "FAIL":
+            await _fail_link(errors, stats)
+
+        if not updates:
+            await _fail_link(
+                [{"code": "NO_RELATIONSHIPS_INDEXED", "message": "No link updates produced"}],
+                stats,
+            )
+
+        ontology_version = await self._fetch_ontology_version(job)
+        command_ids: List[str] = []
+        for idx in range(0, len(updates), self.bulk_update_batch_size):
+            batch = updates[idx : idx + self.bulk_update_batch_size]
+            resp = await self._bulk_update_instances(job, batch, ontology_version=ontology_version)
+            command_id = resp.get("command_id") if isinstance(resp, dict) else None
+            if command_id:
+                command_ids.append(str(command_id))
+
+        await self.objectify_registry.update_objectify_job_status(
+            job_id=job.job_id,
+            status="SUBMITTED",
+            command_id=command_ids[0] if command_ids else None,
+            report={
+                "link_index": True,
+                "total_rows": total_rows,
+                "update_count": len(updates),
+                "command_ids": command_ids,
+                "stats": stats,
+            },
+            completed_at=datetime.now(timezone.utc),
+        )
+        await self._record_gate_result(
+            job=job,
+            status="PASS",
+            details={"stats": stats, "command_ids": command_ids},
+        )
+
+        relationship_spec_id = str(options.get("relationship_spec_id") or "").strip()
+        if relationship_spec_id and self.dataset_registry:
+            try:
+                await self.dataset_registry.record_relationship_index_result(
+                    relationship_spec_id=relationship_spec_id,
+                    status="PASS",
+                )
+            except Exception as exc:
+                logger.warning("Failed to update relationship index status: %s", exc)
+
     async def _validate_batches(
         self,
         *,
         job: ObjectifyJob,
         options: Dict[str, Any],
         mappings: List[FieldMapping],
+        relationship_mappings: List[FieldMapping],
+        relationship_meta: Dict[str, Dict[str, Any]],
         target_field_types: Dict[str, str],
         mapping_sources: List[str],
         sources_by_target: Dict[str, List[str]],
@@ -1763,6 +2639,8 @@ class ObjectifyWorker:
                 rows=rows,
                 row_offset=row_offset,
                 mappings=mappings,
+                relationship_mappings=relationship_mappings,
+                relationship_meta=relationship_meta,
                 target_field_types=target_field_types,
                 mapping_sources=mapping_sources,
                 sources_by_target=sources_by_target,
@@ -1787,6 +2665,128 @@ class ObjectifyWorker:
             "input_rows": total_rows,
             "error_rows": len(error_row_indices),
             "error_count": error_count,
+        }
+        return total_rows, errors, error_row_indices, stats
+
+    async def _scan_key_constraints(
+        self,
+        *,
+        job: ObjectifyJob,
+        options: Dict[str, Any],
+        mappings: List[FieldMapping],
+        relationship_meta: Dict[str, Dict[str, Any]],
+        target_field_types: Dict[str, str],
+        sources_by_target: Dict[str, List[str]],
+        required_targets: set[str],
+        pk_targets: List[str],
+        pk_fields: List[str],
+        unique_keys: List[List[str]],
+        row_batch_size: int,
+        max_rows: Optional[int],
+    ) -> Tuple[int, List[Dict[str, Any]], List[int], Dict[str, Any]]:
+        errors: List[Dict[str, Any]] = []
+        error_row_indices: List[int] = []
+        total_rows = 0
+        pk_duplicate_count = 0
+        pk_missing_count = 0
+        unique_duplicate_count = 0
+        pk_duplicate_samples: List[str] = []
+        unique_duplicate_samples: List[str] = []
+        seen_row_keys: set[str] = set()
+        seen_unique: Dict[Tuple[str, ...], set[str]] = {
+            tuple(keys): set() for keys in unique_keys if keys
+        }
+
+        key_targets = set(pk_targets)
+        for keys in unique_keys:
+            key_targets.update(keys)
+        key_mappings = [m for m in mappings if m.target_field in key_targets]
+        key_sources_by_target = {t: sources_by_target.get(t, []) for t in key_targets}
+        key_mapping_sources = [m.source_field for m in key_mappings if m.source_field]
+        key_field_types = {t: target_field_types.get(t) for t in key_targets if t in target_field_types}
+
+        async for columns, rows, row_offset in self._iter_dataset_batches(
+            job=job,
+            options=options,
+            row_batch_size=row_batch_size,
+            max_rows=max_rows,
+        ):
+            if not rows:
+                continue
+            total_rows += len(rows)
+            batch = self._build_instances_with_validation(
+                columns=columns,
+                rows=rows,
+                row_offset=row_offset,
+                mappings=key_mappings,
+                relationship_mappings=[],
+                relationship_meta=relationship_meta,
+                target_field_types=key_field_types,
+                mapping_sources=key_mapping_sources,
+                sources_by_target=key_sources_by_target,
+                required_targets=required_targets,
+                pk_targets=pk_targets,
+                pk_fields=pk_fields,
+                field_constraints={},
+                field_raw_types={},
+                seen_row_keys=seen_row_keys,
+            )
+            batch_errors = batch.get("errors") or []
+            for err in batch_errors:
+                code = err.get("code") if isinstance(err, dict) else None
+                if code == "PRIMARY_KEY_DUPLICATE":
+                    pk_duplicate_count += 1
+                    row_key = err.get("row_key") if isinstance(err, dict) else None
+                    if row_key and len(pk_duplicate_samples) < 5:
+                        pk_duplicate_samples.append(str(row_key))
+                if code == "PRIMARY_KEY_MISSING":
+                    pk_missing_count += 1
+                if len(errors) < 200:
+                    errors.append(err)
+            error_row_indices.extend(batch.get("error_row_indices") or [])
+
+            instances = batch.get("instances") or []
+            instance_row_indices = batch.get("instance_row_indices") or []
+            for inst, row_idx in zip(instances, instance_row_indices):
+                absolute_idx = int(row_offset) + int(row_idx)
+                if not isinstance(inst, dict):
+                    continue
+                for keys in unique_keys:
+                    if not keys:
+                        continue
+                    key_value = self._derive_unique_key(inst, keys)
+                    if not key_value:
+                        continue
+                    key_tuple = tuple(keys)
+                    seen_set = seen_unique.setdefault(key_tuple, set())
+                    if key_value in seen_set:
+                        errors.append(
+                            {
+                                "row_index": absolute_idx,
+                                "code": "UNIQUE_KEY_DUPLICATE",
+                                "key_fields": keys,
+                                "key_value": key_value,
+                                "message": "Duplicate unique key detected",
+                            }
+                        )
+                        unique_duplicate_count += 1
+                        if len(unique_duplicate_samples) < 5:
+                            unique_duplicate_samples.append(key_value)
+                        error_row_indices.append(absolute_idx)
+                    else:
+                        seen_set.add(key_value)
+
+        error_row_indices = sorted(set(error_row_indices))
+        stats = {
+            "input_rows": total_rows,
+            "error_rows": len(error_row_indices),
+            "error_count": len(errors),
+            "pk_duplicates": pk_duplicate_count,
+            "pk_missing": pk_missing_count,
+            "unique_key_duplicates": unique_duplicate_count,
+            "pk_duplicate_samples": pk_duplicate_samples,
+            "unique_duplicate_samples": unique_duplicate_samples,
+            "unique_keys_checked": len(unique_keys),
         }
         return total_rows, errors, error_row_indices, stats
 

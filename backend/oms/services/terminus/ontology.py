@@ -386,6 +386,7 @@ class OntologyService(BaseTerminusService):
             "@label_i18n": label_i18n,
             "@comment_i18n": description_i18n,
             "type": prop.type,
+            "required": prop.required,
         }
         if prop.constraints:
             documentation["constraints"] = prop.constraints
@@ -403,9 +404,9 @@ class OntologyService(BaseTerminusService):
         schema: Dict[str, Any] = {
             "@class": mapped_type,
             "@documentation": documentation,
+            # TerminusDB requires @type on object property definitions; keep required in documentation.
+            "@type": "Optional",
         }
-        if not prop.required:
-            schema["@type"] = "Optional"
         return schema
     
     def _create_relationship_schema(self, rel: Relationship) -> Dict[str, Any]:
@@ -479,11 +480,11 @@ class OntologyService(BaseTerminusService):
         # Map domain type strings to TerminusDB XSD/sys types.
         # Handle both DataType enum and string inputs
         if isinstance(datatype, str):
-            # Handle string inputs from tests/API calls
+            # Handle string inputs from tests/API calls (case-insensitive for non-prefixed types).
             string_mapping = {
                 "string": "xsd:string",  # Use proper XSD types
                 "integer": "xsd:integer",
-                "decimal": "xsd:decimal", 
+                "decimal": "xsd:decimal",
                 "number": "xsd:decimal",  # Map number to xsd:decimal
                 "float": "xsd:float",
                 "double": "xsd:double",
@@ -516,7 +517,16 @@ class OntologyService(BaseTerminusService):
                 "xsd:anyURI": "xsd:anyURI",
                 "sys:JSON": "sys:JSON",
             }
-            return string_mapping.get(datatype, "sys:JSON")
+            raw_type = datatype.strip()
+            if not raw_type:
+                return "sys:JSON"
+            if raw_type.lower().startswith(("xsd:", "sys:")):
+                return (
+                    string_mapping.get(raw_type)
+                    or string_mapping.get(raw_type.lower())
+                    or raw_type
+                )
+            return string_mapping.get(raw_type.lower(), "sys:JSON")
         
         # Handle DataType enum inputs (legacy)
         enum_mapping = {
@@ -610,6 +620,12 @@ class OntologyService(BaseTerminusService):
                         raw_type = prop_doc.get("type") or prop_doc.get("data_type") or prop_doc.get("datatype")
                         prop_type = raw_type if raw_type else class_type
 
+                        required_flag = prop_doc.get("required")
+                        prop_required = (
+                            bool(required_flag)
+                            if isinstance(required_flag, bool)
+                            else value.get("@type") != "Optional"
+                        )
                         prop = Property(
                             name=key,
                             type=prop_type,  # Prefer documented raw type (array/struct/etc) over terminus class
@@ -619,7 +635,7 @@ class OntologyService(BaseTerminusService):
                                 else prop_doc.get("@label", key)
                             ),
                             description=raw_comment,
-                            required=value.get("@type") != "Optional",
+                            required=prop_required,
                             constraints=prop_doc.get("constraints") or {},
                             primary_key=bool(prop_doc.get("primary_key") or prop_doc.get("primaryKey")),
                             title_key=bool(prop_doc.get("title_key") or prop_doc.get("titleKey")),

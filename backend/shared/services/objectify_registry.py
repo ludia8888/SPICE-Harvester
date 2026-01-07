@@ -56,6 +56,8 @@ class OntologyMappingSpecRecord:
     dataset_branch: str
     artifact_output_name: Optional[str]
     schema_hash: Optional[str]
+    backing_datasource_id: Optional[str]
+    backing_datasource_version_id: Optional[str]
     target_class_id: str
     mappings: List[Dict[str, Any]]
     target_field_types: Dict[str, str]
@@ -150,6 +152,8 @@ class ObjectifyRegistry:
                     dataset_branch TEXT NOT NULL DEFAULT 'main',
                     artifact_output_name TEXT,
                     schema_hash TEXT,
+                    backing_datasource_id UUID,
+                    backing_datasource_version_id UUID,
                     target_class_id TEXT NOT NULL,
                     mappings JSONB NOT NULL DEFAULT '[]'::jsonb,
                     target_field_types JSONB NOT NULL DEFAULT '{{}}'::jsonb,
@@ -179,6 +183,12 @@ class ObjectifyRegistry:
                 CREATE INDEX IF NOT EXISTS idx_mapping_specs_output
                 ON {self._schema}.ontology_mapping_specs(dataset_id, dataset_branch, artifact_output_name, schema_hash, status)
                 """
+            )
+            await conn.execute(
+                f"ALTER TABLE {self._schema}.ontology_mapping_specs ADD COLUMN IF NOT EXISTS backing_datasource_id UUID"
+            )
+            await conn.execute(
+                f"ALTER TABLE {self._schema}.ontology_mapping_specs ADD COLUMN IF NOT EXISTS backing_datasource_version_id UUID"
             )
             await conn.execute(
                 f"""
@@ -386,6 +396,8 @@ class ObjectifyRegistry:
         dataset_branch: str,
         artifact_output_name: str,
         schema_hash: str,
+        backing_datasource_id: Optional[str] = None,
+        backing_datasource_version_id: Optional[str] = None,
         target_class_id: str,
         mappings: List[Dict[str, Any]],
         target_field_types: Optional[Dict[str, str]] = None,
@@ -429,14 +441,17 @@ class ObjectifyRegistry:
                     f"""
                     INSERT INTO {self._schema}.ontology_mapping_specs (
                         mapping_spec_id, dataset_id, dataset_branch, artifact_output_name, schema_hash,
+                        backing_datasource_id, backing_datasource_version_id,
                         target_class_id, mappings, target_field_types, status, version, auto_sync, options
-                    ) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12::jsonb)
+                    ) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::uuid, $7::uuid, $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14::jsonb)
                     """,
                     mapping_spec_id,
                     dataset_id,
                     dataset_branch,
                     artifact_output_name,
                     schema_hash,
+                    backing_datasource_id,
+                    backing_datasource_version_id,
                     target_class_id,
                     normalize_json_payload(mappings),
                     normalize_json_payload(target_field_types),
@@ -468,6 +483,7 @@ class ObjectifyRegistry:
                 record = await conn.fetchrow(
                     f"""
                     SELECT mapping_spec_id, dataset_id, dataset_branch, artifact_output_name, schema_hash,
+                           backing_datasource_id, backing_datasource_version_id,
                            target_class_id, mappings, target_field_types, status, version, auto_sync, options,
                            created_at, updated_at
                     FROM {self._schema}.ontology_mapping_specs
@@ -483,6 +499,10 @@ class ObjectifyRegistry:
                 dataset_branch=str(record["dataset_branch"]),
                 artifact_output_name=record["artifact_output_name"],
                 schema_hash=record["schema_hash"],
+                backing_datasource_id=str(record["backing_datasource_id"]) if record["backing_datasource_id"] else None,
+                backing_datasource_version_id=(
+                    str(record["backing_datasource_version_id"]) if record["backing_datasource_version_id"] else None
+                ),
                 target_class_id=str(record["target_class_id"]),
                 mappings=_coerce_json_list(record["mappings"]),
                 target_field_types=coerce_json_dataset(record["target_field_types"]) or {},
@@ -501,6 +521,7 @@ class ObjectifyRegistry:
             row = await conn.fetchrow(
                 f"""
                 SELECT mapping_spec_id, dataset_id, dataset_branch, artifact_output_name, schema_hash,
+                       backing_datasource_id, backing_datasource_version_id,
                        target_class_id, mappings, target_field_types, status, version, auto_sync, options,
                        created_at, updated_at
                 FROM {self._schema}.ontology_mapping_specs
@@ -516,6 +537,10 @@ class ObjectifyRegistry:
                 dataset_branch=str(row["dataset_branch"]),
                 artifact_output_name=row["artifact_output_name"],
                 schema_hash=row["schema_hash"],
+                backing_datasource_id=str(row["backing_datasource_id"]) if row["backing_datasource_id"] else None,
+                backing_datasource_version_id=(
+                    str(row["backing_datasource_version_id"]) if row["backing_datasource_version_id"] else None
+                ),
                 target_class_id=str(row["target_class_id"]),
                 mappings=_coerce_json_list(row["mappings"]),
                 target_field_types=coerce_json_dataset(row["target_field_types"]) or {},
@@ -548,6 +573,7 @@ class ObjectifyRegistry:
             rows = await conn.fetch(
                 f"""
                 SELECT mapping_spec_id, dataset_id, dataset_branch, artifact_output_name, schema_hash,
+                       backing_datasource_id, backing_datasource_version_id,
                        target_class_id, mappings, target_field_types, status, version, auto_sync, options,
                        created_at, updated_at
                 FROM {self._schema}.ontology_mapping_specs
@@ -565,6 +591,12 @@ class ObjectifyRegistry:
                         dataset_branch=str(row["dataset_branch"]),
                         artifact_output_name=row["artifact_output_name"],
                         schema_hash=row["schema_hash"],
+                        backing_datasource_id=(
+                            str(row["backing_datasource_id"]) if row["backing_datasource_id"] else None
+                        ),
+                        backing_datasource_version_id=(
+                            str(row["backing_datasource_version_id"]) if row["backing_datasource_version_id"] else None
+                        ),
                         target_class_id=str(row["target_class_id"]),
                         mappings=_coerce_json_list(row["mappings"]),
                         target_field_types=coerce_json_dataset(row["target_field_types"]) or {},
@@ -608,6 +640,7 @@ class ObjectifyRegistry:
             row = await conn.fetchrow(
                 f"""
                 SELECT mapping_spec_id, dataset_id, dataset_branch, artifact_output_name, schema_hash,
+                       backing_datasource_id, backing_datasource_version_id,
                        target_class_id, mappings, target_field_types, status, version, auto_sync, options,
                        created_at, updated_at
                 FROM {self._schema}.ontology_mapping_specs
@@ -625,6 +658,10 @@ class ObjectifyRegistry:
                 dataset_branch=str(row["dataset_branch"]),
                 artifact_output_name=row["artifact_output_name"],
                 schema_hash=row["schema_hash"],
+                backing_datasource_id=str(row["backing_datasource_id"]) if row["backing_datasource_id"] else None,
+                backing_datasource_version_id=(
+                    str(row["backing_datasource_version_id"]) if row["backing_datasource_version_id"] else None
+                ),
                 target_class_id=str(row["target_class_id"]),
                 mappings=_coerce_json_list(row["mappings"]),
                 target_field_types=coerce_json_dataset(row["target_field_types"]) or {},

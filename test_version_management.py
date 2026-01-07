@@ -71,13 +71,14 @@ async def _run_version_management():
                     name="name",
                     type="STRING",
                     label="Customer Name",
-                    required=True
+                    required=True,
+                    title_key=True,
                 ),
                 Property(
                     name="email",
                     type="STRING", 
                     label="Email",
-                    required=True
+                    required=True,
                 )
             ]
         )
@@ -125,13 +126,14 @@ async def _run_version_management():
                     name="name",
                     type="STRING",
                     label="Customer Name",
-                    required=True
+                    required=True,
+                    title_key=True,
                 ),
                 Property(
                     name="email",
                     type="STRING",
                     label="Email", 
-                    required=True
+                    required=True,
                 ),
                 Property(
                     name="phone",
@@ -159,7 +161,8 @@ async def _run_version_management():
                     name="name",
                     type="STRING",
                     label="Product Name",
-                    required=True
+                    required=True,
+                    title_key=True,
                 ),
                 Property(
                     name="price",
