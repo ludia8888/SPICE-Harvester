@@ -239,9 +239,11 @@ class AsyncTerminusService:
     # Query Execution - Facade Methods
     # ==========================================
     
-    async def execute_query(self, db_name: str, query_dict: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute_query(
+        self, db_name: str, query_dict: Dict[str, Any], *, branch: str = "main"
+    ) -> Dict[str, Any]:
         """Query execution (query-spec or raw WOQL passthrough)."""
-        return await self.query_service.execute_query(db_name, query_dict)
+        return await self.query_service.execute_query(db_name, query_dict, branch=branch)
 
     async def execute_sparql(
         self, 

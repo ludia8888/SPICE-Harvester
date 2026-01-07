@@ -49,6 +49,7 @@ from shared.services.processed_event_registry import (
 )
 from shared.services.lineage_store import LineageStore
 from shared.services.audit_log_store import AuditLogStore
+from shared.services.dataset_registry import DatasetRegistry
 from shared.utils.chaos import maybe_crash
 from shared.utils.ontology_version import normalize_ontology_version, resolve_ontology_version
 
@@ -105,6 +106,7 @@ class StrictPalantirInstanceWorker:
         }
         self.lineage_store: Optional[LineageStore] = None
         self.audit_store: Optional[AuditLogStore] = None
+        self.dataset_registry: Optional[DatasetRegistry] = None
         self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="instance-worker-kafka")
         self.tracing = get_tracing_service("instance-worker")
         
@@ -197,6 +199,15 @@ class StrictPalantirInstanceWorker:
         self.processed_event_registry = ProcessedEventRegistry()
         await self.processed_event_registry.connect()
         logger.info("✅ ProcessedEventRegistry connected (Postgres)")
+
+        # Dataset registry for edit tracking (best-effort)
+        try:
+            self.dataset_registry = DatasetRegistry()
+            await self.dataset_registry.initialize()
+            logger.info("✅ DatasetRegistry connected (instance edits tracking)")
+        except Exception as e:
+            logger.warning(f"⚠️ DatasetRegistry unavailable (edits tracking disabled): {e}")
+            self.dataset_registry = None
 
         # Event Sourcing is now mandatory for write-side correctness.
         # Legacy "direct Kafka publish" paths are removed because they break SSoT.
@@ -1181,6 +1192,20 @@ class StrictPalantirInstanceWorker:
                 'es_doc_id': instance_id,
                 's3_uri': f"s3://{self.instance_bucket}/{s3_path}"
             })
+
+            await self._record_instance_edit(
+                db_name=db_name,
+                class_id=class_id,
+                instance_id=instance_id,
+                edit_type="create",
+                metadata={
+                    "command_id": command_id,
+                    "branch": branch,
+                    "actor": command.get("created_by") or "system",
+                    "ontology": ontology_version,
+                    "objectify": bool(is_objectify),
+                },
+            )
             
             logger.info(f"✅ STRICT Palantir: Instance created successfully")
             
@@ -1318,16 +1343,123 @@ class StrictPalantirInstanceWorker:
             await self.set_command_status(command_id, "failed", {"error": str(e)})
             raise
 
-    async def process_update_instance(self, command: Dict[str, Any]) -> None:
-        """Process UPDATE_INSTANCE command (idempotent + ordered via registry claim)."""
+    async def process_bulk_update_instances(self, command: Dict[str, Any]) -> None:
+        """Process BULK_UPDATE_INSTANCES command (updates multiple instances)."""
         db_name = command.get("db_name")
         class_id = command.get("class_id")
         command_id = command.get("command_id")
         branch = validate_branch_name(command.get("branch") or "main")
         payload = command.get("payload", {}) or {}
 
-        # Set command status early (202 already returned to user).
         await self.set_command_status(command_id, "processing")
+
+        try:
+            if not db_name:
+                raise ValueError("db_name is required")
+            if not class_id:
+                raise ValueError("class_id is required")
+            if not isinstance(payload, dict):
+                raise ValueError("BULK_UPDATE_INSTANCES payload must be an object")
+
+            raw_instances = payload.get("instances")
+            if not isinstance(raw_instances, list):
+                raise ValueError("BULK_UPDATE_INSTANCES payload.instances must be a list")
+
+            if not raw_instances:
+                await self.set_command_status(
+                    command_id,
+                    "completed",
+                    {"updated": 0, "total": 0, "note": "No instances provided"},
+                )
+                return
+
+            ontology_version = await resolve_ontology_version(
+                self.terminus_service, db_name=db_name, branch=branch, logger=logger
+            )
+            command_meta = command.get("metadata")
+            if not isinstance(command_meta, dict):
+                command_meta = {}
+                command["metadata"] = command_meta
+
+            existing_ontology = normalize_ontology_version(command_meta.get("ontology"))
+            if existing_ontology:
+                merged = dict(existing_ontology)
+                if "ref" not in merged and ontology_version.get("ref"):
+                    merged["ref"] = ontology_version["ref"]
+                if "commit" not in merged and ontology_version.get("commit"):
+                    merged["commit"] = ontology_version["commit"]
+                command_meta["ontology"] = merged
+                ontology_version = merged
+            else:
+                command_meta["ontology"] = dict(ontology_version)
+
+            created_by = command.get("created_by") or "system"
+            total = len(raw_instances)
+            updated_count = 0
+            sample_instance_ids: List[str] = []
+
+            for idx, inst in enumerate(raw_instances):
+                if not isinstance(inst, dict):
+                    raise ValueError(f"instances[{idx}] must be an object")
+                instance_id = inst.get("instance_id")
+                if not instance_id:
+                    raise ValueError(f"instances[{idx}].instance_id is required")
+                instance_id = str(instance_id)
+                validate_instance_id(instance_id)
+                data = inst.get("data")
+                if not isinstance(data, dict):
+                    raise ValueError(f"instances[{idx}].data must be an object")
+
+                child_command_id = str(uuid5(NAMESPACE_URL, f"bulk-update:{command_id}:{instance_id}:{idx}"))
+                update_command = {
+                    "command_id": child_command_id,
+                    "command_type": "UPDATE_INSTANCE",
+                    "db_name": db_name,
+                    "class_id": class_id,
+                    "instance_id": instance_id,
+                    "branch": branch,
+                    "payload": data,
+                    "metadata": {
+                        **command_meta,
+                        "bulk_parent_id": str(command_id),
+                        "bulk_index": idx,
+                        "bulk_total": total,
+                        "created_by": created_by,
+                        "ontology": ontology_version,
+                    },
+                    "created_by": created_by,
+                }
+                await self.process_update_instance(update_command, skip_status=True)
+                updated_count += 1
+                if len(sample_instance_ids) < 5:
+                    sample_instance_ids.append(instance_id)
+
+            await self.set_command_status(
+                command_id,
+                "completed",
+                {
+                    "updated": updated_count,
+                    "total": total,
+                    "sample_instance_ids": sample_instance_ids,
+                },
+            )
+        except Exception as e:
+            logger.error(f"❌ Failed to bulk update instances: {e}")
+            await self.set_command_status(command_id, "failed", {"error": str(e)})
+            raise
+
+    async def process_update_instance(self, command: Dict[str, Any], *, skip_status: bool = False) -> None:
+        """Process UPDATE_INSTANCE command (idempotent + ordered via registry claim)."""
+        db_name = command.get("db_name")
+        class_id = command.get("class_id")
+        command_id = command.get("command_id")
+        branch = validate_branch_name(command.get("branch") or "main")
+        payload = command.get("payload", {}) or {}
+        is_objectify = self._is_objectify_command(command)
+
+        # Set command status early (202 already returned to user).
+        if not skip_status:
+            await self.set_command_status(command_id, "processing")
 
         if not db_name:
             raise ValueError("db_name is required")
@@ -1783,10 +1915,24 @@ class StrictPalantirInstanceWorker:
         await self.event_store.append_event(envelope)
         logger.info(f"  ✅ Stored INSTANCE_UPDATED in Event Store (seq={envelope.sequence_number})")
 
-        await self.set_command_status(
-            command_id,
-            "completed",
-            {"instance_id": instance_id, "s3_uri": f"s3://{self.instance_bucket}/{s3_path}"},
+        if not skip_status:
+            await self.set_command_status(
+                command_id,
+                "completed",
+                {"instance_id": instance_id, "s3_uri": f"s3://{self.instance_bucket}/{s3_path}"},
+            )
+
+        await self._record_instance_edit(
+            db_name=db_name,
+            class_id=class_id,
+            instance_id=instance_id,
+            edit_type="update",
+            metadata={
+                "command_id": command_id,
+                "branch": branch,
+                "actor": command.get("created_by") or "system",
+                "ontology": ontology_version,
+            },
         )
 
     async def process_delete_instance(self, command: Dict[str, Any]) -> None:
@@ -2043,7 +2189,42 @@ class StrictPalantirInstanceWorker:
         logger.info(f"  ✅ Stored INSTANCE_DELETED in Event Store (seq={envelope.sequence_number})")
 
         await self.set_command_status(command_id, "completed", {"instance_id": instance_id})
+
+        await self._record_instance_edit(
+            db_name=db_name,
+            class_id=class_id,
+            instance_id=instance_id,
+            edit_type="delete",
+            metadata={
+                "command_id": command_id,
+                "branch": branch,
+                "actor": command.get("created_by") or "system",
+                "ontology": ontology_version,
+            },
+        )
             
+    async def _record_instance_edit(
+        self,
+        *,
+        db_name: str,
+        class_id: str,
+        instance_id: str,
+        edit_type: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not self.dataset_registry:
+            return
+        try:
+            await self.dataset_registry.record_instance_edit(
+                db_name=db_name,
+                class_id=class_id,
+                instance_id=instance_id,
+                edit_type=str(edit_type or "").strip() or "update",
+                metadata=metadata,
+            )
+        except Exception as exc:
+            logger.debug("Instance edit tracking failed (non-fatal): %s", exc, exc_info=True)
+
     async def set_command_status(self, command_id: str, status: str, result: Dict = None):
         """Set command status using CommandStatusService (preserves history + pubsub)."""
         if not command_id or not self.command_status_service:
@@ -2283,6 +2464,8 @@ class StrictPalantirInstanceWorker:
                             await self.process_create_instance(command)
                         elif command_type == "BULK_CREATE_INSTANCES":
                             await self.process_bulk_create_instances(command)
+                        elif command_type == "BULK_UPDATE_INSTANCES":
+                            await self.process_bulk_update_instances(command)
                         elif command_type == "UPDATE_INSTANCE":
                             await self.process_update_instance(command)
                         elif command_type == "DELETE_INSTANCE":
@@ -2376,6 +2559,8 @@ class StrictPalantirInstanceWorker:
             await self.terminus_service.close()
         if self.processed_event_registry:
             await self.processed_event_registry.close()
+        if self.dataset_registry:
+            await self.dataset_registry.close()
         self._consumer_executor.shutdown(wait=True, cancel_futures=True)
             
 

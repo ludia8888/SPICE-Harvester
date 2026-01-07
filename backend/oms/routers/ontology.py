@@ -1742,12 +1742,14 @@ async def delete_ontology(
 async def query_ontologies(
     query: QueryRequestInternal,
     db_name: str = Depends(ValidatedDatabaseName),
+    branch: str = Query("main", description="Target branch (default: main)"),
     terminus: AsyncTerminusService = TerminusServiceDep,
 ):
     """내부 ID 기반 온톨로지 쿼리"""
     try:
         # 쿼리 데이터 정화
         sanitized_query = sanitize_input(query.model_dump(mode="json"))
+        branch = validate_branch_name(branch)
 
         # 클래스 ID 검증 (있는 경우)
         if sanitized_query.get("class_id"):
@@ -1799,7 +1801,7 @@ async def query_ontologies(
         }
 
         # 쿼리 실행
-        result = await terminus.execute_query(db_name, query_dict)
+        result = await terminus.execute_query(db_name, query_dict, branch=branch)
 
         return {
             "status": "success",
