@@ -15,7 +15,7 @@ DO $$
 BEGIN
     ALTER TABLE database_access
         ADD CONSTRAINT database_access_role_check
-        CHECK (role IN ('Owner', 'Editor', 'Viewer'));
+        CHECK (role IN ('Owner', 'Editor', 'Viewer', 'DomainModeler', 'DataEngineer', 'Security'));
 EXCEPTION
     WHEN duplicate_object THEN NULL;
 END $$;

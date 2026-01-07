@@ -24,6 +24,7 @@ from shared.security.input_sanitizer import (
     validate_branch_name,
     validate_db_name,
 )
+from shared.security.database_access import ensure_database_access_table
 from shared.utils.branch_utils import protected_branch_write_message
 
 # Add shared path for common utilities
@@ -92,7 +93,7 @@ async def _fetch_database_access(db_names: List[str]) -> Dict[str, List[Dict[str
                 db_names,
             )
         except asyncpg.UndefinedTableError:
-            await _ensure_database_access_table(conn)
+            await ensure_database_access_table(conn)
             rows = []
     finally:
         await conn.close()
@@ -139,7 +140,7 @@ async def _upsert_database_owner(
                 principal_name,
             )
         except asyncpg.UndefinedTableError:
-            await _ensure_database_access_table(conn)
+            await ensure_database_access_table(conn)
             await conn.execute(
                 """
                 INSERT INTO database_access (
@@ -158,41 +159,6 @@ async def _upsert_database_owner(
             )
     finally:
         await conn.close()
-
-
-async def _ensure_database_access_table(conn: asyncpg.Connection) -> None:
-    await conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS database_access (
-            db_name TEXT NOT NULL,
-            principal_type TEXT NOT NULL,
-            principal_id TEXT NOT NULL,
-            principal_name TEXT,
-            role TEXT NOT NULL,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            PRIMARY KEY (db_name, principal_type, principal_id)
-        )
-        """
-    )
-    await conn.execute(
-        """
-        DO $$
-        BEGIN
-            ALTER TABLE database_access
-                ADD CONSTRAINT database_access_role_check
-                CHECK (role IN ('Owner', 'Editor', 'Viewer'));
-        EXCEPTION
-            WHEN duplicate_object THEN NULL;
-        END $$;
-        """
-    )
-    await conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_database_access_db_name ON database_access(db_name)"
-    )
-    await conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_database_access_principal ON database_access(principal_type, principal_id)"
-    )
 
 
 def _resolve_actor(request: Request) -> tuple[str, str, str]:

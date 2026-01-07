@@ -290,12 +290,22 @@ def _collect_relationship_spec_issues(spec: Dict[str, Any]) -> List[Dict[str, An
                 missing_fields=["relationship_spec.target_pk_field"],
             )
     else:
-        if not str(rel_spec.get("join_dataset_id") or "").strip():
-            _append_spec_issue(
-                issues,
-                message="relationship_spec.join_dataset_id is required",
-                missing_fields=["relationship_spec.join_dataset_id"],
-            )
+        if rel_type == "object_backed":
+            if not str(rel_spec.get("relationship_object_type") or "").strip():
+                _append_spec_issue(
+                    issues,
+                    message="relationship_spec.relationship_object_type is required",
+                    missing_fields=["relationship_spec.relationship_object_type"],
+                )
+        else:
+            join_dataset_id = str(rel_spec.get("join_dataset_id") or "").strip()
+            auto_create = bool(rel_spec.get("auto_create") or rel_spec.get("autoCreate"))
+            if not join_dataset_id and not auto_create:
+                _append_spec_issue(
+                    issues,
+                    message="relationship_spec.join_dataset_id is required",
+                    missing_fields=["relationship_spec.join_dataset_id"],
+                )
         if not str(rel_spec.get("source_key_column") or "").strip():
             _append_spec_issue(
                 issues,

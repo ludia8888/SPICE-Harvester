@@ -136,6 +136,15 @@ class MappingSuggestionService:
         Returns:
             매핑 제안 결과
         """
+        source_schema = sorted(
+            source_schema or [],
+            key=lambda field: str(field.get("name") or "").strip(),
+        )
+        target_schema = sorted(
+            target_schema or [],
+            key=lambda field: str(field.get("name") or "").strip(),
+        )
+
         all_candidates = []
         
         # 각 소스 필드에 대해 가능한 타겟 매핑 찾기

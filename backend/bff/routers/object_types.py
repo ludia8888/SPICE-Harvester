@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Dict, Optional, Tuple
+from uuid import uuid4
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -16,8 +17,10 @@ from bff.services.oms_client import OMSClient
 from bff.services.mapping_suggestion_service import MappingSuggestionService
 from bff.routers import objectify as objectify_router
 from shared.models.requests import ApiResponse
+from shared.models.objectify_job import ObjectifyJob
 from shared.security.auth_utils import enforce_db_scope
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
+from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database_role
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.objectify_registry import ObjectifyRegistry
 from shared.utils.key_spec import normalize_key_spec
@@ -38,6 +41,13 @@ async def get_objectify_registry() -> ObjectifyRegistry:
     from bff.main import get_objectify_registry as _get_objectify_registry
 
     return await _get_objectify_registry()
+
+
+async def _require_domain_role(request: Request, *, db_name: str) -> None:
+    try:
+        await enforce_database_role(headers=request.headers, db_name=db_name, required_roles=DOMAIN_MODEL_ROLES)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
 
 class ObjectTypeContractRequest(BaseModel):
@@ -226,6 +236,74 @@ def _extract_schema_columns(schema: Any) -> list[dict[str, Any]]:
     return []
 
 
+async def _enqueue_objectify_reindex(
+    *,
+    objectify_registry: ObjectifyRegistry,
+    dataset: Any,
+    version: Any,
+    mapping_spec_id: str,
+    mapping_spec_version: Optional[int],
+    reason: str,
+    mapping_spec_record: Optional[Any] = None,
+    options_override: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    if not mapping_spec_id:
+        return None
+    if not version or not getattr(version, "artifact_key", None):
+        return None
+    mapping_spec = mapping_spec_record or await objectify_registry.get_mapping_spec(mapping_spec_id=mapping_spec_id)
+    if not mapping_spec:
+        return None
+    if mapping_spec.dataset_id != dataset.dataset_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "MAPPING_SPEC_DATASET_MISMATCH",
+                "mapping_spec_id": mapping_spec_id,
+                "dataset_id": dataset.dataset_id,
+            },
+        )
+    resolved_version = int(mapping_spec_version or mapping_spec.version)
+    dedupe_key = objectify_registry.build_dedupe_key(
+        dataset_id=dataset.dataset_id,
+        dataset_branch=dataset.branch,
+        mapping_spec_id=mapping_spec.mapping_spec_id,
+        mapping_spec_version=resolved_version,
+        dataset_version_id=version.version_id,
+        artifact_id=None,
+        artifact_output_name=dataset.name,
+    )
+    existing = await objectify_registry.get_objectify_job_by_dedupe_key(dedupe_key=dedupe_key)
+    if existing:
+        return existing.job_id
+
+    job_id = str(uuid4())
+    options = dict(mapping_spec.options or {})
+    if options_override:
+        options.update(options_override)
+    options.setdefault("object_type_migration_reason", reason)
+    job = ObjectifyJob(
+        job_id=job_id,
+        db_name=dataset.db_name,
+        dataset_id=dataset.dataset_id,
+        dataset_version_id=version.version_id,
+        artifact_output_name=dataset.name,
+        dedupe_key=dedupe_key,
+        dataset_branch=dataset.branch,
+        artifact_key=version.artifact_key or "",
+        mapping_spec_id=mapping_spec.mapping_spec_id,
+        mapping_spec_version=resolved_version,
+        target_class_id=mapping_spec.target_class_id,
+        ontology_branch=options.get("ontology_branch"),
+        max_rows=options.get("max_rows"),
+        batch_size=options.get("batch_size"),
+        allow_partial=bool(options.get("allow_partial")),
+        options=options,
+    )
+    await objectify_registry.enqueue_objectify_job(job=job)
+    return job_id
+
+
 @router.post("/object-types", status_code=status.HTTP_201_CREATED, response_model=ApiResponse)
 async def create_object_type_contract(
     db_name: str,
@@ -239,7 +317,13 @@ async def create_object_type_contract(
 ) -> ApiResponse:
     try:
         db_name = validate_db_name(db_name)
+        await _require_domain_role(request, db_name=db_name)
         payload = sanitize_input(body.model_dump(exclude_unset=True))
+        dataset = None
+        backing = None
+        backing_version = None
+        version = None
+        resolved_schema_hash = None
         class_id = str(payload.get("class_id") or "").strip()
         if not class_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="class_id is required")
@@ -438,6 +522,7 @@ async def get_object_type_contract(
 ) -> ApiResponse:
     try:
         db_name = validate_db_name(db_name)
+        await _require_domain_role(request, db_name=db_name)
         class_id = str(class_id or "").strip()
         if not class_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="class_id is required")
@@ -607,6 +692,12 @@ async def update_object_type_contract(
 
         status_value = payload.get("status") or existing_spec.get("status") or "ACTIVE"
         metadata = payload.get("metadata") if payload.get("metadata") is not None else existing_resource.get("metadata")
+        mapping_spec_id_value = None
+        mapping_spec_version_value = None
+        if isinstance(mapping_spec_payload, dict):
+            mapping_spec_id_value = str(mapping_spec_payload.get("mapping_spec_id") or "").strip() or None
+            mapping_spec_version_value = mapping_spec_payload.get("mapping_spec_version")
+        mapping_spec_record = None
 
         existing_backing = existing_spec.get("backing_source") if isinstance(existing_spec.get("backing_source"), dict) else {}
         backing_changed = False
@@ -630,10 +721,154 @@ async def update_object_type_contract(
             or migration_payload.get("resetEdits")
             or migration_payload.get("edits_reset")
         )
+        id_remap_raw = (
+            migration_payload.get("id_remap")
+            or migration_payload.get("idRemap")
+            or migration_payload.get("id_remap_plan")
+            or migration_payload.get("idRemapPlan")
+        )
+        id_remap: Dict[str, str] = {}
+        if isinstance(id_remap_raw, dict):
+            for old_id, new_id in id_remap_raw.items():
+                if str(old_id).strip() and str(new_id).strip():
+                    id_remap[str(old_id).strip()] = str(new_id).strip()
+        elif isinstance(id_remap_raw, list):
+            for item in id_remap_raw:
+                if not isinstance(item, dict):
+                    continue
+                old_id = item.get("from") or item.get("old") or item.get("source")
+                new_id = item.get("to") or item.get("new") or item.get("target")
+                if str(old_id).strip() and str(new_id).strip():
+                    id_remap[str(old_id).strip()] = str(new_id).strip()
+
+        reindex_required = migration_approved and (backing_changed or pk_changed)
+        status_value_upper = str(status_value or "ACTIVE").strip().upper()
+        if reindex_required and status_value_upper == "ACTIVE":
+            if dataset is None or version is None:
+                existing_backing_id = str(existing_backing.get("ref") or "").strip()
+                existing_backing_version_id = str(
+                    existing_backing.get("version_id")
+                    or existing_backing.get("versionId")
+                    or existing_backing.get("backing_version_id")
+                    or ""
+                ).strip()
+                if existing_backing_id:
+                    backing = await dataset_registry.get_backing_datasource(backing_id=existing_backing_id)
+                    if backing:
+                        dataset = await dataset_registry.get_dataset(dataset_id=backing.dataset_id)
+                if existing_backing_version_id:
+                    backing_version = await dataset_registry.get_backing_datasource_version(
+                        version_id=existing_backing_version_id
+                    )
+                    if backing_version:
+                        version = await dataset_registry.get_version(
+                            version_id=backing_version.dataset_version_id
+                        )
+            if not mapping_spec_id_value:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={"code": "OBJECT_TYPE_MAPPING_SPEC_REQUIRED", "class_id": class_id},
+                )
+            mapping_spec_record = await objectify_registry.get_mapping_spec(
+                mapping_spec_id=mapping_spec_id_value
+            )
+            if not mapping_spec_record:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapping spec not found")
+            if mapping_spec_record.target_class_id != class_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Mapping spec target_class_id mismatch",
+                )
+            if not dataset or not version:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={"code": "OBJECT_TYPE_BACKING_VERSION_REQUIRED", "class_id": class_id},
+                )
+            if mapping_spec_record.dataset_id != dataset.dataset_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "MAPPING_SPEC_DATASET_MISMATCH",
+                        "mapping_spec_id": mapping_spec_record.mapping_spec_id,
+                        "dataset_id": dataset.dataset_id,
+                    },
+                )
+            if not getattr(version, "artifact_key", None):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={"code": "OBJECT_TYPE_BACKING_ARTIFACT_REQUIRED", "class_id": class_id},
+                )
+
+        def _normalize_field_list(raw_value: Any) -> List[str]:
+            if raw_value is None:
+                return []
+            if isinstance(raw_value, list):
+                return [str(v).strip() for v in raw_value if str(v).strip()]
+            if isinstance(raw_value, str):
+                return [v.strip() for v in raw_value.split(",") if v.strip()]
+            return []
+
+        def _normalize_field_moves(raw_value: Any) -> Dict[str, str]:
+            moves: Dict[str, str] = {}
+            if isinstance(raw_value, dict):
+                for old_field, new_field in raw_value.items():
+                    if str(old_field).strip() and str(new_field).strip():
+                        moves[str(old_field).strip()] = str(new_field).strip()
+            elif isinstance(raw_value, list):
+                for item in raw_value:
+                    if not isinstance(item, dict):
+                        continue
+                    old_field = item.get("from") or item.get("old") or item.get("source")
+                    new_field = item.get("to") or item.get("new") or item.get("target")
+                    if str(old_field).strip() and str(new_field).strip():
+                        moves[str(old_field).strip()] = str(new_field).strip()
+            return moves
+
+        edit_field_moves = _normalize_field_moves(
+            migration_payload.get("edit_field_moves")
+            or migration_payload.get("editFieldMoves")
+            or migration_payload.get("field_moves")
+            or migration_payload.get("fieldMoves")
+        )
+        edit_field_drops = _normalize_field_list(
+            migration_payload.get("edit_field_drops")
+            or migration_payload.get("editFieldDrops")
+            or migration_payload.get("field_drops")
+            or migration_payload.get("fieldDrops")
+        )
+        edit_field_invalidates = _normalize_field_list(
+            migration_payload.get("edit_field_invalidates")
+            or migration_payload.get("editFieldInvalidates")
+            or migration_payload.get("field_invalidates")
+            or migration_payload.get("fieldInvalidates")
+        )
+        impact_fields = sorted(
+            {
+                *edit_field_moves.keys(),
+                *edit_field_drops,
+                *edit_field_invalidates,
+            }
+        )
+
+        edit_impact = None
         edit_count = None
+        if pk_changed or impact_fields:
+            if impact_fields:
+                edit_impact = await dataset_registry.get_instance_edit_field_stats(
+                    db_name=db_name,
+                    class_id=class_id,
+                    fields=impact_fields,
+                    status="ACTIVE",
+                )
+                edit_count = edit_impact.get("total") if isinstance(edit_impact, dict) else None
+            if edit_count is None:
+                edit_count = await dataset_registry.count_instance_edits(
+                    db_name=db_name,
+                    class_id=class_id,
+                    status="ACTIVE",
+                )
         if pk_changed:
-            edit_count = await dataset_registry.count_instance_edits(db_name=db_name, class_id=class_id)
-            if edit_count and not reset_edits:
+            if edit_count and not reset_edits and not id_remap:
                 await dataset_registry.record_gate_result(
                     scope="object_type_migration",
                     subject_type="object_type",
@@ -643,6 +878,7 @@ async def update_object_type_contract(
                         "backing_changed": backing_changed,
                         "pk_changed": pk_changed,
                         "edit_count": edit_count,
+                        "edit_impact": edit_impact,
                         "message": "PK 변경 시 편집 이력 초기화 필요",
                     },
                 )
@@ -675,6 +911,55 @@ async def update_object_type_contract(
                 },
             )
 
+        edit_actions: Dict[str, Any] = {}
+        if migration_approved and impact_fields and not reset_edits:
+            try:
+                if edit_field_moves:
+                    moved = await dataset_registry.apply_instance_edit_field_moves(
+                        db_name=db_name,
+                        class_id=class_id,
+                        field_moves=edit_field_moves,
+                        status="ACTIVE",
+                    )
+                    edit_actions["moved_edits"] = moved
+                if edit_field_drops:
+                    dropped = await dataset_registry.update_instance_edit_status_by_fields(
+                        db_name=db_name,
+                        class_id=class_id,
+                        fields=edit_field_drops,
+                        new_status="DROPPED",
+                        status="ACTIVE",
+                        metadata_note="field_drop",
+                    )
+                    edit_actions["dropped_edits"] = dropped
+                if edit_field_invalidates:
+                    invalidated = await dataset_registry.update_instance_edit_status_by_fields(
+                        db_name=db_name,
+                        class_id=class_id,
+                        fields=edit_field_invalidates,
+                        new_status="INVALID",
+                        status="ACTIVE",
+                        metadata_note="field_invalidate",
+                    )
+                    edit_actions["invalidated_edits"] = invalidated
+            except Exception as exc:
+                edit_actions["error"] = str(exc)
+
+        if pk_changed and id_remap and edit_count:
+            try:
+                remapped = await dataset_registry.remap_instance_edits(
+                    db_name=db_name,
+                    class_id=class_id,
+                    id_map=id_remap,
+                    status="ACTIVE",
+                )
+            except Exception:
+                remapped = None
+            migration_payload = {
+                **(migration_payload or {}),
+                "id_remap": id_remap,
+                "remapped_edits": remapped,
+            }
         if pk_changed and reset_edits and edit_count:
             try:
                 cleared = await dataset_registry.clear_instance_edits(db_name=db_name, class_id=class_id)
@@ -684,6 +969,17 @@ async def update_object_type_contract(
                 **(migration_payload or {}),
                 "reset_edits": True,
                 "cleared_edits": cleared,
+            }
+        if impact_fields or edit_actions:
+            migration_payload = {
+                **(migration_payload or {}),
+                "edit_policy": {
+                    "moves": edit_field_moves or None,
+                    "drops": edit_field_drops or None,
+                    "invalidates": edit_field_invalidates or None,
+                },
+                "edit_impact": edit_impact,
+                "edit_actions": edit_actions or None,
             }
 
         updated_payload = {
@@ -709,6 +1005,27 @@ async def update_object_type_contract(
             expected_head_commit=expected_head_commit,
         )
 
+        reindex_job_id = None
+        reindex_error = None
+        if reindex_required and status_value_upper == "ACTIVE":
+            reason = "backing_changed" if backing_changed else "pk_changed"
+            if backing_changed and pk_changed:
+                reason = "backing_and_pk_changed"
+            try:
+                reindex_job_id = await _enqueue_objectify_reindex(
+                    objectify_registry=objectify_registry,
+                    dataset=dataset,
+                    version=version,
+                    mapping_spec_id=mapping_spec_id_value or "",
+                    mapping_spec_version=mapping_spec_version_value,
+                    mapping_spec_record=mapping_spec_record,
+                    reason=reason,
+                    options_override={"object_type_migration": True},
+                )
+            except Exception as exc:
+                reindex_error = str(exc)
+                logger.warning("Failed to enqueue objectify reindex: %s", exc)
+
         if backing_changed or pk_changed:
             await dataset_registry.record_gate_result(
                 scope="object_type_migration",
@@ -717,16 +1034,41 @@ async def update_object_type_contract(
                 status="PASS",
                 details={
                     "backing_changed": backing_changed,
-                "pk_changed": pk_changed,
-                "approved": True,
-                "edit_count": edit_count,
-                "reset_edits": reset_edits,
-                "note": migration_payload.get("note") if migration_payload else None,
-            },
-        )
+                    "pk_changed": pk_changed,
+                    "approved": True,
+                    "edit_count": edit_count,
+                    "reset_edits": reset_edits,
+                    "id_remap": bool(id_remap),
+                    "note": migration_payload.get("note") if migration_payload else None,
+                    "reindex_job_id": reindex_job_id,
+                    "reindex_error": reindex_error,
+                },
+            )
+        if migration_payload:
+            try:
+                await dataset_registry.create_schema_migration_plan(
+                    db_name=db_name,
+                    subject_type="object_type",
+                    subject_id=class_id,
+                    status="APPROVED" if migration_approved else "PENDING",
+                    plan={
+                        **(migration_payload or {}),
+                        "backing_changed": backing_changed,
+                        "pk_changed": pk_changed,
+                        "edit_count": edit_count,
+                        "reset_edits": reset_edits,
+                        "id_remap": id_remap or None,
+                    },
+                )
+            except Exception as exc:
+                logger.warning("Failed to record migration plan: %s", exc)
 
         resource = _extract_resource_payload(response)
-        return ApiResponse.success(message="Object type contract updated", data={"object_type": resource})
+        data = {"object_type": resource}
+        if reindex_job_id or reindex_error:
+            data["reindex_job_id"] = reindex_job_id
+            data["reindex_error"] = reindex_error
+        return ApiResponse.success(message="Object type contract updated", data=data)
     except httpx.HTTPStatusError as exc:
         detail: Any
         try:

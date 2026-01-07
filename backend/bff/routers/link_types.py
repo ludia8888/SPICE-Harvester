@@ -9,14 +9,14 @@ from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from bff.dependencies import OMSClientDep
 from bff.services.oms_client import OMSClient
 from bff.routers import objectify as objectify_router
 from shared.models.requests import ApiResponse
 from shared.security.auth_utils import enforce_db_scope
-from shared.security.input_sanitizer import sanitize_input, validate_db_name
+from shared.security.input_sanitizer import sanitize_input, validate_db_name, validate_branch_name
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.objectify_registry import ObjectifyRegistry
 from shared.services.pipeline_schema_utils import normalize_schema_type
@@ -24,6 +24,11 @@ from shared.utils.import_type_normalization import normalize_import_target_type
 from shared.utils.key_spec import normalize_key_spec
 from shared.utils.schema_hash import compute_schema_hash
 from shared.models.objectify_job import ObjectifyJob
+from shared.security.database_access import (
+    DATA_ENGINEER_ROLES,
+    DOMAIN_MODEL_ROLES,
+    enforce_database_role,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +45,16 @@ async def get_objectify_registry() -> ObjectifyRegistry:
     from bff.main import get_objectify_registry as _get_objectify_registry
 
     return await _get_objectify_registry()
+
+
+LINK_EDIT_ROLES = DOMAIN_MODEL_ROLES | DATA_ENGINEER_ROLES
+
+
+async def _require_db_role(request: Request, *, db_name: str, roles) -> None:  # noqa: ANN001
+    try:
+        await enforce_database_role(headers=request.headers, db_name=db_name, required_roles=roles)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
 
 _TYPE_COMPATIBILITY = {
@@ -107,6 +122,21 @@ def _compute_schema_hash(schema: Any) -> Optional[str]:
     return compute_schema_hash(columns)
 
 
+def _build_join_schema(
+    *,
+    source_key_column: str,
+    target_key_column: str,
+    source_key_type: Optional[str],
+    target_key_type: Optional[str],
+) -> Dict[str, Any]:
+    return {
+        "columns": [
+            {"name": source_key_column, "type": source_key_type or "xsd:string"},
+            {"name": target_key_column, "type": target_key_type or "xsd:string"},
+        ]
+    }
+
+
 def _extract_ontology_properties(payload: Any) -> Dict[str, Dict[str, Any]]:
     if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
         payload = payload["data"]
@@ -153,9 +183,28 @@ class ForeignKeyRelationshipSpec(BaseModel):
 
 
 class JoinTableRelationshipSpec(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     type: str = Field("join_table")
-    join_dataset_id: str
+    join_dataset_id: Optional[str] = Field(default=None)
     join_dataset_version_id: Optional[str] = Field(default=None)
+    join_dataset_name: Optional[str] = Field(default=None)
+    join_dataset_branch: Optional[str] = Field(default=None)
+    auto_create: bool = Field(default=False, alias="autoCreate")
+    source_key_column: str
+    target_key_column: str
+    dedupe_policy: str = Field(default="DEDUP")
+    dangling_policy: str = Field(default="FAIL")
+    auto_sync: bool = Field(default=True)
+
+
+class ObjectBackedRelationshipSpec(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    type: str = Field("object_backed")
+    relationship_object_type: str
+    relationship_dataset_id: Optional[str] = Field(default=None)
+    relationship_dataset_version_id: Optional[str] = Field(default=None)
     source_key_column: str
     target_key_column: str
     dedupe_policy: str = Field(default="DEDUP")
@@ -184,6 +233,14 @@ class LinkTypeUpdateRequest(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
     relationship_spec: Optional[Dict[str, Any]] = None
     trigger_index: bool = Field(default=True)
+
+
+class LinkEditRequest(BaseModel):
+    source_instance_id: str
+    target_instance_id: str
+    edit_type: str = Field(..., description="ADD or REMOVE")
+    branch: Optional[str] = Field(default="main")
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
 def _normalize_spec_type(value: str) -> str:
@@ -251,6 +308,90 @@ async def _resolve_dataset_and_version(
     return dataset, version, schema_hash
 
 
+async def _ensure_join_dataset(
+    *,
+    dataset_registry: DatasetRegistry,
+    request: Request,
+    db_name: str,
+    join_dataset_id: Optional[str],
+    join_dataset_version_id: Optional[str],
+    join_dataset_name: Optional[str],
+    join_dataset_branch: Optional[str],
+    auto_create: bool,
+    default_name: str,
+    source_key_column: str,
+    target_key_column: str,
+    source_key_type: Optional[str],
+    target_key_type: Optional[str],
+) -> Tuple[Any, Any, str]:
+    dataset = None
+    version = None
+    dataset_branch = (join_dataset_branch or "main").strip() or "main"
+    if join_dataset_id:
+        dataset = await dataset_registry.get_dataset(dataset_id=join_dataset_id)
+        if not dataset:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Join dataset not found")
+    else:
+        if not auto_create:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="join_dataset_id is required")
+        name = (join_dataset_name or default_name or "").strip()
+        if not name:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="join_dataset_name is required")
+        dataset = await dataset_registry.get_dataset_by_name(db_name=db_name, name=name, branch=dataset_branch)
+        if not dataset:
+            schema_json = _build_join_schema(
+                source_key_column=source_key_column,
+                target_key_column=target_key_column,
+                source_key_type=source_key_type,
+                target_key_type=target_key_type,
+            )
+            dataset = await dataset_registry.create_dataset(
+                db_name=db_name,
+                name=name,
+                description=f"Auto-created join table for {default_name}",
+                source_type="join_table",
+                source_ref=None,
+                schema_json=schema_json,
+                branch=dataset_branch,
+            )
+
+    enforce_db_scope(request.headers, db_name=dataset.db_name)
+    if dataset.db_name != db_name:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Join dataset does not belong to requested database",
+        )
+
+    if join_dataset_version_id:
+        version = await dataset_registry.get_version(version_id=join_dataset_version_id)
+        if not version or version.dataset_id != dataset.dataset_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Join dataset version not found")
+    if not version:
+        version = await dataset_registry.get_latest_version(dataset_id=dataset.dataset_id)
+    if not version and auto_create:
+        schema_json = _build_join_schema(
+            source_key_column=source_key_column,
+            target_key_column=target_key_column,
+            source_key_type=source_key_type,
+            target_key_type=target_key_type,
+        )
+        version = await dataset_registry.add_version(
+            dataset_id=dataset.dataset_id,
+            lakefs_commit_id=f"auto_join_{uuid4().hex}",
+            artifact_key=None,
+            row_count=0,
+            sample_json=schema_json,
+            schema_json=schema_json,
+        )
+    if not version:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Join dataset version is required")
+
+    schema_hash = _compute_schema_hash(version.sample_json or dataset.schema_json)
+    if not schema_hash:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="schema_hash is required for relationship spec")
+    return dataset, version, schema_hash
+
+
 def _resolve_property_type(prop_map: Dict[str, Dict[str, Any]], field: str) -> Optional[str]:
     meta = prop_map.get(field)
     if not meta:
@@ -271,6 +412,7 @@ async def _build_mapping_request(
     target_class: str,
     predicate: str,
     cardinality: str,
+    branch: str,
     source_props: Dict[str, Dict[str, Any]],
     target_props: Dict[str, Dict[str, Any]],
     source_contract: Dict[str, Any],
@@ -402,17 +544,66 @@ async def _build_mapping_request(
         )
         return mapping_request, dataset.dataset_id, dataset_version_id, spec_type
 
+    object_backed_spec: Optional[ObjectBackedRelationshipSpec] = None
+    relationship_object_type = None
     join_spec = JoinTableRelationshipSpec(**spec_payload)
-    join_dataset_id = str(join_spec.join_dataset_id or "").strip()
-    if not join_dataset_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="join_dataset_id is required")
+    if spec_type == "object_backed":
+        object_backed_spec = ObjectBackedRelationshipSpec(**spec_payload)
+        relationship_object_type = str(object_backed_spec.relationship_object_type or "").strip()
+        if not relationship_object_type:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="relationship_object_type is required for object_backed",
+            )
+        _, relationship_contract = await _resolve_object_type_contract(
+            oms_client=oms_client,
+            db_name=db_name,
+            class_id=relationship_object_type,
+            branch=branch,
+        )
+        backing_source = (
+            relationship_contract.get("backing_source")
+            if isinstance(relationship_contract.get("backing_source"), dict)
+            else {}
+        )
+        join_spec = JoinTableRelationshipSpec(
+            type="join_table",
+            join_dataset_id=object_backed_spec.relationship_dataset_id
+            or str(backing_source.get("dataset_id") or "").strip()
+            or None,
+            join_dataset_version_id=object_backed_spec.relationship_dataset_version_id
+            or str(backing_source.get("dataset_version_id") or "").strip()
+            or None,
+            source_key_column=object_backed_spec.source_key_column,
+            target_key_column=object_backed_spec.target_key_column,
+            dedupe_policy=object_backed_spec.dedupe_policy,
+            dangling_policy=object_backed_spec.dangling_policy,
+            auto_sync=object_backed_spec.auto_sync,
+        )
 
-    dataset, version, schema_hash = await _resolve_dataset_and_version(
+    source_pk_field = source_pk_fields[0] if len(source_pk_fields) == 1 else None
+    target_pk_field = target_pk_fields[0] if len(target_pk_fields) == 1 else None
+    if not source_pk_field or not target_pk_field:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="composite pk requires explicit mapping")
+
+    source_pk_type = _resolve_property_type(source_props, source_pk_field)
+    target_pk_type = _resolve_property_type(target_props, target_pk_field)
+
+    dataset, version, schema_hash = await _ensure_join_dataset(
         dataset_registry=dataset_registry,
-        dataset_id=join_dataset_id,
-        dataset_version_id=join_spec.join_dataset_version_id,
+        request=request,
+        db_name=db_name,
+        join_dataset_id=str(join_spec.join_dataset_id or "").strip() or None,
+        join_dataset_version_id=join_spec.join_dataset_version_id,
+        join_dataset_name=join_spec.join_dataset_name,
+        join_dataset_branch=join_spec.join_dataset_branch,
+        auto_create=bool(join_spec.auto_create),
+        default_name=f"{source_class}_{predicate}_{target_class}_join",
+        source_key_column=str(join_spec.source_key_column or "").strip(),
+        target_key_column=str(join_spec.target_key_column or "").strip(),
+        source_key_type=source_pk_type,
+        target_key_type=target_pk_type,
     )
-    enforce_db_scope(request.headers, db_name=dataset.db_name)
 
     schema_types = _extract_schema_types(version.sample_json or dataset.schema_json)
     source_key_column = str(join_spec.source_key_column or "").strip()
@@ -422,15 +613,8 @@ async def _build_mapping_request(
     if target_key_column not in schema_types:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="target_key_column missing")
 
-    source_pk_field = source_pk_fields[0] if len(source_pk_fields) == 1 else None
-    target_pk_field = target_pk_fields[0] if len(target_pk_fields) == 1 else None
-    if not source_pk_field or not target_pk_field:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="composite pk requires explicit mapping")
-
     source_type = schema_types.get(source_key_column)
     target_type = schema_types.get(target_key_column)
-    source_pk_type = _resolve_property_type(source_props, source_pk_field)
-    target_pk_type = _resolve_property_type(target_props, target_pk_field)
     if not source_type or not source_pk_type or not _is_type_compatible(source_type, source_pk_type):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -463,13 +647,16 @@ async def _build_mapping_request(
         "mode": "link_index",
         "relationship_spec_id": relationship_spec_id,
         "link_type_id": link_type_id,
-        "relationship_kind": "join_table",
+        "relationship_kind": "object_backed" if spec_type == "object_backed" else "join_table",
         "dedupe_policy": _normalize_policy(join_spec.dedupe_policy, default="DEDUP"),
         "dangling_policy": _normalize_policy(join_spec.dangling_policy, default="FAIL"),
+        "full_sync": True,
         "relationship_meta": {
             predicate: {"target": target_class, "cardinality": cardinality},
         },
     }
+    if relationship_object_type:
+        options["relationship_object_type"] = relationship_object_type
 
     mapping_request = objectify_router.CreateMappingSpecRequest(
         dataset_id=dataset.dataset_id,
@@ -484,7 +671,7 @@ async def _build_mapping_request(
         auto_sync=join_spec.auto_sync,
         options=options,
     )
-    return mapping_request, dataset.dataset_id, join_spec.join_dataset_version_id, spec_type
+    return mapping_request, dataset.dataset_id, version.version_id if version else None, spec_type
 
 
 @router.post("/link-types", status_code=status.HTTP_201_CREATED, response_model=ApiResponse)
@@ -500,6 +687,7 @@ async def create_link_type(
 ) -> ApiResponse:
     try:
         db_name = validate_db_name(db_name)
+        await _require_db_role(request, db_name=db_name, roles=DOMAIN_MODEL_ROLES)
         payload = sanitize_input(body.model_dump(by_alias=True))
 
         link_type_id = str(payload.get("id") or "").strip()
@@ -564,6 +752,7 @@ async def create_link_type(
             )
 
         relationship_spec_id = str(uuid4())
+        relationship_object_type = None
 
         resolved_dataset_version_id = None
         if normalized_type == "foreign_key":
@@ -676,17 +865,66 @@ async def create_link_type(
                 options=options,
             )
         else:
+            object_backed_spec: Optional[ObjectBackedRelationshipSpec] = None
+            relationship_object_type = None
             join_spec = JoinTableRelationshipSpec(**spec_payload)
-            join_dataset_id = str(join_spec.join_dataset_id or "").strip()
-            if not join_dataset_id:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="join_dataset_id is required")
+            if spec_type == "object_backed":
+                object_backed_spec = ObjectBackedRelationshipSpec(**spec_payload)
+                relationship_object_type = str(object_backed_spec.relationship_object_type or "").strip()
+                if not relationship_object_type:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="relationship_object_type is required for object_backed",
+                    )
+                _, relationship_contract = await _resolve_object_type_contract(
+                    oms_client=oms_client,
+                    db_name=db_name,
+                    class_id=relationship_object_type,
+                    branch=branch,
+                )
+                backing_source = (
+                    relationship_contract.get("backing_source")
+                    if isinstance(relationship_contract.get("backing_source"), dict)
+                    else {}
+                )
+                join_spec = JoinTableRelationshipSpec(
+                    type="join_table",
+                    join_dataset_id=object_backed_spec.relationship_dataset_id
+                    or str(backing_source.get("dataset_id") or "").strip()
+                    or None,
+                    join_dataset_version_id=object_backed_spec.relationship_dataset_version_id
+                    or str(backing_source.get("dataset_version_id") or "").strip()
+                    or None,
+                    source_key_column=object_backed_spec.source_key_column,
+                    target_key_column=object_backed_spec.target_key_column,
+                    dedupe_policy=object_backed_spec.dedupe_policy,
+                    dangling_policy=object_backed_spec.dangling_policy,
+                    auto_sync=object_backed_spec.auto_sync,
+                )
 
-            dataset, version, schema_hash = await _resolve_dataset_and_version(
+            source_pk_field = source_pk_fields[0] if len(source_pk_fields) == 1 else None
+            target_pk_field = target_pk_fields[0] if len(target_pk_fields) == 1 else None
+            if not source_pk_field or not target_pk_field:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="composite pk requires explicit mapping")
+
+            source_pk_type = _resolve_property_type(source_props, source_pk_field)
+            target_pk_type = _resolve_property_type(target_props, target_pk_field)
+
+            dataset, version, schema_hash = await _ensure_join_dataset(
                 dataset_registry=dataset_registry,
-                dataset_id=join_dataset_id,
-                dataset_version_id=join_spec.join_dataset_version_id,
+                request=request,
+                db_name=db_name,
+                join_dataset_id=str(join_spec.join_dataset_id or "").strip() or None,
+                join_dataset_version_id=join_spec.join_dataset_version_id,
+                join_dataset_name=join_spec.join_dataset_name,
+                join_dataset_branch=join_spec.join_dataset_branch,
+                auto_create=bool(join_spec.auto_create),
+                default_name=f"{source_class}_{predicate}_{target_class}_join",
+                source_key_column=str(join_spec.source_key_column or "").strip(),
+                target_key_column=str(join_spec.target_key_column or "").strip(),
+                source_key_type=source_pk_type,
+                target_key_type=target_pk_type,
             )
-            enforce_db_scope(request.headers, db_name=dataset.db_name)
             resolved_dataset_version_id = version.version_id
 
             schema_types = _extract_schema_types(version.sample_json or dataset.schema_json)
@@ -697,15 +935,8 @@ async def create_link_type(
             if target_key_column not in schema_types:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="target_key_column missing")
 
-            source_pk_field = source_pk_fields[0] if len(source_pk_fields) == 1 else None
-            target_pk_field = target_pk_fields[0] if len(target_pk_fields) == 1 else None
-            if not source_pk_field or not target_pk_field:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="composite pk requires explicit mapping")
-
             source_type = schema_types.get(source_key_column)
             target_type = schema_types.get(target_key_column)
-            source_pk_type = _resolve_property_type(source_props, source_pk_field)
-            target_pk_type = _resolve_property_type(target_props, target_pk_field)
             if not source_type or not source_pk_type or not _is_type_compatible(source_type, source_pk_type):
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
@@ -738,13 +969,16 @@ async def create_link_type(
                 "mode": "link_index",
                 "relationship_spec_id": relationship_spec_id,
                 "link_type_id": link_type_id,
-                "relationship_kind": "join_table",
+                "relationship_kind": "object_backed" if spec_type == "object_backed" else "join_table",
                 "dedupe_policy": _normalize_policy(join_spec.dedupe_policy, default="DEDUP"),
                 "dangling_policy": _normalize_policy(join_spec.dangling_policy, default="FAIL"),
+                "full_sync": True,
                 "relationship_meta": {
                     predicate: {"target": target_class, "cardinality": cardinality},
                 },
             }
+            if relationship_object_type:
+                options["relationship_object_type"] = relationship_object_type
 
             mapping_request = objectify_router.CreateMappingSpecRequest(
                 dataset_id=dataset.dataset_id,
@@ -774,8 +1008,16 @@ async def create_link_type(
         mapping_spec_id = str(mapping_payload.get("mapping_spec_id") or "").strip()
         mapping_spec_version = int(mapping_payload.get("version") or mapping_payload.get("mapping_spec_version") or 1)
 
+        resolved_spec_payload = dict(spec_payload)
+        if normalized_type == "join_table":
+            resolved_spec_payload.setdefault("join_dataset_id", mapping_request.dataset_id)
+            if resolved_dataset_version_id:
+                resolved_spec_payload.setdefault("join_dataset_version_id", resolved_dataset_version_id)
+        if spec_type == "object_backed" and relationship_object_type:
+            resolved_spec_payload.setdefault("relationship_object_type", relationship_object_type)
+
         relationship_spec_summary = {
-            **spec_payload,
+            **resolved_spec_payload,
             "relationship_spec_id": relationship_spec_id,
             "spec_type": spec_type,
             "dataset_id": mapping_request.dataset_id,
@@ -824,7 +1066,7 @@ async def create_link_type(
             dataset_version_id=resolved_dataset_version_id,
             mapping_spec_id=mapping_spec_id,
             mapping_spec_version=mapping_spec_version,
-            spec=spec_payload,
+            spec=resolved_spec_payload,
             status=str(payload.get("status") or "ACTIVE").upper(),
             auto_sync=bool(mapping_request.auto_sync),
         )
@@ -959,12 +1201,14 @@ async def list_link_types(
 async def get_link_type(
     db_name: str,
     link_type_id: str,
+    request: Request,
     branch: str = Query("main", description="Target branch"),
     oms_client: OMSClient = OMSClientDep,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
 ) -> ApiResponse:
     try:
         db_name = validate_db_name(db_name)
+        await _require_db_role(request, db_name=db_name, roles=LINK_EDIT_ROLES)
         link_type_id = str(link_type_id or "").strip()
         if not link_type_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="link_type_id is required")
@@ -992,6 +1236,106 @@ async def get_link_type(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
 
+@router.get("/link-types/{link_type_id}/edits", response_model=ApiResponse)
+async def list_link_edits(
+    db_name: str,
+    link_type_id: str,
+    branch: str = Query("main", description="Target branch"),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+) -> ApiResponse:
+    try:
+        db_name = validate_db_name(db_name)
+        link_type_id = str(link_type_id or "").strip()
+        if not link_type_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="link_type_id is required")
+        branch = validate_branch_name(branch)
+
+        relationship_spec = await dataset_registry.get_relationship_spec(link_type_id=link_type_id)
+        if not relationship_spec:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Relationship spec not found")
+        if relationship_spec.db_name != db_name:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Link type does not belong to requested database")
+
+        edits = await dataset_registry.list_link_edits(
+            db_name=db_name,
+            link_type_id=link_type_id,
+            branch=branch,
+            status="ACTIVE",
+        )
+        return ApiResponse.success(
+            message="Link edits retrieved",
+            data={"link_edits": [e.__dict__ for e in edits]},
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to list link edits: %s", exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
+@router.post("/link-types/{link_type_id}/edits", response_model=ApiResponse)
+async def create_link_edit(
+    db_name: str,
+    link_type_id: str,
+    body: LinkEditRequest,
+    request: Request,
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+) -> ApiResponse:
+    try:
+        db_name = validate_db_name(db_name)
+        link_type_id = str(link_type_id or "").strip()
+        if not link_type_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="link_type_id is required")
+
+        relationship_spec = await dataset_registry.get_relationship_spec(link_type_id=link_type_id)
+        if not relationship_spec:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Relationship spec not found")
+        if relationship_spec.db_name != db_name:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Link type does not belong to requested database")
+
+        spec = relationship_spec.spec or {}
+        edits_enabled = bool(spec.get("edits_enabled") or spec.get("editsEnabled"))
+        if not edits_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "LINK_EDITS_DISABLED", "link_type_id": link_type_id},
+            )
+
+        payload = sanitize_input(body.model_dump())
+        branch = validate_branch_name(payload.get("branch") or "main")
+        edit_type = str(payload.get("edit_type") or "").strip().upper()
+        if edit_type not in {"ADD", "REMOVE"}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="edit_type must be ADD or REMOVE")
+
+        source_instance_id = str(payload.get("source_instance_id") or "").strip()
+        target_instance_id = str(payload.get("target_instance_id") or "").strip()
+        if not source_instance_id or not target_instance_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="source_instance_id and target_instance_id are required",
+            )
+
+        record = await dataset_registry.record_link_edit(
+            db_name=db_name,
+            link_type_id=link_type_id,
+            branch=branch,
+            source_object_type=relationship_spec.source_object_type,
+            target_object_type=relationship_spec.target_object_type,
+            predicate=relationship_spec.predicate,
+            source_instance_id=source_instance_id,
+            target_instance_id=target_instance_id,
+            edit_type=edit_type,
+            status="ACTIVE",
+            metadata=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {},
+        )
+        return ApiResponse.success(message="Link edit recorded", data={"link_edit": record.__dict__})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to record link edit: %s", exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
 @router.put("/link-types/{link_type_id}", response_model=ApiResponse)
 async def update_link_type(
     db_name: str,
@@ -1006,6 +1350,7 @@ async def update_link_type(
 ) -> ApiResponse:
     try:
         db_name = validate_db_name(db_name)
+        await _require_db_role(request, db_name=db_name, roles=DOMAIN_MODEL_ROLES)
         link_type_id = str(link_type_id or "").strip()
         if not link_type_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="link_type_id is required")
@@ -1054,7 +1399,7 @@ async def update_link_type(
                 branch=branch,
             )
 
-            mapping_request, resolved_dataset_id, resolved_dataset_version_id, _ = await _build_mapping_request(
+            mapping_request, resolved_dataset_id, resolved_dataset_version_id, resolved_spec_type = await _build_mapping_request(
                 db_name=db_name,
                 request=request,
                 oms_client=oms_client,
@@ -1065,6 +1410,7 @@ async def update_link_type(
                 target_class=existing.target_object_type,
                 predicate=existing.predicate,
                 cardinality=existing_cardinality,
+                branch=branch,
                 source_props=source_props,
                 target_props=target_props,
                 source_contract=source_contract,
@@ -1084,7 +1430,15 @@ async def update_link_type(
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create mapping spec")
             mapping_spec_id = str(mapping_payload.get("mapping_spec_id") or "").strip()
             mapping_spec_version = int(mapping_payload.get("version") or mapping_payload.get("mapping_spec_version") or 1)
-            updated_spec = relationship_spec_payload
+            updated_spec = dict(relationship_spec_payload)
+            if resolved_spec_type in {"join_table", "object_backed"}:
+                updated_spec.setdefault("join_dataset_id", mapping_request.dataset_id)
+                if resolved_dataset_version_id:
+                    updated_spec.setdefault("join_dataset_version_id", resolved_dataset_version_id)
+            if resolved_spec_type == "object_backed":
+                relationship_object_type = str(updated_spec.get("relationship_object_type") or "").strip()
+                if relationship_object_type:
+                    updated_spec["relationship_object_type"] = relationship_object_type
 
         updated = await dataset_registry.update_relationship_spec(
             relationship_spec_id=existing.relationship_spec_id,
@@ -1177,12 +1531,14 @@ async def update_link_type(
 async def reindex_link_type(
     db_name: str,
     link_type_id: str,
+    request: Request,
     dataset_version_id: Optional[str] = Query(default=None),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
 ) -> ApiResponse:
     try:
         db_name = validate_db_name(db_name)
+        await _require_db_role(request, db_name=db_name, roles=DATA_ENGINEER_ROLES)
         link_type_id = str(link_type_id or "").strip()
         if not link_type_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="link_type_id is required")

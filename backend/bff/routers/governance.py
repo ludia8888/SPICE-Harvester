@@ -13,6 +13,13 @@ from pydantic import BaseModel, Field
 from shared.models.requests import ApiResponse
 from shared.security.auth_utils import enforce_db_scope
 from shared.security.input_sanitizer import sanitize_input, validate_db_name
+from shared.security.database_access import (
+    DATA_ENGINEER_ROLES,
+    DOMAIN_MODEL_ROLES,
+    READ_ROLES,
+    SECURITY_ROLES,
+    enforce_database_role,
+)
 from shared.services.dataset_registry import DatasetRegistry
 from shared.utils.key_spec import normalize_key_spec
 
@@ -25,6 +32,13 @@ async def get_dataset_registry() -> DatasetRegistry:
     from bff.main import get_dataset_registry as _get_dataset_registry
 
     return await _get_dataset_registry()
+
+
+async def _require_db_role(request: Request, *, db_name: str, roles) -> None:  # noqa: ANN001
+    try:
+        await enforce_database_role(headers=request.headers, db_name=db_name, required_roles=roles)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
 
 class CreateBackingDatasourceRequest(BaseModel):
@@ -82,6 +96,7 @@ async def create_backing_datasource(
             enforce_db_scope(request.headers, db_name=dataset.db_name)
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+        await _require_db_role(request, db_name=dataset.db_name, roles=DATA_ENGINEER_ROLES)
 
         existing = await dataset_registry.get_backing_datasource_by_dataset(
             dataset_id=dataset.dataset_id,
@@ -133,6 +148,7 @@ async def list_backing_datasources(
                 enforce_db_scope(request.headers, db_name=dataset.db_name)
             except ValueError as exc:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+            await _require_db_role(request, db_name=dataset.db_name, roles=READ_ROLES)
             record = await dataset_registry.get_backing_datasource_by_dataset(
                 dataset_id=dataset.dataset_id,
                 branch=branch or dataset.branch,
@@ -141,6 +157,7 @@ async def list_backing_datasources(
                 records = [record.__dict__]
         elif db_name:
             enforce_db_scope(request.headers, db_name=db_name)
+            await _require_db_role(request, db_name=db_name, roles=READ_ROLES)
             records = [
                 item.__dict__
                 for item in await dataset_registry.list_backing_datasources(db_name=db_name, branch=branch)
@@ -166,6 +183,7 @@ async def get_backing_datasource(
         if not record:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backing datasource not found")
         enforce_db_scope(request.headers, db_name=record.db_name)
+        await _require_db_role(request, db_name=record.db_name, roles=READ_ROLES)
         return ApiResponse.success(message="Backing datasource retrieved", data={"backing_datasource": record.__dict__})
     except HTTPException:
         raise
@@ -187,6 +205,7 @@ async def create_backing_datasource_version(
         if not backing:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backing datasource not found")
         enforce_db_scope(request.headers, db_name=backing.db_name)
+        await _require_db_role(request, db_name=backing.db_name, roles=DATA_ENGINEER_ROLES)
         dataset_version_id = str(payload.get("dataset_version_id") or "").strip()
         if not dataset_version_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dataset_version_id is required")
@@ -221,6 +240,7 @@ async def list_backing_datasource_versions(
         if not backing:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backing datasource not found")
         enforce_db_scope(request.headers, db_name=backing.db_name)
+        await _require_db_role(request, db_name=backing.db_name, roles=READ_ROLES)
         records = await dataset_registry.list_backing_datasource_versions(backing_id=backing_id)
         return ApiResponse.success(
             message="Backing datasource versions retrieved",
@@ -246,6 +266,7 @@ async def get_backing_datasource_version(
         backing = await dataset_registry.get_backing_datasource(backing_id=record.backing_id)
         if backing:
             enforce_db_scope(request.headers, db_name=backing.db_name)
+            await _require_db_role(request, db_name=backing.db_name, roles=READ_ROLES)
         return ApiResponse.success(
             message="Backing datasource version retrieved",
             data={"backing_datasource_version": record.__dict__},
@@ -270,6 +291,7 @@ async def create_key_spec(
         if not dataset:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
         enforce_db_scope(request.headers, db_name=dataset.db_name)
+        await _require_db_role(request, db_name=dataset.db_name, roles=DOMAIN_MODEL_ROLES)
 
         dataset_version_id = str(payload.get("dataset_version_id") or "").strip() or None
         if dataset_version_id:
@@ -327,6 +349,7 @@ async def list_key_specs(
             if not dataset:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
             enforce_db_scope(request.headers, db_name=dataset.db_name)
+            await _require_db_role(request, db_name=dataset.db_name, roles=READ_ROLES)
         records = await dataset_registry.list_key_specs(dataset_id=dataset_id)
         return ApiResponse.success(message="Key specs retrieved", data={"key_specs": [r.__dict__ for r in records]})
     except HTTPException:
@@ -349,11 +372,42 @@ async def get_key_spec(
         dataset = await dataset_registry.get_dataset(dataset_id=record.dataset_id)
         if dataset:
             enforce_db_scope(request.headers, db_name=dataset.db_name)
+            await _require_db_role(request, db_name=dataset.db_name, roles=READ_ROLES)
         return ApiResponse.success(message="Key spec retrieved", data={"key_spec": record.__dict__})
     except HTTPException:
         raise
     except Exception as exc:
         logger.error("Failed to get key spec: %s", exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
+@router.get("/schema-migration-plans", response_model=ApiResponse)
+async def list_schema_migration_plans(
+    request: Request,
+    db_name: Optional[str] = Query(default=None),
+    subject_type: Optional[str] = Query(default=None),
+    subject_id: Optional[str] = Query(default=None),
+    status_value: Optional[str] = Query(default=None, alias="status"),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+) -> ApiResponse:
+    try:
+        if db_name:
+            enforce_db_scope(request.headers, db_name=db_name)
+            await _require_db_role(request, db_name=db_name, roles=READ_ROLES)
+        records = await dataset_registry.list_schema_migration_plans(
+            db_name=db_name,
+            subject_type=subject_type,
+            subject_id=subject_id,
+            status=status_value,
+        )
+        return ApiResponse.success(
+            message="Schema migration plans retrieved",
+            data={"schema_migration_plans": [r.__dict__ for r in records]},
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to list schema migration plans: %s", exc)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
 
@@ -425,6 +479,7 @@ async def upsert_access_policy(
         payload = sanitize_input(body.model_dump())
         db_name = validate_db_name(payload.get("db_name") or "")
         enforce_db_scope(request.headers, db_name=db_name)
+        await _require_db_role(request, db_name=db_name, roles=SECURITY_ROLES)
 
         subject_type = str(payload.get("subject_type") or "").strip()
         subject_id = str(payload.get("subject_id") or "").strip()
@@ -473,6 +528,7 @@ async def list_access_policies(
     try:
         if db_name:
             enforce_db_scope(request.headers, db_name=db_name)
+            await _require_db_role(request, db_name=db_name, roles=SECURITY_ROLES)
         records = await dataset_registry.list_access_policies(
             db_name=db_name,
             scope=scope,

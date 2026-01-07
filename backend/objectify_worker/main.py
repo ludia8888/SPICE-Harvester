@@ -15,7 +15,7 @@ import os
 import queue as queue_module
 import threading
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 from uuid import NAMESPACE_URL, uuid5
 
 import httpx
@@ -1641,6 +1641,45 @@ class ObjectifyWorker:
             return {}
         return resp.json()
 
+    async def _iter_class_instance_ids(
+        self,
+        *,
+        db_name: str,
+        class_id: str,
+        branch: str,
+        limit: int = 1000,
+    ) -> AsyncIterator[str]:
+        if not self.http:
+            raise RuntimeError("OMS client not initialized")
+        offset = 0
+        while True:
+            resp = await self.http.get(
+                f"/api/v1/instance/{db_name}/class/{class_id}/instances",
+                params={"limit": limit, "offset": offset, "branch": branch},
+            )
+            resp.raise_for_status()
+            if not resp.text:
+                return
+            payload = resp.json()
+            instances = payload.get("instances") if isinstance(payload, dict) else None
+            if not isinstance(instances, list) or not instances:
+                return
+            for inst in instances:
+                if not isinstance(inst, dict):
+                    continue
+                raw_id = inst.get("instance_id") or inst.get("id") or inst.get("@id")
+                if not raw_id:
+                    continue
+                value = str(raw_id)
+                if "/" in value:
+                    value = value.split("/")[-1]
+                value = value.strip()
+                if value:
+                    yield value
+            if len(instances) < limit:
+                return
+            offset += limit
+
     async def _resolve_artifact_output(self, job: ObjectifyJob) -> Tuple[str, str]:
         if not self.pipeline_registry:
             raise RuntimeError("PipelineRegistry not initialized")
@@ -2291,6 +2330,14 @@ class ObjectifyWorker:
         row_batch_size: int,
         max_rows: Optional[int],
     ) -> None:
+        lineage_payload = {
+            "job_id": job.job_id,
+            "mapping_spec_id": mapping_spec.mapping_spec_id,
+            "mapping_spec_version": mapping_spec.version,
+            "dataset_id": job.dataset_id,
+            "dataset_version_id": job.dataset_version_id,
+        }
+
         async def _fail_link(errors: List[Dict[str, Any]], stats: Dict[str, Any]) -> None:
             await self._record_gate_result(
                 job=job,
@@ -2303,6 +2350,11 @@ class ObjectifyWorker:
                     await self.dataset_registry.record_relationship_index_result(
                         relationship_spec_id=relationship_spec_id,
                         status="FAIL",
+                        stats=stats,
+                        errors=errors,
+                        dataset_version_id=job.dataset_version_id,
+                        mapping_spec_version=mapping_spec.version,
+                        lineage=lineage_payload,
                     )
                 except Exception as exc:
                     logger.warning("Failed to update relationship index status: %s", exc)
@@ -2382,7 +2434,52 @@ class ObjectifyWorker:
         dangling_policy = str(options.get("dangling_policy") or "FAIL").strip().upper() or "FAIL"
         if dangling_policy not in {"FAIL", "WARN"}:
             dangling_policy = "FAIL"
-        dedupe_policy = str(options.get("dedupe_policy") or "DEDUP").strip().upper() or "DEDUP"
+        dedupe_policy = str(options.get("dedupe_policy") or options.get("dedupePolicy") or "DEDUP").strip().upper() or "DEDUP"
+        if dedupe_policy not in {"DEDUP", "WARN", "FAIL"}:
+            dedupe_policy = "DEDUP"
+        relationship_kind = str(options.get("relationship_kind") or "").strip().lower()
+        full_sync = bool(options.get("full_sync") or options.get("fullSync") or False)
+        if relationship_kind in {"join_table", "object_backed"} and "full_sync" not in options and "fullSync" not in options:
+            full_sync = True
+
+        target_instances: Dict[str, set[str]] = {}
+        target_fetch_errors: List[Dict[str, Any]] = []
+        dangling_target_samples: List[Dict[str, Any]] = []
+        missing_target_count = 0
+        target_classes = sorted(
+            {
+                str(meta.get("target") or meta.get("linkTarget") or "").strip()
+                for meta in relationship_meta.values()
+                if isinstance(meta, dict)
+            }
+        )
+        target_classes = [value for value in target_classes if value]
+        if target_classes:
+            branch = job.ontology_branch or job.dataset_branch or "main"
+            for target_class in target_classes:
+                try:
+                    ids: set[str] = set()
+                    async for instance_id in self._iter_class_instance_ids(
+                        db_name=job.db_name,
+                        class_id=target_class,
+                        branch=branch,
+                        limit=self.list_page_size,
+                    ):
+                        ids.add(instance_id)
+                    target_instances[target_class] = ids
+                except Exception as exc:
+                    target_fetch_errors.append(
+                        {
+                            "code": "RELATIONSHIP_TARGET_LOOKUP_FAILED",
+                            "target_class": target_class,
+                            "error": str(exc),
+                        }
+                    )
+        if target_fetch_errors and dangling_policy == "FAIL":
+            await _fail_link(
+                target_fetch_errors,
+                {"input_rows": 0, "target_lookup_errors": target_fetch_errors},
+            )
 
         total_rows = 0
         error_rows: List[int] = []
@@ -2513,6 +2610,33 @@ class ObjectifyWorker:
                                 }
                             )
                         continue
+                    target_ids = target_instances.get(target_class)
+                    if target_ids is not None:
+                        ref_id = ref.split("/", 1)[1] if "/" in ref else ref
+                        if ref_id not in target_ids:
+                            dangling_count += 1
+                            missing_target_count += 1
+                            if len(dangling_target_samples) < 20:
+                                dangling_target_samples.append(
+                                    {
+                                        "row_index": absolute_idx,
+                                        "target_field": target_field,
+                                        "target_class": target_class,
+                                        "target_id": ref_id,
+                                    }
+                                )
+                            if dangling_policy == "FAIL":
+                                error_rows.append(absolute_idx)
+                                errors.append(
+                                    {
+                                        "row_index": absolute_idx,
+                                        "code": "RELATIONSHIP_TARGET_MISSING",
+                                        "target_field": target_field,
+                                        "target_class": target_class,
+                                        "target_id": ref_id,
+                                    }
+                                )
+                            continue
                     entry = updates_by_instance.setdefault(instance_id, {})
                     bucket = entry.setdefault(target_field, [])
                     if ref not in bucket:
@@ -2524,11 +2648,161 @@ class ObjectifyWorker:
             "input_rows": total_rows,
             "error_rows": len(error_rows),
             "dangling_count": dangling_count,
+            "dangling_missing_targets": missing_target_count,
             "duplicate_count": duplicate_count,
+            "dedupe_policy": dedupe_policy,
+            "relationship_kind": relationship_kind,
         }
+        if dangling_target_samples:
+            stats["dangling_missing_target_samples"] = dangling_target_samples[:10]
+        if target_fetch_errors:
+            stats["dangling_target_fetch_errors"] = target_fetch_errors[:5]
+
+        dedupe_warnings: List[Dict[str, Any]] = []
+        dangling_warnings: List[Dict[str, Any]] = []
+        if duplicate_count:
+            if dedupe_policy == "FAIL":
+                errors.append(
+                    {
+                        "code": "RELATIONSHIP_DUPLICATE",
+                        "message": "Duplicate relationship pairs detected",
+                        "duplicate_count": duplicate_count,
+                    }
+                )
+                await _fail_link(errors, stats)
+            elif dedupe_policy == "WARN":
+                dedupe_warnings.append(
+                    {
+                        "code": "RELATIONSHIP_DUPLICATE",
+                        "message": "Duplicate relationship pairs deduped",
+                        "duplicate_count": duplicate_count,
+                    }
+                )
+                stats["dedupe_warnings"] = duplicate_count
+        if missing_target_count and dangling_policy != "FAIL":
+            dangling_warnings.append(
+                {
+                    "code": "RELATIONSHIP_TARGET_MISSING",
+                    "missing_count": missing_target_count,
+                    "samples": dangling_target_samples[:10],
+                }
+            )
+        if target_fetch_errors and dangling_policy != "FAIL":
+            dangling_warnings.append(
+                {
+                    "code": "RELATIONSHIP_TARGET_LOOKUP_FAILED",
+                    "errors": target_fetch_errors[:5],
+                }
+            )
 
         if errors and dangling_policy == "FAIL":
             await _fail_link(errors, stats)
+
+        link_edit_errors: List[Dict[str, Any]] = []
+        link_edits_applied = 0
+        if self.dataset_registry:
+            link_type_id = str(options.get("link_type_id") or "").strip()
+            branch = job.ontology_branch or job.dataset_branch or "main"
+            if link_type_id:
+                try:
+                    edits = await self.dataset_registry.list_link_edits(
+                        db_name=job.db_name,
+                        link_type_id=link_type_id,
+                        branch=branch,
+                        status="ACTIVE",
+                        limit=10000,
+                    )
+                except Exception as exc:
+                    edits = []
+                    link_edit_errors.append({"code": "LINK_EDIT_FETCH_FAILED", "error": str(exc)})
+                for edit in edits:
+                    predicate = str(edit.predicate or "").strip()
+                    rel_meta = relationship_meta.get(predicate) or {}
+                    target_class = str(rel_meta.get("target") or rel_meta.get("linkTarget") or "").strip()
+                    if not predicate or not target_class:
+                        link_edit_errors.append(
+                            {
+                                "code": "LINK_EDIT_PREDICATE_UNKNOWN",
+                                "predicate": predicate,
+                            }
+                        )
+                        continue
+                    try:
+                        ref = self._normalize_relationship_ref(edit.target_instance_id, target_class=target_class)
+                    except Exception as exc:
+                        link_edit_errors.append(
+                            {
+                                "code": "LINK_EDIT_TARGET_INVALID",
+                                "predicate": predicate,
+                                "error": str(exc),
+                            }
+                        )
+                        continue
+                    target_ids = target_instances.get(target_class)
+                    if target_ids is not None:
+                        ref_id = ref.split("/", 1)[1] if "/" in ref else ref
+                        if ref_id not in target_ids:
+                            link_edit_errors.append(
+                                {
+                                    "code": "LINK_EDIT_TARGET_MISSING",
+                                    "predicate": predicate,
+                                    "target_class": target_class,
+                                    "target_id": ref_id,
+                                }
+                            )
+                            continue
+
+                    entry = updates_by_instance.setdefault(edit.source_instance_id, {})
+                    bucket = entry.setdefault(predicate, [])
+                    action = str(edit.edit_type or "").strip().upper()
+                    if action == "ADD":
+                        if ref not in bucket:
+                            bucket.append(ref)
+                        link_edits_applied += 1
+                    elif action in {"REMOVE", "DELETE"}:
+                        if ref in bucket:
+                            bucket.remove(ref)
+                        link_edits_applied += 1
+                    else:
+                        link_edit_errors.append(
+                            {"code": "LINK_EDIT_TYPE_INVALID", "edit_type": edit.edit_type}
+                        )
+
+        if link_edits_applied or link_edit_errors:
+            stats["link_edits_applied"] = link_edits_applied
+            if link_edit_errors:
+                stats["link_edit_errors"] = link_edit_errors[:200]
+
+        if full_sync and relationship_kind in {"join_table", "object_backed"}:
+            try:
+                total_instances = 0
+                cleared_instances = 0
+                branch = job.ontology_branch or job.dataset_branch or "main"
+                async for instance_id in self._iter_class_instance_ids(
+                    db_name=job.db_name,
+                    class_id=job.target_class_id,
+                    branch=branch,
+                ):
+                    total_instances += 1
+                    if instance_id in updates_by_instance:
+                        continue
+                    entry = updates_by_instance.setdefault(instance_id, {})
+                    for field in relationship_meta.keys():
+                        entry.setdefault(field, [])
+                    cleared_instances += 1
+                stats["full_sync_total_instances"] = total_instances
+                stats["full_sync_cleared"] = cleared_instances
+            except Exception as exc:
+                await _fail_link(
+                    [
+                        {
+                            "code": "FULL_SYNC_FAILED",
+                            "message": "Unable to enumerate instances for full sync",
+                            "error": str(exc),
+                        }
+                    ],
+                    stats,
+                )
 
         updates: List[Dict[str, Any]] = []
         for instance_id, rel_values in updates_by_instance.items():
@@ -2537,6 +2811,9 @@ class ObjectifyWorker:
                 cardinality = rel_cardinality.get(field) or ""
                 allow_multiple = any(token in cardinality for token in (":n", ":m", "many"))
                 if not allow_multiple:
+                    if not refs:
+                        payload[field] = None
+                        continue
                     if len(refs) > 1:
                         errors.append(
                             {
@@ -2592,10 +2869,22 @@ class ObjectifyWorker:
 
         relationship_spec_id = str(options.get("relationship_spec_id") or "").strip()
         if relationship_spec_id and self.dataset_registry:
+            record_errors: List[Dict[str, Any]] = []
+            if dangling_policy != "FAIL":
+                record_errors.extend(errors)
+            record_errors.extend(dedupe_warnings)
+            record_errors.extend(dangling_warnings)
+            record_errors.extend(link_edit_errors)
+            status_value = "WARN" if record_errors else "PASS"
             try:
                 await self.dataset_registry.record_relationship_index_result(
                     relationship_spec_id=relationship_spec_id,
-                    status="PASS",
+                    status=status_value,
+                    stats=stats,
+                    errors=record_errors,
+                    dataset_version_id=job.dataset_version_id,
+                    mapping_spec_version=mapping_spec.version,
+                    lineage=lineage_payload,
                 )
             except Exception as exc:
                 logger.warning("Failed to update relationship index status: %s", exc)

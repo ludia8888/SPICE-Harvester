@@ -1,6 +1,7 @@
 import pytest
 
 from oms.services.ontology_resource_validator import (
+    _collect_relationship_spec_issues,
     _collect_link_type_issues,
     _find_missing_link_type_refs,
     check_required_fields,
@@ -49,6 +50,48 @@ def test_link_type_invalid_predicate_is_reported():
     assert issues
     invalid_fields = issues[0]["details"]["invalid_fields"]
     assert "predicate" in invalid_fields
+
+
+def test_relationship_spec_missing_is_reported():
+    issues = _collect_relationship_spec_issues({})
+    missing = {field for issue in issues for field in issue["details"]["missing_fields"]}
+    assert "relationship_spec" in missing
+
+
+def test_relationship_spec_invalid_type_is_reported():
+    issues = _collect_relationship_spec_issues({"relationship_spec": {"type": "unknown"}})
+    invalid = {field for issue in issues for field in issue["details"]["invalid_fields"]}
+    assert "relationship_spec.type" in invalid
+
+
+def test_relationship_spec_object_backed_requires_object_type():
+    issues = _collect_relationship_spec_issues(
+        {
+            "relationship_spec": {
+                "type": "object_backed",
+                "relationship_spec_id": "rs-1",
+                "source_key_column": "source_id",
+                "target_key_column": "target_id",
+            }
+        }
+    )
+    missing = {field for issue in issues for field in issue["details"]["missing_fields"]}
+    assert "relationship_spec.relationship_object_type" in missing
+
+
+def test_relationship_spec_join_table_requires_dataset_or_auto_create():
+    issues = _collect_relationship_spec_issues(
+        {
+            "relationship_spec": {
+                "type": "join_table",
+                "relationship_spec_id": "rs-1",
+                "source_key_column": "source_id",
+                "target_key_column": "target_id",
+            }
+        }
+    )
+    missing = {field for issue in issues for field in issue["details"]["missing_fields"]}
+    assert "relationship_spec.join_dataset_id" in missing
 
 
 @pytest.mark.unit

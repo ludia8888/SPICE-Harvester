@@ -27,6 +27,7 @@ from uuid import uuid4, uuid5, NAMESPACE_URL
 from confluent_kafka import Consumer, Producer, KafkaError, TopicPartition
 import redis
 import boto3
+import httpx
 from botocore.exceptions import ClientError
 
 from shared.config.service_config import ServiceConfig
@@ -40,6 +41,7 @@ from shared.config.settings import ApplicationSettings
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import attach_context_from_kafka
 from shared.observability.tracing import get_tracing_service
+from shared.security.auth_utils import get_expected_token
 from shared.security.input_sanitizer import validate_branch_name, validate_class_id, validate_instance_id
 from shared.services.processed_event_registry import (
     ClaimDecision,
@@ -60,6 +62,8 @@ from shared.models.config import ConnectionConfig
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+_BFF_TOKEN_ENV_KEYS = ("BFF_ADMIN_TOKEN", "BFF_WRITE_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN")
 
 
 class StrictPalantirInstanceWorker:
@@ -107,6 +111,7 @@ class StrictPalantirInstanceWorker:
         self.lineage_store: Optional[LineageStore] = None
         self.audit_store: Optional[AuditLogStore] = None
         self.dataset_registry: Optional[DatasetRegistry] = None
+        self.bff_http: Optional[httpx.AsyncClient] = None
         self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="instance-worker-kafka")
         self.tracing = get_tracing_service("instance-worker")
         
@@ -208,6 +213,18 @@ class StrictPalantirInstanceWorker:
         except Exception as e:
             logger.warning(f"⚠️ DatasetRegistry unavailable (edits tracking disabled): {e}")
             self.dataset_registry = None
+
+        token = get_expected_token(_BFF_TOKEN_ENV_KEYS)
+        headers: Dict[str, str] = {}
+        if token:
+            headers["X-Admin-Token"] = token
+        else:
+            logger.warning("No BFF auth token configured; link reindex calls may fail.")
+        self.bff_http = httpx.AsyncClient(
+            base_url=ServiceConfig.get_bff_url(),
+            timeout=60.0,
+            headers=headers,
+        )
 
         # Event Sourcing is now mandatory for write-side correctness.
         # Legacy "direct Kafka publish" paths are removed because they break SSoT.
@@ -1198,6 +1215,7 @@ class StrictPalantirInstanceWorker:
                 class_id=class_id,
                 instance_id=instance_id,
                 edit_type="create",
+                fields=sorted(payload.keys()),
                 metadata={
                     "command_id": command_id,
                     "branch": branch,
@@ -1206,6 +1224,18 @@ class StrictPalantirInstanceWorker:
                     "objectify": bool(is_objectify),
                 },
             )
+
+            if not is_objectify:
+                try:
+                    await self._apply_relationship_object_link_edits(
+                        db_name=db_name,
+                        branch=branch,
+                        class_id=class_id,
+                        instance_id=instance_id,
+                        current_payload=payload,
+                    )
+                except Exception as exc:
+                    logger.debug("Relationship object link sync failed: %s", exc, exc_info=True)
             
             logger.info(f"✅ STRICT Palantir: Instance created successfully")
             
@@ -1220,6 +1250,7 @@ class StrictPalantirInstanceWorker:
         class_id = command.get("class_id")
         command_id = command.get("command_id")
         branch = validate_branch_name(command.get("branch") or "main")
+        is_objectify = self._is_objectify_command(command)
         payload = command.get("payload", {}) or {}
         is_objectify = self._is_objectify_command(command)
 
@@ -1927,6 +1958,7 @@ class StrictPalantirInstanceWorker:
             class_id=class_id,
             instance_id=instance_id,
             edit_type="update",
+            fields=sorted(payload.keys()),
             metadata={
                 "command_id": command_id,
                 "branch": branch,
@@ -1934,6 +1966,19 @@ class StrictPalantirInstanceWorker:
                 "ontology": ontology_version,
             },
         )
+
+        if not is_objectify:
+            try:
+                await self._apply_relationship_object_link_edits(
+                    db_name=db_name,
+                    branch=branch,
+                    class_id=class_id,
+                    instance_id=instance_id,
+                    current_payload=merged_payload,
+                    previous_payload=previous_payload,
+                )
+            except Exception as exc:
+                logger.debug("Relationship object link sync failed: %s", exc, exc_info=True)
 
     async def process_delete_instance(self, command: Dict[str, Any]) -> None:
         """Process DELETE_INSTANCE command (idempotent delete)."""
@@ -2195,6 +2240,7 @@ class StrictPalantirInstanceWorker:
             class_id=class_id,
             instance_id=instance_id,
             edit_type="delete",
+            fields=[],
             metadata={
                 "command_id": command_id,
                 "branch": branch,
@@ -2202,6 +2248,25 @@ class StrictPalantirInstanceWorker:
                 "ontology": ontology_version,
             },
         )
+
+        if not is_objectify:
+            try:
+                previous_payload = await self._resolve_instance_payload(
+                    db_name=db_name,
+                    branch=branch,
+                    class_id=class_id,
+                    instance_id=instance_id,
+                )
+                await self._apply_relationship_object_link_edits(
+                    db_name=db_name,
+                    branch=branch,
+                    class_id=class_id,
+                    instance_id=instance_id,
+                    current_payload=None,
+                    previous_payload=previous_payload,
+                )
+            except Exception as exc:
+                logger.debug("Relationship object delete sync failed: %s", exc, exc_info=True)
             
     async def _record_instance_edit(
         self,
@@ -2210,6 +2275,7 @@ class StrictPalantirInstanceWorker:
         class_id: str,
         instance_id: str,
         edit_type: str,
+        fields: Optional[List[str]] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         if not self.dataset_registry:
@@ -2220,10 +2286,172 @@ class StrictPalantirInstanceWorker:
                 class_id=class_id,
                 instance_id=instance_id,
                 edit_type=str(edit_type or "").strip() or "update",
+                fields=fields,
                 metadata=metadata,
             )
         except Exception as exc:
             logger.debug("Instance edit tracking failed (non-fatal): %s", exc, exc_info=True)
+
+    async def _resolve_instance_payload(
+        self,
+        *,
+        db_name: str,
+        branch: str,
+        class_id: str,
+        instance_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        aggregate_id = f"{db_name}:{branch}:{class_id}:{instance_id}"
+        payload: Optional[Dict[str, Any]] = None
+        if self.event_store:
+            try:
+                events = await self.event_store.get_events(
+                    aggregate_type="Instance",
+                    aggregate_id=aggregate_id,
+                )
+                for ev in events:
+                    if ev.event_type in {"INSTANCE_CREATED", "INSTANCE_UPDATED"} and isinstance(ev.data, dict):
+                        payload = {
+                            k: v
+                            for k, v in ev.data.items()
+                            if k not in {"db_name", "branch", "class_id", "instance_id"}
+                        }
+            except Exception as exc:
+                logger.debug("Failed to resolve instance payload from event store: %s", exc, exc_info=True)
+
+        if payload is not None:
+            return payload
+
+        if self.s3_client:
+            prefixes = [f"{db_name}/{branch}/{class_id}/{instance_id}/"]
+            if branch == "main":
+                prefixes.append(f"{db_name}/{class_id}/{instance_id}/")
+            try:
+                objs = []
+                for prefix in prefixes:
+                    resp = await self._s3_call(
+                        self.s3_client.list_objects_v2,
+                        Bucket=self.instance_bucket,
+                        Prefix=prefix,
+                    )
+                    objs.extend(list((resp or {}).get("Contents") or []))
+                objs.sort(key=lambda o: o.get("LastModified") or datetime.fromtimestamp(0, tz=timezone.utc))
+                for obj in reversed(objs):
+                    key = obj.get("Key")
+                    if not key:
+                        continue
+                    resp = await self._s3_call(
+                        self.s3_client.get_object,
+                        Bucket=self.instance_bucket,
+                        Key=key,
+                    )
+                    body = resp.get("Body")
+                    if body is None:
+                        continue
+                    raw = await self._s3_read_body(body)
+                    doc = json.loads(raw.decode("utf-8"))
+                    if isinstance(doc, dict):
+                        if doc.get("deleted_at") or (
+                            isinstance(resp.get("Metadata"), dict) and resp["Metadata"].get("tombstone") == "true"
+                        ):
+                            continue
+                        payload_doc = doc.get("payload")
+                        if isinstance(payload_doc, dict):
+                            return payload_doc
+            except Exception as exc:
+                logger.debug("Failed to resolve instance payload from S3: %s", exc, exc_info=True)
+
+        return None
+
+    async def _enqueue_link_reindex(self, *, db_name: str, link_type_id: str) -> None:
+        if not self.bff_http:
+            return
+        try:
+            resp = await self.bff_http.post(
+                f"/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/reindex"
+            )
+            resp.raise_for_status()
+        except Exception as exc:
+            logger.warning("Failed to enqueue link reindex for %s: %s", link_type_id, exc)
+
+    async def _apply_relationship_object_link_edits(
+        self,
+        *,
+        db_name: str,
+        branch: str,
+        class_id: str,
+        instance_id: str,
+        current_payload: Optional[Dict[str, Any]],
+        previous_payload: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not self.dataset_registry or not current_payload and not previous_payload:
+            return
+        try:
+            specs = await self.dataset_registry.list_relationship_specs_by_relationship_object_type(
+                db_name=db_name,
+                relationship_object_type=class_id,
+                status="ACTIVE",
+                limit=1000,
+            )
+        except Exception as exc:
+            logger.debug("Failed to list relationship specs for %s: %s", class_id, exc, exc_info=True)
+            return
+        if not specs:
+            return
+        reindex_targets: Set[str] = set()
+        for spec in specs:
+            spec_payload = spec.spec or {}
+            source_key = str(spec_payload.get("source_key_column") or "").strip()
+            target_key = str(spec_payload.get("target_key_column") or "").strip()
+            if not source_key or not target_key:
+                continue
+
+            def _normalize_edit_value(value: Any) -> Optional[str]:
+                if value is None:
+                    return None
+                text = str(value).strip()
+                return text or None
+
+            prev_source = None
+            prev_target = None
+            if isinstance(previous_payload, dict):
+                prev_source = _normalize_edit_value(previous_payload.get(source_key))
+                prev_target = _normalize_edit_value(previous_payload.get(target_key))
+            curr_source = None
+            curr_target = None
+            if isinstance(current_payload, dict):
+                curr_source = _normalize_edit_value(current_payload.get(source_key))
+                curr_target = _normalize_edit_value(current_payload.get(target_key))
+
+            edits: List[Dict[str, Any]] = []
+            if prev_source and prev_target and (prev_source != curr_source or prev_target != curr_target):
+                edits.append({"source": prev_source, "target": prev_target, "edit_type": "REMOVE"})
+            if curr_source and curr_target and (prev_source != curr_source or prev_target != curr_target):
+                edits.append({"source": curr_source, "target": curr_target, "edit_type": "ADD"})
+
+            for edit in edits:
+                try:
+                    await self.dataset_registry.record_link_edit(
+                        db_name=db_name,
+                        link_type_id=spec.link_type_id,
+                        branch=branch,
+                        source_object_type=spec.source_object_type,
+                        target_object_type=spec.target_object_type,
+                        predicate=spec.predicate,
+                        source_instance_id=str(edit["source"]),
+                        target_instance_id=str(edit["target"]),
+                        edit_type=edit["edit_type"],
+                        status="ACTIVE",
+                        metadata={
+                            "reason": "relationship_object_sync",
+                            "relationship_object_id": instance_id,
+                            "relationship_object_type": class_id,
+                        },
+                    )
+                    reindex_targets.add(spec.link_type_id)
+                except Exception as exc:
+                    logger.debug("Failed to record link edit: %s", exc, exc_info=True)
+        for link_type_id in reindex_targets:
+            await self._enqueue_link_reindex(db_name=db_name, link_type_id=link_type_id)
 
     async def set_command_status(self, command_id: str, status: str, result: Dict = None):
         """Set command status using CommandStatusService (preserves history + pubsub)."""
@@ -2561,6 +2789,8 @@ class StrictPalantirInstanceWorker:
             await self.processed_event_registry.close()
         if self.dataset_registry:
             await self.dataset_registry.close()
+        if self.bff_http:
+            await self.bff_http.aclose()
         self._consumer_executor.shutdown(wait=True, cancel_futures=True)
             
 

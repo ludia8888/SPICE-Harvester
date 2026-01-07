@@ -13,6 +13,7 @@ from oms.dependencies import ValidatedDatabaseName, TerminusServiceDep
 from oms.services.async_terminus import AsyncTerminusService
 from shared.security.input_sanitizer import (
     SecurityViolationError,
+    validate_branch_name,
     validate_class_id,
     validate_instance_id,
 )
@@ -28,6 +29,7 @@ async def get_class_instances(
     class_id: str = ...,
     limit: int = Query(default=100, le=1000),
     offset: int = Query(default=0, ge=0),
+    branch: str = Query(default="main"),
     search: Optional[str] = Query(default=None, description="Search query"),
     terminus: AsyncTerminusService = TerminusServiceDep,
 ) -> Dict[str, Any]:
@@ -50,6 +52,7 @@ async def get_class_instances(
     try:
         # 입력 검증
         class_id = validate_class_id(class_id)
+        branch = validate_branch_name(branch)
         
         # 검색어 보안 검증 (Critical Security Fix)
         validated_search = None
@@ -82,6 +85,7 @@ async def get_class_instances(
         result = await terminus.get_class_instances_optimized(
             db_name=db_name,
             class_id=class_id,
+            branch=branch,
             limit=limit,
             offset=offset,
             filter_conditions=filter_conditions
@@ -94,6 +98,7 @@ async def get_class_instances(
             "limit": limit,
             "offset": offset,
             "search": validated_search,
+            "branch": branch,
             "instances": result.get("instances", []),
             "source": "terminus_optimized"
         }

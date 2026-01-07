@@ -25,6 +25,7 @@ from shared.utils.import_type_normalization import normalize_import_target_type
 from shared.utils.key_spec import normalize_key_spec
 from shared.utils.s3_uri import parse_s3_uri
 from shared.utils.schema_hash import compute_schema_hash
+from shared.security.database_access import DATA_ENGINEER_ROLES, DOMAIN_MODEL_ROLES, enforce_database_role
 from bff.dependencies import OMSClientDep
 from bff.services.oms_client import OMSClient
 
@@ -77,6 +78,13 @@ async def get_objectify_job_queue(
     objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
 ) -> ObjectifyJobQueue:
     return ObjectifyJobQueue(objectify_registry=objectify_registry)
+
+
+async def _require_db_role(request: Request, *, db_name: str, roles) -> None:  # noqa: ANN001
+    try:
+        await enforce_database_role(headers=request.headers, db_name=db_name, required_roles=roles)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
 
 async def get_pipeline_registry() -> PipelineRegistry:
@@ -200,6 +208,75 @@ def _extract_schema_types(schema: Any) -> Dict[str, str]:
     if isinstance(props, dict):
         return {str(key).strip(): normalize_schema_type(val) for key, val in props.items() if str(key).strip()}
     return {}
+
+
+def _normalize_mapping_pair(item: Any) -> Optional[tuple[str, str]]:
+    if not isinstance(item, dict):
+        return None
+    source = str(item.get("source_field") or "").strip()
+    target = str(item.get("target_field") or "").strip()
+    if not source or not target:
+        return None
+    return source, target
+
+
+def _build_mapping_change_summary(
+    previous_mappings: List[Dict[str, Any]],
+    new_mappings: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    previous_pairs = {
+        pair for pair in (_normalize_mapping_pair(item) for item in previous_mappings) if pair
+    }
+    new_pairs = {pair for pair in (_normalize_mapping_pair(item) for item in new_mappings) if pair}
+    added_pairs = sorted(new_pairs - previous_pairs)
+    removed_pairs = sorted(previous_pairs - new_pairs)
+
+    previous_by_target: Dict[str, set[str]] = {}
+    for source, target in previous_pairs:
+        previous_by_target.setdefault(target, set()).add(source)
+
+    new_by_target: Dict[str, set[str]] = {}
+    for source, target in new_pairs:
+        new_by_target.setdefault(target, set()).add(source)
+
+    changed_targets: List[Dict[str, Any]] = []
+    for target in sorted(set(previous_by_target) | set(new_by_target)):
+        previous_sources = previous_by_target.get(target, set())
+        new_sources = new_by_target.get(target, set())
+        if previous_sources != new_sources:
+            changed_targets.append(
+                {
+                    "target_field": target,
+                    "previous_sources": sorted(previous_sources),
+                    "new_sources": sorted(new_sources),
+                }
+            )
+
+    impacted_targets = {
+        target for _, target in added_pairs + removed_pairs
+    }
+    impacted_targets.update(item["target_field"] for item in changed_targets)
+
+    impacted_sources = {
+        source for source, _ in added_pairs + removed_pairs
+    }
+    for item in changed_targets:
+        impacted_sources.update(item["previous_sources"])
+        impacted_sources.update(item["new_sources"])
+
+    return {
+        "added": [{"source_field": source, "target_field": target} for source, target in added_pairs],
+        "removed": [{"source_field": source, "target_field": target} for source, target in removed_pairs],
+        "changed_targets": changed_targets,
+        "impacted_targets": sorted(impacted_targets),
+        "impacted_sources": sorted(impacted_sources),
+        "counts": {
+            "added": len(added_pairs),
+            "removed": len(removed_pairs),
+            "changed_targets": len(changed_targets),
+        },
+        "has_changes": bool(added_pairs or removed_pairs or changed_targets),
+    }
 
 
 def _normalize_ontology_payload(payload: Any) -> Dict[str, Any]:
@@ -343,6 +420,7 @@ async def create_mapping_spec(
             enforce_db_scope(request.headers, db_name=dataset.db_name)
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+        await _require_db_role(request, db_name=dataset.db_name, roles=DOMAIN_MODEL_ROLES)
 
         dataset_branch = str(payload.get("dataset_branch") or dataset.branch or "main").strip() or "main"
         artifact_output_name = str(payload.get("artifact_output_name") or dataset.name or "").strip()
@@ -459,6 +537,24 @@ async def create_mapping_spec(
                 "artifact_output_name": artifact_output_name,
             },
         )
+        try:
+            previous_spec = await objectify_registry.get_active_mapping_spec(
+                dataset_id=dataset_id,
+                dataset_branch=dataset_branch,
+                target_class_id=target_class_id,
+                artifact_output_name=artifact_output_name,
+                schema_hash=schema_hash,
+            )
+        except Exception as exc:
+            logger.warning("Failed to resolve previous mapping spec: %s", exc)
+            previous_spec = None
+        if previous_spec:
+            change_summary = _build_mapping_change_summary(previous_spec.mappings, mappings)
+            change_summary.setdefault("previous_mapping_spec_id", previous_spec.mapping_spec_id)
+            change_summary.setdefault("previous_version", previous_spec.version)
+            change_summary.setdefault("expected_version", previous_spec.version + 1)
+            options.setdefault("previous_mapping_spec_id", previous_spec.mapping_spec_id)
+            options.setdefault("change_summary", change_summary)
 
         missing_sources: List[str] = []
         mapped_targets: List[str] = []
@@ -929,6 +1025,7 @@ async def run_objectify(
             enforce_db_scope(request.headers, db_name=dataset.db_name)
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+        await _require_db_role(request, db_name=dataset.db_name, roles=DATA_ENGINEER_ROLES)
 
         artifact_id = str(body.artifact_id or "").strip() or None
         artifact_output_name = str(body.artifact_output_name or "").strip() or None

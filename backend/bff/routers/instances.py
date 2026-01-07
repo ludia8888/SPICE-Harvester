@@ -16,11 +16,39 @@ from bff.services.oms_client import OMSClient
 from shared.security.input_sanitizer import validate_db_name, validate_class_id, validate_instance_id, sanitize_es_query
 from shared.services.elasticsearch_service import ElasticsearchService
 from shared.config.search_config import get_instances_index_name
+from shared.services.dataset_registry import DatasetRegistry
+from shared.utils.access_policy import apply_access_policy
 from elasticsearch.exceptions import ConnectionError as ESConnectionError, NotFoundError, RequestError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/databases/{db_name}", tags=["Instance Management"])
+
+async def get_dataset_registry() -> DatasetRegistry:
+    from bff.main import get_dataset_registry as _get_dataset_registry
+
+    return await _get_dataset_registry()
+
+
+async def _apply_access_policy_to_instances(
+    *,
+    dataset_registry: DatasetRegistry,
+    db_name: str,
+    class_id: str,
+    instances: List[Dict[str, Any]],
+) -> tuple[List[Dict[str, Any]], bool]:
+    if not instances:
+        return instances, False
+    policy = await dataset_registry.get_access_policy(
+        db_name=db_name,
+        scope="data_access",
+        subject_type="object_type",
+        subject_id=class_id,
+    )
+    if not policy:
+        return instances, False
+    filtered, _ = apply_access_policy(instances, policy=policy.policy)
+    return filtered, True
 
 def _normalize_es_search_result(result: Any) -> tuple[int, List[Dict[str, Any]]]:
     """
@@ -75,6 +103,7 @@ async def get_class_instances(
     search: Optional[str] = Query(default=None, description="Search query for filtering instances"),
     elasticsearch_service: ElasticsearchService = Depends(get_elasticsearch_service),
     oms_client: OMSClient = Depends(get_oms_client),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
 ) -> Dict[str, Any]:
     """
     특정 클래스의 인스턴스 목록 조회 (Elasticsearch 사용)
@@ -161,7 +190,14 @@ async def get_class_instances(
         # Elasticsearch 결과 처리
         if es_result and not es_error:
             total, instances = _normalize_es_search_result(es_result)
-            
+            instances, access_filtered = await _apply_access_policy_to_instances(
+                dataset_registry=dataset_registry,
+                db_name=db_name,
+                class_id=class_id,
+                instances=instances,
+            )
+            if access_filtered:
+                total = len(instances)
             return {
                 "class_id": class_id,
                 "total": total,
@@ -190,27 +226,49 @@ async def get_class_instances(
                 # - 최신: {"status":"success","total":..,"instances":[...]}
                 # - 레거시: [{"...":...}, ...]
                 if isinstance(result, list):
+                    instances, _ = await _apply_access_policy_to_instances(
+                        dataset_registry=dataset_registry,
+                        db_name=db_name,
+                        class_id=class_id,
+                        instances=[inst for inst in result if isinstance(inst, dict)],
+                    )
                     return {
                         "class_id": class_id,
-                        "total": len(result),
+                        "total": len(instances),
                         "limit": limit,
                         "offset": offset,
                         "search": search,
-                        "instances": result,
+                        "instances": instances,
                     }
                 if isinstance(result, dict):
                     if result.get("status") == "success":
+                        instances = result.get("instances", [])
+                        if not isinstance(instances, list):
+                            instances = []
+                        instances, access_filtered = await _apply_access_policy_to_instances(
+                            dataset_registry=dataset_registry,
+                            db_name=db_name,
+                            class_id=class_id,
+                            instances=[inst for inst in instances if isinstance(inst, dict)],
+                        )
+                        total = len(instances) if access_filtered else result.get("total", 0)
                         return {
                             "class_id": class_id,
-                            "total": result.get("total", 0),
+                            "total": total,
                             "limit": limit,
                             "offset": offset,
                             "search": search,
-                            "instances": result.get("instances", []),
+                            "instances": instances,
                         }
                     instances = result.get("instances")
                     if isinstance(instances, list):
-                        total = result.get("total")
+                        instances, access_filtered = await _apply_access_policy_to_instances(
+                            dataset_registry=dataset_registry,
+                            db_name=db_name,
+                            class_id=class_id,
+                            instances=[inst for inst in instances if isinstance(inst, dict)],
+                        )
+                        total = len(instances) if access_filtered else result.get("total")
                         return {
                             "class_id": class_id,
                             "total": int(total) if isinstance(total, int) else len(instances),
@@ -259,6 +317,7 @@ async def get_class_sample_values(
     property_name: Optional[str] = None,
     limit: int = Query(default=200, le=500),
     oms_client: OMSClient = Depends(get_oms_client),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
 ) -> Dict[str, Any]:
     """
     특정 클래스/속성의 샘플 값 조회
@@ -277,6 +336,12 @@ async def get_class_sample_values(
         instances = payload.get("instances", []) if isinstance(payload, dict) else []
         if not isinstance(instances, list):
             instances = []
+        instances, _ = await _apply_access_policy_to_instances(
+            dataset_registry=dataset_registry,
+            db_name=db_name,
+            class_id=class_id,
+            instances=[inst for inst in instances if isinstance(inst, dict)],
+        )
 
         def _normalize_field(name: str) -> str:
             if not name:
@@ -347,6 +412,7 @@ async def get_instance(
     instance_id: str,
     elasticsearch_service: ElasticsearchService = Depends(get_elasticsearch_service),
     oms_client: OMSClient = Depends(get_oms_client),  # 의존성 정상 주입
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
 ) -> Dict[str, Any]:
     """
     개별 인스턴스 조회 (Elasticsearch 우선, TerminusDB fallback)
@@ -386,9 +452,20 @@ async def get_instance(
             
             _total, sources = _normalize_es_search_result(result)
             if sources:
+                filtered, _ = await _apply_access_policy_to_instances(
+                    dataset_registry=dataset_registry,
+                    db_name=db_name,
+                    class_id=class_id,
+                    instances=[sources[0]],
+                )
+                if not filtered:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+                    )
                 return {
                     "status": "success",
-                    "data": sources[0],
+                    "data": filtered[0],
                 }
             
             # ES에 문서가 없는 경우 - TerminusDB fallback
@@ -415,9 +492,20 @@ async def get_instance(
             if result and result.get("status") == "success":
                 instance_data = result.get("data", {})
                 if instance_data:
+                    filtered, _ = await _apply_access_policy_to_instances(
+                        dataset_registry=dataset_registry,
+                        db_name=db_name,
+                        class_id=class_id,
+                        instances=[instance_data],
+                    )
+                    if not filtered:
+                        raise HTTPException(
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
+                        )
                     return {
                         "status": "success",
-                        "data": instance_data
+                        "data": filtered[0]
                     }
         except Exception as e:
             logger.error(f"Failed to get instance from OMS: {e}")

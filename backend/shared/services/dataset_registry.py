@@ -190,6 +190,8 @@ class InstanceEditRecord:
     class_id: str
     instance_id: str
     edit_type: str
+    status: str
+    fields: List[str]
     metadata: Dict[str, Any]
     created_at: datetime
 
@@ -212,6 +214,56 @@ class RelationshipSpecRecord:
     auto_sync: bool
     last_index_status: Optional[str]
     last_indexed_at: Optional[datetime]
+    last_index_result_id: Optional[str]
+    last_index_stats: Dict[str, Any]
+    last_index_dataset_version_id: Optional[str]
+    last_index_mapping_spec_version: Optional[int]
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class RelationshipIndexResultRecord:
+    result_id: str
+    relationship_spec_id: str
+    link_type_id: str
+    db_name: str
+    dataset_id: str
+    dataset_version_id: Optional[str]
+    mapping_spec_id: str
+    mapping_spec_version: int
+    status: str
+    stats: Dict[str, Any]
+    errors: List[Dict[str, Any]]
+    lineage: Dict[str, Any]
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class LinkEditRecord:
+    edit_id: str
+    db_name: str
+    link_type_id: str
+    branch: str
+    source_object_type: str
+    target_object_type: str
+    predicate: str
+    source_instance_id: str
+    target_instance_id: str
+    edit_type: str
+    status: str
+    metadata: Dict[str, Any]
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class SchemaMigrationPlanRecord:
+    plan_id: str
+    db_name: str
+    subject_type: str
+    subject_id: str
+    status: str
+    plan: Dict[str, Any]
     created_at: datetime
     updated_at: datetime
 
@@ -381,12 +433,17 @@ class DatasetRegistry:
 
     @staticmethod
     def _row_to_instance_edit(row: asyncpg.Record) -> InstanceEditRecord:
+        fields = coerce_json_dataset(row["fields"]) if "fields" in row else None
+        if not isinstance(fields, list):
+            fields = []
         return InstanceEditRecord(
             edit_id=str(row["edit_id"]),
             db_name=row["db_name"],
             class_id=row["class_id"],
             instance_id=row["instance_id"],
             edit_type=row["edit_type"],
+            status=str(row["status"] or "ACTIVE") if "status" in row else "ACTIVE",
+            fields=[str(value) for value in fields if str(value).strip()],
             metadata=coerce_json_dataset(row["metadata"]) or {},
             created_at=row["created_at"],
         )
@@ -410,6 +467,65 @@ class DatasetRegistry:
             auto_sync=bool(row["auto_sync"]),
             last_index_status=row["last_index_status"],
             last_indexed_at=row["last_indexed_at"],
+            last_index_result_id=str(row["last_index_result_id"]) if row["last_index_result_id"] else None,
+            last_index_stats=coerce_json_dataset(row["last_index_stats"]) or {},
+            last_index_dataset_version_id=(
+                str(row["last_index_dataset_version_id"]) if row["last_index_dataset_version_id"] else None
+            ),
+            last_index_mapping_spec_version=(
+                int(row["last_index_mapping_spec_version"])
+                if row["last_index_mapping_spec_version"] is not None
+                else None
+            ),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    @staticmethod
+    def _row_to_relationship_index_result(row: asyncpg.Record) -> RelationshipIndexResultRecord:
+        return RelationshipIndexResultRecord(
+            result_id=str(row["result_id"]),
+            relationship_spec_id=str(row["relationship_spec_id"]),
+            link_type_id=str(row["link_type_id"]),
+            db_name=row["db_name"],
+            dataset_id=str(row["dataset_id"]),
+            dataset_version_id=str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
+            mapping_spec_id=str(row["mapping_spec_id"]),
+            mapping_spec_version=int(row["mapping_spec_version"]),
+            status=str(row["status"]),
+            stats=coerce_json_dataset(row["stats"]) or {},
+            errors=coerce_json_dataset(row["errors"]) or [],
+            lineage=coerce_json_dataset(row["lineage"]) or {},
+            created_at=row["created_at"],
+        )
+
+    @staticmethod
+    def _row_to_link_edit(row: asyncpg.Record) -> LinkEditRecord:
+        return LinkEditRecord(
+            edit_id=str(row["edit_id"]),
+            db_name=row["db_name"],
+            link_type_id=str(row["link_type_id"]),
+            branch=row["branch"],
+            source_object_type=row["source_object_type"],
+            target_object_type=row["target_object_type"],
+            predicate=row["predicate"],
+            source_instance_id=row["source_instance_id"],
+            target_instance_id=row["target_instance_id"],
+            edit_type=row["edit_type"],
+            status=row["status"],
+            metadata=coerce_json_dataset(row["metadata"]) or {},
+            created_at=row["created_at"],
+        )
+
+    @staticmethod
+    def _row_to_schema_migration_plan(row: asyncpg.Record) -> SchemaMigrationPlanRecord:
+        return SchemaMigrationPlanRecord(
+            plan_id=str(row["plan_id"]),
+            db_name=row["db_name"],
+            subject_type=row["subject_type"],
+            subject_id=row["subject_id"],
+            status=row["status"],
+            plan=coerce_json_dataset(row["plan"]) or {},
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -906,6 +1022,8 @@ class DatasetRegistry:
                     class_id TEXT NOT NULL,
                     instance_id TEXT NOT NULL,
                     edit_type TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'ACTIVE',
+                    fields JSONB NOT NULL DEFAULT '[]'::jsonb,
                     metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
@@ -921,6 +1039,31 @@ class DatasetRegistry:
                 f"""
                 CREATE INDEX IF NOT EXISTS idx_instance_edits_instance
                 ON {self._schema}.instance_edits(db_name, class_id, instance_id)
+                """
+            )
+            await conn.execute(
+                f"""
+                ALTER TABLE {self._schema}.instance_edits
+                    ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'ACTIVE'
+                """
+            )
+            await conn.execute(
+                f"""
+                ALTER TABLE {self._schema}.instance_edits
+                    ADD COLUMN IF NOT EXISTS fields JSONB NOT NULL DEFAULT '[]'::jsonb
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_instance_edits_status
+                ON {self._schema}.instance_edits(db_name, class_id, status)
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_instance_edits_fields
+                ON {self._schema}.instance_edits
+                USING GIN (fields)
                 """
             )
 
@@ -965,6 +1108,136 @@ class DatasetRegistry:
                 f"""
                 CREATE INDEX IF NOT EXISTS idx_relationship_specs_db
                 ON {self._schema}.relationship_specs(db_name, status)
+                """
+            )
+            await conn.execute(
+                f"""
+                ALTER TABLE {self._schema}.relationship_specs
+                    ADD COLUMN IF NOT EXISTS last_index_result_id UUID
+                """
+            )
+            await conn.execute(
+                f"""
+                ALTER TABLE {self._schema}.relationship_specs
+                    ADD COLUMN IF NOT EXISTS last_index_stats JSONB NOT NULL DEFAULT '{{}}'::jsonb
+                """
+            )
+            await conn.execute(
+                f"""
+                ALTER TABLE {self._schema}.relationship_specs
+                    ADD COLUMN IF NOT EXISTS last_index_dataset_version_id UUID
+                """
+            )
+            await conn.execute(
+                f"""
+                ALTER TABLE {self._schema}.relationship_specs
+                    ADD COLUMN IF NOT EXISTS last_index_mapping_spec_version INTEGER
+                """
+            )
+
+            await conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self._schema}.relationship_index_results (
+                    result_id UUID PRIMARY KEY,
+                    relationship_spec_id UUID NOT NULL,
+                    link_type_id TEXT NOT NULL,
+                    db_name TEXT NOT NULL,
+                    dataset_id UUID NOT NULL,
+                    dataset_version_id UUID,
+                    mapping_spec_id UUID NOT NULL,
+                    mapping_spec_version INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    stats JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    errors JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    lineage JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    FOREIGN KEY (relationship_spec_id)
+                        REFERENCES {self._schema}.relationship_specs(relationship_spec_id)
+                        ON DELETE CASCADE,
+                    FOREIGN KEY (dataset_id)
+                        REFERENCES {self._schema}.datasets(dataset_id)
+                        ON DELETE CASCADE,
+                    FOREIGN KEY (dataset_version_id)
+                        REFERENCES {self._schema}.dataset_versions(version_id)
+                        ON DELETE SET NULL
+                )
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_relationship_index_results_spec
+                ON {self._schema}.relationship_index_results(relationship_spec_id, status)
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_relationship_index_results_link
+                ON {self._schema}.relationship_index_results(link_type_id, status)
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_relationship_index_results_db
+                ON {self._schema}.relationship_index_results(db_name, status)
+                """
+            )
+
+            await conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self._schema}.link_edits (
+                    edit_id UUID PRIMARY KEY,
+                    db_name TEXT NOT NULL,
+                    link_type_id TEXT NOT NULL,
+                    branch TEXT NOT NULL DEFAULT 'main',
+                    source_object_type TEXT NOT NULL,
+                    target_object_type TEXT NOT NULL,
+                    predicate TEXT NOT NULL,
+                    source_instance_id TEXT NOT NULL,
+                    target_instance_id TEXT NOT NULL,
+                    edit_type TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'ACTIVE',
+                    metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_link_edits_link
+                ON {self._schema}.link_edits(link_type_id, status)
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_link_edits_source
+                ON {self._schema}.link_edits(db_name, source_object_type, source_instance_id)
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_link_edits_target
+                ON {self._schema}.link_edits(db_name, target_object_type, target_instance_id)
+                """
+            )
+
+            await conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self._schema}.schema_migration_plans (
+                    plan_id UUID PRIMARY KEY,
+                    db_name TEXT NOT NULL,
+                    subject_type TEXT NOT NULL,
+                    subject_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'PENDING',
+                    plan JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            await conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS idx_schema_migration_plans_subject
+                ON {self._schema}.schema_migration_plans(db_name, subject_type, subject_id)
                 """
             )
 
@@ -1994,23 +2267,31 @@ class DatasetRegistry:
         instance_id: str,
         edit_type: str,
         metadata: Optional[Dict[str, Any]] = None,
+        status: str = "ACTIVE",
+        fields: Optional[List[str]] = None,
     ) -> InstanceEditRecord:
         if not self._pool:
             raise RuntimeError("DatasetRegistry not connected")
+        cleaned_fields = [str(field).strip() for field in (fields or []) if str(field).strip()]
         payload = normalize_json_payload(metadata or {})
+        if cleaned_fields:
+            payload = {**payload, "fields": cleaned_fields}
+        status_value = str(status or "ACTIVE").strip().upper() or "ACTIVE"
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""
                 INSERT INTO {self._schema}.instance_edits (
-                    edit_id, db_name, class_id, instance_id, edit_type, metadata
-                ) VALUES ($1::uuid, $2, $3, $4, $5, $6::jsonb)
-                RETURNING edit_id, db_name, class_id, instance_id, edit_type, metadata, created_at
+                    edit_id, db_name, class_id, instance_id, edit_type, status, fields, metadata
+                ) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
+                RETURNING edit_id, db_name, class_id, instance_id, edit_type, status, fields, metadata, created_at
                 """,
                 str(uuid4()),
                 db_name,
                 class_id,
                 instance_id,
                 edit_type,
+                status_value,
+                normalize_json_payload(cleaned_fields),
                 payload,
             )
             if not row:
@@ -2022,6 +2303,7 @@ class DatasetRegistry:
         *,
         db_name: str,
         class_id: str,
+        status: Optional[str] = None,
     ) -> int:
         if not self._pool:
             raise RuntimeError("DatasetRegistry not connected")
@@ -2031,9 +2313,11 @@ class DatasetRegistry:
                 SELECT COUNT(*)
                 FROM {self._schema}.instance_edits
                 WHERE db_name = $1 AND class_id = $2
+                  AND ($3::text IS NULL OR status = $3)
                 """,
                 db_name,
                 class_id,
+                status,
             )
             return int(value or 0)
 
@@ -2043,6 +2327,7 @@ class DatasetRegistry:
         db_name: str,
         class_id: Optional[str] = None,
         instance_id: Optional[str] = None,
+        status: Optional[str] = None,
         limit: int = 200,
     ) -> List[InstanceEditRecord]:
         if not self._pool:
@@ -2050,17 +2335,19 @@ class DatasetRegistry:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
-                SELECT edit_id, db_name, class_id, instance_id, edit_type, metadata, created_at
+                SELECT edit_id, db_name, class_id, instance_id, edit_type, status, fields, metadata, created_at
                 FROM {self._schema}.instance_edits
                 WHERE db_name = $1
                   AND ($2::text IS NULL OR class_id = $2)
                   AND ($3::text IS NULL OR instance_id = $3)
+                  AND ($4::text IS NULL OR status = $4)
                 ORDER BY created_at DESC
-                LIMIT $4
+                LIMIT $5
                 """,
                 db_name,
                 class_id,
                 instance_id,
+                status,
                 limit,
             )
             return [self._row_to_instance_edit(row) for row in rows]
@@ -2086,6 +2373,236 @@ class DatasetRegistry:
                 return int(str(result).split()[-1])
             except Exception:
                 return 0
+
+    async def remap_instance_edits(
+        self,
+        *,
+        db_name: str,
+        class_id: str,
+        id_map: Dict[str, str],
+        status: Optional[str] = None,
+    ) -> int:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        if not id_map:
+            return 0
+        updated = 0
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                for old_id, new_id in id_map.items():
+                    if not old_id or not new_id:
+                        continue
+                    result = await conn.execute(
+                        f"""
+                        UPDATE {self._schema}.instance_edits
+                        SET instance_id = $1
+                        WHERE db_name = $2 AND class_id = $3 AND instance_id = $4
+                          AND ($5::text IS NULL OR status = $5)
+                        """,
+                        str(new_id),
+                        db_name,
+                        class_id,
+                        str(old_id),
+                        status,
+                    )
+                    try:
+                        updated += int(str(result).split()[-1])
+                    except Exception:
+                        continue
+        return updated
+
+    async def get_instance_edit_field_stats(
+        self,
+        *,
+        db_name: str,
+        class_id: str,
+        fields: List[str],
+        status: Optional[str] = "ACTIVE",
+    ) -> Dict[str, Any]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        normalized_fields = [str(field).strip() for field in fields if str(field).strip()]
+        status_value = str(status).strip().upper() if status else None
+        async with self._pool.acquire() as conn:
+            total = await conn.fetchval(
+                f"""
+                SELECT COUNT(*)
+                FROM {self._schema}.instance_edits
+                WHERE db_name = $1 AND class_id = $2
+                  AND ($3::text IS NULL OR status = $3)
+                """,
+                db_name,
+                class_id,
+                status_value,
+            )
+            empty_fields = await conn.fetchval(
+                f"""
+                SELECT COUNT(*)
+                FROM {self._schema}.instance_edits
+                WHERE db_name = $1 AND class_id = $2
+                  AND ($3::text IS NULL OR status = $3)
+                  AND jsonb_array_length(fields) = 0
+                """,
+                db_name,
+                class_id,
+                status_value,
+            )
+            affected = 0
+            if normalized_fields:
+                affected = await conn.fetchval(
+                    f"""
+                    SELECT COUNT(*)
+                    FROM {self._schema}.instance_edits
+                    WHERE db_name = $1 AND class_id = $2
+                      AND ($3::text IS NULL OR status = $3)
+                      AND fields ?| $4::text[]
+                    """,
+                    db_name,
+                    class_id,
+                    status_value,
+                    normalized_fields,
+                )
+            per_field: Dict[str, int] = {}
+            for field in normalized_fields:
+                value = await conn.fetchval(
+                    f"""
+                    SELECT COUNT(*)
+                    FROM {self._schema}.instance_edits
+                    WHERE db_name = $1 AND class_id = $2
+                      AND ($3::text IS NULL OR status = $3)
+                      AND fields ? $4
+                    """,
+                    db_name,
+                    class_id,
+                    status_value,
+                    field,
+                )
+                per_field[field] = int(value or 0)
+            return {
+                "total": int(total or 0),
+                "affected": int(affected or 0),
+                "empty_fields": int(empty_fields or 0),
+                "per_field": per_field,
+            }
+
+    async def apply_instance_edit_field_moves(
+        self,
+        *,
+        db_name: str,
+        class_id: str,
+        field_moves: Dict[str, str],
+        status: Optional[str] = "ACTIVE",
+    ) -> int:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        if not field_moves:
+            return 0
+        status_value = str(status).strip().upper() if status else None
+        updated = 0
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                for old_field, new_field in field_moves.items():
+                    old_name = str(old_field or "").strip()
+                    new_name = str(new_field or "").strip()
+                    if not old_name or not new_name or old_name == new_name:
+                        continue
+                    result = await conn.execute(
+                        f"""
+                        UPDATE {self._schema}.instance_edits
+                        SET fields = (
+                                SELECT jsonb_agg(
+                                    CASE WHEN value = $1 THEN $2 ELSE value END
+                                )
+                                FROM jsonb_array_elements_text(fields) AS value
+                            ),
+                            metadata = jsonb_set(
+                                metadata,
+                                '{{fields}}',
+                                (
+                                    SELECT jsonb_agg(
+                                        CASE WHEN value = $1 THEN $2 ELSE value END
+                                    )
+                                    FROM jsonb_array_elements_text(
+                                        CASE
+                                            WHEN jsonb_typeof(metadata->'fields') = 'array'
+                                                THEN metadata->'fields'
+                                            ELSE '[]'::jsonb
+                                        END
+                                    ) AS value
+                                ),
+                                true
+                            )
+                        WHERE db_name = $3 AND class_id = $4
+                          AND ($5::text IS NULL OR status = $5)
+                          AND fields ? $1
+                        """,
+                        old_name,
+                        new_name,
+                        db_name,
+                        class_id,
+                        status_value,
+                    )
+                    try:
+                        updated += int(str(result).split()[-1])
+                    except Exception:
+                        continue
+        return updated
+
+    async def update_instance_edit_status_by_fields(
+        self,
+        *,
+        db_name: str,
+        class_id: str,
+        fields: List[str],
+        new_status: str,
+        status: Optional[str] = "ACTIVE",
+        metadata_note: Optional[str] = None,
+    ) -> int:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        normalized_fields = [str(field).strip() for field in fields if str(field).strip()]
+        if not normalized_fields:
+            return 0
+        status_value = str(status).strip().upper() if status else None
+        next_status = str(new_status or "").strip().upper()
+        if not next_status:
+            return 0
+        payload_note = metadata_note or None
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                f"""
+                UPDATE {self._schema}.instance_edits
+                SET status = $1,
+                    metadata = jsonb_set(
+                        CASE
+                            WHEN $6::text IS NULL THEN metadata
+                            ELSE jsonb_set(
+                                metadata,
+                                '{{status_note}}',
+                                to_jsonb($6::text),
+                                true
+                            )
+                        END,
+                        '{{status_updated_at}}',
+                        to_jsonb($7::text),
+                        true
+                    )
+                WHERE db_name = $2 AND class_id = $3
+                  AND ($4::text IS NULL OR status = $4)
+                  AND fields ?| $5::text[]
+                """,
+                next_status,
+                db_name,
+                class_id,
+                status_value,
+                normalized_fields,
+                payload_note,
+                utcnow().isoformat(),
+            )
+        try:
+            return int(str(result).split()[-1])
+        except Exception:
+            return 0
 
     async def create_relationship_spec(
         self,
@@ -2119,7 +2636,9 @@ class DatasetRegistry:
                 ) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::uuid, $9::uuid, $10::uuid, $11, $12::jsonb, $13, $14)
                 RETURNING relationship_spec_id, link_type_id, db_name, source_object_type, target_object_type,
                           predicate, spec_type, dataset_id, dataset_version_id, mapping_spec_id, mapping_spec_version,
-                          spec, status, auto_sync, last_index_status, last_indexed_at, created_at, updated_at
+                          spec, status, auto_sync, last_index_status, last_indexed_at, last_index_result_id,
+                          last_index_stats, last_index_dataset_version_id, last_index_mapping_spec_version,
+                          created_at, updated_at
                 """,
                 relationship_spec_id,
                 link_type_id,
@@ -2188,7 +2707,9 @@ class DatasetRegistry:
                 WHERE relationship_spec_id = ${len(values)}::uuid
                 RETURNING relationship_spec_id, link_type_id, db_name, source_object_type, target_object_type,
                           predicate, spec_type, dataset_id, dataset_version_id, mapping_spec_id, mapping_spec_version,
-                          spec, status, auto_sync, last_index_status, last_indexed_at, created_at, updated_at
+                          spec, status, auto_sync, last_index_status, last_indexed_at, last_index_result_id,
+                          last_index_stats, last_index_dataset_version_id, last_index_mapping_spec_version,
+                          created_at, updated_at
                 """,
                 *values,
             )
@@ -2201,28 +2722,84 @@ class DatasetRegistry:
         *,
         relationship_spec_id: str,
         status: str,
+        stats: Optional[Dict[str, Any]] = None,
+        errors: Optional[List[Dict[str, Any]]] = None,
+        dataset_version_id: Optional[str] = None,
+        mapping_spec_version: Optional[int] = None,
+        lineage: Optional[Dict[str, Any]] = None,
         indexed_at: Optional[datetime] = None,
-    ) -> Optional[RelationshipSpecRecord]:
+    ) -> Optional[RelationshipIndexResultRecord]:
         if not self._pool:
             raise RuntimeError("DatasetRegistry not connected")
         indexed_at = indexed_at or utcnow()
+        stats_payload = normalize_json_payload(stats or {})
+        errors_payload = normalize_json_payload(errors or [])
+        lineage_payload = normalize_json_payload(lineage or {})
         async with self._pool.acquire() as conn:
+            spec_row = await conn.fetchrow(
+                f"""
+                SELECT relationship_spec_id, link_type_id, db_name, dataset_id, dataset_version_id,
+                       mapping_spec_id, mapping_spec_version
+                FROM {self._schema}.relationship_specs
+                WHERE relationship_spec_id = $1::uuid
+                """,
+                relationship_spec_id,
+            )
+            if not spec_row:
+                return None
+            resolved_dataset_version_id = (
+                dataset_version_id or (str(spec_row["dataset_version_id"]) if spec_row["dataset_version_id"] else None)
+            )
+            resolved_mapping_version = int(mapping_spec_version or spec_row["mapping_spec_version"])
+            result_id = str(uuid4())
             row = await conn.fetchrow(
                 f"""
+                INSERT INTO {self._schema}.relationship_index_results (
+                    result_id, relationship_spec_id, link_type_id, db_name, dataset_id, dataset_version_id,
+                    mapping_spec_id, mapping_spec_version, status, stats, errors, lineage
+                ) VALUES (
+                    $1::uuid, $2::uuid, $3, $4, $5::uuid, $6::uuid,
+                    $7::uuid, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb
+                )
+                RETURNING result_id, relationship_spec_id, link_type_id, db_name, dataset_id, dataset_version_id,
+                          mapping_spec_id, mapping_spec_version, status, stats, errors, lineage, created_at
+                """,
+                result_id,
+                relationship_spec_id,
+                str(spec_row["link_type_id"]),
+                str(spec_row["db_name"]),
+                str(spec_row["dataset_id"]),
+                resolved_dataset_version_id,
+                str(spec_row["mapping_spec_id"]),
+                resolved_mapping_version,
+                status,
+                stats_payload,
+                errors_payload,
+                lineage_payload,
+            )
+            await conn.execute(
+                f"""
                 UPDATE {self._schema}.relationship_specs
-                SET last_index_status = $1, last_indexed_at = $2, updated_at = NOW()
-                WHERE relationship_spec_id = $3::uuid
-                RETURNING relationship_spec_id, link_type_id, db_name, source_object_type, target_object_type,
-                          predicate, spec_type, dataset_id, dataset_version_id, mapping_spec_id, mapping_spec_version,
-                          spec, status, auto_sync, last_index_status, last_indexed_at, created_at, updated_at
+                SET last_index_status = $1,
+                    last_indexed_at = $2,
+                    last_index_result_id = $3::uuid,
+                    last_index_stats = $4::jsonb,
+                    last_index_dataset_version_id = $5::uuid,
+                    last_index_mapping_spec_version = $6,
+                    updated_at = NOW()
+                WHERE relationship_spec_id = $7::uuid
                 """,
                 status,
                 indexed_at,
+                result_id,
+                stats_payload,
+                resolved_dataset_version_id,
+                resolved_mapping_version,
                 relationship_spec_id,
             )
             if not row:
                 return None
-            return self._row_to_relationship_spec(row)
+            return self._row_to_relationship_index_result(row)
 
     async def get_relationship_spec(
         self,
@@ -2239,7 +2816,9 @@ class DatasetRegistry:
                 f"""
                 SELECT relationship_spec_id, link_type_id, db_name, source_object_type, target_object_type,
                        predicate, spec_type, dataset_id, dataset_version_id, mapping_spec_id, mapping_spec_version,
-                       spec, status, auto_sync, last_index_status, last_indexed_at, created_at, updated_at
+                       spec, status, auto_sync, last_index_status, last_indexed_at, last_index_result_id,
+                       last_index_stats, last_index_dataset_version_id, last_index_mapping_spec_version,
+                       created_at, updated_at
                 FROM {self._schema}.relationship_specs
                 WHERE ($1::uuid IS NULL OR relationship_spec_id = $1::uuid)
                   AND ($2::text IS NULL OR link_type_id = $2)
@@ -2268,7 +2847,9 @@ class DatasetRegistry:
                 f"""
                 SELECT relationship_spec_id, link_type_id, db_name, source_object_type, target_object_type,
                        predicate, spec_type, dataset_id, dataset_version_id, mapping_spec_id, mapping_spec_version,
-                       spec, status, auto_sync, last_index_status, last_indexed_at, created_at, updated_at
+                       spec, status, auto_sync, last_index_status, last_indexed_at, last_index_result_id,
+                       last_index_stats, last_index_dataset_version_id, last_index_mapping_spec_version,
+                       created_at, updated_at
                 FROM {self._schema}.relationship_specs
                 WHERE ($1::text IS NULL OR db_name = $1)
                   AND ($2::uuid IS NULL OR dataset_id = $2::uuid)
@@ -2282,6 +2863,248 @@ class DatasetRegistry:
                 limit,
             )
             return [self._row_to_relationship_spec(row) for row in rows]
+
+    async def list_relationship_specs_by_relationship_object_type(
+        self,
+        *,
+        db_name: str,
+        relationship_object_type: str,
+        status: Optional[str] = "ACTIVE",
+        limit: int = 200,
+    ) -> List[RelationshipSpecRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT relationship_spec_id, link_type_id, db_name, source_object_type, target_object_type,
+                       predicate, spec_type, dataset_id, dataset_version_id, mapping_spec_id, mapping_spec_version,
+                       spec, status, auto_sync, last_index_status, last_indexed_at, last_index_result_id,
+                       last_index_stats, last_index_dataset_version_id, last_index_mapping_spec_version,
+                       created_at, updated_at
+                FROM {self._schema}.relationship_specs
+                WHERE db_name = $1
+                  AND spec_type = 'object_backed'
+                  AND spec->>'relationship_object_type' = $2
+                  AND ($3::text IS NULL OR status = $3)
+                ORDER BY created_at DESC
+                LIMIT $4
+                """,
+                db_name,
+                relationship_object_type,
+                status,
+                limit,
+            )
+            return [self._row_to_relationship_spec(row) for row in rows]
+
+    async def list_relationship_index_results(
+        self,
+        *,
+        relationship_spec_id: Optional[str] = None,
+        link_type_id: Optional[str] = None,
+        db_name: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[RelationshipIndexResultRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT result_id, relationship_spec_id, link_type_id, db_name, dataset_id, dataset_version_id,
+                       mapping_spec_id, mapping_spec_version, status, stats, errors, lineage, created_at
+                FROM {self._schema}.relationship_index_results
+                WHERE ($1::uuid IS NULL OR relationship_spec_id = $1::uuid)
+                  AND ($2::text IS NULL OR link_type_id = $2)
+                  AND ($3::text IS NULL OR db_name = $3)
+                  AND ($4::text IS NULL OR status = $4)
+                ORDER BY created_at DESC
+                LIMIT $5
+                """,
+                relationship_spec_id,
+                link_type_id,
+                db_name,
+                status,
+                limit,
+            )
+            return [self._row_to_relationship_index_result(row) for row in rows]
+
+    async def record_link_edit(
+        self,
+        *,
+        db_name: str,
+        link_type_id: str,
+        branch: str,
+        source_object_type: str,
+        target_object_type: str,
+        predicate: str,
+        source_instance_id: str,
+        target_instance_id: str,
+        edit_type: str,
+        status: str = "ACTIVE",
+        metadata: Optional[Dict[str, Any]] = None,
+        edit_id: Optional[str] = None,
+    ) -> LinkEditRecord:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        edit_id = edit_id or str(uuid4())
+        payload = normalize_json_payload(metadata or {})
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                INSERT INTO {self._schema}.link_edits (
+                    edit_id, db_name, link_type_id, branch, source_object_type, target_object_type,
+                    predicate, source_instance_id, target_instance_id, edit_type, status, metadata
+                ) VALUES (
+                    $1::uuid, $2, $3, $4, $5, $6,
+                    $7, $8, $9, $10, $11, $12::jsonb
+                )
+                RETURNING edit_id, db_name, link_type_id, branch, source_object_type, target_object_type,
+                          predicate, source_instance_id, target_instance_id, edit_type, status, metadata, created_at
+                """,
+                edit_id,
+                db_name,
+                link_type_id,
+                branch,
+                source_object_type,
+                target_object_type,
+                predicate,
+                source_instance_id,
+                target_instance_id,
+                edit_type,
+                status,
+                payload,
+            )
+            if not row:
+                raise RuntimeError("Failed to record link edit")
+            return self._row_to_link_edit(row)
+
+    async def list_link_edits(
+        self,
+        *,
+        db_name: str,
+        link_type_id: Optional[str] = None,
+        branch: Optional[str] = None,
+        status: Optional[str] = None,
+        source_instance_id: Optional[str] = None,
+        target_instance_id: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[LinkEditRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT edit_id, db_name, link_type_id, branch, source_object_type, target_object_type,
+                       predicate, source_instance_id, target_instance_id, edit_type, status, metadata, created_at
+                FROM {self._schema}.link_edits
+                WHERE db_name = $1
+                  AND ($2::text IS NULL OR link_type_id = $2)
+                  AND ($3::text IS NULL OR branch = $3)
+                  AND ($4::text IS NULL OR status = $4)
+                  AND ($5::text IS NULL OR source_instance_id = $5)
+                  AND ($6::text IS NULL OR target_instance_id = $6)
+                ORDER BY created_at DESC
+                LIMIT $7
+                """,
+                db_name,
+                link_type_id,
+                branch,
+                status,
+                source_instance_id,
+                target_instance_id,
+                limit,
+            )
+            return [self._row_to_link_edit(row) for row in rows]
+
+    async def clear_link_edits(
+        self,
+        *,
+        db_name: str,
+        link_type_id: str,
+        branch: Optional[str] = None,
+    ) -> int:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                f"""
+                DELETE FROM {self._schema}.link_edits
+                WHERE db_name = $1 AND link_type_id = $2
+                  AND ($3::text IS NULL OR branch = $3)
+                """,
+                db_name,
+                link_type_id,
+                branch,
+            )
+            try:
+                return int(str(result).split()[-1])
+            except Exception:
+                return 0
+
+    async def create_schema_migration_plan(
+        self,
+        *,
+        db_name: str,
+        subject_type: str,
+        subject_id: str,
+        plan: Dict[str, Any],
+        status: str = "PENDING",
+        plan_id: Optional[str] = None,
+    ) -> SchemaMigrationPlanRecord:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        plan_id = plan_id or str(uuid4())
+        payload = normalize_json_payload(plan or {})
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                INSERT INTO {self._schema}.schema_migration_plans (
+                    plan_id, db_name, subject_type, subject_id, status, plan
+                ) VALUES ($1::uuid, $2, $3, $4, $5, $6::jsonb)
+                RETURNING plan_id, db_name, subject_type, subject_id, status, plan, created_at, updated_at
+                """,
+                plan_id,
+                db_name,
+                subject_type,
+                subject_id,
+                status,
+                payload,
+            )
+            if not row:
+                raise RuntimeError("Failed to create schema migration plan")
+            return self._row_to_schema_migration_plan(row)
+
+    async def list_schema_migration_plans(
+        self,
+        *,
+        db_name: Optional[str] = None,
+        subject_type: Optional[str] = None,
+        subject_id: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[SchemaMigrationPlanRecord]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT plan_id, db_name, subject_type, subject_id, status, plan, created_at, updated_at
+                FROM {self._schema}.schema_migration_plans
+                WHERE ($1::text IS NULL OR db_name = $1)
+                  AND ($2::text IS NULL OR subject_type = $2)
+                  AND ($3::text IS NULL OR subject_id = $3)
+                  AND ($4::text IS NULL OR status = $4)
+                ORDER BY created_at DESC
+                LIMIT $5
+                """,
+                db_name,
+                subject_type,
+                subject_id,
+                status,
+                limit,
+            )
+            return [self._row_to_schema_migration_plan(row) for row in rows]
 
     async def get_ingest_request_by_key(
         self,

@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -76,8 +77,42 @@ class _FakeDatasetRegistry:
 
 
 class _FakeObjectifyRegistry:
+    async def get_active_mapping_spec(self, **kwargs):
+        return None
+
     async def create_mapping_spec(self, **kwargs):
         raise AssertionError("create_mapping_spec should not be called for preflight errors")
+
+
+class _CapturingObjectifyRegistry:
+    def __init__(self, active_spec):
+        self._active_spec = active_spec
+        self.created = None
+
+    async def get_active_mapping_spec(self, **kwargs):
+        return self._active_spec
+
+    async def create_mapping_spec(self, **kwargs):
+        self.created = kwargs
+        now = datetime.now(timezone.utc)
+        return SimpleNamespace(
+            mapping_spec_id="spec-2",
+            dataset_id=kwargs["dataset_id"],
+            dataset_branch=kwargs["dataset_branch"],
+            artifact_output_name=kwargs["artifact_output_name"],
+            schema_hash=kwargs["schema_hash"],
+            backing_datasource_id=kwargs.get("backing_datasource_id"),
+            backing_datasource_version_id=kwargs.get("backing_datasource_version_id"),
+            target_class_id=kwargs["target_class_id"],
+            mappings=kwargs["mappings"],
+            target_field_types=kwargs.get("target_field_types") or {},
+            status=kwargs.get("status") or "ACTIVE",
+            version=2,
+            auto_sync=bool(kwargs.get("auto_sync", True)),
+            options=kwargs.get("options") or {},
+            created_at=now,
+            updated_at=now,
+        )
 
 
 class _FakeOMSClient:
@@ -156,14 +191,21 @@ def _post_mapping_spec(
     key_spec=None,
     object_type_resource=None,
     schema_types=None,
+    objectify_registry=None,
 ):
     dataset = _make_dataset(schema_columns, schema_types=schema_types)
     latest_version = _make_latest(schema_columns, schema_types=schema_types)
     dataset_registry = _FakeDatasetRegistry(dataset, latest_version, key_spec=key_spec)
-    objectify_registry = _FakeObjectifyRegistry()
+    objectify_registry = objectify_registry or _FakeObjectifyRegistry()
     object_type_resource = object_type_resource or _build_object_type_resource(ontology_payload)
     oms_client = _FakeOMSClient(ontology_payload, object_type_resource)
 
+    original_enforce = objectify_router.enforce_database_role
+
+    async def _noop_enforce_database_role(**kwargs):
+        return None
+
+    objectify_router.enforce_database_role = _noop_enforce_database_role
     app.dependency_overrides[objectify_router.get_dataset_registry] = lambda: dataset_registry
     app.dependency_overrides[objectify_router.get_objectify_registry] = lambda: objectify_registry
     app.dependency_overrides[get_oms_client] = lambda: oms_client
@@ -175,6 +217,7 @@ def _post_mapping_spec(
             headers={"X-DB-Name": dataset.db_name},
         )
     finally:
+        objectify_router.enforce_database_role = original_enforce
         app.dependency_overrides.clear()
 
 
@@ -368,6 +411,14 @@ def test_mapping_spec_source_type_incompatible_is_rejected():
     assert res.status_code == 400
     detail = res.json()["detail"]
     assert detail["code"] == "MAPPING_SPEC_TYPE_INCOMPATIBLE"
+    assert detail["mismatches"] == [
+        {
+            "source_field": "amount",
+            "source_type": "xsd:string",
+            "target_field": "amount",
+            "expected_type": "xsd:decimal",
+        }
+    ]
 
 
 def test_mapping_spec_source_type_unsupported_is_rejected():
@@ -389,3 +440,65 @@ def test_mapping_spec_source_type_unsupported_is_rejected():
     assert res.status_code == 400
     detail = res.json()["detail"]
     assert detail["code"] == "MAPPING_SPEC_SOURCE_TYPE_UNSUPPORTED"
+    assert detail["sources"] == [{"source_field": "payload", "source_type": "struct"}]
+
+
+def test_mapping_spec_change_summary_is_recorded():
+    ontology_payload = {
+        "properties": [
+            {"name": "id", "type": "xsd:string", "primary_key": True},
+            {"name": "name", "type": "xsd:string"},
+        ],
+        "relationships": [],
+    }
+    schema_columns = ["id", "name", "full_name"]
+    schema_types = {name: "xsd:string" for name in schema_columns}
+    previous_spec = SimpleNamespace(
+        mapping_spec_id="spec-1",
+        dataset_id="ds-1",
+        dataset_branch="main",
+        artifact_output_name="Dataset",
+        schema_hash="schema-hash",
+        backing_datasource_id="backing-1",
+        backing_datasource_version_id="backing-version-1",
+        target_class_id="Product",
+        mappings=[
+            {"source_field": "id", "target_field": "id"},
+            {"source_field": "name", "target_field": "name"},
+        ],
+        target_field_types={"id": "xsd:string", "name": "xsd:string"},
+        status="ACTIVE",
+        version=1,
+        auto_sync=True,
+        options={},
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    objectify_registry = _CapturingObjectifyRegistry(previous_spec)
+    payload = _base_payload(
+        [
+            {"source_field": "id", "target_field": "id"},
+            {"source_field": "full_name", "target_field": "name"},
+        ],
+        options={"change_note": "rename source"},
+    )
+    payload["artifact_output_name"] = "Dataset"
+
+    res = _post_mapping_spec(
+        payload,
+        schema_columns=schema_columns,
+        schema_types=schema_types,
+        ontology_payload=ontology_payload,
+        objectify_registry=objectify_registry,
+    )
+
+    assert res.status_code == 201, res.text
+    data = res.json()["data"]["mapping_spec"]
+    options = data["options"]
+    summary = options["change_summary"]
+    assert summary["previous_mapping_spec_id"] == "spec-1"
+    assert summary["counts"]["changed_targets"] == 1
+    assert summary["changed_targets"] == [
+        {"target_field": "name", "previous_sources": ["name"], "new_sources": ["full_name"]}
+    ]
+    assert options["impact_scope"]["schema_hash"] == "schema-hash"
