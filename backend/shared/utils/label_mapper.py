@@ -592,8 +592,33 @@ class LabelMapper:
         if not data_list:
             return []
 
+        normalized_data: List[Dict[str, Any]] = []
+        for item in data_list:
+            if isinstance(item, dict):
+                normalized_data.append(item)
+                continue
+            if hasattr(item, "model_dump"):
+                try:
+                    normalized_data.append(item.model_dump(mode="json"))
+                    continue
+                except Exception:
+                    try:
+                        normalized_data.append(item.model_dump())
+                        continue
+                    except Exception:
+                        pass
+            if hasattr(item, "__dict__"):
+                normalized_data.append(dict(item.__dict__))
+                continue
+            logger.warning("Skipping unsupported label mapping payload: %r", type(item))
+
+        if not normalized_data:
+            return []
+
         # Extract all IDs and predicates in one pass
-        class_ids, all_property_ids, all_predicates = self._extract_ids_from_data_list(data_list)
+        class_ids, all_property_ids, all_predicates = self._extract_ids_from_data_list(
+            normalized_data
+        )
 
         # Batch queries for labels
         class_labels = await self.get_class_labels_in_batch(db_name, class_ids, lang)
@@ -602,7 +627,7 @@ class LabelMapper:
         )
 
         # Extract class-property pairs and get property labels in batch
-        all_class_property_pairs = self._extract_class_property_pairs(data_list)
+        all_class_property_pairs = self._extract_class_property_pairs(normalized_data)
         all_property_labels = await self.get_all_property_labels_in_batch(
             db_name, all_class_property_pairs, lang
         )
@@ -612,7 +637,7 @@ class LabelMapper:
             self._convert_data_item_to_display(
                 data, class_labels, all_property_labels, relationship_labels
             )
-            for data in data_list
+            for data in normalized_data
         ]
 
         return labeled_data

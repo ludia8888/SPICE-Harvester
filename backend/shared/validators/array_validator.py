@@ -39,6 +39,14 @@ class ArrayValidator(BaseValidator):
         # Convert to list for normalization
         normalized = list(value)
 
+        if constraints.get("noNullItems"):
+            if any(item is None for item in normalized):
+                return ValidationResult(is_valid=False, message="Array items cannot be null")
+
+        if constraints.get("noNestedArrays"):
+            if any(isinstance(item, (list, tuple)) for item in normalized):
+                return ValidationResult(is_valid=False, message="Nested arrays are not allowed")
+
         # Validate constraints using ConstraintValidator
         constraint_result = ConstraintValidator.validate_constraints(
             normalized, "array", constraints

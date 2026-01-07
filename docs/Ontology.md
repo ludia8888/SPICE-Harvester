@@ -427,33 +427,171 @@ Action type = “입력(Parameters) + 변경 규칙(Rules) + 제출 게이트(Su
 
 ⸻
 
-부록) 문서 대비 코드 구현 현황 (크로스체크)
+부록) 문서 대비 코드 구현 현황 (증거 기반)
 
-표기 규칙
-	•	[구현됨] 모델/CRUD/검증 또는 게이트가 코드로 확인됨
-	•	[부분] 리소스/검증 일부만 존재(자동 적용/실행/게이트 일부 없음)
-	•	[미구현] 관련 모델/검증/실행 로직 확인되지 않음
+상태 정의
+	•	Defined: 모델/리소스 타입 존재(저장 가능)
+	•	Validated: 생성/업데이트 시 검증으로 4xx 차단
+	•	Enforced: 실행 경로(objectify/pipeline/instance)에서 실패 시 write=0
+	•	E2E Proven: 재현 가능한 테스트/로그로 증명됨
+	•	미구현: 위 기준을 충족하지 못함(특히 테스트 부재)
+	•	본 부록 표기는 Defined/Validated/미구현만 사용 (Enforced/E2E는 정의만 유지)
+	•	테스트/로그 증거가 없는 항목은 미구현으로 표기
+
+증거 3종 세트 (각 항목에 필수로 명시)
+	1) 정의/스키마 변환
+	2) 검증 적용 지점(콜스택)
+	3) 실패 재현(테스트/로그)
 
 1) Ontology 타입
-	•	[구현됨] Object type: OntologyBase/요청/응답 모델이 properties/relationships 포함
-	•	[부분] Primary key: Property.primary_key + linter 게이트 존재(별도 object_type pk_spec 리소스)
-	•	[미구현] Title key: 모델/검증 없음
-	•	[구현됨] Property: name/type/label/required/constraints 제공(검증은 기본 scalar 중심)
-	•	[부분] Shared property: 리소스 CRUD/검증 존재, object type 자동 합성 없음
-	•	[부분] Link type: 별도 LinkType 리소스 없음, class reference property → relationship 자동 변환
-	•	[부분] Action type: 리소스 저장/검증만, 실행/Submission criteria/side effects 엔진 없음
-	•	[부분] Interfaces: 리소스 + OMS create/update 계약 검증 게이트, UI/검색 통합 미확인
-	•	[부분] Object type groups: 리소스 CRUD만, UX 통합 미확인
-	•	[부분] Value types: 리소스/검증만, property에서 강제/버전 불변성 없음
-	•	[구현됨] (문서 범위 밖) Function 리소스 정의/검증 존재
+	•	Object type
+		- 상태: Validated
+		- 증거:
+			1) 정의/스키마 변환: backend/shared/models/ontology.py, backend/oms/services/terminus/ontology.py
+			2) 검증 적용 지점: backend/oms/routers/ontology.py (create/update -> lint/interface)
+			3) 실패 재현: backend/tests/unit/services/test_ontology_linter_pk_branching.py
+	•	Primary key
+		- 상태: Validated
+		- 증거:
+			1) 정의/스키마 변환: backend/shared/models/ontology.py (Property.primary_key)
+			2) 검증 적용 지점: backend/shared/services/ontology_linter.py, backend/objectify_worker/main.py
+			3) 실패 재현: backend/tests/unit/services/test_ontology_linter_pk_branching.py, backend/tests/unit/workers/test_objectify_worker_p0_gates.py
+	•	Title key
+		- 상태: Validated
+		- 증거:
+			1) 정의/스키마 변환: backend/shared/models/ontology.py (Property.title_key)
+			2) 검증 적용 지점: backend/shared/services/ontology_linter.py
+			3) 실패 재현: backend/tests/unit/services/test_ontology_linter_pk_branching.py
+	•	Property
+		- 상태: Validated
+		- 증거:
+			1) 정의/스키마 변환: backend/shared/models/ontology.py
+			2) 검증 적용 지점: backend/objectify_worker/main.py (_validate_value_constraints)
+			3) 실패 재현: backend/tests/unit/workers/test_objectify_worker_p0_gates.py
+	•	Shared property
+		- 상태: Validated
+		- 증거:
+			1) 정의/스키마 변환: backend/shared/models/ontology_resources.py
+			2) 검증 적용 지점: backend/oms/routers/ontology.py (_apply_shared_properties), backend/oms/services/ontology_resource_validator.py
+			3) 실패 재현: backend/tests/unit/services/test_ontology_router_helpers.py, backend/tests/unit/services/test_ontology_resource_validator.py
+	•	Link type
+		- 상태: Validated
+		- 증거:
+			1) 정의/스키마 변환: backend/shared/models/ontology_resources.py, backend/oms/services/ontology_resources.py
+			2) 검증 적용 지점: backend/oms/services/ontology_resource_validator.py (link_type)
+			3) 실패 재현: backend/tests/unit/services/test_ontology_resource_validator.py
+		- 비고: 링크 인스턴스 실행 경로는 미구현
+	•	Action type
+		- 상태: Validated (정의/검증까지만)
+		- 증거:
+			1) 정의/스키마 변환: backend/shared/models/ontology_resources.py
+			2) 검증 적용 지점: backend/oms/services/ontology_resource_validator.py, backend/oms/routers/ontology_extensions.py
+			3) 실패 재현: backend/tests/unit/services/test_ontology_resource_validator.py
+		- 미구현: Submission criteria/side effects 실행 엔진
+	•	Interfaces
+		- 상태: Validated
+		- 증거:
+			1) 정의/스키마 변환: backend/shared/models/ontology_resources.py
+			2) 검증 적용 지점: backend/oms/services/ontology_interface_contract.py, backend/oms/routers/ontology.py
+			3) 실패 재현: backend/tests/unit/services/test_ontology_interface_contract.py
+	•	Object type groups
+		- 상태: Validated
+		- 증거:
+			1) 정의/스키마 변환: backend/shared/models/ontology_resources.py
+			2) 검증 적용 지점: backend/oms/routers/ontology.py (_validate_group_refs)
+			3) 실패 재현: backend/tests/unit/services/test_ontology_router_helpers.py
+	•	Value types
+		- 상태: Validated
+		- 증거:
+			1) 정의/스키마 변환: backend/shared/models/ontology_resources.py, backend/shared/utils/ontology_type_normalization.py
+			2) 검증 적용 지점: backend/oms/routers/ontology.py (_validate_value_type_refs), backend/oms/routers/ontology_extensions.py (_validate_value_type_immutability), backend/objectify_worker/main.py
+			3) 실패 재현: backend/tests/unit/services/test_ontology_router_helpers.py, backend/tests/unit/services/test_ontology_value_type_immutability.py, backend/tests/unit/workers/test_objectify_worker_p0_gates.py
+	•	(문서 범위 밖) Function 리소스
+		- 상태: Validated
+		- 증거:
+			1) 정의/스키마 변환: backend/shared/models/ontology_resources.py
+			2) 검증 적용 지점: backend/oms/services/ontology_resource_validator.py
+			3) 실패 재현: backend/tests/unit/services/test_ontology_resource_validator.py
 
 2) Base types/제약
-	•	[부분] 기본 scalar 검증만 수행(string/int/bool + min/max/pattern)
-	•	[미구현] Array/Struct 제약, Geopoint/Geoshape/Cipher/Vector 등 문서상 포맷/중첩 제약
+	•	기본 scalar + enum/format/length/pattern
+		- 상태: Validated
+		- 증거:
+			1) 정의/스키마 변환: backend/shared/utils/ontology_type_normalization.py, backend/shared/validators/constraint_validator.py
+			2) 검증 적용 지점: backend/objectify_worker/main.py (_validate_value_constraints)
+			3) 실패 재현: backend/tests/unit/workers/test_objectify_worker_p0_gates.py
+	•	Array/Struct
+		- 상태: Validated
+		- 증거:
+			1) 정의/스키마 변환: backend/shared/validators/array_validator.py, backend/shared/validators/struct_validator.py
+			2) 검증 적용 지점: backend/objectify_worker/main.py (base_constraints)
+			3) 실패 재현: backend/tests/unit/validators/test_base_type_validators.py
+	•	Vector
+		- 상태: Validated
+		- 증거:
+			1) 정의/스키마 변환: backend/shared/validators/vector_validator.py
+			2) 검증 적용 지점: backend/objectify_worker/main.py (get_validator)
+			3) 실패 재현: backend/tests/unit/validators/test_base_type_validators.py
+	•	Geopoint/Geoshape
+		- 상태: Validated
+		- 증거:
+			1) 정의/스키마 변환: backend/shared/validators/geopoint_validator.py, backend/shared/validators/geoshape_validator.py
+			2) 검증 적용 지점: backend/objectify_worker/main.py (get_validator)
+			3) 실패 재현: backend/tests/unit/validators/test_base_type_validators.py
+	•	Marking/Cipher
+		- 상태: Validated
+		- 증거:
+			1) 정의/스키마 변환: backend/shared/validators/marking_validator.py, backend/shared/validators/cipher_validator.py
+			2) 검증 적용 지점: backend/objectify_worker/main.py (get_validator)
+			3) 실패 재현: backend/tests/unit/validators/test_base_type_validators.py
+	•	Media/Attachment/Time series
+		- 상태: Validated (string 수준)
+		- 증거:
+			1) 정의/스키마 변환: backend/shared/utils/ontology_type_normalization.py, backend/shared/validators/__init__.py
+			2) 검증 적용 지점: backend/objectify_worker/main.py (get_validator -> StringValidator)
+			3) 실패 재현: backend/tests/unit/validators/test_base_type_validators.py
+		- 비고: 전용 포맷 규칙은 미구현
 
 3) 거버넌스/게이트
-	•	[구현됨] Primary key 게이트(ontology linter)
-	•	[구현됨] Interface 계약 게이트(OMS create/update 422)
-	•	[부분] Object type 계약(pk_spec/backing_source) 리소스 검증 + health 이슈(ontology 생성 하드 게이트 아님)
-	•	[부분] Relationship 검증기는 health/리포트용(생성 차단 아님)
-	•	[미구현] Action submission criteria/side effects 실행 게이트
+	•	Primary key 게이트
+		- 상태: Validated
+		- 증거:
+			1) 정의/스키마 변환: backend/shared/models/ontology.py
+			2) 검증 적용 지점: backend/shared/services/ontology_linter.py, backend/objectify_worker/main.py
+			3) 실패 재현: backend/tests/unit/services/test_ontology_linter_pk_branching.py, backend/tests/unit/workers/test_objectify_worker_p0_gates.py
+	•	Title key 게이트
+		- 상태: Validated
+		- 증거:
+			1) 정의/스키마 변환: backend/shared/models/ontology.py
+			2) 검증 적용 지점: backend/shared/services/ontology_linter.py
+			3) 실패 재현: backend/tests/unit/services/test_ontology_linter_pk_branching.py
+	•	Interface 계약 게이트
+		- 상태: Validated
+		- 증거:
+			1) 정의/스키마 변환: backend/shared/models/ontology_resources.py
+			2) 검증 적용 지점: backend/oms/routers/ontology.py (_collect_interface_issues)
+			3) 실패 재현: backend/tests/unit/services/test_ontology_interface_contract.py
+	•	Value type ref 게이트
+		- 상태: Validated
+		- 증거:
+			1) 정의/스키마 변환: backend/shared/models/ontology.py, backend/shared/models/ontology_resources.py
+			2) 검증 적용 지점: backend/oms/routers/ontology.py (_validate_value_type_refs)
+			3) 실패 재현: backend/tests/unit/services/test_ontology_router_helpers.py
+	•	Object type 계약(pk_spec/backing_source) 게이트
+		- 상태: Validated
+		- 증거:
+			1) 정의/스키마 변환: backend/oms/services/ontology_resource_validator.py
+			2) 검증 적용 지점: backend/oms/routers/ontology_extensions.py (validate_resource)
+			3) 실패 재현: backend/tests/unit/services/test_ontology_resource_validator.py
+	•	Relationship 검증 게이트
+		- 상태: Validated
+		- 증거:
+			1) 정의/스키마 변환: backend/oms/validators/relationship_validator.py
+			2) 검증 적용 지점: backend/oms/services/async_terminus.py, backend/oms/routers/ontology.py (_validate_relationships_gate)
+			3) 실패 재현: backend/tests/unit/services/test_ontology_router_helpers.py
+	•	Action submission criteria/side effects
+		- 상태: 미구현
+		- 증거:
+			1) 정의/스키마 변환: 없음
+			2) 검증 적용 지점: 없음
+			3) 실패 재현: 없음

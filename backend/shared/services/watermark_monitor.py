@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 import logging
+import json
 from confluent_kafka import Consumer, TopicPartition
 from confluent_kafka.admin import AdminClient
 import redis.asyncio as aioredis

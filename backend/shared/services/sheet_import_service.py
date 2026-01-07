@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+import json
 import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -124,6 +125,17 @@ class SheetImportService:
         # Basic string-like types
         if t in {"xsd:string", "xsd:anyURI"}:
             return str(value), None
+
+        # JSON / object-like types
+        if t == "sys:JSON":
+            if isinstance(value, (dict, list)):
+                return value, None
+            if isinstance(value, str):
+                try:
+                    return json.loads(value), None
+                except Exception:
+                    return None, f"Cannot parse JSON from '{value}'"
+            return None, f"Cannot coerce JSON from '{value}'"
 
         # Boolean
         if t == "xsd:boolean":

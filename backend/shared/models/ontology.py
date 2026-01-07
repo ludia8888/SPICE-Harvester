@@ -164,7 +164,7 @@ class Relationship(BaseModel):
     @classmethod
     def validate_cardinality(cls, v) -> str:
         """Validate cardinality format"""
-        valid_cardinalities = ["1:1", "1:n", "n:1", "n:m", "n:n"]  # 🔥 THINK ULTRA! Added n:n for OMS compatibility
+        valid_cardinalities = ["1:1", "1:n", "n:1", "n:m", "n:n"]  # Added n:n for OMS compatibility
         if v not in valid_cardinalities:
             raise ValueError(f"Invalid cardinality: {v}. Must be one of {valid_cardinalities}")
         # Normalize n:n to n:m for consistency
@@ -192,17 +192,32 @@ class Property(BaseModel):
         description="Whether this property is the primary key",
         alias="primaryKey",
     )
+    title_key: bool = Field(
+        default=False,
+        description="Whether this property is the title/display key",
+        alias="titleKey",
+    )
+    value_type_ref: Optional[str] = Field(
+        default=None,
+        description="Value type reference for semantic constraints",
+        alias="valueTypeRef",
+    )
+    shared_property_ref: Optional[str] = Field(
+        default=None,
+        description="Shared property reference (metadata reuse)",
+        alias="sharedPropertyRef",
+    )
     default: Optional[Any] = Field(None, description="Default value")
     description: Optional[LocalizedText] = Field(None, description="UI description (string or language map)")
     constraints: Dict[str, Any] = Field(default_factory=dict, description="Property constraints")
     
-    # 🔥 THINK ULTRA! Class reference support for ObjectProperty conversion
+    # Class reference support for ObjectProperty conversion
     target: Optional[str] = Field(None, description="Target class for link properties (BFF input)")
     linkTarget: Optional[str] = Field(None, description="Target class for object reference (when type is a class)")
     isRelationship: Optional[bool] = Field(None, description="Whether this property represents a relationship")
     cardinality: Optional[str] = Field(None, description="Relationship cardinality (1:1, 1:n, n:1, n:m)")
     
-    # 🔥 THINK ULTRA! Array relationship support
+    # Array relationship support
     items: Optional[Dict[str, Any]] = Field(None, description="Array items definition for array type relationships")
 
     @field_validator("name")
@@ -261,11 +276,11 @@ class Property(BaseModel):
     
     def is_class_reference(self) -> bool:
         """Check if this property is a class reference (ObjectProperty)"""
-        # 🔥 THINK ULTRA! type="link" 명시적 지원
+        # Support explicit type="link"
         if self.type == "link":
             return True
             
-        # 🔥 THINK ULTRA! Array relationship 지원
+        # Support array relationships
         if self.type == "array" and self.items:
             items_type = self.items.get("type")
             if items_type == "link" and (self.items.get("linkTarget") or self.items.get("target")):
@@ -275,7 +290,7 @@ class Property(BaseModel):
         if self.target or self.linkTarget or self.isRelationship:
             return True
         
-        # 🔥 ULTRA! Handle parameterized types like list<string>, set<integer>, etc.
+        # Handle parameterized types like list<string>, set<integer>, etc.
         type_lower = self.type.lower()
         if type_lower.startswith(("list<", "set<", "array<", "optional<", "union<")) and type_lower.endswith(">"):
             # These are parameterized basic types, not class references
@@ -286,11 +301,14 @@ class Property(BaseModel):
             "STRING", "INTEGER", "DECIMAL", "BOOLEAN", "DATE", "DATETIME", "TIME", "FLOAT", "DOUBLE", "LONG", "TEXT",
             "ARRAY", "OBJECT", "ENUM", "EMAIL", "PHONE", "URL", "MONEY", "IP", "UUID",
             "COORDINATE", "ADDRESS", "NAME", "IMAGE", "FILE", "LINK", "SET", "LIST",  # LINK 추가
-            "JSON", "GEOPOINT", "UNION", "OPTIONAL"  # 🔥 ULTRA! Added missing basic types
+            "JSON", "STRUCT", "VECTOR", "GEOPOINT", "GEOSHAPE", "MARKING", "CIPHER",
+            "ATTACHMENT", "MEDIA", "TIME_SERIES", "TIMESERIES", "UNION", "OPTIONAL"  # Added missing basic types
         }
         
         # xsd: 프리픽스가 있는 경우는 기본 타입
         if self.type.startswith("xsd:"):
+            return False
+        if self.type.startswith("sys:"):
             return False
             
         # 대문자로 변환하여 기본 타입 목록과 비교
@@ -298,13 +316,13 @@ class Property(BaseModel):
     
     def to_relationship(self) -> Dict[str, Any]:
         """Convert property to relationship format"""
-        # 🔥 THINK ULTRA! type="link"일 때 target 또는 linkTarget 사용
+        # Use target/linkTarget for type="link"
         if self.type == "link":
             if not self.target and not self.linkTarget:
                 raise ValueError(f"Property '{self.name}' with type='link' must have target or linkTarget")
             target = self.target or self.linkTarget
             cardinality = self.cardinality or "n:1"  # link는 보통 n:1
-        # 🔥 THINK ULTRA! Array relationship 지원
+        # Support array relationships
         elif self.type == "array" and self.items:
             items_type = self.items.get("type")
             if items_type == "link" and (self.items.get("linkTarget") or self.items.get("target")):

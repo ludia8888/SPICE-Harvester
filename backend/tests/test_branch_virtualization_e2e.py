@@ -283,7 +283,7 @@ async def test_branch_virtualization_overlay_copy_on_write():
                 "description": "Product for branch virtualization test",
                 "properties": [
                     {"name": "product_id", "type": "string", "label": "Product ID", "required": True},
-                    {"name": "name", "type": "string", "label": "Name", "required": True},
+                    {"name": "name", "type": "string", "label": "Name", "required": True, "titleKey": True},
                     {"name": "category", "type": "string", "label": "Category", "required": False},
                 ],
                 "relationships": [],

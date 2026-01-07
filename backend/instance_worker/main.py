@@ -91,6 +91,18 @@ class StrictPalantirInstanceWorker:
         # First-class provenance/audit (fail-open by default)
         self.enable_lineage = os.getenv("ENABLE_LINEAGE", "true").strip().lower() in {"1", "true", "yes", "on"}
         self.enable_audit_logs = os.getenv("ENABLE_AUDIT_LOGS", "true").strip().lower() in {"1", "true", "yes", "on"}
+        self.allow_pk_generation = os.getenv("INSTANCE_ALLOW_PK_GENERATION", "false").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        self.strict_relationship_schema = os.getenv("INSTANCE_RELATIONSHIP_STRICT", "true").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
         self.lineage_store: Optional[LineageStore] = None
         self.audit_store: Optional[AuditLogStore] = None
         self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="instance-worker-kafka")
@@ -309,12 +321,14 @@ class StrictPalantirInstanceWorker:
         *,
         branch: str = "main",
         allow_pattern_fallback: bool = True,
+        strict_schema: bool = False,
     ) -> Dict[str, Union[str, List[str]]]:
         """
         Extract ONLY relationship fields from payload
         Returns: {field_name: "<TargetClass>/<instance_id>" | ["<TargetClass>/<instance_id>", ...]}
         """
         relationships: Dict[str, Union[str, List[str]]] = {}
+        known_relationship_fields: Set[str] = set()
 
         def _normalize_ref(ref: Any) -> str:
             if not isinstance(ref, str):
@@ -360,6 +374,8 @@ class StrictPalantirInstanceWorker:
                             field_name = getattr(rel, "predicate", None) or getattr(rel, "name", None)
                             cardinality = getattr(rel, "cardinality", None)
 
+                        if field_name:
+                            known_relationship_fields.add(str(field_name))
                         if not field_name or field_name not in payload:
                             continue
 
@@ -399,6 +415,8 @@ class StrictPalantirInstanceWorker:
                             if not isinstance(rel, dict):
                                 continue
                             field_name = rel.get("predicate") or rel.get("name")
+                            if field_name:
+                                known_relationship_fields.add(str(field_name))
                             if not field_name or field_name not in payload:
                                 continue
                             cardinality = rel.get("cardinality")
@@ -432,6 +450,8 @@ class StrictPalantirInstanceWorker:
                     # TerminusDB schema format (relationships as properties with @class)
                     else:
                         for key, value_def in ontology.items():
+                            if isinstance(value_def, dict) and "@class" in value_def:
+                                known_relationship_fields.add(str(key))
                             if isinstance(value_def, dict) and "@class" in value_def and key in payload:
                                 value = payload[key]
                                 wants_many = True if str(value_def.get("@type") or "").strip() == "Set" else None
@@ -462,6 +482,24 @@ class StrictPalantirInstanceWorker:
         except Exception as e:
             logger.warning(f"Could not get ontology for relationship extraction: {e}")
             
+        if strict_schema:
+            unknown_fields: List[str] = []
+
+            def _looks_like_ref(value: Any) -> bool:
+                if isinstance(value, str):
+                    return "/" in value
+                if isinstance(value, list) and value:
+                    return all(isinstance(item, str) and "/" in item for item in value)
+                return False
+
+            for key, value in payload.items():
+                if key in known_relationship_fields or key in relationships:
+                    continue
+                if _looks_like_ref(value):
+                    unknown_fields.append(str(key))
+            if unknown_fields:
+                raise ValueError(f"Unknown relationship fields: {sorted(set(unknown_fields))}")
+
         if not allow_pattern_fallback:
             return relationships
 
@@ -647,6 +685,7 @@ class StrictPalantirInstanceWorker:
             payload,
             branch=branch,
             allow_pattern_fallback=allow_pattern_fallback,
+            strict_schema=self.strict_relationship_schema,
         )
 
         # 3) Store lightweight node in TerminusDB for graph traversal
@@ -844,7 +883,7 @@ class StrictPalantirInstanceWorker:
             else:
                 # Extract primary key value dynamically
                 instance_id = self.get_primary_key_value(
-                    class_id, payload, allow_generate=not is_objectify
+                    class_id, payload, allow_generate=self.allow_pk_generation and not is_objectify
                 )
                 validate_instance_id(instance_id)
 
@@ -963,6 +1002,7 @@ class StrictPalantirInstanceWorker:
                 payload,
                 branch=branch,
                 allow_pattern_fallback=not is_objectify,
+                strict_schema=self.strict_relationship_schema,
             )
             
             # 3. Create PURE lightweight node for TerminusDB (NO system fields!)
@@ -1617,6 +1657,7 @@ class StrictPalantirInstanceWorker:
             merged_payload,
             branch=branch,
             allow_pattern_fallback=not is_objectify,
+            strict_schema=self.strict_relationship_schema,
         )
         terminus_id = f"{class_id}/{instance_id}"
         graph_node: Dict[str, Any] = {

@@ -121,6 +121,62 @@ def test_value_constraints_fail_fast():
     assert 0 in result["error_row_indices"]
 
 
+@pytest.mark.parametrize(
+    ("raw_type", "format_hint", "value"),
+    [
+        ("email", "email", "not-an-email"),
+        ("url", "uri", "not-a-url"),
+        ("uuid", "uuid", "not-a-uuid"),
+    ],
+)
+def test_value_constraints_format_failures(raw_type, format_hint, value):
+    worker = ObjectifyWorker()
+    mappings = [FieldMapping(source_field="field", target_field="field")]
+    result = _build_instances(
+        worker,
+        columns=["field"],
+        rows=[[value]],
+        mappings=mappings,
+        field_constraints={"field": {"format": format_hint}},
+        field_raw_types={"field": raw_type},
+    )
+
+    assert any(err.get("code") == "VALUE_CONSTRAINT_FAILED" for err in result["errors"])
+    assert 0 in result["error_row_indices"]
+
+
+def test_value_constraints_min_length_enforced():
+    worker = ObjectifyWorker()
+    mappings = [FieldMapping(source_field="code", target_field="code")]
+    result = _build_instances(
+        worker,
+        columns=["code"],
+        rows=[["ab"]],
+        mappings=mappings,
+        field_constraints={"code": {"minLength": 3}},
+        field_raw_types={"code": "string"},
+    )
+
+    assert any(err.get("code") == "VALUE_CONSTRAINT_FAILED" for err in result["errors"])
+    assert 0 in result["error_row_indices"]
+
+
+def test_value_constraints_pattern_enforced():
+    worker = ObjectifyWorker()
+    mappings = [FieldMapping(source_field="sku", target_field="sku")]
+    result = _build_instances(
+        worker,
+        columns=["sku"],
+        rows=[["aa11"]],
+        mappings=mappings,
+        field_constraints={"sku": {"pattern": "^[A-Z]{2}\\d{2}$"}},
+        field_raw_types={"sku": "string"},
+    )
+
+    assert any(err.get("code") == "VALUE_CONSTRAINT_FAILED" for err in result["errors"])
+    assert 0 in result["error_row_indices"]
+
+
 def test_duplicate_primary_key_is_blocked():
     worker = ObjectifyWorker()
     mappings = [FieldMapping(source_field="id", target_field="id")]

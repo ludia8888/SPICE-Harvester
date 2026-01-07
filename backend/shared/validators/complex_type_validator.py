@@ -1,5 +1,5 @@
 """
-🔥 THINK ULTRA! Refactored Complex Type Validator
+Refactored Complex Type Validator
 This validator delegates to specialized validators to avoid code duplication
 """
 
@@ -188,6 +188,12 @@ class ComplexTypeValidator:
         DataType.ADDRESS.value: "address",
         DataType.IMAGE.value: "image",
         DataType.FILE.value: "file",
+        DataType.STRUCT.value: "struct",
+        DataType.VECTOR.value: "vector",
+        DataType.GEOPOINT.value: "geopoint",
+        DataType.GEOSHAPE.value: "geoshape",
+        DataType.MARKING.value: "marking",
+        DataType.CIPHER.value: "cipher",
     }
 
     @classmethod

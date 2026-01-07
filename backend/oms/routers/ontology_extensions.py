@@ -49,6 +49,7 @@ from shared.security.input_sanitizer import (
     validate_instance_id,
 )
 from shared.utils.branch_utils import get_protected_branches, protected_branch_write_message
+from shared.utils.ontology_type_normalization import normalize_ontology_base_type
 from shared.services.ontology_linter import (
     OntologyLinterConfig,
     compute_risk_score,
@@ -121,6 +122,31 @@ def _normalize_resource_payload(payload: OntologyResourceRequest) -> Dict[str, A
         "spec": spec,
         "metadata": metadata,
     }
+
+
+def _extract_value_type_spec(payload: Dict[str, Any]) -> Dict[str, Any]:
+    spec = payload.get("spec") if isinstance(payload, dict) else None
+    spec = spec if isinstance(spec, dict) else {}
+    base_type = spec.get("base_type") or spec.get("baseType")
+    constraints = spec.get("constraints") or {}
+    return {"base_type": base_type, "constraints": constraints}
+
+
+def _validate_value_type_immutability(existing: Dict[str, Any], incoming: Dict[str, Any]) -> None:
+    existing_spec = _extract_value_type_spec(existing)
+    incoming_spec = _extract_value_type_spec(incoming)
+    if normalize_ontology_base_type(existing_spec.get("base_type")) != normalize_ontology_base_type(
+        incoming_spec.get("base_type")
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="value_type base_type is immutable; create a new value type for changes",
+        )
+    if (existing_spec.get("constraints") or {}) != (incoming_spec.get("constraints") or {}):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="value_type constraints are immutable; create a new value type for changes",
+        )
 
 
 def _resource_validation_strict() -> bool:
@@ -617,6 +643,15 @@ async def update_resource(
         )
 
         service = OntologyResourceService(terminus)
+        if normalized_type == "value_type":
+            existing = await service.get_resource(
+                db_name,
+                branch=branch,
+                resource_type=normalized_type,
+                resource_id=resource_id,
+            )
+            if existing:
+                _validate_value_type_immutability(existing, sanitized)
         updated = await service.update_resource(
             db_name,
             branch=branch,

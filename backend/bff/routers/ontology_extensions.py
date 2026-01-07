@@ -247,6 +247,7 @@ iface_list, iface_create, iface_get, iface_update, iface_delete = _resource_rout
 group_list, group_create, group_get, group_update, group_delete = _resource_routes("groups")
 func_list, func_create, func_get, func_update, func_delete = _resource_routes("functions")
 action_list, action_create, action_get, action_update, action_delete = _resource_routes("action-types")
+link_list, link_create, link_get, link_update, link_delete = _resource_routes("link-types")
 
 
 router.add_api_route("/shared-properties", shared_list, methods=["GET"])
@@ -284,6 +285,12 @@ router.add_api_route("/action-types", action_create, methods=["POST"], status_co
 router.add_api_route("/action-types/{resource_id}", action_get, methods=["GET"])
 router.add_api_route("/action-types/{resource_id}", action_update, methods=["PUT"])
 router.add_api_route("/action-types/{resource_id}", action_delete, methods=["DELETE"])
+
+router.add_api_route("/link-types", link_list, methods=["GET"])
+router.add_api_route("/link-types", link_create, methods=["POST"], status_code=status.HTTP_201_CREATED)
+router.add_api_route("/link-types/{resource_id}", link_get, methods=["GET"])
+router.add_api_route("/link-types/{resource_id}", link_update, methods=["PUT"])
+router.add_api_route("/link-types/{resource_id}", link_delete, methods=["DELETE"])
 
 
 @router.get("/branches")

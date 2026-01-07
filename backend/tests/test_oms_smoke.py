@@ -262,7 +262,7 @@ async def test_oms_end_to_end_smoke():
                 "description": "Product for OMS smoke test",
                 "properties": [
                     {"name": "product_id", "type": "string", "label": "Product ID", "required": True},
-                    {"name": "name", "type": "string", "label": "Name", "required": True},
+                    {"name": "name", "type": "string", "label": "Name", "required": True, "titleKey": True},
                 ],
                 "relationships": [],
             }

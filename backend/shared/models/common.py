@@ -50,6 +50,12 @@ class DataType(Enum):
     ADDRESS = "address"
     IMAGE = "image"
     FILE = "file"
+    STRUCT = "struct"
+    VECTOR = "vector"
+    GEOPOINT = "geopoint"
+    GEOSHAPE = "geoshape"
+    MARKING = "marking"
+    CIPHER = "cipher"
     DATE_COMPLEX = "date"  # Complex date type that maps to xsd:dateTime
 
     @classmethod
@@ -135,6 +141,12 @@ class DataType(Enum):
             cls.IMAGE.value,
             cls.FILE.value,
             cls.DATE_COMPLEX.value,  # DATE is also a complex type that needs conversion
+            cls.STRUCT.value,
+            cls.VECTOR.value,
+            cls.GEOPOINT.value,
+            cls.GEOSHAPE.value,
+            cls.MARKING.value,
+            cls.CIPHER.value,
         }
         return data_type.lower() in complex_types
 
@@ -143,21 +155,25 @@ class DataType(Enum):
         """Get base type for complex types"""
         data_type_lower = data_type.lower().strip()
 
-        # 🔥 THINK ULTRA! 복합 타입을 명시적으로 기본 타입으로 매핑
+        # 복합 타입을 명시적으로 기본 타입으로 매핑
         complex_type_mapping = {
             # 문자열 기반 복합 타입들
             "email": cls.STRING.value,
             "phone": cls.STRING.value,
             "address": cls.STRING.value,
-            "url": cls.URI.value,  # 🔥 ULTRA FIX: xsd:anyURI 사용
-            "uri": cls.URI.value,  # 🔥 ULTRA FIX: xsd:anyURI 사용
+            "url": cls.URI.value,  # Use xsd:anyURI
+            "uri": cls.URI.value,  # Use xsd:anyURI
             "image": cls.STRING.value,
             "file": cls.STRING.value,
             "enum": cls.STRING.value,
             "uuid": cls.STRING.value,
+            "geopoint": cls.STRING.value,
+            "geoshape": cls.STRING.value,
+            "marking": cls.STRING.value,
+            "cipher": cls.STRING.value,
             
             # 날짜/시간 타입
-            "date": cls.DATETIME.value,  # 🔥 FIX: DATE 타입은 xsd:dateTime으로 매핑
+            "date": cls.DATETIME.value,  # Map date to xsd:dateTime for storage
             
             # 숫자 기반 타입들
             "money": cls.DECIMAL.value,
@@ -166,6 +182,8 @@ class DataType(Enum):
             # 배열과 객체는 JSON 문자열로 저장
             "array": cls.STRING.value,
             "object": cls.STRING.value,
+            "struct": cls.STRING.value,
+            "vector": cls.STRING.value,
         }
         
         # 정확한 타입 이름 매칭 우선
@@ -184,7 +202,7 @@ class DataType(Enum):
         elif "datetime" in data_type_lower:
             return cls.DATETIME.value
         elif "date" in data_type_lower:
-            return cls.DATETIME.value  # 🔥 FIX: date도 xsd:dateTime으로 매핑
+            return cls.DATETIME.value  # Map date to xsd:dateTime for storage
         else:
             # 모든 알 수 없는 타입은 안전하게 string으로 변환
             return cls.STRING.value

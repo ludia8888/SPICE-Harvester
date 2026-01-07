@@ -20,12 +20,14 @@ def normalize_import_target_type(type_value: Any) -> str:
     t = str(type_value).strip()
     if not t:
         return "xsd:string"
-    if t.startswith("xsd:") or t == "link":
+    if t.startswith("xsd:") or t.startswith("sys:") or t == "link":
         return t
 
     t_lower = t.lower()
     if t_lower in {"string", "text"}:
         return "xsd:string"
+    if t_lower in {"uri", "url"}:
+        return "xsd:anyURI"
     if t_lower in {"int", "integer", "long"}:
         return "xsd:integer"
     if t_lower in {"decimal", "number", "float", "double"}:
@@ -39,6 +41,19 @@ def normalize_import_target_type(type_value: Any) -> str:
     if t_lower in {"money", "currency"}:
         # Stored as numeric in instances; currency metadata is not imported yet.
         return "xsd:decimal"
+    if t_lower in {"array", "list", "set", "struct", "object", "json", "vector"}:
+        return "sys:JSON"
+    if t_lower in {
+        "geopoint",
+        "geoshape",
+        "marking",
+        "cipher",
+        "attachment",
+        "media",
+        "media_reference",
+        "time_series",
+        "timeseries",
+    }:
+        return "xsd:string"
 
     return "xsd:string"
-

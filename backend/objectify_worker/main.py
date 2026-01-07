@@ -34,6 +34,7 @@ from shared.services.processed_event_registry import ClaimDecision, ProcessedEve
 from shared.services.sheet_import_service import FieldMapping, SheetImportService
 from shared.utils.env_utils import parse_int_env
 from shared.utils.import_type_normalization import normalize_import_target_type
+from shared.utils.ontology_type_normalization import normalize_ontology_base_type
 from shared.utils.s3_uri import parse_s3_uri
 from shared.errors.error_envelope import build_error_envelope
 from shared.security.auth_utils import get_expected_token
@@ -227,6 +228,8 @@ class ObjectifyWorker:
         lowered = raw.lower()
         if lowered.startswith("xsd:"):
             return raw
+        if lowered.startswith("sys:"):
+            return raw
         supported = {
             "string",
             "text",
@@ -249,6 +252,18 @@ class ObjectifyWorker:
             "ip",
             "phone",
             "json",
+            "array",
+            "struct",
+            "object",
+            "vector",
+            "geopoint",
+            "geoshape",
+            "marking",
+            "cipher",
+            "attachment",
+            "media",
+            "time_series",
+            "timeseries",
         }
         if lowered not in supported:
             return None
@@ -258,7 +273,26 @@ class ObjectifyWorker:
         self,
         value: Any,
         *,
-        constraints: Dict[str, Any],
+        constraints: Any,
+        raw_type: Optional[Any],
+    ) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(constraints, list):
+            for constraint_set in constraints:
+                message = self._validate_value_constraints_single(
+                    value, constraints=constraint_set, raw_type=raw_type
+                )
+                if message:
+                    return message
+            return None
+        return self._validate_value_constraints_single(value, constraints=constraints, raw_type=raw_type)
+
+    def _validate_value_constraints_single(
+        self,
+        value: Any,
+        *,
+        constraints: Any,
         raw_type: Optional[Any],
     ) -> Optional[str]:
         if value is None:
@@ -277,8 +311,23 @@ class ObjectifyWorker:
             type_hint = type_hint[4:]
         format_hint = str(normalized.get("format") or "").strip().lower()
 
+        canonical_type = normalize_ontology_base_type(type_hint) if type_hint else None
+
         validator_key = None
-        if type_hint in {"email", "url", "uri", "uuid", "ip", "phone"}:
+        if canonical_type in {
+            "array",
+            "struct",
+            "vector",
+            "geopoint",
+            "geoshape",
+            "cipher",
+            "marking",
+            "media",
+            "attachment",
+            "time_series",
+        }:
+            validator_key = canonical_type
+        elif type_hint in {"email", "url", "uri", "uuid", "ip", "phone"}:
             validator_key = "url" if type_hint in {"url", "uri"} else type_hint
         elif format_hint in {"email", "uuid", "uri", "url", "ipv4", "ipv6"}:
             validator_key = "url" if format_hint in {"uri", "url"} else format_hint
@@ -698,24 +747,84 @@ class ObjectifyWorker:
                 },
             )
 
+        value_type_refs = {
+            str(meta.get("value_type_ref") or meta.get("valueTypeRef") or "").strip()
+            for meta in prop_map.values()
+            if isinstance(meta, dict)
+        }
+        value_type_refs = {ref for ref in value_type_refs if ref}
+        value_type_defs, missing_value_types = await self._fetch_value_type_defs(job, value_type_refs)
+        if missing_value_types:
+            await _fail_job(
+                "validation_failed",
+                report={
+                    "errors": [
+                        {
+                            "code": "VALUE_TYPE_NOT_FOUND",
+                            "value_type_refs": sorted(missing_value_types),
+                            "message": "Referenced value types are missing",
+                        }
+                    ]
+                },
+            )
+
         resolved_field_types: Dict[str, str] = {}
-        field_constraints: Dict[str, Dict[str, Any]] = {}
+        field_constraints: Dict[str, Any] = {}
         field_raw_types: Dict[str, Optional[Any]] = {}
         required_targets: set[str] = set()
         explicit_pk_targets: set[str] = set()
         unsupported_targets: List[str] = []
         for name, meta in prop_map.items():
             raw_type = meta.get("type") or meta.get("data_type") or meta.get("datatype")
-            field_raw_types[name] = raw_type
-            if raw_type in {"link", "array"}:
+            raw_type_norm = normalize_ontology_base_type(raw_type) or raw_type
+            value_type_ref = str(meta.get("value_type_ref") or meta.get("valueTypeRef") or "").strip() or None
+            value_type_spec = value_type_defs.get(value_type_ref) if value_type_ref else None
+            value_type_base = None
+            value_type_constraints = None
+            if value_type_spec:
+                value_type_base = value_type_spec.get("base_type") or value_type_spec.get("baseType")
+                value_type_constraints = value_type_spec.get("constraints") or value_type_spec.get("constraint") or {}
+
+            if value_type_base and normalize_ontology_base_type(raw_type_norm) in {None, "string"}:
+                raw_type_norm = value_type_base
+
+            field_raw_types[name] = raw_type_norm
+
+            is_relationship = bool(
+                raw_type_norm == "link"
+                or meta.get("isRelationship")
+                or meta.get("target")
+                or meta.get("linkTarget")
+            )
+            items = meta.get("items") if isinstance(meta, dict) else None
+            if isinstance(items, dict):
+                item_type = items.get("type")
+                if item_type == "link" and (items.get("target") or items.get("linkTarget")):
+                    is_relationship = True
+
+            if is_relationship:
                 unsupported_targets.append(name)
                 continue
-            import_type = self._resolve_import_type(raw_type)
+            import_type = self._resolve_import_type(raw_type_norm)
             if not import_type:
                 unsupported_targets.append(name)
                 continue
             resolved_field_types[name] = import_type
-            field_constraints[name] = self._normalize_constraints(meta.get("constraints"), raw_type=raw_type)
+            prop_constraints = self._normalize_constraints(meta.get("constraints"), raw_type=raw_type_norm)
+            base_constraints: Dict[str, Any] = {}
+            if normalize_ontology_base_type(raw_type_norm) == "array":
+                base_constraints = {"noNullItems": True, "noNestedArrays": True}
+            elif normalize_ontology_base_type(raw_type_norm) == "struct":
+                base_constraints = {"noNestedStructs": True, "noArrayFields": True}
+
+            constraint_sets: List[Dict[str, Any]] = []
+            if base_constraints:
+                constraint_sets.append(base_constraints)
+            if value_type_constraints:
+                constraint_sets.append(self._normalize_constraints(value_type_constraints, raw_type=value_type_base))
+            if prop_constraints:
+                constraint_sets.append(prop_constraints)
+            field_constraints[name] = constraint_sets if constraint_sets else {}
             if bool(meta.get("required")):
                 required_targets.add(name)
             if bool(meta.get("primary_key") or meta.get("primaryKey")):
@@ -1122,7 +1231,18 @@ class ObjectifyWorker:
         field_types: Dict[str, str] = {}
         for name, meta in prop_map.items():
             raw_type = meta.get("type") or meta.get("data_type") or meta.get("datatype")
-            if raw_type in {"link", "array"}:
+            is_relationship = bool(
+                raw_type == "link"
+                or meta.get("isRelationship")
+                or meta.get("target")
+                or meta.get("linkTarget")
+            )
+            items = meta.get("items") if isinstance(meta, dict) else None
+            if isinstance(items, dict):
+                item_type = items.get("type")
+                if item_type == "link" and (items.get("target") or items.get("linkTarget")):
+                    is_relationship = True
+            if is_relationship:
                 continue
             import_type = self._resolve_import_type(raw_type)
             if import_type:
@@ -1139,6 +1259,41 @@ class ObjectifyWorker:
         )
         resp.raise_for_status()
         return resp.json() if resp.text else {}
+
+    async def _fetch_value_type_defs(
+        self,
+        job: ObjectifyJob,
+        value_type_refs: set[str],
+    ) -> Tuple[Dict[str, Dict[str, Any]], List[str]]:
+        if not self.http or not value_type_refs:
+            return {}, []
+
+        branch = job.ontology_branch or job.dataset_branch or "main"
+        defs: Dict[str, Dict[str, Any]] = {}
+        missing: List[str] = []
+
+        for ref in sorted(value_type_refs):
+            resp = await self.http.get(
+                f"/api/v1/database/{job.db_name}/ontology/resources/value_type/{ref}",
+                params={"branch": branch},
+            )
+            if resp.status_code == 404:
+                missing.append(ref)
+                continue
+            resp.raise_for_status()
+            payload = resp.json() if resp.text else {}
+            resource = payload.get("data") if isinstance(payload, dict) else None
+            if not isinstance(resource, dict):
+                resource = payload if isinstance(payload, dict) else {}
+            spec = resource.get("spec") if isinstance(resource, dict) else {}
+            if not isinstance(spec, dict):
+                spec = {}
+            defs[ref] = {
+                "base_type": spec.get("base_type") or spec.get("baseType"),
+                "constraints": spec.get("constraints") or {},
+            }
+
+        return defs, missing
 
     async def _fetch_ontology_version(self, job: ObjectifyJob) -> Dict[str, str]:
         if not self.http:
@@ -1406,7 +1561,7 @@ class ObjectifyWorker:
         required_targets: set[str],
         pk_targets: List[str],
         pk_fields: List[str],
-        field_constraints: Dict[str, Dict[str, Any]],
+        field_constraints: Dict[str, Any],
         field_raw_types: Dict[str, Optional[Any]],
         seen_row_keys: Optional[set[str]] = None,
     ) -> Dict[str, Any]:
@@ -1583,7 +1738,7 @@ class ObjectifyWorker:
         required_targets: set[str],
         pk_targets: List[str],
         pk_fields: List[str],
-        field_constraints: Dict[str, Dict[str, Any]],
+        field_constraints: Dict[str, Any],
         field_raw_types: Dict[str, Optional[Any]],
         row_batch_size: int,
         max_rows: Optional[int],

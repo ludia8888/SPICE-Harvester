@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .i18n import LocalizedText
 from .ontology import Property, Relationship
@@ -69,6 +69,18 @@ class InterfaceDefinition(OntologyResourceBase):
 
     required_properties: List[Property] = Field(default_factory=list)
     required_relationships: List[Relationship] = Field(default_factory=list)
+
+
+class LinkTypeDefinition(OntologyResourceBase):
+    """Link type definition between object types."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    from_ref: str = Field(..., alias="from", description="Source object type id")
+    to_ref: str = Field(..., alias="to", description="Target object type id")
+    predicate: str = Field(..., description="Relationship predicate")
+    cardinality: Optional[str] = Field(default=None, description="Cardinality (e.g., 1:n)")
+    constraints: Dict[str, Any] = Field(default_factory=dict, description="Optional link constraints")
 
 
 class GroupDefinition(OntologyResourceBase):

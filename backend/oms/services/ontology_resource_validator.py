@@ -5,6 +5,7 @@ Ontology resource validation (required spec + reference checks).
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from oms.services.async_terminus import AsyncTerminusService
@@ -35,6 +36,8 @@ _SPEC_ALIASES = {
     "sideEffects": "side_effects",
     "deterministic": "deterministic",
     "language": "language",
+    "from": "from",
+    "to": "to",
 }
 
 _REFERENCE_KEYS = {
@@ -67,6 +70,26 @@ _PRIMITIVE_BASE_TYPES = {
     "date",
     "datetime",
     "time",
+    "email",
+    "url",
+    "uri",
+    "uuid",
+    "phone",
+    "ip",
+    "money",
+    "array",
+    "struct",
+    "object",
+    "json",
+    "vector",
+    "geopoint",
+    "geoshape",
+    "marking",
+    "cipher",
+    "attachment",
+    "media",
+    "time_series",
+    "timeseries",
 }
 
 _REFERENCE_TYPE_PREFIX = {
@@ -183,6 +206,67 @@ def _is_primitive_reference(value: str) -> bool:
     return any(lowered.startswith(prefix) for prefix in _REFERENCE_SKIP_PREFIXES)
 
 
+_LINK_PREDICATE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+_LINK_CARDINALITIES = {"1:1", "1:n", "n:1", "n:m", "n:n", "one", "many"}
+
+
+def _strip_object_ref(raw: Any) -> Optional[str]:
+    if not isinstance(raw, str):
+        return None
+    value = raw.strip()
+    if not value:
+        return None
+    for prefix in ("object_type:", "object:", "class:"):
+        if value.startswith(prefix):
+            value = value[len(prefix) :].strip()
+            break
+    if "@" in value:
+        value = value.split("@", 1)[0].strip()
+    return value or None
+
+
+def _collect_link_type_issues(spec: Dict[str, Any]) -> List[Dict[str, Any]]:
+    issues: List[Dict[str, Any]] = []
+    predicate = spec.get("predicate")
+    if isinstance(predicate, str):
+        predicate = predicate.strip()
+    if predicate and not _LINK_PREDICATE_RE.match(predicate):
+        _append_spec_issue(
+            issues,
+            message="link_type predicate must be lower_snake_case",
+            invalid_fields=["predicate"],
+        )
+    cardinality = spec.get("cardinality")
+    if isinstance(cardinality, str):
+        cardinality = cardinality.strip()
+    if cardinality and cardinality not in _LINK_CARDINALITIES:
+        _append_spec_issue(
+            issues,
+            message="link_type cardinality must be one of: 1:1, 1:n, n:1, n:m, one, many",
+            invalid_fields=["cardinality"],
+        )
+    return issues
+
+
+async def _find_missing_link_type_refs(
+    *,
+    terminus: AsyncTerminusService,
+    db_name: str,
+    branch: str,
+    spec: Dict[str, Any],
+) -> List[str]:
+    missing: List[str] = []
+    for key in ("from", "to"):
+        raw = spec.get(key)
+        ref = _strip_object_ref(raw)
+        if not ref:
+            continue
+        exists = await terminus.get_ontology(db_name, ref, branch=branch)
+        if not exists:
+            missing.append(str(raw))
+    return sorted(set(missing))
+
+
 def _validate_required_fields(resource_type: str, spec: Dict[str, Any]) -> None:
     issues = _collect_required_field_issues(resource_type, spec)
     if issues:
@@ -263,12 +347,13 @@ def _collect_required_field_issues(resource_type: str, spec: Dict[str, Any]) -> 
                 message="action_type requires non-empty input_schema object",
                 missing_fields=["input_schema"],
             )
-        if not any(key in input_schema for key in ("fields", "properties", "schema")):
-            _append_spec_issue(
-                issues,
-                message="action_type input_schema must include fields/properties/schema",
-                invalid_fields=["input_schema"],
-            )
+        if isinstance(input_schema, dict) and input_schema:
+            if not any(key in input_schema for key in ("fields", "properties", "schema")):
+                _append_spec_issue(
+                    issues,
+                    message="action_type input_schema must include fields/properties/schema",
+                    invalid_fields=["input_schema"],
+                )
         permission_policy = spec.get("permission_policy")
         if not isinstance(permission_policy, dict) or not permission_policy:
             _append_spec_issue(
@@ -276,13 +361,14 @@ def _collect_required_field_issues(resource_type: str, spec: Dict[str, Any]) -> 
                 message="action_type requires non-empty permission_policy object",
                 missing_fields=["permission_policy"],
             )
-        if not any(key in permission_policy for key in ("roles", "scopes", "policy", "rules")):
-            _append_spec_issue(
-                issues,
-                message="action_type permission_policy must include roles/scopes/policy/rules",
-                missing_fields=["permission_policy.roles|scopes|policy|rules"],
-            )
-        issues.extend(_collect_permission_policy_issues(permission_policy))
+        if isinstance(permission_policy, dict) and permission_policy:
+            if not any(key in permission_policy for key in ("roles", "scopes", "policy", "rules")):
+                _append_spec_issue(
+                    issues,
+                    message="action_type permission_policy must include roles/scopes/policy/rules",
+                    missing_fields=["permission_policy.roles|scopes|policy|rules"],
+                )
+            issues.extend(_collect_permission_policy_issues(permission_policy))
     elif resource_type == "interface":
         props = spec.get("required_properties")
         rels = spec.get("required_relationships")
@@ -326,13 +412,43 @@ def _collect_required_field_issues(resource_type: str, spec: Dict[str, Any]) -> 
                 message="shared_property requires properties list",
                 missing_fields=["properties"],
             )
-        for prop in props:
-            if not isinstance(prop, dict) or not prop.get("name"):
-                _append_spec_issue(
-                    issues,
-                    message="shared_property properties must include name",
-                    invalid_fields=["properties"],
-                )
+        if isinstance(props, list):
+            for prop in props:
+                if not isinstance(prop, dict) or not prop.get("name"):
+                    _append_spec_issue(
+                        issues,
+                        message="shared_property properties must include name",
+                        invalid_fields=["properties"],
+                    )
+    elif resource_type == "link_type":
+        from_ref = spec.get("from")
+        to_ref = spec.get("to")
+        predicate = spec.get("predicate")
+        cardinality = spec.get("cardinality")
+        if not isinstance(from_ref, str) or not from_ref.strip():
+            _append_spec_issue(
+                issues,
+                message="link_type requires non-empty 'from' reference",
+                missing_fields=["from"],
+            )
+        if not isinstance(to_ref, str) or not to_ref.strip():
+            _append_spec_issue(
+                issues,
+                message="link_type requires non-empty 'to' reference",
+                missing_fields=["to"],
+            )
+        if not isinstance(predicate, str) or not predicate.strip():
+            _append_spec_issue(
+                issues,
+                message="link_type requires non-empty predicate",
+                missing_fields=["predicate"],
+            )
+        if cardinality is None:
+            _append_spec_issue(
+                issues,
+                message="link_type requires cardinality",
+                missing_fields=["cardinality"],
+            )
     elif resource_type == "group":
         return issues
     else:
@@ -536,13 +652,28 @@ async def validate_resource(
     spec = _merge_payload_spec(payload)
     _validate_required_fields(normalized_type, spec)
 
-    missing = await find_missing_references(
-        db_name=db_name,
-        resource_type=normalized_type,
-        payload=payload,
-        terminus=terminus,
-        branch=branch,
-    )
+    extra_issues: List[Dict[str, Any]] = []
+    missing: List[str] = []
+
+    if normalized_type == "link_type":
+        extra_issues.extend(_collect_link_type_issues(spec))
+        missing = await _find_missing_link_type_refs(
+            terminus=terminus, db_name=db_name, branch=branch, spec=spec
+        )
+    else:
+        missing = await find_missing_references(
+            db_name=db_name,
+            resource_type=normalized_type,
+            payload=payload,
+            terminus=terminus,
+            branch=branch,
+        )
+
+    if extra_issues:
+        message = extra_issues[0].get("message") or "Invalid link_type spec"
+        if strict:
+            raise ResourceSpecError(message)
+        logger.warning("Ontology resource spec validation (lenient): %s", message)
 
     if missing:
         message = f"Missing referenced types: {', '.join(missing)}"

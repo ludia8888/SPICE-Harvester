@@ -256,6 +256,8 @@ class SmokeContext:
     command_ids: Dict[str, str]
     pipeline_id: Optional[str] = None
     dataset_id: Optional[str] = None
+    dataset_version_id: Optional[str] = None
+    ingest_request_id: Optional[str] = None
     connection_id: Optional[str] = None
 
     @property
@@ -350,6 +352,8 @@ def _format_path(template: str, ctx: SmokeContext, *, overrides: Optional[Dict[s
         "pipeline_id": ctx.pipeline_id or "pipeline_smoke",
         "artifact_id": "00000000-0000-0000-0000-000000000000",
         "dataset_id": ctx.dataset_id or "dataset_smoke",
+        "version_id": ctx.dataset_version_id or "00000000-0000-0000-0000-000000000000",
+        "ingest_request_id": ctx.ingest_request_id or "00000000-0000-0000-0000-000000000000",
         "connection_id": ctx.connection_id or "missing_connection",
         "resource_id": "missing_resource",
         "proposal_id": "00000000-0000-0000-0000-000000000000",
@@ -393,6 +397,7 @@ def _ontology_payload(*, class_id: str, label_en: str, label_ko: str) -> Dict[st
                 "type": "xsd:string",
                 "label": {"en": "Name", "ko": "이름"},
                 "required": True,
+                "titleKey": True,
             },
         ],
         "relationships": [],
@@ -623,6 +628,29 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         }
         return RequestPlan(op.method, op.path, url, (200, 400, 404), json_body=body, headers=headers)
 
+    if key == ("POST", "/api/v1/pipelines/datasets/{dataset_id}/versions/{version_id}/funnel-analysis"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        headers = {"X-DB-Name": ctx.db_name}
+        return RequestPlan(op.method, op.path, url, (200, 404), json_body=None, headers=headers)
+
+    if key == ("GET", "/api/v1/pipelines/datasets/ingest-requests/{ingest_request_id}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        headers = {"X-DB-Name": ctx.db_name}
+        return RequestPlan(op.method, op.path, url, (200, 404), headers=headers)
+
+    if key == ("POST", "/api/v1/pipelines/datasets/ingest-requests/{ingest_request_id}/schema/approve"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        headers = {"X-DB-Name": ctx.db_name, "X-User-ID": "openapi-smoke"}
+        body = {
+            "schema_json": {
+                "columns": [
+                    {"name": f"{ctx.class_id.lower()}_id", "type": "xsd:string"},
+                    {"name": "name", "type": "xsd:string"},
+                ]
+            }
+        }
+        return RequestPlan(op.method, op.path, url, (200, 400, 404), json_body=body, headers=headers)
+
     if key == ("POST", "/api/v1/objectify/mapping-specs"):
         url = f"{BFF_URL}{op.path}"
         headers = {"X-DB-Name": ctx.db_name}
@@ -644,7 +672,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         headers = {"X-DB-Name": ctx.db_name}
         body = {"allow_partial": True}
-        return RequestPlan(op.method, op.path, url, (200, 400, 404), json_body=body, headers=headers)
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409), json_body=body, headers=headers)
 
     if key == ("POST", "/api/v1/pipelines/datasets/excel-upload"):
         url = f"{BFF_URL}{op.path}"
@@ -715,6 +743,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
                     "label": f"{ctx.legacy_class_id} ID",
                     "required": True,
                     "primaryKey": True,
+                    "titleKey": True,
                 }
             ],
             "relationships": [],
@@ -819,6 +848,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
 
     # ---------- Ontology Extensions ----------
     ontology_resource_collections = {
+        "/api/v1/databases/{db_name}/ontology/link-types",
         "/api/v1/databases/{db_name}/ontology/action-types",
         "/api/v1/databases/{db_name}/ontology/functions",
         "/api/v1/databases/{db_name}/ontology/groups",
@@ -1399,6 +1429,31 @@ async def test_openapi_stable_contract_smoke():
                 dataset = (payload.get("data") or {}).get("dataset")
                 if isinstance(dataset, dict):
                     ctx.dataset_id = dataset.get("dataset_id") or ctx.dataset_id
+
+            # Create dataset version for ingest-request / funnel-analysis routes
+            if ctx.dataset_id:
+                plan = await _build_plan(
+                    Operation(
+                        "POST",
+                        "/api/v1/pipelines/datasets/{dataset_id}/versions",
+                        ("Pipeline Builder",),
+                        "Create Dataset Version",
+                    ),
+                    ctx,
+                )
+                status, text, payload = await _request(session, plan)
+                executed.add((plan.method, plan.path_template))
+                if status not in plan.expected_statuses:
+                    raise AssertionError(f"{plan.method} {plan.path_template} unexpected status {status}: {text[:500]}")
+                if isinstance(payload, dict):
+                    version = (payload.get("data") or {}).get("version")
+                    if isinstance(version, dict):
+                        ctx.dataset_version_id = (
+                            version.get("version_id") or version.get("versionId") or ctx.dataset_version_id
+                        )
+                        ctx.ingest_request_id = (
+                            version.get("ingest_request_id") or version.get("ingestRequestId") or ctx.ingest_request_id
+                        )
 
             # Create pipeline for pipeline_id-dependent routes
             plan = await _build_plan(

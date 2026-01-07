@@ -89,7 +89,7 @@ class OntologyService(BaseTerminusService):
                 if metadata_payload.get("internal"):
                     documentation["@internal"] = True
 
-            # 스키마 문서 생성 - 🔥 CRITICAL FIX: Correct TerminusDB format
+            # 스키마 문서 생성 - TerminusDB format
             schema_doc = {
                 "@type": "Class",
                 "@id": ontology.id,
@@ -365,16 +365,48 @@ class OntologyService(BaseTerminusService):
         # - Optional이 필요한 경우만 {"@type": "Optional", "@class": "xsd:string"}
         
         mapped_type = self._map_datatype_to_terminus(prop.type)
-        
-        # 필수 속성: 타입 직접 반환
-        if prop.required:
-            return mapped_type  # "xsd:string" 형태로 직접 반환
-        else:
-            # 옵셔널 속성: Optional로 감싸기
-            return {
-                "@type": "Optional",
-                "@class": mapped_type
-            }
+
+        label_i18n = coerce_localized_text(prop.label)
+        description_i18n = coerce_localized_text(prop.description) if prop.description else {}
+
+        label_display = (
+            select_localized_text(label_i18n, lang="en")
+            or select_localized_text(label_i18n, lang="ko")
+            or prop.name
+        )
+        description_display = (
+            select_localized_text(description_i18n, lang="en")
+            or select_localized_text(description_i18n, lang="ko")
+            or ""
+        )
+
+        documentation: Dict[str, Any] = {
+            "@label": label_display,
+            "@comment": description_display,
+            "@label_i18n": label_i18n,
+            "@comment_i18n": description_i18n,
+            "type": prop.type,
+        }
+        if prop.constraints:
+            documentation["constraints"] = prop.constraints
+        if prop.primary_key:
+            documentation["primary_key"] = True
+        if prop.title_key:
+            documentation["title_key"] = True
+        if prop.value_type_ref:
+            documentation["value_type_ref"] = prop.value_type_ref
+        if prop.shared_property_ref:
+            documentation["shared_property_ref"] = prop.shared_property_ref
+        if prop.items:
+            documentation["items"] = prop.items
+
+        schema: Dict[str, Any] = {
+            "@class": mapped_type,
+            "@documentation": documentation,
+        }
+        if not prop.required:
+            schema["@type"] = "Optional"
+        return schema
     
     def _create_relationship_schema(self, rel: Relationship) -> Dict[str, Any]:
         """관계 스키마 생성 - TerminusDB 공식 패턴 준수"""
@@ -444,7 +476,7 @@ class OntologyService(BaseTerminusService):
     def _map_datatype_to_terminus(self, datatype: Union[DataType, str]) -> str:
         """DataType을 TerminusDB 타입으로 매핑"""
         
-        # 🔥 CRITICAL: TerminusDB doesn't support xsd: types, use sys: types instead
+        # Map domain type strings to TerminusDB XSD/sys types.
         # Handle both DataType enum and string inputs
         if isinstance(datatype, str):
             # Handle string inputs from tests/API calls
@@ -452,20 +484,37 @@ class OntologyService(BaseTerminusService):
                 "string": "xsd:string",  # Use proper XSD types
                 "integer": "xsd:integer",
                 "decimal": "xsd:decimal", 
-                "number": "xsd:decimal",  # 🔥 CRITICAL FIX: map number to xsd:decimal
+                "number": "xsd:decimal",  # Map number to xsd:decimal
                 "float": "xsd:float",
                 "double": "xsd:double",
                 "boolean": "xsd:boolean",
                 "date": "xsd:date",
                 "datetime": "xsd:dateTime",
+                "timestamp": "xsd:dateTime",
                 "email": "xsd:string",
                 "phone": "xsd:string",
+                "uuid": "xsd:string",
+                "url": "xsd:anyURI",
+                "uri": "xsd:anyURI",
+                "geopoint": "xsd:string",
+                "geoshape": "xsd:string",
+                "marking": "xsd:string",
+                "cipher": "xsd:string",
+                "media": "xsd:string",
+                "attachment": "xsd:string",
+                "array": "sys:JSON",
+                "struct": "sys:JSON",
+                "object": "sys:JSON",
+                "json": "sys:JSON",
+                "vector": "sys:JSON",
                 "xsd:string": "xsd:string",  # Keep XSD types as is
                 "xsd:integer": "xsd:integer",
                 "xsd:date": "xsd:date",
                 "xsd:boolean": "xsd:boolean",
                 "xsd:decimal": "xsd:decimal",
-                "xsd:dateTime": "xsd:dateTime"
+                "xsd:dateTime": "xsd:dateTime",
+                "xsd:anyURI": "xsd:anyURI",
+                "sys:JSON": "sys:JSON",
             }
             return string_mapping.get(datatype, "sys:JSON")
         
@@ -558,16 +607,25 @@ class OntologyService(BaseTerminusService):
                         if isinstance(raw_comment, str) and not raw_comment.strip():
                             raw_comment = None
 
+                        raw_type = prop_doc.get("type") or prop_doc.get("data_type") or prop_doc.get("datatype")
+                        prop_type = raw_type if raw_type else class_type
+
                         prop = Property(
                             name=key,
-                            type=class_type,  # Keep the original type string like "xsd:string"
+                            type=prop_type,  # Prefer documented raw type (array/struct/etc) over terminus class
                             label=(
                                 prop_label_i18n
                                 if isinstance(prop_label_i18n, dict) and prop_label_i18n
                                 else prop_doc.get("@label", key)
                             ),
                             description=raw_comment,
-                            required=value.get("@type") != "Optional"
+                            required=value.get("@type") != "Optional",
+                            constraints=prop_doc.get("constraints") or {},
+                            primary_key=bool(prop_doc.get("primary_key") or prop_doc.get("primaryKey")),
+                            title_key=bool(prop_doc.get("title_key") or prop_doc.get("titleKey")),
+                            value_type_ref=prop_doc.get("value_type_ref") or prop_doc.get("valueTypeRef"),
+                            shared_property_ref=prop_doc.get("shared_property_ref") or prop_doc.get("sharedPropertyRef"),
+                            items=prop_doc.get("items"),
                         )
                         ontology.properties.append(prop)
                     else:

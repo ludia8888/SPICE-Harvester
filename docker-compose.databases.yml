@@ -61,7 +61,7 @@ services:
       - cluster.name=spice-foundry-cluster
       - node.name=spice-foundry-node
       - bootstrap.memory_lock=true
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - "ES_JAVA_OPTS=-Xms256m -Xmx256m"
       # Dev/test only: avoid RED cluster when the Docker VM disk is tight (shards become unassigned).
       - cluster.routing.allocation.disk.threshold_enabled=false
       - xpack.security.enabled=false

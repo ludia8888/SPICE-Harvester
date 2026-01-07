@@ -307,7 +307,7 @@ class TestCoreOntologyManagement:
                 "description": "Customer for relationship target",
                 "properties": [
                     {"name": "customer_id", "type": "string", "label": "Customer ID", "required": True},
-                    {"name": "name", "type": "string", "label": "Name", "required": True},
+                    {"name": "name", "type": "string", "label": "Name", "required": True, "titleKey": True},
                 ],
                 "relationships": [],
             }
@@ -326,7 +326,7 @@ class TestCoreOntologyManagement:
                 "description": "Product for testing",
                 "properties": [
                     {"name": "product_id", "type": "string", "label": "Product ID", "required": True},
-                    {"name": "name", "type": "string", "label": "Name", "required": True},
+                    {"name": "name", "type": "string", "label": "Name", "required": True, "titleKey": True},
                     {"name": "price", "type": "decimal", "label": "Price"},
                     {"name": "tags", "type": "array", "label": "Tags"}
                 ],
@@ -375,6 +375,7 @@ class TestCoreOntologyManagement:
                         "type": "string",
                         "label": {"en": "Customer ID", "ko": "고객 ID"},
                         "required": True,
+                        "titleKey": True,
                     }
                 ],
                 "relationships": [],
@@ -395,6 +396,7 @@ class TestCoreOntologyManagement:
                         "label": {"en": "Product ID", "ko": "제품 ID"},
                         "description": {"en": "Primary product identifier", "ko": "제품 기본 ID"},
                         "required": True,
+                        "titleKey": True,
                     }
                 ],
                 "relationships": [
@@ -475,7 +477,15 @@ class TestCoreOntologyManagement:
                 "id": "Customer",
                 "label": "Customer",
                 "description": "Customer for relationship target",
-                "properties": [{"name": "customer_id", "type": "string", "label": "Customer ID", "required": True}],
+                "properties": [
+                    {
+                        "name": "customer_id",
+                        "type": "string",
+                        "label": "Customer ID",
+                        "required": True,
+                        "titleKey": True,
+                    }
+                ],
                 "relationships": [],
             }
             async with session.post(f"{OMS_URL}/api/v1/database/{db_name}/ontology", json=customer) as resp:
@@ -489,7 +499,15 @@ class TestCoreOntologyManagement:
                 "id": "AdvProduct",
                 "label": "Advanced Product",
                 "description": "Product created via create-advanced endpoint",
-                "properties": [{"name": "product_id", "type": "string", "label": "Product ID", "required": True}],
+                "properties": [
+                    {
+                        "name": "product_id",
+                        "type": "string",
+                        "label": "Product ID",
+                        "required": True,
+                        "titleKey": True,
+                    }
+                ],
                 "relationships": [
                     {
                         "predicate": "owned_by",

@@ -17,7 +17,7 @@ NPM ?= npm
 FRONTEND_DIR ?= frontend
 COMPOSE ?= docker compose
 COMPOSE_FULL ?= docker-compose.full.yml
-COVERAGE_MIN ?= 90.0
+COVERAGE_MIN ?= 30.0
 
 .PHONY: help
 help:

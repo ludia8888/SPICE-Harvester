@@ -6,7 +6,7 @@ import logging
 import os
 import hmac
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Path, Query
 from fastapi.responses import JSONResponse
@@ -32,6 +32,7 @@ from shared.models.event_envelope import EventEnvelope
 from shared.services.aggregate_sequence_allocator import OptimisticConcurrencyError
 from shared.utils.ontology_version import resolve_ontology_version
 from shared.utils.language import coerce_localized_text, get_accept_language, select_localized_text
+from shared.utils.ontology_type_normalization import normalize_ontology_base_type
 from shared.services.ontology_linter import (
     OntologyLinterConfig,
     compute_risk_score,
@@ -63,6 +64,7 @@ from shared.models.ontology import (
     OntologyCreateRequest,
     OntologyResponse,
     OntologyUpdateRequest,
+    Property,
     QueryRequestInternal,
     QueryResponse,
 )
@@ -137,18 +139,19 @@ async def _collect_interface_issues(
     metadata: Dict[str, Any],
     properties: List[Any],
     relationships: List[Any],
+    resource_service: Optional[OntologyResourceService] = None,
 ) -> List[Dict[str, Any]]:
     refs = extract_interface_refs(metadata)
     if not refs:
         return []
 
-    resource_service = OntologyResourceService(terminus)
+    service = resource_service or OntologyResourceService(terminus)
     interface_index: Dict[str, Dict[str, Any]] = {}
     for raw_ref in refs:
         interface_id = strip_interface_prefix(raw_ref)
         if not interface_id:
             continue
-        resource = await resource_service.get_resource(
+        resource = await service.get_resource(
             db_name,
             branch=branch,
             resource_type="interface",
@@ -164,6 +167,208 @@ async def _collect_interface_issues(
         relationships=relationships,
         interface_index=interface_index,
     )
+
+
+def _extract_shared_property_refs(metadata: Dict[str, Any]) -> List[str]:
+    if not metadata:
+        return []
+    refs: List[str] = []
+    for key in (
+        "shared_properties",
+        "shared_property_refs",
+        "sharedPropertyRefs",
+        "sharedPropertyRef",
+    ):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            refs.append(value.strip())
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, str) and item.strip():
+                    refs.append(item.strip())
+    seen = set()
+    ordered = []
+    for ref in refs:
+        if ref not in seen:
+            seen.add(ref)
+            ordered.append(ref)
+    return ordered
+
+
+def _extract_group_refs(metadata: Dict[str, Any]) -> List[str]:
+    if not metadata:
+        return []
+    refs: List[str] = []
+    for key in (
+        "groups",
+        "group_refs",
+        "groupRefs",
+        "groupRef",
+        "group",
+    ):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            refs.append(value.strip())
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, str) and item.strip():
+                    refs.append(item.strip())
+    seen = set()
+    ordered = []
+    for ref in refs:
+        if ref not in seen:
+            seen.add(ref)
+            ordered.append(ref)
+    return ordered
+
+
+async def _validate_group_refs(
+    *,
+    terminus: AsyncTerminusService,
+    db_name: str,
+    branch: str,
+    metadata: Dict[str, Any],
+    resource_service: Optional[OntologyResourceService] = None,
+) -> List[str]:
+    refs = _extract_group_refs(metadata)
+    if not refs:
+        return []
+    service = resource_service or OntologyResourceService(terminus)
+    missing: List[str] = []
+    for ref in refs:
+        resource = await service.get_resource(
+            db_name,
+            branch=branch,
+            resource_type="group",
+            resource_id=ref,
+        )
+        if not resource:
+            missing.append(ref)
+    return sorted(set(missing))
+
+
+async def _apply_shared_properties(
+    *,
+    terminus: AsyncTerminusService,
+    db_name: str,
+    branch: str,
+    properties: List[Any],
+    metadata: Dict[str, Any],
+    resource_service: Optional[OntologyResourceService] = None,
+) -> Tuple[List[Any], Dict[str, Any]]:
+    refs = _extract_shared_property_refs(metadata)
+    if not refs:
+        return properties, {}
+
+    service = resource_service or OntologyResourceService(terminus)
+    merged = list(properties or [])
+    existing_names = {getattr(p, "name", None) for p in merged}
+    existing_names = {name for name in existing_names if name}
+
+    missing: List[str] = []
+    duplicate_names: List[str] = []
+    invalid_defs: List[str] = []
+
+    for ref in refs:
+        resource = await service.get_resource(
+            db_name,
+            branch=branch,
+            resource_type="shared_property",
+            resource_id=ref,
+        )
+        if not resource:
+            missing.append(ref)
+            continue
+        spec = resource.get("spec") if isinstance(resource, dict) else None
+        props = spec.get("properties") if isinstance(spec, dict) else None
+        if not isinstance(props, list) or not props:
+            invalid_defs.append(ref)
+            continue
+        for prop_def in props:
+            if not isinstance(prop_def, dict):
+                invalid_defs.append(ref)
+                continue
+            name = str(prop_def.get("name") or "").strip()
+            if not name:
+                invalid_defs.append(ref)
+                continue
+            if name in existing_names:
+                duplicate_names.append(name)
+                continue
+            payload = dict(prop_def)
+            payload.setdefault("label", name)
+            payload["shared_property_ref"] = ref
+            try:
+                merged.append(Property(**payload))
+                existing_names.add(name)
+            except Exception:
+                invalid_defs.append(ref)
+
+    issues = {}
+    if missing:
+        issues["missing_shared_properties"] = sorted(set(missing))
+    if duplicate_names:
+        issues["duplicate_property_names"] = sorted(set(duplicate_names))
+    if invalid_defs:
+        issues["invalid_shared_properties"] = sorted(set(invalid_defs))
+    return merged, issues
+
+
+async def _validate_value_type_refs(
+    *,
+    terminus: AsyncTerminusService,
+    db_name: str,
+    branch: str,
+    properties: List[Any],
+    resource_service: Optional[OntologyResourceService] = None,
+) -> List[Dict[str, Any]]:
+    issues: List[Dict[str, Any]] = []
+    service = resource_service or OntologyResourceService(terminus)
+
+    for prop in properties or []:
+        value_type_ref = getattr(prop, "value_type_ref", None) or getattr(prop, "valueTypeRef", None)
+        if not value_type_ref:
+            continue
+        value_type_ref = str(value_type_ref).strip()
+        if not value_type_ref:
+            continue
+        resource = await service.get_resource(
+            db_name,
+            branch=branch,
+            resource_type="value_type",
+            resource_id=value_type_ref,
+        )
+        if not resource:
+            issues.append(
+                {
+                    "code": "VALUE_TYPE_NOT_FOUND",
+                    "field": prop.name,
+                    "value_type_ref": value_type_ref,
+                    "message": f"Value type '{value_type_ref}' not found",
+                }
+            )
+            continue
+        spec = resource.get("spec") if isinstance(resource, dict) else None
+        spec = spec if isinstance(spec, dict) else {}
+        base_type = spec.get("base_type") or spec.get("baseType")
+        if base_type:
+            prop_type = getattr(prop, "type", None)
+            if normalize_ontology_base_type(prop_type) != normalize_ontology_base_type(base_type):
+                issues.append(
+                    {
+                        "code": "VALUE_TYPE_BASE_MISMATCH",
+                        "field": prop.name,
+                        "value_type_ref": value_type_ref,
+                        "expected_base_type": base_type,
+                        "actual_type": prop_type,
+                        "message": (
+                            f"Property '{prop.name}' type '{prop_type}' does not match "
+                            f"value type base '{base_type}'"
+                        ),
+                    }
+                )
+
+    return issues
 
 
 def _is_internal_ontology(ontology: OntologyResponse) -> bool:
@@ -219,6 +424,44 @@ def _merge_lint_reports(*reports: LintReport) -> LintReport:
     )
 
 
+def _relationship_validation_enabled(flag: Optional[bool] = None) -> bool:
+    env_enabled = os.getenv("ONTOLOGY_VALIDATE_RELATIONSHIPS", "true").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if flag is None:
+        return env_enabled
+    return env_enabled and bool(flag)
+
+
+async def _validate_relationships_gate(
+    *,
+    terminus: AsyncTerminusService,
+    db_name: str,
+    branch: str,
+    ontology_payload: Dict[str, Any],
+    enabled: bool,
+) -> Optional[JSONResponse]:
+    if not enabled:
+        return None
+    validation_result = await terminus.validate_relationships(db_name, ontology_payload, branch=branch)
+    if not validation_result.get("ok", False):
+        error_payload = build_error_envelope(
+            service_name="oms",
+            message="온톨로지 관계 검증에 실패했습니다",
+            detail="Relationship validation failed",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            errors=[issue.get("message") for issue in validation_result.get("errors") or []],
+            context={"relationship_validation": validation_result},
+        )
+        return JSONResponse(status_code=error_payload["http_status"], content=error_payload)
+    return None
+
+
 async def _ensure_database_exists(db_name: str, terminus: AsyncTerminusService):
     """데이터베이스 존재 여부 확인 후 404 예외 발생"""
     # 데이터베이스 이름 보안 검증
@@ -257,15 +500,13 @@ async def create_ontology(
     command_status_service=CommandStatusServiceDep,
 ) -> ApiResponse:
     """내부 ID 기반 온톨로지 생성"""
-    # 🔥 ULTRA DEBUG! OMS received data
-    
     try:
         enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
         branch = validate_branch_name(branch)
         _reject_direct_write_if_required(branch)
         lang = get_accept_language(request)
 
-        # 🔥 FIXED: 데이터베이스 존재 확인 (dependency 제거로 인해 수동 처리)
+        # 데이터베이스 존재 확인 (dependency 제거로 인해 수동 처리)
         db_name = validate_db_name(db_name)
         if not await terminus.database_exists(db_name):
             raise HTTPException(
@@ -298,11 +539,106 @@ async def create_ontology(
             select_localized_text(description_i18n, lang=lang) if description_i18n else None
         )
 
+        metadata_payload = (
+            ontology_data.get("metadata")
+            if isinstance(ontology_data.get("metadata"), dict)
+            else {}
+        )
+        expanded_properties, shared_prop_issues = await _apply_shared_properties(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            properties=list(ontology_request.properties or []),
+            metadata=metadata_payload,
+        )
+        if shared_prop_issues:
+            error_payload = build_error_envelope(
+                service_name="oms",
+                message="공유 속성(shared property) 적용에 실패했습니다",
+                detail="Shared property expansion failed",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                category=ErrorCategory.INPUT,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                errors=["Shared property expansion failed"],
+                context={"shared_property_issues": shared_prop_issues},
+            )
+            return JSONResponse(
+                status_code=error_payload["http_status"],
+                content=error_payload,
+            )
+
+        value_type_issues = await _validate_value_type_refs(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            properties=expanded_properties,
+        )
+        if value_type_issues:
+            issue_messages = [issue.get("message") for issue in value_type_issues]
+            error_payload = build_error_envelope(
+                service_name="oms",
+                message="값 타입(value type) 검증에 실패했습니다",
+                detail="Value type validation failed",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                category=ErrorCategory.INPUT,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                errors=issue_messages,
+                context={"value_type_issues": value_type_issues},
+            )
+            return JSONResponse(
+                status_code=error_payload["http_status"],
+                content=error_payload,
+            )
+
+        missing_groups = await _validate_group_refs(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            metadata=metadata_payload,
+        )
+        if missing_groups:
+            error_payload = build_error_envelope(
+                service_name="oms",
+                message="그룹(group) 참조를 찾을 수 없습니다",
+                detail="Group references not found",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                category=ErrorCategory.INPUT,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                errors=["Group references not found"],
+                context={"missing_groups": missing_groups},
+            )
+            return JSONResponse(
+                status_code=error_payload["http_status"],
+                content=error_payload,
+            )
+
+        missing_groups = await _validate_group_refs(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            metadata=metadata_payload,
+        )
+        if missing_groups:
+            error_payload = build_error_envelope(
+                service_name="oms",
+                message="그룹(group) 참조를 찾을 수 없습니다",
+                detail="Group references not found",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                category=ErrorCategory.INPUT,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                errors=["Group references not found"],
+                context={"missing_groups": missing_groups},
+            )
+            return JSONResponse(
+                status_code=error_payload["http_status"],
+                content=error_payload,
+            )
+
         lint_report = lint_ontology_create(
             class_id=str(ontology_data.get("id")),
             label=label_display,
             abstract=bool(ontology_data.get("abstract", False)),
-            properties=list(ontology_request.properties or []),
+            properties=expanded_properties,
             relationships=list(ontology_request.relationships or []),
             config=OntologyLinterConfig.from_env(branch=branch),
         )
@@ -323,18 +659,13 @@ async def create_ontology(
                 content=error_payload,
             )
 
-        metadata_payload = (
-            ontology_data.get("metadata")
-            if isinstance(ontology_data.get("metadata"), dict)
-            else {}
-        )
         interface_issues = await _collect_interface_issues(
             terminus=terminus,
             db_name=db_name,
             branch=branch,
             ontology_id=str(ontology_data.get("id") or ""),
             metadata=metadata_payload,
-            properties=list(ontology_request.properties or []),
+            properties=expanded_properties,
             relationships=list(ontology_request.relationships or []),
         )
         if interface_issues:
@@ -354,6 +685,10 @@ async def create_ontology(
                 content=error_payload,
             )
 
+        ontology_data["properties"] = [
+            p.model_dump() if hasattr(p, "model_dump") else p for p in expanded_properties
+        ]
+
         try:
             ontology_data = _PROPERTY_CONVERTER.process_class_data(ontology_data)
         except Exception as e:
@@ -362,6 +697,22 @@ async def create_ontology(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Failed to convert properties to relationships: {e}",
             )
+
+        relationship_payload = {
+            "id": ontology_data.get("id"),
+            "label": label_display or ontology_data.get("id"),
+            "properties": ontology_data.get("properties") or [],
+            "relationships": ontology_data.get("relationships") or [],
+        }
+        relationship_response = await _validate_relationships_gate(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            ontology_payload=relationship_payload,
+            enabled=_relationship_validation_enabled(),
+        )
+        if relationship_response:
+            return relationship_response
 
         if enable_event_sourcing:
             ontology_version = await resolve_ontology_version(
@@ -467,7 +818,7 @@ async def create_ontology(
         error_msg = f"Failed to create ontology: {e}"
         traceback_str = traceback.format_exc()
         
-        # 🔥 ULTRA! 에러 타입에 따른 적절한 HTTP 상태 코드 반환
+        # 에러 타입에 따른 적절한 HTTP 상태 코드 반환
         if isinstance(e, DuplicateOntologyError) or "DocumentIdAlreadyExists" in str(e):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -526,22 +877,42 @@ async def validate_ontology_create(
 
         label = _localized_to_string(raw_label, lang=lang) or class_id
 
+        metadata_payload = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        expanded_properties, shared_prop_issues = await _apply_shared_properties(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            properties=list(ontology_request.properties or []),
+            metadata=metadata_payload,
+        )
+        value_type_issues = await _validate_value_type_refs(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            properties=expanded_properties,
+        )
+        missing_groups = await _validate_group_refs(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            metadata=metadata_payload,
+        )
+
         lint_report = lint_ontology_create(
             class_id=class_id,
             label=label,
             abstract=bool(payload.get("abstract", False)),
-            properties=list(ontology_request.properties or []),
+            properties=expanded_properties,
             relationships=list(ontology_request.relationships or []),
             config=OntologyLinterConfig.from_env(branch=branch),
         )
-        metadata_payload = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
         interface_issues = await _collect_interface_issues(
             terminus=terminus,
             db_name=db_name,
             branch=branch,
             ontology_id=class_id,
             metadata=metadata_payload,
-            properties=list(ontology_request.properties or []),
+            properties=expanded_properties,
             relationships=list(ontology_request.relationships or []),
         )
         return ApiResponse.success(
@@ -553,6 +924,9 @@ async def validate_ontology_create(
                 "id_generated": id_generated,
                 "lint_report": lint_report.model_dump(),
                 "interface_issues": interface_issues,
+                "shared_property_issues": shared_prop_issues,
+                "value_type_issues": value_type_issues,
+                "missing_groups": missing_groups,
             },
         ).to_dict()
     except SecurityViolationError as e:
@@ -600,18 +974,43 @@ async def validate_ontology_update(
         raw_label = patch.get("label") if "label" in patch else existing.label
         label = _localized_to_string(raw_label, lang=lang) or str(existing.label)
 
+        if "metadata" in patch:
+            metadata_payload = patch.get("metadata") if isinstance(patch.get("metadata"), dict) else {}
+        else:
+            metadata_payload = existing.metadata if isinstance(existing.metadata, dict) else {}
+
+        expanded_properties, shared_prop_issues = await _apply_shared_properties(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            properties=list(updated_properties or []),
+            metadata=metadata_payload,
+        )
+        value_type_issues = await _validate_value_type_refs(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            properties=expanded_properties,
+        )
+        missing_groups = await _validate_group_refs(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            metadata=metadata_payload,
+        )
+
         baseline = lint_ontology_create(
             class_id=class_id,
             label=label,
             abstract=bool(updated_abstract),
-            properties=list(updated_properties or []),
+            properties=expanded_properties,
             relationships=list(updated_relationships or []),
             config=OntologyLinterConfig.from_env(branch=branch),
         )
         diff = lint_ontology_update(
             existing_properties=list(existing.properties or []),
             existing_relationships=list(existing.relationships or []),
-            updated_properties=list(updated_properties or []),
+            updated_properties=expanded_properties,
             updated_relationships=list(updated_relationships or []),
             config=OntologyLinterConfig.from_env(branch=branch),
         )
@@ -620,18 +1019,13 @@ async def validate_ontology_update(
         high_risk = any((issue.rule_id or "").startswith("ONT9") for issue in diff.warnings or [])
         protected_branch = _is_protected_branch(branch)
 
-        if "metadata" in patch:
-            metadata_payload = patch.get("metadata") if isinstance(patch.get("metadata"), dict) else {}
-        else:
-            metadata_payload = existing.metadata if isinstance(existing.metadata, dict) else {}
-
         interface_issues = await _collect_interface_issues(
             terminus=terminus,
             db_name=db_name,
             branch=branch,
             ontology_id=class_id,
             metadata=metadata_payload,
-            properties=list(updated_properties or []),
+            properties=expanded_properties,
             relationships=list(updated_relationships or []),
         )
 
@@ -647,6 +1041,9 @@ async def validate_ontology_update(
                 "lint_report_create": baseline.model_dump(),
                 "lint_report_diff": diff.model_dump(),
                 "interface_issues": interface_issues,
+                "shared_property_issues": shared_prop_issues,
+                "value_type_issues": value_type_issues,
+                "missing_groups": missing_groups,
             },
         ).to_dict()
     except SecurityViolationError as e:
@@ -687,14 +1084,28 @@ async def list_ontologies(
             )
 
         # TerminusDB에서 조회 (branch-aware)
-        ontologies = await terminus.get_ontology(db_name, branch=branch)
+        effective_limit = limit if limit is not None else 1000
+        ontologies = await terminus.get_ontology(
+            db_name,
+            class_id=None,
+            raise_if_missing=False,
+            branch=branch,
+        )
+        if ontologies:
+            ontologies = ontologies[offset : offset + effective_limit]
+        else:
+            ontologies = []
 
         # 레이블 적용 (다국어 지원)
         labeled_ontologies = []
         if ontologies:
             try:
+                normalized_ontologies = [
+                    item.model_dump(mode="json") if hasattr(item, "model_dump") else item
+                    for item in ontologies
+                ]
                 labeled_ontologies = await label_mapper.convert_to_display_batch(
-                    db_name, ontologies, "ko"
+                    db_name, normalized_ontologies, "ko"
                 )
             except Exception as e:
                 logger.warning(f"Failed to apply labels: {e}")
@@ -897,18 +1308,120 @@ async def update_ontology(
         else:
             label_for_lint = select_localized_text(existing.label, lang=lang) or class_id
 
+        if "metadata" in sanitized_data:
+            metadata_payload = (
+                sanitized_data.get("metadata")
+                if isinstance(sanitized_data.get("metadata"), dict)
+                else {}
+            )
+        else:
+            metadata_payload = existing.metadata if isinstance(existing.metadata, dict) else {}
+
+        expanded_properties, shared_prop_issues = await _apply_shared_properties(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            properties=list(updated_properties or []),
+            metadata=metadata_payload,
+        )
+        if shared_prop_issues:
+            error_payload = build_error_envelope(
+                service_name="oms",
+                message="공유 속성(shared property) 적용에 실패했습니다",
+                detail="Shared property expansion failed",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                category=ErrorCategory.INPUT,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                errors=["Shared property expansion failed"],
+                context={"shared_property_issues": shared_prop_issues},
+            )
+            return JSONResponse(
+                status_code=error_payload["http_status"],
+                content=error_payload,
+            )
+
+        value_type_issues = await _validate_value_type_refs(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            properties=expanded_properties,
+        )
+        if value_type_issues:
+            issue_messages = [issue.get("message") for issue in value_type_issues]
+            error_payload = build_error_envelope(
+                service_name="oms",
+                message="값 타입(value type) 검증에 실패했습니다",
+                detail="Value type validation failed",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                category=ErrorCategory.INPUT,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                errors=issue_messages,
+                context={"value_type_issues": value_type_issues},
+            )
+            return JSONResponse(
+                status_code=error_payload["http_status"],
+                content=error_payload,
+            )
+
+        missing_groups = await _validate_group_refs(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            metadata=metadata_payload,
+        )
+        if missing_groups:
+            error_payload = build_error_envelope(
+                service_name="oms",
+                message="그룹(group) 참조를 찾을 수 없습니다",
+                detail="Group references not found",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                category=ErrorCategory.INPUT,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                errors=["Group references not found"],
+                context={"missing_groups": missing_groups},
+            )
+            return JSONResponse(
+                status_code=error_payload["http_status"],
+                content=error_payload,
+            )
+
+        converted_properties_raw = [
+            p.model_dump() if hasattr(p, "model_dump") else p for p in expanded_properties
+        ]
+        converted_relationships = list(updated_relationships or [])
+        if ontology_data.properties is not None or ontology_data.relationships is not None:
+            conversion_payload = {
+                "id": class_id,
+                "properties": converted_properties_raw,
+                "relationships": converted_relationships,
+            }
+            try:
+                converted = _PROPERTY_CONVERTER.process_class_data(conversion_payload)
+            except Exception as e:
+                logger.error("Property→relationship conversion failed: %s", e)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Failed to convert properties to relationships: {e}",
+                )
+            converted_properties_raw = converted.get("properties") or []
+            converted_relationships = converted.get("relationships") or []
+            expanded_properties = [
+                p if isinstance(p, Property) else Property(**p) for p in converted_properties_raw
+            ]
+            updated_relationships = converted_relationships
+
         baseline = lint_ontology_create(
             class_id=class_id,
             label=str(label_for_lint or class_id),
             abstract=bool(updated_abstract),
-            properties=list(updated_properties or []),
+            properties=expanded_properties,
             relationships=list(updated_relationships or []),
             config=OntologyLinterConfig.from_env(branch=branch),
         )
         diff = lint_ontology_update(
             existing_properties=list(existing.properties or []),
             existing_relationships=list(existing.relationships or []),
-            updated_properties=list(updated_properties or []),
+            updated_properties=expanded_properties,
             updated_relationships=list(updated_relationships or []),
             config=OntologyLinterConfig.from_env(branch=branch),
         )
@@ -931,22 +1444,13 @@ async def update_ontology(
                 content=error_payload,
             )
 
-        if "metadata" in sanitized_data:
-            metadata_payload = (
-                sanitized_data.get("metadata")
-                if isinstance(sanitized_data.get("metadata"), dict)
-                else {}
-            )
-        else:
-            metadata_payload = existing.metadata if isinstance(existing.metadata, dict) else {}
-
         interface_issues = await _collect_interface_issues(
             terminus=terminus,
             db_name=db_name,
             branch=branch,
             ontology_id=class_id,
             metadata=metadata_payload,
-            properties=list(updated_properties or []),
+            properties=expanded_properties,
             relationships=list(updated_relationships or []),
         )
         if interface_issues:
@@ -965,6 +1469,27 @@ async def update_ontology(
                 status_code=error_payload["http_status"],
                 content=error_payload,
             )
+
+        relationship_payload = {
+            "id": class_id,
+            "label": label_for_lint or class_id,
+            "properties": converted_properties_raw,
+            "relationships": converted_relationships,
+        }
+        relationship_response = await _validate_relationships_gate(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            ontology_payload=relationship_payload,
+            enabled=_relationship_validation_enabled(),
+        )
+        if relationship_response:
+            return relationship_response
+
+        shared_refs = _extract_shared_property_refs(metadata_payload)
+        if ontology_data.properties is not None or shared_refs:
+            sanitized_data["properties"] = converted_properties_raw
+            sanitized_data["relationships"] = converted_relationships
 
         protected_branch = _is_protected_branch(branch)
         high_risk = any((issue.rule_id or "").startswith("ONT9") for issue in diff.warnings or [])
@@ -1369,11 +1894,62 @@ async def create_ontology_with_advanced_relationships(
 
         label_display = select_localized_text(label_i18n, lang=lang) or str(ontology_data.get("id") or "Unknown")
 
+        metadata_payload = (
+            ontology_data.get("metadata")
+            if isinstance(ontology_data.get("metadata"), dict)
+            else {}
+        )
+        expanded_properties, shared_prop_issues = await _apply_shared_properties(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            properties=list(ontology_request.properties or []),
+            metadata=metadata_payload,
+        )
+        if shared_prop_issues:
+            error_payload = build_error_envelope(
+                service_name="oms",
+                message="공유 속성(shared property) 적용에 실패했습니다",
+                detail="Shared property expansion failed",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                category=ErrorCategory.INPUT,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                errors=["Shared property expansion failed"],
+                context={"shared_property_issues": shared_prop_issues},
+            )
+            return JSONResponse(
+                status_code=error_payload["http_status"],
+                content=error_payload,
+            )
+
+        value_type_issues = await _validate_value_type_refs(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            properties=expanded_properties,
+        )
+        if value_type_issues:
+            issue_messages = [issue.get("message") for issue in value_type_issues]
+            error_payload = build_error_envelope(
+                service_name="oms",
+                message="값 타입(value type) 검증에 실패했습니다",
+                detail="Value type validation failed",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                category=ErrorCategory.INPUT,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                errors=issue_messages,
+                context={"value_type_issues": value_type_issues},
+            )
+            return JSONResponse(
+                status_code=error_payload["http_status"],
+                content=error_payload,
+            )
+
         lint_report = lint_ontology_create(
             class_id=str(ontology_data.get("id")),
             label=label_display,
             abstract=bool(ontology_data.get("abstract", False)),
-            properties=list(ontology_request.properties or []),
+            properties=expanded_properties,
             relationships=list(ontology_request.relationships or []),
             config=OntologyLinterConfig.from_env(branch=branch),
         )
@@ -1394,18 +1970,13 @@ async def create_ontology_with_advanced_relationships(
                 content=error_payload,
             )
 
-        metadata_payload = (
-            ontology_data.get("metadata")
-            if isinstance(ontology_data.get("metadata"), dict)
-            else {}
-        )
         interface_issues = await _collect_interface_issues(
             terminus=terminus,
             db_name=db_name,
             branch=branch,
             ontology_id=str(ontology_data.get("id") or ""),
             metadata=metadata_payload,
-            properties=list(ontology_request.properties or []),
+            properties=expanded_properties,
             relationships=list(ontology_request.relationships or []),
         )
         if interface_issues:
@@ -1426,6 +1997,9 @@ async def create_ontology_with_advanced_relationships(
             )
 
         try:
+            ontology_data["properties"] = [
+                p.model_dump() if hasattr(p, "model_dump") else p for p in expanded_properties
+            ]
             ontology_data = _PROPERTY_CONVERTER.process_class_data(ontology_data)
         except Exception as e:
             logger.error("Property→relationship conversion failed: %s", e)
@@ -1433,6 +2007,26 @@ async def create_ontology_with_advanced_relationships(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Failed to convert properties to relationships: {e}",
             )
+
+        relationship_response = await _validate_relationships_gate(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            ontology_payload=ontology_data,
+            enabled=_relationship_validation_enabled(validate_relationships),
+        )
+        if relationship_response:
+            return relationship_response
+
+        relationship_response = await _validate_relationships_gate(
+            terminus=terminus,
+            db_name=db_name,
+            branch=branch,
+            ontology_payload=ontology_data,
+            enabled=_relationship_validation_enabled(),
+        )
+        if relationship_response:
+            return relationship_response
 
         if enable_event_sourcing:
             ontology_version = await resolve_ontology_version(

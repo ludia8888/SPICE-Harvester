@@ -28,6 +28,8 @@ class OntologyLinterConfig:
 
     require_primary_key: bool = True
     allow_implicit_primary_key: bool = True
+    require_title_key: bool = True
+    allow_implicit_title_key: bool = True
     block_event_like_class_names: bool = False
     enforce_snake_case_fields: bool = False
 
@@ -52,11 +54,25 @@ class OntologyLinterConfig:
                     return False
             return True
 
+        def _allow_implicit_title_key_default() -> bool:
+            if _is_production_env():
+                return False
+            if _requires_proposals() and branch:
+                protected = get_protected_branches()
+                if branch in protected:
+                    return False
+            return True
+
         return cls(
             require_primary_key=_truthy("ONTOLOGY_REQUIRE_PRIMARY_KEY", "true"),
             allow_implicit_primary_key=_truthy(
                 "ONTOLOGY_ALLOW_IMPLICIT_PRIMARY_KEY",
                 "true" if _allow_implicit_primary_key_default() else "false",
+            ),
+            require_title_key=_truthy("ONTOLOGY_REQUIRE_TITLE_KEY", "true"),
+            allow_implicit_title_key=_truthy(
+                "ONTOLOGY_ALLOW_IMPLICIT_TITLE_KEY",
+                "true" if _allow_implicit_title_key_default() else "false",
             ),
             block_event_like_class_names=_truthy("ONTOLOGY_BLOCK_EVENT_LIKE_CLASS", "false"),
             enforce_snake_case_fields=_truthy("ONTOLOGY_ENFORCE_SNAKE_CASE_FIELDS", "false"),
@@ -271,9 +287,95 @@ def lint_ontology_create(
                                 en="Choose one canonical identifier and set primary_key=true.",
                                 ko="가장 대표 식별자 1개에 primary_key=true를 지정하세요",
                             ),
-                            metadata={"id_like_fields": [p.name for p in id_like]},
-                        )
+                        metadata={"id_like_fields": [p.name for p in id_like]},
                     )
+                )
+
+    if cfg.require_title_key and not abstract:
+        expected_title = f"{class_id.lower()}_name"
+        explicit_title = [p for p in properties if getattr(p, "title_key", False)]
+        title_like = [
+            p
+            for p in properties
+            if p.name in {"name", "title", "label", expected_title} or p.name.endswith("_name")
+        ]
+
+        if len(explicit_title) > 1:
+            errors.append(
+                _issue(
+                    LintSeverity.ERROR,
+                    "ONT003",
+                    m(
+                        en="Multiple title_key fields detected. Only one display key is allowed.",
+                        ko="여러 개의 title_key가 지정되었습니다. 표시 키는 하나만 허용됩니다.",
+                    ),
+                    path="properties",
+                    suggestion=m(
+                        en="Choose a single title key (e.g., 'name') and set title_key=true on it.",
+                        ko="대표 표시 키 1개(예: 'name')만 title_key=true로 지정하세요.",
+                    ),
+                    metadata={"title_key_fields": [p.name for p in explicit_title]},
+                )
+            )
+        elif not explicit_title:
+            if not cfg.allow_implicit_title_key:
+                errors.append(
+                    _issue(
+                        LintSeverity.ERROR,
+                        "ONT003",
+                        m(
+                            en="Explicit title_key is required on protected/prod branches.",
+                            ko="보호/프로덕션 브랜치에서는 title_key를 명시해야 합니다.",
+                        ),
+                        path="properties",
+                        suggestion=m(
+                            en=f"Set title_key=true on '{expected_title}' or a display field.",
+                            ko=f"'{expected_title}' 등 표시용 필드에 title_key=true를 지정하세요.",
+                        ),
+                        rationale=m(
+                            en="Without a title key, objects render without a stable display name.",
+                            ko="title_key가 없으면 객체 표시 이름이 불안정해집니다.",
+                        ),
+                        metadata={"title_like_fields": [p.name for p in title_like]},
+                    )
+                )
+            elif not title_like:
+                errors.append(
+                    _issue(
+                        LintSeverity.ERROR,
+                        "ONT003",
+                        m(
+                            en="Missing title key field. Objects need a stable display name.",
+                            ko="title key 속성이 없습니다. 객체 표시 이름이 필요합니다.",
+                        ),
+                        path="properties",
+                        suggestion=m(
+                            en="Add a 'name' (xsd:string) property or set title_key=true.",
+                            ko="'name'(xsd:string) 속성을 추가하거나 title_key=true를 지정하세요.",
+                        ),
+                        rationale=m(
+                            en="UI/object views depend on a stable display name.",
+                            ko="UI/객체 뷰는 안정적인 표시 이름에 의존합니다.",
+                        ),
+                    )
+                )
+            else:
+                warnings.append(
+                    _issue(
+                        LintSeverity.WARNING,
+                        "ONT004",
+                        m(
+                            en="Implicit title key accepted in dev. Declare title_key explicitly for production.",
+                            ko="개발 환경에서는 암묵적 title key를 허용하지만, 프로덕션에서는 title_key를 명시하세요.",
+                        ),
+                        path="properties",
+                        suggestion=m(
+                            en="Choose one display field and set title_key=true.",
+                            ko="대표 표시 필드 1개에 title_key=true를 지정하세요.",
+                        ),
+                        metadata={"title_like_fields": [p.name for p in title_like]},
+                    )
+                )
 
     triggers = list({*(_event_like_triggers(label)), *(_event_like_triggers(class_id))})
     if triggers:

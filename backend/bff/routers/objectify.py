@@ -181,6 +181,8 @@ def _resolve_import_type(raw_type: Any) -> Optional[str]:
     lowered = raw.lower()
     if lowered.startswith("xsd:"):
         return raw
+    if lowered.startswith("sys:"):
+        return raw
     supported = {
         "string",
         "text",
@@ -203,6 +205,18 @@ def _resolve_import_type(raw_type: Any) -> Optional[str]:
         "ip",
         "phone",
         "json",
+        "array",
+        "struct",
+        "object",
+        "vector",
+        "geopoint",
+        "geoshape",
+        "marking",
+        "cipher",
+        "attachment",
+        "media",
+        "time_series",
+        "timeseries",
     }
     if lowered not in supported:
         return None
@@ -354,7 +368,18 @@ async def create_mapping_spec(
         for target in mapped_targets:
             prop = prop_map.get(target) or {}
             raw_type = prop.get("type") or prop.get("data_type") or prop.get("datatype")
-            if raw_type in {"link", "array"}:
+            is_relationship = bool(
+                raw_type == "link"
+                or prop.get("isRelationship")
+                or prop.get("target")
+                or prop.get("linkTarget")
+            )
+            items = prop.get("items") if isinstance(prop, dict) else None
+            if isinstance(items, dict):
+                item_type = items.get("type")
+                if item_type == "link" and (items.get("target") or items.get("linkTarget")):
+                    is_relationship = True
+            if is_relationship:
                 unsupported_types.append(target)
                 continue
             import_type = _resolve_import_type(raw_type)
