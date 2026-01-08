@@ -1,5 +1,7 @@
 # Backend Method Index
 
+> Status: Auto-generated snapshot. It may be stale; regenerate from source if you need an up-to-date index.
+
 > Generated: 2026-01-05T10:15:01.826369Z
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 

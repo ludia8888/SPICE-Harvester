@@ -11,7 +11,7 @@ pip install confluent-kafka
 
 2. 환경 변수 설정 (선택사항):
 ```bash
-export KAFKA_BOOTSTRAP_SERVERS=localhost:9092
+export KAFKA_BOOTSTRAP_SERVERS=localhost:39092
 ```
 
 3. 컨슈머 실행:

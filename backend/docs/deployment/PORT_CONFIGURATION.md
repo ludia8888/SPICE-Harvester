@@ -1,5 +1,7 @@
 # 🔥 SPICE HARVESTER Port Configuration Guide
 
+> Updated: 2026-01-08
+
 ## Overview
 All service ports are now centrally configured through environment variables, eliminating hardcoded port conflicts.
 
@@ -37,27 +39,6 @@ oms_url = ServiceConfig.get_oms_url()  # Returns http://localhost:8000 or $OMS_B
 bff_url = ServiceConfig.get_bff_url()  # Returns http://localhost:8002 or $BFF_BASE_URL
 funnel_url = ServiceConfig.get_funnel_url()  # Returns http://localhost:8003 or $FUNNEL_BASE_URL
 ```
-
-## Changes Made
-
-### OMS (oms/main.py)
-- Changed from hardcoded `port=8001` to `port=ServiceConfig.get_oms_port()`
-- Now uses port 8000 by default (matching all tests and scripts)
-
-### BFF (bff/main.py)
-- Changed from hardcoded `port=8002` to `port=ServiceConfig.get_bff_port()`
-- OMS client initialization now uses `ServiceConfig.get_oms_url()`
-
-### BFF OMS Client (bff/services/oms_client.py)
-- Changed from hardcoded `"http://localhost:8000"` to `ServiceConfig.get_oms_url()`
-- Automatically picks up OMS_BASE_URL or constructs from OMS_HOST/OMS_PORT
-
-### Test Configuration (test_config.py)
-- Now uses ServiceConfig as fallback for all URLs
-- TEST_* environment variables still take precedence for test overrides
-
-### Funnel Data Processor
-- Changed from hardcoded BFF URL to `ServiceConfig.get_bff_url()`
 
 ## Running Services
 

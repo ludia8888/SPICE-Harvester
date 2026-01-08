@@ -8,13 +8,31 @@ Google Sheets를 SPICE HARVESTER 온톨로지 시스템과 연동하는 커넥�
 - **데이터 미리보기**: 컬럼 헤더와 샘플 데이터 추출
 - **동기화 런타임 분리**: Trigger(변경 감지) + Sync Worker(반영)로 확장 가능하게 분리
 - **다국어 지원**: 한국어, 영어, 일본어, 중국어 시트 이름 처리
-- **보안**: 공개 시트만 접근 (OAuth2는 향후 지원 예정)
+- **보안**: 공개 시트는 API key 없이, 비공개 시트는 OAuth2 연결로 접근
 
 ## 📋 API 엔드포인트
 
 > 기준: **BFF** 서비스(`http://localhost:8002`)에 노출된 Google Sheets 커넥터 API입니다.
 
-### 1) 시트 미리보기 (URL 기반; Funnel/프론트 공용)
+### 0) OAuth (비공개 시트용)
+
+```bash
+POST /api/v1/data-connectors/google-sheets/oauth/start
+GET  /api/v1/data-connectors/google-sheets/oauth/callback
+GET  /api/v1/data-connectors/google-sheets/connections
+DELETE /api/v1/data-connectors/google-sheets/connections/{connection_id}
+```
+
+OAuth 없이도 공개 시트는 미리보기/등록이 가능합니다.
+
+### 1) 시트 목록/워크시트 조회
+
+```bash
+GET /api/v1/data-connectors/google-sheets/drive/spreadsheets
+GET /api/v1/data-connectors/google-sheets/spreadsheets/{sheet_id}/worksheets
+```
+
+### 2) 시트 미리보기 (URL 기반; Funnel/프론트 공용)
 
 ```bash
 POST /api/v1/data-connectors/google-sheets/preview
@@ -66,7 +84,7 @@ POST /api/v1/data-connectors/google-sheets/grid
 }
 ```
 
-### 2) 시트 등록 (Sync 대상 등록)
+### 3) 시트 등록 (Sync 대상 등록)
 
 ```bash
 POST /api/v1/data-connectors/google-sheets/register
@@ -101,19 +119,25 @@ POST /api/v1/data-connectors/google-sheets/register
 - **매핑이 확정된 경우에만**(`database_name` + `class_label` 등) Sync Worker가 데이터를 fetch/normalize한 뒤 BFF의 bulk-create 커맨드를 제출합니다.
 - 변경 감지는 Trigger 서비스가 수행하고, 이벤트는 Kafka `connector-updates`(EventEnvelope)로 통일됩니다.
 
-### 3) 등록된 시트 목록
+### 4) 시트 파이프라인 시작 (등록된 시트)
+
+```bash
+POST /api/v1/data-connectors/google-sheets/{sheet_id}/start-pipelining
+```
+
+### 5) 등록된 시트 목록
 
 ```bash
 GET /api/v1/data-connectors/google-sheets/registered
 ```
 
-### 4) 등록된 시트 미리보기 (sheet_id 기반)
+### 6) 등록된 시트 미리보기 (sheet_id 기반)
 
 ```bash
 GET /api/v1/data-connectors/google-sheets/{sheet_id}/preview
 ```
 
-### 5) 시트 등록 해제
+### 7) 시트 등록 해제
 
 ```bash
 DELETE /api/v1/data-connectors/google-sheets/{sheet_id}

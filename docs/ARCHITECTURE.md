@@ -6,11 +6,13 @@
 
 ## 0) TL;DR
 
-- **BFF가 유일한 프론트 API 계약**이며 OMS/Funnel/Workers로 라우팅한다.
+- **BFF가 유일한 프론트 API 계약**이며 OMS/Funnel/Registry/Pipeline/Objectify로 라우팅한다.
 - **Event Store(S3/MinIO)가 Write SSoT**이고, Kafka는 transport다.
-- **Control Plane은 Postgres**(proposal/approval/deploy/registry/outbox/processed_event_registry).
+- **Control Plane은 Postgres**(dataset/pipeline/objectify registry, proposal/approval/deploy, gate results, outbox, processed_event_registry).
 - **Ontology 정의는 TerminusDB**, 데이터 아티팩트는 **lakeFS + MinIO**, 검색은 **Elasticsearch**.
-- **Outbox + Reconciler**로 dataset/objectify 등의 내구성을 확보한다.
+- **Outbox + Reconciler**로 dataset/objectify 작업 내구성을 확보한다.
+- **Relationship indexing + link edits overlay**로 그래프 관계와 수정을 분리 관리한다.
+- **Audit/Lineage는 Postgres에 저장되고 BFF로 조회된다**.
 
 ---
 
@@ -53,6 +55,7 @@ graph TD
   UI --> BFF
   BFF --> OMS
   BFF --> FUNNEL
+  BFF --> LFS
 
   OMS --> TDB
   OMS --> PG
@@ -75,7 +78,12 @@ graph TD
   SPW --> ES
 
   PLW --> LFS
+  PLW --> PG
   OBJ --> LFS
+  OBJ --> PG
+  PLS --> PG
+  PLS --> KAF
+  ING --> PG
 
   CTS --> PG
   CTS --> KAF
@@ -87,6 +95,24 @@ graph TD
 ```
 
 **Note**: BFF 내부에서 `dataset_ingest_outbox_worker`와 `objectify_outbox_worker`가 함께 실행된다.
+
+---
+
+## 1.1) 서비스 역할 (현재 구현)
+
+- **BFF**: 단일 API gateway, auth/rate limit, dataset ingest + pipeline/objectify orchestration, graph/query/lineage/audit, command status(HTTP+WS), admin tasks, AI/Context7.
+- **OMS**: ontology/branch/version/pull request/merge/rollback, async command 등록, 스키마 검증.
+- **Funnel**: 타입 추론/프로파일링(스키마/컬럼 분석).
+- **message-relay**: S3/MinIO Event Store tail → Kafka publish.
+- **ontology-worker**: ontology command 처리 → TerminusDB write + domain event.
+- **instance-worker**: instance command 처리 → TerminusDB write + link indexing + domain event.
+- **projection-worker**: domain event → ES projection (DLQ 포함).
+- **search-projection-worker**: 선택적 검색 인덱스 업데이트 (`ENABLE_SEARCH_PROJECTION`).
+- **pipeline-worker**: Spark 기반 변환 실행(Preview/Build/Deploy + 계약/expectations).
+- **pipeline-scheduler**: 스케줄 파이프라인 실행 트리거 → job queue.
+- **objectify-worker**: mapping spec → bulk instance 생성 + 관계 인덱싱 + edits overlay.
+- **ingest-reconciler-worker**: dataset ingest/outbox 상태 복구/재발행.
+- **connector-trigger-service / connector-sync-worker**: Google Sheets 변경 감지 → BFF ingest 호출.
 
 ---
 
@@ -137,19 +163,27 @@ sequenceDiagram
 
 ---
 
-## 4) Control Plane (Proposal/Approval/Deploy/Health)
+## 4) Control Plane (Registry/Proposal/Approval/Deploy/Health)
 
-### 4.1 Proposal/Approval
+### 4.1 Registries & Governance Specs
+
+- `dataset_registry` / `pipeline_registry` / `objectify_registry`가 데이터/파이프라인 실행 이력을 보존.
+- BackingDataSource/Version, KeySpec, MappingSpec, Schema Migration Plan을 Postgres에 기록.
+- Gate Policy/Result가 스키마/매핑/데이터 검증 결과를 축적한다.
+- Dataset/Objectify outbox가 비동기 작업을 내구적으로 트리거한다.
+- Access policy(행/컬럼 마스킹)는 dataset_registry에 저장되고 BFF 조회 경로에서 적용된다.
+
+### 4.2 Proposal/Approval
 
 - **Pull Request 서비스**가 Postgres(MVCC)로 proposal 상태를 관리.
 - 보호된 브랜치에서 direct write는 `409`로 차단된다.
 
-### 4.2 Deploy
+### 4.3 Deploy
 
 - `deployments_v2`에 `ontology_commit_id`, `snapshot_rid`, `gate_policy`, `health_summary` 고정.
 - **deploy outbox**가 후속 작업(캐시/알림/프로젝션)을 분리 처리.
 
-### 4.3 Health Gate
+### 4.4 Health Gate
 
 - Linter + 관계 검증 결과를 Postgres에 기록.
 - 동일 commit/policy 조합은 dedupe 가능.
@@ -163,10 +197,14 @@ sequenceDiagram
 - BFF에서 CSV/Excel/Media 업로드 처리.
 - **Idempotency Key 필수**: 동일 payload 재시도 시 중복 방지.
 - 업로드 → lakeFS commit → dataset registry 기록 → **outbox 발행** → (event store + lineage 기록).
+- ingest-reconciler가 stale ingest를 복구/정리한다.
 
 ### 5.2 Pipeline Build/Deploy
 
 - `pipeline-worker`가 Spark 기반 빌드 실행.
+- 지원 변환: filter/join/compute/rename/cast/dedupe/groupBy/aggregate/window/pivot/union 등.
+- expectations(not_null 등) 기반 데이터 품질 체크를 지원한다.
+- 스키마 계약(schema contract) 위반이나 타입 미스매치는 빌드 게이트에서 차단.
 - build/preview 결과는 **PipelineRegistry**에 기록.
 - Deploy 시 lakeFS merge + dataset version 등록 + lineage 기록.
 
@@ -186,15 +224,25 @@ sequenceDiagram
 
 ---
 
-## 7) Read/Query Path
+## 7) Relationship Indexing & Link Edits
+
+- LinkType/RelationshipSpec은 온톨로지 리소스로 저장된다.
+- 인덱싱 파이프라인이 FK/조인 테이블 입력을 그래프 엣지로 반영한다.
+- dangling policy(WARN/FAIL) 기반으로 인덱싱 상태/통계를 기록한다.
+- Link edits(override)는 별도 레이어로 저장되며 reindex 시 반영될 수 있다.
+
+---
+
+## 8) Read/Query Path
 
 - **Elasticsearch projection**이 기본 조회 경로.
 - ES 장애 시 OMS/TerminusDB로 **fallback**한다.
 - Graph query는 WOQL 기반 schema traversal + ES document fetch를 결합한다.
+- Access policy에 따라 결과가 마스킹/필터링될 수 있다.
 
 ---
 
-## 8) Consistency & Idempotency
+## 9) Consistency & Idempotency
 
 - `AggregateSequenceAllocator` (Postgres)로 **expected_seq** 보장.
 - `ProcessedEventRegistry`로 worker idempotency + ordering 보장.
@@ -203,24 +251,26 @@ sequenceDiagram
 
 ---
 
-## 9) Observability & Security
+## 10) Observability & Security
 
 - Prometheus metrics + OpenTelemetry tracing.
 - Error normalization (`shared/errors/error_response.py`).
 - Input sanitizer로 SQL/XSS/NoSQL 주입 차단.
 - Rate limiting (Redis token bucket + local fallback).
 - `/api/v1/monitoring`, `/api/v1/config` 로 상태/설정 모니터링 제공.
+- Admin 전용 replay/recompute/trace 작업 엔드포인트가 존재한다 (`backend/bff/routers/admin.py`).
+- Audit logs(해시 체인) + lineage graph가 Postgres에 저장되며 BFF API로 조회 가능하다.
 
 ---
 
-## 10) Runtime / Local
+## 11) Runtime / Local
 
 - 권장 실행: `docker-compose.full.yml`.
 - 구성 요소: terminusdb, postgres, kafka, minio, lakefs, bff, oms, funnel, workers.
 
 ---
 
-## 11) 코드 네비게이션
+## 12) 코드 네비게이션
 
 - `backend/bff/` : API contract + aggregation
 - `backend/oms/` : TerminusDB + ontology control
@@ -228,4 +278,6 @@ sequenceDiagram
 - `backend/*_worker/` : async command execution + projection
 - `backend/message_relay/` : S3 event tail → Kafka publish
 - `backend/funnel/` : type inference + structure analysis
-
+- `backend/pipeline_worker/` : Spark transforms + dataset artifacts
+- `backend/objectify_worker/` : mapping spec → ontology instances
+- `backend/connector_trigger_service/`, `backend/connector_sync_worker/` : connector ingest flow

@@ -1,5 +1,5 @@
 # Kafka Broker Configuration for Production
-## THINK ULTRA³ - Event Sourcing + CQRS with Exactly-Once Semantics
+## Event Sourcing + CQRS with At-Least-Once Delivery
 
 This document describes the required Kafka broker configuration for SPICE HARVESTER production deployment.
 
@@ -25,14 +25,10 @@ min.insync.replicas=2
 # Enable automatic leader election
 unclean.leader.election.enable=false
 
-############################# Exactly-Once Semantics #############################
-# Enable idempotent and transactional producers
-transaction.state.log.replication.factor=3
-transaction.state.log.min.isr=2
-
-# Transaction timeout
-transaction.max.timeout.ms=900000  # 15 minutes
-transaction.abort.timed.out.transaction.cleanup.interval.ms=60000  # 1 minute
+############################# Delivery Semantics #############################
+# At-least-once delivery; consumers are idempotent via processed_events.
+# Enable idempotent producers if you operate a multi-broker cluster.
+# transaction.* settings are optional and depend on your Kafka deployment.
 
 ############################# Log Retention #############################
 log.retention.hours=168  # 7 days
@@ -160,8 +156,8 @@ log.dirs=/var/kafka-logs-3
 - Guarantees no data loss (may impact availability)
 
 ### 3. **transaction.state.log.min.isr=2**
-- Ensures transactional state is replicated
-- Critical for exactly-once semantics
+- Required only if you enable Kafka transactions
+- Not required for SPICE HARVESTER correctness (handled by idempotent consumers)
 
 ### 4. **compression.type=snappy**
 - Balance between compression ratio and CPU usage

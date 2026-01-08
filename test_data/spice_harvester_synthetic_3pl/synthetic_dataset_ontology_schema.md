@@ -1,5 +1,7 @@
 # Synthetic Dataset Ontology Schema for SPICE HARVESTER
 
+> Status: Sample data/schema used for synthetic tests. Not a production contract.
+
 ## 1. Purpose
 This ontology schema is designed to test the SPICE HARVESTER's ability to process and infer insights from synthetic supply chain data across multiple entities and relationships.
 

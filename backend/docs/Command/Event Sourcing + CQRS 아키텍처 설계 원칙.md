@@ -1,7 +1,8 @@
 # 아키텍처 설계 원칙: Event Sourcing + CQRS
 
-> NOTE (2025-12): 현재 실사용 경로는 **S3/MinIO Event Store(SSoT) + EventPublisher(S3 tail → Kafka)** 이며, PostgreSQL은 **`processed_events`(멱등 레지스트리) + write-side seq allocator** 용도로만 사용합니다.  
-> 멱등/순서 계약은 `docs/IDEMPOTENCY_CONTRACT.md`를 기준으로 합니다.
+> NOTE (2026-01): 현재 실사용 경로는 **S3/MinIO Event Store(SSoT) + EventPublisher(S3 tail → Kafka)** 입니다.  
+> PostgreSQL은 **`processed_events`/`aggregate_versions`** 외에도 **registry/outbox/gate** 등 control plane을 담당합니다.  
+> 이 문서는 인스턴스 write path 중심이며, data plane은 `docs/ARCHITECTURE.md`를 참고하세요.
 
 ## 1. 개요
 
@@ -18,7 +19,8 @@
 ```mermaid
 graph TD
     subgraph "API 계층 (BFF/OMS)"
-        A[API Endpoint] -->|1. Command 생성| B(OMS)
+        A[Client] --> BFF[BFF]
+        BFF -->|1. Async Command| B(OMS)
         B -->|2. Append Command Event (SSoT)| C[S3/MinIO Event Store]
     end
 
@@ -47,11 +49,12 @@ graph TD
 
 | 컴포넌트 | 역할 | 핵심 기술 |
 | :--- | :--- | :--- |
+| **BFF** | 클라이언트 요청을 받아 OMS/Funnel/Registry로 라우팅하고 async write 상태를 제공 | FastAPI |
 | **OMS** | 사용자의 요청(Command)을 검증하고 `EventEnvelope(kind=command)`로 **Event Store에 append** 합니다. | FastAPI, S3/MinIO |
 | **EventPublisher (message_relay)** | Event Store의 인덱스를 tail 하여 Kafka로 전달합니다. (Publisher/Kafka는 at-least-once) | `asyncio`, `aioboto3`, `confluent-kafka` |
 | **Instance Worker** | **쓰기 모델(Write Model)**의 핵심. Kafka에서 커맨드를 받아 실제 데이터 변경 작업을 수행합니다. | `confluent-kafka`, `boto3` |
 | **S3 (MinIO)** | **이벤트 저장소(Event Store)**. 모든 인스턴스 커맨드의 원본 로그를 불변의 상태로 영구 저장하는 **진실의 원천(Source of Truth)** 입니다. | S3 API |
-| **TerminusDB** | 인스턴스의 **최신 상태를 저장하는 캐시** 역할을 하는 쓰기 모델의 일부입니다. 빠른 직접 조회를 지원합니다. | Graph DB |
+| **TerminusDB** | 인스턴스의 **현재 그래프 상태**를 저장하는 쓰기 모델입니다. | Graph DB |
 | **Projection Worker** | **읽기 모델(Read Model)**을 생성하는 역할. 도메인 이벤트를 구독하여 검색에 최적화된 문서를 Elasticsearch에 저장(Projection)합니다. | `confluent-kafka`, `elasticsearch-py` |
 | **Elasticsearch** | 검색 및 목록 조회에 특화된 고성능 읽기 모델입니다. | Search Engine |
 | **PostgreSQL Registry** | `processed_events` / `aggregate_versions`로 멱등+순서(aggregate seq)를 강제합니다. | PostgreSQL |
@@ -60,9 +63,9 @@ graph TD
 
 ## 3. 데이터 흐름: 인스턴스 생성의 생명주기
 
-1.  **Command 생성 및 저장 (at OMS)**
-    -   사용자가 인스턴스 생성 API (`/instances/{db_name}/async/{class_id}/create`)를 호출합니다.
-    -   `InstanceCommand` 객체가 생성됩니다.
+1.  **Command 생성 및 저장 (at BFF/OMS)**
+    -   사용자가 인스턴스 생성 API (`/api/v1/instances/{db_name}/async/{class_id}/create`)를 호출합니다.
+    -   BFF가 OMS async write API로 전달합니다.
     -   OMS가 이 커맨드를 `EventEnvelope(kind=command)`로 **S3/MinIO Event Store(SSoT)에 append** 합니다. 이 시점에서 클라이언트에게는 `202 Accepted`와 함께 `command_id`가 즉시 반환됩니다.
 
 2.  **Command 발행 (at EventPublisher)**

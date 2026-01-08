@@ -1,4 +1,6 @@
 # 🔍 Issues Found & Fixed (Historical)
+> Status: Historical snapshot. Content reflects the state at the time it was written and may be outdated.
+
 
 > Originally written: 2024-11-14  
 > Updated: 2025-12-17 (steady-state doc refresh)

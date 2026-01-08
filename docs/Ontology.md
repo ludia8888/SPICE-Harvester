@@ -1,4 +1,7 @@
-알겠습니다, 시현님. 아래는 팔란티어 Foundry 문서에 나온 정의/제약만으로, “온톨로지 타입(설계도 부품들)”, “프로퍼티 기본 데이터 타입(Base types)”, “Value type(의미 래퍼)”를 끝까지 분해해서 설명한 것입니다.
+> Updated: 2026-01-08  
+> Status: Foundry reference notes. 이 문서는 SPICE HARVESTER의 현재 구현을 설명하지 않습니다.
+
+아래는 팔란티어 Foundry 문서에 나온 정의/제약만으로, “온톨로지 타입(설계도 부품들)”, “프로퍼티 기본 데이터 타입(Base types)”, “Value type(의미 래퍼)”를 분해해서 설명한 것입니다.
 
 ⸻
 

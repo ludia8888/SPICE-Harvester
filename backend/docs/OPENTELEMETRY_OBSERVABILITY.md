@@ -1,5 +1,7 @@
 # OpenTelemetry Observability Implementation
 
+> Updated: 2026-01-08
+
 ## Overview
 
 Based on Context7 analysis recommendations, we've implemented comprehensive observability across all SPICE HARVESTER microservices using OpenTelemetry standards for distributed tracing and metrics collection.

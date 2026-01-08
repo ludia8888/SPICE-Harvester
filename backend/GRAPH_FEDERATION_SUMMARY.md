@@ -1,4 +1,6 @@
 # Graph Federation Implementation Summary
+> Status: Historical snapshot. Content reflects the state at the time it was written and may be outdated.
+
 ## THINK ULTRA³ - Multi-hop Query Architecture
 
 ### Overview

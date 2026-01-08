@@ -1,4 +1,5 @@
 # SPICE HARVESTER Performance Critical Improvements Test Results
+> Status: Historical snapshot. Content reflects the state at the time it was written and may be outdated.
 ## THINK ULTRA³ - Production Ready Event Sourcing + CQRS
 
 Date: 2024-08-12

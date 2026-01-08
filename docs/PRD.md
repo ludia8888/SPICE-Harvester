@@ -511,138 +511,138 @@ E. 재사용/교체(Reusability & Swap)
 
 ⸻
 
-구현 상태/증거 매트릭스 (Defined / Validated / Enforced / E2E)
+구현 상태/증거 매트릭스 (Defined / Validated / Enforced / Test Evidence)
 
-※ E2E는 실제 테스트 실행으로 재현된 항목만 “Proven”으로 표시.
+※ 아래 Test Evidence는 관련 테스트/경로가 존재함을 뜻합니다. 이 문서 업데이트 과정에서 테스트 실행은 수행하지 않았으며, 실제 실행 증거는 별도 로그/CI 기록으로 관리하세요.
 
 RQ-OD-001 BackingDataSource 연결 선언
 	•	Defined: `backend/shared/services/dataset_registry.py` (backing_datasources/backing_datasource_versions), `backend/bff/routers/governance.py`
 	•	Validated: `backend/oms/services/ontology_resource_validator.py` (object_type backing_source 필수), `backend/bff/routers/object_types.py` (_resolve_backing)
 	•	Enforced: `backend/objectify_worker/main.py` (object_type contract 필수 + pk_spec 검증)
-	•	E2E Proven: `backend/bff/tests/test_object_types_backing_retrieval.py` (backing datasource/version 조회), `backend/bff/tests/test_object_types_migration_gate.py` (swap/migration gate)
+	•	Test Evidence: `backend/bff/tests/test_object_types_backing_retrieval.py` (backing datasource/version 조회), `backend/bff/tests/test_object_types_migration_gate.py` (swap/migration gate)
 
 RQ-OD-002 PropertyMapping 자동/수동 매핑
 	•	Defined: `backend/shared/services/objectify_registry.py` (mapping spec 버전), `backend/bff/services/mapping_suggestion_service.py`
 	•	Validated: `backend/bff/routers/objectify.py` (source/target/type preflight + change_summary/impact_scope 기록), `backend/bff/routers/object_types.py` (auto_generate_mapping)
 	•	Enforced: `backend/objectify_worker/main.py` (mapping spec/필수 필드/타입 검증)
-	•	E2E Proven: `backend/bff/tests/test_objectify_mapping_spec_preflight.py` (change_summary), `backend/bff/tests/test_mapping_suggestion_service.py` (determinism)
+	•	Test Evidence: `backend/bff/tests/test_objectify_mapping_spec_preflight.py` (change_summary), `backend/bff/tests/test_mapping_suggestion_service.py` (determinism)
 
 RQ-OD-003 스키마 호환성 검증(하드게이트)
 	•	Defined: `backend/bff/routers/objectify.py` (허용 타입/캐스트)
 	•	Validated: `backend/bff/routers/objectify.py` (존재/타입 불일치 차단)
 	•	Enforced: `backend/objectify_worker/main.py` (MAPPING_SPEC_* 오류로 실패)
-	•	E2E Proven: `backend/bff/tests/test_objectify_mapping_spec_preflight.py` (type mismatch/unsupported detail 검증)
+	•	Test Evidence: `backend/bff/tests/test_objectify_mapping_spec_preflight.py` (type mismatch/unsupported detail 검증)
 
 RQ-OD-004 KeySpec 강제(Primary/Title)
 	•	Defined: `backend/shared/utils/key_spec.py`, `backend/shared/services/dataset_registry.py`
 	•	Validated: `backend/oms/services/ontology_resource_validator.py`, `backend/bff/routers/object_types.py`
 	•	Enforced: `backend/objectify_worker/main.py` (pk_spec/title_spec 필수)
-	•	E2E Proven: `backend/bff/tests/test_object_types_key_spec_required.py` (primary/title 필수)
+	•	Test Evidence: `backend/bff/tests/test_object_types_key_spec_required.py` (primary/title 필수)
 
 RQ-OD-005 PrimaryKey 유일성/결정성
 	•	Defined: `_scan_key_constraints` (`backend/objectify_worker/main.py`)
 	•	Validated: 동일 함수 내 PRIMARY_KEY_DUPLICATE/MISSING 검출
 	•	Enforced: validation_failed 시 objectify 실패 → write 0건
-	•	E2E Proven: `backend/tests/unit/workers/test_objectify_worker_pk_uniqueness.py` (중복 시 job 실패 + write 차단)
+	•	Test Evidence: `backend/tests/unit/workers/test_objectify_worker_pk_uniqueness.py` (중복 시 job 실패 + write 차단)
 
 RQ-OD-006 Indexing Pipeline 자동 연결
 	•	Defined: `backend/pipeline_worker/main.py` (_maybe_enqueue_objectify_job)
 	•	Validated: mapping_spec schema_hash 매칭 필수
 	•	Enforced: schema mismatch 시 job 미발행 + gate result 기록
-	•	E2E Proven: `backend/tests/unit/workers/test_pipeline_worker_objectify_auto_enqueue.py` (auto enqueue + schema gate), `backend/tests/unit/workers/test_objectify_worker_lineage_dataset_version.py` (dataset_version lineage), `make backend-prod-full` (core flow)
+	•	Test Evidence: `backend/tests/unit/workers/test_pipeline_worker_objectify_auto_enqueue.py` (auto enqueue + schema gate), `backend/tests/unit/workers/test_objectify_worker_lineage_dataset_version.py` (dataset_version lineage), `make backend-prod-full` (core flow)
 
 RQ-OD-007 스키마 변경 감지/마이그레이션 게이트
 	•	Defined: `backend/pipeline_worker/main.py` (schema_hash mismatch + schema_diff), `backend/shared/services/dataset_registry.py` (schema_migration_plans), `backend/bff/routers/governance.py`
 	•	Validated: object_type update 시 migration.approved 필수 (`backend/bff/routers/object_types.py`)
 	•	Enforced: gate result FAIL + auto index 차단
-	•	E2E Proven: `backend/tests/unit/workers/test_pipeline_worker_objectify_auto_enqueue.py` (schema_diff gate), `backend/bff/tests/test_object_types_migration_gate.py` (approval gate + plan)
+	•	Test Evidence: `backend/tests/unit/workers/test_pipeline_worker_objectify_auto_enqueue.py` (schema_diff gate), `backend/bff/tests/test_object_types_migration_gate.py` (approval gate + plan)
 
 RQ-OD-008 Writeback/Edits 마이그레이션 정책
 	•	Defined: `backend/shared/services/dataset_registry.py` (instance_edits, remap_instance_edits), `backend/instance_worker/main.py` (edit 기록)
 	•	Validated: pk 변경 시 reset_edits 또는 id_remap 없으면 409 (`backend/bff/routers/object_types.py`)
 	•	Enforced: reset_edits 시 편집 이력 삭제, id_remap 시 편집 재매핑
-	•	E2E Proven: `backend/tests/test_access_policy_link_indexing_e2e.py` (reset_edits gate), `backend/bff/tests/test_object_types_edit_migration.py` (move/drop/invalidate + id_remap plan)
+	•	Test Evidence: `backend/tests/test_access_policy_link_indexing_e2e.py` (reset_edits gate), `backend/bff/tests/test_object_types_edit_migration.py` (move/drop/invalidate + id_remap plan)
 
 RQ-RS-001 LinkType 1급 리소스
 	•	Defined: `backend/bff/routers/link_types.py`, `backend/oms/services/ontology_resource_validator.py`
 	•	Validated: link_type 필수 필드 + relationship_spec 필수 검증
 	•	Enforced: relationship_spec 미충족 시 4xx
-	•	E2E Proven: `backend/bff/tests/test_link_types_retrieval.py` (relationship_spec + index status), `make backend-prod-full` (OpenAPI smoke 경유)
+	•	Test Evidence: `backend/bff/tests/test_link_types_retrieval.py` (relationship_spec + index status), `make backend-prod-full` (OpenAPI smoke 경유)
 
 RQ-RS-002/003 FK/Join 관계 정의
 	•	Defined: `backend/bff/routers/link_types.py` (FK/Join spec)
 	•	Validated: 타입/컬럼 존재성/PK 호환성 검증
 	•	Enforced: mapping spec 생성 실패 → 링크 인덱싱 차단
-	•	E2E Proven: `backend/bff/tests/test_link_types_fk_validation.py` (FK 타입 검증), `backend/bff/tests/test_link_types_join_table_validation.py` (join 컬럼/타입 검증), `backend/tests/unit/workers/test_objectify_worker_link_index_dangling.py` (FK 매칭 링크 생성 + join dedupe)
+	•	Test Evidence: `backend/bff/tests/test_link_types_fk_validation.py` (FK 타입 검증), `backend/bff/tests/test_link_types_join_table_validation.py` (join 컬럼/타입 검증), `backend/tests/unit/workers/test_objectify_worker_link_index_dangling.py` (FK 매칭 링크 생성 + join dedupe)
 
 RQ-RS-004 JoinTable 자동 생성 옵션
 	•	Defined: `backend/bff/routers/link_types.py` (_ensure_join_dataset, auto_create)
 	•	Validated: join_dataset_name/branch/schema_hash 검증
 	•	Enforced: auto_create 활성 시 join dataset/version 자동 생성
-	•	E2E Proven: `backend/bff/tests/test_link_types_auto_join_table.py` (unit)
+	•	Test Evidence: `backend/bff/tests/test_link_types_auto_join_table.py` (unit)
 
 RQ-RS-005 Object-backed Link 지원
 	•	Defined: `backend/bff/routers/link_types.py` (ObjectBackedRelationshipSpec), `backend/oms/services/ontology_resource_validator.py`
 	•	Validated: relationship_object_type 필수 검증 + relationship backing resolve
 	•	Enforced: join table 검증/매핑 생성 실패 시 차단
-	•	E2E Proven: `backend/tests/unit/workers/test_objectify_worker_link_index_dangling.py` (object_backed 링크 생성/삭제 full_sync)
+	•	Test Evidence: `backend/tests/unit/workers/test_objectify_worker_link_index_dangling.py` (object_backed 링크 생성/삭제 full_sync)
 
 RQ-RS-006 RelationshipSpec 검증(하드게이트) 정책
 	•	Defined: `backend/oms/services/ontology_resource_validator.py` (_collect_relationship_spec_issues), `backend/bff/routers/link_types.py` (_build_mapping_request)
 	•	Validated: `backend/bff/routers/link_types.py` (필수 필드/컬럼/타입 검증), `backend/oms/services/ontology_resource_validator.py` (relationship_spec 필수/유형 검증)
 	•	Enforced: 검증 실패 시 4xx로 LinkType 생성/수정 차단 (`backend/bff/routers/link_types.py`)
-	•	E2E Proven: `backend/tests/unit/services/test_ontology_resource_validator.py` (relationship_spec 누락/유형/필수 필드)
+	•	Test Evidence: `backend/tests/unit/services/test_ontology_resource_validator.py` (relationship_spec 누락/유형/필수 필드)
 
 RQ-RS-007 LinkIndexing Pipeline
 	•	Defined: `backend/objectify_worker/main.py` (_run_link_index_job), `backend/shared/services/dataset_registry.py` (relationship_index_results, last_index_*)
 	•	Validated: pk/row key/relationship 값 검증 + 통계/라인리지 기록
 	•	Enforced: dangling_policy=FAIL 시 전체 실패 (0건) + status 기록
-	•	E2E Proven: `backend/tests/unit/workers/test_objectify_worker_link_index_dangling.py` (PASS/WARN/FAIL 기록 + lineage)
+	•	Test Evidence: `backend/tests/unit/workers/test_objectify_worker_link_index_dangling.py` (PASS/WARN/FAIL 기록 + lineage)
 
 RQ-RS-008 Dangling Reference 정책
 	•	Defined: link_index options.dangling_policy, relationship_index_results.stats
 	•	Validated: WARN/FAIL 분기 + 대상 인스턴스 존재성 확인 + dangling 통계 기록
 	•	Enforced: FAIL 시 전체 실패
-	•	E2E Proven: `backend/tests/unit/workers/test_objectify_worker_link_index_dangling.py` (WARN/FAIL 분기 + 통계 기록)
+	•	Test Evidence: `backend/tests/unit/workers/test_objectify_worker_link_index_dangling.py` (WARN/FAIL 분기 + 통계 기록)
 
 RQ-RS-009 링크 편집(override) 저장소
 	•	Defined: `backend/shared/services/dataset_registry.py` (link_edits), `backend/bff/routers/link_types.py` (edits API)
 	•	Validated: edits_enabled flag 확인
 	•	Enforced: `backend/objectify_worker/main.py` (ADD/REMOVE overlay 적용)
-	•	E2E Proven: `backend/bff/tests/test_link_types_link_edits.py` (edits API), `backend/tests/unit/workers/test_objectify_worker_link_index_dangling.py` (overlay 적용)
+	•	Test Evidence: `backend/bff/tests/test_link_types_link_edits.py` (edits API), `backend/tests/unit/workers/test_objectify_worker_link_index_dangling.py` (overlay 적용)
 
 RQ-SEP-001/003 계층 분리 + 자동 반영
 	•	Defined: DomainModel(ontology) ↔ DataContract(object_type + backing + mapping_spec) 분리
 	•	Validated: object_type spec 필수 필드 검증
 	•	Enforced: objectify/pipeline gate
-	•	E2E Proven: `backend/tests/unit/workers/test_pipeline_worker_objectify_auto_enqueue_nospark.py` (자동 enqueue + schema gate), `backend/tests/unit/workers/test_objectify_worker_lineage_dataset_version.py` (dataset_version lineage)
+	•	Test Evidence: `backend/tests/unit/workers/test_pipeline_worker_objectify_auto_enqueue_nospark.py` (자동 enqueue + schema gate), `backend/tests/unit/workers/test_objectify_worker_lineage_dataset_version.py` (dataset_version lineage)
 
 RQ-SEP-002 독립적 변경 관리(버전/브랜치/프로포절)
 	•	Defined: `backend/bff/routers/ontology_extensions.py` (ontology branch/proposal), `backend/shared/services/pipeline_registry.py` (proposal_status/fields), `backend/bff/routers/pipeline.py` (proposal submit/approve)
 	•	Validated: `backend/bff/routers/pipeline.py` (_pipeline_requires_proposal, protected branch gate), `backend/shared/utils/branch_utils.py`
 	•	Enforced: protected branch 업데이트/배포 시 승인된 proposal 없으면 409 (`backend/bff/routers/pipeline.py`)
-	•	E2E Proven: `backend/bff/tests/test_pipeline_proposal_governance.py` (unit), `backend/bff/tests/test_pipeline_router_helpers.py` (unit)
+	•	Test Evidence: `backend/bff/tests/test_pipeline_proposal_governance.py` (unit), `backend/bff/tests/test_pipeline_router_helpers.py` (unit)
 
 RQ-SEP-004 거버넌스/책임 분리(조직 역할 모델)
 	•	Defined: `backend/shared/services/pipeline_registry.py` (pipeline_permissions), `backend/bff/routers/database.py` (database_access roles)
 	•	Validated: `backend/bff/routers/pipeline.py` (_ensure_pipeline_permission), `backend/bff/routers/database.py` (Owner 체크)
 	•	Enforced: 권한 부족 시 403 (`backend/bff/routers/pipeline.py`, `backend/bff/routers/database.py`)
-	•	E2E Proven: `backend/bff/tests/test_pipeline_permissions_enforced.py` (unit)
+	•	Test Evidence: `backend/bff/tests/test_pipeline_permissions_enforced.py` (unit)
 
 RQ-SEP-005 AccessPolicy (행/컬럼 마스킹)
 	•	Defined: `backend/shared/services/dataset_registry.py` (access_policies), `backend/bff/routers/governance.py`
 	•	Validated: 정책 저장 시 DB/대상 검증
 	•	Enforced: `backend/bff/routers/query.py`, `backend/bff/routers/graph.py`, `backend/bff/routers/instances.py` (마스킹/필터 적용)
-	•	E2E Proven: `backend/tests/unit/utils/test_access_policy.py`, `backend/bff/tests/test_instances_access_policy.py`
+	•	Test Evidence: `backend/tests/unit/utils/test_access_policy.py`, `backend/bff/tests/test_instances_access_policy.py`
 
 RQ-SEP-006 호환 계층(마이그레이션/폴백) 제공
 	•	Defined: `backend/bff/routers/pipeline.py` (_detect_breaking_schema_changes), `backend/pipeline_worker/main.py` (schema_hash mismatch gate), `backend/shared/services/dataset_registry.py` (schema_migration_plans), `backend/bff/routers/object_types.py` (migration gate)
 	•	Validated: breaking schema change 탐지 + migration.approved 요구 (`backend/bff/routers/pipeline.py`, `backend/bff/routers/object_types.py`)
 	•	Enforced: REPLAY_REQUIRED/OBJECT_TYPE_MIGRATION_REQUIRED 409 + gate_result 기록 (`backend/bff/routers/pipeline.py`, `backend/pipeline_worker/main.py`, `backend/bff/routers/object_types.py`)
-	•	E2E Proven: `backend/bff/tests/test_pipeline_promotion_semantics.py` (unit)
+	•	Test Evidence: `backend/bff/tests/test_pipeline_promotion_semantics.py` (unit)
 
 RQ-SEP-007 확장성과 재사용성: 데이터 교체(Swap)와 파생 재사용
 	•	Defined: `backend/shared/services/dataset_registry.py` (backing_datasources/backing_datasource_versions), `backend/bff/routers/governance.py` (backing datasource APIs), `backend/bff/routers/object_types.py` (_resolve_backing)
 	•	Validated: backing datasource/version/schema_hash 검증 (`backend/bff/routers/object_types.py`)
 	•	Enforced: backing 변경 시 migration.approved 필요 + swap 후 objectify reindex enqueue (`backend/bff/routers/object_types.py`)
-	•	E2E Proven: `backend/bff/tests/test_object_types_swap_reindex.py` (swap 후 reindex enqueue)
+	•	Test Evidence: `backend/bff/tests/test_object_types_swap_reindex.py` (swap 후 reindex enqueue)

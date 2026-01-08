@@ -30,28 +30,39 @@ pip install -e ".[docs]"
 
 ### Services
 - **RedisService**: Redis client with connection pooling
-- **StorageService**: S3/MinIO storage operations (requires boto3)
+- **StorageService / EventStore**: S3/MinIO storage and event append/replay helpers
 - **ElasticsearchService**: Elasticsearch client wrapper
-- **CommandStatusService**: Command status tracking
+- **CommandStatusService**: Command status tracking (async writes)
 - **WebSocketService**: WebSocket connection management
 - **BackgroundTaskManager**: Background task lifecycle management
+- **ProcessedEventRegistry**: Idempotency + ordering guard for consumers
+- **AggregateSequenceAllocator**: expected_seq allocation for OCC
+- **DatasetRegistry / PipelineRegistry / ObjectifyRegistry**: control plane registries
+- **ConnectorRegistry**: connector sources/mappings/sync state
+- **LineageStore / AuditLogStore**: lineage graph + audit log persistence
+- **LakefsClient / LakefsStorageService**: lakeFS artifacts and versioned datasets
+- **Pipeline utilities**: definition/validation/locking/graph utils for Spark worker
 
 ### Models
-- Common data models (BaseResponse, ApiResponse, etc.)
-- Command models for CQRS pattern
-- Ontology models
-- Background task models
+- Common response models (BaseResponse, ApiResponse, error envelopes)
+- Command/event models for CQRS pattern
+- Ontology, relationship, link type models
+- Pipeline/dataset/objectify registry models
+- Background task + gate result models
 
 ### Validators
 - Email validation (requires email-validator)
 - Phone number validation (requires phonenumbers)
 - URL validation
-- Custom validators
+- Constraint validation (not_null, unique, range, etc.)
+- Ontology and relationship validators
 
 ### Utilities
 - ID generators
 - Label mappers
 - JSON-LD converters
+- Input sanitization + auth helpers
+- Key spec / mapping spec normalization helpers
 - Security utilities
 
 ## Dependencies

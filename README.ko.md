@@ -4,11 +4,18 @@
 
 ## 1) What it is (한 문단)
 
-SPICE HARVESTER는 **Event Sourcing + CQRS** 기반의 플랫폼으로, **온톨로지/관계 그래프(Triplestore/Graph)**는 TerminusDB에서, **문서 payload/검색**은 Elasticsearch에서 관리합니다. 그리고 Kafka의 **at-least-once** 전달(중복 발행/재전달/재시작/리플레이)이 발생해도 **side effect가 중복 적용되지 않도록** Postgres 기반 정합성 레이어(멱등/순서/OCC)를 강하게 보장합니다.
+SPICE HARVESTER는 **Event Sourcing + CQRS** 기반으로 아래를 결합한 플랫폼입니다:
+- **온톨로지/관계 그래프** (TerminusDB)
+- **검색/읽기 프로젝션** (Elasticsearch)
+- **데이터 플레인**: raw ingest → pipeline 변환 → objectify로 온톨로지 인스턴스 생성 (lakeFS + Spark pipeline worker)
+- **거버넌스 + lineage + audit**로 변경 이력을 추적 가능
+
+Kafka의 **at-least-once** 전달(중복 발행/재전달/재시작/리플레이)이 발생해도 **side effect가 중복 적용되지 않도록** Postgres 기반 정합성 레이어(멱등/순서/OCC)를 강하게 보장합니다.
 
 ## 2) Who it’s for / Use cases (누구를 위한가)
 
 - **지식 그래프/온톨로지**를 구축하려는 팀 (product ↔ supplier ↔ customer, 소유/의존/라인리지)
+- raw ingest부터 **ETL/정제 → 온톨로지 매핑 → 검색**까지 필요한 데이터 플랫폼 팀
 - 변경 이력/감사가 필수인 **데이터 거버넌스/플랫폼** 팀
 - “스프레드시트 중심” 운영 데이터를 **스키마 추론 → 매핑 → 임포트**로 온보딩하려는 팀
 - 여러 upstream을 통합하며 **재시도/중복**이 정상인 환경에서, 결과 동일성을 보장해야 하는 시스템
@@ -19,6 +26,23 @@ SPICE HARVESTER는 **Event Sourcing + CQRS** 기반의 플랫폼으로, **온톨
 - **Correctness-first**: `processed_events`(멱등 레지스트리) + `aggregate_versions`(순서/스테일 가드) + write-side OCC(`expected_seq`)를 코드/테스트로 고정
 - **Lineage-first**: event → artifact(ES/Terminus/S3 등) 연결을 1급으로 다뤄 “왜 이 데이터가 존재하나?”를 설명이 아니라 증명으로 전환
 - **Rebuildable**: ES/프로젝션은 “진실”이 아니라 materialized view이며, Event Store replay로 재구축 가능
+- **Data plane 분리**: lakeFS + dataset registry로 raw/cleaned 아티팩트를 그래프 스토어와 분리 관리
+
+## 3.1) 기능 전체 목록 (현재 구현)
+
+- **온톨로지/그래프**: 클래스/속성/관계 CRUD, 브랜치/병합/롤백, 질의, 관계 검증(OMS/BFF).
+- **관계 모델링**: LinkType + RelationshipSpec(FK/조인테이블/object-backed), dangling 정책, link edits overlay.
+- **거버넌스**: 보호 브랜치, proposal/승인, merge 체크, health gate, 객체/백킹 스키마 마이그레이션 계획.
+- **데이터 플레인 인제스트**: CSV/Excel/미디어 업로드, Google Sheets 커넥터, Funnel 타입 추론/프로파일링, lakeFS 데이터셋 버전 관리, dataset registry + ingest outbox + reconciler.
+- **파이프라인 실행**: preview/build/deploy, Spark 변환(필터/조인/계산/캐스팅/리네임/union/dedupe/groupBy/aggregate/window/pivot), 스키마 계약 + expectations, 파이프라인 스케줄러.
+- **Objectify**: mapping spec 버전 관리, 자동/제안 매핑, KeySpec(Primary/Title) 강제, PK 유일성 게이트, edits 마이그레이션.
+- **이벤트 소싱 정합성**: S3/MinIO Event Store, message-relay→Kafka, processed_event_registry, sequence allocator, command status(HTTP + WS), admin replay/recompute.
+- **조회/프로젝션**: Elasticsearch 프로젝션, graph query federation + label query, optional search-projection worker.
+- **Access policy**: dataset 단위 정책에 따라 instance/query/graph 결과가 행/컬럼 마스킹된다.
+- **운영/보안**: audit logs, lineage graph, health/config/monitoring, tracing/metrics, rate limiting + 입력 sanitizer, auth token guard.
+- **AI/LLM**: 자연어 질의 계획/응답 + Context7 지식베이스 연동.
+
+전체 엔드포인트 목록: `docs/API_REFERENCE.md`
 
 ## 4) Architecture
 
@@ -26,31 +50,41 @@ SPICE HARVESTER는 **Event Sourcing + CQRS** 기반의 플랫폼으로, **온톨
 flowchart LR
   Client --> BFF
   BFF --> OMS
+  BFF --> Funnel
+  BFF --> PG[(Postgres: registry/outbox)]
+  BFF --> LFS[(lakeFS + MinIO)]
+
   OMS -->|append command| EventStore[(S3/MinIO Event Store)]
   EventStore --> Relay[message-relay (S3 tail -> Kafka)]
   Relay --> Kafka[(Kafka)]
 
   Kafka --> InstanceWorker[instance-worker]
   Kafka --> OntologyWorker[ontology-worker]
+  Kafka --> ProjectionWorker[projection-worker]
 
   InstanceWorker -->|write graph| TerminusDB[(TerminusDB)]
   InstanceWorker -->|append domain events| EventStore
-  InstanceWorker --> PG[(Postgres: processed_events + aggregate_versions)]
+  InstanceWorker --> PG
 
   OntologyWorker -->|write schema| TerminusDB
   OntologyWorker -->|append domain events| EventStore
   OntologyWorker --> PG
 
-  Kafka --> ProjectionWorker[projection-worker]
   ProjectionWorker --> ES[(Elasticsearch)]
   ProjectionWorker --> Redis[(Redis)]
   ProjectionWorker --> PG
+
+  LFS --> PipelineWorker[pipeline-worker]
+  PipelineWorker --> LFS
+  PG --> ObjectifyWorker[objectify-worker]
+  ObjectifyWorker --> Kafka
 ```
 
 **Truth sources (SSoT)**:
 - Graph/schema authority: TerminusDB
 - Immutable log: S3/MinIO Event Store (commands + domain events)
-- Correctness registry: Postgres (idempotency + ordering + seq allocator)
+- Control plane: Postgres (registries, outbox, idempotency, ordering, gates)
+- Data plane: lakeFS + MinIO (dataset/artifact versions)
 
 ## 5) Reliability Contract (짧게)
 
@@ -224,6 +258,12 @@ curl -fsS -X PUT "http://localhost:8002/api/v1/databases/${DB}/instances/Product
 
 ```bash
 PYTHON_BIN=python3.12 ./backend/run_production_tests.sh --full
+```
+
+Pipeline 변환/정제 E2E (전체 스택 필요):
+
+```bash
+RUN_PIPELINE_TRANSFORM_E2E=true PYTHON_BIN=python3.12 ./backend/run_production_tests.sh --full
 ```
 
 카오스(파괴적: docker compose stop/start/restart 및 워커 크래시 주입):

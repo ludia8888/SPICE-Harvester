@@ -1,5 +1,7 @@
 # DevOps 운영 리스크/코스트 최소화 보고서 (MSA) — SPICE-Harvester
 
+> 상태: 운영 관점 제언 보고서(과거 스냅샷)입니다. 현재 환경/구성은 코드/운영 문서와 대조하세요.
+
 > 작성일: 2025-12-18  
 > 관점: Senior DevOps / SRE  
 > 범위: Backend MSA 전체(OMS/BFF/Funnel/Workers) + Infra(Postgres/Redis/Kafka/MinIO/Elasticsearch/TerminusDB)  
@@ -305,4 +307,3 @@ SPICE-Harvester는 **Event Sourcing(SSoT: S3/MinIO) + CQRS(Projection to ES) + G
 - Audit Logs 문서: `docs/AUDIT_LOGS.md`
 - Lineage backfill 스크립트: `backend/scripts/backfill_lineage.py`
 - Lineage 지표 API(BFF): `GET /api/v1/lineage/metrics`
-

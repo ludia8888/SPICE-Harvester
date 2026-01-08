@@ -1,6 +1,6 @@
 # Complex Types Testing Guide (Steady State)
 
-> Updated: 2025-12-17
+> Updated: 2026-01-08
 
 This guide documents where complex-type validation lives and how to run the current tests.
 

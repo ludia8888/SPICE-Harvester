@@ -1,4 +1,6 @@
 # 🔥 CLAUDE RULE - REQUIRED PRODUCTION FIXES
+> 상태: 과거 스냅샷입니다. 작성 시점 기준이며 현재 구현과 다를 수 있습니다.
+
 
 ## CRITICAL ISSUES FOUND (No bypasses, real fixes only)
 

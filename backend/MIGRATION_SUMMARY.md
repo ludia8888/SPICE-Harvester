@@ -1,4 +1,5 @@
 # S3/MinIO Event Store Migration Summary (Updated)
+> Status: Historical snapshot. Content reflects the state at the time it was written and may be outdated.
 
 > Updated: 2025-12-17  
 > Status: **COMPLETE** — legacy dual-write flags and Kafka wrapper formats were removed.

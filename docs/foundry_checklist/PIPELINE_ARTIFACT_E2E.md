@@ -1,5 +1,7 @@
 # Pipeline Artifact E2E Runbook
 
+> Status: Historical runbook. Validate endpoints and prerequisites against current code before use.
+
 ## Purpose
 - Validate the artifact-first loop: ingest -> preview artifact -> build artifact -> deploy promotion -> dataset_version link -> lineage.
 - Produce evidence files under `docs/foundry_checklist/evidence/pipeline_artifact_e2e/`.

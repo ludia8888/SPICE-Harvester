@@ -36,11 +36,11 @@ Client implementation for connecting to MCP servers:
 
 ### 4. Context7 Router (`/bff/routers/context7.py`)
 FastAPI router providing REST endpoints for Context7:
-- `/api/context7/search`: Search knowledge base
-- `/api/context7/context/{entity_id}`: Get entity context
-- `/api/context7/knowledge`: Add new knowledge
-- `/api/context7/link`: Create entity relationships
-- `/api/context7/analyze/ontology`: Analyze ontology with AI
+- `/api/v1/api/context7/search`: Search knowledge base
+- `/api/v1/api/context7/context/{entity_id}`: Get entity context
+- `/api/v1/api/context7/knowledge`: Add new knowledge
+- `/api/v1/api/context7/link`: Create entity relationships
+- `/api/v1/api/context7/analyze/ontology`: Analyze ontology with AI
 
 ## Setup
 
@@ -128,12 +128,12 @@ async def list_databases():
 
 ```bash
 # Search Context7
-curl -X POST http://localhost:8002/api/context7/search \
+curl -X POST http://localhost:8002/api/v1/api/context7/search \
   -H "Content-Type: application/json" \
   -d '{"query": "ontology patterns", "limit": 10}'
 
 # Add knowledge
-curl -X POST http://localhost:8002/api/context7/knowledge \
+curl -X POST http://localhost:8002/api/v1/api/context7/knowledge \
   -H "Content-Type: application/json" \
   -d '{
     "title": "MVCC Implementation",
@@ -142,7 +142,7 @@ curl -X POST http://localhost:8002/api/context7/knowledge \
   }'
 
 # Analyze ontology
-curl -X POST http://localhost:8002/api/context7/analyze/ontology \
+curl -X POST http://localhost:8002/api/v1/api/context7/analyze/ontology \
   -H "Content-Type: application/json" \
   -d '{
     "ontology_id": "Person",
@@ -156,7 +156,7 @@ curl -X POST http://localhost:8002/api/context7/analyze/ontology \
 ```
 ┌─────────────────────────────────────────────┐
 │              BFF Service                     │
-│         (FastAPI + Context7 Router)          │
+│        (FastAPI + Context7 Router)           │
 └─────────────────┬───────────────────────────┘
                   │
          ┌────────▼────────┐

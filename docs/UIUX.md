@@ -1,3 +1,6 @@
+> Updated: 2026-01-08  
+> Status: external reference (Palantir Foundry UI notes). Not a description of the current SPICE HARVESTER frontend.
+
 **Palantir Foundry Ontology Editor** (일명 Ontology Manager, 온톨로지 관리 애플리케이션)는 Palantir Foundry 플랫폼에서 기업의 데이터 **온톨로지(Ontology)**를 구축하고 관리하기 위한 전문 UI 도구입니다 . 온톨로지는 조직의 디지털 자산(데이터셋, 모델 등)을 현실 세계의 개념(예: 설비, 제품, 주문, 거래 등)에 연결한 *“디지털 트윈”* 개념의 **코어 데이터 모델**로서, 오브젝트(엔터티), 속성, 링크(관계) 등의 **시멘틱 요소**와 액션, 함수 등의 **키네틱 요소**를 포함합니다  . Ontology Editor를 통해 사용자는 이러한 온톨로지 구성요소들을 **코드 작성 없이** 시각적 인터페이스로 정의하고, 데이터 원본에 매핑하며, 상호 관계를 설정함으로써 조직 전반의 **공통 데이터 언어**를 형성할 수 있습니다  .
 
 ## **Ontology Editor의 주요 UI 화면과 구성 요소**

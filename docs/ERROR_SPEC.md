@@ -1,5 +1,7 @@
 # Enterprise Error Spec
 
+> Updated: 2026-01-08
+
 This repository uses structured enterprise error codes for consistent
 classification across services and workers. The source of truth is
 `backend/shared/errors/enterprise_catalog.py`.

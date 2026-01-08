@@ -1,4 +1,5 @@
 # Test Suite Overview — Event Sourcing Steady State
+> Status: Historical snapshot. Content reflects the state at the time it was written and may be outdated.
 
 > Updated: 2025-12-17  
 > Status: consolidation complete (legacy suites removed/archived)

@@ -23,7 +23,7 @@ Welcome to the SPICE HARVESTER project documentation. This directory contains al
 ### Quick Start Guides
 
 #### For Developers
-1. Start with the [System Architecture](ARCHITECTURE.md) to understand the system (90-95% complete backend)
+1. Start with the [System Architecture](ARCHITECTURE.md) to understand the system topology and data/control planes
 2. Follow the root [README](../README.md) for backend setup instructions
 3. Use the [Frontend UI/UX Spec](frontend.md) for frontend development
 4. Review the [API Reference](API_REFERENCE.md) for endpoint details
@@ -89,22 +89,22 @@ backend/docs/              # Backend-specific documentation
 ## Key Features Documented
 
 ### Enterprise Microservices Architecture
-- **BFF (Backend for Frontend)** - Port 8002: User-friendly API gateway with Service Factory pattern
-- **OMS (Ontology Management Service)** - Port 8000: Core ontology operations with 18+ validators
-- **Funnel (Type Inference Service)** - Port 8003: AI-powered data analysis with 1,048 lines of algorithms
-- **Shared Components** - Service Factory, validators, and utilities
+- **BFF (Backend for Frontend)** - Port 8002: API gateway, routing, async command tracking
+- **OMS (Ontology Management Service)** - Port 8000: Ontology + graph operations on TerminusDB
+- **Funnel (Type Inference Service)** - Port 8003: schema/type inference utilities
+- **Pipeline/Objectify Workers** - ETL transforms + dataset → ontology instance mapping
+- **Connector Services** - Google Sheets ingest/preview/polling
+- **Shared Components** - registries, validators, security, observability
 
 ### Technical Capabilities
-- **Complex Type System** - Support for 18+ data types (MONEY, EMAIL, PHONE, COORDINATE, ADDRESS, etc.)
-- **Advanced AI Type Inference** - Multilingual pattern recognition (Korean, Japanese, Chinese)
-- **Git-like Version Control** - 7/7 git features working (100% complete)
-  - Branch management, commits, diff, merge, PR, rollback, history
-  - 3-stage diff engine and rebase-based merging
-- **Relationship Management** - Automatic Property-to-Relationship conversion
-- **Multi-language Support** - Comprehensive internationalization
-- **Performance Optimization** - 95%+ success rate, <5s response time
-- **Security Features** - Input sanitization, authentication, audit logging
-- **TerminusDB Integration** - Full schema type support
+- **Event sourcing + idempotency** - processed_event registry, expected_seq OCC, replayable projections
+- **Ontology + relationship management** - schema validation, link types, link edits overlay
+- **Data plane** - ingest, pipeline transforms (filter/join/cast/dedupe), schema contracts, expectations
+- **Objectify** - mapping spec → bulk instance creation
+- **Branching/versions** - TerminusDB-backed branches, diffs, merges
+- **Lineage + audit** - lineage graph, audit logs, gate results
+- **Connectors** - Google Sheets OAuth + ingest flow
+- **Security/observability** - input sanitization, rate limiting, metrics, tracing
 
 ### Frontend Technology Stack
 - **React 18 + TypeScript 5** - Modern UI framework with strict typing
@@ -114,9 +114,8 @@ backend/docs/              # Backend-specific documentation
 - **UI Icons** - @blueprintjs/icons
 
 ### Current Implementation Status
-- **Backend Services**: ✅ 90-95% Complete (Production-ready)
-- **Frontend Infrastructure**: ✅ 100% Complete (Development-ready)
-- **Frontend Components**: ✅ Core screens implemented; UX polish and QA in progress
+- **Backend services/workers**: runnable via `docker-compose.full.yml`; production readiness depends on environment hardening
+- **Frontend**: React + Blueprint app scaffold with BFF-aligned API routes
 
 ### Service Configuration
 - **Port Assignments**:

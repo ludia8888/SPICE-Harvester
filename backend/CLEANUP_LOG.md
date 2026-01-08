@@ -1,3 +1,5 @@
+> Status: Historical snapshot. Content reflects the state at the time it was written and may be outdated.
+
 
 ## Cleanup performed on Thu Aug 14 14:26:09 KST 2025
 - Archived 146 legacy files to legacy_archive_20250814_142608

@@ -1,5 +1,7 @@
 # Enterprise Error Taxonomy
 
+> Updated: 2026-01-08
+
 This file lists all structured error codes currently mapped in
 `backend/shared/errors/enterprise_catalog.py`.
 

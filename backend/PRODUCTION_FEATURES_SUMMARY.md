@@ -1,4 +1,6 @@
 # Production Features Implementation Summary
+> Status: Historical snapshot. Content reflects the state at the time it was written and may be outdated.
+
 ## Event Sourcing + CQRS (Steady-State)
 
 > NOTE (2025-12): This summary describes the current steady-state path:

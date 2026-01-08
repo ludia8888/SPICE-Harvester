@@ -1,15 +1,18 @@
 # Ontology Deploy Runbook (P0)
 
+> Updated: 2026-01-08  
+> Default registry: `ontology_deployments_v2` / `ontology_deploy_outbox_v2` (controlled by `ONTOLOGY_DEPLOYMENTS_V2`)
+
 ## Rollback options
 
 ### Option A: Re-promote a previous deployment (preferred)
-1. Look up the last known-good deployment in `ontology_deployments`.
+1. Look up the last known-good deployment in `ontology_deployments_v2` (or `ontology_deployments` if v2 is disabled).
 2. Create a new proposal from a branch at the approved commit (or reuse an existing branch).
 3. Approve/merge the proposal.
 4. Deploy using `/api/v1/databases/{db}/ontology/deploy` with:
    - `proposal_id`
    - `ontology_commit_id` = approved commit id
-5. Confirm a new row is written to `ontology_deployments` and the outbox is published.
+5. Confirm a new row is written to `ontology_deployments_v2` (or v1 table) and the outbox is published.
 
 ### Option B: Reset main to a previous commit (only if policy allows)
 1. Enable rollback: `ENABLE_OMS_ROLLBACK=true`.
@@ -17,6 +20,6 @@
 3. Re-run `/api/v1/databases/{db}/ontology/deploy` for the restored commit to record SSoT.
 
 ## Operational checks
-- Ensure `ontology_deploy_outbox` rows move from `pending` → `published`.
+- Ensure `ontology_deploy_outbox_v2` rows move from `pending` → `published` (or v1 table).
 - Verify `ontology_events` receives `ONTOLOGY_DEPLOYED` events after deploy.
 - Confirm downstream consumers (search/projection/cache) refresh after deploy.

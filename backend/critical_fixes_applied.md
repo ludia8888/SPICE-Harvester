@@ -1,4 +1,6 @@
 # Critical Fixes Applied - SPICE HARVESTER Performance Improvements
+> Status: Historical snapshot. Content reflects the state at the time it was written and may be outdated.
+
 ## THINK ULTRA³ - Production Ready Fixes
 
 Date: 2024-08-12

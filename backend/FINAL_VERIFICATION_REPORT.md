@@ -1,4 +1,6 @@
 # Final Verification Checklist — Event Sourcing Steady State
+> Status: Historical snapshot. Content reflects the state at the time it was written and may be outdated.
+
 
 > Updated: 2025-12-17  
 > Scope: S3/MinIO Event Store (SSoT) + EventPublisher (S3 tail → Kafka) + Kafka consumers (Workers/Projection).  

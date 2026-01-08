@@ -1,5 +1,9 @@
 # Ontology Resource Design (P0)
 
+> Updated: 2026-01-08  
+> Status: design/target spec. 일부 항목은 아직 코드에 완전 반영되지 않았습니다.  
+> Current behavior: `docs/ARCHITECTURE.md` + BFF/OMS OpenAPI.
+
 Foundry-style split: TerminusDB holds **definitions + compiled snapshot**, Postgres holds **control-plane state** (proposal/approve/deploy/health/outbox). This doc fixes P0 schemas for Terminus.
 
 ## Decision framework (Foundry docs vs implementation choices)

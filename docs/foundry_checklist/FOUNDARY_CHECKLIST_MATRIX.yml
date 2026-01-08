@@ -1,3 +1,5 @@
+# Status: Historical snapshot. Evidence and statuses may be stale.
+
 - id: CL-001
   priority: P0
   original_text: "•\t☐ 그래프 캔버스에서 파이프라인을 작성할 수 있다 (입력→변환→출력의 노드 연결)."

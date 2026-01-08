@@ -61,7 +61,7 @@ Lineage는 Postgres에 저장됩니다.
   - 반환: 하류 `artifact` 노드 목록(운영 도구/롤백 플래너용)
 - `GET /api/v1/lineage/metrics`
   - Query: `db_name`, `window_minutes`
-  - 반환: `lineage_lag_seconds`, `missing_lineage_ratio_estimate` 등 운영 지표
+  - 반환: `missing_lineage_ratio_estimate`, `backfill_queue` 등 운영 지표
 
 구현: `backend/bff/routers/lineage.py`
 
@@ -115,7 +115,7 @@ Lineage는 `fail-open`(서비스는 계속 동작)일 수 있습니다.
 
 ---
 
-## 5) 런타임 옵션
+## 8) 런타임 옵션
 
 - `ENABLE_LINEAGE=true|false`  
   - 기본값 `true`

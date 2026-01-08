@@ -1,3 +1,6 @@
+> Updated: 2026-01-08  
+> Status: external reference (Palantir Foundry design notes). Not a description of the current SPICE HARVESTER frontend.
+
 ## **Palantir Foundry 디자인 시스템 구조**
 
 ### **디자인 철학과 원칙**

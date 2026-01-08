@@ -1,6 +1,8 @@
 # Production Runbook — Event Sourcing Steady State
 ## S3/MinIO Event Store (SSoT) + EventPublisher (S3 tail → Kafka)
 
+> Status: Operational guidance. Validate ports and environment variables against your deployment.
+
 > Updated: 2025-12-17  
 > This document replaces the legacy “dual-write migration runbook”. Dual-write flags and wrapper formats were removed.
 
@@ -46,7 +48,7 @@ Quick checks (adjust ports/hosts for your environment):
 ```bash
 curl -fsS http://localhost:9000/minio/health/live
 pg_isready -h 127.0.0.1 -p ${POSTGRES_PORT_HOST:-5433}
-kafka-topics --bootstrap-server 127.0.0.1:9092 --list >/dev/null
+kafka-topics --bootstrap-server 127.0.0.1:${KAFKA_PORT_HOST:-39092} --list >/dev/null
 curl -fsS http://localhost:6363/api/info >/dev/null
 ```
 

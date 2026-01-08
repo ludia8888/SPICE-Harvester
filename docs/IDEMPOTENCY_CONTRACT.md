@@ -1,5 +1,7 @@
 # Idempotency & Ordering Contract
 
+> Updated: 2026-01-08
+
 ## 1) Idempotency (as a contract)
 
 Same `event_id` produces **at most one side-effect** across the whole system.

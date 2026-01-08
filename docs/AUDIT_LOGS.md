@@ -82,6 +82,7 @@ DB 권한이 있는 공격자는 데이터를 수정할 수 있습니다.
 - `ENABLE_AUDIT_LOGS=true|false`
   - 기본값 `true`
   - 비활성화 시, 서비스 동작은 계속되지만 audit 기록은 생략됩니다(Fail-open).
+  - 참고: 과거 문서/설정에는 `ENABLE_AUDIT_LOGGING`이 등장할 수 있으나, 실제 코드는 `ENABLE_AUDIT_LOGS`를 읽습니다.
 
 ---
 
@@ -91,4 +92,3 @@ EventStore는 멱등성을 지원하므로, 같은 이벤트를 재시도해서 
 
 - `EVENT_APPENDED`: 실제로 Event Store(S3/MinIO)에 **신규 저장**된 경우
 - `EVENT_APPEND_SKIPPED_DUPLICATE`: 이미 존재해서 **멱등(no-op)** 으로 처리된 경우
-

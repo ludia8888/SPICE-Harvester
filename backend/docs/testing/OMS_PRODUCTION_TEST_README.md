@@ -1,6 +1,6 @@
 # OMS Production Readiness Tests (Steady State)
 
-> Updated: 2025-12-17  
+> Updated: 2026-01-08  
 > Architecture: S3/MinIO Event Store (SSoT) + EventPublisher (S3 tail → Kafka) + Kafka consumers with Postgres idempotency/OCC.
 
 This guide documents how to run the current production-readiness checks for OMS (and the surrounding stack).
@@ -27,7 +27,7 @@ export FUNNEL_BASE_URL=http://localhost:8003
 export TERMINUS_SERVER_URL=http://localhost:6363
 export MINIO_ENDPOINT_URL=http://localhost:9000
 export ELASTICSEARCH_URL=http://localhost:9200
-export KAFKA_BOOTSTRAP_SERVERS=localhost:9092
+export KAFKA_BOOTSTRAP_SERVERS=localhost:39092
 export POSTGRES_URL=postgresql://spiceadmin:spicepass123@localhost:5433/spicedb
 ```
 

@@ -1,6 +1,6 @@
 # LLM Integration Blueprint (Domain-Neutral, Enterprise-Safe) — SPICE-Harvester
 
-> 작성일: 2025-12-18  
+> 업데이트: 2026-01-08  
 > 대상: PO/PM, Backend/Platform, DevOps/SRE, Security  
 > 목표: “엑셀/구글시트 → 정형화 → 온톨로지 매핑/적재 → 탐색/운영” 전 구간에 **LLM을 안전하게 결합**해 자동화율/설명가능성을 높이되, **결정론적 코어(CQRS/Event Sourcing/Validation)** 의 신뢰성·재현성·감사 가능성을 절대 훼손하지 않는다.
 
@@ -40,7 +40,9 @@ LLM 결합의 출발점은 “이미 되는 것”과 “사람이 힘든 것”
 
 ---
 
-## 2) LLM을 붙여야 “진짜로 좋아지는” 지점(도메인 중립 기준)
+## 2) 현재 구현된 LLM 연동 표면
+
+- BFF AI 라우터: `POST /api/v1/ai/query/{db_name}`, `POST /api/v1/ai/translate/query-plan/{db_name}`\n- Context7 라우터: `/api/v1/api/context7/*` (검색/컨텍스트/지식/링크/온톨로지 분석)\n\n위 라우터는 “추천/보조” 역할이며, 최종 반영은 항상 서버 검증/승인 흐름을 통과해야 합니다.\n\n---\n\n## 3) LLM을 붙여야 “진짜로 좋아지는” 지점(도메인 중립 기준)
 
 LLM은 “규칙으로 커버하기 어려운 **언어/의미/모호성**”에 강합니다.
 

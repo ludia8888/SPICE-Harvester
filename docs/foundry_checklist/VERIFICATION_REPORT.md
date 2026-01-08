@@ -1,5 +1,7 @@
 # Foundry Checklist Verification Report
 
+> Status: Historical snapshot. Evidence and pass/fail counts may not match the current codebase.
+
 - Checklist: `docs/PipelineBuilder_checklist.md`
 - Matrix: `docs/foundry_checklist/FOUNDARY_CHECKLIST_MATRIX.yml`
 - Evidence dir: `docs/foundry_checklist/evidence/`
