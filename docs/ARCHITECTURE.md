@@ -281,3 +281,234 @@ sequenceDiagram
 - `backend/pipeline_worker/` : Spark transforms + dataset artifacts
 - `backend/objectify_worker/` : mapping spec → ontology instances
 - `backend/connector_trigger_service/`, `backend/connector_sync_worker/` : connector ingest flow
+
+---
+
+## 13) Auto-generated Reference (from code)
+
+이 섹션은 코드/compose를 기반으로 자동 생성됩니다. 수정 시 아래 스크립트를 사용하세요:
+
+```bash
+python scripts/generate_architecture_reference.py
+```
+
+### Compose Inventory (docker-compose.full.yml)
+
+<!-- BEGIN AUTO-GENERATED ARCH: COMPOSE_INVENTORY -->
+Source: `docker-compose.full.yml` (with extends resolved).
+
+| Service | Ports | Depends On |
+| --- | --- | --- |
+| `bff` | 8002:8002 | oms<br/>funnel<br/>postgres<br/>lakefs<br/>otel-collector |
+| `connector-sync-worker` | - | bff<br/>kafka<br/>postgres<br/>otel-collector |
+| `connector-trigger-service` | - | kafka<br/>postgres<br/>otel-collector |
+| `elasticsearch` | ${ELASTICSEARCH_PORT_HOST:-9200}:9200<br/>${ELASTICSEARCH_TRANSPORT_PORT_HOST:-9300}:9300 | - |
+| `funnel` | 8003:8003 | otel-collector |
+| `ingest-reconciler-worker` | ${INGEST_RECONCILER_PORT_HOST:-8012}:8012 | postgres<br/>otel-collector |
+| `instance-worker` | - | terminusdb<br/>kafka<br/>elasticsearch<br/>minio<br/>message-relay<br/>postgres<br/>otel-collector |
+| `jaeger` | 16686:16686 | - |
+| `kafka` | ${KAFKA_PORT_HOST:-39092}:9092<br/>${KAFKA_PORT_INTERNAL_HOST:-29092}:29092 | zookeeper |
+| `kafka-ui` | ${KAFKA_UI_PORT_HOST:-8080}:8080 | kafka<br/>zookeeper |
+| `lakefs` | ${LAKEFS_PORT_HOST:-48080}:8000 | postgres<br/>minio |
+| `lakefs-init` | - | lakefs<br/>minio-init |
+| `message-relay` | - | kafka<br/>postgres<br/>minio<br/>otel-collector |
+| `minio` | ${MINIO_PORT_HOST:-9000}:9000<br/>${MINIO_CONSOLE_PORT_HOST:-9001}:9001 | - |
+| `minio-init` | - | minio |
+| `objectify-worker` | - | kafka<br/>postgres<br/>lakefs<br/>oms<br/>otel-collector |
+| `oms` | 8000:8000 | terminusdb<br/>postgres<br/>redis<br/>elasticsearch<br/>minio<br/>otel-collector |
+| `ontology-worker` | - | terminusdb<br/>kafka<br/>redis<br/>message-relay<br/>postgres<br/>otel-collector |
+| `otel-collector` | 4317:4317<br/>4318:4318 | jaeger |
+| `pipeline-scheduler` | - | kafka<br/>postgres<br/>lakefs<br/>otel-collector |
+| `pipeline-worker` | - | kafka<br/>postgres<br/>minio<br/>lakefs<br/>otel-collector |
+| `postgres` | ${POSTGRES_PORT_HOST:-5433}:5432 | - |
+| `projection-worker` | - | kafka<br/>elasticsearch<br/>redis<br/>message-relay<br/>postgres<br/>otel-collector |
+| `redis` | ${REDIS_PORT_HOST:-6379}:6379 | - |
+| `search-projection-worker` | - | kafka<br/>elasticsearch<br/>otel-collector |
+| `terminusdb` | 6363:6363 | - |
+| `zookeeper` | ${ZOOKEEPER_PORT_HOST:-2181}:2181 | - |
+<!-- END AUTO-GENERATED ARCH: COMPOSE_INVENTORY -->
+
+### Compose Dependency Graph (docker-compose.full.yml)
+
+<!-- BEGIN AUTO-GENERATED ARCH: COMPOSE_GRAPH -->
+```mermaid
+graph TD
+  svc_bff[bff]
+  svc_connector_sync_worker[connector-sync-worker]
+  svc_connector_trigger_service[connector-trigger-service]
+  svc_elasticsearch[elasticsearch]
+  svc_funnel[funnel]
+  svc_ingest_reconciler_worker[ingest-reconciler-worker]
+  svc_instance_worker[instance-worker]
+  svc_jaeger[jaeger]
+  svc_kafka[kafka]
+  svc_kafka_ui[kafka-ui]
+  svc_lakefs[lakefs]
+  svc_lakefs_init[lakefs-init]
+  svc_message_relay[message-relay]
+  svc_minio[minio]
+  svc_minio_init[minio-init]
+  svc_objectify_worker[objectify-worker]
+  svc_oms[oms]
+  svc_ontology_worker[ontology-worker]
+  svc_otel_collector[otel-collector]
+  svc_pipeline_scheduler[pipeline-scheduler]
+  svc_pipeline_worker[pipeline-worker]
+  svc_postgres[postgres]
+  svc_projection_worker[projection-worker]
+  svc_redis[redis]
+  svc_search_projection_worker[search-projection-worker]
+  svc_terminusdb[terminusdb]
+  svc_zookeeper[zookeeper]
+  svc_bff --> svc_oms
+  svc_bff --> svc_funnel
+  svc_bff --> svc_postgres
+  svc_bff --> svc_lakefs
+  svc_bff --> svc_otel_collector
+  svc_connector_sync_worker --> svc_bff
+  svc_connector_sync_worker --> svc_kafka
+  svc_connector_sync_worker --> svc_postgres
+  svc_connector_sync_worker --> svc_otel_collector
+  svc_connector_trigger_service --> svc_kafka
+  svc_connector_trigger_service --> svc_postgres
+  svc_connector_trigger_service --> svc_otel_collector
+  svc_funnel --> svc_otel_collector
+  svc_ingest_reconciler_worker --> svc_postgres
+  svc_ingest_reconciler_worker --> svc_otel_collector
+  svc_instance_worker --> svc_terminusdb
+  svc_instance_worker --> svc_kafka
+  svc_instance_worker --> svc_elasticsearch
+  svc_instance_worker --> svc_minio
+  svc_instance_worker --> svc_message_relay
+  svc_instance_worker --> svc_postgres
+  svc_instance_worker --> svc_otel_collector
+  svc_kafka --> svc_zookeeper
+  svc_kafka_ui --> svc_kafka
+  svc_kafka_ui --> svc_zookeeper
+  svc_lakefs --> svc_postgres
+  svc_lakefs --> svc_minio
+  svc_lakefs_init --> svc_lakefs
+  svc_lakefs_init --> svc_minio_init
+  svc_message_relay --> svc_kafka
+  svc_message_relay --> svc_postgres
+  svc_message_relay --> svc_minio
+  svc_message_relay --> svc_otel_collector
+  svc_minio_init --> svc_minio
+  svc_objectify_worker --> svc_kafka
+  svc_objectify_worker --> svc_postgres
+  svc_objectify_worker --> svc_lakefs
+  svc_objectify_worker --> svc_oms
+  svc_objectify_worker --> svc_otel_collector
+  svc_oms --> svc_terminusdb
+  svc_oms --> svc_postgres
+  svc_oms --> svc_redis
+  svc_oms --> svc_elasticsearch
+  svc_oms --> svc_minio
+  svc_oms --> svc_otel_collector
+  svc_ontology_worker --> svc_terminusdb
+  svc_ontology_worker --> svc_kafka
+  svc_ontology_worker --> svc_redis
+  svc_ontology_worker --> svc_message_relay
+  svc_ontology_worker --> svc_postgres
+  svc_ontology_worker --> svc_otel_collector
+  svc_otel_collector --> svc_jaeger
+  svc_pipeline_scheduler --> svc_kafka
+  svc_pipeline_scheduler --> svc_postgres
+  svc_pipeline_scheduler --> svc_lakefs
+  svc_pipeline_scheduler --> svc_otel_collector
+  svc_pipeline_worker --> svc_kafka
+  svc_pipeline_worker --> svc_postgres
+  svc_pipeline_worker --> svc_minio
+  svc_pipeline_worker --> svc_lakefs
+  svc_pipeline_worker --> svc_otel_collector
+  svc_projection_worker --> svc_kafka
+  svc_projection_worker --> svc_elasticsearch
+  svc_projection_worker --> svc_redis
+  svc_projection_worker --> svc_message_relay
+  svc_projection_worker --> svc_postgres
+  svc_projection_worker --> svc_otel_collector
+  svc_search_projection_worker --> svc_kafka
+  svc_search_projection_worker --> svc_elasticsearch
+  svc_search_projection_worker --> svc_otel_collector
+```
+<!-- END AUTO-GENERATED ARCH: COMPOSE_GRAPH -->
+
+### Service Entry Points (backend/*/main.py)
+
+<!-- BEGIN AUTO-GENERATED ARCH: ENTRYPOINTS -->
+- `backend/bff/main.py`
+- `backend/connector_sync_worker/main.py`
+- `backend/connector_trigger_service/main.py`
+- `backend/funnel/main.py`
+- `backend/ingest_reconciler_worker/main.py`
+- `backend/instance_worker/main.py`
+- `backend/message_relay/main.py`
+- `backend/objectify_worker/main.py`
+- `backend/oms/main.py`
+- `backend/ontology_worker/main.py`
+- `backend/pipeline_scheduler/main.py`
+- `backend/pipeline_worker/main.py`
+- `backend/projection_worker/main.py`
+- `backend/search_projection_worker/main.py`
+<!-- END AUTO-GENERATED ARCH: ENTRYPOINTS -->
+
+### Router Inventory (BFF)
+
+<!-- BEGIN AUTO-GENERATED ARCH: BFF_ROUTERS -->
+| Router | Prefix | Tags |
+| --- | --- | --- |
+| `admin.router` | `/api/v1` | - |
+| `ai.router` | `/api/v1` | - |
+| `audit.router` | `/api/v1` | - |
+| `command_status.router` | `/api/v1` | - |
+| `config_monitoring.router` | `/api/v1/config` | - |
+| `data_connector.router` | `/api/v1` | - |
+| `database.router` | `/api/v1` | - |
+| `governance.router` | `/api/v1` | - |
+| `graph.router` | `router-defined` | - |
+| `health.router` | `/api/v1` | - |
+| `instance_async.router` | `/api/v1` | - |
+| `instances.router` | `/api/v1` | - |
+| `lineage.router` | `/api/v1` | - |
+| `link_types.router` | `/api/v1` | - |
+| `mapping.router` | `/api/v1` | - |
+| `merge_conflict.router` | `/api/v1` | - |
+| `monitoring.router` | `/api/v1/monitoring` | - |
+| `object_types.router` | `/api/v1` | - |
+| `objectify.router` | `/api/v1` | - |
+| `ontology.router` | `/api/v1` | - |
+| `ontology_extensions.router` | `/api/v1` | - |
+| `ops.router` | `/api/v1` | - |
+| `pipeline.router` | `/api/v1` | - |
+| `query.router` | `/api/v1` | - |
+| `summary.router` | `/api/v1` | - |
+| `tasks.router` | `/api/v1` | - |
+| `websocket.router` | `/api/v1` | - |
+<!-- END AUTO-GENERATED ARCH: BFF_ROUTERS -->
+
+### Router Inventory (OMS)
+
+<!-- BEGIN AUTO-GENERATED ARCH: OMS_ROUTERS -->
+| Router | Prefix | Tags |
+| --- | --- | --- |
+| `branch.router` | `/api/v1` | branch |
+| `command_status.router` | `/api/v1` | command-status |
+| `config_monitoring.router` | `/api/v1/config` | config-monitoring |
+| `database.router` | `/api/v1` | database |
+| `instance.router` | `/api/v1` | instance |
+| `instance_async.router` | `/api/v1` | async-instance |
+| `monitoring.router` | `/api/v1/monitoring` | monitoring |
+| `ontology.router` | `/api/v1` | ontology |
+| `ontology_extensions.router` | `/api/v1` | ontology |
+| `pull_request.router` | `/api/v1` | pull-requests |
+| `query.router` | `/api/v1` | query |
+| `version.router` | `/api/v1` | version |
+<!-- END AUTO-GENERATED ARCH: OMS_ROUTERS -->
+
+### Router Inventory (Funnel)
+
+<!-- BEGIN AUTO-GENERATED ARCH: FUNNEL_ROUTERS -->
+| Router | Prefix | Tags |
+| --- | --- | --- |
+| `type_inference_router` | `/api/v1` | - |
+<!-- END AUTO-GENERATED ARCH: FUNNEL_ROUTERS -->

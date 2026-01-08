@@ -46,6 +46,12 @@ diff-cover "coverage.xml" --compare-branch "origin/${BASE_REF}" --fail-under=100
 echo "🧾 Backend methods check..."
 "$PYTHON_BIN" scripts/generate_backend_methods.py --check
 
+echo "🧾 API reference check..."
+"$PYTHON_BIN" scripts/generate_api_reference.py --check
+
+echo "🧾 Architecture reference check..."
+"$PYTHON_BIN" scripts/generate_architecture_reference.py --check
+
 echo "🎨 Frontend lint + build..."
 cd frontend
 "$NPM_BIN" ci
