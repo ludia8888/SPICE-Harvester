@@ -227,6 +227,7 @@ services:
       - FUNNEL_BASE_URL=http://funnel:8003
       - AGENT_BASE_URL=http://agent:8004
       - AGENT_PROXY_TIMEOUT_SECONDS=${AGENT_PROXY_TIMEOUT_SECONDS:-30}
+      - BFF_AGENT_TOKEN=${BFF_AGENT_TOKEN:-}
       - MCP_CONFIG_PATH=/app/mcp-config.json
       - CONTEXT7_API_KEY=${CONTEXT7_API_KEY:-}
       - CONTEXT7_WORKSPACE=${CONTEXT7_WORKSPACE:-}
@@ -321,6 +322,8 @@ services:
       - MINIO_ENDPOINT_URL=http://spice-minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
+      - EVENT_STORE_BUCKET=${AGENT_EVENT_STORE_BUCKET:-spice-agent-store}
+      - AGENT_BFF_TOKEN=${BFF_AGENT_TOKEN:-}
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
     depends_on:

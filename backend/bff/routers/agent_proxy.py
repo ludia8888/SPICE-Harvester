@@ -35,6 +35,8 @@ _FORWARD_HEADER_ALLOWLIST = {
     "x-user-id",
     "x-user-type",
 }
+_CALLER_HEADER = "x-spice-caller"
+_BLOCKED_CALLER = "agent"
 
 _HOP_BY_HOP_HEADERS = {
     "connection",
@@ -69,6 +71,12 @@ def _filter_response_headers(headers: httpx.Headers) -> Dict[str, str]:
 
 
 async def _proxy_agent_request(request: Request, path: str) -> Response:
+    caller = (request.headers.get("X-Spice-Caller") or "").strip().lower()
+    if caller == _BLOCKED_CALLER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Agent proxy loop blocked",
+        )
     agent_url = ServiceConfig.get_agent_url()
     suffix = path.lstrip("/")
     target_path = "/api/v1/agent"

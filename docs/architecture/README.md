@@ -56,7 +56,7 @@ graph TD
 Notes:
 - BFF runs dataset/objectify outbox workers in-process.
 - search-projection-worker is optional (`ENABLE_SEARCH_PROJECTION=false` by default).
-- Agent service is internal; it executes LangGraph runs, calls BFF for actions, and logs events/audit trails to S3/Postgres.
+- Agent service is internal; it executes LangGraph runs, calls BFF for actions, and logs events/audit trails to S3/Postgres (agent-dedicated bucket).
 
 ## 2) Event Sourcing Write Path
 

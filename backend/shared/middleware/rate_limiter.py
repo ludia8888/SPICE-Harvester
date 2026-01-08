@@ -440,6 +440,8 @@ def rate_limit(
             # If no Request found, skip rate limiting (for non-HTTP contexts)
             if request is None:
                 return await func(*args, **kwargs)
+            if getattr(request.state, "is_internal_agent", False):
+                return await func(*args, **kwargs)
             # Get or create rate limiter
             if not hasattr(request.app.state, "rate_limiter"):
                 request.app.state.rate_limiter = RateLimiter()

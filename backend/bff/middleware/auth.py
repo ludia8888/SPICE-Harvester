@@ -17,7 +17,8 @@ from shared.security.auth_utils import (
     is_exempt_path,
     parse_bool,
 )
-_TOKEN_ENV_KEYS = ("BFF_ADMIN_TOKEN", "BFF_WRITE_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN")
+_AGENT_TOKEN_ENV_KEY = "BFF_AGENT_TOKEN"
+_TOKEN_ENV_KEYS = ("BFF_ADMIN_TOKEN", "BFF_WRITE_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN", _AGENT_TOKEN_ENV_KEY)
 _REQUIRE_ENV_KEY = "BFF_REQUIRE_AUTH"
 _ALLOW_DISABLE_ENV_KEYS = ("ALLOW_INSECURE_BFF_AUTH_DISABLE", "ALLOW_INSECURE_AUTH_DISABLE")
 _EXEMPT_PATHS_DEFAULT = (
@@ -79,6 +80,11 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
                 content={"detail": "Authentication required"},
             )
 
+        agent_token = (os.getenv(_AGENT_TOKEN_ENV_KEY) or "").strip()
+        if agent_token and hmac.compare_digest(presented, agent_token):
+            request.state.is_internal_agent = True
+            return await call_next(request)
+
         if not hmac.compare_digest(presented, expected):
             return JSONResponse(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -123,6 +129,10 @@ async def enforce_bff_websocket_auth(websocket: WebSocket, token: Optional[str])
         )
         await websocket.close(code=4401, reason="Authentication required")
         return False
+
+    agent_token = (os.getenv(_AGENT_TOKEN_ENV_KEY) or "").strip()
+    if agent_token and hmac.compare_digest(presented, agent_token):
+        return True
 
     if not hmac.compare_digest(presented, expected):
         logger.warning(

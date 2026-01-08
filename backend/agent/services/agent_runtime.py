@@ -42,6 +42,11 @@ def _safe_json(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=True, separators=(",", ":"), default=str)
 
 
+def _is_agent_proxy_path(path: str) -> bool:
+    normalized = path if path.startswith("/") else f"/{path}"
+    return normalized.startswith("/api/v1/agent")
+
+
 def _extract_scope(context: Dict[str, Any]) -> Dict[str, Any]:
     allowed_keys = {
         "db_name",
@@ -70,6 +75,7 @@ class AgentRuntimeConfig:
     max_payload_bytes: int
     timeout_s: float
     service_name: str
+    bff_token: Optional[str]
 
 
 class AgentRuntime:
@@ -92,6 +98,7 @@ class AgentRuntime:
         audit_store: Optional[AuditLogStore],
     ) -> "AgentRuntime":
         bff_url = _clean_url(os.getenv("AGENT_BFF_BASE_URL") or ServiceConfig.get_bff_url())
+        bff_token = (os.getenv("AGENT_BFF_TOKEN") or os.getenv("BFF_AGENT_TOKEN") or "").strip() or None
         allowed_services = ("bff",)
         config = AgentRuntimeConfig(
             bff_url=bff_url,
@@ -100,6 +107,7 @@ class AgentRuntime:
             max_payload_bytes=_env_int("AGENT_TOOL_MAX_PAYLOAD_BYTES", 200000),
             timeout_s=float(os.getenv("AGENT_TOOL_TIMEOUT_SECONDS", "30")),
             service_name=os.getenv("AGENT_SERVICE_NAME", "agent"),
+            bff_token=bff_token,
         )
         return cls(event_store=event_store, audit_store=audit_store, config=config)
 
@@ -138,6 +146,9 @@ class AgentRuntime:
         output = {
             key: value for key, value in headers.items() if key.lower() in allowlist and value
         }
+        output["X-Spice-Caller"] = "agent"
+        if self.config.bff_token:
+            output["Authorization"] = f"Bearer {self.config.bff_token}"
         output.setdefault("X-Actor", actor)
         return output
 
@@ -236,6 +247,40 @@ class AgentRuntime:
             step_index=step_index,
             resource_type="agent_tool",
         )
+
+        if _is_agent_proxy_path(path):
+            error = "blocked: agent_proxy_loop"
+            await self.record_event(
+                event_type="AGENT_TOOL_RESULT",
+                run_id=run_id,
+                actor=actor,
+                status="failure",
+                data={
+                    "step_index": step_index,
+                    "tool": tool_call.service,
+                    "method": tool_call.method,
+                    "path": path,
+                    "data_scope": data_scope,
+                    "output_digest": None,
+                    "output_preview": None,
+                    "output_size_bytes": None,
+                    "http_status": 400,
+                    "duration_ms": 0,
+                    "error": error,
+                },
+                request_id=request_id,
+                step_index=step_index,
+                resource_type="agent_tool",
+                error=error,
+            )
+            return {
+                "status": "failure",
+                "http_status": 400,
+                "output_digest": None,
+                "duration_ms": 0,
+                "data_scope": data_scope,
+                "error": error,
+            }
 
         if dry_run:
             return {

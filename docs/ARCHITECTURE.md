@@ -107,7 +107,7 @@ graph TD
 ## 1.1) 서비스 역할 (현재 구현)
 
 - **BFF**: 단일 API gateway, auth/rate limit, dataset ingest + pipeline/objectify orchestration, graph/query/lineage/audit, command status(HTTP+WS), admin tasks, AI/Context7.
-- **Agent**: LangGraph 기반 에이전트 실행(제안/오케스트레이션). 외부 호출은 BFF만 사용하며 감사/이벤트를 기록한다.
+- **Agent**: LangGraph 기반 에이전트 실행(제안/오케스트레이션). 외부 호출은 BFF만 사용하며, 에이전트 이벤트는 SSoT Event Store와 분리된 버킷에 기록한다.
 - **OMS**: ontology/branch/version/pull request/merge/rollback, async command 등록, 스키마 검증.
 - **Funnel**: 타입 추론/프로파일링(스키마/컬럼 분석).
 - **message-relay**: S3/MinIO Event Store tail → Kafka publish.
