@@ -8,6 +8,7 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -1213,12 +1214,17 @@ async def get_link_type(
         if not link_type_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="link_type_id is required")
 
-        payload = await oms_client.get_ontology_resource(
-            db_name,
-            resource_type="link_type",
-            resource_id=link_type_id,
-            branch=branch,
-        )
+        try:
+            payload = await oms_client.get_ontology_resource(
+                db_name,
+                resource_type="link_type",
+                resource_id=link_type_id,
+                branch=branch,
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response is not None and exc.response.status_code == status.HTTP_404_NOT_FOUND:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Link type not found") from exc
+            raise
         resource = payload.get("data") if isinstance(payload, dict) else payload
 
         relationship_spec = await dataset_registry.get_relationship_spec(link_type_id=link_type_id)

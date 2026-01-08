@@ -478,7 +478,10 @@ async def upsert_access_policy(
     try:
         payload = sanitize_input(body.model_dump())
         db_name = validate_db_name(payload.get("db_name") or "")
-        enforce_db_scope(request.headers, db_name=db_name)
+        try:
+            enforce_db_scope(request.headers, db_name=db_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
         await _require_db_role(request, db_name=db_name, roles=SECURITY_ROLES)
 
         subject_type = str(payload.get("subject_type") or "").strip()
@@ -522,19 +525,22 @@ async def list_access_policies(
     scope: Optional[str] = Query(default=None),
     subject_type: Optional[str] = Query(default=None),
     subject_id: Optional[str] = Query(default=None),
-    status: Optional[str] = Query(default=None),
+    policy_status: Optional[str] = Query(default=None, alias="status"),
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
 ) -> ApiResponse:
     try:
         if db_name:
-            enforce_db_scope(request.headers, db_name=db_name)
+            try:
+                enforce_db_scope(request.headers, db_name=db_name)
+            except ValueError as exc:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
             await _require_db_role(request, db_name=db_name, roles=SECURITY_ROLES)
         records = await dataset_registry.list_access_policies(
             db_name=db_name,
             scope=scope,
             subject_type=subject_type,
             subject_id=subject_id,
-            status=status,
+            status=policy_status,
         )
         return ApiResponse.success(
             message="Access policies retrieved",

@@ -259,6 +259,7 @@ class SmokeContext:
     dataset_version_id: Optional[str] = None
     ingest_request_id: Optional[str] = None
     connection_id: Optional[str] = None
+    link_type_id: Optional[str] = None
 
     @property
     def ontology_aggregate_id(self) -> str:
@@ -355,6 +356,7 @@ def _format_path(template: str, ctx: SmokeContext, *, overrides: Optional[Dict[s
         "version_id": ctx.dataset_version_id or "00000000-0000-0000-0000-000000000000",
         "ingest_request_id": ctx.ingest_request_id or "00000000-0000-0000-0000-000000000000",
         "connection_id": ctx.connection_id or "missing_connection",
+        "link_type_id": ctx.link_type_id or "missing_link_type",
         "resource_id": "missing_resource",
         "proposal_id": "00000000-0000-0000-0000-000000000000",
     }
@@ -742,11 +744,13 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
             "subject_id": ctx.class_id,
             "policy": {"mask_columns": ["name"]},
         }
-        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409, 422), json_body=body)
+        headers = {"X-DB-Name": ctx.db_name}
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409, 422), json_body=body, headers=headers)
 
     if key == ("GET", "/api/v1/access-policies"):
         url = f"{BFF_URL}{op.path}"
-        return RequestPlan(op.method, op.path, url, (200,), params={"db_name": ctx.db_name})
+        headers = {"X-DB-Name": ctx.db_name}
+        return RequestPlan(op.method, op.path, url, (200,), params={"db_name": ctx.db_name}, headers=headers)
 
     if key == ("POST", "/api/v1/objectify/datasets/{dataset_id}/run"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
@@ -937,6 +941,26 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     if key == ("PUT", "/api/v1/databases/{db_name}/ontology/object-types/{class_id}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_id': ctx.class_id})}"
         return RequestPlan(op.method, op.path, url, (200, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
+
+    if key == ("GET", "/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 404))
+
+    if key == ("PUT", "/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
+
+    if key == ("GET", "/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409))
+
+    if key == ("POST", "/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409, 422), json_body=None, note="smoke: validate only")
+
+    if key == ("POST", "/api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/reindex"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409))
 
     # ---------- Ontology Extensions ----------
     ontology_resource_collections = {
