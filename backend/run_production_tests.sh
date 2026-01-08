@@ -293,6 +293,7 @@ if [[ "$MODE" == "full" ]]; then
   "$PYTHON_BIN" -m pytest tests/test_worker_lease_safety_e2e.py -q
   "$PYTHON_BIN" -m pytest tests/test_event_store_tls_guard.py -q
   "$PYTHON_BIN" -m pytest tests/test_critical_fixes_e2e.py -q
+  RUN_PIPELINE_OBJECTIFY_E2E=true "$PYTHON_BIN" -m pytest tests/test_pipeline_objectify_es_e2e.py -q
 
   # 5) Chaos-lite (no mocks; controls docker-compose)
   if [[ "$RUN_CHAOS_LITE" == "true" ]]; then

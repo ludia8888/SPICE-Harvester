@@ -41,12 +41,31 @@ def _read_env_file(path: Path) -> Dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        values[key.strip()] = value.strip()
+        values[key.strip()] = value.strip().strip("'").strip('"')
     return values
 
 
 ENV_FILE_VALUES = _read_env_file(REPO_ROOT / ".env")
-ES_PORT = int(os.getenv("ELASTICSEARCH_PORT_HOST") or ENV_FILE_VALUES.get("ELASTICSEARCH_PORT_HOST") or "9200")
+
+
+def _get_env_value(key: str) -> str:
+    raw = os.getenv(key)
+    if raw is None:
+        raw = ENV_FILE_VALUES.get(key)
+    if raw is None:
+        return ""
+    return str(raw).strip().strip("'").strip('"')
+
+
+def _require_token(keys: tuple[str, ...]) -> str:
+    for key in keys:
+        value = _get_env_value(key)
+        if value:
+            return value
+    raise RuntimeError(f"Missing auth token env. Tried: {', '.join(keys)}")
+
+
+ES_PORT = int(_get_env_value("ELASTICSEARCH_PORT_HOST") or "9200")
 
 
 @dataclass(frozen=True)
@@ -65,6 +84,15 @@ ENDPOINTS = Endpoints(
 # Instance aggregate_id format (shared.models.commands.InstanceCommand):
 #   "{db_name}:{branch}:{class_id}:{instance_id}"
 DEFAULT_BRANCH = "main"
+OMS_HEADERS = {
+    "X-Admin-Token": _require_token(("OMS_ADMIN_TOKEN", "OMS_WRITE_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN"))
+}
+BFF_HEADERS = {
+    "X-Admin-Token": _require_token(("BFF_ADMIN_TOKEN", "BFF_WRITE_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN"))
+}
+_bff_db_scope = _get_env_value("BFF_DB_SCOPE") or _get_env_value("BFF_DB_NAME")
+if _bff_db_scope:
+    BFF_HEADERS["X-DB-Name"] = _bff_db_scope
 
 
 def _run(cmd: list[str], *, cwd: Path, env: Optional[Dict[str, str]] = None) -> str:
@@ -112,6 +140,10 @@ def _http_json(method: str, url: str, payload: Optional[Dict[str, Any]] = None, 
     if payload is not None:
         headers["Content-Type"] = "application/json"
         data = json.dumps(payload).encode("utf-8")
+    if url.startswith(ENDPOINTS.oms):
+        headers.update(OMS_HEADERS)
+    elif url.startswith(ENDPOINTS.bff):
+        headers.update(BFF_HEADERS)
     req = Request(url, method=method.upper(), data=data, headers=headers)
     with urlopen(req, timeout=timeout_s) as resp:
         body = resp.read().decode("utf-8")
