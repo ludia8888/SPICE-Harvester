@@ -10,7 +10,7 @@
 - **BFF is the frontend contract**. Frontend clients should only call `/api/v1/...` BFF routes.
 - OMS/Funnel/Workers are internal dependencies. Their APIs are not the frontend contract.
 - Payload schemas are best read from OpenAPI. This document enumerates **current routes** and behavior.
-- Agent service (LangGraph, :8004) exposes `/api/v1/agent/*` for internal orchestration only; details in `docs/ARCHITECTURE.md` / `docs/LLM_INTEGRATION.md`.
+- Agent service (LangGraph, :8004) is reachable via the BFF `/api/v1/agent/*` proxy only; direct access is internal. Details in `docs/ARCHITECTURE.md` / `docs/LLM_INTEGRATION.md`.
 
 ## Conventions
 
@@ -68,6 +68,11 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/admin/replay-instance-state/{task_id}/trace`
 - `GET /api/v1/admin/system-health`
 
+### Agent
+- `POST /api/v1/agent/runs`
+- `GET /api/v1/agent/runs/{run_id}`
+- `GET /api/v1/agent/runs/{run_id}/events`
+
 ### AI
 - `POST /api/v1/ai/query/{db_name}`
 - `POST /api/v1/ai/translate/query-plan/{db_name}`
@@ -102,6 +107,15 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/config/config/report`
 - `GET /api/v1/config/config/security-audit`
 - `GET /api/v1/config/config/validation`
+
+### context7
+- `POST /api/v1/context7/analyze/ontology`
+- `GET /api/v1/context7/context/{entity_id}`
+- `GET /api/v1/context7/health`
+- `POST /api/v1/context7/knowledge`
+- `POST /api/v1/context7/link`
+- `POST /api/v1/context7/search`
+- `GET /api/v1/context7/suggestions/{db_name}/{class_id}`
 
 ### Data Connectors
 - `GET /api/v1/data-connectors/google-sheets/connections`
