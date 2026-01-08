@@ -6,7 +6,7 @@
 
 ## 0) TL;DR
 
-- **BFF가 유일한 프론트 API 계약**이며 OMS/Funnel/Registry/Pipeline/Objectify로 라우팅한다.
+- **BFF가 결정론적 프론트 API 계약**이며 OMS/Funnel/Registry/Pipeline/Objectify로 라우팅한다. LangGraph 기반 **Agent 서비스는 별도 오케스트레이션 계층**이다.
 - **Event Store(S3/MinIO)가 Write SSoT**이고, Kafka는 transport다.
 - **Control Plane은 Postgres**(dataset/pipeline/objectify registry, proposal/approval/deploy, gate results, outbox, processed_event_registry).
 - **Ontology 정의는 TerminusDB**, 데이터 아티팩트는 **lakeFS + MinIO**, 검색은 **Elasticsearch**.
@@ -24,6 +24,7 @@ graph TD
 
   subgraph API
     BFF[BFF FastAPI :8002]
+    AGENT[Agent FastAPI :8004]
     OMS[OMS FastAPI :8000]
     FUNNEL[Funnel FastAPI :8003]
   end
@@ -53,9 +54,16 @@ graph TD
   end
 
   UI --> BFF
+  UI --> AGENT
   BFF --> OMS
   BFF --> FUNNEL
   BFF --> LFS
+
+  AGENT --> BFF
+  AGENT --> OMS
+  AGENT --> FUNNEL
+  AGENT --> PG
+  AGENT --> S3
 
   OMS --> TDB
   OMS --> PG
@@ -101,6 +109,7 @@ graph TD
 ## 1.1) 서비스 역할 (현재 구현)
 
 - **BFF**: 단일 API gateway, auth/rate limit, dataset ingest + pipeline/objectify orchestration, graph/query/lineage/audit, command status(HTTP+WS), admin tasks, AI/Context7.
+- **Agent**: LangGraph 기반 에이전트 실행(제안/오케스트레이션) + 감사/이벤트 기록.
 - **OMS**: ontology/branch/version/pull request/merge/rollback, async command 등록, 스키마 검증.
 - **Funnel**: 타입 추론/프로파일링(스키마/컬럼 분석).
 - **message-relay**: S3/MinIO Event Store tail → Kafka publish.
@@ -266,7 +275,7 @@ sequenceDiagram
 ## 11) Runtime / Local
 
 - 권장 실행: `docker-compose.full.yml`.
-- 구성 요소: terminusdb, postgres, kafka, minio, lakefs, bff, oms, funnel, workers.
+- 구성 요소: terminusdb, postgres, kafka, minio, lakefs, bff, oms, funnel, agent, workers.
 
 ---
 
@@ -274,6 +283,7 @@ sequenceDiagram
 
 - `backend/bff/` : API contract + aggregation
 - `backend/oms/` : TerminusDB + ontology control
+- `backend/agent/` : LangGraph agent runtime + audit/event logging
 - `backend/shared/` : Event Store, registries, models, security
 - `backend/*_worker/` : async command execution + projection
 - `backend/message_relay/` : S3 event tail → Kafka publish
@@ -299,6 +309,7 @@ Source: `docker-compose.full.yml` (with extends resolved).
 
 | Service | Ports | Depends On |
 | --- | --- | --- |
+| `agent` | 8004:8004 | bff<br/>oms<br/>funnel<br/>postgres<br/>minio<br/>otel-collector |
 | `bff` | 8002:8002 | oms<br/>funnel<br/>postgres<br/>lakefs<br/>otel-collector |
 | `connector-sync-worker` | - | bff<br/>kafka<br/>postgres<br/>otel-collector |
 | `connector-trigger-service` | - | kafka<br/>postgres<br/>otel-collector |
@@ -333,6 +344,7 @@ Source: `docker-compose.full.yml` (with extends resolved).
 <!-- BEGIN AUTO-GENERATED ARCH: COMPOSE_GRAPH -->
 ```mermaid
 graph TD
+  svc_agent[agent]
   svc_bff[bff]
   svc_connector_sync_worker[connector-sync-worker]
   svc_connector_trigger_service[connector-trigger-service]
@@ -360,6 +372,12 @@ graph TD
   svc_search_projection_worker[search-projection-worker]
   svc_terminusdb[terminusdb]
   svc_zookeeper[zookeeper]
+  svc_agent --> svc_bff
+  svc_agent --> svc_oms
+  svc_agent --> svc_funnel
+  svc_agent --> svc_postgres
+  svc_agent --> svc_minio
+  svc_agent --> svc_otel_collector
   svc_bff --> svc_oms
   svc_bff --> svc_funnel
   svc_bff --> svc_postgres
@@ -436,6 +454,7 @@ graph TD
 ### Service Entry Points (backend/*/main.py)
 
 <!-- BEGIN AUTO-GENERATED ARCH: ENTRYPOINTS -->
+- `backend/agent/main.py`
 - `backend/bff/main.py`
 - `backend/connector_sync_worker/main.py`
 - `backend/connector_trigger_service/main.py`
@@ -462,6 +481,7 @@ graph TD
 | `audit.router` | `/api/v1` | - |
 | `command_status.router` | `/api/v1` | - |
 | `config_monitoring.router` | `/api/v1/config` | - |
+| `context7.router` | `/api/v1` | - |
 | `data_connector.router` | `/api/v1` | - |
 | `database.router` | `/api/v1` | - |
 | `governance.router` | `/api/v1` | - |

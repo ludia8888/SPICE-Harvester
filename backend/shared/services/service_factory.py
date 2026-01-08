@@ -429,3 +429,15 @@ FUNNEL_SERVICE_INFO = ServiceInfo(
         {"name": "Schema Suggestion", "description": "Schema generation operations"},
     ]
 )
+
+AGENT_SERVICE_INFO = ServiceInfo(
+    name="Agent",
+    title="Agent Service",
+    description="LangGraph 기반 에이전트 실행 및 감사 이벤트 기록",
+    version="0.1.0",
+    port=ServiceConfig.get_agent_port(),
+    host=ServiceConfig.get_agent_host(),
+    tags=[
+        {"name": "Agent", "description": "Agent runs, steps, and audit-traceable actions"},
+    ],
+)

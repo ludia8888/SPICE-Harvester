@@ -36,11 +36,11 @@ Client implementation for connecting to MCP servers:
 
 ### 4. Context7 Router (`/bff/routers/context7.py`)
 FastAPI router providing REST endpoints for Context7:
-- `/api/v1/api/context7/search`: Search knowledge base
-- `/api/v1/api/context7/context/{entity_id}`: Get entity context
-- `/api/v1/api/context7/knowledge`: Add new knowledge
-- `/api/v1/api/context7/link`: Create entity relationships
-- `/api/v1/api/context7/analyze/ontology`: Analyze ontology with AI
+- `/api/v1/context7/search`: Search knowledge base
+- `/api/v1/context7/context/{entity_id}`: Get entity context
+- `/api/v1/context7/knowledge`: Add new knowledge
+- `/api/v1/context7/link`: Create entity relationships
+- `/api/v1/context7/analyze/ontology`: Analyze ontology with AI
 
 ## Setup
 
@@ -73,6 +73,8 @@ MCP_LOG_LEVEL=info
 MCP_TIMEOUT=30000
 ```
 
+Docker 환경에서는 `MCP_CONFIG_PATH=/app/mcp-config.json` 처럼 컨테이너 내부 경로를 사용하세요.
+
 ### 3. Start MCP Servers
 
 #### Option A: Manual Start
@@ -99,6 +101,10 @@ mcp-terminus:
   networks:
     - spice_network
 ```
+
+`bff` 서비스에서 Context7을 쓰는 경우:
+- 컨테이너에 `nodejs`/`npm`이 설치되어 있어야 합니다. (`npx` 사용)
+- `mcp-config.json`을 컨테이너에 마운트하고 `MCP_CONFIG_PATH`를 설정하세요.
 
 ## Usage Examples
 
@@ -128,12 +134,12 @@ async def list_databases():
 
 ```bash
 # Search Context7
-curl -X POST http://localhost:8002/api/v1/api/context7/search \
+curl -X POST http://localhost:8002/api/v1/context7/search \
   -H "Content-Type: application/json" \
   -d '{"query": "ontology patterns", "limit": 10}'
 
 # Add knowledge
-curl -X POST http://localhost:8002/api/v1/api/context7/knowledge \
+curl -X POST http://localhost:8002/api/v1/context7/knowledge \
   -H "Content-Type: application/json" \
   -d '{
     "title": "MVCC Implementation",
@@ -142,7 +148,7 @@ curl -X POST http://localhost:8002/api/v1/api/context7/knowledge \
   }'
 
 # Analyze ontology
-curl -X POST http://localhost:8002/api/v1/api/context7/analyze/ontology \
+curl -X POST http://localhost:8002/api/v1/context7/analyze/ontology \
   -H "Content-Type: application/json" \
   -d '{
     "ontology_id": "Person",

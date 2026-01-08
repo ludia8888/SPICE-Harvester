@@ -6,15 +6,17 @@ Provides endpoints for Context7 MCP server integration
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from bff.dependencies import OMSClientDep
+from bff.services.oms_client import OMSClient
 from backend.mcp.mcp_client import get_context7_client, Context7Client
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/api/context7",
+    prefix="/context7",
     tags=["context7"],
     responses={
         404: {"description": "Not found"},
@@ -50,6 +52,7 @@ class OntologyAnalysisRequest(BaseModel):
     """Request to analyze ontology with Context7"""
     ontology_id: str = Field(..., description="Ontology ID")
     db_name: str = Field(..., description="Database name")
+    branch: str = Field("main", description="Ontology branch")
     include_relationships: bool = Field(True, description="Include relationship analysis")
     include_suggestions: bool = Field(True, description="Include improvement suggestions")
 
@@ -68,7 +71,8 @@ async def search_context7(
     try:
         results = await client.search(
             query=request.query,
-            limit=request.limit
+            limit=request.limit,
+            filters=request.filters,
         )
         
         return {
@@ -158,7 +162,8 @@ async def create_entity_link(
         result = await client.link_entities(
             source_id=request.source_id,
             target_id=request.target_id,
-            relationship=request.relationship
+            relationship=request.relationship,
+            properties=request.properties,
         )
         
         return {
@@ -179,7 +184,8 @@ async def create_entity_link(
 @router.post("/analyze/ontology")
 async def analyze_ontology(
     request: OntologyAnalysisRequest,
-    client: Context7Client = Depends(get_context7_client)
+    client: Context7Client = Depends(get_context7_client),
+    oms_client: OMSClient = OMSClientDep,
 ) -> Dict[str, Any]:
     """
     Analyze ontology structure with Context7 AI
@@ -188,18 +194,22 @@ async def analyze_ontology(
         Analysis results including suggestions and insights
     """
     try:
-        # First get the ontology from our system
-        # This would integrate with OMS client
-        # For now, we'll create a mock structure
-        
-        ontology_data = {
-            "id": request.ontology_id,
+        payload = await oms_client.get(
+            f"/api/v1/database/{request.db_name}/ontology/{request.ontology_id}",
+            params={"branch": request.branch},
+        )
+        ontology_data = payload.get("data", payload) if isinstance(payload, dict) else payload
+
+        analysis_request = {
             "db_name": request.db_name,
+            "branch": request.branch,
+            "ontology_id": request.ontology_id,
             "include_relationships": request.include_relationships,
-            "include_suggestions": request.include_suggestions
+            "include_suggestions": request.include_suggestions,
+            "ontology": ontology_data,
         }
         
-        analysis = await client.analyze_ontology(ontology_data)
+        analysis = await client.analyze_ontology(analysis_request)
         
         return {
             "ontology_id": request.ontology_id,

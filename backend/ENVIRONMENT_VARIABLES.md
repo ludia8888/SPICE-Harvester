@@ -9,6 +9,34 @@
 OMS_BASE_URL=http://localhost:8000
 BFF_BASE_URL=http://localhost:8002
 FUNNEL_BASE_URL=http://localhost:8003
+AGENT_BASE_URL=http://localhost:8004
+```
+
+## MCP / Context7
+
+```bash
+CONTEXT7_API_KEY=your_context7_api_key_here
+CONTEXT7_WORKSPACE=your_workspace_name
+MCP_CONFIG_PATH=./mcp-config.json
+MCP_LOG_LEVEL=info
+MCP_TIMEOUT=30000
+```
+
+## Agent Service
+
+```bash
+AGENT_PORT=8004
+AGENT_HOST=127.0.0.1
+AGENT_BFF_BASE_URL=http://localhost:8002
+AGENT_OMS_BASE_URL=http://localhost:8000
+AGENT_FUNNEL_BASE_URL=http://localhost:8003
+AGENT_ALLOWED_SERVICES=bff,oms,funnel
+AGENT_ALLOWED_CUSTOM_URLS=
+AGENT_REQUIRE_EVENT_STORE=true
+AGENT_RUN_MAX_STEPS=50
+AGENT_TOOL_TIMEOUT_SECONDS=30
+AGENT_TOOL_MAX_PAYLOAD_BYTES=200000
+AGENT_AUDIT_MAX_PREVIEW_CHARS=2000
 ```
 
 ## Auth

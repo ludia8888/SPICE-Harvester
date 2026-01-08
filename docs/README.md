@@ -9,7 +9,7 @@ Welcome to the SPICE HARVESTER project documentation. This directory contains al
 - **[System Architecture](ARCHITECTURE.md)** - Comprehensive system architecture with microservices design, implementation status, and performance metrics
 - **[Frontend UI/UX Spec](frontend.md)** - BFF-aligned frontend implementation spec (Blueprint.js + Palantir 3-pane)
 - **[Frontend Policies](FRONTEND_POLICIES.md)** - Frontend state/auth/query/command tracking policies
-- **[API Reference](API_REFERENCE.md)** - Complete API documentation for all services
+- **[API Reference](API_REFERENCE.md)** - BFF API documentation (frontend contract)
 - **[Operations Manual](OPERATIONS.md)** - Deployment, maintenance, and operational procedures
 - **[DevOps Risk & Cost Report](DEVOPS_MSA_RISK_COST_REPORT.md)** - Senior DevOps 관점 운영 리스크/코스트 분석 및 우선순위 개선안
 - **[LLM Integration Blueprint](LLM_INTEGRATION.md)** - LLM을 Funnel/OMS/Graph/Lineage에 안전하게 결합하는 설계(도메인 중립)
@@ -92,6 +92,7 @@ backend/docs/              # Backend-specific documentation
 - **BFF (Backend for Frontend)** - Port 8002: API gateway, routing, async command tracking
 - **OMS (Ontology Management Service)** - Port 8000: Ontology + graph operations on TerminusDB
 - **Funnel (Type Inference Service)** - Port 8003: schema/type inference utilities
+- **Agent (LangGraph Service)** - Port 8004: agent runs + audit/event logging
 - **Pipeline/Objectify Workers** - ETL transforms + dataset → ontology instance mapping
 - **Connector Services** - Google Sheets ingest/preview/polling
 - **Shared Components** - registries, validators, security, observability

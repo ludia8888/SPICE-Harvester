@@ -27,13 +27,13 @@ classifiers = [
 # 해결: shared/pyproject.toml이 모든 외부 라이브러리 버전을 중앙집중 관리
 dependencies = [
     # 🚀 Web Framework - MSA Core Stack
-    "fastapi==0.104.1",        # 통일된 버전: BFF, OMS, Funnel 등 모든 API 서비스
-    "uvicorn[standard]==0.24.0", # ASGI 서버 - 개발/프로덕션 환경 일관성
-    "httpx==0.25.2",           # HTTP 클라이언트 - 서비스 간 통신
+    "fastapi==0.115.0",        # 통일된 버전: BFF, OMS, Funnel 등 모든 API 서비스
+    "uvicorn[standard]==0.31.1", # ASGI 서버 - 개발/프로덕션 환경 일관성
+    "httpx==0.27.2",           # HTTP 클라이언트 - 서비스 간 통신
     
     # 📋 Data Validation & Settings
-    "pydantic==2.5.0",         # 데이터 검증 - 모든 서비스 공통
-    "pydantic-settings==2.1.0", # 설정 관리
+    "pydantic==2.11.10",         # 데이터 검증 - 모든 서비스 공통
+    "pydantic-settings==2.5.2", # 설정 관리
     "python-dotenv==1.0.0",    # 환경변수 로딩
     
     # 🗄️ Database & Caching - GHOST DEPENDENCY RESOLVED
@@ -60,7 +60,7 @@ dependencies = [
     "bcrypt==4.1.1",          # 암호화 라이브러리
     
     # 🌐 HTTP & File Handling
-    "python-multipart==0.0.6", # 멀티파트 폼 데이터 처리
+    "python-multipart==0.0.21", # 멀티파트 폼 데이터 처리
     "aiofiles==23.2.1",       # 비동기 파일 처리
     
     # 📊 Data Processing
@@ -91,6 +91,12 @@ dependencies = [
     
     # 📝 Logging
     "python-json-logger==2.0.7", # 구조화된 로깅
+
+    # 🔌 MCP (Context7 integration)
+    "mcp==1.25.0",
+
+    # Agent orchestration
+    "langgraph==0.2.50",
 ]
 
 [project.optional-dependencies]

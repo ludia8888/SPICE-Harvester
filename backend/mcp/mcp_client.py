@@ -7,11 +7,13 @@ import asyncio
 import json
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from contextlib import AsyncExitStack
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import httpx
-from mcp import Client
+from mcp.client.session import ClientSession
 from mcp.client.stdio import stdio_client
 
 logger = logging.getLogger(__name__)
@@ -33,16 +35,44 @@ class MCPClientManager:
     Handles Context7 and other MCP servers
     """
     
-    def __init__(self, config_path: str = "mcp-config.json"):
-        self.config_path = config_path
+    def __init__(self, config_path: Optional[str] = None):
+        self.config_path = self._resolve_config_path(config_path)
         self.servers: Dict[str, MCPServerConfig] = {}
-        self.clients: Dict[str, Client] = {}
+        self.clients: Dict[str, ClientSession] = {}
+        self._sessions: Dict[str, AsyncExitStack] = {}
         self._load_config()
         
+    @staticmethod
+    def _resolve_config_path(config_path: Optional[str]) -> str:
+        candidates: List[Path] = []
+        if config_path:
+            candidates.append(Path(config_path))
+
+        env_path = (os.getenv("MCP_CONFIG_PATH") or "").strip()
+        if env_path:
+            candidates.append(Path(env_path))
+
+        candidates.append(Path.cwd() / "mcp-config.json")
+        candidates.append(Path(__file__).resolve().parents[2] / "mcp-config.json")
+
+        for candidate in candidates:
+            if candidate.exists():
+                return str(candidate)
+
+        return str(candidates[0]) if candidates else "mcp-config.json"
+
     def _load_config(self):
         """Load MCP configuration from file"""
         try:
-            with open(self.config_path, 'r') as f:
+            config_path = Path(self.config_path)
+            if not config_path.exists():
+                logger.error(
+                    "MCP config not found: %s (set MCP_CONFIG_PATH to override)",
+                    self.config_path,
+                )
+                return
+
+            with config_path.open("r", encoding="utf-8") as f:
                 config = json.load(f)
                 
             for name, server_config in config.get("mcpServers", {}).items():
@@ -59,7 +89,7 @@ class MCPClientManager:
         except Exception as e:
             logger.error(f"Failed to load MCP config: {e}")
     
-    async def connect_server(self, server_name: str) -> Optional[Client]:
+    async def connect_server(self, server_name: str) -> Optional[ClientSession]:
         """
         Connect to a specific MCP server
         
@@ -78,6 +108,7 @@ class MCPClientManager:
             
         server_config = self.servers[server_name]
         
+        stack = AsyncExitStack()
         try:
             # Prepare environment variables
             env = os.environ.copy()
@@ -87,29 +118,36 @@ class MCPClientManager:
                     env[key] = os.path.expandvars(value)
             
             # Create client and connect
-            async with stdio_client(
-                server_config.command,
-                *server_config.args,
-                env=env
-            ) as (read_stream, write_stream):
-                client = Client(f"{server_name}-client", {})
-                await client.connect(read_stream, write_stream)
-                
-                self.clients[server_name] = client
-                logger.info(f"Connected to MCP server: {server_name}")
-                
-                return client
+            read_stream, write_stream = await stack.enter_async_context(
+                stdio_client(
+                    server_config.command,
+                    *server_config.args,
+                    env=env,
+                )
+            )
+            client = ClientSession(read_stream, write_stream)
+            await stack.enter_async_context(client)
+            await client.initialize()
+
+            self.clients[server_name] = client
+            self._sessions[server_name] = stack
+            logger.info("Connected to MCP server: %s", server_name)
+
+            return client
                 
         except Exception as e:
             logger.error(f"Failed to connect to {server_name}: {e}")
+            await stack.aclose()
             return None
     
     async def disconnect_server(self, server_name: str):
         """Disconnect from a specific MCP server"""
+        stack = self._sessions.pop(server_name, None)
+        if stack:
+            await stack.aclose()
         if server_name in self.clients:
-            # MCP clients handle cleanup in context manager
             del self.clients[server_name]
-            logger.info(f"Disconnected from MCP server: {server_name}")
+        logger.info("Disconnected from MCP server: %s", server_name)
     
     async def call_tool(
         self,
@@ -163,21 +201,32 @@ class Context7Client:
         self.mcp_manager = mcp_manager
         self.server_name = "context7"
         
-    async def search(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+    async def search(
+        self,
+        query: str,
+        limit: int = 10,
+        *,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
         """
         Search Context7 knowledge base
         
         Args:
             query: Search query
             limit: Maximum results
+            filters: Optional server-side filters
             
         Returns:
             Search results
         """
+        payload = {"query": query, "limit": limit}
+        if filters:
+            payload["filters"] = filters
+
         return await self.mcp_manager.call_tool(
             self.server_name,
             "search",
-            {"query": query, "limit": limit}
+            payload,
         )
     
     async def get_context(self, entity_id: str) -> Dict[str, Any]:
@@ -227,7 +276,9 @@ class Context7Client:
         self,
         source_id: str,
         target_id: str,
-        relationship: str
+        relationship: str,
+        *,
+        properties: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Create relationship between entities
@@ -240,14 +291,18 @@ class Context7Client:
         Returns:
             Link creation result
         """
+        payload = {
+            "source_id": source_id,
+            "target_id": target_id,
+            "relationship": relationship,
+        }
+        if properties:
+            payload["properties"] = properties
+
         return await self.mcp_manager.call_tool(
             self.server_name,
             "link_entities",
-            {
-                "source_id": source_id,
-                "target_id": target_id,
-                "relationship": relationship
-            }
+            payload,
         )
     
     async def analyze_ontology(self, ontology_data: Dict[str, Any]) -> Dict[str, Any]:

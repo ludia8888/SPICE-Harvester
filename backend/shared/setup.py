@@ -17,13 +17,13 @@ setup(
     python_requires=">=3.9",
     install_requires=[
         # 🚀 Web Framework - MSA Core Stack
-        "fastapi==0.104.1",
-        "uvicorn[standard]==0.24.0",
-        "httpx==0.25.2",
+        "fastapi==0.115.0",
+        "uvicorn[standard]==0.31.1",
+        "httpx==0.27.2",
         
         # 📋 Data Validation & Settings
-        "pydantic==2.5.0",
-        "pydantic-settings==2.1.0",
+        "pydantic==2.11.10",
+        "pydantic-settings==2.5.2",
         "python-dotenv==1.0.0",
         
         # 🗄️ Database & Caching
@@ -50,7 +50,7 @@ setup(
         "bcrypt==4.1.1",
         
         # 🌐 HTTP & File Handling
-        "python-multipart==0.0.6",
+        "python-multipart==0.0.21",
         "aiofiles==23.2.1",
         
         # 📊 Data Processing
@@ -70,6 +70,12 @@ setup(
         
         # 📝 Logging
         "python-json-logger==2.0.7",
+
+        # 🔌 MCP (Context7 integration)
+        "mcp==1.25.0",
+
+        # Agent orchestration
+        "langgraph==0.2.50",
         
         # 📊 Observability - OpenTelemetry
         "opentelemetry-api==1.23.0",

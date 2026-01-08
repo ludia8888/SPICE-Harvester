@@ -89,7 +89,9 @@ def stop_services(processes):
 def main():
     processes = {}
 
-    parser = argparse.ArgumentParser(description="Start SPICE HARVESTER services locally (OMS/BFF/Funnel).")
+    parser = argparse.ArgumentParser(
+        description="Start SPICE HARVESTER services locally (OMS/BFF/Funnel/Agent)."
+    )
     parser.add_argument(
         "--env",
         choices=["development", "production"],
@@ -107,12 +109,14 @@ def main():
     oms_path = str(base_path / "oms")
     bff_path = str(base_path / "bff")
     funnel_path = str(base_path / "funnel")
+    agent_path = str(base_path / "agent")
     
     # Verify all main.py files exist
     services_config = [
         ("OMS", oms_path, 8000),
         ("BFF", bff_path, 8002),
-        ("Funnel", funnel_path, 8003)
+        ("Funnel", funnel_path, 8003),
+        ("Agent", agent_path, 8004),
     ]
     
     for name, path, port in services_config:
@@ -172,16 +176,33 @@ def main():
             return 1
             
         processes["BFF"] = bff_process
+
+        # Start Agent service (depends on core APIs)
+        agent_process = start_service(
+            "Agent",
+            agent_path,
+            f"{sys.executable} -m uvicorn main:app --host 0.0.0.0 --port 8004",
+            8004,
+            health_path="/health",
+        )
+
+        if not agent_process:
+            stop_services(processes)
+            return 1
+
+        processes["Agent"] = agent_process
         
         print("\n🎉 All services started successfully!")
         print("\n📋 Services running:")
         print(f"  - OMS (Ontology Management): {protocol}://localhost:8000")
         print(f"  - BFF (Backend for Frontend): {protocol}://localhost:8002")
         print(f"  - Funnel (Type Inference): {protocol}://localhost:8003")
+        print(f"  - Agent (LangGraph): {protocol}://localhost:8004")
         print("\n🔍 API Documentation:")
         print(f"  - OMS Docs: {protocol}://localhost:8000/docs")
         print(f"  - BFF Docs: {protocol}://localhost:8002/docs")
         print(f"  - Funnel Docs: {protocol}://localhost:8003/docs")
+        print(f"  - Agent Docs: {protocol}://localhost:8004/docs")
         print("\n💡 Key APIs:")
         print("  - Database Management: POST /api/v1/databases")
         print("  - Ontology Creation: POST /api/v1/databases/{db_name}/ontology")

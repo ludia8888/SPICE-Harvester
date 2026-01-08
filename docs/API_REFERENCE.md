@@ -10,6 +10,7 @@
 - **BFF is the frontend contract**. Frontend clients should only call `/api/v1/...` BFF routes.
 - OMS/Funnel/Workers are internal dependencies. Their APIs are not the frontend contract.
 - Payload schemas are best read from OpenAPI. This document enumerates **current routes** and behavior.
+- Agent service (LangGraph, :8004) exposes `/api/v1/agent/*` and is documented in `docs/ARCHITECTURE.md` / `docs/LLM_INTEGRATION.md`.
 
 ## Conventions
 

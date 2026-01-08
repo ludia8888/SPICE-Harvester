@@ -6,6 +6,8 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     curl \
+    nodejs \
+    npm \
     && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip and install build tools
@@ -13,6 +15,10 @@ RUN pip install --upgrade pip setuptools wheel
 
 # Copy shared modules first
 COPY shared /app/shared
+RUN mkdir -p /app/backend
+
+# Copy MCP modules for backend.mcp imports
+COPY mcp /app/backend/mcp
 
 # Install shared package (temporarily hide pyproject.toml to force setup.py usage)
 RUN cd /app/shared && mv pyproject.toml pyproject.toml.bak && cd /app && pip install ./shared && cd /app/shared && mv pyproject.toml.bak pyproject.toml

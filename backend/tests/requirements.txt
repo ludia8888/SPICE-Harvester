@@ -1,14 +1,14 @@
 # 🎯 Test Dependencies - VERSION CONFLICTS RESOLVED!
 #
-# ❌ 이전: httpx>=0.24.0 (다른 서비스의 0.25.2와 충돌), pydantic>=1.10.0 (구버전) 
+# ❌ 이전: httpx>=0.24.0 (다른 서비스의 0.27.2와 충돌), pydantic>=1.10.0 (구버전) 
 # ✅ 현재: shared/pyproject.toml에서 중앙집중 관리 → 모든 서비스와 동일한 버전
 #
 # 현재 shared 패키지에서 제공하는 의존성:
 # - pytest==7.4.3 + pytest-asyncio==0.21.1 + pytest-cov==4.1.0: 테스트 프레임워크
 # - pytest-mock: shared의 optional-dependencies[test]에 포함
-# - httpx==0.25.2: HTTP 클라이언트 (모든 서비스와 동일한 버전)
-# - pydantic==2.5.0: 데이터 검증 (최신 버전)
-# - fastapi==0.104.1: API 프레임워크
+# - httpx==0.27.2: HTTP 클라이언트 (모든 서비스와 동일한 버전)
+# - pydantic==2.11.10: 데이터 검증 (최신 버전)
+# - fastapi==0.115.0: API 프레임워크
 
 # 🔗 Shared package + pinned test dependencies
 -e ../shared

@@ -51,6 +51,22 @@ services:
       - postgres
       - lakefs
       - otel-collector
+
+  agent:
+    extends:
+      file: backend/docker-compose.yml
+      service: agent
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORT_OTLP=true
+      - OTEL_ENABLE_TRACING=true
+    depends_on:
+      - bff
+      - oms
+      - funnel
+      - postgres
+      - minio
+      - otel-collector
       
   funnel:
     extends:

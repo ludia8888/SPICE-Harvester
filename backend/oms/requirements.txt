@@ -4,7 +4,7 @@
 # ✅ 현재: shared/pyproject.toml에서 중앙집중 관리 → 단일 진실 공급원
 #
 # 현재 shared 패키지에서 제공하는 의존성:
-# - fastapi==0.104.1: API 프레임워크
+# - fastapi==0.115.0: API 프레임워크
 # - terminusdb-client==10.2.0: 그래프 DB 연결
 # - asyncpg==0.29.0: PostgreSQL 비동기 드라이버
 # - redis[hiredis]==5.0.1: 캐싱 및 세션 관리

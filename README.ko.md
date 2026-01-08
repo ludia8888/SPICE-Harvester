@@ -40,7 +40,7 @@ Kafka의 **at-least-once** 전달(중복 발행/재전달/재시작/리플레이
 - **조회/프로젝션**: Elasticsearch 프로젝션, graph query federation + label query, optional search-projection worker.
 - **Access policy**: dataset 단위 정책에 따라 instance/query/graph 결과가 행/컬럼 마스킹된다.
 - **운영/보안**: audit logs, lineage graph, health/config/monitoring, tracing/metrics, rate limiting + 입력 sanitizer, auth token guard.
-- **AI/LLM**: 자연어 질의 계획/응답 + Context7 지식베이스 연동.
+- **AI/LLM**: 자연어 질의 계획/응답 + Context7 지식베이스 연동 + 선택적 Agent(LangGraph) 오케스트레이션 서비스.
 
 전체 엔드포인트 목록: `docs/API_REFERENCE.md`
 
@@ -49,10 +49,17 @@ Kafka의 **at-least-once** 전달(중복 발행/재전달/재시작/리플레이
 ```mermaid
 flowchart LR
   Client --> BFF
+  Client --> Agent
   BFF --> OMS
   BFF --> Funnel
   BFF --> PG[(Postgres: registry/outbox)]
   BFF --> LFS[(lakeFS + MinIO)]
+
+  Agent --> BFF
+  Agent --> OMS
+  Agent --> Funnel
+  Agent --> PG
+  Agent --> EventStore
 
   OMS -->|append command| EventStore[(S3/MinIO Event Store)]
   EventStore --> Relay[message-relay (S3 tail -> Kafka)]

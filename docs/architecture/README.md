@@ -9,10 +9,17 @@
 ```mermaid
 graph TD
   UI[Clients] --> BFF[BFF :8002]
+  UI --> AGENT[Agent :8004]
   BFF --> OMS[OMS :8000]
   BFF --> FUNNEL[Funnel :8003]
   BFF --> PG[(Postgres)]
   BFF --> LFS[(lakeFS + MinIO)]
+
+  AGENT --> BFF
+  AGENT --> OMS
+  AGENT --> FUNNEL
+  AGENT --> PG
+  AGENT --> S3[(Event Store S3/MinIO)]
 
   OMS --> TDB[(TerminusDB)]
   OMS --> S3[(Event Store S3/MinIO)]
@@ -51,6 +58,7 @@ graph TD
 Notes:
 - BFF runs dataset/objectify outbox workers in-process.
 - search-projection-worker is optional (`ENABLE_SEARCH_PROJECTION=false` by default).
+- Agent service executes LangGraph runs and logs events/audit trails to S3/Postgres.
 
 ## 2) Event Sourcing Write Path
 
@@ -135,6 +143,7 @@ flowchart LR
 
 - `backend/bff/`: API gateway and orchestration
 - `backend/oms/`: TerminusDB control + async write APIs
+- `backend/agent/`: LangGraph agent runtime + audit/event logging
 - `backend/pipeline_worker/`: Spark pipeline execution
 - `backend/objectify_worker/`: mapping spec -> instance creation
 - `backend/connector_trigger_service/`, `backend/connector_sync_worker/`: connector ingest flow

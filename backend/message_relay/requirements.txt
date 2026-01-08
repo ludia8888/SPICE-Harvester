@@ -6,7 +6,7 @@
 # 현재 shared 패키지에서 제공하는 의존성:
 # - asyncpg==0.29.0: PostgreSQL 비동기 드라이버
 # - confluent-kafka==2.3.0: 메시지 큐 처리
-# - pydantic==2.5.0: 데이터 검증
+# - pydantic==2.11.10: 데이터 검증
 # - python-dotenv==1.0.0: 환경변수 로딩
 # - python-json-logger==2.0.7: 구조화된 로깅
 # - 기타 모든 공통 라이브러리

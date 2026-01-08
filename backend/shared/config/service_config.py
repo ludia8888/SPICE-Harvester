@@ -27,6 +27,7 @@ class ServiceConfig:
     DEFAULT_OMS_PORT = 8000
     DEFAULT_BFF_PORT = 8002
     DEFAULT_FUNNEL_PORT = 8003
+    DEFAULT_AGENT_PORT = 8004
     DEFAULT_ELASTICSEARCH_PORT = 9200
     DEFAULT_LAKEFS_PORT = 8000
 
@@ -46,6 +47,11 @@ class ServiceConfig:
         return int(os.getenv("FUNNEL_PORT", str(ServiceConfig.DEFAULT_FUNNEL_PORT)))
 
     @staticmethod
+    def get_agent_port() -> int:
+        """Get Agent service port from environment or default."""
+        return int(os.getenv("AGENT_PORT", str(ServiceConfig.DEFAULT_AGENT_PORT)))
+
+    @staticmethod
     def get_oms_host() -> str:
         """Get OMS host from environment or default."""
         # FIXED: Use 127.0.0.1 instead of localhost to avoid IPv6 issues
@@ -62,6 +68,11 @@ class ServiceConfig:
         """Get Funnel host from environment or default."""
         # FIXED: Use 127.0.0.1 instead of localhost to avoid IPv6 issues
         return os.getenv("FUNNEL_HOST", "127.0.0.1")
+
+    @staticmethod
+    def get_agent_host() -> str:
+        """Get Agent host from environment or default."""
+        return os.getenv("AGENT_HOST", "127.0.0.1")
 
     @staticmethod
     def get_oms_url() -> str:
@@ -114,6 +125,24 @@ class ServiceConfig:
 
         host = ServiceConfig.get_funnel_host()
         port = ServiceConfig.get_funnel_port()
+        protocol = ServiceConfig.get_protocol()
+        return f"{protocol}://{host}:{port}"
+
+    @staticmethod
+    def get_agent_url() -> str:
+        """
+        Get complete Agent URL from environment or construct from host/port.
+
+        Priority:
+        1. AGENT_BASE_URL environment variable (if set)
+        2. Constructed from AGENT_HOST and AGENT_PORT
+        3. Default: http://localhost:8004
+        """
+        if base_url := os.getenv("AGENT_BASE_URL"):
+            return base_url.rstrip("/")
+
+        host = ServiceConfig.get_agent_host()
+        port = ServiceConfig.get_agent_port()
         protocol = ServiceConfig.get_protocol()
         return f"{protocol}://{host}:{port}"
 
@@ -268,7 +297,7 @@ class ServiceConfig:
         Get URL for a specific service by name.
 
         Args:
-            service_name: Name of the service (oms, bff, funnel)
+            service_name: Name of the service (oms, bff, funnel, agent)
 
         Returns:
             Service URL
@@ -280,6 +309,7 @@ class ServiceConfig:
             "oms": ServiceConfig.get_oms_url,
             "bff": ServiceConfig.get_bff_url,
             "funnel": ServiceConfig.get_funnel_url,
+            "agent": ServiceConfig.get_agent_url,
             "terminus": ServiceConfig.get_terminus_url,
         }
 
@@ -295,6 +325,7 @@ class ServiceConfig:
             "oms": ServiceConfig.get_oms_url(),
             "bff": ServiceConfig.get_bff_url(),
             "funnel": ServiceConfig.get_funnel_url(),
+            "agent": ServiceConfig.get_agent_url(),
             "terminus": ServiceConfig.get_terminus_url(),
         }
 
@@ -629,6 +660,11 @@ def get_funnel_url() -> str:
     return ServiceConfig.get_funnel_url()
 
 
+def get_agent_url() -> str:
+    """Get Agent URL - convenience function."""
+    return ServiceConfig.get_agent_url()
+
+
 if __name__ == "__main__":
     # Print current configuration when run directly
     print("🔥 SPICE HARVESTER Service Configuration")
@@ -644,6 +680,8 @@ if __name__ == "__main__":
     print(f"BFF URL: {ServiceConfig.get_bff_url()}")
     print(f"Funnel Port: {ServiceConfig.get_funnel_port()}")
     print(f"Funnel URL: {ServiceConfig.get_funnel_url()}")
+    print(f"Agent Port: {ServiceConfig.get_agent_port()}")
+    print(f"Agent URL: {ServiceConfig.get_agent_url()}")
     print(f"TerminusDB URL: {ServiceConfig.get_terminus_url()}")
     print(f"Docker Environment: {ServiceConfig.is_docker_environment()}")
     print("=" * 50)

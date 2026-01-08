@@ -1,0 +1,5 @@
+# 🎯 Agent Service Dependencies - SINGLE SOURCE OF TRUTH
+#
+# All shared dependencies are managed in shared/pyproject.toml.
+
+-e ../shared

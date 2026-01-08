@@ -21,6 +21,7 @@ from . import graph
 from . import lineage
 from . import audit
 from . import ai
+from . import context7
 from . import summary
 from . import pipeline
 from . import objectify
@@ -46,6 +47,7 @@ __all__ = [
     "lineage",
     "audit",
     "ai",
+    "context7",
     "summary",
     "pipeline",
     "objectify",

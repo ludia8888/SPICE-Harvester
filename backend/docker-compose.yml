@@ -227,6 +227,9 @@ services:
       - OMS_BASE_URL=http://oms:8000
       - OMS_CLIENT_TIMEOUT_SECONDS=${OMS_CLIENT_TIMEOUT_SECONDS:-60}
       - FUNNEL_BASE_URL=http://funnel:8003
+      - MCP_CONFIG_PATH=/app/mcp-config.json
+      - CONTEXT7_API_KEY=${CONTEXT7_API_KEY:-}
+      - CONTEXT7_WORKSPACE=${CONTEXT7_WORKSPACE:-}
       # Infra (needed for WebSocket notifications / search / rate limiting)
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
@@ -293,8 +296,48 @@ services:
       - spice_network
     volumes:
       - bff_data:/app/data
+      - ../mcp-config.json:/app/mcp-config.json:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Agent Service (LangGraph runtime)
+  agent:
+    build:
+      context: .
+      dockerfile: ./agent/Dockerfile
+    container_name: spice_agent
+    environment:
+      - AGENT_BFF_BASE_URL=http://bff:8002
+      - AGENT_OMS_BASE_URL=http://oms:8000
+      - AGENT_FUNNEL_BASE_URL=http://funnel:8003
+      - AGENT_ALLOWED_SERVICES=bff,oms,funnel
+      - AGENT_REQUIRE_EVENT_STORE=true
+      - AGENT_SERVICE_NAME=agent
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
+      - POSTGRES_DB=${POSTGRES_DB:-spicedb}
+      - MINIO_ENDPOINT_URL=http://spice-minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
+      - LOG_LEVEL=INFO
+      - DOCKER_CONTAINER=true
+    ports:
+      - "8004:8004"
+    depends_on:
+      - bff
+      - oms
+      - funnel
+      - postgres
+      - minio
+    networks:
+      - spice_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
       interval: 30s
       timeout: 10s
       retries: 5

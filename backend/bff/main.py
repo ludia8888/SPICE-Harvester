@@ -102,9 +102,32 @@ from bff.services.oms_client import OMSClient
 # Data connector imports
 from data_connector.google_sheets.service import GoogleSheetsService
 from bff.routers import (
-    database, health, mapping, merge_conflict, ontology, ontology_extensions, query,
-    instances, instance_async, websocket, tasks, admin, data_connector,
-    command_status, graph, lineage, audit, ai, summary, pipeline, objectify, ops, governance, object_types, link_types
+    admin,
+    ai,
+    audit,
+    command_status,
+    context7,
+    data_connector,
+    database,
+    governance,
+    graph,
+    health,
+    instance_async,
+    instances,
+    lineage,
+    link_types,
+    mapping,
+    merge_conflict,
+    object_types,
+    objectify,
+    ontology,
+    ontology_extensions,
+    ops,
+    pipeline,
+    query,
+    summary,
+    tasks,
+    websocket,
 )
 
 # Monitoring and observability routers
@@ -757,6 +780,7 @@ app.include_router(data_connector.router, prefix="/api/v1")
 app.include_router(lineage.router, prefix="/api/v1")
 app.include_router(audit.router, prefix="/api/v1")
 app.include_router(ai.router, prefix="/api/v1")
+app.include_router(context7.router, prefix="/api/v1")
 app.include_router(summary.router, prefix="/api/v1")
 app.include_router(pipeline.router, prefix="/api/v1")
 app.include_router(objectify.router, prefix="/api/v1")
