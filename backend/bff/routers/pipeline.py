@@ -1991,6 +1991,7 @@ async def create_pipeline(
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
     request: Request = None,
 ) -> ApiResponse:
+    sanitized: Dict[str, Any] = {}
     try:
         sanitized = sanitize_input(payload)
         db_name = validate_db_name(str(sanitized.get("db_name") or ""))
@@ -2146,12 +2147,17 @@ async def create_pipeline(
             detail={"code": "PIPELINE_ALREADY_EXISTS", "message": str(exc)},
         ) from exc
     except Exception as e:
+        db_name = ""
+        if isinstance(sanitized, dict):
+            db_name = str(sanitized.get("db_name") or "")
+        if not db_name and isinstance(payload, dict):
+            db_name = str(payload.get("db_name") or "")
         await _log_pipeline_audit(
             audit_store,
             request=request,
             action="PIPELINE_CREATED",
             status="failure",
-            db_name=str(sanitized.get("db_name") or ""),
+            db_name=db_name,
             error=str(e),
         )
         logger.error(f"Failed to create pipeline: {e}")
