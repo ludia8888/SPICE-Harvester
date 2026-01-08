@@ -56,6 +56,8 @@ from shared.dependencies.providers import (
 from shared.services.service_factory import BFF_SERVICE_INFO, create_fastapi_service, run_service
 from shared.services.connector_registry import ConnectorRegistry
 from shared.services.dataset_registry import DatasetRegistry
+from shared.services.agent_registry import AgentRegistry
+from shared.services.agent_tool_registry import AgentToolRegistry
 from shared.services.pipeline_registry import PipelineRegistry
 from shared.services.pipeline_executor import PipelineExecutor
 from shared.services.objectify_registry import ObjectifyRegistry
@@ -104,6 +106,8 @@ from data_connector.google_sheets.service import GoogleSheetsService
 from bff.routers import (
     admin,
     ai,
+    agent_plans,
+    agent_tools,
     audit,
     command_status,
     context7,
@@ -187,10 +191,16 @@ class BFFServiceContainer:
         # 9. Initialize Objectify Registry (dataset -> ontology mapping)
         await self._initialize_objectify_registry()
 
-        # 10. Initialize Pipeline Executor (preview/build engine)
+        # 10. Initialize Agent Registry (plan/run/approval tracking)
+        await self._initialize_agent_registry()
+
+        # 11. Initialize Agent Tool Registry (allowlist/policy)
+        await self._initialize_agent_tool_registry()
+
+        # 12. Initialize Pipeline Executor (preview/build engine)
         await self._initialize_pipeline_executor()
         
-        # 11. Initialize Google Sheets Service (connector library)
+        # 13. Initialize Google Sheets Service (connector library)
         await self._initialize_google_sheets_service()
         
         logger.info("BFF services initialized successfully")
@@ -322,6 +332,28 @@ class BFFServiceContainer:
         except Exception as e:
             logger.error(f"Failed to initialize ObjectifyRegistry: {e}")
 
+    async def _initialize_agent_registry(self) -> None:
+        """Initialize Postgres-backed agent registry."""
+        try:
+            logger.info("Initializing AgentRegistry (Postgres)...")
+            registry = AgentRegistry()
+            await registry.initialize()
+            self._bff_services["agent_registry"] = registry
+            logger.info("AgentRegistry initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize AgentRegistry: {e}")
+
+    async def _initialize_agent_tool_registry(self) -> None:
+        """Initialize Postgres-backed agent tool registry."""
+        try:
+            logger.info("Initializing AgentToolRegistry (Postgres)...")
+            registry = AgentToolRegistry()
+            await registry.initialize()
+            self._bff_services["agent_tool_registry"] = registry
+            logger.info("AgentToolRegistry initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize AgentToolRegistry: {e}")
+
     async def _initialize_pipeline_executor(self) -> None:
         """Initialize pipeline executor (preview/build engine)."""
         try:
@@ -438,6 +470,20 @@ class BFFServiceContainer:
             except Exception as e:
                 logger.error(f"Error closing ObjectifyRegistry: {e}")
 
+        if "agent_registry" in self._bff_services:
+            try:
+                await self._bff_services["agent_registry"].close()
+                logger.info("AgentRegistry closed")
+            except Exception as e:
+                logger.error(f"Error closing AgentRegistry: {e}")
+
+        if "agent_tool_registry" in self._bff_services:
+            try:
+                await self._bff_services["agent_tool_registry"].close()
+                logger.info("AgentToolRegistry closed")
+            except Exception as e:
+                logger.error(f"Error closing AgentToolRegistry: {e}")
+
         if "pipeline_executor" in self._bff_services:
             self._bff_services.pop("pipeline_executor", None)
         
@@ -485,6 +531,18 @@ class BFFServiceContainer:
         if "objectify_registry" not in self._bff_services:
             raise RuntimeError("ObjectifyRegistry not initialized")
         return self._bff_services["objectify_registry"]
+
+    def get_agent_registry(self) -> AgentRegistry:
+        """Get agent registry instance"""
+        if "agent_registry" not in self._bff_services:
+            raise RuntimeError("AgentRegistry not initialized")
+        return self._bff_services["agent_registry"]
+
+    def get_agent_tool_registry(self) -> AgentToolRegistry:
+        """Get agent tool registry instance"""
+        if "agent_tool_registry" not in self._bff_services:
+            raise RuntimeError("AgentToolRegistry not initialized")
+        return self._bff_services["agent_tool_registry"]
 
     def get_pipeline_executor(self) -> PipelineExecutor:
         """Get pipeline executor instance"""
@@ -750,6 +808,17 @@ async def get_objectify_registry() -> ObjectifyRegistry:
         raise RuntimeError("BFF container not initialized")
     return _bff_container.get_objectify_registry()
 
+async def get_agent_registry() -> AgentRegistry:
+    if _bff_container is None:
+        raise RuntimeError("BFF container not initialized")
+    return _bff_container.get_agent_registry()
+
+
+async def get_agent_tool_registry() -> AgentToolRegistry:
+    if _bff_container is None:
+        raise RuntimeError("BFF container not initialized")
+    return _bff_container.get_agent_tool_registry()
+
 
 async def get_pipeline_executor() -> PipelineExecutor:
     """Get PipelineExecutor from BFF container"""
@@ -783,6 +852,8 @@ app.include_router(audit.router, prefix="/api/v1")
 app.include_router(ai.router, prefix="/api/v1")
 app.include_router(context7.router, prefix="/api/v1")
 app.include_router(agent_proxy.router, prefix="/api/v1")
+app.include_router(agent_plans.router, prefix="/api/v1")
+app.include_router(agent_tools.router, prefix="/api/v1")
 app.include_router(summary.router, prefix="/api/v1")
 app.include_router(pipeline.router, prefix="/api/v1")
 app.include_router(objectify.router, prefix="/api/v1")

@@ -6,6 +6,7 @@ from .common import *
 from .config import *
 from .google_sheets import *
 from .pipeline_job import PipelineJob
+from .agent_plan import AgentPlan, AgentPlanDataScope, AgentPlanRiskLevel, AgentPlanStep
 from .ontology import *
 from .ontology_resources import *
 
@@ -42,4 +43,8 @@ __all__ = [
     "GoogleSheetRegisterRequest",
     "GoogleSheetRegisterResponse",
     "PipelineJob",
+    "AgentPlan",
+    "AgentPlanDataScope",
+    "AgentPlanRiskLevel",
+    "AgentPlanStep",
 ]

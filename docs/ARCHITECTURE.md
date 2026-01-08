@@ -49,7 +49,8 @@ graph TD
     KAF[Kafka]
     RED[Redis]
     ES[(Elasticsearch)]
-    S3[(MinIO/S3)]
+    S3[(S3/MinIO Event Store)]
+    S3A[(S3/MinIO Agent Store)]
     LFS[(lakeFS)]
   end
 
@@ -61,7 +62,7 @@ graph TD
 
   AGENT --> BFF
   AGENT --> PG
-  AGENT --> S3
+  AGENT --> S3A
 
   OMS --> TDB
   OMS --> PG
@@ -289,6 +290,102 @@ sequenceDiagram
 - `backend/pipeline_worker/` : Spark transforms + dataset artifacts
 - `backend/objectify_worker/` : mapping spec → ontology instances
 - `backend/connector_trigger_service/`, `backend/connector_sync_worker/` : connector ingest flow
+
+## 12.1) THINK ULTRA Design (현재 코드 기준)
+
+이 섹션은 "실제 코드 기준"으로 전체 시스템의 설계 의도와 실행 경로를 재구성한 문서다.
+의도/구현/제약을 분리해 과장 없이 현재 상태를 명확히 기록한다.
+LangGraph 확장 설계는 별도 문서(`docs/LANGGRAPH_EXTENSION.md`)에 정리한다.
+
+### 12.1.1 설계 불변성 (Invariants)
+
+- **단일 프론트 계약**: 외부 호출은 BFF만 허용한다. Agent/OMS/Funnel은 내부 전용이다.
+- **SSoT 분리**: Event Store(S3/MinIO)=Write SSoT, TerminusDB=Ontology SSoT, Postgres=Control Plane SSoT, lakeFS=Data Plane SSoT.
+- **Event Sourcing**: 모든 write는 immutable event로 저장되고, Kafka는 transport다.
+- **Idempotency/Ordering**: `event_id` + `sequence_number` + ProcessedEventRegistry로 중복/경합을 제거한다.
+
+### 12.1.2 Control Plane 모델 (Postgres 중심)
+
+- **DatasetRegistry**: dataset/version, ingest request/transaction/outbox, backing datasource + version, key spec, gate policy/result, access policy, instance edits, relationship spec/index 결과, link edits, schema migration plan을 관리한다.
+- **PipelineRegistry**: pipeline/version/run/artifact, dependencies, permissions, watermarks, UDFs, promotion manifest를 관리한다.
+- **ObjectifyRegistry**: mapping spec + objectify job + outbox를 관리한다.
+- **ProcessedEventRegistry**: worker idempotency + ordering lease를 보장한다.
+
+### 12.1.3 Event Sourcing & Async Write (OMS/Workers)
+
+1. BFF가 OMS에 async command를 요청한다.
+2. OMS는 Command EventEnvelope를 Event Store에 append한다.
+3. message-relay가 S3 index를 tail하여 Kafka로 publish한다.
+4. Worker가 command를 처리하고 domain event를 다시 Event Store에 append한다.
+5. projection-worker가 ES read model을 갱신한다.
+
+### 12.1.4 Data Plane E2E (Ingest → Pipeline → Objectify → Projection)
+
+1. **Ingest**: BFF가 CSV/Excel/Media/Connector 데이터를 받아 lakeFS에 커밋하고 ingest request/outbox를 기록한다.
+2. **Schema Gate**: 샘플/스키마 해시를 기록하고 승인/거부를 gate result로 남긴다.
+3. **Pipeline**: preview는 local executor, build/deploy는 Spark pipeline-worker가 수행한다.
+4. **Contract/Expectations**: schema checks/contract/expectations 실패는 build/deploy를 차단한다.
+5. **Objectify**: mapping spec + key spec 기반으로 bulk instance 생성(job) 후 OMS로 write 이벤트를 보낸다.
+6. **Auto Objectify**: `auto_sync=true`인 mapping spec만 자동 실행되며 schema hash 불일치는 gate fail로 기록된다.
+7. **Projection**: instance event는 TerminusDB에 적용되고 ES로 투사된다.
+
+### 12.1.5 Relationship Indexing & Link Edits
+
+- RelationshipSpec은 join-table/FK/object-backed 링크를 정의한다.
+- Objectify/Instance worker가 링크를 인덱싱하고 결과/통계/라인리지를 기록한다.
+- dangling policy(FAIL/WARN)는 결과에 반영되며, link edits는 별도 overlay 레이어로 저장된다.
+
+### 12.1.6 Governance & Branching
+
+- 보호된 브랜치는 direct write를 차단하고 proposal/approval 흐름을 요구한다.
+- Gate policy/result는 schema/mapping/quality 검증을 기록하고 pipeline/objectify에 적용된다.
+
+### 12.1.7 Read/Query Path & Access Policy
+
+- Label 기반 Query는 BFF가 라벨→내부 ID 변환 후 OMS/TerminusDB 쿼리를 실행한다.
+- Graph Query는 TerminusDB traversal + ES 문서 fetch를 결합한다.
+- Access policy는 행/컬럼 필터/마스킹을 적용한다.
+
+### 12.1.8 Agent + LangGraph (현재 구현)
+
+- Agent는 LangGraph 기반 **순차 step executor**이며, tool 호출 대상은 BFF로 제한된다.
+- Agent는 `/api/v1/agent/*` 경로 호출을 자체 차단하고, BFF는 `X-Spice-Caller: agent`를 차단해 루프를 방지한다.
+- Agent 이벤트는 core Event Store와 분리된 버킷으로 저장된다. (`AGENT_EVENT_STORE_BUCKET` → agent의 `EVENT_STORE_BUCKET`)
+- 내부 호출 인증은 `BFF_AGENT_TOKEN`(alias: `AGENT_BFF_TOKEN`)을 사용하고, **요청 주체**는 `X-Actor`/`X-User-*` 헤더로 분리 기록한다.
+- Rate limit은 내부 agent 호출을 별도 버킷/우회로 처리한다 (`is_internal_agent` 플래그 기반).
+- Agent의 S3 사용 목적은 **이벤트 로그/감사**이며, 아티팩트 저장소는 별도 버킷으로 분리 설계(미구현)한다.
+
+### 12.1.9 LLM/Context7 (현재 구현)
+
+- `/api/v1/ai/*`는 **읽기 전용 계획 생성**과 요약만 수행한다 (write 금지).
+- LLM Gateway는 JSON schema 검증을 통해 출력 안전성을 강제한다.
+- `/api/v1/context7/*`는 search/knowledge/link/ontology analyze를 제공하지만 Agent와 자동 연계는 없다.
+
+### 12.1.10 현재 미구현/제약 (명시)
+
+- 자연어 → 파이프라인 자동 구성/실행은 구현되어 있지 않다.
+- 온톨로지 자동 구축은 human-in-the-loop 없이 동작하지 않는다.
+- Agent는 planner가 없고, 사용자 제공 steps만 실행한다.
+- Planner/allowlist/approval은 설계 문서(`docs/LANGGRAPH_EXTENSION.md`)에 있으며 단계적 구현이 필요하다.
+
+### 12.1.11 코드 크로스체크 앵커 (주요 구현 위치)
+
+- Event Store: `backend/shared/services/event_store.py`
+- Idempotency/Ordering: `backend/shared/services/processed_event_registry.py`
+- Ingest/Pipeline/Objectify API: `backend/bff/routers/pipeline.py`, `backend/bff/routers/objectify.py`
+- Pipeline transforms: `backend/shared/services/pipeline_executor.py`, `backend/shared/services/pipeline_transform_spec.py`
+- Objectify + link indexing: `backend/objectify_worker/main.py`, `backend/instance_worker/main.py`
+- Agent runtime + proxy: `backend/agent/services/agent_runtime.py`, `backend/bff/routers/agent_proxy.py`
+- AI/Context7: `backend/bff/routers/ai.py`, `backend/bff/routers/context7.py`
+
+### 12.1.12 Agent 실행 상태 저장 계약 (계획)
+
+LangGraph 확장 시 plan/approval/run 추적을 위한 최소 저장소 계약을 둔다.
+아래는 **제안 스키마**이며 실제 구현 전까지는 문서상의 계약으로만 유지한다.
+
+- `agent_runs`: `run_id`, `plan_id`, `status`, `started_at`, `finished_at`, `requester`, `delegated_actor`, `risk_level`
+- `agent_steps`: `run_id`, `step_id`, `tool_id`, `status`, `command_id`/`task_id`, `input_digest`, `output_digest`, `error`
+- `agent_approvals`: `plan_id`, `step_id?`, `approved_by`, `approved_at`, `decision`, `comment`
 
 ---
 

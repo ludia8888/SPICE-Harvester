@@ -23,6 +23,8 @@ from . import audit
 from . import ai
 from . import context7
 from . import agent_proxy
+from . import agent_plans
+from . import agent_tools
 from . import summary
 from . import pipeline
 from . import objectify
@@ -50,6 +52,8 @@ __all__ = [
     "ai",
     "context7",
     "agent_proxy",
+    "agent_plans",
+    "agent_tools",
     "summary",
     "pipeline",
     "objectify",
