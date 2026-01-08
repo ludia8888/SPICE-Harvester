@@ -40,7 +40,7 @@ It is designed to survive **at-least-once** delivery (Kafka redeliveries, worker
 - **Query & projection**: Elasticsearch projections, graph query federation + label query, optional search-projection worker.
 - **Access policy**: row/column masking applied to instance/query/graph reads via dataset-level policies.
 - **Ops & security**: audit logs, lineage graph, health/config/monitoring endpoints, tracing/metrics, rate limiting + input sanitizer, auth token guard.
-- **AI/LLM**: natural-language query plan/answer endpoints + Context7 knowledge base integration + optional Agent (LangGraph) orchestration service.
+- **AI/LLM**: natural-language query plan/answer endpoints + Context7 knowledge base integration + optional Agent (LangGraph) orchestration service (internal, via BFF).
 
 Full API list: `docs/API_REFERENCE.md`
 
@@ -49,15 +49,13 @@ Full API list: `docs/API_REFERENCE.md`
 ```mermaid
 flowchart LR
   Client --> BFF
-  Client --> Agent
+  BFF --> Agent
   BFF --> OMS
   BFF --> Funnel
   BFF --> PG[(Postgres: registry/outbox)]
   BFF --> LFS[(lakeFS + MinIO)]
 
   Agent --> BFF
-  Agent --> OMS
-  Agent --> Funnel
   Agent --> PG
   Agent --> EventStore
 

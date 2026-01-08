@@ -9,15 +9,13 @@
 ```mermaid
 graph TD
   UI[Clients] --> BFF[BFF :8002]
-  UI --> AGENT[Agent :8004]
+  BFF --> AGENT[Agent :8004]
   BFF --> OMS[OMS :8000]
   BFF --> FUNNEL[Funnel :8003]
   BFF --> PG[(Postgres)]
   BFF --> LFS[(lakeFS + MinIO)]
 
   AGENT --> BFF
-  AGENT --> OMS
-  AGENT --> FUNNEL
   AGENT --> PG
   AGENT --> S3[(Event Store S3/MinIO)]
 
@@ -58,7 +56,7 @@ graph TD
 Notes:
 - BFF runs dataset/objectify outbox workers in-process.
 - search-projection-worker is optional (`ENABLE_SEARCH_PROJECTION=false` by default).
-- Agent service executes LangGraph runs and logs events/audit trails to S3/Postgres.
+- Agent service is internal; it executes LangGraph runs, calls BFF for actions, and logs events/audit trails to S3/Postgres.
 
 ## 2) Event Sourcing Write Path
 

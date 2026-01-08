@@ -99,7 +99,7 @@ class AgentRuntime:
         funnel_url = _clean_url(os.getenv("AGENT_FUNNEL_BASE_URL") or ServiceConfig.get_funnel_url())
         allowed_services = tuple(
             s.strip().lower()
-            for s in (os.getenv("AGENT_ALLOWED_SERVICES") or "bff,oms,funnel").split(",")
+            for s in (os.getenv("AGENT_ALLOWED_SERVICES") or "bff").split(",")
             if s.strip()
         )
         allowed_custom_urls = tuple(

@@ -311,9 +311,7 @@ services:
     container_name: spice_agent
     environment:
       - AGENT_BFF_BASE_URL=http://bff:8002
-      - AGENT_OMS_BASE_URL=http://oms:8000
-      - AGENT_FUNNEL_BASE_URL=http://funnel:8003
-      - AGENT_ALLOWED_SERVICES=bff,oms,funnel
+      - AGENT_ALLOWED_SERVICES=bff
       - AGENT_REQUIRE_EVENT_STORE=true
       - AGENT_SERVICE_NAME=agent
       - POSTGRES_HOST=postgres

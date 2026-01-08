@@ -44,7 +44,7 @@ LLM 결합의 출발점은 “이미 되는 것”과 “사람이 힘든 것”
 
 - BFF AI 라우터: `POST /api/v1/ai/query/{db_name}`, `POST /api/v1/ai/translate/query-plan/{db_name}`
 - Context7 라우터: `/api/v1/context7/*` (검색/컨텍스트/지식/링크/온톨로지 분석)
-- Agent 서비스(옵션): `/api/v1/agent/*` (LangGraph 기반 실행/감사 이벤트 기록)
+- Agent 서비스(옵션): `/api/v1/agent/*` (내부 오케스트레이션, BFF 경유 실행, 감사 이벤트 기록)
 
 위 라우터는 “추천/보조” 역할이며, 최종 반영은 항상 서버 검증/승인 흐름을 통과해야 합니다.
 

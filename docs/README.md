@@ -92,7 +92,7 @@ backend/docs/              # Backend-specific documentation
 - **BFF (Backend for Frontend)** - Port 8002: API gateway, routing, async command tracking
 - **OMS (Ontology Management Service)** - Port 8000: Ontology + graph operations on TerminusDB
 - **Funnel (Type Inference Service)** - Port 8003: schema/type inference utilities
-- **Agent (LangGraph Service)** - Port 8004: agent runs + audit/event logging
+- **Agent (LangGraph Service)** - Port 8004: internal agent runs + audit/event logging (BFF 경유)
 - **Pipeline/Objectify Workers** - ETL transforms + dataset → ontology instance mapping
 - **Connector Services** - Google Sheets ingest/preview/polling
 - **Shared Components** - registries, validators, security, observability
