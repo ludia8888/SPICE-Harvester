@@ -108,7 +108,10 @@ EVENT_PUBLISHER_METRICS_LOG_INTERVAL_SECONDS=30
 
 1. **OMS health**
 ```bash
+# localhost requires backend/docker-compose.debug-ports.yml
 curl -fsS http://localhost:8000/health | jq .
+# or from inside the docker network
+# curl -fsS http://oms:8000/health | jq .
 ```
 
 2. **Event store write path**

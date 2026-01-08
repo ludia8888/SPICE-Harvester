@@ -44,8 +44,6 @@ services:
       - SSL_KEY_PATH=/ssl/oms/server.key
       - SSL_CA_PATH=/ssl/ca.crt
       - VERIFY_SSL=${VERIFY_SSL:-false}
-    ports:
-      - "8000:8000"
     depends_on:
       terminusdb:
         condition: service_healthy
@@ -68,6 +66,8 @@ services:
     environment:
       - OMS_BASE_URL=${OMS_BASE_URL:-https://oms:8000}
       - FUNNEL_BASE_URL=${FUNNEL_BASE_URL:-https://funnel:8003}
+      - AGENT_BASE_URL=${AGENT_BASE_URL:-https://agent:8004}
+      - AGENT_PROXY_TIMEOUT_SECONDS=${AGENT_PROXY_TIMEOUT_SECONDS:-30}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - BFF_REQUIRE_AUTH=${BFF_REQUIRE_AUTH:-true}
       - BFF_REQUIRE_DB_SCOPE=${BFF_REQUIRE_DB_SCOPE:-false}
@@ -108,8 +108,6 @@ services:
       - SSL_KEY_PATH=/ssl/funnel/server.key
       - SSL_CA_PATH=/ssl/ca.crt
       - VERIFY_SSL=${VERIFY_SSL:-false}
-    ports:
-      - "8003:8003"
     networks:
       - spice_network
     volumes:

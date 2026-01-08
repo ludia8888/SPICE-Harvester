@@ -22,6 +22,7 @@ from . import lineage
 from . import audit
 from . import ai
 from . import context7
+from . import agent_proxy
 from . import summary
 from . import pipeline
 from . import objectify
@@ -48,6 +49,7 @@ __all__ = [
     "audit",
     "ai",
     "context7",
+    "agent_proxy",
     "summary",
     "pipeline",
     "objectify",

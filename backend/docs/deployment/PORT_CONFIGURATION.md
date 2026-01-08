@@ -6,9 +6,10 @@
 All service ports are now centrally configured through environment variables, eliminating hardcoded port conflicts.
 
 ## Default Port Assignments
-- **OMS (Ontology Management Service)**: 8000
-- **BFF (Backend for Frontend)**: 8002
-- **Funnel (Type Inference Service)**: 8003
+- **OMS (internal; debug ports only)**: 8000
+- **BFF (external)**: 8002
+- **Funnel (internal; debug ports only)**: 8003
+- **Agent (internal; debug ports only)**: 8004
 - **TerminusDB**: 6363
 
 ## Configuration Methods
@@ -19,9 +20,12 @@ Set these in your `.env` file or shell environment:
 OMS_PORT=8000
 BFF_PORT=8002
 FUNNEL_PORT=8003
-OMS_BASE_URL=http://localhost:8000  # Optional
-BFF_BASE_URL=http://localhost:8002  # Optional
-FUNNEL_BASE_URL=http://localhost:8003  # Optional
+AGENT_PORT=8004
+OMS_BASE_URL=http://oms:8000  # Docker network default
+BFF_BASE_URL=http://localhost:8002  # External entrypoint
+FUNNEL_BASE_URL=http://funnel:8003  # Docker network default
+AGENT_BASE_URL=http://agent:8004  # Docker network default
+# To expose internal ports on localhost, use backend/docker-compose.debug-ports.yml
 ```
 
 ### 2. Using ServiceConfig
@@ -35,9 +39,9 @@ bff_port = ServiceConfig.get_bff_port()  # Returns 8002 or $BFF_PORT
 funnel_port = ServiceConfig.get_funnel_port()  # Returns 8003 or $FUNNEL_PORT
 
 # Get URLs
-oms_url = ServiceConfig.get_oms_url()  # Returns http://localhost:8000 or $OMS_BASE_URL
-bff_url = ServiceConfig.get_bff_url()  # Returns http://localhost:8002 or $BFF_BASE_URL
-funnel_url = ServiceConfig.get_funnel_url()  # Returns http://localhost:8003 or $FUNNEL_BASE_URL
+oms_url = ServiceConfig.get_oms_url()  # http://oms:8000 in Docker, http://localhost:8000 otherwise
+bff_url = ServiceConfig.get_bff_url()  # http://localhost:8002 or $BFF_BASE_URL
+funnel_url = ServiceConfig.get_funnel_url()  # http://funnel:8003 in Docker, http://localhost:8003 otherwise
 ```
 
 ## Running Services
@@ -83,17 +87,21 @@ This will automatically start:
 And provide helpful API endpoints for schema suggestion!
 
 ## Docker Configuration
-Docker Compose already uses environment variables:
+Docker Compose already uses environment variables and keeps OMS/Funnel/Agent internal by default:
 ```yaml
 services:
   oms:
-    ports:
-      - "${OMS_PORT:-8000}:8000"
   bff:
     environment:
       - OMS_BASE_URL=${OMS_BASE_URL:-http://oms:8000}
     ports:
       - "${BFF_PORT:-8002}:8002"
+```
+
+To expose internal ports for debugging:
+
+```bash
+docker compose -f docker-compose.full.yml -f backend/docker-compose.debug-ports.yml up -d
 ```
 
 ## Testing

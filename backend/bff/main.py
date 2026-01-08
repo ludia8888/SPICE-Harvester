@@ -107,6 +107,7 @@ from bff.routers import (
     audit,
     command_status,
     context7,
+    agent_proxy,
     data_connector,
     database,
     governance,
@@ -781,6 +782,7 @@ app.include_router(lineage.router, prefix="/api/v1")
 app.include_router(audit.router, prefix="/api/v1")
 app.include_router(ai.router, prefix="/api/v1")
 app.include_router(context7.router, prefix="/api/v1")
+app.include_router(agent_proxy.router, prefix="/api/v1")
 app.include_router(summary.router, prefix="/api/v1")
 app.include_router(pipeline.router, prefix="/api/v1")
 app.include_router(objectify.router, prefix="/api/v1")

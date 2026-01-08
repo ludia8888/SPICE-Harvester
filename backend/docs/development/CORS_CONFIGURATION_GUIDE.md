@@ -34,6 +34,7 @@ Then inspect:
 
 ```bash
 curl http://localhost:8002/debug/cors  # BFF
-curl http://localhost:8000/debug/cors  # OMS
-curl http://localhost:8003/debug/cors  # Funnel
+# OMS/Funnel debug endpoints are internal; use backend/docker-compose.debug-ports.yml if needed.
+# curl http://localhost:8000/debug/cors  # OMS
+# curl http://localhost:8003/debug/cors  # Funnel
 ```

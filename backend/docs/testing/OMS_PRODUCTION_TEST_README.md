@@ -18,7 +18,8 @@ This guide documents how to run the current production-readiness checks for OMS 
 
 1) Start infra (MinIO/Postgres/Kafka/TerminusDB, optionally Elasticsearch).  
 2) Start services (at minimum OMS; for full-stack tests also start BFF/Funnel, plus EventPublisher/workers/projection if validating async flow).  
-3) If your local stack uses non-default ports, export endpoint overrides (examples):
+3) If your local stack uses non-default ports, export endpoint overrides (examples).
+   Default compose keeps OMS/Funnel internal; use backend/docker-compose.debug-ports.yml if you need localhost access.
 
 ```bash
 export OMS_BASE_URL=http://localhost:8000

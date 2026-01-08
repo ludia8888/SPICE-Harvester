@@ -1,7 +1,7 @@
 # OMS API Endpoints (Code-Backed)
 
 > Updated: 2026-01-08  \
-> Base URL (local): `http://localhost:8000/api/v1`
+> Base URL (local): `http://localhost:8000/api/v1` (debug ports) / `http://oms:8000/api/v1` (docker network)
 
 ## Auth
 

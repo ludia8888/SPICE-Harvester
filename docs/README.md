@@ -89,10 +89,10 @@ backend/docs/              # Backend-specific documentation
 ## Key Features Documented
 
 ### Enterprise Microservices Architecture
-- **BFF (Backend for Frontend)** - Port 8002: API gateway, routing, async command tracking
-- **OMS (Ontology Management Service)** - Port 8000: Ontology + graph operations on TerminusDB
-- **Funnel (Type Inference Service)** - Port 8003: schema/type inference utilities
-- **Agent (LangGraph Service)** - Port 8004: internal agent runs + audit/event logging (BFF 경유)
+- **BFF (Backend for Frontend)** - Port 8002: API gateway, routing, async command tracking (external entrypoint)
+- **OMS (Ontology Management Service)** - Port 8000: Ontology + graph operations on TerminusDB (internal; debug ports only)
+- **Funnel (Type Inference Service)** - Port 8003: schema/type inference utilities (internal; debug ports only)
+- **Agent (LangGraph Service)** - Port 8004: internal agent runs + audit/event logging (BFF proxy only)
 - **Pipeline/Objectify Workers** - ETL transforms + dataset → ontology instance mapping
 - **Connector Services** - Google Sheets ingest/preview/polling
 - **Shared Components** - registries, validators, security, observability
@@ -119,10 +119,11 @@ backend/docs/              # Backend-specific documentation
 - **Frontend**: React + Blueprint app scaffold with BFF-aligned API routes
 
 ### Service Configuration
-- **Port Assignments**:
+- **Port Assignments** (host exposure):
   - BFF: 8002 (Frontend API gateway)
-  - OMS: 8000 (Core ontology service)
-  - Funnel: 8003 (Type inference service)
+  - OMS: 8000 (internal; expose via `backend/docker-compose.debug-ports.yml` when needed)
+  - Funnel: 8003 (internal; expose via `backend/docker-compose.debug-ports.yml` when needed)
+  - Agent: 8004 (internal; expose via `backend/docker-compose.debug-ports.yml` when needed)
   - TerminusDB: 6363 (Graph database)
 
 ## Documentation Standards

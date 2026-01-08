@@ -1,0 +1,16 @@
+version: "3.8"
+
+# Optional debug-only port exposure for internal services.
+# Usage:
+#   docker compose -f docker-compose.full.yml -f backend/docker-compose.debug-ports.yml up -d
+#   docker compose -f backend/docker-compose.yml -f backend/docker-compose.debug-ports.yml up -d
+services:
+  oms:
+    ports:
+      - "8000:8000"
+  funnel:
+    ports:
+      - "8003:8003"
+  agent:
+    ports:
+      - "8004:8004"

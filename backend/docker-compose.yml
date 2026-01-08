@@ -202,8 +202,6 @@ services:
       - DOCKER_CONTAINER=true
       - OMS_REQUIRE_AUTH=${OMS_REQUIRE_AUTH:-true}
       - ADMIN_TOKEN=${ADMIN_TOKEN:?ADMIN_TOKEN is required}
-    ports:
-      - "8000:8000"
     depends_on:
       - terminusdb
       - postgres
@@ -227,6 +225,8 @@ services:
       - OMS_BASE_URL=http://oms:8000
       - OMS_CLIENT_TIMEOUT_SECONDS=${OMS_CLIENT_TIMEOUT_SECONDS:-60}
       - FUNNEL_BASE_URL=http://funnel:8003
+      - AGENT_BASE_URL=http://agent:8004
+      - AGENT_PROXY_TIMEOUT_SECONDS=${AGENT_PROXY_TIMEOUT_SECONDS:-30}
       - MCP_CONFIG_PATH=/app/mcp-config.json
       - CONTEXT7_API_KEY=${CONTEXT7_API_KEY:-}
       - CONTEXT7_WORKSPACE=${CONTEXT7_WORKSPACE:-}
@@ -311,7 +311,6 @@ services:
     container_name: spice_agent
     environment:
       - AGENT_BFF_BASE_URL=http://bff:8002
-      - AGENT_ALLOWED_SERVICES=bff
       - AGENT_REQUIRE_EVENT_STORE=true
       - AGENT_SERVICE_NAME=agent
       - POSTGRES_HOST=postgres
@@ -324,12 +323,8 @@ services:
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
-    ports:
-      - "8004:8004"
     depends_on:
       - bff
-      - oms
-      - funnel
       - postgres
       - minio
     networks:
@@ -556,8 +551,6 @@ services:
       - REDIS_PASSWORD=${REDIS_PASSWORD:-spicepass123}
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
-    ports:
-      - "8003:8003"
     networks:
       - spice_network
     healthcheck:

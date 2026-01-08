@@ -307,12 +307,12 @@ Source: `docker-compose.full.yml` (with extends resolved).
 
 | Service | Ports | Depends On |
 | --- | --- | --- |
-| `agent` | 8004:8004 | bff<br/>oms<br/>funnel<br/>postgres<br/>minio<br/>otel-collector |
+| `agent` | - | bff<br/>postgres<br/>minio<br/>otel-collector |
 | `bff` | 8002:8002 | oms<br/>funnel<br/>postgres<br/>lakefs<br/>otel-collector |
 | `connector-sync-worker` | - | bff<br/>kafka<br/>postgres<br/>otel-collector |
 | `connector-trigger-service` | - | kafka<br/>postgres<br/>otel-collector |
 | `elasticsearch` | ${ELASTICSEARCH_PORT_HOST:-9200}:9200<br/>${ELASTICSEARCH_TRANSPORT_PORT_HOST:-9300}:9300 | - |
-| `funnel` | 8003:8003 | otel-collector |
+| `funnel` | - | otel-collector |
 | `ingest-reconciler-worker` | ${INGEST_RECONCILER_PORT_HOST:-8012}:8012 | postgres<br/>otel-collector |
 | `instance-worker` | - | terminusdb<br/>kafka<br/>elasticsearch<br/>minio<br/>message-relay<br/>postgres<br/>otel-collector |
 | `jaeger` | 16686:16686 | - |
@@ -324,7 +324,7 @@ Source: `docker-compose.full.yml` (with extends resolved).
 | `minio` | ${MINIO_PORT_HOST:-9000}:9000<br/>${MINIO_CONSOLE_PORT_HOST:-9001}:9001 | - |
 | `minio-init` | - | minio |
 | `objectify-worker` | - | kafka<br/>postgres<br/>lakefs<br/>oms<br/>otel-collector |
-| `oms` | 8000:8000 | terminusdb<br/>postgres<br/>redis<br/>elasticsearch<br/>minio<br/>otel-collector |
+| `oms` | - | terminusdb<br/>postgres<br/>redis<br/>elasticsearch<br/>minio<br/>otel-collector |
 | `ontology-worker` | - | terminusdb<br/>kafka<br/>redis<br/>message-relay<br/>postgres<br/>otel-collector |
 | `otel-collector` | 4317:4317<br/>4318:4318 | jaeger |
 | `pipeline-scheduler` | - | kafka<br/>postgres<br/>lakefs<br/>otel-collector |
@@ -371,8 +371,6 @@ graph TD
   svc_terminusdb[terminusdb]
   svc_zookeeper[zookeeper]
   svc_agent --> svc_bff
-  svc_agent --> svc_oms
-  svc_agent --> svc_funnel
   svc_agent --> svc_postgres
   svc_agent --> svc_minio
   svc_agent --> svc_otel_collector
@@ -475,6 +473,7 @@ graph TD
 | Router | Prefix | Tags |
 | --- | --- | --- |
 | `admin.router` | `/api/v1` | - |
+| `agent_proxy.router` | `/api/v1` | - |
 | `ai.router` | `/api/v1` | - |
 | `audit.router` | `/api/v1` | - |
 | `command_status.router` | `/api/v1` | - |

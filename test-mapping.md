@@ -9,9 +9,9 @@
    - `/test_data/products.csv` - 제품 데이터 (10건)
 
 2. **백엔드 서비스 상태**
-   - ✅ OMS (localhost:8000)
    - ✅ BFF (localhost:8002)
-   - ✅ Funnel (localhost:8004)
+   - ✅ OMS (internal; debug ports: localhost:8000)
+   - ✅ Funnel (internal; debug ports: localhost:8003)
    - ✅ TerminusDB (localhost:6363)
 
 3. **프론트엔드**

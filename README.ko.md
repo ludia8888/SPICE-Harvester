@@ -114,11 +114,17 @@ cp .env.example .env
 docker compose -f docker-compose.full.yml up -d
 ```
 
-Health:
+Health (기본은 BFF만 외부 포트로 노출):
 
 ```bash
-curl -fsS http://localhost:8000/health
 curl -fsS http://localhost:8002/api/v1/health
+```
+
+OMS/Funnel을 직접 확인해야 할 경우:
+
+```bash
+docker compose -f docker-compose.full.yml -f backend/docker-compose.debug-ports.yml up -d
+curl -fsS http://localhost:8000/health
 curl -fsS http://localhost:8003/health
 ```
 

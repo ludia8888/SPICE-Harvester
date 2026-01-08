@@ -62,8 +62,6 @@ services:
       - OTEL_ENABLE_TRACING=true
     depends_on:
       - bff
-      - oms
-      - funnel
       - postgres
       - minio
       - otel-collector

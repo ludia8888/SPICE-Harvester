@@ -11,13 +11,14 @@ Recommended dev stack:
 docker compose -f docker-compose.full.yml up -d
 ```
 
-Key services/ports (defaults, override via `.env`):
+Key services/ports (defaults, override via `.env`). OMS/Funnel/Agent are internal by default; use the debug ports override when you need direct access.
 
 | Component | Port |
 | --- | ---: |
-| OMS | 8000 |
-| BFF | 8002 |
-| Funnel | 8003 |
+| OMS (internal; debug ports only) | 8000 |
+| BFF (external) | 8002 |
+| Funnel (internal; debug ports only) | 8003 |
+| Agent (internal; debug ports only) | 8004 |
 | TerminusDB | 6363 |
 | Postgres | 5433 |
 | Redis | 6379 |
@@ -32,9 +33,14 @@ Key services/ports (defaults, override via `.env`):
 ## 2) Health / Monitoring
 
 - BFF: `GET http://localhost:8002/api/v1/health`
-- OMS: `GET http://localhost:8000/health`
-- Funnel: `GET http://localhost:8003/health`
-- Metrics: `GET http://localhost:8002/metrics` (BFF), `GET http://localhost:8000/metrics` (OMS)
+- OMS/Funnel health checks require the debug ports override:
+  - `docker compose -f docker-compose.full.yml -f backend/docker-compose.debug-ports.yml up -d`
+  - `GET http://localhost:8000/health`
+  - `GET http://localhost:8003/health`
+- Metrics: `GET http://localhost:8002/metrics` (BFF); OMS metrics require the debug ports override
+
+Quick smoke (external ports only):
+- `HOST=127.0.0.1 ./scripts/smoke_external_ports.sh`
 - Detailed monitoring: `/api/v1/monitoring/*` and `/api/v1/config/*`
 
 ## 3) Authentication & Security

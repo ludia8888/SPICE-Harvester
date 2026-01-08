@@ -65,10 +65,7 @@ def _extract_scope(context: Dict[str, Any]) -> Dict[str, Any]:
 @dataclass(frozen=True)
 class AgentRuntimeConfig:
     bff_url: str
-    oms_url: str
-    funnel_url: str
     allowed_services: Tuple[str, ...]
-    allowed_custom_urls: Tuple[str, ...]
     max_preview_chars: int
     max_payload_bytes: int
     timeout_s: float
@@ -95,24 +92,10 @@ class AgentRuntime:
         audit_store: Optional[AuditLogStore],
     ) -> "AgentRuntime":
         bff_url = _clean_url(os.getenv("AGENT_BFF_BASE_URL") or ServiceConfig.get_bff_url())
-        oms_url = _clean_url(os.getenv("AGENT_OMS_BASE_URL") or ServiceConfig.get_oms_url())
-        funnel_url = _clean_url(os.getenv("AGENT_FUNNEL_BASE_URL") or ServiceConfig.get_funnel_url())
-        allowed_services = tuple(
-            s.strip().lower()
-            for s in (os.getenv("AGENT_ALLOWED_SERVICES") or "bff").split(",")
-            if s.strip()
-        )
-        allowed_custom_urls = tuple(
-            u.strip().rstrip("/")
-            for u in (os.getenv("AGENT_ALLOWED_CUSTOM_URLS") or "").split(",")
-            if u.strip()
-        )
+        allowed_services = ("bff",)
         config = AgentRuntimeConfig(
             bff_url=bff_url,
-            oms_url=oms_url,
-            funnel_url=funnel_url,
             allowed_services=allowed_services,
-            allowed_custom_urls=allowed_custom_urls,
             max_preview_chars=_env_int("AGENT_AUDIT_MAX_PREVIEW_CHARS", 2000),
             max_payload_bytes=_env_int("AGENT_TOOL_MAX_PAYLOAD_BYTES", 200000),
             timeout_s=float(os.getenv("AGENT_TOOL_TIMEOUT_SECONDS", "30")),
@@ -122,21 +105,10 @@ class AgentRuntime:
 
     def _resolve_base_url(self, tool_call: AgentToolCall) -> str:
         service = tool_call.service.lower()
-        if service == "custom":
-            if not tool_call.base_url:
-                raise ValueError("custom tool requires base_url")
-            base_url = _clean_url(tool_call.base_url)
-            if not self.config.allowed_custom_urls or base_url not in self.config.allowed_custom_urls:
-                raise ValueError("custom base_url is not allowlisted")
-            return base_url
         if service not in self.config.allowed_services:
             raise ValueError(f"service not allowed: {service}")
         if service == "bff":
             return self.config.bff_url
-        if service == "oms":
-            return self.config.oms_url
-        if service == "funnel":
-            return self.config.funnel_url
         raise ValueError(f"unsupported service: {service}")
 
     def _preview_payload(self, obj: Any) -> str:

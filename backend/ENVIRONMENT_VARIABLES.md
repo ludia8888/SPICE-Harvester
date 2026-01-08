@@ -5,11 +5,21 @@
 
 ## Service URLs (local/dev)
 
+BFF is the only external port by default. OMS/Funnel/Agent are internal unless you opt in to the debug ports override.
+
 ```bash
-OMS_BASE_URL=http://localhost:8000
+# External (host)
 BFF_BASE_URL=http://localhost:8002
-FUNNEL_BASE_URL=http://localhost:8003
-AGENT_BASE_URL=http://localhost:8004
+
+# Internal (docker network)
+OMS_BASE_URL=http://oms:8000
+FUNNEL_BASE_URL=http://funnel:8003
+AGENT_BASE_URL=http://agent:8004
+
+# Host direct access (debug ports only)
+# OMS_BASE_URL=http://localhost:8000
+# FUNNEL_BASE_URL=http://localhost:8003
+# AGENT_BASE_URL=http://localhost:8004
 ```
 
 ## MCP / Context7
@@ -28,13 +38,12 @@ MCP_TIMEOUT=30000
 AGENT_PORT=8004
 AGENT_HOST=127.0.0.1
 AGENT_BFF_BASE_URL=http://localhost:8002
-AGENT_ALLOWED_SERVICES=bff
-AGENT_ALLOWED_CUSTOM_URLS=
 AGENT_REQUIRE_EVENT_STORE=true
 AGENT_RUN_MAX_STEPS=50
 AGENT_TOOL_TIMEOUT_SECONDS=30
 AGENT_TOOL_MAX_PAYLOAD_BYTES=200000
 AGENT_AUDIT_MAX_PREVIEW_CHARS=2000
+AGENT_PROXY_TIMEOUT_SECONDS=30
 ```
 
 ## Auth

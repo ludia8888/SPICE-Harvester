@@ -114,11 +114,17 @@ cp .env.example .env
 docker compose -f docker-compose.full.yml up -d
 ```
 
-Health:
+Health (BFF is the only external port by default):
 
 ```bash
-curl -fsS http://localhost:8000/health
 curl -fsS http://localhost:8002/api/v1/health
+```
+
+Need direct OMS/Funnel access for debugging?
+
+```bash
+docker compose -f docker-compose.full.yml -f backend/docker-compose.debug-ports.yml up -d
+curl -fsS http://localhost:8000/health
 curl -fsS http://localhost:8003/health
 ```
 
