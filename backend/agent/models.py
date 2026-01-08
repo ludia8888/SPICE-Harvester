@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 
 class AgentToolCall(BaseModel):
+    tool_id: Optional[str] = Field(default=None, description="Allowlist tool id")
     service: Literal["bff"] = Field(..., description="Target service (BFF only)")
     method: Literal["GET", "POST", "PUT", "PATCH", "DELETE"] = Field(
         "POST", description="HTTP method"

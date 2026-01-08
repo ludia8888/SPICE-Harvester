@@ -4,13 +4,14 @@ import asyncio
 import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from agent.models import AgentRunRequest
+from agent.models import AgentRunRequest, AgentToolCall
 from agent.services.agent_graph import AgentState, run_agent_graph
 from agent.services.agent_runtime import AgentRuntime
+from shared.services.agent_registry import AgentRegistry
 from shared.models.responses import ApiResponse
 from shared.utils.llm_safety import digest_for_audit, mask_pii
 
@@ -52,11 +53,99 @@ def _request_meta(request: Request, body: AgentRunRequest) -> Dict[str, Any]:
     }
 
 
+def _step_id(index: int) -> str:
+    return f"step_{index}"
+
+
+def _resolve_tool_id(tool_call: AgentToolCall) -> str:
+    tool_id = (tool_call.tool_id or "").strip()
+    if tool_id:
+        return tool_id
+    method = (tool_call.method or "POST").strip().upper()
+    path = (tool_call.path or "").strip()
+    return f"{tool_call.service}:{method}:{path}"
+
+
+def _extract_plan_id(context: Dict[str, Any]) -> Optional[str]:
+    if not context:
+        return None
+    for key in ("plan_id", "planId"):
+        value = context.get(key)
+        if value:
+            try:
+                return str(UUID(str(value)))
+            except Exception:
+                return None
+    return None
+
+
+def _extract_plan_snapshot(context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not context:
+        return None
+    candidate = context.get("plan_snapshot") or context.get("plan")
+    if isinstance(candidate, dict):
+        return candidate
+    return None
+
+
+def _extract_risk_level(context: Dict[str, Any]) -> str:
+    if not context:
+        return "read"
+    raw = str(context.get("risk_level") or "read").strip().lower()
+    return raw or "read"
+
+
+async def _record_run_start(
+    *,
+    agent_registry: Optional[AgentRegistry],
+    run_id: str,
+    actor: str,
+    requester: str,
+    delegated_actor: str,
+    body: AgentRunRequest,
+    request_meta: Dict[str, Any],
+) -> None:
+    if not agent_registry:
+        return
+    masked_context = mask_pii(body.context or {}, max_string_chars=200)
+    plan_snapshot = _extract_plan_snapshot(body.context or {})
+    if plan_snapshot is not None:
+        plan_snapshot = mask_pii(plan_snapshot, max_string_chars=200)
+    await agent_registry.create_run(
+        run_id=run_id,
+        plan_id=_extract_plan_id(body.context or {}),
+        status="RUNNING",
+        risk_level=_extract_risk_level(body.context or {}),
+        requester=requester,
+        delegated_actor=delegated_actor,
+        context={**masked_context, "request_meta": request_meta},
+        plan_snapshot=plan_snapshot or {},
+    )
+    for idx, step in enumerate(body.steps):
+        tool_id = _resolve_tool_id(step)
+        input_digest = digest_for_audit({"query": step.query, "body": step.body})
+        await agent_registry.create_step(
+            run_id=run_id,
+            step_id=_step_id(idx),
+            tool_id=tool_id,
+            status="PENDING",
+            input_digest=input_digest,
+            metadata={
+                "service": step.service,
+                "method": step.method,
+                "path": step.path,
+                "description": step.description,
+                "data_scope": mask_pii(step.data_scope or {}, max_string_chars=200),
+            },
+        )
+
+
 async def _execute_agent_run(
     *,
     runtime: AgentRuntime,
     state: AgentState,
     request_id: Optional[str],
+    agent_registry: Optional[AgentRegistry],
 ) -> None:
     run_id = state["run_id"]
     actor = state["actor"]
@@ -79,6 +168,41 @@ async def _execute_agent_run(
             },
             request_id=request_id,
         )
+        if agent_registry:
+            results = final_state.get("results", []) or []
+            steps = final_state.get("steps", []) or []
+            for idx, step in enumerate(steps):
+                result = results[idx] if idx < len(results) else None
+                if result is None:
+                    status = "SKIPPED"
+                    output_digest = None
+                    error = None
+                else:
+                    status_raw = str(result.get("status") or "").upper()
+                    status = status_raw or "UNKNOWN"
+                    if status == "SUCCESS":
+                        status = "SUCCESS"
+                    elif status == "FAILURE":
+                        status = "FAILED"
+                    elif status == "SKIPPED":
+                        status = "SKIPPED"
+                    else:
+                        status = status_raw or "UNKNOWN"
+                    output_digest = result.get("output_digest")
+                    error = result.get("error")
+                await agent_registry.update_step_status(
+                    run_id=run_id,
+                    step_id=_step_id(idx),
+                    status=status,
+                    output_digest=output_digest,
+                    error=error,
+                    finished_at=datetime.now(timezone.utc),
+                )
+            await agent_registry.update_run_status(
+                run_id=run_id,
+                status="FAILED" if failed else "COMPLETED",
+                finished_at=datetime.now(timezone.utc),
+            )
     except Exception as exc:
         await runtime.record_event(
             event_type="AGENT_RUN_FAILED",
@@ -92,6 +216,21 @@ async def _execute_agent_run(
             request_id=request_id,
             error=str(exc),
         )
+        if agent_registry:
+            await agent_registry.update_run_status(
+                run_id=run_id,
+                status="FAILED",
+                finished_at=datetime.now(timezone.utc),
+            )
+            steps = state.get("steps", []) or []
+            for idx in range(len(steps)):
+                status = "FAILED" if idx == 0 else "SKIPPED"
+                await agent_registry.update_step_status(
+                    run_id=run_id,
+                    step_id=_step_id(idx),
+                    status=status,
+                    finished_at=datetime.now(timezone.utc),
+                )
 
 
 @router.post("/runs")
@@ -108,6 +247,7 @@ async def create_agent_run(request: Request, body: AgentRunRequest) -> Dict[str,
         event_store=request.app.state.event_store,  # type: ignore[attr-defined]
         audit_store=request.app.state.audit_store,  # type: ignore[attr-defined]
     )
+    agent_registry = request.app.state.agent_registry  # type: ignore[attr-defined]
 
     run_id = str(uuid4())
     request_meta = _request_meta(request, body)
@@ -128,6 +268,16 @@ async def create_agent_run(request: Request, body: AgentRunRequest) -> Dict[str,
         request_id=request_meta.get("request_id"),
     )
 
+    await _record_run_start(
+        agent_registry=agent_registry,
+        run_id=run_id,
+        actor=actor,
+        requester=principal_id,
+        delegated_actor=request.headers.get("X-Actor") or "agent",
+        body=body,
+        request_meta=request_meta,
+    )
+
     state: AgentState = {
         "run_id": run_id,
         "actor": actor,
@@ -142,7 +292,12 @@ async def create_agent_run(request: Request, body: AgentRunRequest) -> Dict[str,
     }
 
     task = asyncio.create_task(
-        _execute_agent_run(runtime=runtime, state=state, request_id=request_meta.get("request_id"))
+        _execute_agent_run(
+            runtime=runtime,
+            state=state,
+            request_id=request_meta.get("request_id"),
+            agent_registry=agent_registry,
+        )
     )
     request.app.state.agent_tasks[run_id] = task  # type: ignore[attr-defined]
     task.add_done_callback(

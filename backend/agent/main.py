@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from agent.routers.agent import router as agent_router
 from shared.middleware.rate_limiter import RateLimiter
 from shared.services.audit_log_store import AuditLogStore
+from shared.services.agent_registry import AgentRegistry
 from shared.services.event_store import event_store
 from shared.services.service_factory import AGENT_SERVICE_INFO, create_fastapi_service, run_service
 from shared.utils.app_logger import get_logger
@@ -53,6 +54,15 @@ async def lifespan(app: FastAPI):
         logger.warning("AuditLogStore unavailable for agent service: %s", exc)
     app.state.audit_store = audit_store
 
+    agent_registry = None
+    try:
+        agent_registry = AgentRegistry()
+        await agent_registry.initialize()
+        logger.info("AgentRegistry connected for agent service")
+    except Exception as exc:
+        logger.warning("AgentRegistry unavailable for agent service: %s", exc)
+    app.state.agent_registry = agent_registry
+
     app.state.agent_tasks = {}
 
     try:
@@ -69,6 +79,8 @@ async def lifespan(app: FastAPI):
         await app.state.rate_limiter.close()
     if getattr(app.state, "audit_store", None):
         await app.state.audit_store.close()
+    if getattr(app.state, "agent_registry", None):
+        await app.state.agent_registry.close()
 
 
 app = create_fastapi_service(
