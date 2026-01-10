@@ -334,6 +334,8 @@ async def get_agent_run(
     started_at = None
     completed_at = None
     status = "running"
+    latest_progress: Optional[Dict[str, Any]] = None
+    latest_progress_at: Optional[datetime] = None
 
     for event in events:
         if event.event_type == "AGENT_RUN_STARTED":
@@ -349,10 +351,24 @@ async def get_agent_run(
         if event.event_type == "AGENT_RUN_FAILED":
             status = "failed"
             completed_at = event.occurred_at
+        if event.event_type == "AGENT_TOOL_PROGRESS":
+            if latest_progress_at is None or event.occurred_at > latest_progress_at:
+                latest_progress_at = event.occurred_at
+                latest_progress = event.data
 
     payload_events: List[Dict[str, Any]] = []
     if include_events:
         payload_events = [event.model_dump(mode="json") for event in events[:limit]]
+
+    progress_payload = None
+    if latest_progress:
+        progress_payload = {
+            "command_id": latest_progress.get("command_id"),
+            "status": latest_progress.get("status"),
+            "step_index": latest_progress.get("step_index"),
+            "progress": latest_progress.get("progress"),
+            "updated_at": latest_progress_at.isoformat() if latest_progress_at else None,
+        }
 
     response = ApiResponse.success(
         "Agent run fetched",
@@ -364,6 +380,7 @@ async def get_agent_run(
             "steps_total": steps_total,
             "steps_completed": steps_completed,
             "failed_step": failed_step,
+            "progress": progress_payload,
             "events": payload_events,
         },
     )

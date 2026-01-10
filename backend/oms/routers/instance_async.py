@@ -840,7 +840,24 @@ async def _track_bulk_create_progress(
         logger.info(f"Starting progress tracking for bulk create command {command_id}")
         
         # Simulate progress updates (in real scenario, this would monitor actual progress)
+        terminal_statuses = {
+            CommandStatus.COMPLETED.value,
+            CommandStatus.FAILED.value,
+            CommandStatus.CANCELLED.value,
+        }
         for i in range(0, total_instances + 1, max(1, total_instances // 10)):
+            status_info = await command_status_service.get_command_status(command_id)
+            if status_info:
+                raw_status = status_info.get("status")
+                if hasattr(raw_status, "value"):
+                    raw_status = raw_status.value
+                if str(raw_status).upper() in terminal_statuses:
+                    logger.info(
+                        "Stopping bulk create progress tracking for %s (status=%s)",
+                        command_id,
+                        raw_status,
+                    )
+                    break
             # Update progress
             progress_percentage = (i / total_instances) * 100 if total_instances > 0 else 100
             

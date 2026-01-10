@@ -44,4 +44,5 @@ class AgentRunSummary(BaseModel):
     steps_total: int = 0
     steps_completed: int = 0
     failed_step: Optional[int] = None
+    progress: Optional[Dict[str, Any]] = None
     events: List[Dict[str, Any]] = Field(default_factory=list)

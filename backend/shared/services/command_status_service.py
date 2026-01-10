@@ -125,6 +125,27 @@ class CommandStatusService:
             logger.warning(f"Command {command_id} not found")
             return False
             
+        # Guard against status regressions after terminal completion.
+        current_status = current_data.get("status")
+        if hasattr(current_status, "value"):
+            current_status = current_status.value
+        terminal_statuses = {
+            CommandStatus.COMPLETED.value,
+            CommandStatus.FAILED.value,
+            CommandStatus.CANCELLED.value,
+        }
+        if (
+            str(current_status).upper() in terminal_statuses
+            and status.value not in terminal_statuses
+        ):
+            logger.info(
+                "Skipping status downgrade for %s (%s -> %s)",
+                command_id,
+                current_status,
+                status.value,
+            )
+            return False
+
         # Add to history
         history_entry = {
             "status": status,
@@ -392,11 +413,23 @@ class CommandStatusService:
                 user_id=metadata.get("created_by") if metadata else None
             )
         else:
-            # Update existing status
+            progress_payload = None
+            message = f"Status updated to {status}"
+            error = None
+            if metadata:
+                progress_payload = metadata.get("progress")
+                error = metadata.get("error")
+                if isinstance(progress_payload, dict):
+                    message = progress_payload.get("message") or message
+                elif isinstance(metadata.get("message"), str):
+                    message = metadata["message"]
+            # Update existing status (progress may be a dict or number)
             await self.update_status(
                 command_id=command_id,
                 status=status,
-                message=f"Status updated to {status}"
+                message=message,
+                error=error,
+                progress=progress_payload,
             )
     
     async def get_command_status(self, command_id: str) -> Optional[Dict[str, Any]]:

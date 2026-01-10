@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import os
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
+from urllib.parse import quote
 
+import aiohttp
 import httpx
 
 from agent.models import AgentToolCall
@@ -15,6 +20,12 @@ from shared.models.event_envelope import EventEnvelope
 from shared.services.audit_log_store import AuditLogStore
 from shared.services.event_store import EventStore
 from shared.utils.llm_safety import digest_for_audit, mask_pii, truncate_text
+
+logger = logging.getLogger(__name__)
+
+_COMMAND_PENDING_STATUSES = {"PENDING", "PROCESSING", "RETRYING"}
+_COMMAND_TERMINAL_STATUSES = {"COMPLETED", "FAILED", "CANCELLED"}
+_COMMAND_STATUSES = _COMMAND_PENDING_STATUSES | _COMMAND_TERMINAL_STATUSES
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -67,6 +78,123 @@ def _extract_scope(context: Dict[str, Any]) -> Dict[str, Any]:
     return scope
 
 
+def _normalize_status(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    raw = str(value).strip().upper()
+    return raw or None
+
+
+def _extract_command_id_from_url(url: str) -> Optional[str]:
+    match = re.search(r"/commands/([^/]+)/status", url or "")
+    if match:
+        return match.group(1)
+    return None
+
+
+def _extract_command_id(payload: Any) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    for key in ("command_id", "commandId"):
+        value = payload.get(key)
+        if value:
+            return str(value)
+    data = payload.get("data")
+    if isinstance(data, dict):
+        for key in ("command_id", "commandId"):
+            value = data.get(key)
+            if value:
+                return str(value)
+        commands = data.get("commands")
+        if isinstance(commands, list) and len(commands) == 1 and isinstance(commands[0], dict):
+            cmd_id = commands[0].get("command_id") or commands[0].get("commandId")
+            if cmd_id:
+                return str(cmd_id)
+    status_url = payload.get("status_url") or payload.get("statusUrl")
+    if not status_url and isinstance(data, dict):
+        status_url = data.get("status_url") or data.get("statusUrl")
+    if isinstance(status_url, str):
+        return _extract_command_id_from_url(status_url)
+    return None
+
+
+def _extract_command_status(payload: Any) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    status = _normalize_status(payload.get("status"))
+    if status:
+        return status
+    data = payload.get("data")
+    if isinstance(data, dict):
+        status = _normalize_status(data.get("status"))
+        if status:
+            return status
+    result = payload.get("result")
+    if isinstance(result, dict):
+        status = _normalize_status(result.get("status"))
+        if status:
+            return status
+    return None
+
+
+def _extract_status_url(payload: Any) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    status_url = payload.get("status_url") or payload.get("statusUrl")
+    if status_url:
+        return str(status_url)
+    data = payload.get("data")
+    if isinstance(data, dict):
+        status_url = data.get("status_url") or data.get("statusUrl")
+        if status_url:
+            return str(status_url)
+    return None
+
+
+def _extract_progress(payload: Any) -> Tuple[Optional[float], Optional[str], Dict[str, Any]]:
+    progress_payload: Dict[str, Any] = {}
+    message: Optional[str] = None
+    progress_value: Optional[float] = None
+
+    if isinstance(payload, dict):
+        data = payload.get("data")
+        result = payload.get("result")
+        if isinstance(result, dict) and not isinstance(data, dict):
+            data = result
+        if isinstance(data, dict):
+            progress = data.get("progress")
+            if isinstance(progress, dict):
+                progress_payload = dict(progress)
+                if "percentage" in progress:
+                    progress_value = progress.get("percentage")
+                elif "percent" in progress:
+                    progress_value = progress.get("percent")
+                elif "current" in progress and "total" in progress:
+                    total = progress.get("total") or 0
+                    current = progress.get("current") or 0
+                    progress_value = (float(current) / float(total) * 100.0) if total else None
+                message = progress.get("message") or progress.get("note")
+            elif isinstance(progress, (int, float)):
+                progress_value = float(progress)
+            if not message:
+                message = data.get("progress_message") or data.get("message")
+        if not message:
+            message = payload.get("message") if isinstance(payload.get("message"), str) else None
+
+    if progress_value is not None:
+        try:
+            progress_value = max(0.0, min(100.0, float(progress_value)))
+        except (TypeError, ValueError):
+            progress_value = None
+
+    if progress_value is not None:
+        progress_payload.setdefault("percentage", progress_value)
+    if message:
+        progress_payload.setdefault("message", message)
+
+    return progress_value, message, progress_payload
+
+
 @dataclass(frozen=True)
 class AgentRuntimeConfig:
     bff_url: str
@@ -76,6 +204,10 @@ class AgentRuntimeConfig:
     timeout_s: float
     service_name: str
     bff_token: Optional[str]
+    command_timeout_s: float
+    command_poll_interval_s: float
+    command_ws_idle_s: float
+    command_ws_enabled: bool
 
 
 class AgentRuntime:
@@ -100,6 +232,16 @@ class AgentRuntime:
         bff_url = _clean_url(os.getenv("AGENT_BFF_BASE_URL") or ServiceConfig.get_bff_url())
         bff_token = (os.getenv("AGENT_BFF_TOKEN") or os.getenv("BFF_AGENT_TOKEN") or "").strip() or None
         allowed_services = ("bff",)
+        command_timeout_raw = (
+            os.getenv("AGENT_COMMAND_TIMEOUT_SECONDS")
+            or os.getenv("PIPELINE_RUN_TIMEOUT_SECONDS")
+            or os.getenv("PIPELINE_RUN_TIMEOUT")
+            or "600"
+        )
+        try:
+            command_timeout = float(command_timeout_raw)
+        except ValueError:
+            command_timeout = 600.0
         config = AgentRuntimeConfig(
             bff_url=bff_url,
             allowed_services=allowed_services,
@@ -108,6 +250,10 @@ class AgentRuntime:
             timeout_s=float(os.getenv("AGENT_TOOL_TIMEOUT_SECONDS", "30")),
             service_name=os.getenv("AGENT_SERVICE_NAME", "agent"),
             bff_token=bff_token,
+            command_timeout_s=command_timeout,
+            command_poll_interval_s=float(os.getenv("AGENT_COMMAND_POLL_INTERVAL_SECONDS", "2")),
+            command_ws_idle_s=float(os.getenv("AGENT_COMMAND_WS_IDLE_SECONDS", "5")),
+            command_ws_enabled=_env_bool("AGENT_COMMAND_WS_ENABLED", True),
         )
         return cls(event_store=event_store, audit_store=audit_store, config=config)
 
@@ -151,6 +297,221 @@ class AgentRuntime:
             output["Authorization"] = f"Bearer {self.config.bff_token}"
         output.setdefault("X-Actor", actor)
         return output
+
+    def _resolve_status_url(self, command_id: str, payload: Any) -> str:
+        status_url = _extract_status_url(payload)
+        if status_url:
+            if status_url.startswith("http://") or status_url.startswith("https://"):
+                return status_url
+            if status_url.startswith("/"):
+                return f"{self.config.bff_url}{status_url}"
+            return f"{self.config.bff_url}/{status_url}"
+        return f"{self.config.bff_url}/api/v1/commands/{command_id}/status"
+
+    def _resolve_ws_token(self, request_headers: Dict[str, str]) -> Optional[str]:
+        if self.config.bff_token:
+            return self.config.bff_token
+        for key in ("authorization", "Authorization"):
+            value = request_headers.get(key)
+            if value:
+                raw = value.strip()
+                if raw.lower().startswith("bearer "):
+                    return raw.split(" ", 1)[1].strip()
+                return raw
+        for key in ("x-admin-token", "X-Admin-Token"):
+            value = request_headers.get(key)
+            if value:
+                return value.strip()
+        return None
+
+    def _resolve_ws_url(self, command_id: str, token: Optional[str]) -> str:
+        base = self.config.bff_url
+        if base.startswith("https://"):
+            ws_base = "wss://" + base[len("https://"):]
+        elif base.startswith("http://"):
+            ws_base = "ws://" + base[len("http://"):]
+        else:
+            ws_base = f"ws://{base}"
+        url = f"{ws_base}/api/v1/ws/commands/{command_id}"
+        if token:
+            url = f"{url}?token={quote(token)}"
+        return url
+
+    def _update_progress_context(
+        self,
+        *,
+        context: Dict[str, Any],
+        command_id: str,
+        status: Optional[str],
+        progress_payload: Dict[str, Any],
+    ) -> None:
+        if context is None:
+            return
+        entry = {"command_id": command_id}
+        if status:
+            entry["status"] = status
+        entry.update(progress_payload)
+        command_progress = context.setdefault("command_progress", {})
+        if isinstance(command_progress, dict):
+            command_progress[command_id] = entry
+        context["latest_progress"] = entry
+
+    async def _fetch_command_status(
+        self,
+        *,
+        status_url: str,
+        actor: str,
+        request_headers: Dict[str, str],
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(
+                    status_url,
+                    headers=self._forward_headers(request_headers, actor),
+                )
+            if response.status_code >= 400:
+                return None
+            if "application/json" in response.headers.get("content-type", ""):
+                return response.json()
+            return {"status": response.text}
+        except Exception as exc:
+            logger.debug("Command status poll failed: %s", exc)
+            return None
+
+    async def _wait_for_command_completion(
+        self,
+        *,
+        run_id: str,
+        actor: str,
+        step_index: int,
+        command_id: str,
+        initial_payload: Any,
+        request_id: Optional[str],
+        request_headers: Dict[str, str],
+        context: Dict[str, Any],
+    ) -> Tuple[Any, Optional[str]]:
+        status_url = self._resolve_status_url(command_id, initial_payload)
+        deadline = time.monotonic() + max(1.0, float(self.config.command_timeout_s))
+        poll_interval = max(0.5, float(self.config.command_poll_interval_s))
+        ws_idle = max(0.5, float(self.config.command_ws_idle_s))
+
+        last_status: Optional[str] = None
+        last_progress: Optional[float] = None
+        last_payload: Any = initial_payload
+
+        async def handle_update(payload: Dict[str, Any]) -> Optional[str]:
+            nonlocal last_status, last_progress, last_payload
+            last_payload = payload
+            status = _extract_command_status(payload) or last_status
+            progress_value, message, progress_payload = _extract_progress(payload)
+            if progress_value is not None or message:
+                progress_payload = dict(progress_payload)
+                if message:
+                    progress_payload["message"] = message
+                if progress_value is not None:
+                    progress_payload["percentage"] = progress_value
+            if status or progress_payload:
+                if status != last_status or progress_value != last_progress or progress_payload:
+                    await self.record_event(
+                        event_type="AGENT_TOOL_PROGRESS",
+                        run_id=run_id,
+                        actor=actor,
+                        status="success",
+                        data={
+                            "step_index": step_index,
+                            "command_id": command_id,
+                            "status": status,
+                            "progress": progress_payload,
+                        },
+                        request_id=request_id,
+                        step_index=step_index,
+                        resource_type="agent_tool",
+                    )
+                self._update_progress_context(
+                    context=context,
+                    command_id=command_id,
+                    status=status,
+                    progress_payload=progress_payload,
+                )
+            if status:
+                last_status = status
+            if progress_value is not None:
+                last_progress = progress_value
+            return status
+
+        token = self._resolve_ws_token(request_headers)
+        if self.config.command_ws_enabled:
+            ws_url = self._resolve_ws_url(command_id, token)
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.ws_connect(ws_url, heartbeat=30, timeout=10) as ws:
+                        while time.monotonic() < deadline:
+                            timeout = min(ws_idle, max(0.1, deadline - time.monotonic()))
+                            try:
+                                msg = await ws.receive(timeout=timeout)
+                            except asyncio.TimeoutError:
+                                payload = await self._fetch_command_status(
+                                    status_url=status_url,
+                                    actor=actor,
+                                    request_headers=request_headers,
+                                )
+                                if payload:
+                                    status = await handle_update(payload)
+                                    if status in _COMMAND_TERMINAL_STATUSES:
+                                        return last_payload, status
+                                continue
+                            if msg.type == aiohttp.WSMsgType.TEXT:
+                                try:
+                                    parsed = json.loads(msg.data)
+                                except json.JSONDecodeError:
+                                    continue
+                                if parsed.get("type") == "command_update":
+                                    payload = parsed.get("data") or {}
+                                    status = await handle_update(payload)
+                                    if status in _COMMAND_TERMINAL_STATUSES:
+                                        final_payload = await self._fetch_command_status(
+                                            status_url=status_url,
+                                            actor=actor,
+                                            request_headers=request_headers,
+                                        )
+                                        if final_payload:
+                                            await handle_update(final_payload)
+                                            return final_payload, _extract_command_status(final_payload) or status
+                                        return last_payload, status
+                            elif msg.type in {aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR}:
+                                break
+            except Exception as exc:
+                logger.debug("WebSocket progress stream failed: %s", exc)
+
+        while time.monotonic() < deadline:
+            payload = await self._fetch_command_status(
+                status_url=status_url,
+                actor=actor,
+                request_headers=request_headers,
+            )
+            if payload:
+                status = await handle_update(payload)
+                if status in _COMMAND_TERMINAL_STATUSES:
+                    return last_payload, status
+            await asyncio.sleep(poll_interval)
+
+        timeout_status = last_status or "TIMEOUT"
+        await self.record_event(
+            event_type="AGENT_TOOL_PROGRESS",
+            run_id=run_id,
+            actor=actor,
+            status="failure",
+            data={
+                "step_index": step_index,
+                "command_id": command_id,
+                "status": "TIMEOUT",
+                "progress": {"message": f"Command timed out after {int(self.config.command_timeout_s)}s"},
+            },
+            request_id=request_id,
+            step_index=step_index,
+            resource_type="agent_tool",
+        )
+        return last_payload, timeout_status
 
     async def record_event(
         self,
@@ -298,6 +659,8 @@ class AgentRuntime:
         output_size = None
         http_status = None
         response_payload: Any = None
+        command_id: Optional[str] = None
+        command_status: Optional[str] = None
         try:
             async with httpx.AsyncClient(timeout=self.config.timeout_s) as client:
                 response = await client.request(
@@ -313,18 +676,34 @@ class AgentRuntime:
                 response_payload = response.json()
             else:
                 response_payload = response.text
-            output_size = self._payload_size(response_payload)
-            output_digest = digest_for_audit(response_payload)
-            output_preview = (
-                self._preview_payload(response_payload)
-                if output_size <= self.config.max_payload_bytes
-                else f"<omitted: {output_size} bytes>"
-            )
+            command_id = _extract_command_id(response_payload)
+            command_status = _extract_command_status(response_payload)
             if response.status_code >= 400:
                 error = f"HTTP {response.status_code}"
+            if not error and command_id and (command_status is None or command_status in _COMMAND_PENDING_STATUSES):
+                response_payload, command_status = await self._wait_for_command_completion(
+                    run_id=run_id,
+                    actor=actor,
+                    step_index=step_index,
+                    command_id=command_id,
+                    initial_payload=response_payload,
+                    request_id=request_id,
+                    request_headers=request_headers,
+                    context=context,
+                )
+                if command_status in {"FAILED", "CANCELLED", "TIMEOUT"}:
+                    error = f"command {command_id} {command_status}"
         except Exception as exc:
             error = str(exc)
         duration_ms = int((time.monotonic() - start_time) * 1000)
+
+        output_size = self._payload_size(response_payload)
+        output_digest = digest_for_audit(response_payload)
+        output_preview = (
+            self._preview_payload(response_payload)
+            if output_size <= self.config.max_payload_bytes
+            else f"<omitted: {output_size} bytes>"
+        )
 
         status = "failure" if error else "success"
         await self.record_event(
@@ -342,6 +721,8 @@ class AgentRuntime:
                 "output_preview": output_preview,
                 "output_size_bytes": output_size,
                 "http_status": http_status,
+                "command_id": command_id,
+                "command_status": command_status,
                 "duration_ms": duration_ms,
                 "error": error,
             },
@@ -357,5 +738,7 @@ class AgentRuntime:
             "output_digest": output_digest,
             "duration_ms": duration_ms,
             "data_scope": data_scope,
+            "command_id": command_id,
+            "command_status": command_status,
             "error": error,
         }
