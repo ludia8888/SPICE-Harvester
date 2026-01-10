@@ -17,6 +17,7 @@ Welcome to the SPICE HARVESTER project documentation. This directory contains al
 - **[Data Lineage](DATA_LINEAGE.md)** - Provenance/lineage 그래프 설계 및 운영(백필/지표 포함)
 - **[Audit Logs](AUDIT_LOGS.md)** - 감사 로그 스키마/보장(guarantees) 및 운영 가이드
 - **[Idempotency Contract](IDEMPOTENCY_CONTRACT.md)** - 재시도/중복 처리(At-least-once) 안전성 계약
+- **[Action Writeback Design](ACTION_WRITEBACK_DESIGN.md)** - Action writeback 실행/overlay/충돌 정책 설계
 - **[UI/UX Guidelines](UIUX.md)** - User interface and experience design standards
 - **[Design System](DesignSystem.md)** - Design system documentation and guidelines
 
@@ -63,6 +64,7 @@ docs/
 ├── DATA_LINEAGE.md        # Data lineage / provenance 운영 가이드
 ├── AUDIT_LOGS.md          # Audit logs 스키마/보장 및 운영
 ├── IDEMPOTENCY_CONTRACT.md  # Idempotency(멱등성) 계약/가이드
+├── ACTION_WRITEBACK_DESIGN.md  # Action writeback 설계 (atomic patchset + ES overlay)
 ├── UIUX.md               # UI/UX guidelines
 ├── DesignSystem.md       # 🔄 Design system (renamed from DesignSysyem.md)
 └── architecture/         # Architecture diagrams and details
