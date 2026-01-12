@@ -777,7 +777,7 @@ async def get_instance(
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail={
-                        "error": "not_found",
+                        "code": "RESOURCE_NOT_FOUND",
                         "message": f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
                         "base_branch": resolved_base_branch,
                         "overlay_branch": resolved_overlay_branch,
@@ -840,7 +840,7 @@ async def get_instance(
                         raise HTTPException(
                             status_code=status.HTTP_404_NOT_FOUND,
                             detail={
-                                "error": "not_found",
+                                "code": "RESOURCE_NOT_FOUND",
                                 "message": f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
                                 "base_branch": resolved_base_branch,
                                 "overlay_branch": resolved_overlay_branch,
@@ -895,7 +895,7 @@ async def get_instance(
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
                         detail={
-                            "error": "not_found",
+                            "code": "RESOURCE_NOT_FOUND",
                             "message": f"인스턴스 '{instance_id}'를 찾을 수 없습니다",
                             "base_branch": resolved_base_branch,
                             "overlay_branch": resolved_overlay_branch,

@@ -61,7 +61,6 @@ from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.utils.jsonld import JSONToJSONLDConverter
 from shared.utils.label_mapper import LabelMapper
-from shared.errors.error_response import install_error_handlers
 from oms.services.ontology_deploy_outbox import run_ontology_deploy_outbox_worker
 from oms.services.ontology_deployment_registry import OntologyDeploymentRegistry
 from oms.services.ontology_deployment_registry_v2 import OntologyDeploymentRegistryV2
@@ -432,10 +431,10 @@ app = create_fastapi_service(
     service_info=OMS_SERVICE_INFO,
     custom_lifespan=lifespan,
     include_health_check=False,  # Handled by existing health endpoint
-    include_logging_middleware=True
+    include_logging_middleware=True,
+    validation_error_status=status.HTTP_400_BAD_REQUEST,
 )
 install_oms_auth_middleware(app)
-install_error_handlers(app, service_name="oms", validation_status=status.HTTP_400_BAD_REQUEST)
 
 
 # Modern dependency injection functions

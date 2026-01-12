@@ -11,12 +11,13 @@ from contextlib import asynccontextmanager
 from typing import Any, Callable, Dict, List, Optional
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from starlette.responses import Response
 
 from shared.config.service_config import ServiceConfig
+from shared.errors.error_response import install_error_handlers
 from shared.models.requests import ApiResponse
 from shared.i18n.middleware import install_i18n_middleware
 from shared.middleware.rate_limiter import install_rate_limit_headers_middleware
@@ -51,7 +52,9 @@ def create_fastapi_service(
     custom_lifespan: Optional[Callable] = None,
     include_health_check: bool = True,
     include_logging_middleware: bool = True,
-    custom_tags: Optional[List[Dict[str, str]]] = None
+    custom_tags: Optional[List[Dict[str, str]]] = None,
+    include_error_handlers: bool = True,
+    validation_error_status: int = status.HTTP_422_UNPROCESSABLE_ENTITY,
 ) -> FastAPI:
     """
     Create a standardized FastAPI application with common configurations.
@@ -95,6 +98,13 @@ def create_fastapi_service(
         lifespan=lifespan_func,
         openapi_tags=openapi_tags
     )
+
+    if include_error_handlers:
+        install_error_handlers(
+            app,
+            service_name=service_info.name,
+            validation_status=validation_error_status,
+        )
 
     # Install i18n language negotiation + best-effort response localization
     install_i18n_middleware(app)
