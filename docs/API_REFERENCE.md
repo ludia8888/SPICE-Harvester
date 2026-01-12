@@ -1,6 +1,6 @@
 # SPICE HARVESTER — BFF API Reference (v1, code-backed)
 
-> Updated: 2026-01-08  \
+> Updated: 2026-01-11  \
 > Base URL (local): `http://localhost:8002/api/v1`  \
 > OpenAPI (local): `http://localhost:8002/openapi.json`  \
 > Swagger UI (local): `http://localhost:8002/docs`
@@ -28,6 +28,7 @@
 
 - Many write endpoints return **202 + `command_id`**; poll `/api/v1/commands/{command_id}/status`.
 - Some writes are synchronous (200/201) when no async command is created.
+- Action writeback submissions return **202 + `action_log_id`** (not `command_id`).
 
 ### Rate limiting
 
@@ -43,8 +44,51 @@
 
 ### Branching
 
-- Many endpoints accept `?branch=` (default `main`).
+- Many endpoints accept `?branch=` (default `main`). For read APIs, `branch` is a deprecated alias for `base_branch`.
 - Branch names in path parameters use `{branch_name:path}` to allow `/`.
+
+### Action writeback (overlay reads)
+
+Some read APIs support **Action-only writeback overlay** (`docs/ACTION_WRITEBACK_DESIGN.md`).
+
+Branch parameters (read APIs):
+- `base_branch`: authoritative base branch (Terminus + base ES index). Default: `main`.
+- `overlay_branch`: ES overlay branch. Default is resolved server-side for writeback-enabled types (usually `writeback-{db_name}`).
+- `branch` (deprecated): alias for `base_branch` only.
+
+Writeback read flags:
+- `WRITEBACK_READ_OVERLAY=true` enables automatic overlay reads for object types listed in `WRITEBACK_ENABLED_OBJECT_TYPES`.
+- `overlay_branch` can be explicitly provided to force overlay reads regardless of `WRITEBACK_READ_OVERLAY`.
+
+Overlay response metadata (best-effort, varies per endpoint):
+- `overlay_status`: `ACTIVE | DISABLED | DEGRADED`
+- `writeback_enabled`: whether the type is writeback-enabled (by server config)
+- `writeback_edits_present`: whether writeback edits exist (may be `null` when not computable)
+
+Notes:
+- ES overlay documents are only written when an Action produces a **non-noop** `applied_changes` (or a tombstone).
+  If a conflict policy results in a no-op (e.g. `BASE_WINS` skip), reads may return the base document even when
+  `overlay_branch` is provided, and overlay-only fields like `patchset_commit_id` may be absent.
+- Conflict/decision details should be read from the ActionLog (`/api/v1/databases/{db_name}/actions/logs/...`).
+
+Degraded behavior:
+- For writeback-enabled types, **no silent Terminus-only fallback** is allowed when overlay is required.
+- If ES overlay is unavailable, endpoints either:
+  - return `503` with `overlay_status=DEGRADED`, or
+  - return a server-merged view with `overlay_status=DEGRADED` (currently only implemented for single-instance reads).
+
+Action submission note:
+- `POST /api/v1/databases/{db_name}/actions/{action_type_id}/submit` returns an `action_log_id` (ActionLog).
+- Use `GET /api/v1/databases/{db_name}/actions/logs/{action_log_id}` (or `GET /api/v1/databases/{db_name}/actions/logs`) to read status/result.
+- Actor identity is derived from request headers (`X-User-ID`, optional `X-User-Type` default `user`) and forwarded to OMS as `metadata.user_id` / `metadata.user_type`.
+- ActionLog is also exposed as a virtual ontology object type `ActionLog`:
+  `GET /api/v1/databases/{db_name}/class/ActionLog/instance/{action_log_id}` and `GET /api/v1/databases/{db_name}/class/ActionLog/instances`.
+
+### Direct CRUD guard (writeback-enabled types)
+
+When `WRITEBACK_ENFORCE=true`, direct instance CRUD is **ingestion-only** for writeback-enabled object types:
+- `POST/PUT/DELETE /api/v1/databases/{db_name}/instances/...` requires `metadata.kind=ingest` (or a system principal).
+- Operational edits should use `POST /api/v1/databases/{db_name}/actions/{action_type_id}/submit`.
 
 ## Endpoint Index
 
@@ -56,6 +100,11 @@ python scripts/generate_api_reference.py
 
 <!-- BEGIN AUTO-GENERATED ENDPOINTS -->
 > Generated from OpenAPI by `scripts/generate_api_reference.py`. Do not edit manually.
+
+### Actions
+- `GET /api/v1/databases/{db_name}/actions/logs`
+- `GET /api/v1/databases/{db_name}/actions/logs/{action_log_id}`
+- `POST /api/v1/databases/{db_name}/actions/{action_type_id}/submit`
 
 ### Admin Operations
 - `POST /api/v1/admin/cleanup-old-replays`
@@ -72,6 +121,15 @@ python scripts/generate_api_reference.py
 - `POST /api/v1/agent/runs`
 - `GET /api/v1/agent/runs/{run_id}`
 - `GET /api/v1/agent/runs/{run_id}/events`
+
+### Agent Plans
+- `POST /api/v1/agent-plans/validate`
+- `POST /api/v1/agent-plans/{plan_id}/approvals`
+
+### Agent Tool Admin
+- `GET /api/v1/admin/agent-tools`
+- `POST /api/v1/admin/agent-tools`
+- `GET /api/v1/admin/agent-tools/{tool_id}`
 
 ### AI
 - `POST /api/v1/ai/query/{db_name}`
@@ -238,8 +296,6 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/databases/{db_name}/ontology/interfaces/{resource_id}`
 - `PUT /api/v1/databases/{db_name}/ontology/interfaces/{resource_id}`
 - `DELETE /api/v1/databases/{db_name}/ontology/interfaces/{resource_id}`
-- `GET /api/v1/databases/{db_name}/ontology/link-types`
-- `POST /api/v1/databases/{db_name}/ontology/link-types`
 - `GET /api/v1/databases/{db_name}/ontology/link-types/{resource_id}`
 - `PUT /api/v1/databases/{db_name}/ontology/link-types/{resource_id}`
 - `DELETE /api/v1/databases/{db_name}/ontology/link-types/{resource_id}`
@@ -258,6 +314,8 @@ python scripts/generate_api_reference.py
 - `DELETE /api/v1/databases/{db_name}/ontology/value-types/{resource_id}`
 
 ### Ontology Link Types
+- `GET /api/v1/databases/{db_name}/ontology/link-types`
+- `POST /api/v1/databases/{db_name}/ontology/link-types`
 - `GET /api/v1/databases/{db_name}/ontology/link-types/{link_type_id}`
 - `PUT /api/v1/databases/{db_name}/ontology/link-types/{link_type_id}`
 - `GET /api/v1/databases/{db_name}/ontology/link-types/{link_type_id}/edits`

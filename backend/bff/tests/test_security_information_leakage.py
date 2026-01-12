@@ -17,7 +17,14 @@ from typing import Dict, Any, List
 
 from bff.main import app
 from bff.dependencies import get_elasticsearch_service, get_oms_client
+from bff.routers import instances as instances_router
 from elasticsearch.exceptions import ConnectionError as ESConnectionError
+
+
+class _StubDatasetRegistry:
+    async def get_access_policy(self, *, db_name, scope, subject_type, subject_id):  # noqa: ANN003
+        return None
+
 
 class TestInformationLeakagePrevention:
     """Test suite to verify BFF APIs don't leak internal architecture information"""
@@ -59,6 +66,7 @@ class TestInformationLeakagePrevention:
 
         mock_oms = AsyncMock()
 
+        app.dependency_overrides[instances_router.get_dataset_registry] = lambda: _StubDatasetRegistry()
         app.dependency_overrides[get_elasticsearch_service] = lambda: mock_es
         app.dependency_overrides[get_oms_client] = lambda: mock_oms
         try:
@@ -101,6 +109,7 @@ class TestInformationLeakagePrevention:
         mock_oms = AsyncMock()
         mock_oms.get_instance.return_value = mock_oms_result
 
+        app.dependency_overrides[instances_router.get_dataset_registry] = lambda: _StubDatasetRegistry()
         app.dependency_overrides[get_elasticsearch_service] = lambda: mock_es
         app.dependency_overrides[get_oms_client] = lambda: mock_oms
         try:
@@ -141,6 +150,7 @@ class TestInformationLeakagePrevention:
 
         mock_oms = AsyncMock()
 
+        app.dependency_overrides[instances_router.get_dataset_registry] = lambda: _StubDatasetRegistry()
         app.dependency_overrides[get_elasticsearch_service] = lambda: mock_es
         app.dependency_overrides[get_oms_client] = lambda: mock_oms
         try:
@@ -179,6 +189,7 @@ class TestInformationLeakagePrevention:
         mock_oms = AsyncMock()
         mock_oms.get_class_instances.return_value = mock_oms_result
 
+        app.dependency_overrides[instances_router.get_dataset_registry] = lambda: _StubDatasetRegistry()
         app.dependency_overrides[get_elasticsearch_service] = lambda: mock_es
         app.dependency_overrides[get_oms_client] = lambda: mock_oms
         try:
@@ -211,6 +222,7 @@ class TestInformationLeakagePrevention:
         mock_oms = AsyncMock()
         mock_oms.get_instance.side_effect = Exception("OMS connection failed")
 
+        app.dependency_overrides[instances_router.get_dataset_registry] = lambda: _StubDatasetRegistry()
         app.dependency_overrides[get_elasticsearch_service] = lambda: mock_es
         app.dependency_overrides[get_oms_client] = lambda: mock_oms
         try:

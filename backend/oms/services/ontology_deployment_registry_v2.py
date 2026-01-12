@@ -242,6 +242,49 @@ class OntologyDeploymentRegistryV2:
             "health_summary": health_summary,
         }
 
+    async def get_latest_deployed_commit(
+        self,
+        *,
+        db_name: str,
+        target_branch: str = "main",
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Return the latest succeeded deployment record for a db/branch.
+
+        Actions must execute against a deployed ontology commit (not a floating branch head).
+        """
+        await self.ensure_schema()
+        row = await postgres_db.fetchrow(
+            """
+            SELECT deployment_id, db_name, target_branch, ontology_commit_id, snapshot_rid,
+                   status, deployed_by, deployed_at, gate_policy, health_summary, error, metadata
+            FROM ontology_deployments_v2
+            WHERE db_name = $1
+              AND target_branch = $2
+              AND status = 'succeeded'
+            ORDER BY deployed_at DESC
+            LIMIT 1
+            """,
+            db_name,
+            target_branch,
+        )
+        if not row:
+            return None
+        return {
+            "deployment_id": str(row["deployment_id"]),
+            "db_name": row["db_name"],
+            "target_branch": row["target_branch"],
+            "ontology_commit_id": row["ontology_commit_id"],
+            "snapshot_rid": row["snapshot_rid"],
+            "status": row["status"],
+            "deployed_by": row["deployed_by"],
+            "deployed_at": row["deployed_at"].isoformat() if row["deployed_at"] else None,
+            "gate_policy": self._maybe_decode_json(row["gate_policy"]),
+            "health_summary": self._maybe_decode_json(row["health_summary"]),
+            "error": row["error"],
+            "metadata": self._maybe_decode_json(row["metadata"]),
+        }
+
     async def claim_outbox_batch(
         self,
         *,

@@ -14,6 +14,8 @@ exporters:
     endpoint: jaeger:4317
     tls:
       insecure: true
+  prometheus:
+    endpoint: 0.0.0.0:8889
 
 service:
   pipelines:
@@ -21,4 +23,7 @@ service:
       receivers: [otlp]
       processors: [batch]
       exporters: [logging, otlp/jaeger]
-
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [logging, prometheus]

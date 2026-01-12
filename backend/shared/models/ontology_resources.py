@@ -105,6 +105,12 @@ class ActionTypeDefinition(OntologyResourceBase):
     output_schema: Dict[str, Any] = Field(default_factory=dict)
     permission_policy: Dict[str, Any] = Field(default_factory=dict)
     side_effects: List[str] = Field(default_factory=list)
+    writeback_target: Dict[str, Any] = Field(default_factory=dict, description="Writeback repo/branch target")
+    submission_criteria: Optional[str] = Field(default=None, description="Server-side submission gating expression")
+    validation_rules: List[Any] = Field(default_factory=list, description="Server-side pre-apply validation rules")
+    conflict_policy: Optional[str] = Field(default=None, description="Conflict policy for writeback vs base updates")
+    audit_policy: Dict[str, Any] = Field(default_factory=dict, description="Audit policy for logs/redaction")
+    implementation: Dict[str, Any] = Field(default_factory=dict, description="Action implementation descriptor")
 
 
 class OntologyResourceRecord(BaseModel):

@@ -46,6 +46,9 @@ class EventType(str, Enum):
     INSTANCES_BULK_CREATED = "INSTANCES_BULK_CREATED"
     INSTANCES_BULK_UPDATED = "INSTANCES_BULK_UPDATED"
     INSTANCES_BULK_DELETED = "INSTANCES_BULK_DELETED"
+
+    # Action Events (writeback)
+    ACTION_APPLIED = "ACTION_APPLIED"
     
     # Failure Events (실패)
     COMMAND_FAILED = "COMMAND_FAILED"
@@ -157,6 +160,25 @@ class InstanceEvent(BaseEvent):
                 f"{data.get('db_name', '')}:{data.get('branch', 'main')}:"
                 f"{data.get('class_id', '')}:{data.get('instance_id', '')}"
             )
+        super().__init__(**data)
+
+
+class ActionAppliedEvent(BaseEvent):
+    """Action applied (writeback patchset commit) event."""
+
+    db_name: str = Field(..., description="Database name")
+    action_log_id: str = Field(..., description="Action log id")
+    patchset_commit_id: str = Field(..., description="lakeFS commit id that contains patchset payload")
+    writeback_target: Dict[str, Any] = Field(default_factory=dict, description="Writeback repo/branch target")
+    overlay_branch: str = Field(..., description="Overlay branch token for ES indices")
+
+    def __init__(self, **data):
+        if "event_type" not in data:
+            data["event_type"] = EventType.ACTION_APPLIED
+        if "aggregate_type" not in data:
+            data["aggregate_type"] = "Writeback"
+        if "aggregate_id" not in data:
+            data["aggregate_id"] = str(data.get("db_name", "") or "")
         super().__init__(**data)
 
 

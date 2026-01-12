@@ -688,6 +688,10 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:-spicepass123}
+      # lakeFS S3 gateway (required for ActionApplied -> patchset reads)
+      - LAKEFS_S3_ENDPOINT_URL=http://lakefs:8000
+      - LAKEFS_ACCESS_KEY_ID=${LAKEFS_ACCESS_KEY_ID:-spice-lakefs-admin}
+      - LAKEFS_SECRET_ACCESS_KEY=${LAKEFS_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
       # Correctness/chaos tuning (defaults are production-safe)
       - PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS=${PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS:-900}
       - PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS=${PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS:-30}
@@ -702,6 +706,47 @@ services:
       - kafka
       - elasticsearch
       - redis
+    networks:
+      - spice_network
+    restart: unless-stopped
+
+  # Action Worker (Action-only writeback execution)
+  action-worker:
+    build:
+      context: .
+      dockerfile: ./action_worker/Dockerfile
+    container_name: spice_action_worker
+    environment:
+      - KAFKA_HOST=kafka
+      - KAFKA_PORT=29092
+      - TERMINUS_SERVER_URL=http://terminusdb:6363
+      - TERMINUS_USER=admin
+      - TERMINUS_ACCOUNT=admin
+      - TERMINUS_KEY=${TERMINUS_KEY:-admin}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
+      - POSTGRES_DB=${POSTGRES_DB:-spicedb}
+      - MINIO_ENDPOINT_URL=http://spice-minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
+      - EVENT_STORE_BUCKET=${EVENT_STORE_BUCKET:-spice-event-store}
+      - INSTANCE_BUCKET=${INSTANCE_BUCKET:-instance-events}
+      - LAKEFS_API_URL=http://lakefs:8000
+      - LAKEFS_S3_ENDPOINT_URL=http://lakefs:8000
+      - LAKEFS_ACCESS_KEY_ID=${LAKEFS_ACCESS_KEY_ID:-spice-lakefs-admin}
+      - LAKEFS_SECRET_ACCESS_KEY=${LAKEFS_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
+      - LAKEFS_SERVICE_PRINCIPAL=action-worker
+      - LOG_LEVEL=INFO
+      - DOCKER_CONTAINER=true
+      - ACTION_WORKER_GROUP=${ACTION_WORKER_GROUP:-action-worker-group}
+    depends_on:
+      - terminusdb
+      - kafka
+      - postgres
+      - minio
+      - lakefs
     networks:
       - spice_network
     restart: unless-stopped

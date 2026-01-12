@@ -109,6 +109,7 @@ from bff.routers import (
     agent_plans,
     agent_tools,
     audit,
+    actions,
     command_status,
     context7,
     agent_proxy,
@@ -137,13 +138,15 @@ from bff.routers import (
 
 # Monitoring and observability routers
 from shared.routers import monitoring, config_monitoring
+from shared.observability.logging import install_trace_context_filter
 
 # Logging setup
 logging.basicConfig(
     level=logging.INFO, 
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s - %(message)s",
     force=True
 )
+install_trace_context_filter()
 logger = logging.getLogger(__name__)
 
 
@@ -832,16 +835,20 @@ async def get_pipeline_executor() -> PipelineExecutor:
 
 # Router registration (unchanged)
 app.include_router(database.router, prefix="/api/v1")
+# NOTE: Ontology extensions must be registered before legacy ontology routes because
+# legacy `/ontology/{class_id}` would otherwise greedily capture subpaths like
+# `/ontology/branches` or `/ontology/action-types`.
+app.include_router(ontology_extensions.router, prefix="/api/v1")
 app.include_router(ontology.router, prefix="/api/v1")
 app.include_router(object_types.router, prefix="/api/v1")
 app.include_router(link_types.router, prefix="/api/v1")
-app.include_router(ontology_extensions.router, prefix="/api/v1")
 app.include_router(query.router, prefix="/api/v1")
 app.include_router(mapping.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(merge_conflict.router, prefix="/api/v1")
 app.include_router(instances.router, prefix="/api/v1")
 app.include_router(instance_async.router, prefix="/api/v1")
+app.include_router(actions.router, prefix="/api/v1")
 app.include_router(command_status.router, prefix="/api/v1")
 app.include_router(websocket.router, prefix="/api/v1")
 app.include_router(tasks.router, prefix="/api/v1")

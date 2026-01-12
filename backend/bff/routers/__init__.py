@@ -31,6 +31,7 @@ from . import objectify
 from . import governance
 from . import object_types
 from . import link_types
+from . import actions
 
 __all__ = [
     "database",
@@ -60,4 +61,5 @@ __all__ = [
     "governance",
     "object_types",
     "link_types",
+    "actions",
 ]

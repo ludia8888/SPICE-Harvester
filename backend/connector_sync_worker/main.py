@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
@@ -34,6 +35,8 @@ from shared.observability.context_propagation import (
     attach_context_from_kafka,
     kafka_headers_from_envelope_metadata,
 )
+from shared.observability.logging import install_trace_context_filter
+from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.connector_registry import ConnectorRegistry
 from shared.services.lineage_store import LineageStore
@@ -65,6 +68,7 @@ class ConnectorSyncWorker:
         self.backoff_base = parse_int_env("CONNECTOR_SYNC_BACKOFF_BASE_SECONDS", 2, min_value=0, max_value=300)
         self.backoff_max = parse_int_env("CONNECTOR_SYNC_BACKOFF_MAX_SECONDS", 60, min_value=1, max_value=3600)
         self.tracing = get_tracing_service("connector-sync-worker")
+        self.metrics = get_metrics_collector("connector-sync-worker")
 
         self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kafka-consumer")
         self._producer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kafka-producer")
@@ -477,6 +481,7 @@ class ConnectorSyncWorker:
                 payload = json.loads(raw)
                 envelope = EventEnvelope.model_validate(payload)
                 kafka_headers = msg.headers()
+                start = time.monotonic()
 
                 with attach_context_from_kafka(
                     kafka_headers=kafka_headers,
@@ -536,6 +541,14 @@ class ConnectorSyncWorker:
                             sequence_number=envelope.sequence_number,
                         )
                         await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
+                        try:
+                            self.metrics.record_event(
+                                str(envelope.event_type),
+                                action="processed",
+                                duration=time.monotonic() - start,
+                            )
+                        except Exception:
+                            pass
 
             except json.JSONDecodeError as e:
                 logger.error(f"Invalid JSON in connector-updates (dropping): {e}")
@@ -595,7 +608,11 @@ class ConnectorSyncWorker:
 
 
 async def _main() -> None:
-    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s - %(message)s",
+    )
+    install_trace_context_filter()
     worker = ConnectorSyncWorker()
     await worker.initialize()
     try:

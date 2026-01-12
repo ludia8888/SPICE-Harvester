@@ -39,6 +39,11 @@ class _StubDatasetRegistry:
             return self._version
         return None
 
+    async def get_key_spec_for_dataset(self, *, dataset_id, dataset_version_id=None):  # noqa: ANN003
+        _ = dataset_id
+        _ = dataset_version_id
+        return None
+
 
 class _PKDuplicateWorker(ObjectifyWorker):
     def __init__(self, *, rows, mapping_spec, dataset, version):
@@ -116,5 +121,6 @@ async def test_pk_duplicates_fail_before_writes():
         await worker._process_job(job)
 
     assert worker.objectify_registry.last_status["status"] == "FAILED"
-    stats = worker.objectify_registry.last_status["report"]["stats"]
+    report = worker.objectify_registry.last_status["report"]
+    stats = report.get("stats") or (report.get("context") or {}).get("stats") or {}
     assert stats["pk_duplicates"] == 1

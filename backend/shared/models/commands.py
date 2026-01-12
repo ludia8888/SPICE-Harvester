@@ -46,6 +46,9 @@ class CommandType(str, Enum):
     BULK_UPDATE_INSTANCES = "BULK_UPDATE_INSTANCES"
     BULK_DELETE_INSTANCES = "BULK_DELETE_INSTANCES"
 
+    # Action Commands (writeback)
+    EXECUTE_ACTION = "EXECUTE_ACTION"
+
 
 class CommandStatus(str, Enum):
     """명령 상태"""
@@ -145,6 +148,29 @@ class InstanceCommand(BaseCommand):
             if data.get("instance_id"):
                 parts.append(data["instance_id"])
             data["aggregate_id"] = ":".join(parts)
+        super().__init__(**data)
+
+
+class ActionCommand(BaseCommand):
+    """Action execution command (intent-only writeback)."""
+
+    db_name: str = Field(..., description="Database name")
+    action_log_id: UUID = Field(..., description="Action log id (also used as command_id)")
+    action_type_id: str = Field(..., description="Action type identifier")
+    ontology_commit_id: str = Field(..., description="Deployed ontology commit id (executable)")
+    base_branch: str = Field("main", description="Base branch for authoritative reads (default: main)")
+    overlay_branch: Optional[str] = Field(None, description="Overlay branch token for ES writeback indices")
+    correlation_id: Optional[str] = Field(None, description="Correlation id for tracing/audit")
+
+    def __init__(self, **data):
+        if "command_type" not in data:
+            data["command_type"] = CommandType.EXECUTE_ACTION
+        if "aggregate_type" not in data:
+            data["aggregate_type"] = "Writeback"
+        if "aggregate_id" not in data:
+            data["aggregate_id"] = str(data.get("db_name", "") or "")
+        if "command_id" not in data and data.get("action_log_id"):
+            data["command_id"] = data["action_log_id"]
         super().__init__(**data)
 
 

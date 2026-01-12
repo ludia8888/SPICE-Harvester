@@ -22,14 +22,19 @@ services:
     extends:
       file: backend/docker-compose.yml
       service: oms
+    ports:
+      - "8000:8000"
     environment:
       - ENABLE_PULL_REQUESTS=true
       # Dev-stack default: allow direct writes on protected branches (smoke/E2E tests + README flow).
       # Set to true in environments that require proposal workflow on protected branches (main/prod).
       - ONTOLOGY_REQUIRE_PROPOSALS=false
+      # Allow Prometheus to scrape /metrics without requiring admin tokens (local dev stack).
+      - OMS_AUTH_EXEMPT_PATHS=/health,/,/metrics
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_EXPORT_OTLP=true
       - OTEL_ENABLE_TRACING=true
+      - OTEL_ENABLE_METRICS=true
     depends_on:
       - terminusdb
       - postgres
@@ -42,9 +47,12 @@ services:
       service: bff
     environment:
       - INPUT_SANITIZER_MAX_LIST_ITEMS=10000
+      # Allow Prometheus to scrape /metrics without requiring admin tokens (local dev stack).
+      - BFF_AUTH_EXEMPT_PATHS=/api/v1/health,/api/v1/,/api/v1/data-connectors/google-sheets/oauth/callback,/metrics
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_EXPORT_OTLP=true
       - OTEL_ENABLE_TRACING=true
+      - OTEL_ENABLE_METRICS=true
     depends_on:
       - oms
       - funnel
@@ -60,6 +68,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_EXPORT_OTLP=true
       - OTEL_ENABLE_TRACING=true
+      - OTEL_ENABLE_METRICS=true
     depends_on:
       - bff
       - postgres
@@ -74,6 +83,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_EXPORT_OTLP=true
       - OTEL_ENABLE_TRACING=true
+      - OTEL_ENABLE_METRICS=true
     depends_on:
       - otel-collector
       
@@ -85,6 +95,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_EXPORT_OTLP=true
       - OTEL_ENABLE_TRACING=true
+      - OTEL_ENABLE_METRICS=true
     depends_on:
       - postgres
       - kafka
@@ -99,6 +110,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_EXPORT_OTLP=true
       - OTEL_ENABLE_TRACING=true
+      - OTEL_ENABLE_METRICS=true
     depends_on:
       - terminusdb
       - kafka
@@ -114,6 +126,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_EXPORT_OTLP=true
       - OTEL_ENABLE_TRACING=true
+      - OTEL_ENABLE_METRICS=true
     depends_on:
       - terminusdb
       - kafka
@@ -130,12 +143,31 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_EXPORT_OTLP=true
       - OTEL_ENABLE_TRACING=true
+      - OTEL_ENABLE_METRICS=true
     depends_on:
       - elasticsearch
       - redis
       - kafka
       - message-relay
       - postgres
+      - otel-collector
+
+  action-worker:
+    extends:
+      file: backend/docker-compose.yml
+      service: action-worker
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORT_OTLP=true
+      - OTEL_ENABLE_TRACING=true
+      - OTEL_ENABLE_METRICS=true
+    depends_on:
+      - terminusdb
+      - kafka
+      - message-relay
+      - postgres
+      - minio
+      - lakefs
       - otel-collector
 
   search-projection-worker:
@@ -146,6 +178,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_EXPORT_OTLP=true
       - OTEL_ENABLE_TRACING=true
+      - OTEL_ENABLE_METRICS=true
     depends_on:
       - elasticsearch
       - kafka
@@ -160,6 +193,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_EXPORT_OTLP=true
       - OTEL_ENABLE_TRACING=true
+      - OTEL_ENABLE_METRICS=true
     depends_on:
       - kafka
       - postgres
@@ -173,6 +207,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_EXPORT_OTLP=true
       - OTEL_ENABLE_TRACING=true
+      - OTEL_ENABLE_METRICS=true
     depends_on:
       - bff
       - kafka
@@ -187,6 +222,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_EXPORT_OTLP=true
       - OTEL_ENABLE_TRACING=true
+      - OTEL_ENABLE_METRICS=true
     depends_on:
       - kafka
       - postgres
@@ -202,6 +238,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_EXPORT_OTLP=true
       - OTEL_ENABLE_TRACING=true
+      - OTEL_ENABLE_METRICS=true
     depends_on:
       - kafka
       - postgres
@@ -216,6 +253,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_EXPORT_OTLP=true
       - OTEL_ENABLE_TRACING=true
+      - OTEL_ENABLE_METRICS=true
     depends_on:
       - kafka
       - postgres
@@ -231,6 +269,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_EXPORT_OTLP=true
       - OTEL_ENABLE_TRACING=true
+      - OTEL_ENABLE_METRICS=true
     depends_on:
       - postgres
       - otel-collector
@@ -311,8 +350,40 @@ services:
     ports:
       - "4317:4317"
       - "4318:4318"
+      - "8889:8889"
     depends_on:
       - jaeger
+    networks:
+      - spice_network
+
+  prometheus:
+    image: prom/prometheus:v2.50.1
+    container_name: spice_prometheus
+    command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    volumes:
+      - ./backend/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "19090:9090"
+    depends_on:
+      - otel-collector
+    networks:
+      - spice_network
+
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: spice_grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./backend/monitoring/grafana_dashboard.json:/var/lib/grafana/dashboards/spice-harvester.json:ro
+      - ./backend/monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./backend/monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+    ports:
+      - "13000:3000"
+    depends_on:
+      - prometheus
     networks:
       - spice_network
 

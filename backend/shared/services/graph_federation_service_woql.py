@@ -15,9 +15,11 @@ import httpx
 import aiohttp
 from typing import Any, Dict, List, Optional, Tuple
 
+from shared.config.app_config import AppConfig
 from shared.config.search_config import get_instances_index_name
 from shared.security.input_sanitizer import validate_branch_name
 from shared.utils.terminus_branch import encode_branch_name
+from shared.utils.writeback_lifecycle import DEFAULT_LIFECYCLE_ID, derive_lifecycle_id, overlay_doc_id
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +162,9 @@ class GraphFederationServiceWOQL:
         db_name: str,
         start_class: str,
         hops: List[Tuple[str, str]],  # [(predicate, target_class), ...]
-        branch: str = "main",
+        base_branch: str = "main",
+        overlay_branch: Optional[str] = None,
+        strict_overlay: bool = False,
         filters: Optional[Dict[str, Any]] = None,
         limit: int = 100,
         offset: int = 0,
@@ -175,8 +179,8 @@ class GraphFederationServiceWOQL:
         """
         Execute multi-hop graph query with ES federation using REAL WOQL
         """
-        branch = validate_branch_name(branch or "main")
-        logger.info(f"🔥 REAL WOQL Multi-hop query: {start_class} -> {hops}")
+        base_branch = validate_branch_name(base_branch or "main")
+        logger.info(f"🔥 REAL WOQL Multi-hop query: {start_class} -> {hops} (base_branch={base_branch}, overlay_branch={overlay_branch})")
 
         max_hops = int(os.getenv("GRAPH_QUERY_MAX_HOPS", "10"))
         if len(hops) > max_hops:
@@ -200,7 +204,7 @@ class GraphFederationServiceWOQL:
         }
         if enforce_semantics and hops:
             await self._validate_hop_semantics(
-                db_name=db_name, branch=branch, start_class=start_class, hops=hops
+                db_name=db_name, branch=base_branch, start_class=start_class, hops=hops
             )
         
         # Step 1: Build WOQL query for graph traversal
@@ -212,7 +216,7 @@ class GraphFederationServiceWOQL:
         woql_query = {"@type": "Limit", "limit": limit, "query": woql_query}
         
         # Step 2: Execute WOQL query
-        branch_path = self._terminus_branch_path(branch)
+        branch_path = self._terminus_branch_path(base_branch)
         async with httpx.AsyncClient() as client:
             request_body = {"query": woql_query}
             
@@ -373,7 +377,11 @@ class GraphFederationServiceWOQL:
         
         if include_documents and es_doc_ids:
             documents, es_index_by_node_id, tombstoned_nodes = await self._fetch_es_documents(
-                db_name, list(es_doc_ids), branch=branch
+                db_name,
+                list(es_doc_ids),
+                base_branch=base_branch,
+                overlay_branch=overlay_branch,
+                strict_overlay=bool(strict_overlay),
             )
         
         # Step 5: Optionally fetch audit records
@@ -381,7 +389,8 @@ class GraphFederationServiceWOQL:
             audit_records = await self._fetch_audit_records(db_name, list(es_doc_ids))
         
         # Step 6: Combine results
-        branch_index = get_instances_index_name(db_name, branch=branch)
+        es_branch = validate_branch_name(overlay_branch) if overlay_branch else base_branch
+        branch_index = get_instances_index_name(db_name, branch=es_branch)
         result_nodes = []
         for node in nodes.values():
             terminus_id = node["terminus_id"]
@@ -443,7 +452,9 @@ class GraphFederationServiceWOQL:
         *,
         db_name: str,
         class_name: str,
-        branch: str = "main",
+        base_branch: str = "main",
+        overlay_branch: Optional[str] = None,
+        strict_overlay: bool = False,
         filters: Optional[Dict[str, Any]] = None,
         include_documents: bool = True,
         include_audit: bool = False
@@ -453,7 +464,7 @@ class GraphFederationServiceWOQL:
         TerminusDB has lightweight nodes (IDs + relationships),
         Elasticsearch has full domain data
         """
-        branch = validate_branch_name(branch or "main")
+        base_branch = validate_branch_name(base_branch or "main")
         logger.info(f"📊 PALANTIR Query: {class_name} via WOQL -> ES enrichment")
         
         # PALANTIR PRINCIPLE: Lightweight nodes in TerminusDB, full data in ES
@@ -466,7 +477,7 @@ class GraphFederationServiceWOQL:
         es_doc_ids = []
         try:
             import httpx
-            branch_path = self._terminus_branch_path(branch)
+            branch_path = self._terminus_branch_path(base_branch)
             async with httpx.AsyncClient() as client:
                 request_body = {"query": woql_query}
                 response = await client.post(
@@ -498,7 +509,13 @@ class GraphFederationServiceWOQL:
         audit_records = {}
         
         if include_documents and es_doc_ids:
-            documents, _, _ = await self._fetch_es_documents(db_name, es_doc_ids, branch=branch)
+            documents, _, _ = await self._fetch_es_documents(
+                db_name,
+                es_doc_ids,
+                base_branch=base_branch,
+                overlay_branch=overlay_branch,
+                strict_overlay=bool(strict_overlay),
+            )
         
         if include_audit and es_doc_ids:
             audit_records = await self._fetch_audit_records(db_name, es_doc_ids)
@@ -797,7 +814,9 @@ class GraphFederationServiceWOQL:
         db_name: str,
         doc_ids: List[str],
         *,
-        branch: str = "main",
+        base_branch: str = "main",
+        overlay_branch: Optional[str] = None,
+        strict_overlay: bool = False,
     ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, str], set[str]]:
         """
         Fetch documents from Elasticsearch for the given graph node IDs.
@@ -810,7 +829,8 @@ class GraphFederationServiceWOQL:
         if not doc_ids:
             return {}, {}, set()
 
-        branch = validate_branch_name(branch or "main")
+        base_branch = validate_branch_name(base_branch or "main")
+        es_branch = validate_branch_name(overlay_branch) if overlay_branch else base_branch
         
         terminus_ids = [str(doc_id) for doc_id in doc_ids if doc_id]
         if not terminus_ids:
@@ -824,7 +844,12 @@ class GraphFederationServiceWOQL:
         # Use `_mget` to avoid relying on index mappings (keyword/text fields).
         pairs = [(terminus_id, self._extract_es_doc_id(terminus_id)) for terminus_id in terminus_ids]
 
-        async def _mget(index_name: str, *, wanted: List[tuple[str, str]]) -> Dict[str, Dict[str, Any]]:
+        async def _mget(
+            index_name: str,
+            *,
+            wanted: List[tuple[str, str]],
+            raise_on_error: bool = False,
+        ) -> Dict[str, Dict[str, Any]]:
             if not wanted:
                 return {}
             async with aiohttp.ClientSession() as session:
@@ -849,50 +874,75 @@ class GraphFederationServiceWOQL:
                         if resp.status == 404:
                             logger.warning(f"ES index not found: {index_name}")
                             return {}
+                        if raise_on_error:
+                            raise RuntimeError(f"ES mget failed (status={resp.status})")
                         logger.warning(
                             f"Failed to fetch ES documents: {resp.status} ({await resp.text()})"
                         )
                         return {}
                 except Exception as e:
+                    if raise_on_error:
+                        raise
                     logger.error(f"Error fetching ES documents: {e}")
                     return {}
 
-        # Branch virtualization overlay: branch index first, then fall back to main.
-        branch_index = get_instances_index_name(db_name, branch=branch)
-        base_index = get_instances_index_name(db_name, branch="main")
-
-        if branch == "main":
-            found = await _mget(base_index, wanted=pairs)
+        base_index = get_instances_index_name(db_name, branch=base_branch)
+        if es_branch == base_branch:
+            found = await _mget(base_index, wanted=pairs, raise_on_error=False)
             for terminus_id, src in found.items():
                 documents[terminus_id] = src
                 index_by_node[terminus_id] = base_index
-            logger.info(f"Fetched {len(documents)} documents from Elasticsearch (branch=main)")
+            logger.info(f"Fetched {len(documents)} documents from Elasticsearch (branch={base_branch})")
             return documents, index_by_node, tombstoned
 
-        # 1) Overlay fetch
-        overlay_found = await _mget(branch_index, wanted=pairs)
+        overlay_index = get_instances_index_name(db_name, branch=es_branch)
+
+        # Always fetch base first (needed for lifecycle_id when overlay is writeback/*).
+        base_found = await _mget(base_index, wanted=pairs, raise_on_error=False)
+
+        writeback_prefix = AppConfig.ONTOLOGY_WRITEBACK_BRANCH_PREFIX.rstrip("/") + "/"
+        use_writeback_overlay_ids = es_branch.startswith(writeback_prefix)
+
+        if use_writeback_overlay_ids:
+            overlay_wanted: List[tuple[str, str]] = []
+            for terminus_id, es_id in pairs:
+                base_doc = base_found.get(terminus_id)
+                if not isinstance(base_doc, dict):
+                    continue
+                lifecycle_id = str(base_doc.get("lifecycle_id") or "").strip()
+                if not lifecycle_id and isinstance(base_doc.get("data"), dict):
+                    lifecycle_id = derive_lifecycle_id(base_doc["data"])
+                lifecycle_id = lifecycle_id or DEFAULT_LIFECYCLE_ID
+                overlay_wanted.append((terminus_id, overlay_doc_id(instance_id=es_id, lifecycle_id=lifecycle_id)))
+            overlay_found = await _mget(
+                overlay_index,
+                wanted=overlay_wanted,
+                raise_on_error=bool(strict_overlay),
+            )
+        else:
+            overlay_found = await _mget(
+                overlay_index,
+                wanted=pairs,
+                raise_on_error=bool(strict_overlay),
+            )
+
         for terminus_id, src in overlay_found.items():
-            if src.get("deleted"):
+            if src.get("deleted") or src.get("overlay_tombstone") is True:
                 tombstoned.add(terminus_id)
-                index_by_node[terminus_id] = branch_index
+                index_by_node[terminus_id] = overlay_index
                 continue
             documents[terminus_id] = src
-            index_by_node[terminus_id] = branch_index
+            index_by_node[terminus_id] = overlay_index
 
-        # 2) Fallback to base for missing + not tombstoned
-        missing = [
-            (terminus_id, es_id)
-            for (terminus_id, es_id) in pairs
-            if terminus_id not in overlay_found and terminus_id not in tombstoned
-        ]
-        base_found = await _mget(base_index, wanted=missing)
         for terminus_id, src in base_found.items():
+            if terminus_id in documents or terminus_id in tombstoned:
+                continue
             documents[terminus_id] = src
             index_by_node[terminus_id] = base_index
 
         logger.info(
             f"Fetched {len(documents)} documents from Elasticsearch "
-            f"(branch={branch}, overlay_hits={len(overlay_found)}, tombstones={len(tombstoned)})"
+            f"(base_branch={base_branch}, overlay_branch={es_branch}, overlay_hits={len(overlay_found)}, tombstones={len(tombstoned)})"
         )
         return documents, index_by_node, tombstoned
     

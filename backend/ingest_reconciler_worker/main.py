@@ -17,6 +17,7 @@ import httpx
 from fastapi import FastAPI
 
 from shared.observability.metrics import get_metrics_collector
+from shared.observability.logging import install_trace_context_filter
 from shared.observability.tracing import get_tracing_service
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.service_factory import ServiceInfo, create_fastapi_service
@@ -236,7 +237,11 @@ app = create_fastapi_service(
 def main() -> None:
     import uvicorn
 
-    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s - %(message)s",
+    )
+    install_trace_context_filter()
     uvicorn.run(
         "ingest_reconciler_worker.main:app",
         host="0.0.0.0",

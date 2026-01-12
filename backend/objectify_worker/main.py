@@ -14,6 +14,7 @@ import logging
 import os
 import queue as queue_module
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 from uuid import NAMESPACE_URL, uuid5
@@ -24,6 +25,8 @@ from confluent_kafka import Consumer, KafkaError, Producer, TopicPartition
 from shared.config.service_config import ServiceConfig
 from shared.models.objectify_job import ObjectifyJob
 from shared.observability.context_propagation import attach_context_from_kafka, kafka_headers_from_current_context
+from shared.observability.logging import install_trace_context_filter
+from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.objectify_registry import ObjectifyRegistry
@@ -111,6 +114,7 @@ class ObjectifyWorker:
         self.backoff_base = parse_int_env("OBJECTIFY_BACKOFF_BASE_SECONDS", 2, min_value=0, max_value=300)
         self.backoff_max = parse_int_env("OBJECTIFY_BACKOFF_MAX_SECONDS", 60, min_value=1, max_value=3600)
         self.tracing = get_tracing_service("objectify-worker")
+        self.metrics = get_metrics_collector("objectify-worker")
 
     def _build_error_report(
         self,
@@ -605,6 +609,7 @@ class ObjectifyWorker:
                 if not payload:
                     continue
 
+                start = time.monotonic()
                 with attach_context_from_kafka(kafka_headers=kafka_headers, service_name="objectify-worker"):
                     with self.tracing.span(
                         "objectify_worker.process_message",
@@ -663,6 +668,14 @@ class ObjectifyWorker:
                             if self.processed:
                                 await self.processed.mark_done(handler=self.handler, event_id=job.job_id)
                             self.consumer.commit(message=msg, asynchronous=False)
+                            try:
+                                self.metrics.record_event(
+                                    "OBJECTIFY_JOB",
+                                    action="processed",
+                                    duration=time.monotonic() - start,
+                                )
+                            except Exception:
+                                pass
                         except Exception as exc:
                             self.tracing.record_exception(exc)
                             err = str(exc)
@@ -3349,7 +3362,11 @@ class ObjectifyWorker:
 
 
 async def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s - %(message)s",
+    )
+    install_trace_context_filter()
     worker = ObjectifyWorker()
     await worker.run()
 

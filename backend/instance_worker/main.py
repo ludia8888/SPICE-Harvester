@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from datetime import datetime, timezone
@@ -40,6 +41,8 @@ from shared.services.command_status_service import (
 from shared.config.settings import ApplicationSettings
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import attach_context_from_kafka
+from shared.observability.logging import install_trace_context_filter
+from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.security.auth_utils import get_expected_token
 from shared.security.input_sanitizer import validate_branch_name, validate_class_id, validate_instance_id
@@ -60,7 +63,11 @@ from oms.services.async_terminus import AsyncTerminusService
 from oms.services.event_store import EventStore
 from shared.models.config import ConnectionConfig
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s - %(message)s",
+)
+install_trace_context_filter()
 logger = logging.getLogger(__name__)
 
 _BFF_TOKEN_ENV_KEYS = ("BFF_ADMIN_TOKEN", "BFF_WRITE_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN")
@@ -114,9 +121,38 @@ class StrictPalantirInstanceWorker:
         self.bff_http: Optional[httpx.AsyncClient] = None
         self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="instance-worker-kafka")
         self.tracing = get_tracing_service("instance-worker")
+        self.metrics = get_metrics_collector("instance-worker")
         
         # PALANTIR PRINCIPLE: Only business concepts in graph
         # No system fields or storage details
+
+    @staticmethod
+    def _is_ingest_metadata(metadata: Any) -> bool:
+        if not isinstance(metadata, dict):
+            return False
+        return str(metadata.get("kind") or "").strip().lower() == "ingest"
+
+    @classmethod
+    def _writeback_guard_blocks(cls, command: Dict[str, Any]) -> bool:
+        if not AppConfig.WRITEBACK_ENFORCE:
+            return False
+        if not isinstance(command, dict):
+            return False
+        command_type = str(command.get("command_type") or "").strip()
+        if command_type not in {
+            "CREATE_INSTANCE",
+            "UPDATE_INSTANCE",
+            "DELETE_INSTANCE",
+            "BULK_CREATE_INSTANCES",
+            "BULK_UPDATE_INSTANCES",
+        }:
+            return False
+        class_id = str(command.get("class_id") or "").strip()
+        if not class_id:
+            return False
+        if not AppConfig.is_writeback_enabled_object_type(class_id):
+            return False
+        return not cls._is_ingest_metadata(command.get("metadata"))
         
     async def initialize(self):
         """Initialize all connections"""
@@ -2609,6 +2645,7 @@ class StrictPalantirInstanceWorker:
 
                 kafka_headers = msg.headers()
                 fallback_metadata = raw_message.get("metadata") if isinstance(raw_message, dict) else None
+                start = time.monotonic()
                 with attach_context_from_kafka(
                     kafka_headers=kafka_headers,
                     fallback_metadata=fallback_metadata if isinstance(fallback_metadata, dict) else None,
@@ -2688,6 +2725,30 @@ class StrictPalantirInstanceWorker:
                         logger.info(f"  Database: {command.get('db_name')}")
                         logger.info(f"  Class: {command.get('class_id')}")
 
+                        if self._writeback_guard_blocks(command):
+                            await self.set_command_status(
+                                command_id,
+                                "failed",
+                                {
+                                    "error": "writeback_enforced",
+                                    "message": (
+                                        "Direct CRUD instance writes are ingestion-only for writeback-enabled object types. "
+                                        "Use Actions for operational edits."
+                                    ),
+                                    "class_id": command.get("class_id"),
+                                },
+                            )
+                            if registry_claimed and self.processed_event_registry and registry_event_id:
+                                await self.processed_event_registry.mark_done(
+                                    handler="instance_worker",
+                                    event_id=str(registry_event_id),
+                                    aggregate_id=str(registry_aggregate_id) if registry_aggregate_id else None,
+                                    # Blocked commands must not advance aggregate ordering watermarks.
+                                    sequence_number=None,
+                                )
+                            await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
+                            continue
+
                         if command_type == "CREATE_INSTANCE":
                             await self.process_create_instance(command)
                         elif command_type == "BULK_CREATE_INSTANCES":
@@ -2711,6 +2772,12 @@ class StrictPalantirInstanceWorker:
                             )
 
                         await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
+                        try:
+                            duration_s = time.monotonic() - start
+                            if command_type:
+                                self.metrics.record_event(str(command_type), action="processed", duration=duration_s)
+                        except Exception:
+                            pass
 
             except Exception as e:
                 logger.error(f"Error processing command: {e}")

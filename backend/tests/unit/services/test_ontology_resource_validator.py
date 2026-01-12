@@ -21,6 +21,8 @@ def test_action_type_requires_input_schema_and_policy():
     missing = {field for issue in issues for field in issue["details"]["missing_fields"]}
     assert "input_schema" in missing
     assert "permission_policy" in missing
+    assert "writeback_target" in missing
+    assert "implementation" in missing
 
 
 def test_object_type_requires_pk_spec_and_backing_source():
@@ -43,6 +45,38 @@ def test_function_requires_expression_and_return_type_ref():
     missing = {field for issue in issues for field in issue["details"]["missing_fields"]}
     assert "expression" in missing
     assert "return_type_ref" in missing
+
+
+def test_action_type_rejects_unsafe_submission_criteria_expression():
+    spec = {
+        "input_schema": {"fields": [{"name": "ticket", "type": "object_ref", "required": True}]},
+        "permission_policy": {"effect": "ALLOW", "principals": ["role:DomainModeler"]},
+        "writeback_target": {"repo": "ontology-writeback", "branch": "writeback-{db_name}"},
+        "implementation": {
+            "type": "template_v1",
+            "targets": [{"target": {"from": "input.ticket"}, "changes": {"set": {"status": "APPROVED"}}}],
+        },
+        "submission_criteria": "__import__('os')",
+    }
+    issues = check_required_fields("action_type", spec)
+    invalid = {field for issue in issues for field in issue["details"]["invalid_fields"]}
+    assert "submission_criteria" in invalid
+
+
+def test_action_type_rejects_invalid_validation_rules():
+    spec = {
+        "input_schema": {"fields": [{"name": "ticket", "type": "object_ref", "required": True}]},
+        "permission_policy": {"effect": "ALLOW", "principals": ["role:DomainModeler"]},
+        "writeback_target": {"repo": "ontology-writeback", "branch": "writeback-{db_name}"},
+        "implementation": {
+            "type": "template_v1",
+            "targets": [{"target": {"from": "input.ticket"}, "changes": {"set": {"status": "APPROVED"}}}],
+        },
+        "validation_rules": [{"type": "assert", "scope": "each_target", "expr": "__import__('os')"}],
+    }
+    issues = check_required_fields("action_type", spec)
+    invalid = {field for issue in issues for field in issue["details"]["invalid_fields"]}
+    assert "validation_rules[0].expr" in invalid
 
 
 def test_link_type_invalid_predicate_is_reported():

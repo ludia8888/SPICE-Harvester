@@ -5,19 +5,129 @@ Based on Context7 recommendations for observability
 This module provides metrics collection for monitoring system performance.
 """
 
+import os
 import time
 from typing import Dict, Optional, Any
 from functools import wraps
 from contextlib import contextmanager
 
 from opentelemetry import metrics
-from opentelemetry.metrics import Counter, Histogram, UpDownCounter, ObservableGauge
+from opentelemetry.metrics import Counter, Histogram, UpDownCounter, ObservableGauge, set_meter_provider
 from prometheus_client import Counter as PrometheusCounter, Histogram as PrometheusHistogram, Gauge
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from shared.utils.app_logger import get_logger
 
 logger = get_logger(__name__)
+
+try:  # best-effort: enable OTLP export when SDK is available
+    from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+    from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION
+
+    _HAS_OTEL_METRICS_SDK = True
+except Exception:  # pragma: no cover - env dependent
+    OTLPMetricExporter = None
+    MeterProvider = None
+    PeriodicExportingMetricReader = None
+    Resource = None
+    SERVICE_NAME = None
+    SERVICE_VERSION = None
+    _HAS_OTEL_METRICS_SDK = False
+
+
+class OpenTelemetryMetricsConfig:
+    SERVICE_VERSION = os.getenv("OTEL_SERVICE_VERSION", "1.0.0")
+    ENVIRONMENT = os.getenv("OTEL_ENVIRONMENT", os.getenv("ENVIRONMENT", "development"))
+
+    OTLP_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
+
+    ENABLE_METRICS = os.getenv("OTEL_ENABLE_METRICS", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+    _raw_export_otlp = os.getenv("OTEL_EXPORT_OTLP")
+    if _raw_export_otlp is None:
+        EXPORT_OTLP = bool(OTLP_ENDPOINT)
+    else:
+        EXPORT_OTLP = _raw_export_otlp.strip().lower() in {"1", "true", "yes", "on"}
+
+    EXPORT_INTERVAL_SECONDS = float(os.getenv("OTEL_METRIC_EXPORT_INTERVAL_SECONDS", "10") or "10")
+
+
+_metrics_provider_initialized = False
+_metrics_provider_no_op_logged = False
+
+
+def _log_no_op_once(reason: str) -> None:
+    global _metrics_provider_no_op_logged
+    if _metrics_provider_no_op_logged:
+        return
+    _metrics_provider_no_op_logged = True
+    logger.warning("OpenTelemetry metrics running in no-op mode: %s", reason)
+
+
+def initialize_metrics_provider(*, service_name: str) -> None:
+    """
+    Configure a global MeterProvider so OTel metrics are actually exported.
+
+    Safe to call multiple times; first call wins (per-process).
+    """
+
+    global _metrics_provider_initialized
+    if _metrics_provider_initialized:
+        return
+
+    if not OpenTelemetryMetricsConfig.ENABLE_METRICS:
+        _log_no_op_once("OTEL_ENABLE_METRICS=false")
+        _metrics_provider_initialized = True
+        return
+
+    if not _HAS_OTEL_METRICS_SDK:
+        _log_no_op_once("OpenTelemetry metrics SDK not available")
+        _metrics_provider_initialized = True
+        return
+
+    resource = Resource.create(
+        {
+            SERVICE_NAME: service_name,
+            SERVICE_VERSION: OpenTelemetryMetricsConfig.SERVICE_VERSION,
+            "environment": OpenTelemetryMetricsConfig.ENVIRONMENT,
+            "service.namespace": "spice-harvester",
+        }
+    )
+
+    readers = []
+    if OpenTelemetryMetricsConfig.EXPORT_OTLP:
+        if OTLPMetricExporter is None:
+            _log_no_op_once("OTLP exporter requested but opentelemetry-exporter-otlp is not installed")
+        elif not OpenTelemetryMetricsConfig.OTLP_ENDPOINT:
+            _log_no_op_once("OTLP exporter requested but OTEL_EXPORTER_OTLP_ENDPOINT is not set")
+        else:
+            try:
+                interval_ms = int(max(OpenTelemetryMetricsConfig.EXPORT_INTERVAL_SECONDS, 1.0) * 1000)
+                exporter = OTLPMetricExporter(endpoint=OpenTelemetryMetricsConfig.OTLP_ENDPOINT, insecure=True)
+                readers.append(PeriodicExportingMetricReader(exporter, export_interval_millis=interval_ms))
+                logger.info(
+                    "OTLP metrics exporter configured: endpoint=%s interval_s=%s",
+                    OpenTelemetryMetricsConfig.OTLP_ENDPOINT,
+                    OpenTelemetryMetricsConfig.EXPORT_INTERVAL_SECONDS,
+                )
+            except Exception as e:
+                _log_no_op_once(f"Failed to configure OTLP metric exporter: {e}")
+
+    if not readers:
+        _log_no_op_once("Metrics enabled but no exporters configured/available")
+        _metrics_provider_initialized = True
+        return
+
+    try:
+        provider = MeterProvider(resource=resource, metric_readers=readers)
+        set_meter_provider(provider)
+        _metrics_provider_initialized = True
+        logger.info("OpenTelemetry metrics initialized: service=%s", service_name)
+    except Exception as e:
+        _log_no_op_once(f"Failed to set meter provider: {e}")
+        _metrics_provider_initialized = True
 
 _PROM_COUNTERS: Dict[str, PrometheusCounter] = {}
 _PROM_HISTOGRAMS: Dict[str, PrometheusHistogram] = {}
@@ -667,5 +777,6 @@ def get_metrics_collector(service_name: str) -> MetricsCollector:
     """
     global _metrics_collector
     if _metrics_collector is None:
+        initialize_metrics_provider(service_name=service_name)
         _metrics_collector = MetricsCollector(service_name)
     return _metrics_collector

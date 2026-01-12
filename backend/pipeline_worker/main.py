@@ -32,6 +32,8 @@ from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.models.event_envelope import EventEnvelope
 from shared.models.pipeline_job import PipelineJob
 from shared.observability.context_propagation import attach_context_from_kafka, kafka_headers_from_current_context
+from shared.observability.logging import install_trace_context_filter
+from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.lakefs_client import LakeFSClient, LakeFSConflictError, LakeFSError
@@ -316,6 +318,7 @@ class PipelineWorker:
             "PIPELINE_LOCK_ACQUIRE_TIMEOUT_SECONDS", 3600, min_value=30, max_value=86_400
         )
         self.tracing = get_tracing_service("pipeline-worker")
+        self.metrics = get_metrics_collector("pipeline-worker")
 
     def _build_error_payload(
         self,
@@ -584,6 +587,7 @@ class PipelineWorker:
                         self.consumer.commit(msg)
                     continue
 
+                start = time.monotonic()
                 with attach_context_from_kafka(kafka_headers=kafka_headers, service_name="pipeline-worker"):
                     with self.tracing.span(
                         "pipeline_worker.process_job",
@@ -631,6 +635,14 @@ class PipelineWorker:
                             await self.processed.mark_done(handler=self.handler, event_id=job.job_id)
                             if self.consumer:
                                 self.consumer.commit(msg)
+                            try:
+                                self.metrics.record_event(
+                                    "PIPELINE_JOB",
+                                    action="processed",
+                                    duration=time.monotonic() - start,
+                                )
+                            except Exception:
+                                pass
                         except Exception as exc:
                             err = str(exc)
                             if isinstance(exc, ConnectionRefusedError):
@@ -3747,7 +3759,11 @@ def _list_part_files(path: str, *, extensions: Optional[set[str]] = None) -> Lis
 
 
 async def main() -> None:
-    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s - %(message)s",
+    )
+    install_trace_context_filter()
     worker = PipelineWorker()
     await worker.run()
 

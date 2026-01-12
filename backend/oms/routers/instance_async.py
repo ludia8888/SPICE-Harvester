@@ -48,6 +48,30 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/instances/{db_name}/async", tags=["Async Instance Management"])
 
+def _enforce_ingest_only_if_writeback_enabled(
+    *,
+    class_id: str,
+    metadata: Optional[Dict[str, Any]],
+) -> None:
+    if not AppConfig.WRITEBACK_ENFORCE:
+        return
+    if not AppConfig.is_writeback_enabled_object_type(class_id):
+        return
+    kind = ""
+    if isinstance(metadata, dict):
+        kind = str(metadata.get("kind") or "").strip().lower()
+    if kind == "ingest":
+        return
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "error": "writeback_enforced",
+            "message": "Direct CRUD instance writes are ingestion-only for writeback-enabled object types. Use Actions.",
+            "class_id": class_id,
+            "hint": "Set metadata.kind=ingest for ingestion paths, or submit an Action for operational edits.",
+        },
+    )
+
 
 async def _fallback_from_registry(
     *,
@@ -133,7 +157,13 @@ class InstanceUpdateRequest(BaseModel):
     """인스턴스 수정 요청"""
     data: Dict[str, Any] = Field(..., description="수정할 데이터")
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="메타데이터")
-    
+
+
+class InstanceDeleteRequest(BaseModel):
+    """인스턴스 삭제 요청 (optional body for metadata/ingest marker)."""
+
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="메타데이터")
+
 
 class BulkInstanceCreateRequest(BaseModel):
     """대량 인스턴스 생성 요청"""
@@ -166,8 +196,9 @@ async def create_instance_async(
     """
     try:
         # 입력 검증
-        sanitized_data = sanitize_input(request.data)
         branch = validate_branch_name(branch)
+        _enforce_ingest_only_if_writeback_enabled(class_id=class_id, metadata=request.metadata)
+        sanitized_data = sanitize_input(request.data)
 
         # CREATE_INSTANCE는 aggregate_id 정합성을 위해 instance_id를 포함해야 함
         instance_id = _derive_instance_id(class_id, sanitized_data)
@@ -285,8 +316,9 @@ async def update_instance_async(
     try:
         # 입력 검증
         validate_instance_id(instance_id)
-        sanitized_data = sanitize_input(request.data)
         branch = validate_branch_name(branch)
+        _enforce_ingest_only_if_writeback_enabled(class_id=class_id, metadata=request.metadata)
+        sanitized_data = sanitize_input(request.data)
 
         ontology_version = merge_ontology_stamp(
             (request.metadata or {}).get("ontology"),
@@ -388,6 +420,7 @@ async def delete_instance_async(
     instance_id: str = ...,
     branch: str = Query("main", description="Target branch (default: main)"),
     expected_seq: int = Query(..., ge=0, description="Expected current aggregate sequence (OCC)"),
+    request: Optional[InstanceDeleteRequest] = None,
     terminus=TerminusServiceDep,
     command_status_service: Optional[CommandStatusService] = CommandStatusServiceDep,
     event_store=EventStoreDep,
@@ -400,6 +433,10 @@ async def delete_instance_async(
         # 입력 검증
         validate_instance_id(instance_id)
         branch = validate_branch_name(branch)
+        _enforce_ingest_only_if_writeback_enabled(
+            class_id=class_id,
+            metadata=(request.metadata if request else None),
+        )
 
         ontology_version = await resolve_ontology_version(terminus, db_name=db_name, branch=branch, logger=logger)
         
@@ -413,6 +450,7 @@ async def delete_instance_async(
             expected_seq=expected_seq,
             payload={},  # 삭제는 payload 필요 없음
             metadata={
+                **(((request.metadata or {}) if request else {}) or {}),
                 "user_id": user_id,
                 "deleted_at": datetime.now(timezone.utc).isoformat(),
                 "ontology": ontology_version,
@@ -511,6 +549,7 @@ async def bulk_create_instances_async(
     try:
         # 입력 검증
         branch = validate_branch_name(branch)
+        _enforce_ingest_only_if_writeback_enabled(class_id=class_id, metadata=request.metadata)
         sanitized_instances = [sanitize_input(instance) for instance in request.instances]
 
         ontology_version = merge_ontology_stamp(
@@ -633,6 +672,7 @@ async def bulk_update_instances_async(
     """
     try:
         branch = validate_branch_name(branch)
+        _enforce_ingest_only_if_writeback_enabled(class_id=class_id, metadata=request.metadata)
         sanitized_instances: List[Dict[str, Any]] = []
 
         for idx, inst in enumerate(request.instances):
@@ -910,6 +950,7 @@ async def bulk_create_instances_with_tracking(
     
     # Validate input
     branch = validate_branch_name(branch)
+    _enforce_ingest_only_if_writeback_enabled(class_id=class_id, metadata=request.metadata)
     sanitized_instances = [sanitize_input(instance) for instance in request.instances]
 
     ontology_version = merge_ontology_stamp(

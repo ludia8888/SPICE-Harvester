@@ -320,15 +320,20 @@ def _get_logging_config(service_name: str) -> Dict[str, Any]:
     return {
         "version": 1,
         "disable_existing_loggers": False,
+        "filters": {
+            "trace_context": {
+                "()": "shared.observability.logging.TraceContextFilter",
+            },
+        },
         "formatters": {
             "default": {
                 "()": "uvicorn.logging.DefaultFormatter",
-                "fmt": "%(levelprefix)s %(asctime)s - %(message)s",
+                "fmt": "%(levelprefix)s %(asctime)s - trace_id=%(trace_id)s span_id=%(span_id)s - %(message)s",
                 "datefmt": "%Y-%m-%d %H:%M:%S",
             },
             "access": {
                 "()": "uvicorn.logging.AccessFormatter",
-                "fmt": '%(levelprefix)s %(asctime)s - %(client_addr)s - "%(request_line)s" %(status_code)s',
+                "fmt": '%(levelprefix)s %(asctime)s - trace_id=%(trace_id)s span_id=%(span_id)s - %(client_addr)s - "%(request_line)s" %(status_code)s',
                 "datefmt": "%Y-%m-%d %H:%M:%S",
             },
         },
@@ -337,11 +342,13 @@ def _get_logging_config(service_name: str) -> Dict[str, Any]:
                 "formatter": "default",
                 "class": "logging.StreamHandler",
                 "stream": "ext://sys.stderr",
+                "filters": ["trace_context"],
             },
             "access": {
                 "formatter": "access",
                 "class": "logging.StreamHandler",
                 "stream": "ext://sys.stdout",
+                "filters": ["trace_context"],
             },
         },
         "loggers": {

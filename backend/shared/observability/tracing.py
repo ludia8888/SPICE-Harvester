@@ -61,6 +61,14 @@ except Exception:  # pragma: no cover - depends on environment
     HAS_OPENTELEMETRY = False
 
 
+try:  # optional: baggage propagation for richer cross-service context
+    from opentelemetry.baggage.propagation import W3CBaggagePropagator
+    from opentelemetry.propagators.composite import CompositePropagator
+except Exception:  # pragma: no cover - depends on environment
+    W3CBaggagePropagator = None
+    CompositePropagator = None
+
+
 try:  # optional
     from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 except Exception:  # pragma: no cover - depends on environment
@@ -218,7 +226,19 @@ class TracingService:
                 )
 
             set_tracer_provider(tracer_provider)
-            set_global_textmap(TraceContextTextMapPropagator())
+
+            # Prefer W3C Trace Context + W3C baggage when available. This improves
+            # end-to-end correlation (e.g., request_id/correlation_id) across HTTP hops.
+            propagator = TraceContextTextMapPropagator()
+            if CompositePropagator is not None and W3CBaggagePropagator is not None:
+                try:
+                    propagator = CompositePropagator(
+                        [TraceContextTextMapPropagator(), W3CBaggagePropagator()]
+                    )
+                except Exception:
+                    propagator = TraceContextTextMapPropagator()
+
+            set_global_textmap(propagator)
             self.tracer = otel_trace.get_tracer(self.service_name, OpenTelemetryConfig.SERVICE_VERSION)
             self._initialized = True
             logger.info(f"OpenTelemetry tracing initialized: service={self.service_name} sample_rate={ratio}")
@@ -386,22 +406,51 @@ def get_tracing_service(service_name: Optional[str] = None) -> TracingService:
 
 
 def trace_endpoint(name: Optional[str] = None):
-    tracing = get_tracing_service()
-    if HAS_OPENTELEMETRY and otel_trace is not None:
-        return tracing.trace(name, kind=otel_trace.SpanKind.SERVER)
-    return tracing.trace(name, kind=None)
+    """
+    Lazily create a tracing decorator for request handlers.
+
+    Important: this must NOT call `get_tracing_service()` at import/decorator time.
+    Some modules apply this decorator at import time, before the service has had a
+    chance to initialize tracing with the correct `service.name`.
+    """
+
+    kind = otel_trace.SpanKind.SERVER if HAS_OPENTELEMETRY and otel_trace is not None else None
+    return _lazy_trace(name=name, kind=kind, attributes=None)
 
 
 def trace_db_operation(name: Optional[str] = None):
-    tracing = get_tracing_service()
     attrs = {"db.system": "postgresql"}
-    if HAS_OPENTELEMETRY and otel_trace is not None:
-        return tracing.trace(name, kind=otel_trace.SpanKind.CLIENT, attributes=attrs)
-    return tracing.trace(name, kind=None, attributes=attrs)
+    kind = otel_trace.SpanKind.CLIENT if HAS_OPENTELEMETRY and otel_trace is not None else None
+    return _lazy_trace(name=name, kind=kind, attributes=attrs)
 
 
 def trace_external_call(name: Optional[str] = None):
-    tracing = get_tracing_service()
-    if HAS_OPENTELEMETRY and otel_trace is not None:
-        return tracing.trace(name, kind=otel_trace.SpanKind.CLIENT)
-    return tracing.trace(name, kind=None)
+    kind = otel_trace.SpanKind.CLIENT if HAS_OPENTELEMETRY and otel_trace is not None else None
+    return _lazy_trace(name=name, kind=kind, attributes=None)
+
+
+def _lazy_trace(*, name: Optional[str], kind=None, attributes: Optional[Dict[str, Any]] = None):
+    def decorator(func):
+        import asyncio
+
+        if asyncio.iscoroutinefunction(func):
+
+            @wraps(func)
+            async def async_wrapper(*args, **kwargs):
+                tracing = get_tracing_service()
+                span_name = name or f"{func.__module__}.{func.__name__}"
+                with tracing.span(span_name, kind=kind, attributes=attributes):
+                    return await func(*args, **kwargs)
+
+            return async_wrapper
+
+        @wraps(func)
+        def sync_wrapper(*args, **kwargs):
+            tracing = get_tracing_service()
+            span_name = name or f"{func.__module__}.{func.__name__}"
+            with tracing.span(span_name, kind=kind, attributes=attributes):
+                return func(*args, **kwargs)
+
+        return sync_wrapper
+
+    return decorator

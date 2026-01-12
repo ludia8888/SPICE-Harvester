@@ -280,6 +280,22 @@ class OntologyResourceService:
         spec_payload = spec if isinstance(spec, dict) else {}
         metadata_payload = metadata if isinstance(metadata, dict) else {}
 
+        existing_metadata = (existing or {}).get("metadata")
+        if not isinstance(existing_metadata, dict):
+            existing_metadata = {}
+
+        if is_create:
+            merged_metadata = dict(metadata_payload or {})
+            merged_metadata["rev"] = 1
+        else:
+            prev_rev = 0
+            try:
+                prev_rev = int(existing_metadata.get("rev") or 0)
+            except (TypeError, ValueError):
+                prev_rev = 0
+            merged_metadata = {**existing_metadata, **(metadata_payload or {})}
+            merged_metadata["rev"] = max(1, prev_rev + 1)
+
         if base_payload:
             spec_payload = {**base_payload, **spec_payload}
 
@@ -298,7 +314,7 @@ class OntologyResourceService:
             "label_i18n": label_i18n,
             "description_i18n": description_i18n,
             "spec": spec_payload or None,
-            "metadata": metadata_payload or None,
+            "metadata": merged_metadata or None,
             "created_at": created_at,
             "updated_at": now.isoformat(),
         }

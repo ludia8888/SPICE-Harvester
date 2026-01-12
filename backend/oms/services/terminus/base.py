@@ -108,7 +108,7 @@ class BaseTerminusService:
 
     def _branch_descriptor(self, branch: Optional[str]) -> str:
         """
-        Build the TerminusDB descriptor path for a branch.
+        Build the TerminusDB descriptor path for a branch (or commit).
 
         TerminusDB branch names cannot contain `/` in the descriptor segment, so we encode
         Git-like names (e.g. "feature/foo") at the Terminus boundary only.
@@ -117,7 +117,25 @@ class BaseTerminusService:
         """
         if not branch or branch == "main":
             return ""
-        encoded = encode_branch_name(branch)
+
+        raw = str(branch).strip()
+        if not raw:
+            return ""
+
+        # Allow "commit-addressed reads" by accepting commit identifiers in place of branch names.
+        # TerminusDB commit descriptors use /local/commit/<raw_commit>, while some APIs surface
+        # commits as "ValidCommit/<raw_commit>" or "InitialCommit/<raw_commit>".
+        if "/local/commit/" in raw:
+            commit_tail = raw.split("/local/commit/", 1)[1].strip().strip("/")
+            if commit_tail:
+                return f"/local/commit/{commit_tail}"
+        for prefix in ("ValidCommit/", "InitialCommit/"):
+            if raw.startswith(prefix):
+                commit_tail = raw.split("/", 1)[1].strip()
+                if commit_tail:
+                    return f"/local/commit/{commit_tail}"
+
+        encoded = encode_branch_name(raw)
         return f"/local/branch/{encoded}"
     
     async def _authenticate(self) -> str:

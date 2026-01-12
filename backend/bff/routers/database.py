@@ -609,6 +609,27 @@ async def list_classes(
         result = await oms.list_ontologies(db_name)
 
         classes = result.get("data", {}).get("ontologies", [])
+        if not isinstance(classes, list):
+            classes = []
+
+        # Virtual/system ontology object types (control plane).
+        action_log_id = "ActionLog"
+        if not any(
+            isinstance(item, dict) and str(item.get("id") or "").strip() == action_log_id
+            for item in classes
+        ):
+            classes.append(
+                {
+                    "id": action_log_id,
+                    "label": "Action Log",
+                    "description": "Action-only writeback audit log (Postgres-backed; first-class ontology object)",
+                    "metadata": {
+                        "system": True,
+                        "backing_store": "postgres",
+                        "table": "spice_action_logs.ontology_action_logs",
+                    },
+                }
+            )
 
         return {"classes": classes, "count": len(classes)}
     except SecurityViolationError as e:
@@ -686,6 +707,41 @@ async def get_class(
         # 입력 데이터 보안 검증
         db_name = validate_db_name(db_name)
         class_id = sanitize_input(class_id)
+
+        if str(class_id or "").strip() == "ActionLog":
+            return {
+                "status": "success",
+                "message": "Virtual ontology class",
+                "data": {
+                    "id": "ActionLog",
+                    "label": "Action Log",
+                    "description": "Action-only writeback audit log (Postgres-backed; first-class ontology object).",
+                    "properties": [
+                        {"name": "action_log_id", "type": "uuid"},
+                        {"name": "db_name", "type": "string"},
+                        {"name": "action_type_id", "type": "string"},
+                        {"name": "action_type_rid", "type": "string"},
+                        {"name": "ontology_commit_id", "type": "string"},
+                        {"name": "status", "type": "string"},
+                        {"name": "input", "type": "object"},
+                        {"name": "result", "type": "object"},
+                        {"name": "submitted_by", "type": "string"},
+                        {"name": "submitted_at", "type": "datetime"},
+                        {"name": "finished_at", "type": "datetime"},
+                        {"name": "writeback_target", "type": "object"},
+                        {"name": "writeback_commit_id", "type": "string"},
+                        {"name": "action_applied_event_id", "type": "string"},
+                        {"name": "action_applied_seq", "type": "integer"},
+                        {"name": "metadata", "type": "object"},
+                        {"name": "updated_at", "type": "datetime"},
+                    ],
+                    "metadata": {
+                        "system": True,
+                        "backing_store": "postgres",
+                        "table": "spice_action_logs.ontology_action_logs",
+                    },
+                },
+            }
 
         # OMS를 통해 클래스 조회
         result = await oms.get_ontology(db_name, class_id)

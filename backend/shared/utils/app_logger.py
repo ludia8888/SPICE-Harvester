@@ -7,6 +7,7 @@ import logging
 import sys
 from typing import Optional
 
+from shared.observability.logging import TraceContextFilter, install_trace_context_filter
 
 def get_logger(name: str, level: Optional[str] = None) -> logging.Logger:
     """
@@ -37,7 +38,13 @@ def get_logger(name: str, level: Optional[str] = None) -> logging.Logger:
     handler.setLevel(log_level)
 
     # Create formatter
-    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    install_trace_context_filter()
+    trace_filter = TraceContextFilter()
+    logger.addFilter(trace_filter)
+    handler.addFilter(trace_filter)
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s - %(message)s"
+    )
     handler.setFormatter(formatter)
 
     # Add handler to logger
@@ -65,7 +72,11 @@ def configure_logging(level: str = "INFO") -> None:
     if not logging.root.handlers:
         handler = logging.StreamHandler(sys.stdout)
         handler.setLevel(log_level)
-        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        install_trace_context_filter()
+        handler.addFilter(TraceContextFilter())
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s - %(message)s"
+        )
         handler.setFormatter(formatter)
         logging.root.addHandler(handler)
 

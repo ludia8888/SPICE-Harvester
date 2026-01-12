@@ -83,6 +83,8 @@ setup(
         "opentelemetry-instrumentation==0.44b0",
         "opentelemetry-instrumentation-fastapi==0.44b0",
         "opentelemetry-instrumentation-httpx==0.44b0",
+        "opentelemetry-instrumentation-asyncpg==0.44b0",
+        "opentelemetry-instrumentation-redis==0.44b0",
         "opentelemetry-instrumentation-asyncio==0.44b0",
         "opentelemetry-exporter-otlp==1.23.0",
         "opentelemetry-exporter-jaeger==1.21.0",

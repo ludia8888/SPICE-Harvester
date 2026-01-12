@@ -208,6 +208,9 @@ services:
     depends_on:
       - lakefs
       - minio-init
+    environment:
+      - LAKEFS_INSTALLATION_ACCESS_KEY_ID=${LAKEFS_INSTALLATION_ACCESS_KEY_ID:-spice-lakefs-admin}
+      - LAKEFS_INSTALLATION_SECRET_ACCESS_KEY=${LAKEFS_INSTALLATION_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -230,6 +233,7 @@ services:
         }
         create_repo "pipeline-artifacts" "s3://lakefs/pipeline-artifacts"
         create_repo "raw-datasets" "s3://lakefs/raw-datasets"
+        create_repo "ontology-writeback" "s3://lakefs/ontology-writeback"
         echo "lakeFS repositories ready."
         exit 0
     restart: "no"

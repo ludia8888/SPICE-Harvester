@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Optional
@@ -31,6 +32,8 @@ from shared.observability.context_propagation import (
     kafka_headers_from_current_context,
     kafka_headers_from_envelope_metadata,
 )
+from shared.observability.logging import install_trace_context_filter
+from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.connector_registry import ConnectorRegistry, ConnectorSource
 from shared.utils.env_utils import parse_int_env
@@ -48,6 +51,7 @@ class ConnectorTriggerService:
         self.poll_concurrency = parse_int_env("CONNECTOR_TRIGGER_POLL_CONCURRENCY", 5, min_value=1, max_value=100)
         self.outbox_batch = parse_int_env("CONNECTOR_TRIGGER_OUTBOX_BATCH", 50, min_value=1, max_value=500)
         self.tracing = get_tracing_service("connector-trigger-service")
+        self.metrics = get_metrics_collector("connector-trigger-service")
 
         self._producer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kafka-producer")
         self.registry: Optional[ConnectorRegistry] = None
@@ -237,6 +241,8 @@ class ConnectorTriggerService:
                     },
                 ):
 
+                    batch_start = time.monotonic()
+
                     delivery_errors: dict[str, str] = {}
 
                     def _cb(err, msg, outbox_id: str):
@@ -272,6 +278,10 @@ class ConnectorTriggerService:
                                     headers=headers or None,
                                     on_delivery=lambda err, msg, outbox_id=item.outbox_id: _cb(err, msg, outbox_id),
                                 )
+                                try:
+                                    self.metrics.record_event("CONNECTOR_UPDATE", action="published")
+                                except Exception:
+                                    pass
 
                     remaining = await self._producer_call(self.producer.flush, 10)
                     if remaining != 0:
@@ -288,6 +298,15 @@ class ConnectorTriggerService:
                             await self.registry.mark_outbox_failed(
                                 outbox_id=item.outbox_id, error="flush incomplete; delivery unknown"
                             )
+
+                    try:
+                        self.metrics.record_event(
+                            "CONNECTOR_OUTBOX_BATCH",
+                            action="processed",
+                            duration=time.monotonic() - batch_start,
+                        )
+                    except Exception:
+                        pass
 
             except Exception as e:
                 logger.error(f"Outbox publish loop error: {e}")
@@ -310,7 +329,11 @@ class ConnectorTriggerService:
 
 
 async def _main() -> None:
-    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s - %(message)s",
+    )
+    install_trace_context_filter()
     svc = ConnectorTriggerService()
     await svc.initialize()
     try:

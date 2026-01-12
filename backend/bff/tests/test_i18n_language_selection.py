@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from bff.main import app
 from bff.dependencies import get_elasticsearch_service, get_oms_client
+from bff.routers import instances as instances_router
 from elasticsearch.exceptions import ConnectionError as ESConnectionError
 
 
@@ -34,6 +35,11 @@ def test_bff_http_exception_detail_localizes_by_lang_param():
     mock_oms = AsyncMock()
     mock_oms.get_instance.side_effect = Exception("OMS connection failed")
 
+    class _StubDatasetRegistry:
+        async def get_access_policy(self, *, db_name, scope, subject_type, subject_id):  # noqa: ANN003
+            return None
+
+    app.dependency_overrides[instances_router.get_dataset_registry] = lambda: _StubDatasetRegistry()
     app.dependency_overrides[get_elasticsearch_service] = lambda: mock_es
     app.dependency_overrides[get_oms_client] = lambda: mock_oms
 

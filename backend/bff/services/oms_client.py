@@ -307,7 +307,7 @@ class OMSClient:
         """온톨로지 리소스 생성"""
         try:
             params = {"branch": branch}
-            if expected_head_commit:
+            if expected_head_commit is not None:
                 params["expected_head_commit"] = expected_head_commit
             response = await self.client.post(
                 f"/api/v1/database/{db_name}/ontology/resources/{resource_type}",
@@ -333,7 +333,7 @@ class OMSClient:
         """온톨로지 리소스 업데이트"""
         try:
             params = {"branch": branch}
-            if expected_head_commit:
+            if expected_head_commit is not None:
                 params["expected_head_commit"] = expected_head_commit
             response = await self.client.put(
                 f"/api/v1/database/{db_name}/ontology/resources/{resource_type}/{resource_id}",
@@ -358,7 +358,7 @@ class OMSClient:
         """온톨로지 리소스 삭제"""
         try:
             params = {"branch": branch}
-            if expected_head_commit:
+            if expected_head_commit is not None:
                 params["expected_head_commit"] = expected_head_commit
             response = await self.client.delete(
                 f"/api/v1/database/{db_name}/ontology/resources/{resource_type}/{resource_id}",

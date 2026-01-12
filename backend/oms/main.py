@@ -73,18 +73,20 @@ from shared.middleware.rate_limiter import rate_limit, RateLimitPresets, RateLim
 # Router imports
 from oms.routers import (
     branch, database, ontology, ontology_extensions, version,
-    instance_async, instance, query, command_status
+    instance_async, instance, query, command_status, action_async
 )
 
 # Monitoring and observability routers
 from shared.routers import monitoring, config_monitoring
+from shared.observability.logging import install_trace_context_filter
 
 # Logging setup
 logging.basicConfig(
     level=logging.INFO, 
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s - %(message)s",
     force=True
 )
+install_trace_context_filter()
 logger = logging.getLogger(__name__)
 
 
@@ -643,6 +645,7 @@ app.include_router(ontology.router, prefix="/api/v1", tags=["ontology"])
 app.include_router(query.router, prefix="/api/v1", tags=["query"])
 app.include_router(instance_async.router, prefix="/api/v1", tags=["async-instance"])
 app.include_router(instance.router, prefix="/api/v1", tags=["instance"])
+app.include_router(action_async.router, prefix="/api/v1", tags=["async-actions"])
 app.include_router(branch.router, prefix="/api/v1", tags=["branch"])
 app.include_router(version.router, prefix="/api/v1", tags=["version"])
 app.include_router(command_status.router, prefix="/api/v1", tags=["command-status"])

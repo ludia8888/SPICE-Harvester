@@ -139,7 +139,7 @@ All below share the common fields and a type-specific `spec`.
   - `writeback_target` is required (writeback dataset for latest state); action submissions must be logged for audit.
   - P0 writeback target is fixed: lakeFS writeback dataset_version (each action produces a new writeback commit recorded in action logs).
   - Default naming is deterministic but config-injectable:
-    - repo: `ontology_writeback`, branch prefix: `writeback/{db_name}`
+    - repo: `ontology-writeback`, branch prefix: `writeback-{db_name}`
     - overrides: `ONTOLOGY_WRITEBACK_REPO`, `ONTOLOGY_WRITEBACK_BRANCH_PREFIX`, `ONTOLOGY_WRITEBACK_DATASET_ID` (optional)
 
 ## Compiled snapshot (Terminus)

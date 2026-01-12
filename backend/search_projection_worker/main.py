@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -22,6 +23,8 @@ from shared.observability.context_propagation import (
     attach_context_from_kafka,
     kafka_headers_from_envelope_metadata,
 )
+from shared.observability.logging import install_trace_context_filter
+from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.elasticsearch_service import create_elasticsearch_service_legacy
 from shared.services.processed_event_registry import ClaimDecision, ProcessedEventRegistry
@@ -49,6 +52,7 @@ class SearchProjectionWorker:
         self.processed: Optional[ProcessedEventRegistry] = None
         self.es = None
         self.tracing = get_tracing_service("search-projection-worker")
+        self.metrics = get_metrics_collector("search-projection-worker")
 
     async def initialize(self) -> None:
         if not self.enabled:
@@ -143,6 +147,7 @@ class SearchProjectionWorker:
                         raise RuntimeError("ProcessedEventRegistry not initialized")
 
                     kafka_headers = msg.headers()
+                    start = time.monotonic()
                     with attach_context_from_kafka(
                         kafka_headers=kafka_headers,
                         fallback_metadata=envelope.metadata if isinstance(envelope.metadata, dict) else None,
@@ -189,6 +194,14 @@ class SearchProjectionWorker:
                                     sequence_number=envelope.sequence_number,
                                 )
                             self.consumer.commit(message=msg, asynchronous=False)
+                            try:
+                                self.metrics.record_event(
+                                    str(envelope.event_type),
+                                    action="processed",
+                                    duration=time.monotonic() - start,
+                                )
+                            except Exception:
+                                pass
                 except Exception as exc:
                     err = str(exc)
                     retryable = self._is_retryable_error(exc)
@@ -349,7 +362,11 @@ class SearchProjectionWorker:
 
 
 async def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s - %(message)s",
+    )
+    install_trace_context_filter()
     worker = SearchProjectionWorker()
     await worker.run()
 

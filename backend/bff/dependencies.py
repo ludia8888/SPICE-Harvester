@@ -37,6 +37,7 @@ from shared.config.settings import ApplicationSettings
 from shared.utils.label_mapper import LabelMapper
 from shared.utils.jsonld import JSONToJSONLDConverter
 from shared.services.elasticsearch_service import ElasticsearchService
+from shared.services.action_log_registry import ActionLogRegistry
 
 # BFF specific imports
 from bff.services.oms_client import OMSClient
@@ -123,6 +124,29 @@ class BFFDependencyProvider:
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"JSON-LD converter not available: {str(e)}",
             )
+
+    @staticmethod
+    async def get_action_log_registry(
+        container: ServiceContainer = Depends(get_container),
+    ) -> ActionLogRegistry:
+        """
+        Get ActionLogRegistry (Postgres-backed) from container.
+
+        This provides a stable read surface for Action-only writeback audit logs.
+        """
+        if not container.has(ActionLogRegistry):
+            def create_action_logs(settings: ApplicationSettings) -> ActionLogRegistry:  # noqa: ARG001
+                return ActionLogRegistry()
+
+            container.register_singleton(ActionLogRegistry, create_action_logs)
+
+        try:
+            return await container.get(ActionLogRegistry)
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"ActionLogRegistry not available: {str(e)}",
+            ) from e
 
 
 # Type-safe dependency annotations for cleaner injection
@@ -592,6 +616,7 @@ TerminusServiceDep = Depends(get_terminus_service)
 get_oms_client = BFFDependencyProvider.get_oms_client
 get_label_mapper = BFFDependencyProvider.get_label_mapper
 get_jsonld_converter = BFFDependencyProvider.get_jsonld_converter
+get_action_log_registry = BFFDependencyProvider.get_action_log_registry
 
 
 # Health check function for the modernized dependencies

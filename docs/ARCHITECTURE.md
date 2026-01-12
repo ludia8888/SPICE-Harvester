@@ -10,6 +10,7 @@
 - **Event Store(S3/MinIO)가 Write SSoT**이고, Kafka는 transport다.
 - **Control Plane은 Postgres**(dataset/pipeline/objectify registry, proposal/approval/deploy, gate results, outbox, processed_event_registry).
 - **Ontology 정의는 TerminusDB**, 데이터 아티팩트는 **lakeFS + MinIO**, 검색은 **Elasticsearch**.
+- **Action-only writeback**은 lakeFS commit-addressed patchset + ES overlay(derived cache)로 구현되며, writeback 대상 타입에서 overlay 장애는 **명시적 DEGRADED/503**로 처리한다(절대 silent fallback 금지).
 - **Outbox + Reconciler**로 dataset/objectify 작업 내구성을 확보한다.
 - **Relationship indexing + link edits overlay**로 그래프 관계와 수정을 분리 관리한다.
 - **Audit/Lineage는 Postgres에 저장되고 BFF로 조회된다**.
@@ -34,6 +35,9 @@ graph TD
     OW[ontology-worker]
     IW[instance-worker]
     PW[projection-worker]
+    AW[action-worker]
+    AOW[action-outbox-worker]
+    WMW[writeback-materializer-worker]
     SPW[search-projection-worker]
     PLW[pipeline-worker]
     PLS[pipeline-scheduler]
@@ -74,6 +78,7 @@ graph TD
   KAF --> OW
   KAF --> IW
   KAF --> PW
+  KAF --> AW
   KAF --> SPW
   KAF --> PLW
   KAF --> OBJ
@@ -83,6 +88,14 @@ graph TD
   IW --> TDB
   PW --> ES
   SPW --> ES
+  AW --> PG
+  AW --> LFS
+  AW --> S3
+  AOW --> PG
+  AOW --> LFS
+  AOW --> S3
+  WMW --> LFS
+  WMW --> S3
 
   PLW --> LFS
   PLW --> PG
@@ -102,6 +115,7 @@ graph TD
 ```
 
 **Note**: BFF 내부에서 `dataset_ingest_outbox_worker`와 `objectify_outbox_worker`가 함께 실행된다.
+**Note**: `action-worker` / `action-outbox-worker` / `writeback-materializer-worker`는 코드로 구현되어 있으며, 실행을 위해 별도 서비스로 구동(또는 compose에 추가)해야 한다.
 
 ---
 
@@ -115,6 +129,9 @@ graph TD
 - **ontology-worker**: ontology command 처리 → TerminusDB write + domain event.
 - **instance-worker**: instance command 처리 → TerminusDB write + link indexing + domain event.
 - **projection-worker**: domain event → ES projection (DLQ 포함).
+- **action-worker**: ActionCommand consume → (permission + `submission_criteria` gate) → patchset 계산 → lakeFS writeback commit → ActionApplied emit + queue append.
+- **action-outbox-worker**: ActionLog 상태머신(outbox) 복구(emit/queue append 재시도)로 partial failure를 수렴.
+- **writeback-materializer-worker**: `writeback_edits_queue`를 스캔하여 `writeback_merged_snapshot`을 생성(재빌드/서버 merge fallback 최적화).
 - **search-projection-worker**: 선택적 검색 인덱스 업데이트 (`ENABLE_SEARCH_PROJECTION`).
 - **pipeline-worker**: Spark 기반 변환 실행(Preview/Build/Deploy + 계약/expectations).
 - **pipeline-scheduler**: 스케줄 파이프라인 실행 트리거 → job queue.
@@ -158,14 +175,66 @@ sequenceDiagram
 
 ---
 
+## 2.1) Action-only Writeback Flow (lakeFS patchset + ES overlay)
+
+Action writeback은 `docs/ACTION_WRITEBACK_DESIGN.md` 철학을 따르는 별도 write plane이다:
+- **writeback은 Action만 허용**(Direct CRUD는 ingest-only로 제한 가능)
+- lakeFS에 **commit-addressed patchset**을 기록하고,
+- ES overlay는 **derived cache**이며 read-your-write는 overlay로 보장한다.
+- Actor identity는 `X-User-ID`/`X-User-Type` 헤더로부터 결정되며, OMS/worker는 `(principal_type, principal_id)` + `role:*` principal tag로 `permission_policy`/dataset ACL을 평가한다.
+- `action-worker`는 `action_type.spec.submission_criteria`를 안전한 boolean evaluator(`backend/shared/utils/safe_bool_expression.py`)로 평가하고, false/평가불가면 ActionLog를 `FAILED`로 종결한다.
+- `WRITEBACK_ENFORCE_GOVERNANCE=true`에서는 backing dataset ACL과 writeback dataset ACL이 정렬되지 않으면(Action worker에서 검증 불가 포함) Action을 reject한다.
+- `conflict_policy=BASE_WINS` 등으로 `applied_changes`가 **no-op**이 되면, overlay 문서와 writeback queue entry는 생성되지 않을 수 있다
+  (이 경우 read는 base로 자연스럽게 fallback되고, 의사결정/충돌 메타는 ActionLog에서 조회한다).
+
+기본 저장소/브랜치(구현 기준):
+- lakeFS repo: `ontology-writeback` (`ONTOLOGY_WRITEBACK_REPO`)
+- overlay/writeback branch: `writeback-{db_name}` (`ONTOLOGY_WRITEBACK_BRANCH_PREFIX`)
+- datasets: `writeback_patchsets`, `writeback_edits_queue`, `writeback_merged_snapshot`
+
+```mermaid
+sequenceDiagram
+  participant Client
+  participant BFF
+  participant OMS
+  participant PG as Postgres(ActionLogs)
+  participant S3 as EventStore (S3/MinIO)
+  participant Relay as message-relay
+  participant Kafka
+  participant AW as action-worker
+  participant LFS as lakeFS(writeback)
+  participant PW as projection-worker
+
+  Client->>BFF: Action submit (intent)
+  BFF->>OMS: submit_action_async
+  OMS->>PG: ActionLog create (PENDING)
+  OMS->>S3: ActionCommand append (action_commands)
+  S3->>Relay: index tail
+  Relay->>Kafka: command publish
+  Kafka->>AW: consume ActionCommand
+  AW->>S3: base state replay (conflict check)
+  AW->>LFS: write patchset commit (writeback_patchsets)
+  AW->>PG: ActionLog update (COMMIT_WRITTEN)
+  AW->>S3: ActionApplied append (action_events)
+  S3->>Relay: index tail
+  Relay->>Kafka: event publish
+  Kafka->>PW: consume ActionApplied
+  PW->>LFS: read patchset
+  PW->>ES: write overlay doc (external_gte, non-noop only)
+```
+
+내구성/복구:
+- `action_outbox_worker`가 ActionLog 상태머신을 스캔하여 **event emit/queue append 누락을 복구**한다.
+- `writeback_edits_queue`는 per-object append-only 인덱스이며, `writeback_materializer_worker`가 `writeback_merged_snapshot`을 생성해 재빌드/서버 merge fallback 비용을 낮춘다.
+
 ## 3) 저장소/인프라 역할 (SSoT 분리)
 
 | 저장소 | 역할 | SSoT 여부 |
 |---|---|---|
 | **S3/MinIO (Event Store)** | Command + Domain 이벤트 로그 (immutable) | Write SSoT |
 | **TerminusDB** | Ontology 정의 + 버전/브랜치 | Definition SSoT |
-| **Postgres** | registry/outbox/proposal/health/processed_event_registry | Control Plane SSoT |
-| **lakeFS + MinIO** | dataset/artifact 버전 관리 | Data plane SSoT |
+| **Postgres** | registry/outbox/proposal/health/processed_event_registry + action logs | Control Plane SSoT |
+| **lakeFS + MinIO** | dataset/artifact 버전 관리 + writeback patchsets/queue/snapshot | Data plane SSoT |
 | **Elasticsearch** | CQRS read model/projection | Read cache |
 | **Redis** | command status, cache, websocket, rate limit | 보조 |
 
@@ -179,6 +248,9 @@ sequenceDiagram
 - BackingDataSource/Version, KeySpec, MappingSpec, Schema Migration Plan을 Postgres에 기록.
 - Gate Policy/Result가 스키마/매핑/데이터 검증 결과를 축적한다.
 - Dataset/Objectify outbox가 비동기 작업을 내구적으로 트리거한다.
+- Action-only writeback은 `spice_action_logs.ontology_action_logs`(ActionLogRegistry)로 상태/감사(SSoT)를 관리한다.
+- ActionLog는 단순 감사 로그가 아니라 **온톨로지 객체(1급 객체)**로 취급되며, BFF에서 가상 object type `ActionLog`로도 노출된다
+  (`GET /api/v1/databases/{db_name}/class/ActionLog/instance/{action_log_id}`, `GET /api/v1/databases/{db_name}/class/ActionLog/instances`).
 - Access policy(행/컬럼 마스킹)는 dataset_registry에 저장되고 BFF 조회 경로에서 적용된다.
 
 ### 4.2 Proposal/Approval
@@ -243,9 +315,12 @@ sequenceDiagram
 
 ## 8) Read/Query Path
 
-- **Elasticsearch projection**이 기본 조회 경로.
-- ES 장애 시 OMS/TerminusDB로 **fallback**한다.
-- Graph query는 WOQL 기반 schema traversal + ES document fetch를 결합한다.
+- **Elasticsearch projection**이 기본 조회 경로(derived cache)이며, writeback-enabled 타입은 **overlay branch**로 read-your-write를 보장한다.
+- Read API는 `base_branch`(Terminus/SSoT)와 `overlay_branch`(ES overlay)를 분리한다. (`branch`는 `base_branch`의 deprecated alias)
+- writeback-enabled 타입에서 overlay가 required인데 ES가 불가하면:
+  - 가능하면 서버 merge view를 반환하고 `overlay_status=DEGRADED`로 명시한다(현재 단건 instance read에서 제공).
+  - 불가하면 `503` + `overlay_status=DEGRADED`로 통일하며, **Terminus-only silent fallback은 금지**한다.
+- Graph query는 **WOQL 기반 traversal(Terminus)** + **ES document fetch/overlay enrichment**를 결합한다.
 - Access policy에 따라 결과가 마스킹/필터링될 수 있다.
 
 ---
@@ -404,12 +479,14 @@ Source: `docker-compose.full.yml` (with extends resolved).
 
 | Service | Ports | Depends On |
 | --- | --- | --- |
+| `action-worker` | - | terminusdb<br/>kafka<br/>postgres<br/>minio<br/>lakefs<br/>message-relay<br/>otel-collector |
 | `agent` | - | bff<br/>postgres<br/>minio<br/>otel-collector |
 | `bff` | 8002:8002 | oms<br/>funnel<br/>postgres<br/>lakefs<br/>otel-collector |
 | `connector-sync-worker` | - | bff<br/>kafka<br/>postgres<br/>otel-collector |
 | `connector-trigger-service` | - | kafka<br/>postgres<br/>otel-collector |
 | `elasticsearch` | ${ELASTICSEARCH_PORT_HOST:-9200}:9200<br/>${ELASTICSEARCH_TRANSPORT_PORT_HOST:-9300}:9300 | - |
 | `funnel` | - | otel-collector |
+| `grafana` | 13000:3000 | prometheus |
 | `ingest-reconciler-worker` | ${INGEST_RECONCILER_PORT_HOST:-8012}:8012 | postgres<br/>otel-collector |
 | `instance-worker` | - | terminusdb<br/>kafka<br/>elasticsearch<br/>minio<br/>message-relay<br/>postgres<br/>otel-collector |
 | `jaeger` | 16686:16686 | - |
@@ -421,13 +498,14 @@ Source: `docker-compose.full.yml` (with extends resolved).
 | `minio` | ${MINIO_PORT_HOST:-9000}:9000<br/>${MINIO_CONSOLE_PORT_HOST:-9001}:9001 | - |
 | `minio-init` | - | minio |
 | `objectify-worker` | - | kafka<br/>postgres<br/>lakefs<br/>oms<br/>otel-collector |
-| `oms` | - | terminusdb<br/>postgres<br/>redis<br/>elasticsearch<br/>minio<br/>otel-collector |
+| `oms` | 8000:8000 | terminusdb<br/>postgres<br/>redis<br/>elasticsearch<br/>minio<br/>otel-collector |
 | `ontology-worker` | - | terminusdb<br/>kafka<br/>redis<br/>message-relay<br/>postgres<br/>otel-collector |
-| `otel-collector` | 4317:4317<br/>4318:4318 | jaeger |
+| `otel-collector` | 4317:4317<br/>4318:4318<br/>8889:8889 | jaeger |
 | `pipeline-scheduler` | - | kafka<br/>postgres<br/>lakefs<br/>otel-collector |
 | `pipeline-worker` | - | kafka<br/>postgres<br/>minio<br/>lakefs<br/>otel-collector |
 | `postgres` | ${POSTGRES_PORT_HOST:-5433}:5432 | - |
 | `projection-worker` | - | kafka<br/>elasticsearch<br/>redis<br/>message-relay<br/>postgres<br/>otel-collector |
+| `prometheus` | 19090:9090 | otel-collector |
 | `redis` | ${REDIS_PORT_HOST:-6379}:6379 | - |
 | `search-projection-worker` | - | kafka<br/>elasticsearch<br/>otel-collector |
 | `terminusdb` | 6363:6363 | - |
@@ -439,12 +517,14 @@ Source: `docker-compose.full.yml` (with extends resolved).
 <!-- BEGIN AUTO-GENERATED ARCH: COMPOSE_GRAPH -->
 ```mermaid
 graph TD
+  svc_action_worker[action-worker]
   svc_agent[agent]
   svc_bff[bff]
   svc_connector_sync_worker[connector-sync-worker]
   svc_connector_trigger_service[connector-trigger-service]
   svc_elasticsearch[elasticsearch]
   svc_funnel[funnel]
+  svc_grafana[grafana]
   svc_ingest_reconciler_worker[ingest-reconciler-worker]
   svc_instance_worker[instance-worker]
   svc_jaeger[jaeger]
@@ -463,10 +543,18 @@ graph TD
   svc_pipeline_worker[pipeline-worker]
   svc_postgres[postgres]
   svc_projection_worker[projection-worker]
+  svc_prometheus[prometheus]
   svc_redis[redis]
   svc_search_projection_worker[search-projection-worker]
   svc_terminusdb[terminusdb]
   svc_zookeeper[zookeeper]
+  svc_action_worker --> svc_terminusdb
+  svc_action_worker --> svc_kafka
+  svc_action_worker --> svc_postgres
+  svc_action_worker --> svc_minio
+  svc_action_worker --> svc_lakefs
+  svc_action_worker --> svc_message_relay
+  svc_action_worker --> svc_otel_collector
   svc_agent --> svc_bff
   svc_agent --> svc_postgres
   svc_agent --> svc_minio
@@ -484,6 +572,7 @@ graph TD
   svc_connector_trigger_service --> svc_postgres
   svc_connector_trigger_service --> svc_otel_collector
   svc_funnel --> svc_otel_collector
+  svc_grafana --> svc_prometheus
   svc_ingest_reconciler_worker --> svc_postgres
   svc_ingest_reconciler_worker --> svc_otel_collector
   svc_instance_worker --> svc_terminusdb
@@ -538,6 +627,7 @@ graph TD
   svc_projection_worker --> svc_message_relay
   svc_projection_worker --> svc_postgres
   svc_projection_worker --> svc_otel_collector
+  svc_prometheus --> svc_otel_collector
   svc_search_projection_worker --> svc_kafka
   svc_search_projection_worker --> svc_elasticsearch
   svc_search_projection_worker --> svc_otel_collector
@@ -547,6 +637,8 @@ graph TD
 ### Service Entry Points (backend/*/main.py)
 
 <!-- BEGIN AUTO-GENERATED ARCH: ENTRYPOINTS -->
+- `backend/action_outbox_worker/main.py`
+- `backend/action_worker/main.py`
 - `backend/agent/main.py`
 - `backend/bff/main.py`
 - `backend/connector_sync_worker/main.py`
@@ -562,6 +654,7 @@ graph TD
 - `backend/pipeline_worker/main.py`
 - `backend/projection_worker/main.py`
 - `backend/search_projection_worker/main.py`
+- `backend/writeback_materializer_worker/main.py`
 <!-- END AUTO-GENERATED ARCH: ENTRYPOINTS -->
 
 ### Router Inventory (BFF)
@@ -569,8 +662,11 @@ graph TD
 <!-- BEGIN AUTO-GENERATED ARCH: BFF_ROUTERS -->
 | Router | Prefix | Tags |
 | --- | --- | --- |
+| `actions.router` | `/api/v1` | - |
 | `admin.router` | `/api/v1` | - |
+| `agent_plans.router` | `/api/v1` | - |
 | `agent_proxy.router` | `/api/v1` | - |
+| `agent_tools.router` | `/api/v1` | - |
 | `ai.router` | `/api/v1` | - |
 | `audit.router` | `/api/v1` | - |
 | `command_status.router` | `/api/v1` | - |
@@ -605,6 +701,7 @@ graph TD
 <!-- BEGIN AUTO-GENERATED ARCH: OMS_ROUTERS -->
 | Router | Prefix | Tags |
 | --- | --- | --- |
+| `action_async.router` | `/api/v1` | async-actions |
 | `branch.router` | `/api/v1` | branch |
 | `command_status.router` | `/api/v1` | command-status |
 | `config_monitoring.router` | `/api/v1/config` | config-monitoring |

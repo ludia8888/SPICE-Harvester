@@ -593,6 +593,46 @@ class StorageService:
             if e.response['Error']['Code'] == 'NoSuchBucket':
                 raise FileNotFoundError(f"Bucket not found: {bucket}")
             raise
+
+    async def list_command_files(
+        self,
+        *,
+        bucket: str,
+        prefix: str,
+    ) -> list[str]:
+        """
+        List command JSON objects under a prefix (pagination-aware, sorted by LastModified).
+
+        The Action writeback worker uses a branch-aware prefix:
+        `{db_name}/{branch}/{class_id}/{instance_id}/`.
+        """
+        prefix = (prefix or "").lstrip("/")
+        if not prefix:
+            raise ValueError("prefix is required")
+        if not prefix.endswith("/"):
+            prefix = f"{prefix}/"
+
+        objects: list[Dict[str, Any]] = []
+        token: Optional[str] = None
+        while True:
+            contents, token = await self.list_objects_paginated(
+                bucket=bucket,
+                prefix=prefix,
+                max_keys=1000,
+                continuation_token=token,
+            )
+            for obj in contents:
+                if not isinstance(obj, dict):
+                    continue
+                key = str(obj.get("Key") or "")
+                if not key.startswith(prefix) or not key.endswith(".json"):
+                    continue
+                objects.append(obj)
+            if not token:
+                break
+
+        objects.sort(key=lambda obj: obj.get("LastModified") or datetime.fromtimestamp(0, tz=timezone.utc))
+        return [str(obj.get("Key") or "") for obj in objects if str(obj.get("Key") or "").strip()]
             
     async def replay_instance_state(
         self,

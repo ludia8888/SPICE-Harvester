@@ -36,13 +36,16 @@ from shared.observability.context_propagation import (
     carrier_from_envelope_metadata,
     kafka_headers_from_envelope_metadata,
 )
+from shared.observability.logging import install_trace_context_filter
+from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 
 # 로깅 설정
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s - %(message)s",
 )
+install_trace_context_filter()
 logger = logging.getLogger(__name__)
 
 
@@ -125,6 +128,7 @@ class EventPublisher:
         self.lookback_seconds = int(os.getenv("EVENT_PUBLISHER_LOOKBACK_SECONDS", "600"))
         self.lookback_max_keys = int(os.getenv("EVENT_PUBLISHER_LOOKBACK_MAX_KEYS", "2000"))
         self.tracing = get_tracing_service("message-relay")
+        self.metrics = get_metrics_collector("message-relay")
         if self.lookback_seconds < 0:
             self.lookback_seconds = 0
         if self.lookback_max_keys < 0:
@@ -701,6 +705,11 @@ class EventPublisher:
 
                     headers = kafka_headers_from_envelope_metadata(meta_obj) if meta_obj else []
                     carrier = carrier_from_envelope_metadata(meta_obj) if meta_obj else {}
+                    event_type = ""
+                    if env:
+                        event_type = str(env.event_type or "")
+                    elif raw_payload and isinstance(raw_payload, dict):
+                        event_type = str(raw_payload.get("event_type") or raw_payload.get("eventType") or "")
 
                     try:
                         with attach_context_from_carrier(carrier or None, service_name="message-relay"):
@@ -721,6 +730,11 @@ class EventPublisher:
                                     headers=headers or None,
                                     callback=delivery_cb_factory(idx_key),
                                 )
+                                try:
+                                    if event_type:
+                                        self.metrics.record_event(event_type, action="published")
+                                except Exception:
+                                    pass
                     except BufferError:
                         # Local buffer is full: flush pending messages then retry.
                         self._metrics_total["kafka_produce_buffer_full"] += 1

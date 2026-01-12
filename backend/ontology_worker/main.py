@@ -51,12 +51,14 @@ from oms.exceptions import DuplicateOntologyError, DatabaseError
 from shared.observability.tracing import get_tracing_service, trace_endpoint
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.context_propagation import attach_context_from_kafka
+from shared.observability.logging import install_trace_context_filter
 
 # 로깅 설정
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s - %(message)s",
 )
+install_trace_context_filter()
 logger = logging.getLogger(__name__)
 
 

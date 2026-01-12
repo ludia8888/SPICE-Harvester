@@ -10,7 +10,10 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from oms.services.async_terminus import AsyncTerminusService
 from oms.services.ontology_resources import OntologyResourceService, normalize_resource_type
+from shared.utils.action_input_schema import ActionInputSchemaError, normalize_input_schema
+from shared.utils.action_template_engine import ActionImplementationError, validate_template_v1_definition
 from shared.utils.key_spec import normalize_key_spec
+from shared.utils.safe_bool_expression import BoolExpressionError, validate_bool_expression_syntax
 
 logger = logging.getLogger(__name__)
 
@@ -404,6 +407,16 @@ def _collect_required_field_issues(resource_type: str, spec: Dict[str, Any]) -> 
                         message="object_type backing_source requires version_id when ACTIVE",
                         missing_fields=["backing_source.version_id"],
                     )
+
+        conflict_policy = spec.get("conflict_policy")
+        if conflict_policy is not None:
+            allowed = {"WRITEBACK_WINS", "BASE_WINS", "FAIL", "MANUAL_REVIEW"}
+            if not isinstance(conflict_policy, str) or not conflict_policy.strip() or conflict_policy.strip() not in allowed:
+                _append_spec_issue(
+                    issues,
+                    message="object_type conflict_policy must be one of: WRITEBACK_WINS, BASE_WINS, FAIL, MANUAL_REVIEW",
+                    invalid_fields=["conflict_policy"],
+                )
         normalized_pk = normalize_key_spec(pk_spec if isinstance(pk_spec, dict) else {})
         if not normalized_pk.get("primary_key"):
             _append_spec_issue(
@@ -448,10 +461,12 @@ def _collect_required_field_issues(resource_type: str, spec: Dict[str, Any]) -> 
                 missing_fields=["input_schema"],
             )
         if isinstance(input_schema, dict) and input_schema:
-            if not any(key in input_schema for key in ("fields", "properties", "schema")):
+            try:
+                normalize_input_schema(input_schema)
+            except ActionInputSchemaError as exc:
                 _append_spec_issue(
                     issues,
-                    message="action_type input_schema must include fields/properties/schema",
+                    message=f"action_type input_schema is invalid: {exc}",
                     invalid_fields=["input_schema"],
                 )
         permission_policy = spec.get("permission_policy")
@@ -462,13 +477,122 @@ def _collect_required_field_issues(resource_type: str, spec: Dict[str, Any]) -> 
                 missing_fields=["permission_policy"],
             )
         if isinstance(permission_policy, dict) and permission_policy:
-            if not any(key in permission_policy for key in ("roles", "scopes", "policy", "rules")):
+            issues.extend(_collect_permission_policy_issues(permission_policy))
+
+        writeback_target = spec.get("writeback_target")
+        if not isinstance(writeback_target, dict) or not writeback_target:
+            _append_spec_issue(
+                issues,
+                message="action_type requires writeback_target",
+                missing_fields=["writeback_target"],
+            )
+        else:
+            repo = writeback_target.get("repo")
+            branch = writeback_target.get("branch")
+            missing: List[str] = []
+            if not isinstance(repo, str) or not repo.strip():
+                missing.append("writeback_target.repo")
+            if not isinstance(branch, str) or not branch.strip():
+                missing.append("writeback_target.branch")
+            if missing:
                 _append_spec_issue(
                     issues,
-                    message="action_type permission_policy must include roles/scopes/policy/rules",
-                    missing_fields=["permission_policy.roles|scopes|policy|rules"],
+                    message="action_type writeback_target requires repo and branch",
+                    missing_fields=missing,
                 )
-            issues.extend(_collect_permission_policy_issues(permission_policy))
+
+        conflict_policy = spec.get("conflict_policy")
+        if conflict_policy is not None:
+            allowed = {"WRITEBACK_WINS", "BASE_WINS", "FAIL", "MANUAL_REVIEW"}
+            if not isinstance(conflict_policy, str) or not conflict_policy.strip() or conflict_policy.strip() not in allowed:
+                _append_spec_issue(
+                    issues,
+                    message="action_type conflict_policy must be one of: WRITEBACK_WINS, BASE_WINS, FAIL, MANUAL_REVIEW",
+                    invalid_fields=["conflict_policy"],
+                )
+
+        submission_criteria = spec.get("submission_criteria")
+        if submission_criteria is not None:
+            if not isinstance(submission_criteria, str) or not submission_criteria.strip():
+                _append_spec_issue(
+                    issues,
+                    message="action_type submission_criteria must be a non-empty string",
+                    invalid_fields=["submission_criteria"],
+                )
+            else:
+                try:
+                    validate_bool_expression_syntax(submission_criteria)
+                except BoolExpressionError as exc:
+                    _append_spec_issue(
+                        issues,
+                        message=f"action_type submission_criteria is invalid: {exc}",
+                        invalid_fields=["submission_criteria"],
+                    )
+
+        validation_rules = spec.get("validation_rules")
+        if validation_rules is not None:
+            if not isinstance(validation_rules, list):
+                _append_spec_issue(
+                    issues,
+                    message="action_type validation_rules must be a list",
+                    invalid_fields=["validation_rules"],
+                )
+            else:
+                for idx, rule in enumerate(validation_rules):
+                    if not isinstance(rule, dict):
+                        _append_spec_issue(
+                            issues,
+                            message="action_type validation_rules entries must be objects",
+                            invalid_fields=[f"validation_rules[{idx}]"],
+                        )
+                        continue
+                    if str(rule.get("type") or "").strip().lower() != "assert":
+                        _append_spec_issue(
+                            issues,
+                            message="action_type validation_rules only supports type=assert (P0)",
+                            invalid_fields=[f"validation_rules[{idx}].type"],
+                        )
+                        continue
+                    scope = str(rule.get("scope") or "each_target").strip().lower()
+                    if scope not in {"action", "each_target"}:
+                        _append_spec_issue(
+                            issues,
+                            message="action_type validation_rules.assert scope must be action|each_target",
+                            invalid_fields=[f"validation_rules[{idx}].scope"],
+                        )
+                    expr = rule.get("expr") or rule.get("expression")
+                    if not isinstance(expr, str) or not expr.strip():
+                        _append_spec_issue(
+                            issues,
+                            message="action_type validation_rules.assert requires expr",
+                            invalid_fields=[f"validation_rules[{idx}].expr"],
+                        )
+                        continue
+                    try:
+                        validate_bool_expression_syntax(expr)
+                    except BoolExpressionError as exc:
+                        _append_spec_issue(
+                            issues,
+                            message=f"action_type validation_rules[{idx}] expr is invalid: {exc}",
+                            invalid_fields=[f"validation_rules[{idx}].expr"],
+                        )
+
+        implementation = spec.get("implementation")
+        if not isinstance(implementation, dict) or not implementation:
+            _append_spec_issue(
+                issues,
+                message="action_type requires executable implementation (template_v1)",
+                missing_fields=["implementation"],
+            )
+        else:
+            try:
+                validate_template_v1_definition(implementation)
+            except ActionImplementationError as exc:
+                _append_spec_issue(
+                    issues,
+                    message=f"action_type implementation is invalid: {exc}",
+                    invalid_fields=["implementation"],
+                )
     elif resource_type == "interface":
         props = spec.get("required_properties")
         rels = spec.get("required_relationships")
@@ -601,6 +725,54 @@ def _collect_required_items_issues(
 
 def _collect_permission_policy_issues(policy: Dict[str, Any]) -> List[Dict[str, Any]]:
     issues: List[Dict[str, Any]] = []
+
+    # New (Foundry-aligned) shape: { effect: "ALLOW|DENY", principals: ["role:...","user:..."], conditions?: {} }
+    if any(key in policy for key in ("effect", "principals")):
+        effect = policy.get("effect")
+        principals = policy.get("principals")
+
+        if not isinstance(effect, str) or not effect.strip():
+            _append_spec_issue(
+                issues,
+                message="permission_policy requires effect",
+                missing_fields=["permission_policy.effect"],
+            )
+        else:
+            normalized = effect.strip().upper()
+            if normalized not in {"ALLOW", "DENY"}:
+                _append_spec_issue(
+                    issues,
+                    message="permission_policy.effect must be ALLOW or DENY",
+                    invalid_fields=["permission_policy.effect"],
+                )
+
+        if principals is None or principals == []:
+            _append_spec_issue(
+                issues,
+                message="permission_policy requires principals",
+                missing_fields=["permission_policy.principals"],
+            )
+        elif not _validate_string_list(principals, field_name="permission_policy.principals"):
+            _append_spec_issue(
+                issues,
+                message="permission_policy.principals must be a list of non-empty strings",
+                invalid_fields=["permission_policy.principals"],
+            )
+        else:
+            invalid = []
+            for principal in principals or []:
+                p = str(principal).strip()
+                if not p.startswith(("user:", "group:", "role:", "service:")):
+                    invalid.append(p)
+            if invalid:
+                _append_spec_issue(
+                    issues,
+                    message="permission_policy.principals must be namespaced (user:|group:|role:|service:)",
+                    invalid_fields=["permission_policy.principals"],
+                )
+
+        return issues
+
     has_policy = False
     roles = policy.get("roles")
     scopes = policy.get("scopes")
@@ -662,8 +834,8 @@ def _collect_permission_policy_issues(policy: Dict[str, Any]) -> List[Dict[str, 
     if not has_policy:
         _append_spec_issue(
             issues,
-            message="action_type permission_policy must define non-empty roles/scopes/policy/rules",
-            missing_fields=["permission_policy.roles|scopes|policy|rules"],
+            message="action_type permission_policy must define effect+principals or roles/scopes/policy/rules",
+            missing_fields=["permission_policy.effect|principals|roles|scopes|policy|rules"],
         )
     return issues
 

@@ -4,6 +4,7 @@ Application Configuration
 """
 
 import os
+import re
 from typing import Optional
 
 
@@ -21,6 +22,7 @@ class AppConfig:
     # Event Topics (used by workers to publish events)
     INSTANCE_EVENTS_TOPIC = "instance_events"
     ONTOLOGY_EVENTS_TOPIC = "ontology_events"
+    ACTION_EVENTS_TOPIC = os.getenv("ACTION_EVENTS_TOPIC", "action_events")
     PROJECTION_DLQ_TOPIC = "projection_failures_dlq"
     CONNECTOR_UPDATES_TOPIC = "connector-updates"
     CONNECTOR_UPDATES_DLQ_TOPIC = "connector-updates-dlq"
@@ -33,6 +35,7 @@ class AppConfig:
     INSTANCE_COMMANDS_TOPIC = "instance_commands"
     ONTOLOGY_COMMANDS_TOPIC = "ontology_commands"
     DATABASE_COMMANDS_TOPIC = "database_commands"
+    ACTION_COMMANDS_TOPIC = os.getenv("ACTION_COMMANDS_TOPIC", "action_commands")
     
     # Kafka Consumer Groups
     PROJECTION_WORKER_GROUP = "projection-worker-group"
@@ -144,14 +147,94 @@ class AppConfig:
     # ======================
     # Ontology Writeback Defaults
     # ======================
-    ONTOLOGY_WRITEBACK_REPO = os.getenv("ONTOLOGY_WRITEBACK_REPO", "ontology_writeback")
+    # lakeFS repository ids must match `^[a-z0-9][a-z0-9-]{2,62}$` (no underscores).
+    ONTOLOGY_WRITEBACK_REPO = os.getenv("ONTOLOGY_WRITEBACK_REPO", "ontology-writeback")
     ONTOLOGY_WRITEBACK_BRANCH_PREFIX = os.getenv("ONTOLOGY_WRITEBACK_BRANCH_PREFIX", "writeback")
     ONTOLOGY_WRITEBACK_DATASET_ID = (os.getenv("ONTOLOGY_WRITEBACK_DATASET_ID") or "").strip() or None
 
+    # Writeback feature flags (ACTION_WRITEBACK_DESIGN.md)
+    # NOTE: Defaults are intentionally conservative; enable explicitly per environment.
+    WRITEBACK_ENFORCE = os.getenv("WRITEBACK_ENFORCE", "false").strip().lower() in {"1", "true", "yes", "on"}
+    WRITEBACK_ENFORCE_GOVERNANCE = os.getenv("WRITEBACK_ENFORCE_GOVERNANCE", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    WRITEBACK_READ_OVERLAY = os.getenv("WRITEBACK_READ_OVERLAY", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    WRITEBACK_ENABLED_OBJECT_TYPES_RAW = os.getenv("WRITEBACK_ENABLED_OBJECT_TYPES", "").strip()
+    WRITEBACK_DATASET_ACL_SCOPE = (os.getenv("WRITEBACK_DATASET_ACL_SCOPE") or "").strip() or "dataset_acl"
+
+    @staticmethod
+    def _normalize_object_type_id(value: str) -> str:
+        raw = str(value or "").strip()
+        if not raw:
+            return ""
+        lowered = raw.lower()
+        for prefix in ("object_type:", "object:", "class:"):
+            if lowered.startswith(prefix):
+                raw = raw.split(":", 1)[1]
+                break
+        if "@" in raw:
+            raw = raw.split("@", 1)[0]
+        return raw.strip()
+
+    @classmethod
+    def get_writeback_enabled_object_types(cls) -> set[str]:
+        raw = cls.WRITEBACK_ENABLED_OBJECT_TYPES_RAW
+        if not raw:
+            return set()
+        parts = [p.strip() for p in raw.split(",")]
+        normalized = {cls._normalize_object_type_id(p) for p in parts if cls._normalize_object_type_id(p)}
+        return normalized
+
+    @classmethod
+    def is_writeback_enabled_object_type(cls, class_id: str) -> bool:
+        enabled = cls.get_writeback_enabled_object_types()
+        if not enabled:
+            return False
+        if "*" in enabled or "all" in {e.lower() for e in enabled}:
+            return True
+        normalized = cls._normalize_object_type_id(class_id)
+        return normalized in enabled
+
     @classmethod
     def get_ontology_writeback_branch(cls, db_name: str) -> str:
-        prefix = cls.ONTOLOGY_WRITEBACK_BRANCH_PREFIX.rstrip("/")
-        return f"{prefix}/{db_name}"
+        """
+        Return a lakeFS-compatible writeback branch id.
+
+        Note:
+        - lakeFS branch ids cannot contain `/` and must match `[A-Za-z0-9_-]+`.
+        - We therefore avoid Git-like `prefix/{db}` naming and use a safe separator.
+        """
+
+        prefix = str(cls.ONTOLOGY_WRITEBACK_BRANCH_PREFIX or "writeback").strip()
+        prefix = prefix.rstrip("/").replace("/", "-")
+        raw = f"{prefix}-{db_name}"
+        return cls.sanitize_lakefs_branch_id(raw)
+
+    @staticmethod
+    def sanitize_lakefs_branch_id(value: str) -> str:
+        raw = str(value or "").strip()
+        if not raw:
+            return "writeback"
+
+        # lakeFS branch ids: letters/digits/underscore/dash only (no slashes).
+        raw = raw.replace("/", "-")
+        raw = re.sub(r"[^A-Za-z0-9_-]", "_", raw)
+        raw = re.sub(r"_+", "_", raw).strip("_")
+        raw = re.sub(r"-+", "-", raw).strip("-")
+
+        if not raw:
+            raw = "writeback"
+        if raw.startswith("-"):
+            raw = f"wb{raw}"
+        return raw
     
     # ======================
     # Cache & TTL Settings
@@ -224,6 +307,7 @@ class AppConfig:
         return [
             cls.INSTANCE_EVENTS_TOPIC,
             cls.ONTOLOGY_EVENTS_TOPIC,
+            cls.ACTION_EVENTS_TOPIC,
             cls.PROJECTION_DLQ_TOPIC,
             cls.CONNECTOR_UPDATES_TOPIC,
             cls.CONNECTOR_UPDATES_DLQ_TOPIC,
@@ -233,7 +317,8 @@ class AppConfig:
             cls.DATASET_INGEST_OUTBOX_DLQ_TOPIC,
             cls.INSTANCE_COMMANDS_TOPIC,
             cls.ONTOLOGY_COMMANDS_TOPIC,
-            cls.DATABASE_COMMANDS_TOPIC
+            cls.DATABASE_COMMANDS_TOPIC,
+            cls.ACTION_COMMANDS_TOPIC,
         ]
     
     @classmethod

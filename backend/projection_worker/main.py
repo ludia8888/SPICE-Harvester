@@ -32,6 +32,7 @@ from shared.models.events import (
 )
 from shared.services.redis_service import RedisService, create_redis_service
 from shared.services.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
+from shared.services.lakefs_storage_service import LakeFSStorageService, create_lakefs_storage_service
 from shared.services.projection_manager import ProjectionManager
 from shared.services.processed_event_registry import (
     ClaimDecision,
@@ -44,17 +45,22 @@ from shared.services.audit_log_store import AuditLogStore
 from shared.utils.chaos import maybe_crash
 from shared.utils.ontology_version import split_ref_commit
 from shared.utils.language import coerce_localized_text, select_localized_text, get_default_language
+from shared.utils.resource_rid import strip_rid_revision
+from shared.utils.writeback_paths import ref_key, writeback_patchset_key
+from shared.utils.writeback_lifecycle import overlay_doc_id
 
 # Observability imports
 from shared.observability.tracing import get_tracing_service
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.context_propagation import attach_context_from_kafka, kafka_headers_from_current_context
+from shared.observability.logging import install_trace_context_filter
 
 # 로깅 설정
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s - %(message)s",
 )
+install_trace_context_filter()
 logger = logging.getLogger(__name__)
 
 
@@ -80,6 +86,7 @@ class ProjectionWorker:
         self.tracing_service = None
         self.metrics_collector = None
         self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="projection-worker-kafka")
+        self.lakefs_storage: Optional[LakeFSStorageService] = None
 
         # Durable idempotency (Postgres)
         self.enable_processed_event_registry = (
@@ -393,6 +400,17 @@ class ProjectionWorker:
         await self.elasticsearch_service.connect()
         logger.info("Elasticsearch connection established")
 
+        # lakeFS storage gateway (required for ActionApplied -> patchset reads). Best-effort on startup.
+        try:
+            self.lakefs_storage = create_lakefs_storage_service(settings)
+            if self.lakefs_storage:
+                logger.info("lakeFS storage configured for writeback patchset reads")
+            else:
+                logger.warning("lakeFS storage disabled (boto3 missing) - ActionApplied projection will be degraded")
+        except Exception as e:
+            logger.warning(f"lakeFS storage unavailable - ActionApplied projection will be degraded: {e}")
+            self.lakefs_storage = None
+
         # Durable processed-events registry (idempotency + ordering guard)
         self.processed_event_registry = ProcessedEventRegistry()
         await self.processed_event_registry.connect()
@@ -421,7 +439,7 @@ class ProjectionWorker:
         await self._setup_indices()
         
         # 토픽 구독
-        topics = [AppConfig.INSTANCE_EVENTS_TOPIC, AppConfig.ONTOLOGY_EVENTS_TOPIC]
+        topics = [AppConfig.INSTANCE_EVENTS_TOPIC, AppConfig.ONTOLOGY_EVENTS_TOPIC, AppConfig.ACTION_EVENTS_TOPIC]
         await self._consumer_call(self.consumer.subscribe, topics)
         logger.info(f"Subscribed to topics: {topics}")
         
@@ -489,6 +507,12 @@ class ProjectionWorker:
                     properties={
                         "ontology_ref": {"type": "keyword"},
                         "ontology_commit": {"type": "keyword"},
+                        "lifecycle_id": {"type": "keyword"},
+                        "patchset_commit_id": {"type": "keyword"},
+                        "action_log_id": {"type": "keyword"},
+                        "overlay_tombstone": {"type": "boolean"},
+                        "conflict_status": {"type": "keyword"},
+                        "base_token": {"type": "object", "enabled": True},
                     },
                 )
             except Exception as e:
@@ -669,6 +693,8 @@ class ProjectionWorker:
                             await self._handle_instance_event(event_data)
                         elif topic == AppConfig.ONTOLOGY_EVENTS_TOPIC:
                             await self._handle_ontology_event(event_data)
+                        elif topic == AppConfig.ACTION_EVENTS_TOPIC:
+                            await self._handle_action_event(event_data)
                         else:
                             logger.warning(f"Unknown topic: {topic}")
                         maybe_crash("projection_worker:after_side_effect", logger=logger)
@@ -751,6 +777,221 @@ class ProjectionWorker:
         except Exception as e:
             logger.error(f"Error handling ontology event: {e}")
             raise
+
+    async def _handle_action_event(self, event_data: Dict[str, Any]):
+        """Action writeback events -> overlay projection."""
+        try:
+            event_type = event_data.get("event_type")
+            payload = event_data.get("data", {})
+            event_id = event_data.get("event_id")
+
+            if event_type == EventType.ACTION_APPLIED.value:
+                await self._handle_action_applied(payload, event_id, event_data)
+            else:
+                logger.warning(f"Unknown action event type: {event_type}")
+        except Exception as e:
+            logger.error(f"Error handling action event: {e}")
+            raise
+
+    async def _handle_action_applied(
+        self,
+        action_data: Dict[str, Any],
+        event_id: str,
+        event_data: Dict[str, Any],
+    ) -> None:
+        if not self.lakefs_storage:
+            raise RuntimeError("lakeFS storage is not configured; cannot project ActionApplied patchsets")
+
+        db_name = event_data.get("db_name") or (action_data.get("db_name") if isinstance(action_data, dict) else None)
+        if not isinstance(db_name, str) or not db_name.strip():
+            raise ValueError("db_name is required for action applied projection")
+        db_name = db_name.strip()
+
+        if not isinstance(action_data, dict):
+            raise ValueError("action event data must be an object")
+
+        action_log_id = action_data.get("action_log_id")
+        patchset_commit_id = action_data.get("patchset_commit_id")
+        overlay_branch = action_data.get("overlay_branch") or AppConfig.get_ontology_writeback_branch(db_name)
+        writeback_target = action_data.get("writeback_target") if isinstance(action_data.get("writeback_target"), dict) else {}
+        repo = str(writeback_target.get("repo") or AppConfig.ONTOLOGY_WRITEBACK_REPO).strip()
+
+        if not action_log_id or not patchset_commit_id:
+            raise ValueError("action_log_id and patchset_commit_id are required")
+        action_log_id = str(action_log_id)
+        patchset_commit_id = str(patchset_commit_id)
+        overlay_branch = str(overlay_branch).strip() or AppConfig.get_ontology_writeback_branch(db_name)
+
+        patchset = await self.lakefs_storage.load_json(
+            bucket=repo,
+            key=ref_key(patchset_commit_id, writeback_patchset_key(action_log_id)),
+        )
+        targets = patchset.get("targets") if isinstance(patchset, dict) else None
+        if not isinstance(targets, list):
+            targets = []
+
+        incoming_seq = self._parse_sequence(event_data.get("sequence_number"))
+        if incoming_seq is None:
+            # Overlay writes must be externally versioned to preserve ordering.
+            raise ValueError("ActionApplied requires sequence_number for overlay projection")
+
+        overlay_index = await self._ensure_index_exists(db_name, "instances", branch=overlay_branch)
+        base_index = await self._ensure_index_exists(db_name, "instances", branch="main")
+
+        for target in targets:
+            if not isinstance(target, dict):
+                continue
+            resource_rid = str(target.get("resource_rid") or "")
+            class_id = strip_rid_revision(resource_rid)
+            class_id = class_id.strip() or None
+            instance_id = str(target.get("instance_id") or "").strip()
+            lifecycle_id = str(target.get("lifecycle_id") or "lc-0").strip() or "lc-0"
+            changes = None
+            if isinstance(target.get("applied_changes"), dict):
+                changes = target.get("applied_changes")
+            elif isinstance(target.get("changes"), dict):
+                changes = target.get("changes")
+            else:
+                changes = {}
+            base_token = target.get("base_token") if isinstance(target.get("base_token"), dict) else {}
+            conflict = target.get("conflict") if isinstance(target.get("conflict"), dict) else {}
+            conflict_status = None
+            if conflict:
+                status_value = str(conflict.get("status") or "").strip().upper()
+                policy_value = str(conflict.get("policy") or "").strip().upper()
+                resolution_value = str(conflict.get("resolution") or "").strip().upper()
+                if status_value:
+                    conflict_status = ":".join([part for part in (status_value, policy_value, resolution_value) if part])
+
+            if isinstance(target.get("applied_changes"), dict):
+                # BASE_WINS etc: do not write overlay docs for no-op applied changes.
+                is_noop = not bool(changes.get("delete")) and not (
+                    (changes.get("set") or {})
+                    or (changes.get("unset") or [])
+                    or (changes.get("link_add") or [])
+                    or (changes.get("link_remove") or [])
+                )
+                if is_noop:
+                    continue
+
+            if not instance_id:
+                continue
+
+            overlay_id = overlay_doc_id(instance_id=instance_id, lifecycle_id=lifecycle_id)
+            overlay_doc = await self.elasticsearch_service.get_document(overlay_index, overlay_id)
+            base_doc = None
+            if not overlay_doc:
+                base_doc = await self.elasticsearch_service.get_document(base_index, instance_id)
+
+            effective = dict(overlay_doc or base_doc or {})
+            data_payload = effective.get("data")
+            if not isinstance(data_payload, dict):
+                data_payload = {}
+            effective["data"] = data_payload
+
+            if bool(changes.get("delete")):
+                effective = {
+                    "instance_id": instance_id,
+                    "class_id": class_id,
+                    "db_name": db_name,
+                    "branch": overlay_branch,
+                    "overlay_tombstone": True,
+                    "lifecycle_id": lifecycle_id,
+                    "base_token": base_token,
+                    "patchset_commit_id": patchset_commit_id,
+                    "action_log_id": action_log_id,
+                    "conflict_status": conflict_status,
+                    "event_id": event_id,
+                    "event_sequence": incoming_seq,
+                    "version": int(incoming_seq),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            else:
+                set_ops = changes.get("set") if isinstance(changes.get("set"), dict) else {}
+                unset_ops = changes.get("unset") if isinstance(changes.get("unset"), list) else []
+
+                for k, v in (set_ops or {}).items():
+                    if isinstance(k, str) and k:
+                        data_payload[k] = v
+                for k in unset_ops or []:
+                    if isinstance(k, str) and k:
+                        data_payload.pop(k, None)
+
+                for op_key, add in (("link_add", True), ("link_remove", False)):
+                    ops = changes.get(op_key)
+                    if not isinstance(ops, list):
+                        continue
+                    for item in ops:
+                        field = None
+                        target = None
+                        if isinstance(item, dict):
+                            field = item.get("field") or item.get("predicate") or item.get("name")
+                            target = item.get("value") or item.get("to") or item.get("target")
+                            if (field is None or target is None) and len(item) == 1:
+                                k, v = next(iter(item.items()))
+                                field = k
+                                target = v
+                        elif isinstance(item, str):
+                            raw = item.strip()
+                            if ":" in raw:
+                                field, target = raw.split(":", 1)
+                        field_str = str(field or "").strip()
+                        target_str = str(target or "").strip()
+                        if not field_str or not target_str:
+                            continue
+                        existing = data_payload.get(field_str)
+                        if isinstance(existing, list):
+                            values = [str(v) for v in existing if v is not None]
+                        elif existing is None:
+                            values = []
+                        else:
+                            values = [str(existing)]
+                        if add:
+                            if target_str not in values:
+                                values.append(target_str)
+                        else:
+                            values = [v for v in values if v != target_str]
+                        data_payload[field_str] = values
+
+                effective.update(
+                    {
+                        "instance_id": instance_id,
+                        "class_id": class_id or effective.get("class_id"),
+                        "db_name": db_name,
+                        "branch": overlay_branch,
+                        "overlay_tombstone": False,
+                        "lifecycle_id": lifecycle_id,
+                        "base_token": base_token,
+                        "patchset_commit_id": patchset_commit_id,
+                        "action_log_id": action_log_id,
+                        "conflict_status": conflict_status,
+                        "event_id": event_id,
+                        "event_sequence": incoming_seq,
+                        "version": int(incoming_seq),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+
+            try:
+                await self.elasticsearch_service.index_document(
+                    overlay_index,
+                    effective,
+                    doc_id=overlay_id,
+                    refresh=True,
+                    version=incoming_seq,
+                    version_type="external_gte",
+                )
+            except Exception as e:
+                if self._is_es_version_conflict(e):
+                    logger.info(
+                        "Skipping stale ActionApplied overlay write via ES version conflict "
+                        "(seq=%s, instance_id=%s, lifecycle_id=%s)",
+                        incoming_seq,
+                        instance_id,
+                        lifecycle_id,
+                    )
+                    continue
+                raise
             
     async def _handle_instance_created(self, instance_data: Dict[str, Any], event_id: str, event_data: Dict[str, Any]):
         """인스턴스 생성 이벤트 처리"""
@@ -813,12 +1054,17 @@ class ProjectionWorker:
                 event_meta = {}
             ontology_ref, ontology_commit = split_ref_commit(event_meta.get("ontology"))
 
+            lifecycle_id = str(event_data.get("command_id") or "").strip()
+            if not lifecycle_id:
+                lifecycle_id = str(event_id).strip()
+
             doc = {
                 'instance_id': instance_id,
                 'class_id': instance_data.get('class_id'),
                 'class_label': class_label,
                 'properties': self._normalize_properties(instance_data.get('properties', [])),
                 'data': instance_data,  # 원본 데이터 (enabled: false)
+                'lifecycle_id': lifecycle_id,
                 'event_id': event_id,
                 'event_sequence': incoming_seq,
                 'event_timestamp': event_data.get('occurred_at') or event_data.get('timestamp'),
@@ -931,6 +1177,13 @@ class ProjectionWorker:
                 instance_id
             )
 
+            lifecycle_id = ""
+            if isinstance(existing_doc, dict):
+                lifecycle_id = str(existing_doc.get("lifecycle_id") or "").strip()
+            if not lifecycle_id:
+                lifecycle_id = str(instance_data.get("lifecycle_id") or "").strip()
+            lifecycle_id = lifecycle_id or "lc-0"
+
             incoming_seq = self._parse_sequence(event_data.get("sequence_number"))
             if existing_doc:
                 if existing_doc.get("event_id") == event_id:
@@ -987,6 +1240,7 @@ class ProjectionWorker:
                 'class_label': class_label,
                 'properties': self._normalize_properties(instance_data.get('properties', [])),
                 'data': instance_data,
+                'lifecycle_id': lifecycle_id,
                 'event_id': event_id,
                 'event_sequence': incoming_seq,
                 'event_timestamp': event_data.get('occurred_at') or event_data.get('timestamp'),

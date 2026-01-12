@@ -262,21 +262,33 @@ Optional trace exporter:
 
 ### Prometheus
 
-Metrics exporter:
-- Endpoint: `/metrics`
-- Format: Prometheus text format
+Metrics sources (local dev stack):
+- **Per-service Prometheus endpoint**: `http://localhost:<service_port>/metrics`
+  - Provided by `prometheus-client` and exposed by `create_fastapi_service()`.
+- **OTel Collector Prometheus exporter**: `http://localhost:8889/metrics`
+  - Aggregates OTLP-exported metrics from all services/workers.
 
 ## Deployment
 
 ### Local Development
 
-Use the full compose (includes Jaeger + OTel Collector):
+Use the full compose (includes Jaeger + OTel Collector + Prometheus + Grafana):
 ```bash
 docker-compose -f docker-compose.full.yml up -d
 ```
 
 Then open Jaeger UI:
 `http://localhost:16686`
+
+Prometheus UI:
+`http://localhost:19090`
+
+Grafana UI (admin/admin by default in compose):
+`http://localhost:13000`
+
+Notes:
+- BFF/OMS enable token auth by default; the full compose sets `BFF_AUTH_EXEMPT_PATHS` and `OMS_AUTH_EXEMPT_PATHS`
+  to allow Prometheus scraping of `/metrics` in local development.
 
 ### Production
 
@@ -394,7 +406,8 @@ Import these dashboard templates:
 ### Missing Metrics
 
 1. Verify metrics collector initialization
-2. Check Prometheus endpoint
+2. Check the OTel Collector exporter: `http://localhost:8889/metrics`
+3. Check service metrics endpoint: `http://localhost:<port>/metrics`
 3. Review metric recording calls
 
 ### High Memory Usage

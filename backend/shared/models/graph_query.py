@@ -68,6 +68,11 @@ class GraphEdge(BaseModel):
 class GraphQueryResponse(BaseModel):
     """Response model for graph queries."""
 
+    base_branch: Optional[str] = None
+    overlay_branch: Optional[str] = None
+    overlay_status: Optional[str] = None
+    writeback_enabled: Optional[bool] = None
+    writeback_edits_present: Optional[bool] = None
     nodes: List[GraphNode]
     edges: List[GraphEdge]
     query: Dict[str, Any]

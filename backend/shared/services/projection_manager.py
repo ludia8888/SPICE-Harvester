@@ -188,6 +188,9 @@ class ProjectionManager:
         woql_config = metadata["woql_config"]
         result = await self.graph_service.multi_hop_query(
             db_name=metadata["db_name"],
+            base_branch=str(woql_config.get("base_branch") or woql_config.get("branch") or "main"),
+            overlay_branch=woql_config.get("overlay_branch"),
+            strict_overlay=False,
             start_class=woql_config["start_class"],
             hops=woql_config["hops"],
             filters=woql_config.get("filters"),
