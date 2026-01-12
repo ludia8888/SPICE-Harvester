@@ -14,7 +14,7 @@ from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from bff.dependencies import get_action_log_registry, get_oms_client
 from bff.services.oms_client import OMSClient
@@ -57,6 +57,44 @@ class ActionSimulateScenarioRequest(BaseModel):
     )
 
 
+class ActionSimulateStatePatch(BaseModel):
+    """Patch-like state override for decision simulation (what-if)."""
+
+    set: Dict[str, Any] = Field(default_factory=dict)
+    unset: List[str] = Field(default_factory=list)
+    link_add: List[Any] = Field(default_factory=list)
+    link_remove: List[Any] = Field(default_factory=list)
+    delete: bool = Field(default=False, description="delete is not supported for simulation assumptions")
+
+    @field_validator("delete")
+    @classmethod
+    def _reject_delete(cls, value: bool) -> bool:
+        if value:
+            raise ValueError("delete is not supported for simulation assumptions")
+        return False
+
+
+class ActionSimulateObservedBaseOverrides(BaseModel):
+    """Override observed_base snapshot fields/links to simulate stale reads."""
+
+    fields: Dict[str, Any] = Field(default_factory=dict)
+    links: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ActionSimulateTargetAssumption(BaseModel):
+    class_id: str
+    instance_id: str
+    base_overrides: Optional[ActionSimulateStatePatch] = None
+    observed_base_overrides: Optional[ActionSimulateObservedBaseOverrides] = None
+
+
+class ActionSimulateAssumptions(BaseModel):
+    targets: List[ActionSimulateTargetAssumption] = Field(
+        default_factory=list,
+        description="Per-target state injections (Level 2 what-if base state assumptions).",
+    )
+
+
 class ActionSimulateRequest(BaseModel):
     input: Dict[str, Any] = Field(default_factory=dict, description="Intent-only action input payload")
     correlation_id: Optional[str] = Field(default=None, description="Correlation id for trace/audit")
@@ -74,6 +112,10 @@ class ActionSimulateRequest(BaseModel):
         description="Optional scenario list (policy comparisons). If omitted, server simulates the effective policy only.",
     )
     include_effects: bool = Field(default=True, description="If true, compute downstream lakeFS/ES overlay effects")
+    assumptions: Optional[ActionSimulateAssumptions] = Field(
+        default=None,
+        description="Optional decision simulation assumptions (Level 2 state injection).",
+    )
 
 
 def _parse_uuid(value: str) -> UUID:
@@ -144,6 +186,7 @@ def _serialize_action_simulation_version(record: Any) -> Dict[str, Any]:
         "action_type_rid": getattr(record, "action_type_rid", None),
         "preview_action_log_id": getattr(record, "preview_action_log_id", None),
         "input": getattr(record, "input", None),
+        "assumptions": getattr(record, "assumptions", None),
         "scenarios": getattr(record, "scenarios", None),
         "result": getattr(record, "result", None),
         "error": getattr(record, "error", None),
@@ -254,6 +297,8 @@ async def simulate_action(
             "scenarios": [s.model_dump(exclude_none=True) for s in (request.scenarios or [])],
             "include_effects": bool(request.include_effects),
         }
+        if request.assumptions is not None:
+            oms_payload["assumptions"] = request.assumptions.model_dump(exclude_none=True)
 
         return await oms_client.post(
             f"/api/v1/actions/{db_name}/async/{action_type_id}/simulate",

@@ -1899,6 +1899,27 @@ _EXTERNAL_CODE_SPECS: Dict[str, EnterpriseErrorSpec] = {
         title="Action input invalid",
         severity=EnterpriseSeverity.ERROR,
     ),
+    "simulation_assumption_invalid": EnterpriseErrorSpec(
+        code_template="SHV-{subsystem}-INP-VAL-3010",
+        domain=EnterpriseDomain.INPUT,
+        error_class=EnterpriseClass.VALIDATION,
+        title="Simulation assumptions invalid",
+        severity=EnterpriseSeverity.ERROR,
+    ),
+    "simulation_assumption_forbidden_field": EnterpriseErrorSpec(
+        code_template="SHV-{subsystem}-INP-VAL-3011",
+        domain=EnterpriseDomain.INPUT,
+        error_class=EnterpriseClass.VALIDATION,
+        title="Simulation assumptions include forbidden fields",
+        severity=EnterpriseSeverity.ERROR,
+    ),
+    "simulation_assumption_target_not_found": EnterpriseErrorSpec(
+        code_template="SHV-{subsystem}-INP-VAL-3012",
+        domain=EnterpriseDomain.INPUT,
+        error_class=EnterpriseClass.VALIDATION,
+        title="Simulation assumption target not found",
+        severity=EnterpriseSeverity.ERROR,
+    ),
     "base_instance_not_found": EnterpriseErrorSpec(
         code_template="SHV-{subsystem}-DAT-NOT-3003",
         domain=EnterpriseDomain.DATA,

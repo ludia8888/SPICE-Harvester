@@ -163,6 +163,207 @@ def _apply_changes_to_payload(payload: Dict[str, Any], changes: Dict[str, Any]) 
     return False
 
 
+_ASSUMPTION_FORBIDDEN_FIELDS = {
+    "instance_id",
+    "class_id",
+    "db_name",
+    "branch",
+    "lifecycle_id",
+    "rid",
+    "overlay_tombstone",
+    "base_token",
+    "patchset_commit_id",
+    "action_log_id",
+}
+
+
+def _assumption_is_forbidden_field(field: str) -> bool:
+    key = str(field or "").strip()
+    if not key:
+        return True
+    if key.startswith("_"):
+        return True
+    return key in _ASSUMPTION_FORBIDDEN_FIELDS
+
+
+def _extract_link_fields(ops: Any) -> List[str]:
+    fields: set[str] = set()
+    if not isinstance(ops, list):
+        return []
+    for item in ops:
+        field = None
+        if isinstance(item, dict):
+            field = item.get("field") or item.get("predicate") or item.get("name")
+            if field is None and len(item) == 1:
+                field = next(iter(item.keys()))
+        elif isinstance(item, str):
+            raw = item.strip()
+            if ":" in raw:
+                field, _value = raw.split(":", 1)
+        field_str = str(field or "").strip()
+        if field_str:
+            fields.add(field_str)
+    return sorted(fields)
+
+
+def _extract_patch_field_lists(patch: Dict[str, Any]) -> Tuple[List[str], List[str]]:
+    if not isinstance(patch, dict):
+        return [], []
+    set_ops = patch.get("set") if isinstance(patch.get("set"), dict) else {}
+    unset_ops = patch.get("unset") if isinstance(patch.get("unset"), list) else []
+
+    fields: set[str] = set()
+    links: set[str] = set()
+
+    for key in (set_ops or {}).keys():
+        key_str = str(key or "").strip()
+        if key_str:
+            fields.add(key_str)
+    for key in unset_ops or []:
+        key_str = str(key or "").strip()
+        if key_str:
+            fields.add(key_str)
+    for key in _extract_link_fields(patch.get("link_add")) + _extract_link_fields(patch.get("link_remove")):
+        if key:
+            links.add(key)
+    return sorted(fields), sorted(links)
+
+
+def _apply_assumption_patch(
+    *,
+    scope: str,
+    base_state: Dict[str, Any],
+    patch: Dict[str, Any],
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    if not isinstance(base_state, dict):
+        raise ValueError("base_state must be a dict")
+    if not isinstance(patch, dict):
+        return dict(base_state), {"fields": [], "links": []}
+    if bool(patch.get("delete")):
+        raise ActionSimulationRejected(
+            _attach_enterprise(
+                {
+                    "error": "simulation_assumption_invalid",
+                    "message": "delete is not allowed in simulation assumptions",
+                    "scope": scope,
+                }
+            ),
+            status_code=400,
+        )
+
+    fields, links = _extract_patch_field_lists(patch)
+    forbidden = [f for f in fields + links if _assumption_is_forbidden_field(f)]
+    if forbidden:
+        raise ActionSimulationRejected(
+            _attach_enterprise(
+                {
+                    "error": "simulation_assumption_forbidden_field",
+                    "message": "One or more fields are not allowed in simulation assumptions",
+                    "scope": scope,
+                    "fields": sorted(set(forbidden)),
+                }
+            ),
+            status_code=400,
+        )
+
+    assumed = dict(base_state)
+    tombstone = _apply_changes_to_payload(assumed, patch)
+    if tombstone:
+        raise ActionSimulationRejected(
+            _attach_enterprise(
+                {
+                    "error": "simulation_assumption_invalid",
+                    "message": "delete is not allowed in simulation assumptions",
+                    "scope": scope,
+                }
+            ),
+            status_code=400,
+        )
+    return assumed, {"fields": fields, "links": links}
+
+
+def _apply_observed_base_overrides(
+    *,
+    observed_base: Dict[str, Any],
+    overrides: Dict[str, Any],
+) -> Dict[str, Any]:
+    if not isinstance(observed_base, dict) or not isinstance(overrides, dict):
+        return {"fields": [], "links": []}
+
+    overridden_fields: List[str] = []
+    overridden_links: List[str] = []
+
+    fields = observed_base.get("fields") if isinstance(observed_base.get("fields"), dict) else {}
+    links = observed_base.get("links") if isinstance(observed_base.get("links"), dict) else {}
+
+    override_fields = overrides.get("fields") if isinstance(overrides.get("fields"), dict) else {}
+    override_links = overrides.get("links") if isinstance(overrides.get("links"), dict) else {}
+
+    for key, value in override_fields.items():
+        field = str(key or "").strip()
+        if not field:
+            continue
+        if field not in fields:
+            raise ActionSimulationRejected(
+                _attach_enterprise(
+                    {
+                        "error": "simulation_assumption_invalid",
+                        "message": "observed_base_overrides.fields may only include touched fields",
+                        "field": field,
+                    }
+                ),
+                status_code=400,
+            )
+        if _assumption_is_forbidden_field(field):
+            raise ActionSimulationRejected(
+                _attach_enterprise(
+                    {
+                        "error": "simulation_assumption_forbidden_field",
+                        "message": "observed_base_overrides contains forbidden field",
+                        "field": field,
+                        "scope": "observed_base_overrides.fields",
+                    }
+                ),
+                status_code=400,
+            )
+        fields[field] = value
+        overridden_fields.append(field)
+
+    for key, value in override_links.items():
+        field = str(key or "").strip()
+        if not field:
+            continue
+        if field not in links:
+            raise ActionSimulationRejected(
+                _attach_enterprise(
+                    {
+                        "error": "simulation_assumption_invalid",
+                        "message": "observed_base_overrides.links may only include touched link fields",
+                        "field": field,
+                    }
+                ),
+                status_code=400,
+            )
+        if _assumption_is_forbidden_field(field):
+            raise ActionSimulationRejected(
+                _attach_enterprise(
+                    {
+                        "error": "simulation_assumption_forbidden_field",
+                        "message": "observed_base_overrides contains forbidden link field",
+                        "field": field,
+                        "scope": "observed_base_overrides.links",
+                    }
+                ),
+                status_code=400,
+            )
+        links[field] = value
+        overridden_links.append(field)
+
+    observed_base["fields"] = fields
+    observed_base["links"] = links
+    return {"fields": sorted(set(overridden_fields)), "links": sorted(set(overridden_links))}
+
+
 @dataclass(frozen=True)
 class ActionSimulationScenario:
     scenario_id: str
@@ -176,12 +377,14 @@ class TargetPreflight:
     instance_id: str
     lifecycle_id: str
     base_state: Dict[str, Any]
+    access_base_state: Dict[str, Any]
     changes: Dict[str, Any]
     observed_base: Dict[str, Any]
     base_token: Dict[str, Any]
     conflict_fields: List[str]
     conflict_links: List[Dict[str, str]]
     object_conflict_policy: Optional[str]
+    assumptions: Optional[Dict[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -509,6 +712,7 @@ async def preflight_action_writeback(
     action_spec: Dict[str, Any],
     action_type_rid: str,
     input_payload: Dict[str, Any],
+    assumptions: Optional[Dict[str, Any]] = None,
     submitted_by: str,
     submitted_by_type: str,
     actor_role: Optional[str],
@@ -543,6 +747,55 @@ async def preflight_action_writeback(
     if not compiled_shape:
         raise ActionSimulationRejected(
             _attach_enterprise({"error": "action_no_targets", "message": "template_v1 resolved to zero targets"}),
+            status_code=400,
+        )
+
+    assumptions_by_key: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    if assumptions is not None:
+        if not isinstance(assumptions, dict):
+            raise ActionSimulationRejected(
+                _attach_enterprise({"error": "simulation_assumption_invalid", "message": "assumptions must be an object"}),
+                status_code=400,
+            )
+        raw_targets = assumptions.get("targets")
+        if raw_targets is not None and not isinstance(raw_targets, list):
+            raise ActionSimulationRejected(
+                _attach_enterprise({"error": "simulation_assumption_invalid", "message": "assumptions.targets must be a list"}),
+                status_code=400,
+            )
+        for idx, item in enumerate(raw_targets or []):
+            if not isinstance(item, dict):
+                raise ActionSimulationRejected(
+                    _attach_enterprise({"error": "simulation_assumption_invalid", "message": "assumptions.targets entries must be objects", "index": idx}),
+                    status_code=400,
+                )
+            class_id = _safe_str(item.get("class_id"))
+            instance_id = _safe_str(item.get("instance_id"))
+            if not class_id or not instance_id:
+                raise ActionSimulationRejected(
+                    _attach_enterprise({"error": "simulation_assumption_invalid", "message": "assumptions.targets requires class_id and instance_id", "index": idx}),
+                    status_code=400,
+                )
+            key = (class_id, instance_id)
+            if key in assumptions_by_key:
+                raise ActionSimulationRejected(
+                    _attach_enterprise({"error": "simulation_assumption_invalid", "message": "duplicate assumptions target", "class_id": class_id, "instance_id": instance_id}),
+                    status_code=400,
+                )
+            assumptions_by_key[key] = item
+
+    target_keys = {( _safe_str(t.class_id), _safe_str(t.instance_id) ) for t in compiled_shape}
+    unknown_targets = [{"class_id": c, "instance_id": i} for (c, i) in assumptions_by_key.keys() if (c, i) not in target_keys]
+    unknown_targets.sort(key=lambda item: (str(item.get("class_id") or ""), str(item.get("instance_id") or "")))
+    if unknown_targets:
+        raise ActionSimulationRejected(
+            _attach_enterprise(
+                {
+                    "error": "simulation_assumption_target_not_found",
+                    "message": "assumptions provided for a target that is not part of this action",
+                    "targets": unknown_targets,
+                }
+            ),
             status_code=400,
         )
 
@@ -612,6 +865,8 @@ async def preflight_action_writeback(
         return meta
 
     target_docs: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    access_docs: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    assumption_reports: Dict[Tuple[str, str], Dict[str, Any]] = {}
     for item in compiled_shape:
         class_id = _safe_str(item.class_id)
         instance_id = _safe_str(item.instance_id)
@@ -637,7 +892,23 @@ async def preflight_action_writeback(
                 ),
                 status_code=404,
             )
-        target_docs[(class_id, instance_id)] = base_state
+        access_docs[(class_id, instance_id)] = base_state
+
+        assumed_state = base_state
+        assumption = assumptions_by_key.get((class_id, instance_id))
+        base_overrides_report: Dict[str, Any] = {"fields": [], "links": []}
+        if assumption and isinstance(assumption.get("base_overrides"), dict):
+            assumed_state, base_overrides_report = _apply_assumption_patch(
+                scope="base_overrides",
+                base_state=base_state,
+                patch=assumption.get("base_overrides") or {},
+            )
+        target_docs[(class_id, instance_id)] = assumed_state
+        if assumption:
+            assumption_reports[(class_id, instance_id)] = {
+                "base_overrides_applied": base_overrides_report,
+                "observed_base_overrides_applied": {"fields": [], "links": []},
+            }
 
     user_ctx: Dict[str, Any] = {
         "id": submitted_by,
@@ -670,6 +941,9 @@ async def preflight_action_writeback(
                 _attach_enterprise({"error": "base_instance_state_unavailable", "message": "base_state missing for compiled target"}),
                 status_code=500,
             )
+        access_state = access_docs.get((class_id, instance_id))
+        if not isinstance(access_state, dict) or not access_state:
+            access_state = base_state
         changes = changes_by_key.get((class_id, instance_id))
         if not isinstance(changes, dict):
             raise ActionSimulationRejected(
@@ -685,6 +959,13 @@ async def preflight_action_writeback(
             rev=obj_meta.get("rev") if isinstance(obj_meta, dict) else None,
         )
         observed_base = compute_observed_base(base=base_state, changes=changes)
+        assumption = assumptions_by_key.get((class_id, instance_id))
+        observed_override_report: Dict[str, Any] = {"fields": [], "links": []}
+        if assumption and isinstance(assumption.get("observed_base_overrides"), dict):
+            observed_override_report = _apply_observed_base_overrides(
+                observed_base=observed_base,
+                overrides=assumption.get("observed_base_overrides") or {},
+            )
         base_token = compute_base_token(
             db_name=db_name,
             class_id=class_id,
@@ -696,6 +977,12 @@ async def preflight_action_writeback(
         conflict_fields = detect_overlap_fields(observed_base=observed_base, current_base=base_state)
         conflict_links = detect_overlap_links(observed_base=observed_base, current_base=base_state, changes=changes)
 
+        assumptions_payload = None
+        report = assumption_reports.get((class_id, instance_id))
+        if report is not None:
+            report["observed_base_overrides_applied"] = observed_override_report
+            assumptions_payload = report
+
         loaded.append(
             TargetPreflight(
                 resource_rid=object_type_rid,
@@ -703,12 +990,14 @@ async def preflight_action_writeback(
                 instance_id=instance_id,
                 lifecycle_id=lifecycle_id,
                 base_state=base_state,
+                access_base_state=access_state,
                 changes=changes,
                 observed_base=observed_base,
                 base_token=base_token,
                 conflict_fields=conflict_fields,
                 conflict_links=conflict_links,
                 object_conflict_policy=obj_meta.get("conflict_policy") if isinstance(obj_meta, dict) else None,
+                assumptions=assumptions_payload,
             )
         )
 
@@ -726,7 +1015,7 @@ async def preflight_action_writeback(
                 access_policy = None
             if not access_policy or not isinstance(access_policy.policy, dict) or not access_policy.policy:
                 continue
-            filtered, _info = apply_access_policy([tgt.base_state], policy=access_policy.policy)
+            filtered, _info = apply_access_policy([tgt.access_base_state], policy=access_policy.policy)
             if not filtered:
                 denied.append({"class_id": tgt.class_id, "instance_id": tgt.instance_id})
         if denied:
@@ -988,6 +1277,7 @@ async def simulate_effects_for_patchset(
     action_log_id: str,
     patchset_id: str,
     targets: List[Dict[str, Any]],
+    base_overrides_by_target: Optional[Dict[Tuple[str, str], Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     merger = WritebackMergeService(base_storage=base_storage, lakefs_storage=lakefs_storage)
 
@@ -1029,6 +1319,18 @@ async def simulate_effects_for_patchset(
 
         effective = dict(baseline or {})
         data_payload = effective.get("data") if isinstance(effective.get("data"), dict) else {}
+
+        assumption_patch = None
+        if base_overrides_by_target and isinstance(base_overrides_by_target.get((class_id, instance_id)), dict):
+            assumption_patch = base_overrides_by_target.get((class_id, instance_id)) or {}
+        base_overrides_report: Dict[str, Any] = {"fields": [], "links": []}
+        if isinstance(assumption_patch, dict) and assumption_patch:
+            data_payload, base_overrides_report = _apply_assumption_patch(
+                scope="base_overrides",
+                base_state=data_payload,
+                patch=assumption_patch,
+            )
+
         tombstone = _apply_changes_to_payload(data_payload, applied_changes)
         if tombstone:
             effective.update(
@@ -1074,6 +1376,7 @@ async def simulate_effects_for_patchset(
                 "overlay_document": effective,
                 "overlay_would_write": not _is_noop_changes(applied_changes),
                 "queue_would_write": not _is_noop_changes(applied_changes),
+                "assumptions_applied": {"base_overrides_applied": base_overrides_report} if base_overrides_report != {"fields": [], "links": []} else None,
             }
         )
 

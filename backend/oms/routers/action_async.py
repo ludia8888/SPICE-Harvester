@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from oms.dependencies import EventStoreDep, TerminusServiceDep, ensure_database_exists
 from oms.services.ontology_deployment_registry_v2 import OntologyDeploymentRegistryV2
@@ -49,6 +49,7 @@ from shared.utils.writeback_conflicts import (
     compute_base_token,
     compute_observed_base,
 )
+from shared.utils.access_policy import apply_access_policy
 from shared.utils.writeback_lifecycle import derive_lifecycle_id
 
 from oms.services.action_simulation_service import (
@@ -94,6 +95,44 @@ class ActionSimulateScenarioRequest(BaseModel):
     )
 
 
+class ActionSimulateStatePatch(BaseModel):
+    """Patch-like state override for decision simulation (what-if)."""
+
+    set: Dict[str, Any] = Field(default_factory=dict)
+    unset: List[str] = Field(default_factory=list)
+    link_add: List[Any] = Field(default_factory=list)
+    link_remove: List[Any] = Field(default_factory=list)
+    delete: bool = Field(default=False, description="delete is not supported for simulation assumptions")
+
+    @field_validator("delete")
+    @classmethod
+    def _reject_delete(cls, value: bool) -> bool:
+        if value:
+            raise ValueError("delete is not supported for simulation assumptions")
+        return False
+
+
+class ActionSimulateObservedBaseOverrides(BaseModel):
+    """Override observed_base snapshot fields/links to simulate stale reads."""
+
+    fields: Dict[str, Any] = Field(default_factory=dict)
+    links: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ActionSimulateTargetAssumption(BaseModel):
+    class_id: str
+    instance_id: str
+    base_overrides: Optional[ActionSimulateStatePatch] = None
+    observed_base_overrides: Optional[ActionSimulateObservedBaseOverrides] = None
+
+
+class ActionSimulateAssumptions(BaseModel):
+    targets: List[ActionSimulateTargetAssumption] = Field(
+        default_factory=list,
+        description="Per-target state injections (Level 2 what-if base state assumptions).",
+    )
+
+
 class ActionSimulateRequest(BaseModel):
     input: Dict[str, Any] = Field(default_factory=dict, description="Intent-only action input payload")
     correlation_id: Optional[str] = Field(default=None, description="Correlation id for trace/audit")
@@ -111,6 +150,10 @@ class ActionSimulateRequest(BaseModel):
         description="Optional scenario list (policy comparisons). If omitted, server simulates the effective policy only.",
     )
     include_effects: bool = Field(default=True, description="If true, compute downstream lakeFS/ES overlay effects")
+    assumptions: Optional[ActionSimulateAssumptions] = Field(
+        default=None,
+        description="Optional decision simulation assumptions (Level 2 state injection).",
+    )
 
 
 def _resolve_writeback_target(
@@ -522,6 +565,7 @@ async def simulate_action_async(
             action_spec=spec,
             action_type_rid=action_type_rid,
             input_payload=sanitized_input,
+            assumptions=request.assumptions.model_dump(exclude_none=True) if request.assumptions is not None else None,
             submitted_by=submitted_by,
             submitted_by_type=submitted_by_type,
             actor_role=actor_role,
@@ -531,6 +575,35 @@ async def simulate_action_async(
 
         preview_action_log_id = uuid4().hex
         scenarios = request.scenarios or [ActionSimulateScenarioRequest(scenario_id="default", conflict_policy=None)]
+
+        access_policies: Dict[str, Dict[str, Any]] = {}
+        if dataset_registry:
+            for tgt in preflight.loaded_targets:
+                if tgt.class_id in access_policies:
+                    continue
+                try:
+                    rec = await dataset_registry.get_access_policy(
+                        db_name=db_name,
+                        scope="data_access",
+                        subject_type="object_type",
+                        subject_id=tgt.class_id,
+                    )
+                except Exception:
+                    rec = None
+                policy = rec.policy if rec and isinstance(rec.policy, dict) else None
+                if isinstance(policy, dict) and policy:
+                    access_policies[tgt.class_id] = policy
+
+        base_overrides_by_target: Dict[tuple[str, str], Dict[str, Any]] = {}
+        if request.assumptions is not None:
+            for tgt in request.assumptions.targets or []:
+                if tgt.base_overrides is None:
+                    continue
+                class_id = str(tgt.class_id or "").strip()
+                instance_id = str(tgt.instance_id or "").strip()
+                if not class_id or not instance_id:
+                    continue
+                base_overrides_by_target[(class_id, instance_id)] = tgt.base_overrides.model_dump(exclude_none=True)
 
         results: List[Dict[str, Any]] = []
         for scenario in scenarios:
@@ -558,7 +631,87 @@ async def simulate_action_async(
                         action_log_id=preview_action_log_id,
                         patchset_id=patchset_id,
                         targets=targets,
+                        base_overrides_by_target=base_overrides_by_target or None,
                     )
+
+                # Apply access policy masking to any returned base-derived artifacts (observed_base + overlay docs).
+                if access_policies:
+                    for tgt in patchset.get("targets") if isinstance(patchset.get("targets"), list) else []:
+                        resource_rid = str(tgt.get("resource_rid") or "").strip()
+                        class_id = resource_rid.split("@", 1)[0].split(":", 1)[-1] if resource_rid else ""
+                        policy = access_policies.get(class_id)
+                        if not policy:
+                            continue
+                        mask_columns = policy.get("mask_columns") or []
+                        if isinstance(mask_columns, str):
+                            mask_columns = [c.strip() for c in mask_columns.split(",") if c.strip()]
+                        if not isinstance(mask_columns, list) or not mask_columns:
+                            continue
+                        mask_value = policy.get("mask_value")
+                        observed = tgt.get("observed_base")
+                        if isinstance(observed, dict):
+                            fields = observed.get("fields") if isinstance(observed.get("fields"), dict) else {}
+                            links = observed.get("links") if isinstance(observed.get("links"), dict) else {}
+                            for col in mask_columns:
+                                key = str(col or "").strip()
+                                if not key:
+                                    continue
+                                if key in fields:
+                                    fields[key] = mask_value
+                                if key in links:
+                                    links[key] = mask_value
+                            observed["fields"] = fields
+                            observed["links"] = links
+                        conflict = tgt.get("conflict") if isinstance(tgt.get("conflict"), dict) else {}
+                        link_conflicts = conflict.get("links") if isinstance(conflict.get("links"), list) else []
+                        for item in link_conflicts:
+                            if not isinstance(item, dict):
+                                continue
+                            field = str(item.get("field") or "").strip()
+                            if field and field in mask_columns and "value" in item:
+                                item["value"] = mask_value
+
+                    for conflict in conflicts:
+                        if not isinstance(conflict, dict):
+                            continue
+                        class_id = str(conflict.get("class_id") or "").strip()
+                        policy = access_policies.get(class_id)
+                        if not policy:
+                            continue
+                        mask_columns = policy.get("mask_columns") or []
+                        if isinstance(mask_columns, str):
+                            mask_columns = [c.strip() for c in mask_columns.split(",") if c.strip()]
+                        if not isinstance(mask_columns, list) or not mask_columns:
+                            continue
+                        mask_value = policy.get("mask_value")
+                        for item in conflict.get("links") if isinstance(conflict.get("links"), list) else []:
+                            if not isinstance(item, dict):
+                                continue
+                            field = str(item.get("field") or "").strip()
+                            if field and field in mask_columns and "value" in item:
+                                item["value"] = mask_value
+
+                    if effects and isinstance(effects, dict):
+                        docs = effects.get("es_overlay") if isinstance(effects.get("es_overlay"), dict) else {}
+                        per_target = docs.get("documents") if isinstance(docs.get("documents"), list) else []
+                        for entry in per_target:
+                            if not isinstance(entry, dict):
+                                continue
+                            class_id = str(entry.get("class_id") or "").strip()
+                            policy = access_policies.get(class_id)
+                            if not policy:
+                                continue
+                            overlay_doc = entry.get("overlay_document")
+                            data = overlay_doc.get("data") if isinstance(overlay_doc, dict) else None
+                            if not isinstance(data, dict):
+                                continue
+                            filtered, info = apply_access_policy([data], policy=policy)
+                            if filtered:
+                                overlay_doc["data"] = filtered[0]
+                                entry["access_policy"] = {"allowed": True, **(info or {})}
+                            else:
+                                overlay_doc["data"] = {}
+                                entry["access_policy"] = {"allowed": False, **(info or {})}
 
                 results.append(
                     {
@@ -573,12 +726,72 @@ async def simulate_action_async(
                     }
                 )
             except ActionSimulationRejected as exc:
+                error_payload = exc.payload
+                if access_policies and isinstance(error_payload, dict):
+                    attempted_changes = error_payload.get("attempted_changes")
+                    if isinstance(attempted_changes, list):
+                        for tgt in attempted_changes:
+                            if not isinstance(tgt, dict):
+                                continue
+                            resource_rid = str(tgt.get("resource_rid") or "").strip()
+                            class_id = resource_rid.split("@", 1)[0].split(":", 1)[-1] if resource_rid else ""
+                            policy = access_policies.get(class_id)
+                            if not policy:
+                                continue
+                            mask_columns = policy.get("mask_columns") or []
+                            if isinstance(mask_columns, str):
+                                mask_columns = [c.strip() for c in mask_columns.split(",") if c.strip()]
+                            if not isinstance(mask_columns, list) or not mask_columns:
+                                continue
+                            mask_value = policy.get("mask_value")
+                            observed = tgt.get("observed_base")
+                            if isinstance(observed, dict):
+                                fields = observed.get("fields") if isinstance(observed.get("fields"), dict) else {}
+                                links = observed.get("links") if isinstance(observed.get("links"), dict) else {}
+                                for col in mask_columns:
+                                    key = str(col or "").strip()
+                                    if not key:
+                                        continue
+                                    if key in fields:
+                                        fields[key] = mask_value
+                                    if key in links:
+                                        links[key] = mask_value
+                                observed["fields"] = fields
+                                observed["links"] = links
+                            conflict = tgt.get("conflict") if isinstance(tgt.get("conflict"), dict) else {}
+                            link_conflicts = conflict.get("links") if isinstance(conflict.get("links"), list) else []
+                            for item in link_conflicts:
+                                if not isinstance(item, dict):
+                                    continue
+                                field = str(item.get("field") or "").strip()
+                                if field and field in mask_columns and "value" in item:
+                                    item["value"] = mask_value
+                    for conflict in error_payload.get("conflicts") if isinstance(error_payload.get("conflicts"), list) else []:
+                        if not isinstance(conflict, dict):
+                            continue
+                        class_id = str(conflict.get("class_id") or "").strip()
+                        policy = access_policies.get(class_id)
+                        if not policy:
+                            continue
+                        mask_columns = policy.get("mask_columns") or []
+                        if isinstance(mask_columns, str):
+                            mask_columns = [c.strip() for c in mask_columns.split(",") if c.strip()]
+                        if not isinstance(mask_columns, list) or not mask_columns:
+                            continue
+                        mask_value = policy.get("mask_value")
+                        for item in conflict.get("links") if isinstance(conflict.get("links"), list) else []:
+                            if not isinstance(item, dict):
+                                continue
+                            field = str(item.get("field") or "").strip()
+                            if field and field in mask_columns and "value" in item:
+                                item["value"] = mask_value
+
                 results.append(
                     {
                         "scenario_id": scenario_id,
                         "conflict_policy_override": conflict_override,
                         "status": "REJECTED",
-                        "error": exc.payload,
+                        "error": error_payload,
                     }
                 )
 
@@ -595,6 +808,13 @@ async def simulate_action_async(
                 "preview_action_log_id": preview_action_log_id,
                 "simulation_id": simulation_id,
                 "version": version,
+                "assumptions": request.assumptions.model_dump(exclude_none=True) if request.assumptions is not None else None,
+                "assumptions_applied": [
+                    {"class_id": t.class_id, "instance_id": t.instance_id, **(t.assumptions or {})}
+                    for t in preflight.loaded_targets
+                    if t.assumptions is not None
+                ]
+                or None,
                 "results": results,
             },
         }
@@ -610,6 +830,7 @@ async def simulate_action_async(
                 action_type_rid=action_type_rid,
                 preview_action_log_id=preview_action_log_id,
                 input_payload=sanitized_input,
+                assumptions=request.assumptions.model_dump(exclude_none=True) if request.assumptions is not None else None,
                 scenarios=[s.model_dump(exclude_none=True) for s in scenarios],
                 result=result_payload.get("data") if isinstance(result_payload.get("data"), dict) else None,
                 error=None,
@@ -632,6 +853,7 @@ async def simulate_action_async(
                     action_type_rid=action_type_rid,
                     preview_action_log_id=preview_action_log_id,
                     input_payload=sanitize_input(request.input),
+                    assumptions=request.assumptions.model_dump(exclude_none=True) if request.assumptions is not None else None,
                     scenarios=[s.model_dump(exclude_none=True) for s in (request.scenarios or [])],
                     result=None,
                     error=exc.payload,
@@ -654,6 +876,7 @@ async def simulate_action_async(
                     action_type_rid=action_type_rid,
                     preview_action_log_id=preview_action_log_id,
                     input_payload=sanitize_input(request.input),
+                    assumptions=request.assumptions.model_dump(exclude_none=True) if request.assumptions is not None else None,
                     scenarios=[s.model_dump(exclude_none=True) for s in (request.scenarios or [])],
                     result=None,
                     error={"error": ErrorCode.HTTP_ERROR.value, "status_code": int(exc.status_code), "detail": exc.detail},

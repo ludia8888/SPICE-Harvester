@@ -22,12 +22,14 @@ def _preflight(*, conflict_fields: list[str], conflict_policy: str | None = None
         instance_id="i1",
         lifecycle_id="lc-0",
         base_state=base_state,
+        access_base_state=base_state,
         changes=changes,
         observed_base=observed_base,
         base_token=base_token,
         conflict_fields=conflict_fields,
         conflict_links=[],
         object_conflict_policy=None,
+        assumptions=None,
     )
     return ActionPreflight(
         db_name="db",
@@ -98,4 +100,3 @@ def test_no_conflict_does_not_reject_under_fail() -> None:
     assert not conflicts
     assert patchset["targets"][0]["applied_changes"]["set"] == {"status": "APPROVED"}
     assert policies_used == ["FAIL"]
-

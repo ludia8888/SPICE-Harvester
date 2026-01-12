@@ -74,6 +74,7 @@ class ActionSimulationVersionRecord:
     action_type_rid: Optional[str]
     preview_action_log_id: Optional[str]
     input: Dict[str, Any]
+    assumptions: Dict[str, Any]
     scenarios: List[Dict[str, Any]]
     result: Optional[Dict[str, Any]]
     error: Optional[Dict[str, Any]]
@@ -162,6 +163,7 @@ class ActionSimulationRegistry:
                     action_type_rid TEXT,
                     preview_action_log_id TEXT,
                     input JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    assumptions JSONB NOT NULL DEFAULT '{{}}'::jsonb,
                     scenarios JSONB NOT NULL DEFAULT '[]'::jsonb,
                     result JSONB,
                     error JSONB,
@@ -171,6 +173,9 @@ class ActionSimulationRegistry:
                     PRIMARY KEY (simulation_id, version)
                 )
                 """
+            )
+            await conn.execute(
+                f"ALTER TABLE {self._schema}.action_simulation_versions ADD COLUMN IF NOT EXISTS assumptions JSONB NOT NULL DEFAULT '{{}}'::jsonb"
             )
             await conn.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_action_sim_versions_sim ON {self._schema}.action_simulation_versions(simulation_id, version DESC)"
@@ -203,6 +208,7 @@ class ActionSimulationRegistry:
             action_type_rid=row.get("action_type_rid"),
             preview_action_log_id=row.get("preview_action_log_id"),
             input=coerce_json_dataset(row.get("input")),
+            assumptions=coerce_json_dataset(row.get("assumptions")),
             scenarios=_coerce_json_list(row.get("scenarios")),
             result=coerce_json_dataset(row.get("result")) if row.get("result") is not None else None,
             error=coerce_json_dataset(row.get("error")) if row.get("error") is not None else None,
@@ -329,6 +335,7 @@ class ActionSimulationRegistry:
         action_type_rid: Optional[str],
         preview_action_log_id: Optional[str],
         input_payload: Dict[str, Any],
+        assumptions: Optional[Dict[str, Any]] = None,
         scenarios: List[Dict[str, Any]],
         result: Optional[Dict[str, Any]],
         error: Optional[Dict[str, Any]],
@@ -338,6 +345,7 @@ class ActionSimulationRegistry:
         if not self._pool:
             raise RuntimeError("ActionSimulationRegistry not connected")
         payload_input = normalize_json_payload(input_payload)
+        payload_assumptions = normalize_json_payload(assumptions) if assumptions is not None else {}
         payload_scenarios = normalize_json_payload(scenarios)
         payload_result = normalize_json_payload(result) if result is not None else None
         payload_error = normalize_json_payload(error) if error is not None else None
@@ -347,18 +355,18 @@ class ActionSimulationRegistry:
                 INSERT INTO {self._schema}.action_simulation_versions (
                     simulation_id, version, status, base_branch, overlay_branch,
                     ontology_commit_id, action_type_rid, preview_action_log_id,
-                    input, scenarios, result, error,
+                    input, assumptions, scenarios, result, error,
                     created_by, created_by_type
                 )
                 VALUES (
                     $1::uuid, $2, $3, $4, $5,
                     $6, $7, $8,
-                    $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb,
-                    $13, $14
+                    $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb,
+                    $14, $15
                 )
                 RETURNING simulation_id, version, status, base_branch, overlay_branch,
                           ontology_commit_id, action_type_rid, preview_action_log_id,
-                          input, scenarios, result, error,
+                          input, assumptions, scenarios, result, error,
                           created_by, created_by_type, created_at
                 """,
                 simulation_id,
@@ -370,6 +378,7 @@ class ActionSimulationRegistry:
                 action_type_rid,
                 preview_action_log_id,
                 payload_input,
+                payload_assumptions,
                 payload_scenarios,
                 payload_result,
                 payload_error,
@@ -392,7 +401,7 @@ class ActionSimulationRegistry:
                 f"""
                 SELECT simulation_id, version, status, base_branch, overlay_branch,
                        ontology_commit_id, action_type_rid, preview_action_log_id,
-                       input, scenarios, result, error,
+                       input, assumptions, scenarios, result, error,
                        created_by, created_by_type, created_at
                 FROM {self._schema}.action_simulation_versions
                 WHERE simulation_id = $1::uuid
@@ -413,7 +422,7 @@ class ActionSimulationRegistry:
                 f"""
                 SELECT simulation_id, version, status, base_branch, overlay_branch,
                        ontology_commit_id, action_type_rid, preview_action_log_id,
-                       input, scenarios, result, error,
+                       input, assumptions, scenarios, result, error,
                        created_by, created_by_type, created_at
                 FROM {self._schema}.action_simulation_versions
                 WHERE simulation_id = $1::uuid AND version = $2
