@@ -71,6 +71,7 @@ from shared.utils.action_template_engine import (
     compile_template_v1_change_shape,
 )
 from shared.utils.safe_bool_expression import BoolExpressionError, safe_eval_bool_expression
+from shared.utils.submission_criteria_diagnostics import infer_submission_criteria_failure_reason
 from shared.utils.writeback_governance import extract_backing_dataset_id, policies_aligned
 from shared.utils.writeback_paths import (
     queue_entry_key,
@@ -1010,12 +1011,17 @@ class ActionWorker:
                         raise _ActionRejected("submission_criteria_error") from exc
 
                     if not criteria_ok:
+                        failure_info = infer_submission_criteria_failure_reason(submission_criteria)
                         await self.action_logs.mark_failed(
                             action_log_id=action_log_id,
                             result=_audit_result(
                                 {
                                 "error": "submission_criteria_failed",
                                 "message": "submission_criteria evaluated to false",
+                                "reason": failure_info.get("reason"),
+                                "reasons": failure_info.get("reasons"),
+                                "criteria_identifiers": failure_info.get("identifiers"),
+                                "actor_role": actor_role,
                                 "submission_criteria": submission_criteria,
                                 "targets": target_meta,
                                 }

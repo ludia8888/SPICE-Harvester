@@ -195,6 +195,47 @@ def _extract_progress(payload: Any) -> Tuple[Optional[float], Optional[str], Dic
     return progress_value, message, progress_payload
 
 
+def _method_is_write(method: str) -> bool:
+    return str(method or "").strip().upper() in {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _extract_overlay_status(payload: Any) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+
+    candidates = [payload]
+    detail = payload.get("detail")
+    if isinstance(detail, dict):
+        candidates.append(detail)
+    context = payload.get("context")
+    if isinstance(context, dict):
+        candidates.append(context)
+        context_detail = context.get("detail")
+        if isinstance(context_detail, dict):
+            candidates.append(context_detail)
+    data = payload.get("data")
+    if isinstance(data, dict):
+        candidates.append(data)
+
+    for item in candidates:
+        value = item.get("overlay_status")
+        if isinstance(value, str) and value.strip():
+            return value.strip().upper()
+    return None
+
+
+def _extract_enterprise_legacy_code(payload: Any) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    enterprise = payload.get("enterprise")
+    if not isinstance(enterprise, dict):
+        return None
+    legacy_code = enterprise.get("legacy_code")
+    if isinstance(legacy_code, str) and legacy_code.strip():
+        return legacy_code.strip()
+    return None
+
+
 @dataclass(frozen=True)
 class AgentRuntimeConfig:
     bff_url: str
@@ -208,6 +249,8 @@ class AgentRuntimeConfig:
     command_poll_interval_s: float
     command_ws_idle_s: float
     command_ws_enabled: bool
+    block_writes_on_overlay_degraded: bool
+    allow_degraded_writes: bool
 
 
 class AgentRuntime:
@@ -242,6 +285,10 @@ class AgentRuntime:
             command_timeout = float(command_timeout_raw)
         except ValueError:
             command_timeout = 600.0
+
+        block_writes_on_overlay_degraded = _env_bool("AGENT_BLOCK_WRITES_ON_OVERLAY_DEGRADED", True)
+        allow_degraded_writes = _env_bool("AGENT_ALLOW_DEGRADED_WRITES", False)
+
         config = AgentRuntimeConfig(
             bff_url=bff_url,
             allowed_services=allowed_services,
@@ -254,6 +301,8 @@ class AgentRuntime:
             command_poll_interval_s=float(os.getenv("AGENT_COMMAND_POLL_INTERVAL_SECONDS", "2")),
             command_ws_idle_s=float(os.getenv("AGENT_COMMAND_WS_IDLE_SECONDS", "5")),
             command_ws_enabled=_env_bool("AGENT_COMMAND_WS_ENABLED", True),
+            block_writes_on_overlay_degraded=block_writes_on_overlay_degraded,
+            allow_degraded_writes=allow_degraded_writes,
         )
         return cls(event_store=event_store, audit_store=audit_store, config=config)
 
@@ -652,6 +701,43 @@ class AgentRuntime:
                 "data_scope": data_scope,
             }
 
+        if self.config.block_writes_on_overlay_degraded and _method_is_write(tool_call.method):
+            overlay_status = str((context or {}).get("overlay_status") or "").strip().upper()
+            allow_override = bool((context or {}).get("allow_degraded_writes")) or self.config.allow_degraded_writes
+            if overlay_status == "DEGRADED" and not allow_override:
+                error = "blocked: overlay_degraded"
+                await self.record_event(
+                    event_type="AGENT_TOOL_RESULT",
+                    run_id=run_id,
+                    actor=actor,
+                    status="failure",
+                    data={
+                        "step_index": step_index,
+                        "tool": tool_call.service,
+                        "method": tool_call.method,
+                        "path": path,
+                        "data_scope": data_scope,
+                        "output_digest": None,
+                        "output_preview": None,
+                        "output_size_bytes": None,
+                        "http_status": 409,
+                        "duration_ms": 0,
+                        "error": error,
+                    },
+                    request_id=request_id,
+                    step_index=step_index,
+                    resource_type="agent_tool",
+                    error=error,
+                )
+                return {
+                    "status": "failure",
+                    "http_status": 409,
+                    "output_digest": None,
+                    "duration_ms": 0,
+                    "data_scope": data_scope,
+                    "error": error,
+                }
+
         start_time = time.monotonic()
         error: Optional[str] = None
         output_preview = None
@@ -678,6 +764,15 @@ class AgentRuntime:
                 response_payload = response.text
             command_id = _extract_command_id(response_payload)
             command_status = _extract_command_status(response_payload)
+            detected_overlay_status = _extract_overlay_status(response_payload)
+            if detected_overlay_status and isinstance(context, dict):
+                context["overlay_status"] = detected_overlay_status
+                if detected_overlay_status == "DEGRADED":
+                    context["overlay_degraded"] = True
+            legacy_code = _extract_enterprise_legacy_code(response_payload)
+            if legacy_code == "overlay_degraded" and isinstance(context, dict):
+                context["overlay_status"] = "DEGRADED"
+                context["overlay_degraded"] = True
             if response.status_code >= 400:
                 error = f"HTTP {response.status_code}"
             if not error and command_id and (command_status is None or command_status in _COMMAND_PENDING_STATUSES):
