@@ -19,6 +19,7 @@ classification across services and workers. The source of truth is
 
 - `BFF` - API gateway (Backend-for-Frontend)
 - `OMS` - Ontology Management Service
+- `ACT` - Action worker (writeback executor)
 - `OBJ` - Objectify worker
 - `PIP` - Pipeline worker
 - `PRJ` - Projection workers
@@ -69,7 +70,9 @@ classification across services and workers. The source of truth is
   "http_status": 422,
   "retryable": false,
   "enterprise": {
-    "schema": "1.0",
+    "schema": "1.1",
+    "catalog_ref": "4566eb7",
+    "catalog_fingerprint": "sha256:…",
     "code": "SHV-BFF-INP-VAL-0001",
     "domain": "input",
     "class": "validation",
@@ -80,6 +83,11 @@ classification across services and workers. The source of truth is
     "http_status_hint": 422,
     "retryable": false,
     "default_retry_policy": "none",
+    "max_attempts": 1,
+    "base_delay_ms": 0,
+    "max_delay_ms": 0,
+    "jitter_strategy": "none",
+    "retry_after_header_respect": false,
     "human_required": true,
     "runbook_ref": "REQUEST_VALIDATION_FAILED",
     "safe_next_actions": ["request_human"],
@@ -97,8 +105,11 @@ classification across services and workers. The source of truth is
   `backend/shared/errors/enterprise_catalog.py`.
 - Objectify worker hard-gate errors map from error strings like
   `dataset_not_found` or `validation_failed` in the same file.
-- `enterprise.http_status` and `enterprise.retryable` follow taxonomy defaults
-  (not only the raw HTTP response status).
+- `enterprise.http_status` / `enterprise.retryable` follow taxonomy defaults (not only raw HTTP status).
+- `enterprise.http_status_hint` is a *hint* for standard HTTP semantics when the actual HTTP status is absent/unknown:
+  actual HTTP status (response) > `enterprise.http_status_hint` > fallback.
+- Retry automation should key off the enterprise retry fields (`retryable`, `default_retry_policy`, `max_attempts`,
+  `base_delay_ms`, `max_delay_ms`, `jitter_strategy`, `retry_after_header_respect`) instead of ad-hoc string matching.
 
 ## Examples
 

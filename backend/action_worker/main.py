@@ -28,6 +28,8 @@ from oms.services.ontology_resources import OntologyResourceService
 from shared.config.app_config import AppConfig
 from shared.config.service_config import ServiceConfig
 from shared.config.settings import ApplicationSettings
+from shared.errors.enterprise_catalog import is_external_code, resolve_enterprise_error
+from shared.errors.error_types import ErrorCode
 from shared.models.event_envelope import EventEnvelope
 from shared.models.events import ActionAppliedEvent
 from shared.observability.context_propagation import attach_context_from_kafka
@@ -645,7 +647,30 @@ class ActionWorker:
         audit_policy = spec.get("audit_policy")
 
         def _audit_result(payload: Dict[str, Any]) -> Dict[str, Any]:
-            return audit_action_log_result(payload, audit_policy=audit_policy)
+            enriched = dict(payload or {})
+            error_key = str(enriched.get("error") or "").strip()
+            if error_key and "enterprise" not in enriched:
+                enterprise = None
+                if is_external_code(error_key):
+                    enterprise = resolve_enterprise_error(
+                        service_name="action-worker",
+                        code=None,
+                        category=None,
+                        status_code=400,
+                        external_code=error_key,
+                    ).to_dict()
+                else:
+                    with suppress(Exception):
+                        enterprise = resolve_enterprise_error(
+                            service_name="action-worker",
+                            code=ErrorCode(error_key),
+                            category=None,
+                            status_code=400,
+                            external_code=None,
+                        ).to_dict()
+                if enterprise is not None:
+                    enriched["enterprise"] = enterprise
+            return audit_action_log_result(enriched, audit_policy=audit_policy)
 
         writeback_target = log_rec.writeback_target or {
             "repo": AppConfig.ONTOLOGY_WRITEBACK_REPO,

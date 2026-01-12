@@ -59,6 +59,11 @@ def _render() -> str:
     for legacy, spec in sorted(catalog._ERROR_CODE_SPECS.items(), key=lambda item: item[0].value):  # type: ignore[attr-defined]
         legacy_code = legacy.value
         retry_policy = catalog._resolve_default_retry_policy(spec)  # type: ignore[attr-defined]
+        max_attempts = catalog._resolve_max_attempts(spec, retry_policy=retry_policy)  # type: ignore[attr-defined]
+        base_delay_ms = catalog._resolve_base_delay_ms(spec, retry_policy=retry_policy)  # type: ignore[attr-defined]
+        max_delay_ms = catalog._resolve_max_delay_ms(spec, retry_policy=retry_policy)  # type: ignore[attr-defined]
+        jitter_strategy = catalog._resolve_jitter_strategy(spec, retry_policy=retry_policy)  # type: ignore[attr-defined]
+        retry_after_header_respect = catalog._resolve_retry_after_header_respect(spec)  # type: ignore[attr-defined]
         human_required = catalog._resolve_human_required(spec)  # type: ignore[attr-defined]
         safe_next_actions = catalog._resolve_safe_next_actions(  # type: ignore[attr-defined]
             spec,
@@ -76,6 +81,11 @@ def _render() -> str:
                 spec.title,
                 str(catalog._resolve_retryable(spec)).lower(),  # type: ignore[attr-defined]
                 retry_policy.value,
+                str(max_attempts),
+                str(base_delay_ms),
+                str(max_delay_ms),
+                jitter_strategy.value,
+                str(bool(retry_after_header_respect)).lower(),
                 str(human_required).lower(),
                 catalog._resolve_runbook_ref(spec, legacy_code=legacy_code),  # type: ignore[attr-defined]
                 ",".join(action.value for action in safe_next_actions),
@@ -93,6 +103,11 @@ def _render() -> str:
                 "Title",
                 "Retryable",
                 "Default retry policy",
+                "Max attempts",
+                "Base delay ms",
+                "Max delay ms",
+                "Jitter strategy",
+                "Retry-After respect",
                 "Human required",
                 "Runbook ref",
                 "Safe next actions",
@@ -109,6 +124,11 @@ def _render() -> str:
     for legacy, spec in sorted(catalog._OBJECTIFY_ERROR_SPECS.items(), key=lambda item: item[0]):  # type: ignore[attr-defined]
         legacy_code = legacy
         retry_policy = catalog._resolve_default_retry_policy(spec)  # type: ignore[attr-defined]
+        max_attempts = catalog._resolve_max_attempts(spec, retry_policy=retry_policy)  # type: ignore[attr-defined]
+        base_delay_ms = catalog._resolve_base_delay_ms(spec, retry_policy=retry_policy)  # type: ignore[attr-defined]
+        max_delay_ms = catalog._resolve_max_delay_ms(spec, retry_policy=retry_policy)  # type: ignore[attr-defined]
+        jitter_strategy = catalog._resolve_jitter_strategy(spec, retry_policy=retry_policy)  # type: ignore[attr-defined]
+        retry_after_header_respect = catalog._resolve_retry_after_header_respect(spec)  # type: ignore[attr-defined]
         human_required = catalog._resolve_human_required(spec)  # type: ignore[attr-defined]
         safe_next_actions = catalog._resolve_safe_next_actions(  # type: ignore[attr-defined]
             spec,
@@ -126,6 +146,11 @@ def _render() -> str:
                 spec.title,
                 str(catalog._resolve_retryable(spec)).lower(),  # type: ignore[attr-defined]
                 retry_policy.value,
+                str(max_attempts),
+                str(base_delay_ms),
+                str(max_delay_ms),
+                jitter_strategy.value,
+                str(bool(retry_after_header_respect)).lower(),
                 str(human_required).lower(),
                 catalog._resolve_runbook_ref(spec, legacy_code=legacy_code),  # type: ignore[attr-defined]
                 ",".join(action.value for action in safe_next_actions),
@@ -143,6 +168,11 @@ def _render() -> str:
                 "Title",
                 "Retryable",
                 "Default retry policy",
+                "Max attempts",
+                "Base delay ms",
+                "Max delay ms",
+                "Jitter strategy",
+                "Retry-After respect",
                 "Human required",
                 "Runbook ref",
                 "Safe next actions",
@@ -159,6 +189,11 @@ def _render() -> str:
     for legacy, spec in sorted(catalog._EXTERNAL_CODE_SPECS.items(), key=lambda item: item[0]):  # type: ignore[attr-defined]
         legacy_code = legacy
         retry_policy = catalog._resolve_default_retry_policy(spec)  # type: ignore[attr-defined]
+        max_attempts = catalog._resolve_max_attempts(spec, retry_policy=retry_policy)  # type: ignore[attr-defined]
+        base_delay_ms = catalog._resolve_base_delay_ms(spec, retry_policy=retry_policy)  # type: ignore[attr-defined]
+        max_delay_ms = catalog._resolve_max_delay_ms(spec, retry_policy=retry_policy)  # type: ignore[attr-defined]
+        jitter_strategy = catalog._resolve_jitter_strategy(spec, retry_policy=retry_policy)  # type: ignore[attr-defined]
+        retry_after_header_respect = catalog._resolve_retry_after_header_respect(spec)  # type: ignore[attr-defined]
         human_required = catalog._resolve_human_required(spec)  # type: ignore[attr-defined]
         safe_next_actions = catalog._resolve_safe_next_actions(  # type: ignore[attr-defined]
             spec,
@@ -176,6 +211,11 @@ def _render() -> str:
                 spec.title,
                 str(catalog._resolve_retryable(spec)).lower(),  # type: ignore[attr-defined]
                 retry_policy.value,
+                str(max_attempts),
+                str(base_delay_ms),
+                str(max_delay_ms),
+                jitter_strategy.value,
+                str(bool(retry_after_header_respect)).lower(),
                 str(human_required).lower(),
                 catalog._resolve_runbook_ref(spec, legacy_code=legacy_code),  # type: ignore[attr-defined]
                 ",".join(action.value for action in safe_next_actions),
@@ -193,6 +233,11 @@ def _render() -> str:
                 "Title",
                 "Retryable",
                 "Default retry policy",
+                "Max attempts",
+                "Base delay ms",
+                "Max delay ms",
+                "Jitter strategy",
+                "Retry-After respect",
                 "Human required",
                 "Runbook ref",
                 "Safe next actions",

@@ -1,12 +1,21 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, Optional, Tuple
 
 from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.utils.canonical_json import sha256_canonical_json_prefixed
 
-ENTERPRISE_SCHEMA_VERSION = "1.0"
+ENTERPRISE_SCHEMA_VERSION = "1.1"
+ENTERPRISE_CATALOG_REF = (
+    os.getenv("ENTERPRISE_CATALOG_REF")
+    or os.getenv("GIT_SHA")
+    or os.getenv("SOURCE_VERSION")
+    or os.getenv("OTEL_SERVICE_VERSION")
+    or ""
+).strip()
 
 
 class EnterpriseSeverity(str, Enum):
@@ -67,6 +76,11 @@ class EnterpriseRetryPolicy(str, Enum):
     AFTER_REFRESH = "after_refresh"
 
 
+class EnterpriseJitterStrategy(str, Enum):
+    NONE = "none"
+    DETERMINISTIC_EQUAL_JITTER = "deterministic_equal_jitter"
+
+
 class EnterpriseSafeNextAction(str, Enum):
     RETRY_BACKOFF = "retry_backoff"
     RETRY_IMMEDIATE = "retry_immediate"
@@ -84,6 +98,7 @@ class EnterpriseOwner(str, Enum):
 class EnterpriseSubsystem(str, Enum):
     BFF = "BFF"
     OMS = "OMS"
+    ACTION = "ACT"
     OBJECTIFY = "OBJ"
     PIPELINE = "PIP"
     PROJECTION = "PRJ"
@@ -102,6 +117,11 @@ class EnterpriseErrorSpec:
     default_http_status: Optional[int] = None
     retryable: Optional[bool] = None
     default_retry_policy: Optional[EnterpriseRetryPolicy] = None
+    max_attempts: Optional[int] = None
+    base_delay_ms: Optional[int] = None
+    max_delay_ms: Optional[int] = None
+    jitter_strategy: Optional[EnterpriseJitterStrategy] = None
+    retry_after_header_respect: Optional[bool] = None
     human_required: Optional[bool] = None
     runbook_ref: Optional[str] = None
     safe_next_actions: Optional[Tuple[EnterpriseSafeNextAction, ...]] = None
@@ -121,6 +141,11 @@ class EnterpriseError:
     http_status_hint: int
     retryable: bool
     default_retry_policy: EnterpriseRetryPolicy
+    max_attempts: int
+    base_delay_ms: int
+    max_delay_ms: int
+    jitter_strategy: EnterpriseJitterStrategy
+    retry_after_header_respect: bool
     human_required: bool
     runbook_ref: str
     safe_next_actions: Tuple[EnterpriseSafeNextAction, ...]
@@ -132,6 +157,8 @@ class EnterpriseError:
     def to_dict(self) -> Dict[str, object]:
         payload: Dict[str, object] = {
             "schema": ENTERPRISE_SCHEMA_VERSION,
+            "catalog_ref": ENTERPRISE_CATALOG_REF,
+            "catalog_fingerprint": enterprise_catalog_fingerprint(),
             "code": self.code,
             "domain": self.domain.value,
             "class": self.error_class.value,
@@ -142,6 +169,11 @@ class EnterpriseError:
             "http_status_hint": self.http_status_hint,
             "retryable": self.retryable,
             "default_retry_policy": self.default_retry_policy.value,
+            "max_attempts": int(self.max_attempts),
+            "base_delay_ms": int(self.base_delay_ms),
+            "max_delay_ms": int(self.max_delay_ms),
+            "jitter_strategy": self.jitter_strategy.value,
+            "retry_after_header_respect": bool(self.retry_after_header_respect),
             "human_required": self.human_required,
             "runbook_ref": self.runbook_ref,
             "safe_next_actions": [action.value for action in self.safe_next_actions],
@@ -163,6 +195,8 @@ def _normalize_subsystem(service_name: Optional[str]) -> EnterpriseSubsystem:
         return EnterpriseSubsystem.BFF
     if name in {"oms", "ontology"}:
         return EnterpriseSubsystem.OMS
+    if name in {"action-worker", "action_worker", "actionworker", "action"}:
+        return EnterpriseSubsystem.ACTION
     if name in {"objectify-worker", "objectify_worker", "objectify"}:
         return EnterpriseSubsystem.OBJECTIFY
     if name in {"pipeline-scheduler", "pipeline_scheduler"}:
@@ -244,6 +278,36 @@ _DEFAULT_RETRY_POLICY_BY_CLASS: Dict[EnterpriseClass, EnterpriseRetryPolicy] = {
     EnterpriseClass.LIMIT: EnterpriseRetryPolicy.BACKOFF,
     EnterpriseClass.AUTH: EnterpriseRetryPolicy.AFTER_REFRESH,
 }
+
+_DEFAULT_MAX_ATTEMPTS_BY_RETRY_POLICY: Dict[EnterpriseRetryPolicy, int] = {
+    EnterpriseRetryPolicy.NONE: 1,
+    EnterpriseRetryPolicy.IMMEDIATE: 2,
+    EnterpriseRetryPolicy.BACKOFF: 3,
+    EnterpriseRetryPolicy.AFTER_REFRESH: 2,
+}
+
+_DEFAULT_BASE_DELAY_MS_BY_RETRY_POLICY: Dict[EnterpriseRetryPolicy, int] = {
+    EnterpriseRetryPolicy.NONE: 0,
+    EnterpriseRetryPolicy.IMMEDIATE: 0,
+    EnterpriseRetryPolicy.AFTER_REFRESH: 0,
+    EnterpriseRetryPolicy.BACKOFF: 500,
+}
+
+_DEFAULT_MAX_DELAY_MS_BY_RETRY_POLICY: Dict[EnterpriseRetryPolicy, int] = {
+    EnterpriseRetryPolicy.NONE: 0,
+    EnterpriseRetryPolicy.IMMEDIATE: 0,
+    EnterpriseRetryPolicy.AFTER_REFRESH: 0,
+    EnterpriseRetryPolicy.BACKOFF: 10_000,
+}
+
+_DEFAULT_JITTER_STRATEGY_BY_RETRY_POLICY: Dict[EnterpriseRetryPolicy, EnterpriseJitterStrategy] = {
+    EnterpriseRetryPolicy.NONE: EnterpriseJitterStrategy.NONE,
+    EnterpriseRetryPolicy.IMMEDIATE: EnterpriseJitterStrategy.NONE,
+    EnterpriseRetryPolicy.AFTER_REFRESH: EnterpriseJitterStrategy.NONE,
+    EnterpriseRetryPolicy.BACKOFF: EnterpriseJitterStrategy.DETERMINISTIC_EQUAL_JITTER,
+}
+
+_DEFAULT_RETRY_AFTER_HEADER_RESPECT_BY_CLASS: Dict[EnterpriseClass, bool] = {}
 
 _DEFAULT_HUMAN_REQUIRED_BY_CLASS: Dict[EnterpriseClass, bool] = {
     EnterpriseClass.TIMEOUT: False,
@@ -353,6 +417,7 @@ _ERROR_CODE_SPECS: Dict[ErrorCode, EnterpriseErrorSpec] = {
         error_class=EnterpriseClass.LIMIT,
         title="Rate limit exceeded",
         severity=EnterpriseSeverity.ERROR,
+        retry_after_header_respect=True,
     ),
     ErrorCode.UPSTREAM_ERROR: EnterpriseErrorSpec(
         code_template="SHV-{subsystem}-UPS-INTG-0001",
@@ -483,6 +548,7 @@ _CATEGORY_SPECS: Dict[ErrorCategory, EnterpriseErrorSpec] = {
         error_class=EnterpriseClass.LIMIT,
         title="Rate limit error",
         severity=EnterpriseSeverity.ERROR,
+        retry_after_header_respect=True,
     ),
     ErrorCategory.UPSTREAM: EnterpriseErrorSpec(
         code_template="SHV-{subsystem}-UPS-INTG-0999",
@@ -2023,6 +2089,88 @@ def _resolve_human_required(spec: EnterpriseErrorSpec) -> bool:
     return _DEFAULT_HUMAN_REQUIRED_BY_CLASS.get(spec.error_class, True)
 
 
+def _resolve_max_attempts(spec: EnterpriseErrorSpec, *, retry_policy: EnterpriseRetryPolicy) -> int:
+    if spec.max_attempts is not None:
+        try:
+            return max(1, int(spec.max_attempts))
+        except (TypeError, ValueError):
+            return 1
+    return _DEFAULT_MAX_ATTEMPTS_BY_RETRY_POLICY.get(retry_policy, 1)
+
+
+def _resolve_base_delay_ms(spec: EnterpriseErrorSpec, *, retry_policy: EnterpriseRetryPolicy) -> int:
+    if spec.base_delay_ms is not None:
+        try:
+            return max(0, int(spec.base_delay_ms))
+        except (TypeError, ValueError):
+            return 0
+    return _DEFAULT_BASE_DELAY_MS_BY_RETRY_POLICY.get(retry_policy, 0)
+
+
+def _resolve_max_delay_ms(spec: EnterpriseErrorSpec, *, retry_policy: EnterpriseRetryPolicy) -> int:
+    if spec.max_delay_ms is not None:
+        try:
+            return max(0, int(spec.max_delay_ms))
+        except (TypeError, ValueError):
+            return 0
+    return _DEFAULT_MAX_DELAY_MS_BY_RETRY_POLICY.get(retry_policy, 0)
+
+
+def _resolve_jitter_strategy(spec: EnterpriseErrorSpec, *, retry_policy: EnterpriseRetryPolicy) -> EnterpriseJitterStrategy:
+    if spec.jitter_strategy is not None:
+        return spec.jitter_strategy
+    return _DEFAULT_JITTER_STRATEGY_BY_RETRY_POLICY.get(retry_policy, EnterpriseJitterStrategy.NONE)
+
+
+def _resolve_retry_after_header_respect(spec: EnterpriseErrorSpec) -> bool:
+    if spec.retry_after_header_respect is not None:
+        return bool(spec.retry_after_header_respect)
+    return _DEFAULT_RETRY_AFTER_HEADER_RESPECT_BY_CLASS.get(spec.error_class, False)
+
+
+_CATALOG_FINGERPRINT_CACHE: Optional[str] = None
+
+
+def enterprise_catalog_fingerprint() -> str:
+    global _CATALOG_FINGERPRINT_CACHE
+    if _CATALOG_FINGERPRINT_CACHE:
+        return _CATALOG_FINGERPRINT_CACHE
+
+    def _spec_payload(spec: EnterpriseErrorSpec) -> Dict[str, object]:
+        payload: Dict[str, object] = {
+            "code_template": spec.code_template,
+            "domain": spec.domain.value,
+            "class": spec.error_class.value,
+            "title": spec.title,
+            "severity": spec.severity.value,
+            "default_http_status": spec.default_http_status,
+            "retryable": spec.retryable,
+            "default_retry_policy": spec.default_retry_policy.value if spec.default_retry_policy else None,
+            "max_attempts": spec.max_attempts,
+            "base_delay_ms": spec.base_delay_ms,
+            "max_delay_ms": spec.max_delay_ms,
+            "jitter_strategy": spec.jitter_strategy.value if spec.jitter_strategy else None,
+            "retry_after_header_respect": spec.retry_after_header_respect,
+            "human_required": spec.human_required,
+            "runbook_ref": spec.runbook_ref,
+            "safe_next_actions": (
+                [action.value for action in spec.safe_next_actions] if spec.safe_next_actions else None
+            ),
+            "action": spec.action.value if spec.action else None,
+            "owner": spec.owner.value if spec.owner else None,
+        }
+        return payload
+
+    payload: Dict[str, object] = {
+        "schema": ENTERPRISE_SCHEMA_VERSION,
+        "error_codes": {k.value: _spec_payload(v) for k, v in sorted(_ERROR_CODE_SPECS.items(), key=lambda kv: kv[0].value)},  # type: ignore[name-defined]
+        "categories": {k.value: _spec_payload(v) for k, v in sorted(_CATEGORY_SPECS.items(), key=lambda kv: kv[0].value)},  # type: ignore[name-defined]
+        "objectify": {k: _spec_payload(v) for k, v in sorted(_OBJECTIFY_ERROR_SPECS.items(), key=lambda kv: kv[0])},  # type: ignore[name-defined]
+        "external": {k: _spec_payload(v) for k, v in sorted(_EXTERNAL_CODE_SPECS.items(), key=lambda kv: kv[0])},  # type: ignore[name-defined]
+    }
+    _CATALOG_FINGERPRINT_CACHE = sha256_canonical_json_prefixed(payload)
+    return _CATALOG_FINGERPRINT_CACHE
+
 def _resolve_runbook_ref(spec: EnterpriseErrorSpec, *, legacy_code: Optional[str]) -> str:
     if spec.runbook_ref is not None and str(spec.runbook_ref).strip():
         return str(spec.runbook_ref).strip()
@@ -2092,6 +2240,11 @@ def resolve_enterprise_error(
     http_status_hint = _resolve_http_status_hint(spec, status_code)
     retryable = _resolve_retryable(spec, retryable_hint=retryable_hint)
     retry_policy = _resolve_default_retry_policy(spec)
+    max_attempts = _resolve_max_attempts(spec, retry_policy=retry_policy)
+    base_delay_ms = _resolve_base_delay_ms(spec, retry_policy=retry_policy)
+    max_delay_ms = _resolve_max_delay_ms(spec, retry_policy=retry_policy)
+    jitter_strategy = _resolve_jitter_strategy(spec, retry_policy=retry_policy)
+    retry_after_header_respect = _resolve_retry_after_header_respect(spec)
     human_required = _resolve_human_required(spec)
     runbook_ref = _resolve_runbook_ref(spec, legacy_code=legacy_code)
     safe_next_actions = _resolve_safe_next_actions(
@@ -2113,6 +2266,11 @@ def resolve_enterprise_error(
         http_status_hint=http_status_hint,
         retryable=retryable,
         default_retry_policy=retry_policy,
+        max_attempts=max_attempts,
+        base_delay_ms=base_delay_ms,
+        max_delay_ms=max_delay_ms,
+        jitter_strategy=jitter_strategy,
+        retry_after_header_respect=retry_after_header_respect,
         human_required=human_required,
         runbook_ref=runbook_ref,
         safe_next_actions=safe_next_actions,
@@ -2135,6 +2293,11 @@ def resolve_objectify_error(error: str) -> Optional[EnterpriseError]:
     http_status_hint = _resolve_http_status_hint(spec, 400)
     retryable = _resolve_retryable(spec, retryable_hint=False)
     retry_policy = _resolve_default_retry_policy(spec)
+    max_attempts = _resolve_max_attempts(spec, retry_policy=retry_policy)
+    base_delay_ms = _resolve_base_delay_ms(spec, retry_policy=retry_policy)
+    max_delay_ms = _resolve_max_delay_ms(spec, retry_policy=retry_policy)
+    jitter_strategy = _resolve_jitter_strategy(spec, retry_policy=retry_policy)
+    retry_after_header_respect = _resolve_retry_after_header_respect(spec)
     human_required = _resolve_human_required(spec)
     runbook_ref = _resolve_runbook_ref(spec, legacy_code=error)
     safe_next_actions = _resolve_safe_next_actions(
@@ -2156,6 +2319,11 @@ def resolve_objectify_error(error: str) -> Optional[EnterpriseError]:
         http_status_hint=http_status_hint,
         retryable=retryable,
         default_retry_policy=retry_policy,
+        max_attempts=max_attempts,
+        base_delay_ms=base_delay_ms,
+        max_delay_ms=max_delay_ms,
+        jitter_strategy=jitter_strategy,
+        retry_after_header_respect=retry_after_header_respect,
         human_required=human_required,
         runbook_ref=runbook_ref,
         safe_next_actions=safe_next_actions,

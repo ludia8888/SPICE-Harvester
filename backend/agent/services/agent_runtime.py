@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -8,6 +9,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import quote
 
@@ -62,6 +64,31 @@ def _clean_url(value: str) -> str:
 def _safe_json(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=True, separators=(",", ":"), default=str)
 
+
+def _extract_retry_after_ms(headers: Dict[str, str]) -> Optional[int]:
+    raw = (headers.get("retry-after") or headers.get("Retry-After") or "").strip()
+    if not raw:
+        return None
+    try:
+        seconds = int(raw)
+    except ValueError:
+        seconds = None
+
+    if seconds is not None:
+        if seconds < 0:
+            return None
+        return seconds * 1000
+
+    with contextlib.suppress(Exception):
+        dt = parsedate_to_datetime(raw)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        delta_ms = int((dt - datetime.now(timezone.utc)).total_seconds() * 1000)
+        if delta_ms <= 0:
+            return None
+        return delta_ms
+
+    return None
 
 def _is_agent_proxy_path(path: str) -> bool:
     normalized = path if path.startswith("/") else f"/{path}"
@@ -865,6 +892,7 @@ class AgentRuntime:
         api_category: Optional[str] = None
         enterprise: Optional[dict[str, Any]] = None
         retryable: Optional[bool] = None
+        retry_after_ms: Optional[int] = None
         try:
             async with httpx.AsyncClient(timeout=self.config.timeout_s) as client:
                 response = await client.request(
@@ -894,6 +922,7 @@ class AgentRuntime:
                 api_category = _extract_api_category(response_payload)
                 enterprise = _extract_enterprise(response_payload)
                 retryable = _extract_retryable(response_payload)
+                retry_after_ms = _extract_retry_after_ms(dict(response.headers))
 
             legacy_code = _extract_enterprise_legacy_code(response_payload)
             if legacy_code == "overlay_degraded" and isinstance(context, dict):
@@ -919,6 +948,7 @@ class AgentRuntime:
                     api_category = _extract_api_category(response_payload) or api_category
                     enterprise = _extract_enterprise(response_payload) or enterprise
                     retryable = _extract_retryable(response_payload)
+                    retry_after_ms = _extract_retry_after_ms(dict(response.headers)) or retry_after_ms
                 if command_status in {"FAILED", "CANCELLED", "TIMEOUT"}:
                     error = f"command {command_id} {command_status}"
         except Exception as exc:
@@ -959,6 +989,7 @@ class AgentRuntime:
                 "api_category": api_category,
                 "enterprise": enterprise,
                 "retryable": retryable,
+                "retry_after_ms": retry_after_ms,
             },
             request_id=request_id,
             step_index=step_index,
@@ -980,5 +1011,6 @@ class AgentRuntime:
             "api_category": api_category,
             "enterprise": enterprise,
             "retryable": retryable,
+            "retry_after_ms": retry_after_ms,
             "signals": _extract_action_log_signals(response_payload),
         }

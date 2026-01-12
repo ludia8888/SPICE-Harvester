@@ -6,7 +6,7 @@ from typing import Any, Dict, List, TypedDict
 from langgraph.graph import END, StateGraph
 
 from agent.models import AgentToolCall
-from agent.services.agent_policy import compute_backoff_s, decide_policy
+from agent.services.agent_policy import compute_retry_delay_s, decide_policy
 from agent.services.agent_runtime import AgentRuntime
 
 
@@ -106,7 +106,19 @@ async def _decide_next(state: AgentState, runtime: AgentRuntime) -> AgentState:
         "details": policy.details,
     }
 
-    max_attempts = max(1, int(runtime.config.auto_retry_max_attempts))
+    enterprise = pending.get("enterprise") if isinstance(pending.get("enterprise"), dict) else {}
+    enterprise_max_attempts = enterprise.get("max_attempts")
+    try:
+        enterprise_max_attempts = int(enterprise_max_attempts)
+    except (TypeError, ValueError):
+        enterprise_max_attempts = None
+
+    max_attempts_cap = max(1, int(runtime.config.auto_retry_max_attempts))
+    max_attempts = (
+        min(max_attempts_cap, max(1, int(enterprise_max_attempts)))
+        if enterprise_max_attempts is not None
+        else max_attempts_cap
+    )
     auto_retry_enabled = bool(runtime.config.auto_retry_enabled)
     allow_writes = bool(runtime.config.auto_retry_allow_writes)
     method = str(steps[idx].method or "").strip().upper()
@@ -116,12 +128,39 @@ async def _decide_next(state: AgentState, runtime: AgentRuntime) -> AgentState:
     if auto_retry_enabled and policy.recommended_action == "retry" and safe_to_retry and attempt_remaining:
         next_attempt = attempt + 1
         attempts[idx] = next_attempt
-        retry_delay_s = compute_backoff_s(
-            seed=f"{state['run_id']}:{idx}:{next_attempt}:{policy.family}",
-            attempt=next_attempt,
-            base_delay_s=float(runtime.config.auto_retry_base_delay_s),
-            max_delay_s=float(runtime.config.auto_retry_max_delay_s),
-        )
+        base_delay_ms = enterprise.get("base_delay_ms")
+        max_delay_ms = enterprise.get("max_delay_ms")
+        jitter_strategy = enterprise.get("jitter_strategy")
+        retry_after_header_respect = bool(enterprise.get("retry_after_header_respect"))
+
+        try:
+            base_delay_ms = int(base_delay_ms)
+        except (TypeError, ValueError):
+            base_delay_ms = int(float(runtime.config.auto_retry_base_delay_s) * 1000)
+        try:
+            max_delay_ms = int(max_delay_ms)
+        except (TypeError, ValueError):
+            max_delay_ms = int(float(runtime.config.auto_retry_max_delay_s) * 1000)
+
+        seed = f"{state['run_id']}:{idx}:{next_attempt}:{policy.family}"
+        retry_after_ms = pending.get("retry_after_ms")
+        try:
+            retry_after_ms = int(retry_after_ms)
+        except (TypeError, ValueError):
+            retry_after_ms = None
+
+        if retry_after_header_respect and retry_after_ms is not None and retry_after_ms > 0:
+            retry_delay_s = max(0.0, min(float(retry_after_ms) / 1000.0, float(max_delay_ms) / 1000.0))
+            retry_delay_source = "retry_after"
+        else:
+            retry_delay_s = compute_retry_delay_s(
+                seed=seed,
+                attempt=next_attempt,
+                base_delay_ms=int(base_delay_ms),
+                max_delay_ms=int(max_delay_ms),
+                jitter_strategy=str(jitter_strategy or ""),
+            )
+            retry_delay_source = "policy"
         await runtime.record_event(
             event_type="AGENT_TOOL_RETRYING",
             run_id=state["run_id"],
@@ -131,6 +170,9 @@ async def _decide_next(state: AgentState, runtime: AgentRuntime) -> AgentState:
                 "step_index": idx,
                 "attempt": next_attempt,
                 "retry_delay_ms": int(retry_delay_s * 1000),
+                "retry_delay_source": retry_delay_source,
+                "retry_max_attempts": int(max_attempts),
+                "retry_seed": seed,
                 "policy": policy_payload,
             },
             request_id=state.get("request_id"),
