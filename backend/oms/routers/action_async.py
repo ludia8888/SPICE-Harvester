@@ -10,8 +10,8 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
-from uuid import uuid4
+from typing import Any, Dict, List, Optional
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
@@ -21,13 +21,18 @@ from oms.services.ontology_deployment_registry_v2 import OntologyDeploymentRegis
 from oms.services.ontology_resources import OntologyResourceService
 from shared.config.app_config import AppConfig
 from shared.config.settings import ApplicationSettings
+from shared.errors.error_types import ErrorCode
 from shared.models.commands import ActionCommand
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import enrich_metadata_with_current_trace
 from shared.security.database_access import DOMAIN_MODEL_ROLES, get_database_access_role
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input
 from shared.services.action_log_registry import ActionLogRegistry
+from shared.services.action_simulation_registry import ActionSimulationRegistry
+from shared.services.dataset_registry import DatasetRegistry
+from shared.services.lakefs_storage_service import create_lakefs_storage_service
 from shared.services.storage_service import create_storage_service
+from shared.utils.canonical_json import sha256_canonical_json_prefixed
 from shared.utils.action_audit_policy import audit_action_log_input
 from shared.utils.action_input_schema import (
     ActionInputSchemaError,
@@ -45,6 +50,14 @@ from shared.utils.writeback_conflicts import (
     compute_observed_base,
 )
 from shared.utils.writeback_lifecycle import derive_lifecycle_id
+
+from oms.services.action_simulation_service import (
+    ActionSimulationRejected,
+    build_patchset_for_scenario,
+    enforce_action_permission,
+    preflight_action_writeback,
+    simulate_effects_for_patchset,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +84,33 @@ class ActionSubmitResponse(BaseModel):
     base_branch: str
     overlay_branch: str
     writeback_target: Dict[str, Any]
+
+
+class ActionSimulateScenarioRequest(BaseModel):
+    scenario_id: Optional[str] = Field(default=None, description="Optional client-provided scenario identifier")
+    conflict_policy: Optional[str] = Field(
+        default=None,
+        description="Optional conflict_policy override for this scenario (WRITEBACK_WINS|BASE_WINS|FAIL|MANUAL_REVIEW)",
+    )
+
+
+class ActionSimulateRequest(BaseModel):
+    input: Dict[str, Any] = Field(default_factory=dict, description="Intent-only action input payload")
+    correlation_id: Optional[str] = Field(default=None, description="Correlation id for trace/audit")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
+    base_branch: str = Field("main", description="Base branch for authoritative reads (default: main)")
+    overlay_branch: Optional[str] = Field(
+        default=None,
+        description="Optional overlay branch override (default derived from writeback_target)",
+    )
+    simulation_id: Optional[str] = Field(default=None, description="Optional simulation id for versioned reruns")
+    title: Optional[str] = Field(default=None, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    scenarios: Optional[list[ActionSimulateScenarioRequest]] = Field(
+        default=None,
+        description="Optional scenario list (policy comparisons). If omitted, server simulates the effective policy only.",
+    )
+    include_effects: bool = Field(default=True, description="If true, compute downstream lakeFS/ES overlay effects")
 
 
 def _resolve_writeback_target(
@@ -343,3 +383,288 @@ async def submit_action_async(
 
     except SecurityViolationError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+
+@router.post(
+    "/{action_type_id}/simulate",
+    status_code=status.HTTP_200_OK,
+)
+async def simulate_action_async(
+    db_name: str = Depends(ensure_database_exists),
+    action_type_id: str = Path(..., description="Action type identifier"),
+    request: ActionSimulateRequest = ...,
+    terminus=TerminusServiceDep,
+) -> Dict[str, Any]:
+    """
+    Simulate an Action writeback (dry-run).
+
+    This endpoint:
+    - validates inputs + submission criteria + validation rules + governance gates,
+    - computes conflict_policy resolution outcomes,
+    - and returns predicted downstream artifacts (patchset / queue / overlay docs),
+    without writing to lakeFS / ES / EventStore.
+    """
+
+    dataset_registry: Optional[DatasetRegistry] = None
+    simulation_registry: Optional[ActionSimulationRegistry] = None
+    simulation_id: Optional[str] = None
+    version: Optional[int] = None
+    action_type_rid: Optional[str] = None
+    ontology_commit_id: Optional[str] = None
+    submitted_by: Optional[str] = None
+    submitted_by_type: str = "user"
+    preview_action_log_id: Optional[str] = None
+    try:
+        action_type_id = str(action_type_id or "").strip()
+        if not action_type_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="action_type_id is required")
+
+        resolved_base_branch = str(request.base_branch or "").strip() or "main"
+
+        deployments = OntologyDeploymentRegistryV2()
+        latest = await deployments.get_latest_deployed_commit(db_name=db_name, target_branch=resolved_base_branch)
+        if not latest or not latest.get("ontology_commit_id"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "no_deployed_ontology",
+                    "message": "No deployed ontology commit found; deploy ontology before simulating actions.",
+                    "db_name": db_name,
+                    "target_branch": resolved_base_branch,
+                },
+            )
+        ontology_commit_id = str(latest["ontology_commit_id"])
+
+        resources = OntologyResourceService(terminus)
+        action_resource = await resources.get_resource(
+            db_name,
+            branch=ontology_commit_id,
+            resource_type="action_type",
+            resource_id=action_type_id,
+        )
+        if not action_resource:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"error": "action_type_not_found", "action_type_id": action_type_id},
+            )
+        spec = action_resource.get("spec") if isinstance(action_resource, dict) else None
+        if not isinstance(spec, dict):
+            spec = {}
+        action_meta = action_resource.get("metadata") if isinstance(action_resource, dict) else None
+        action_type_rid = format_resource_rid(
+            resource_type="action_type",
+            resource_id=action_type_id,
+            rev=parse_metadata_rev(action_meta),
+        )
+
+        submitted_by = str((request.metadata or {}).get("user_id") or "").strip()
+        submitted_by_type = str((request.metadata or {}).get("user_type") or "user").strip().lower() or "user"
+        actor_role = await enforce_action_permission(
+            db_name=db_name,
+            submitted_by=submitted_by,
+            submitted_by_type=submitted_by_type,
+            action_spec=spec,
+        )
+
+        simulation_registry = ActionSimulationRegistry()
+        await simulation_registry.connect()
+        simulation_id = str(request.simulation_id or "").strip()
+        if simulation_id:
+            try:
+                simulation_id = str(UUID(simulation_id))
+            except Exception as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="simulation_id must be a UUID") from exc
+            existing = await simulation_registry.get_simulation(simulation_id=simulation_id)
+            if not existing:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ActionSimulation not found")
+            if existing.db_name != db_name or existing.action_type_id != action_type_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="simulation_id does not match db_name/action_type_id",
+                )
+        else:
+            simulation_id = str(uuid4())
+            await simulation_registry.create_simulation(
+                simulation_id=simulation_id,
+                db_name=db_name,
+                action_type_id=action_type_id,
+                title=request.title,
+                description=request.description,
+                created_by=submitted_by,
+                created_by_type=submitted_by_type,
+            )
+        version = await simulation_registry.next_version(simulation_id=simulation_id)
+
+        settings = ApplicationSettings()
+        base_storage = create_storage_service(settings)
+        if not base_storage:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="StorageService unavailable")
+        lakefs_storage = create_lakefs_storage_service(settings)
+        if not lakefs_storage:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="LakeFSStorageService unavailable")
+
+        if AppConfig.WRITEBACK_ENFORCE_GOVERNANCE:
+            dataset_registry = DatasetRegistry()
+            await dataset_registry.connect()
+
+        try:
+            sanitized_input = sanitize_input(request.input)
+        except SecurityViolationError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+        preflight = await preflight_action_writeback(
+            terminus=terminus,
+            base_storage=base_storage,
+            dataset_registry=dataset_registry,
+            db_name=db_name,
+            action_type_id=action_type_id,
+            ontology_commit_id=ontology_commit_id,
+            action_spec=spec,
+            action_type_rid=action_type_rid,
+            input_payload=sanitized_input,
+            submitted_by=submitted_by,
+            submitted_by_type=submitted_by_type,
+            actor_role=actor_role,
+            base_branch=resolved_base_branch,
+            overlay_branch=request.overlay_branch,
+        )
+
+        preview_action_log_id = uuid4().hex
+        scenarios = request.scenarios or [ActionSimulateScenarioRequest(scenario_id="default", conflict_policy=None)]
+
+        results: List[Dict[str, Any]] = []
+        for scenario in scenarios:
+            scenario_id = str(scenario.scenario_id or "default").strip() or "default"
+            conflict_override = str(scenario.conflict_policy or "").strip() or None
+
+            try:
+                patchset, targets, conflicts, policies_used = build_patchset_for_scenario(
+                    preflight=preflight,
+                    action_log_id=preview_action_log_id,
+                    conflict_policy_override=conflict_override,
+                )
+                patchset_id = sha256_canonical_json_prefixed(patchset)
+
+                effects = None
+                if request.include_effects:
+                    effects = await simulate_effects_for_patchset(
+                        base_storage=base_storage,
+                        lakefs_storage=lakefs_storage,
+                        db_name=db_name,
+                        base_branch=preflight.base_branch,
+                        overlay_branch=preflight.overlay_branch,
+                        writeback_repo=str(preflight.writeback_target.get("repo") or ""),
+                        writeback_branch=str(preflight.writeback_target.get("branch") or ""),
+                        action_log_id=preview_action_log_id,
+                        patchset_id=patchset_id,
+                        targets=targets,
+                    )
+
+                results.append(
+                    {
+                        "scenario_id": scenario_id,
+                        "conflict_policy_override": conflict_override,
+                        "status": "ACCEPTED",
+                        "patchset_id": patchset_id,
+                        "conflicts": conflicts,
+                        "conflict_policies_used": policies_used,
+                        "patchset": patchset,
+                        "effects": effects,
+                    }
+                )
+            except ActionSimulationRejected as exc:
+                results.append(
+                    {
+                        "scenario_id": scenario_id,
+                        "conflict_policy_override": conflict_override,
+                        "status": "REJECTED",
+                        "error": exc.payload,
+                    }
+                )
+
+        result_payload = {
+            "status": "success",
+            "data": {
+                "db_name": db_name,
+                "action_type_id": action_type_id,
+                "action_type_rid": action_type_rid,
+                "ontology_commit_id": ontology_commit_id,
+                "base_branch": preflight.base_branch,
+                "overlay_branch": preflight.overlay_branch,
+                "writeback_target": preflight.writeback_target,
+                "preview_action_log_id": preview_action_log_id,
+                "simulation_id": simulation_id,
+                "version": version,
+                "results": results,
+            },
+        }
+
+        if simulation_registry:
+            await simulation_registry.create_version(
+                simulation_id=simulation_id,
+                version=version,
+                status="COMPUTED",
+                base_branch=preflight.base_branch,
+                overlay_branch=preflight.overlay_branch,
+                ontology_commit_id=ontology_commit_id,
+                action_type_rid=action_type_rid,
+                preview_action_log_id=preview_action_log_id,
+                input_payload=sanitized_input,
+                scenarios=[s.model_dump(exclude_none=True) for s in scenarios],
+                result=result_payload.get("data") if isinstance(result_payload.get("data"), dict) else None,
+                error=None,
+                created_by=submitted_by,
+                created_by_type=submitted_by_type,
+            )
+
+        return result_payload
+
+    except ActionSimulationRejected as exc:
+        if simulation_registry and simulation_id and version is not None:
+            try:
+                await simulation_registry.create_version(
+                    simulation_id=simulation_id,
+                    version=version,
+                    status="REJECTED",
+                    base_branch=str(request.base_branch or "").strip() or "main",
+                    overlay_branch=str(request.overlay_branch or "").strip() or "main",
+                    ontology_commit_id=ontology_commit_id,
+                    action_type_rid=action_type_rid,
+                    preview_action_log_id=preview_action_log_id,
+                    input_payload=sanitize_input(request.input),
+                    scenarios=[s.model_dump(exclude_none=True) for s in (request.scenarios or [])],
+                    result=None,
+                    error=exc.payload,
+                    created_by=submitted_by or "system",
+                    created_by_type=submitted_by_type or "user",
+                )
+            except Exception:
+                pass
+        raise HTTPException(status_code=exc.status_code, detail=exc.payload) from exc
+    except HTTPException as exc:
+        if simulation_registry and simulation_id and version is not None:
+            try:
+                await simulation_registry.create_version(
+                    simulation_id=simulation_id,
+                    version=version,
+                    status="FAILED",
+                    base_branch=str(request.base_branch or "").strip() or "main",
+                    overlay_branch=str(request.overlay_branch or "").strip() or "main",
+                    ontology_commit_id=ontology_commit_id,
+                    action_type_rid=action_type_rid,
+                    preview_action_log_id=preview_action_log_id,
+                    input_payload=sanitize_input(request.input),
+                    scenarios=[s.model_dump(exclude_none=True) for s in (request.scenarios or [])],
+                    result=None,
+                    error={"error": ErrorCode.HTTP_ERROR.value, "status_code": int(exc.status_code), "detail": exc.detail},
+                    created_by=submitted_by or "system",
+                    created_by_type=submitted_by_type or "user",
+                )
+            except Exception:
+                pass
+        raise
+    finally:
+        if dataset_registry:
+            await dataset_registry.close()
+        if simulation_registry:
+            await simulation_registry.close()

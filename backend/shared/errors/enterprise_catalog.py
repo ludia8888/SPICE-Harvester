@@ -1899,6 +1899,20 @@ _EXTERNAL_CODE_SPECS: Dict[str, EnterpriseErrorSpec] = {
         title="Action input invalid",
         severity=EnterpriseSeverity.ERROR,
     ),
+    "base_instance_not_found": EnterpriseErrorSpec(
+        code_template="SHV-{subsystem}-DAT-NOT-3003",
+        domain=EnterpriseDomain.DATA,
+        error_class=EnterpriseClass.NOT_FOUND,
+        title="Base instance not found",
+        severity=EnterpriseSeverity.ERROR,
+    ),
+    "base_instance_state_unavailable": EnterpriseErrorSpec(
+        code_template="SHV-{subsystem}-SYS-INT-3001",
+        domain=EnterpriseDomain.SYSTEM,
+        error_class=EnterpriseClass.INTERNAL,
+        title="Base instance state unavailable",
+        severity=EnterpriseSeverity.ERROR,
+    ),
     "submitted_by_required": EnterpriseErrorSpec(
         code_template="SHV-{subsystem}-INP-VAL-3002",
         domain=EnterpriseDomain.INPUT,

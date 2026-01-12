@@ -104,6 +104,11 @@ python scripts/generate_api_reference.py
 ### Actions
 - `GET /api/v1/databases/{db_name}/actions/logs`
 - `GET /api/v1/databases/{db_name}/actions/logs/{action_log_id}`
+- `GET /api/v1/databases/{db_name}/actions/simulations`
+- `GET /api/v1/databases/{db_name}/actions/simulations/{simulation_id}`
+- `GET /api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions`
+- `GET /api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions/{version}`
+- `POST /api/v1/databases/{db_name}/actions/{action_type_id}/simulate`
 - `POST /api/v1/databases/{db_name}/actions/{action_type_id}/submit`
 
 ### Admin Operations

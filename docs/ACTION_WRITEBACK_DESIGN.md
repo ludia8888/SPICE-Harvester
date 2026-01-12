@@ -13,6 +13,7 @@
 - API contract: base_branch / overlay_branch
 - Data model
 - Write path (Action execution)
+- Decision simulation (dry-run)
 - Read path (ES overlay)
 - Conflict policy (first-class)
 - Permissions and submission criteria
@@ -566,6 +567,50 @@ It never mutates the backing dataset; it only produces writeback views.
 4) Side-effects (optional)
    - Executed after commit (never inside the atomic patchset).
    - Side-effects must tolerate at-least-once retries and be idempotent.
+
+## Decision simulation (dry-run)
+
+Goal:
+- Preview **applied diffs** + predicted downstream artifacts (**lakeFS patchset/queue keys, ES overlay docs**) without mutating
+  lakeFS / ES / Event Store.
+- Support scenario comparisons (e.g. conflict policies) and persist versioned results for a "Decision Simulation app" UI.
+
+Endpoints (code-aligned):
+- **BFF**: `POST /api/v1/databases/{db_name}/actions/{action_type_id}/simulate`
+- **OMS**: `POST /api/v1/actions/{db_name}/async/{action_type_id}/simulate`
+- **BFF (versioning/read)**:
+  - `GET /api/v1/databases/{db_name}/actions/simulations`
+  - `GET /api/v1/databases/{db_name}/actions/simulations/{simulation_id}`
+  - `GET /api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions`
+  - `GET /api/v1/databases/{db_name}/actions/simulations/{simulation_id}/versions/{version}`
+
+Behavior (P0):
+- Runs the same preflight gates as the Action worker:
+  - `permission_policy` + database role gate
+  - writeback governance (dataset ACL alignment) when enabled
+  - `data_access` policy gate
+  - `submission_criteria` evaluation (reject on false)
+  - `validation_rules` evaluation (reject on failure)
+- Computes conflict resolution per scenario:
+  - request may include `scenarios[]` with `conflict_policy` overrides
+  - per-scenario outcome is `ACCEPTED` or `REJECTED` with full conflict diagnostics
+- Produces predicted downstream artifacts (no writes):
+  - `patchset` (includes both `changes` and `applied_changes`)
+  - `es_overlay.documents[].overlay_document` (predicted overlay doc to index)
+  - `lakefs.patchset_key` and per-object `queue_entry_key_template`
+
+Determinism + semantics:
+- `patchset_id` is a deterministic digest: `sha256_canonical_json_prefixed(patchset)` and is **not** a lakeFS commit id.
+- Queue entry keys include an `<seq>` placeholder because `action_applied_seq` is only assigned on real apply.
+- Simulation uses a synthetic `preview_action_log_id` to reuse the same storage key conventions as real runs.
+
+Versioning store (control-plane):
+- Stored in Postgres schema `spice_action_simulations`:
+  - `action_simulations` (simulation header)
+  - `action_simulation_versions` (immutable per-run versions, including errors)
+- Simulation failures are persisted:
+  - `status=REJECTED` for policy gate failures (e.g. criteria/permission/conflict FAIL)
+  - `status=FAILED` for infrastructure/HTTP failures
 
 ## Read path (ES overlay)
 

@@ -22,6 +22,8 @@ from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
 from shared.services.action_log_registry import ActionLogRecord, ActionLogRegistry
 
+from shared.services.action_simulation_registry import ActionSimulationRegistry
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/databases/{db_name}/actions", tags=["Actions"])
@@ -45,6 +47,33 @@ class ActionSubmitRequest(BaseModel):
     input: Dict[str, Any] = Field(default_factory=dict, description="Intent-only action input payload")
     correlation_id: Optional[str] = Field(default=None, description="Correlation id for trace/audit")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
+
+
+class ActionSimulateScenarioRequest(BaseModel):
+    scenario_id: Optional[str] = Field(default=None, description="Optional client-provided scenario identifier")
+    conflict_policy: Optional[str] = Field(
+        default=None,
+        description="Optional conflict_policy override for this scenario (WRITEBACK_WINS|BASE_WINS|FAIL|MANUAL_REVIEW)",
+    )
+
+
+class ActionSimulateRequest(BaseModel):
+    input: Dict[str, Any] = Field(default_factory=dict, description="Intent-only action input payload")
+    correlation_id: Optional[str] = Field(default=None, description="Correlation id for trace/audit")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
+    base_branch: str = Field("main", description="Base branch for authoritative reads (default: main)")
+    overlay_branch: Optional[str] = Field(
+        default=None,
+        description="Optional overlay branch override (default derived from writeback_target)",
+    )
+    simulation_id: Optional[str] = Field(default=None, description="Optional simulation id for versioned reruns")
+    title: Optional[str] = Field(default=None, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    scenarios: Optional[List[ActionSimulateScenarioRequest]] = Field(
+        default=None,
+        description="Optional scenario list (policy comparisons). If omitted, server simulates the effective policy only.",
+    )
+    include_effects: bool = Field(default=True, description="If true, compute downstream lakeFS/ES overlay effects")
 
 
 def _parse_uuid(value: str) -> UUID:
@@ -87,6 +116,40 @@ def _serialize_action_log(record: ActionLogRecord) -> Dict[str, Any]:
         "action_applied_seq": record.action_applied_seq,
         "metadata": record.metadata,
         "updated_at": _dt_iso(record.updated_at),
+    }
+
+
+def _serialize_action_simulation(record: Any) -> Dict[str, Any]:
+    return {
+        "simulation_id": getattr(record, "simulation_id", None),
+        "db_name": getattr(record, "db_name", None),
+        "action_type_id": getattr(record, "action_type_id", None),
+        "title": getattr(record, "title", None),
+        "description": getattr(record, "description", None),
+        "created_by": getattr(record, "created_by", None),
+        "created_by_type": getattr(record, "created_by_type", None),
+        "created_at": _dt_iso(getattr(record, "created_at", None)),
+        "updated_at": _dt_iso(getattr(record, "updated_at", None)),
+    }
+
+
+def _serialize_action_simulation_version(record: Any) -> Dict[str, Any]:
+    return {
+        "simulation_id": getattr(record, "simulation_id", None),
+        "version": getattr(record, "version", None),
+        "status": getattr(record, "status", None),
+        "base_branch": getattr(record, "base_branch", None),
+        "overlay_branch": getattr(record, "overlay_branch", None),
+        "ontology_commit_id": getattr(record, "ontology_commit_id", None),
+        "action_type_rid": getattr(record, "action_type_rid", None),
+        "preview_action_log_id": getattr(record, "preview_action_log_id", None),
+        "input": getattr(record, "input", None),
+        "scenarios": getattr(record, "scenarios", None),
+        "result": getattr(record, "result", None),
+        "error": getattr(record, "error", None),
+        "created_by": getattr(record, "created_by", None),
+        "created_by_type": getattr(record, "created_by_type", None),
+        "created_at": _dt_iso(getattr(record, "created_at", None)),
     }
 
 
@@ -135,6 +198,67 @@ async def submit_action(
             json=oms_payload,
         )
 
+    except HTTPException:
+        raise
+    except httpx.HTTPStatusError as e:
+        _raise_httpx_as_http_exception(e)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="OMS 요청 실패") from e
+    except SecurityViolationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+
+@router.post(
+    "/{action_type_id}/simulate",
+    status_code=status.HTTP_200_OK,
+)
+async def simulate_action(
+    db_name: str,
+    action_type_id: str,
+    request: ActionSimulateRequest,
+    http_request: Request,
+    oms_client: OMSClient = Depends(get_oms_client),
+) -> Dict[str, Any]:
+    """
+    Action writeback simulation (dry-run) surface.
+
+    Enforces user/database access and forwards intent-only simulation requests to OMS.
+    """
+    try:
+        db_name = validate_db_name(db_name)
+        action_type_id = str(action_type_id or "").strip()
+        if not action_type_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="action_type_id is required")
+
+        try:
+            await enforce_database_role(headers=http_request.headers, db_name=db_name, required_roles=DOMAIN_MODEL_ROLES)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+        principal_type, principal_id = resolve_database_actor(http_request.headers)
+        sanitized_input = sanitize_input(request.input)
+
+        oms_payload = {
+            "input": sanitized_input,
+            "correlation_id": request.correlation_id,
+            "metadata": {
+                **(request.metadata or {}),
+                "user_id": principal_id,
+                "user_type": principal_type,
+            },
+            "base_branch": request.base_branch,
+            "overlay_branch": request.overlay_branch,
+            "simulation_id": request.simulation_id,
+            "title": request.title,
+            "description": request.description,
+            "scenarios": [s.model_dump(exclude_none=True) for s in (request.scenarios or [])],
+            "include_effects": bool(request.include_effects),
+        }
+
+        return await oms_client.post(
+            f"/api/v1/actions/{db_name}/async/{action_type_id}/simulate",
+            json=oms_payload,
+        )
     except HTTPException:
         raise
     except httpx.HTTPStatusError as e:
@@ -198,3 +322,122 @@ async def list_action_logs(
         "count": len(records),
         "data": [_serialize_action_log(rec) for rec in records],
     }
+
+
+@router.get("/simulations")
+async def list_action_simulations(
+    db_name: str,
+    http_request: Request,
+    action_type_id: Optional[str] = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> Dict[str, Any]:
+    db_name = validate_db_name(db_name)
+    try:
+        await enforce_database_role(headers=http_request.headers, db_name=db_name, required_roles=DOMAIN_MODEL_ROLES)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    registry = ActionSimulationRegistry()
+    await registry.connect()
+    try:
+        sims = await registry.list_simulations(db_name=db_name, action_type_id=action_type_id, limit=limit, offset=offset)
+        return {
+            "status": "success",
+            "count": len(sims),
+            "data": [_serialize_action_simulation(sim) for sim in sims],
+        }
+    finally:
+        await registry.close()
+
+
+@router.get("/simulations/{simulation_id}")
+async def get_action_simulation(
+    db_name: str,
+    simulation_id: str,
+    http_request: Request,
+    include_versions: bool = Query(default=True),
+    version_limit: int = Query(default=20, ge=1, le=200),
+) -> Dict[str, Any]:
+    db_name = validate_db_name(db_name)
+    simulation_uuid = _parse_uuid(simulation_id)
+
+    try:
+        await enforce_database_role(headers=http_request.headers, db_name=db_name, required_roles=DOMAIN_MODEL_ROLES)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    registry = ActionSimulationRegistry()
+    await registry.connect()
+    try:
+        sim = await registry.get_simulation(simulation_id=str(simulation_uuid))
+        if not sim or sim.db_name != db_name:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ActionSimulation not found")
+
+        payload: Dict[str, Any] = {"simulation": _serialize_action_simulation(sim)}
+        if include_versions:
+            versions = await registry.list_versions(simulation_id=str(simulation_uuid), limit=version_limit, offset=0)
+            payload["versions"] = [_serialize_action_simulation_version(v) for v in versions]
+        return {"status": "success", "data": payload}
+    finally:
+        await registry.close()
+
+
+@router.get("/simulations/{simulation_id}/versions")
+async def list_action_simulation_versions(
+    db_name: str,
+    simulation_id: str,
+    http_request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> Dict[str, Any]:
+    db_name = validate_db_name(db_name)
+    simulation_uuid = _parse_uuid(simulation_id)
+
+    try:
+        await enforce_database_role(headers=http_request.headers, db_name=db_name, required_roles=DOMAIN_MODEL_ROLES)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    registry = ActionSimulationRegistry()
+    await registry.connect()
+    try:
+        sim = await registry.get_simulation(simulation_id=str(simulation_uuid))
+        if not sim or sim.db_name != db_name:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ActionSimulation not found")
+        versions = await registry.list_versions(simulation_id=str(simulation_uuid), limit=limit, offset=offset)
+        return {
+            "status": "success",
+            "count": len(versions),
+            "data": [_serialize_action_simulation_version(v) for v in versions],
+        }
+    finally:
+        await registry.close()
+
+
+@router.get("/simulations/{simulation_id}/versions/{version}")
+async def get_action_simulation_version(
+    db_name: str,
+    simulation_id: str,
+    version: int,
+    http_request: Request,
+) -> Dict[str, Any]:
+    db_name = validate_db_name(db_name)
+    simulation_uuid = _parse_uuid(simulation_id)
+    try:
+        await enforce_database_role(headers=http_request.headers, db_name=db_name, required_roles=DOMAIN_MODEL_ROLES)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    registry = ActionSimulationRegistry()
+    await registry.connect()
+    try:
+        sim = await registry.get_simulation(simulation_id=str(simulation_uuid))
+        if not sim or sim.db_name != db_name:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ActionSimulation not found")
+        ver = await registry.get_version(simulation_id=str(simulation_uuid), version=int(version))
+        if not ver:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ActionSimulationVersion not found")
+        return {"status": "success", "data": _serialize_action_simulation_version(ver)}
+    finally:
+        await registry.close()

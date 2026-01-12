@@ -37,6 +37,7 @@ import pytest
 from tests.utils.auth import bff_auth_headers
 
 BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
+OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhost:8000").rstrip("/")
 
 # Optional external verification
 SMOKE_GOOGLE_SHEET_URL = (os.getenv("SMOKE_GOOGLE_SHEET_URL") or "").strip()
@@ -158,6 +159,53 @@ async def _get_write_side_last_sequence(*, aggregate_type: str, aggregate_id: st
     finally:
         await conn.close()
 
+async def _get_ontology_head_commit(
+    session: aiohttp.ClientSession,
+    *,
+    db_name: str,
+    branch: str = "main",
+) -> str:
+    async with session.get(
+        f"{OMS_URL}/api/v1/version/{db_name}/head",
+        params={"branch": branch},
+        headers=BFF_HEADERS,
+    ) as resp:
+        if resp.status != 200:
+            raise AssertionError(f"Failed to get ontology head commit (http={resp.status}): {await resp.text()}")
+        payload = await resp.json()
+
+    data = payload.get("data") if isinstance(payload, dict) else None
+    head_commit_id = (data or {}).get("head_commit_id") if isinstance(data, dict) else None
+    if isinstance(head_commit_id, str) and head_commit_id.strip():
+        return head_commit_id.strip()
+    raise AssertionError(f"Unexpected ontology head payload shape: {payload}")
+
+
+async def _record_deployed_commit(
+    *,
+    db_name: str,
+    target_branch: str,
+    ontology_commit_id: str,
+) -> None:
+    # Import lazily so the test can run without OMS deps in some environments.
+    from oms.database.postgres import db as postgres_db
+    from oms.services.ontology_deployment_registry_v2 import OntologyDeploymentRegistryV2
+
+    await postgres_db.connect()
+    try:
+        registry = OntologyDeploymentRegistryV2()
+        await registry.record_deployment(
+            db_name=db_name,
+            target_branch=target_branch,
+            ontology_commit_id=ontology_commit_id,
+            proposal_id=None,
+            status="succeeded",
+            deployed_by="openapi_smoke",
+            metadata={"source": "test_openapi_contract_smoke"},
+        )
+    finally:
+        await postgres_db.disconnect()
+
 
 async def _wait_for_command_completed(
     session: aiohttp.ClientSession,
@@ -260,6 +308,10 @@ class SmokeContext:
     ingest_request_id: Optional[str] = None
     connection_id: Optional[str] = None
     link_type_id: Optional[str] = None
+    action_type_id: Optional[str] = None
+    action_log_id: Optional[str] = None
+    simulation_id: Optional[str] = None
+    simulation_version: Optional[int] = None
 
     @property
     def ontology_aggregate_id(self) -> str:
@@ -359,6 +411,10 @@ def _format_path(template: str, ctx: SmokeContext, *, overrides: Optional[Dict[s
         "link_type_id": ctx.link_type_id or "missing_link_type",
         "resource_id": "missing_resource",
         "proposal_id": "00000000-0000-0000-0000-000000000000",
+        "action_type_id": ctx.action_type_id or "missing_action_type",
+        "action_log_id": ctx.action_log_id or "00000000-0000-0000-0000-000000000000",
+        "simulation_id": ctx.simulation_id or "00000000-0000-0000-0000-000000000000",
+        "version": str(ctx.simulation_version or 1),
     }
     if overrides:
         values.update(overrides)
@@ -1322,6 +1378,28 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
         return RequestPlan(op.method, op.path, url, (200, 404))
 
+    # ---------- Actions (writeback) ----------
+    if key == ("POST", "/api/v1/databases/{db_name}/actions/{action_type_id}/submit"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        params = {"base_branch": "main"}
+        # Intentionally invalid: omit required fields so OMS rejects without enqueueing any work.
+        body = {"input": {"product": {"class_id": ctx.class_id, "instance_id": ctx.instance_id}}}
+        return RequestPlan(op.method, op.path, url, (202, 400, 403, 404, 409, 422), params=params, json_body=body)
+
+    if key == ("POST", "/api/v1/databases/{db_name}/actions/{action_type_id}/simulate"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {
+            "input": {
+                "product": {"class_id": ctx.class_id, "instance_id": ctx.instance_id},
+                "new_name": "OpenAPI Smoke (simulated)",
+            },
+            "base_branch": "main",
+            "simulation_id": ctx.simulation_id,
+            "scenarios": [{"scenario_id": "default", "conflict_policy": "FAIL"}],
+            "include_effects": True,
+        }
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 409, 422), json_body=body)
+
     # ---------- AI (LLM) ----------
     if key in {("POST", "/api/v1/ai/query/{db_name}"), ("POST", "/api/v1/ai/translate/query-plan/{db_name}")}:
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
@@ -1437,6 +1515,7 @@ async def test_openapi_stable_contract_smoke():
         legacy_class_id="LegacySmokeClass",
         instance_id=f"prod_{unique}",
         command_ids={},
+        action_type_id=f"RenameProduct_{unique}",
     )
 
     failures: list[str] = []
@@ -1516,6 +1595,85 @@ async def test_openapi_stable_contract_smoke():
                 assert command_id, f"Missing command_id for async instance create: {payload}"
                 ctx.command_ids["create_instance"] = str(command_id)
                 await _wait_for_command_completed(session, command_id=str(command_id), timeout_seconds=180)
+
+            # Create one action type and mark the current ontology commit as deployed so Action simulation can run.
+            head_commit = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch="main")
+            action_type_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/action-types"
+            action_type_body = {
+                "id": ctx.action_type_id,
+                "label": {"en": "Rename Product", "ko": "상품 이름 변경"},
+                "description": {"en": "Rename an existing Product", "ko": "기존 Product 인스턴스 이름 변경"},
+                "spec": {
+                    "input_schema": {
+                        "fields": [
+                            {"name": "product", "type": "object_ref", "required": True, "object_type": ctx.class_id},
+                            {"name": "new_name", "type": "string", "required": True, "max_length": 2000},
+                        ],
+                        "allow_extra_fields": False,
+                    },
+                    "permission_policy": {
+                        "effect": "ALLOW",
+                        "principals": ["role:Owner", "role:Editor", "role:DomainModeler"],
+                    },
+                    "writeback_target": {
+                        "repo": "ontology-writeback",
+                        "branch": f"writeback-{ctx.db_name}",
+                    },
+                    "conflict_policy": "FAIL",
+                    "implementation": {
+                        "type": "template_v1",
+                        "targets": [
+                            {
+                                "target": {"from": "input.product"},
+                                "changes": {
+                                    "set": {"name": {"$ref": "input.new_name"}},
+                                },
+                            }
+                        ],
+                    },
+                },
+                "metadata": {"source": "openapi_smoke"},
+            }
+
+            async with session.post(
+                action_type_url,
+                params={"branch": "main", "expected_head_commit": head_commit},
+                json=action_type_body,
+            ) as resp:
+                executed.add(("POST", "/api/v1/databases/{db_name}/ontology/action-types"))
+                if resp.status != 201:
+                    raise AssertionError(
+                        f"Failed to create action type (http={resp.status}): {await resp.text()}"
+                    )
+
+            deployed_commit = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch="main")
+            await _record_deployed_commit(db_name=ctx.db_name, target_branch="main", ontology_commit_id=deployed_commit)
+
+            simulate_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/actions/{ctx.action_type_id}/simulate"
+            simulate_body = {
+                "input": {
+                    "product": {"class_id": ctx.class_id, "instance_id": ctx.instance_id},
+                    "new_name": "OpenAPI Smoke Product (simulated)",
+                },
+                "base_branch": "main",
+                "include_effects": True,
+            }
+            async with session.post(simulate_url, json=simulate_body) as resp:
+                status = resp.status
+                text = await resp.text()
+                executed.add(("POST", "/api/v1/databases/{db_name}/actions/{action_type_id}/simulate"))
+                if status != 200:
+                    raise AssertionError(f"Action simulate failed (http={status}): {text[:800]}")
+                payload = json.loads(text) if text else {}
+                data = payload.get("data") if isinstance(payload, dict) else None
+                if isinstance(data, dict):
+                    sim_id = data.get("simulation_id")
+                    if isinstance(sim_id, str) and sim_id.strip():
+                        ctx.simulation_id = sim_id.strip()
+                    try:
+                        ctx.simulation_version = int(data.get("version") or 0) or None
+                    except Exception:
+                        ctx.simulation_version = None
 
             # Import mappings so label-based query can run deterministically
             plan = await _build_plan(
