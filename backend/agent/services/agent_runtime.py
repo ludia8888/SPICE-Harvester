@@ -45,6 +45,16 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
 def _clean_url(value: str) -> str:
     return value.rstrip("/")
 
@@ -236,6 +246,88 @@ def _extract_enterprise_legacy_code(payload: Any) -> Optional[str]:
     return None
 
 
+def _iter_error_candidates(payload: Any) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    candidates: list[dict[str, Any]] = [payload]
+    for key in ("detail", "context", "result", "data"):
+        nested = payload.get(key)
+        if isinstance(nested, dict):
+            candidates.append(nested)
+    return candidates
+
+
+def _extract_error_key(payload: Any) -> Optional[str]:
+    enterprise = _extract_enterprise(payload)
+    if enterprise:
+        legacy_code = enterprise.get("legacy_code")
+        if isinstance(legacy_code, str) and legacy_code.strip():
+            return legacy_code.strip()
+    for candidate in _iter_error_candidates(payload):
+        value = candidate.get("error")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _extract_enterprise(payload: Any) -> Optional[dict[str, Any]]:
+    for candidate in _iter_error_candidates(payload):
+        enterprise = candidate.get("enterprise")
+        if isinstance(enterprise, dict) and enterprise:
+            return dict(enterprise)
+    return None
+
+
+def _extract_api_code(payload: Any) -> Optional[str]:
+    for candidate in _iter_error_candidates(payload):
+        value = candidate.get("code")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _extract_api_category(payload: Any) -> Optional[str]:
+    for candidate in _iter_error_candidates(payload):
+        value = candidate.get("category")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _extract_retryable(payload: Any) -> Optional[bool]:
+    for candidate in _iter_error_candidates(payload):
+        value = candidate.get("retryable")
+        if isinstance(value, bool):
+            return value
+    enterprise = _extract_enterprise(payload)
+    if enterprise:
+        retryable = enterprise.get("retryable")
+        if isinstance(retryable, bool):
+            return retryable
+    return None
+
+
+def _extract_action_log_signals(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return {}
+    class_id = str(data.get("class_id") or "").strip()
+    if class_id.lower() != "actionlog" and "action_log_id" not in data:
+        return {}
+    result = data.get("result") if isinstance(data.get("result"), dict) else {}
+    signals: dict[str, Any] = {
+        "action_log_id": str(data.get("action_log_id") or data.get("instance_id") or "").strip() or None,
+        "action_log_status": str(data.get("status") or "").strip().upper() or None,
+        "action_log_error": str(result.get("error") or "").strip() or None,
+    }
+    for key in ("reason", "reasons", "criteria_identifiers", "actor_role"):
+        if key in result:
+            signals[f"action_log_{key}"] = result.get(key)
+    return {k: v for k, v in signals.items() if v not in (None, "", [], {})}
+
+
 @dataclass(frozen=True)
 class AgentRuntimeConfig:
     bff_url: str
@@ -251,6 +343,11 @@ class AgentRuntimeConfig:
     command_ws_enabled: bool
     block_writes_on_overlay_degraded: bool
     allow_degraded_writes: bool
+    auto_retry_enabled: bool
+    auto_retry_max_attempts: int
+    auto_retry_base_delay_s: float
+    auto_retry_max_delay_s: float
+    auto_retry_allow_writes: bool
 
 
 class AgentRuntime:
@@ -288,6 +385,8 @@ class AgentRuntime:
 
         block_writes_on_overlay_degraded = _env_bool("AGENT_BLOCK_WRITES_ON_OVERLAY_DEGRADED", True)
         allow_degraded_writes = _env_bool("AGENT_ALLOW_DEGRADED_WRITES", False)
+        auto_retry_enabled = _env_bool("AGENT_AUTO_RETRY_ENABLED", True)
+        auto_retry_allow_writes = _env_bool("AGENT_AUTO_RETRY_ALLOW_WRITES", False)
 
         config = AgentRuntimeConfig(
             bff_url=bff_url,
@@ -303,6 +402,11 @@ class AgentRuntime:
             command_ws_enabled=_env_bool("AGENT_COMMAND_WS_ENABLED", True),
             block_writes_on_overlay_degraded=block_writes_on_overlay_degraded,
             allow_degraded_writes=allow_degraded_writes,
+            auto_retry_enabled=auto_retry_enabled,
+            auto_retry_max_attempts=_env_int("AGENT_AUTO_RETRY_MAX_ATTEMPTS", 3),
+            auto_retry_base_delay_s=_env_float("AGENT_AUTO_RETRY_BASE_DELAY_SECONDS", 0.5),
+            auto_retry_max_delay_s=_env_float("AGENT_AUTO_RETRY_MAX_DELAY_SECONDS", 8.0),
+            auto_retry_allow_writes=auto_retry_allow_writes,
         )
         return cls(event_store=event_store, audit_store=audit_store, config=config)
 
@@ -433,6 +537,7 @@ class AgentRuntime:
         run_id: str,
         actor: str,
         step_index: int,
+        attempt: int,
         command_id: str,
         initial_payload: Any,
         request_id: Optional[str],
@@ -468,6 +573,7 @@ class AgentRuntime:
                         status="success",
                         data={
                             "step_index": step_index,
+                            "attempt": attempt,
                             "command_id": command_id,
                             "status": status,
                             "progress": progress_payload,
@@ -552,6 +658,7 @@ class AgentRuntime:
             status="failure",
             data={
                 "step_index": step_index,
+                "attempt": attempt,
                 "command_id": command_id,
                 "status": "TIMEOUT",
                 "progress": {"message": f"Command timed out after {int(self.config.command_timeout_s)}s"},
@@ -618,6 +725,7 @@ class AgentRuntime:
         run_id: str,
         actor: str,
         step_index: int,
+        attempt: int = 0,
         tool_call: AgentToolCall,
         context: Dict[str, Any],
         dry_run: bool,
@@ -645,6 +753,7 @@ class AgentRuntime:
             status="success",
             data={
                 "step_index": step_index,
+                "attempt": attempt,
                 "tool": tool_call.service,
                 "method": tool_call.method,
                 "path": path,
@@ -667,6 +776,7 @@ class AgentRuntime:
                 status="failure",
                 data={
                     "step_index": step_index,
+                    "attempt": attempt,
                     "tool": tool_call.service,
                     "method": tool_call.method,
                     "path": path,
@@ -690,6 +800,7 @@ class AgentRuntime:
                 "duration_ms": 0,
                 "data_scope": data_scope,
                 "error": error,
+                "error_key": "agent_proxy_loop",
             }
 
         if dry_run:
@@ -713,6 +824,7 @@ class AgentRuntime:
                     status="failure",
                     data={
                         "step_index": step_index,
+                        "attempt": attempt,
                         "tool": tool_call.service,
                         "method": tool_call.method,
                         "path": path,
@@ -736,6 +848,7 @@ class AgentRuntime:
                     "duration_ms": 0,
                     "data_scope": data_scope,
                     "error": error,
+                    "error_key": "overlay_degraded",
                 }
 
         start_time = time.monotonic()
@@ -747,6 +860,11 @@ class AgentRuntime:
         response_payload: Any = None
         command_id: Optional[str] = None
         command_status: Optional[str] = None
+        error_key: Optional[str] = None
+        api_code: Optional[str] = None
+        api_category: Optional[str] = None
+        enterprise: Optional[dict[str, Any]] = None
+        retryable: Optional[bool] = None
         try:
             async with httpx.AsyncClient(timeout=self.config.timeout_s) as client:
                 response = await client.request(
@@ -769,6 +887,14 @@ class AgentRuntime:
                 context["overlay_status"] = detected_overlay_status
                 if detected_overlay_status == "DEGRADED":
                     context["overlay_degraded"] = True
+
+            if response.status_code >= 400:
+                error_key = _extract_error_key(response_payload)
+                api_code = _extract_api_code(response_payload)
+                api_category = _extract_api_category(response_payload)
+                enterprise = _extract_enterprise(response_payload)
+                retryable = _extract_retryable(response_payload)
+
             legacy_code = _extract_enterprise_legacy_code(response_payload)
             if legacy_code == "overlay_degraded" and isinstance(context, dict):
                 context["overlay_status"] = "DEGRADED"
@@ -780,12 +906,19 @@ class AgentRuntime:
                     run_id=run_id,
                     actor=actor,
                     step_index=step_index,
+                    attempt=attempt,
                     command_id=command_id,
                     initial_payload=response_payload,
                     request_id=request_id,
                     request_headers=request_headers,
                     context=context,
                 )
+                if command_status in {"FAILED", "CANCELLED", "TIMEOUT"}:
+                    error_key = _extract_error_key(response_payload) or error_key
+                    api_code = _extract_api_code(response_payload) or api_code
+                    api_category = _extract_api_category(response_payload) or api_category
+                    enterprise = _extract_enterprise(response_payload) or enterprise
+                    retryable = _extract_retryable(response_payload)
                 if command_status in {"FAILED", "CANCELLED", "TIMEOUT"}:
                     error = f"command {command_id} {command_status}"
         except Exception as exc:
@@ -808,6 +941,7 @@ class AgentRuntime:
             status=status,
             data={
                 "step_index": step_index,
+                "attempt": attempt,
                 "tool": tool_call.service,
                 "method": tool_call.method,
                 "path": path,
@@ -820,6 +954,11 @@ class AgentRuntime:
                 "command_status": command_status,
                 "duration_ms": duration_ms,
                 "error": error,
+                "error_key": error_key,
+                "api_code": api_code,
+                "api_category": api_category,
+                "enterprise": enterprise,
+                "retryable": retryable,
             },
             request_id=request_id,
             step_index=step_index,
@@ -836,4 +975,10 @@ class AgentRuntime:
             "command_id": command_id,
             "command_status": command_status,
             "error": error,
+            "error_key": error_key,
+            "api_code": api_code,
+            "api_category": api_category,
+            "enterprise": enterprise,
+            "retryable": retryable,
+            "signals": _extract_action_log_signals(response_payload),
         }

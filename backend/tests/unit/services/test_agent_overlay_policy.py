@@ -34,6 +34,11 @@ async def test_agent_blocks_write_when_overlay_degraded() -> None:
             command_ws_enabled=False,
             block_writes_on_overlay_degraded=True,
             allow_degraded_writes=False,
+            auto_retry_enabled=True,
+            auto_retry_max_attempts=3,
+            auto_retry_base_delay_s=0.1,
+            auto_retry_max_delay_s=1.0,
+            auto_retry_allow_writes=False,
         ),
     )
     tool_call = AgentToolCall(
@@ -58,4 +63,3 @@ async def test_agent_blocks_write_when_overlay_degraded() -> None:
     assert result["status"] == "failure"
     assert result["http_status"] == 409
     assert result["error"] == "blocked: overlay_degraded"
-

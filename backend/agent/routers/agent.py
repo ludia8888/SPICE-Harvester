@@ -289,6 +289,11 @@ async def create_agent_run(request: Request, body: AgentRunRequest) -> Dict[str,
         "request_headers": dict(request.headers),
         "request_id": request_meta.get("request_id"),
         "failed": False,
+        "attempts": {},
+        "pending_result": None,
+        "next_action": "continue",
+        "retry_delay_s": None,
+        "policy": None,
     }
 
     task = asyncio.create_task(
@@ -336,15 +341,23 @@ async def get_agent_run(
     status = "running"
     latest_progress: Optional[Dict[str, Any]] = None
     latest_progress_at: Optional[datetime] = None
+    finalized_steps: set[int] = set()
+    saw_step_finalized = False
 
     for event in events:
         if event.event_type == "AGENT_RUN_STARTED":
             steps_total = int(event.data.get("steps_total") or 0)
             started_at = event.occurred_at
-        if event.event_type == "AGENT_TOOL_RESULT":
-            steps_completed += 1
-            if event.data.get("error") and failed_step is None:
-                failed_step = int(event.data.get("step_index") or 0)
+        if event.event_type == "AGENT_STEP_FINALIZED":
+            saw_step_finalized = True
+            try:
+                step_idx = int(event.data.get("step_index") or 0)
+            except Exception:
+                step_idx = 0
+            finalized_steps.add(step_idx)
+            meta = event.metadata if isinstance(event.metadata, dict) else {}
+            if meta.get("status") == "failure" and failed_step is None:
+                failed_step = step_idx
         if event.event_type == "AGENT_RUN_COMPLETED":
             status = "completed"
             completed_at = event.occurred_at
@@ -355,6 +368,20 @@ async def get_agent_run(
             if latest_progress_at is None or event.occurred_at > latest_progress_at:
                 latest_progress_at = event.occurred_at
                 latest_progress = event.data
+
+    if saw_step_finalized:
+        steps_completed = len(finalized_steps)
+    else:
+        # Back-compat for historical runs (pre retry-aware step finalization).
+        steps_completed = sum(1 for ev in events if ev.event_type == "AGENT_TOOL_RESULT")
+        if failed_step is None:
+            for ev in events:
+                if ev.event_type == "AGENT_TOOL_RESULT" and ev.data.get("error"):
+                    try:
+                        failed_step = int(ev.data.get("step_index") or 0)
+                    except Exception:
+                        failed_step = 0
+                    break
 
     payload_events: List[Dict[str, Any]] = []
     if include_events:

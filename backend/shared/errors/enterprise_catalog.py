@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from shared.errors.error_types import ErrorCategory, ErrorCode
 
@@ -60,6 +60,21 @@ class EnterpriseAction(str, Enum):
     INVESTIGATE = "investigate"
 
 
+class EnterpriseRetryPolicy(str, Enum):
+    NONE = "none"
+    BACKOFF = "backoff"
+    IMMEDIATE = "immediate"
+    AFTER_REFRESH = "after_refresh"
+
+
+class EnterpriseSafeNextAction(str, Enum):
+    RETRY_BACKOFF = "retry_backoff"
+    RETRY_IMMEDIATE = "retry_immediate"
+    AFTER_REFRESH = "after_refresh"
+    SAFE_MODE = "safe_mode"
+    REQUEST_HUMAN = "request_human"
+
+
 class EnterpriseOwner(str, Enum):
     USER = "user"
     SYSTEM = "system"
@@ -86,6 +101,10 @@ class EnterpriseErrorSpec:
     severity: EnterpriseSeverity
     default_http_status: Optional[int] = None
     retryable: Optional[bool] = None
+    default_retry_policy: Optional[EnterpriseRetryPolicy] = None
+    human_required: Optional[bool] = None
+    runbook_ref: Optional[str] = None
+    safe_next_actions: Optional[Tuple[EnterpriseSafeNextAction, ...]] = None
     action: Optional[EnterpriseAction] = None
     owner: Optional[EnterpriseOwner] = None
 
@@ -99,7 +118,12 @@ class EnterpriseError:
     severity: EnterpriseSeverity
     title: str
     http_status: int
+    http_status_hint: int
     retryable: bool
+    default_retry_policy: EnterpriseRetryPolicy
+    human_required: bool
+    runbook_ref: str
+    safe_next_actions: Tuple[EnterpriseSafeNextAction, ...]
     action: EnterpriseAction
     owner: EnterpriseOwner
     legacy_code: Optional[str] = None
@@ -115,7 +139,12 @@ class EnterpriseError:
             "severity": self.severity.value,
             "title": self.title,
             "http_status": self.http_status,
+            "http_status_hint": self.http_status_hint,
             "retryable": self.retryable,
+            "default_retry_policy": self.default_retry_policy.value,
+            "human_required": self.human_required,
+            "runbook_ref": self.runbook_ref,
+            "safe_next_actions": [action.value for action in self.safe_next_actions],
             "action": self.action.value,
             "owner": self.owner.value,
         }
@@ -209,6 +238,28 @@ _DEFAULT_OWNER_BY_CLASS: Dict[EnterpriseClass, EnterpriseOwner] = {
     EnterpriseClass.INTERNAL: EnterpriseOwner.OPERATOR,
 }
 
+_DEFAULT_RETRY_POLICY_BY_CLASS: Dict[EnterpriseClass, EnterpriseRetryPolicy] = {
+    EnterpriseClass.TIMEOUT: EnterpriseRetryPolicy.BACKOFF,
+    EnterpriseClass.UNAVAILABLE: EnterpriseRetryPolicy.BACKOFF,
+    EnterpriseClass.LIMIT: EnterpriseRetryPolicy.BACKOFF,
+    EnterpriseClass.AUTH: EnterpriseRetryPolicy.AFTER_REFRESH,
+}
+
+_DEFAULT_HUMAN_REQUIRED_BY_CLASS: Dict[EnterpriseClass, bool] = {
+    EnterpriseClass.TIMEOUT: False,
+    EnterpriseClass.UNAVAILABLE: False,
+    EnterpriseClass.LIMIT: False,
+    EnterpriseClass.AUTH: False,
+    EnterpriseClass.VALIDATION: True,
+    EnterpriseClass.SECURITY: True,
+    EnterpriseClass.PERMISSION: True,
+    EnterpriseClass.NOT_FOUND: True,
+    EnterpriseClass.CONFLICT: True,
+    EnterpriseClass.STATE: True,
+    EnterpriseClass.INTEGRATION: True,
+    EnterpriseClass.INTERNAL: True,
+}
+
 
 _ERROR_CODE_SPECS: Dict[ErrorCode, EnterpriseErrorSpec] = {
     ErrorCode.REQUEST_VALIDATION_FAILED: EnterpriseErrorSpec(
@@ -240,6 +291,12 @@ _ERROR_CODE_SPECS: Dict[ErrorCode, EnterpriseErrorSpec] = {
         title="Payload too large",
         severity=EnterpriseSeverity.ERROR,
         default_http_status=413,
+        retryable=False,
+        default_retry_policy=EnterpriseRetryPolicy.NONE,
+        human_required=True,
+        safe_next_actions=(EnterpriseSafeNextAction.REQUEST_HUMAN,),
+        action=EnterpriseAction.FIX_INPUT,
+        owner=EnterpriseOwner.USER,
     ),
     ErrorCode.AUTH_REQUIRED: EnterpriseErrorSpec(
         code_template="SHV-{subsystem}-ACC-AUT-0001",
@@ -1852,6 +1909,11 @@ _EXTERNAL_CODE_SPECS: Dict[str, EnterpriseErrorSpec] = {
         error_class=EnterpriseClass.UNAVAILABLE,
         title="Overlay degraded",
         severity=EnterpriseSeverity.ERROR,
+        retryable=False,
+        default_retry_policy=EnterpriseRetryPolicy.NONE,
+        human_required=True,
+        runbook_ref="overlay_degraded",
+        safe_next_actions=(EnterpriseSafeNextAction.SAFE_MODE, EnterpriseSafeNextAction.REQUEST_HUMAN),
     ),
     "context7_unavailable": EnterpriseErrorSpec(
         code_template="SHV-{subsystem}-UPS-UNA-3001",
@@ -1943,6 +2005,59 @@ def _resolve_retryable(
     return _DEFAULT_RETRYABLE_BY_CLASS.get(spec.error_class, False)
 
 
+def _resolve_http_status_hint(spec: EnterpriseErrorSpec, status_code: int) -> int:
+    if spec.default_http_status is not None:
+        return spec.default_http_status
+    return _DEFAULT_HTTP_STATUS_BY_CLASS.get(spec.error_class, status_code)
+
+
+def _resolve_default_retry_policy(spec: EnterpriseErrorSpec) -> EnterpriseRetryPolicy:
+    if spec.default_retry_policy is not None:
+        return spec.default_retry_policy
+    return _DEFAULT_RETRY_POLICY_BY_CLASS.get(spec.error_class, EnterpriseRetryPolicy.NONE)
+
+
+def _resolve_human_required(spec: EnterpriseErrorSpec) -> bool:
+    if spec.human_required is not None:
+        return bool(spec.human_required)
+    return _DEFAULT_HUMAN_REQUIRED_BY_CLASS.get(spec.error_class, True)
+
+
+def _resolve_runbook_ref(spec: EnterpriseErrorSpec, *, legacy_code: Optional[str]) -> str:
+    if spec.runbook_ref is not None and str(spec.runbook_ref).strip():
+        return str(spec.runbook_ref).strip()
+    return str(legacy_code or "unknown_error").strip() or "unknown_error"
+
+
+def _resolve_safe_next_actions(
+    spec: EnterpriseErrorSpec,
+    *,
+    legacy_code: Optional[str],
+    retry_policy: EnterpriseRetryPolicy,
+    human_required: bool,
+) -> Tuple[EnterpriseSafeNextAction, ...]:
+    if spec.safe_next_actions is not None:
+        return spec.safe_next_actions
+
+    actions: list[EnterpriseSafeNextAction] = []
+    if retry_policy == EnterpriseRetryPolicy.BACKOFF:
+        actions.append(EnterpriseSafeNextAction.RETRY_BACKOFF)
+    elif retry_policy == EnterpriseRetryPolicy.IMMEDIATE:
+        actions.append(EnterpriseSafeNextAction.RETRY_IMMEDIATE)
+    elif retry_policy == EnterpriseRetryPolicy.AFTER_REFRESH:
+        actions.append(EnterpriseSafeNextAction.AFTER_REFRESH)
+
+    if human_required:
+        actions.append(EnterpriseSafeNextAction.REQUEST_HUMAN)
+
+    if legacy_code == "overlay_degraded" and EnterpriseSafeNextAction.SAFE_MODE not in actions:
+        actions.insert(0, EnterpriseSafeNextAction.SAFE_MODE)
+
+    if not actions:
+        actions.append(EnterpriseSafeNextAction.REQUEST_HUMAN)
+    return tuple(actions)
+
+
 def _resolve_action(spec: EnterpriseErrorSpec) -> EnterpriseAction:
     return spec.action or _DEFAULT_ACTION_BY_CLASS.get(spec.error_class, EnterpriseAction.INVESTIGATE)
 
@@ -1970,12 +2085,23 @@ def resolve_enterprise_error(
         spec = _CATEGORY_SPECS.get(ErrorCategory.INTERNAL)
 
     subsystem = _normalize_subsystem(service_name).value
-    resolved_status = _resolve_http_status(spec, status_code, prefer_status_code=prefer_status_code)
-    retryable = _resolve_retryable(spec, retryable_hint=retryable_hint)
-    action = _resolve_action(spec)
-    owner = _resolve_owner(spec)
     legacy_code = external_code or (code.value if isinstance(code, ErrorCode) else None)
     legacy_category = category.value if isinstance(category, ErrorCategory) else None
+
+    resolved_status = _resolve_http_status(spec, status_code, prefer_status_code=prefer_status_code)
+    http_status_hint = _resolve_http_status_hint(spec, status_code)
+    retryable = _resolve_retryable(spec, retryable_hint=retryable_hint)
+    retry_policy = _resolve_default_retry_policy(spec)
+    human_required = _resolve_human_required(spec)
+    runbook_ref = _resolve_runbook_ref(spec, legacy_code=legacy_code)
+    safe_next_actions = _resolve_safe_next_actions(
+        spec,
+        legacy_code=legacy_code,
+        retry_policy=retry_policy,
+        human_required=human_required,
+    )
+    action = _resolve_action(spec)
+    owner = _resolve_owner(spec)
     return EnterpriseError(
         code=spec.code_template.format(subsystem=subsystem),
         domain=spec.domain,
@@ -1984,7 +2110,12 @@ def resolve_enterprise_error(
         severity=spec.severity,
         title=spec.title,
         http_status=resolved_status,
+        http_status_hint=http_status_hint,
         retryable=retryable,
+        default_retry_policy=retry_policy,
+        human_required=human_required,
+        runbook_ref=runbook_ref,
+        safe_next_actions=safe_next_actions,
         action=action,
         owner=owner,
         legacy_code=legacy_code,
@@ -2001,6 +2132,17 @@ def resolve_objectify_error(error: str) -> Optional[EnterpriseError]:
         return None
     subsystem = EnterpriseSubsystem.OBJECTIFY.value
     resolved_status = _resolve_http_status(spec, 400)
+    http_status_hint = _resolve_http_status_hint(spec, 400)
+    retryable = _resolve_retryable(spec, retryable_hint=False)
+    retry_policy = _resolve_default_retry_policy(spec)
+    human_required = _resolve_human_required(spec)
+    runbook_ref = _resolve_runbook_ref(spec, legacy_code=error)
+    safe_next_actions = _resolve_safe_next_actions(
+        spec,
+        legacy_code=error,
+        retry_policy=retry_policy,
+        human_required=human_required,
+    )
     action = _resolve_action(spec)
     owner = _resolve_owner(spec)
     return EnterpriseError(
@@ -2011,7 +2153,12 @@ def resolve_objectify_error(error: str) -> Optional[EnterpriseError]:
         severity=spec.severity,
         title=spec.title,
         http_status=resolved_status,
-        retryable=_resolve_retryable(spec, retryable_hint=False),
+        http_status_hint=http_status_hint,
+        retryable=retryable,
+        default_retry_policy=retry_policy,
+        human_required=human_required,
+        runbook_ref=runbook_ref,
+        safe_next_actions=safe_next_actions,
         action=action,
         owner=owner,
         legacy_code=error,

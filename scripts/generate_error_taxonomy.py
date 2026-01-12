@@ -36,6 +36,7 @@ def _md_table(headers: Sequence[str], rows: Iterable[Sequence[str]]) -> str:
 
 def _render() -> str:
     catalog = _load_catalog()
+    status_hint_fallback = 500
 
     now = datetime.now(timezone.utc).date().isoformat()
     lines: List[str] = []
@@ -56,19 +57,47 @@ def _render() -> str:
     lines.append("")
     core_rows: List[List[str]] = []
     for legacy, spec in sorted(catalog._ERROR_CODE_SPECS.items(), key=lambda item: item[0].value):  # type: ignore[attr-defined]
+        legacy_code = legacy.value
+        retry_policy = catalog._resolve_default_retry_policy(spec)  # type: ignore[attr-defined]
+        human_required = catalog._resolve_human_required(spec)  # type: ignore[attr-defined]
+        safe_next_actions = catalog._resolve_safe_next_actions(  # type: ignore[attr-defined]
+            spec,
+            legacy_code=legacy_code,
+            retry_policy=retry_policy,
+            human_required=human_required,
+        )
         core_rows.append(
             [
-                legacy.value,
+                legacy_code,
                 spec.code_template.replace("{subsystem}", "{SUBSYS}"),
                 spec.domain.value,
                 spec.error_class.value,
                 spec.severity.value,
                 spec.title,
+                str(catalog._resolve_retryable(spec)).lower(),  # type: ignore[attr-defined]
+                retry_policy.value,
+                str(human_required).lower(),
+                catalog._resolve_runbook_ref(spec, legacy_code=legacy_code),  # type: ignore[attr-defined]
+                ",".join(action.value for action in safe_next_actions),
+                str(catalog._resolve_http_status_hint(spec, status_hint_fallback)),  # type: ignore[attr-defined]
             ]
         )
     lines.append(
         _md_table(
-            ["Legacy code", "Enterprise code", "Domain", "Class", "Severity", "Title"],
+            [
+                "Legacy code",
+                "Enterprise code",
+                "Domain",
+                "Class",
+                "Severity",
+                "Title",
+                "Retryable",
+                "Default retry policy",
+                "Human required",
+                "Runbook ref",
+                "Safe next actions",
+                "HTTP status hint",
+            ],
             core_rows,
         )
     )
@@ -78,19 +107,47 @@ def _render() -> str:
     lines.append("")
     obj_rows: List[List[str]] = []
     for legacy, spec in sorted(catalog._OBJECTIFY_ERROR_SPECS.items(), key=lambda item: item[0]):  # type: ignore[attr-defined]
+        legacy_code = legacy
+        retry_policy = catalog._resolve_default_retry_policy(spec)  # type: ignore[attr-defined]
+        human_required = catalog._resolve_human_required(spec)  # type: ignore[attr-defined]
+        safe_next_actions = catalog._resolve_safe_next_actions(  # type: ignore[attr-defined]
+            spec,
+            legacy_code=legacy_code,
+            retry_policy=retry_policy,
+            human_required=human_required,
+        )
         obj_rows.append(
             [
-                legacy,
+                legacy_code,
                 spec.code_template.format(subsystem="OBJ"),
                 spec.domain.value,
                 spec.error_class.value,
                 spec.severity.value,
                 spec.title,
+                str(catalog._resolve_retryable(spec)).lower(),  # type: ignore[attr-defined]
+                retry_policy.value,
+                str(human_required).lower(),
+                catalog._resolve_runbook_ref(spec, legacy_code=legacy_code),  # type: ignore[attr-defined]
+                ",".join(action.value for action in safe_next_actions),
+                str(catalog._resolve_http_status_hint(spec, status_hint_fallback)),  # type: ignore[attr-defined]
             ]
         )
     lines.append(
         _md_table(
-            ["Legacy code", "Enterprise code", "Domain", "Class", "Severity", "Title"],
+            [
+                "Legacy code",
+                "Enterprise code",
+                "Domain",
+                "Class",
+                "Severity",
+                "Title",
+                "Retryable",
+                "Default retry policy",
+                "Human required",
+                "Runbook ref",
+                "Safe next actions",
+                "HTTP status hint",
+            ],
             obj_rows,
         )
     )
@@ -100,19 +157,47 @@ def _render() -> str:
     lines.append("")
     ext_rows: List[List[str]] = []
     for legacy, spec in sorted(catalog._EXTERNAL_CODE_SPECS.items(), key=lambda item: item[0]):  # type: ignore[attr-defined]
+        legacy_code = legacy
+        retry_policy = catalog._resolve_default_retry_policy(spec)  # type: ignore[attr-defined]
+        human_required = catalog._resolve_human_required(spec)  # type: ignore[attr-defined]
+        safe_next_actions = catalog._resolve_safe_next_actions(  # type: ignore[attr-defined]
+            spec,
+            legacy_code=legacy_code,
+            retry_policy=retry_policy,
+            human_required=human_required,
+        )
         ext_rows.append(
             [
-                legacy,
+                legacy_code,
                 spec.code_template.replace("{subsystem}", "{SUBSYS}"),
                 spec.domain.value,
                 spec.error_class.value,
                 spec.severity.value,
                 spec.title,
+                str(catalog._resolve_retryable(spec)).lower(),  # type: ignore[attr-defined]
+                retry_policy.value,
+                str(human_required).lower(),
+                catalog._resolve_runbook_ref(spec, legacy_code=legacy_code),  # type: ignore[attr-defined]
+                ",".join(action.value for action in safe_next_actions),
+                str(catalog._resolve_http_status_hint(spec, status_hint_fallback)),  # type: ignore[attr-defined]
             ]
         )
     lines.append(
         _md_table(
-            ["Legacy code", "Enterprise code", "Domain", "Class", "Severity", "Title"],
+            [
+                "Legacy code",
+                "Enterprise code",
+                "Domain",
+                "Class",
+                "Severity",
+                "Title",
+                "Retryable",
+                "Default retry policy",
+                "Human required",
+                "Runbook ref",
+                "Safe next actions",
+                "HTTP status hint",
+            ],
             ext_rows,
         )
     )
@@ -159,4 +244,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

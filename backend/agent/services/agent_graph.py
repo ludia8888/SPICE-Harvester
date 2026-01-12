@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, List, TypedDict
 
 from langgraph.graph import END, StateGraph
 
 from agent.models import AgentToolCall
+from agent.services.agent_policy import compute_backoff_s, decide_policy
 from agent.services.agent_runtime import AgentRuntime
 
 
@@ -19,41 +21,167 @@ class AgentState(TypedDict):
     request_headers: Dict[str, str]
     request_id: str | None
     failed: bool
-
-
-def _should_continue(state: AgentState) -> str:
-    if state.get("failed"):
-        return "end"
-    if state.get("step_index", 0) >= len(state.get("steps", [])):
-        return "end"
-    return "continue"
+    attempts: Dict[int, int]
+    pending_result: Dict[str, Any] | None
+    next_action: str
+    retry_delay_s: float | None
+    policy: Dict[str, Any] | None
 
 
 async def _execute_step(state: AgentState, runtime: AgentRuntime) -> AgentState:
     idx = state.get("step_index", 0)
     steps = state.get("steps", [])
     if idx >= len(steps):
-        return state
+        return {**state, "next_action": "end", "pending_result": None}
     tool_call = steps[idx]
+    attempts = dict(state.get("attempts") or {})
+    attempt = int(attempts.get(idx) or 0)
     result = await runtime.execute_tool_call(
         run_id=state["run_id"],
         actor=state["actor"],
         step_index=idx,
+        attempt=attempt,
         tool_call=tool_call,
         context=state.get("context", {}),
         dry_run=bool(state.get("dry_run")),
         request_headers=state.get("request_headers", {}),
         request_id=state.get("request_id"),
     )
+    return {
+        **state,
+        "attempts": attempts,
+        "pending_result": result,
+        "next_action": "decide",
+    }
+
+
+async def _decide_next(state: AgentState, runtime: AgentRuntime) -> AgentState:
+    idx = state.get("step_index", 0)
+    steps = state.get("steps", [])
+    pending = state.get("pending_result")
+    if pending is None:
+        if idx >= len(steps):
+            return {**state, "next_action": "end"}
+        return {**state, "next_action": "end", "failed": True}
+
+    status = str(pending.get("status") or "").strip().lower()
     results = list(state.get("results", []))
-    results.append(result)
-    failed = result.get("status") == "failure"
+    attempts = dict(state.get("attempts") or {})
+    attempt = int(attempts.get(idx) or 0)
+
+    if status != "failure":
+        results.append(pending)
+        await runtime.record_event(
+            event_type="AGENT_STEP_FINALIZED",
+            run_id=state["run_id"],
+            actor=state["actor"],
+            status="success",
+            data={
+                "step_index": idx,
+                "attempt": attempt,
+                "final_status": status,
+                "output_digest": pending.get("output_digest"),
+            },
+            request_id=state.get("request_id"),
+            step_index=idx,
+            resource_type="agent_step",
+        )
+        next_idx = idx + 1
+        return {
+            **state,
+            "step_index": next_idx,
+            "results": results,
+            "pending_result": None,
+            "failed": False,
+            "next_action": "end" if next_idx >= len(steps) else "continue",
+            "policy": None,
+        }
+
+    policy = decide_policy(tool_call=steps[idx], result=pending, context=state.get("context", {}))
+    policy_payload = {
+        "family": policy.family,
+        "recommended_action": policy.recommended_action,
+        "safe_to_auto_retry": policy.safe_to_auto_retry,
+        "reason": policy.reason,
+        "details": policy.details,
+    }
+
+    max_attempts = max(1, int(runtime.config.auto_retry_max_attempts))
+    auto_retry_enabled = bool(runtime.config.auto_retry_enabled)
+    allow_writes = bool(runtime.config.auto_retry_allow_writes)
+    method = str(steps[idx].method or "").strip().upper()
+    safe_to_retry = policy.safe_to_auto_retry or (allow_writes and method in {"POST", "PUT", "PATCH", "DELETE"})
+    attempt_remaining = (attempt + 1) < max_attempts
+
+    if auto_retry_enabled and policy.recommended_action == "retry" and safe_to_retry and attempt_remaining:
+        next_attempt = attempt + 1
+        attempts[idx] = next_attempt
+        retry_delay_s = compute_backoff_s(
+            seed=f"{state['run_id']}:{idx}:{next_attempt}:{policy.family}",
+            attempt=next_attempt,
+            base_delay_s=float(runtime.config.auto_retry_base_delay_s),
+            max_delay_s=float(runtime.config.auto_retry_max_delay_s),
+        )
+        await runtime.record_event(
+            event_type="AGENT_TOOL_RETRYING",
+            run_id=state["run_id"],
+            actor=state["actor"],
+            status="success",
+            data={
+                "step_index": idx,
+                "attempt": next_attempt,
+                "retry_delay_ms": int(retry_delay_s * 1000),
+                "policy": policy_payload,
+            },
+            request_id=state.get("request_id"),
+            step_index=idx,
+            resource_type="agent_tool",
+        )
+        return {
+            **state,
+            "attempts": attempts,
+            "pending_result": None,
+            "retry_delay_s": retry_delay_s,
+            "next_action": "retry",
+            "policy": policy_payload,
+        }
+
+    results.append(pending)
+    await runtime.record_event(
+        event_type="AGENT_STEP_FINALIZED",
+        run_id=state["run_id"],
+        actor=state["actor"],
+        status="failure",
+        data={
+            "step_index": idx,
+            "attempt": attempt,
+            "final_status": status,
+            "output_digest": pending.get("output_digest"),
+            "error": pending.get("error"),
+            "policy": policy_payload,
+        },
+        request_id=state.get("request_id"),
+        step_index=idx,
+        resource_type="agent_step",
+        error=str(pending.get("error") or ""),
+    )
     return {
         **state,
         "step_index": idx + 1,
         "results": results,
-        "failed": failed,
+        "attempts": attempts,
+        "pending_result": None,
+        "failed": True,
+        "next_action": "end",
+        "policy": policy_payload,
     }
+
+
+async def _wait_before_retry(state: AgentState) -> AgentState:
+    delay = float(state.get("retry_delay_s") or 0.0)
+    if delay > 0:
+        await asyncio.sleep(delay)
+    return {**state, "retry_delay_s": None, "next_action": "continue"}
 
 
 def build_agent_graph(runtime: AgentRuntime):
@@ -62,13 +190,21 @@ def build_agent_graph(runtime: AgentRuntime):
     async def execute_step(state: AgentState) -> AgentState:
         return await _execute_step(state, runtime)
 
+    async def decide_next(state: AgentState) -> AgentState:
+        return await _decide_next(state, runtime)
+
     graph.add_node("execute_step", execute_step)
+    graph.add_node("decide_next", decide_next)
+    graph.add_node("wait_retry", _wait_before_retry)
+
     graph.set_entry_point("execute_step")
+    graph.add_edge("execute_step", "decide_next")
     graph.add_conditional_edges(
-        "execute_step",
-        _should_continue,
-        {"continue": "execute_step", "end": END},
+        "decide_next",
+        lambda state: state.get("next_action", "end"),
+        {"continue": "execute_step", "retry": "wait_retry", "end": END},
     )
+    graph.add_edge("wait_retry", "execute_step")
     return graph.compile()
 
 
