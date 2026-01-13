@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -17,7 +16,7 @@ from confluent_kafka import Consumer, KafkaError, Producer, TopicPartition
 from elasticsearch.exceptions import ApiError as ElasticsearchException, RequestError, ConnectionError as ESConnectionError
 
 from shared.config.app_config import AppConfig
-from shared.config.service_config import ServiceConfig
+from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import (
     attach_context_from_kafka,
@@ -28,14 +27,15 @@ from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.elasticsearch_service import create_elasticsearch_service_legacy
 from shared.services.processed_event_registry import ClaimDecision, ProcessedEventRegistry
-from shared.utils.env_utils import parse_bool_env, parse_int_env
 
 logger = logging.getLogger(__name__)
 
 
 class SearchProjectionWorker:
     def __init__(self) -> None:
-        self.enabled = bool(parse_bool_env("ENABLE_SEARCH_PROJECTION", False))
+        settings = get_settings()
+        cfg = settings.workers.search_projection
+        self.enabled = bool(cfg.enabled)
         self.topic = (AppConfig.INSTANCE_EVENTS_TOPIC or "").strip() or "instance_events"
         self.dlq_topic = (
             (AppConfig.SEARCH_PROJECTION_DLQ_TOPIC or "").strip()
@@ -43,11 +43,11 @@ class SearchProjectionWorker:
             or "projection_failures_dlq"
         )
         self.group_id = (AppConfig.SEARCH_PROJECTION_GROUP or "search-projection-worker").strip()
-        self.handler = (os.getenv("SEARCH_PROJECTION_HANDLER") or "search_projection_worker").strip()
-        self.index_name = (os.getenv("SEARCH_INDEX") or "objects").strip() or "objects"
-        self.max_retries = parse_int_env("SEARCH_PROJECTION_MAX_RETRIES", 5, min_value=1, max_value=100)
-        self.backoff_base = parse_int_env("SEARCH_PROJECTION_BACKOFF_BASE_SECONDS", 2, min_value=0, max_value=300)
-        self.backoff_max = parse_int_env("SEARCH_PROJECTION_BACKOFF_MAX_SECONDS", 60, min_value=1, max_value=3600)
+        self.handler = str(cfg.handler or "search_projection_worker").strip() or "search_projection_worker"
+        self.index_name = str(cfg.index_name or "objects").strip() or "objects"
+        self.max_retries = int(cfg.max_retries)
+        self.backoff_base = int(cfg.backoff_base_seconds)
+        self.backoff_max = int(cfg.backoff_max_seconds)
         self.consumer: Optional[Consumer] = None
         self.dlq_producer: Optional[Producer] = None
         self.processed: Optional[ProcessedEventRegistry] = None
@@ -59,6 +59,7 @@ class SearchProjectionWorker:
         if not self.enabled:
             logger.info("Search projection disabled; worker will not start.")
             return
+        settings = get_settings()
         self.es = create_elasticsearch_service_legacy()
         await self.es.connect()
         self.processed = ProcessedEventRegistry()
@@ -72,7 +73,7 @@ class SearchProjectionWorker:
 
         self.consumer = Consumer(
             {
-                "bootstrap.servers": ServiceConfig.get_kafka_bootstrap_servers(),
+                "bootstrap.servers": settings.database.kafka_servers,
                 "group.id": self.group_id,
                 "auto.offset.reset": "earliest",
                 "enable.auto.commit": False,
@@ -82,10 +83,11 @@ class SearchProjectionWorker:
         )
         self.consumer.subscribe([self.topic])
 
+        service_name = settings.observability.service_name or "search-projection-worker"
         self.dlq_producer = Producer(
             {
-                "bootstrap.servers": ServiceConfig.get_kafka_bootstrap_servers(),
-                "client.id": os.getenv("SERVICE_NAME") or "search-projection-worker",
+                "bootstrap.servers": settings.database.kafka_servers,
+                "client.id": service_name,
                 "acks": "all",
                 "retries": 3,
                 "retry.backoff.ms": 100,
@@ -273,7 +275,7 @@ class SearchProjectionWorker:
     async def _heartbeat_loop(self, *, handler: str, event_id: str) -> None:
         if not self.processed:
             return
-        interval = parse_int_env("PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS", 30, min_value=1, max_value=3600)
+        interval = int(get_settings().event_sourcing.processed_event_heartbeat_interval_seconds)
         while True:
             try:
                 await asyncio.sleep(interval)
@@ -363,8 +365,9 @@ class SearchProjectionWorker:
 
 
 async def main() -> None:
+    log_level = get_settings().observability.log_level
     logging.basicConfig(
-        level=os.getenv("LOG_LEVEL", "INFO"),
+        level=log_level,
         format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
     )
     install_trace_context_filter()

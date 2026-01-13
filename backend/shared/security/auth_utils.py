@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from typing import Iterable, Mapping, Optional
 
+from shared.config.settings import get_settings
 from shared.utils.env_utils import parse_bool
 
 _DB_SCOPE_HEADER_KEYS = (
@@ -15,8 +16,24 @@ _DB_SCOPE_HEADER_KEYS = (
 
 
 def get_expected_token(env_keys: Iterable[str]) -> Optional[str]:
+    settings = get_settings()
+    auth = settings.auth
+    clients = settings.clients
+
+    values_by_key: dict[str, Optional[str]] = {
+        "BFF_ADMIN_TOKEN": auth.bff_admin_token,
+        "BFF_WRITE_TOKEN": auth.bff_write_token,
+        "BFF_AGENT_TOKEN": auth.bff_agent_token,
+        "OMS_ADMIN_TOKEN": auth.oms_admin_token,
+        "OMS_WRITE_TOKEN": auth.oms_write_token,
+        "ADMIN_API_KEY": auth.admin_api_key,
+        "ADMIN_TOKEN": auth.admin_token,
+        # Internal client tokens (used by workers/services for service-to-service calls)
+        "OMS_CLIENT_TOKEN": clients.oms_client_token,
+    }
+
     for key in env_keys:
-        value = (os.getenv(key) or "").strip()
+        value = (values_by_key.get(key) or "").strip()
         if value:
             return value
     return None
@@ -33,8 +50,14 @@ def extract_presented_token(headers: Mapping[str, str]) -> Optional[str]:
 
 
 def auth_disable_allowed(allow_disable_env_keys: Iterable[str]) -> bool:
+    auth = get_settings().auth
+    allowed_by_key: dict[str, bool] = {
+        "ALLOW_INSECURE_BFF_AUTH_DISABLE": bool(auth.allow_insecure_bff_auth_disable),
+        "ALLOW_INSECURE_OMS_AUTH_DISABLE": bool(auth.allow_insecure_oms_auth_disable),
+        "ALLOW_INSECURE_AUTH_DISABLE": bool(auth.allow_insecure_auth_disable),
+    }
     for key in allow_disable_env_keys:
-        if parse_bool(os.getenv(key, "")) is True:
+        if allowed_by_key.get(str(key), False):
             return True
     return False
 
@@ -47,10 +70,18 @@ def auth_required(
     allow_pytest: bool = False,
     pytest_env_key: str = "PYTEST_CURRENT_TEST",
 ) -> bool:
-    parsed = parse_bool(os.getenv(require_env_key, ""))
+    settings = get_settings()
+    auth = settings.auth
+
+    if require_env_key == "BFF_REQUIRE_AUTH":
+        return auth.is_bff_auth_required(allow_pytest=allow_pytest, default_required=default_required)
+    if require_env_key == "OMS_REQUIRE_AUTH":
+        return auth.is_oms_auth_required(default_required=default_required)
+
+    parsed = parse_bool(os.environ.get(require_env_key, ""))
     if parsed is not None:
         return parsed
-    if allow_pytest and os.getenv(pytest_env_key):
+    if allow_pytest and os.environ.get(pytest_env_key):
         return False
     if get_expected_token(token_env_keys):
         return True
@@ -58,10 +89,18 @@ def auth_required(
 
 
 def get_exempt_paths(env_key: str, *, defaults: Iterable[str]) -> set[str]:
-    raw = (os.getenv(env_key) or "").strip()
-    if not raw:
+    auth = get_settings().auth
+    if env_key == "BFF_AUTH_EXEMPT_PATHS":
+        raw = auth.bff_auth_exempt_paths
+    elif env_key == "OMS_AUTH_EXEMPT_PATHS":
+        raw = auth.oms_auth_exempt_paths
+    else:
+        raw = os.environ.get(env_key)
+
+    value = str(raw or "").strip()
+    if not value:
         return set(defaults)
-    return {path.strip() for path in raw.split(",") if path.strip()} or set(defaults)
+    return {path.strip() for path in value.split(",") if path.strip()} or set(defaults)
 
 
 def is_exempt_path(path: str, *, exempt_paths: Iterable[str]) -> bool:
@@ -82,7 +121,11 @@ def enforce_db_scope(
     db_name: str,
     require_env_key: str = "BFF_REQUIRE_DB_SCOPE",
 ) -> None:
-    required = parse_bool(os.getenv(require_env_key, "")) is True
+    required = False
+    if require_env_key == "BFF_REQUIRE_DB_SCOPE":
+        required = bool(get_settings().auth.bff_require_db_scope)
+    else:
+        required = parse_bool(os.environ.get(require_env_key, "")) is True
     scope = get_db_scope(headers)
     if not scope:
         if required:

@@ -18,7 +18,6 @@ import asyncio
 from datetime import datetime, timezone
 from typing import List, AsyncIterator, Optional, Dict, Any, AsyncGenerator
 from datetime import timedelta
-import os
 import hashlib
 from urllib.parse import urlparse
 
@@ -27,6 +26,7 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from shared.config.service_config import ServiceConfig
+from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import enrich_metadata_with_current_trace
 from shared.services.aggregate_sequence_allocator import AggregateSequenceAllocator
@@ -67,34 +67,36 @@ class EventStore:
         self.session = None
         self.s3_client = None
         self._sequence_allocator: Optional[AggregateSequenceAllocator] = None
-        self._sequence_mode = os.getenv("EVENT_STORE_SEQUENCE_ALLOCATOR_MODE", "postgres").strip().lower()
-        self._lineage_enabled = os.getenv("ENABLE_LINEAGE", "true").strip().lower() in {"1", "true", "yes", "on"}
-        self._audit_enabled = os.getenv("ENABLE_AUDIT_LOGS", "true").strip().lower() in {"1", "true", "yes", "on"}
         self._lineage_store: Optional[Any] = None
         self._audit_store: Optional[Any] = None
+
+    @property
+    def _sequence_mode(self) -> str:
+        value = str(get_settings().event_sourcing.event_store_sequence_allocator_mode or "").strip().lower()
+        return value or "postgres"
+
+    @property
+    def _lineage_enabled(self) -> bool:
+        return bool(get_settings().observability.enable_lineage)
+
+    @property
+    def _audit_enabled(self) -> bool:
+        return bool(get_settings().observability.enable_audit_logs)
 
     def _s3_client_kwargs(self) -> Dict[str, Any]:
         parsed = urlparse(self.endpoint_url)
         scheme = (parsed.scheme or "http").lower()
         use_ssl = scheme == "https"
-        require_tls = os.getenv("EVENT_STORE_REQUIRE_TLS", "false").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
+        require_tls = bool(get_settings().event_sourcing.event_store_require_tls)
         if require_tls and not use_ssl:
             raise RuntimeError(
                 f"Event Store requires TLS but endpoint is not https: {self.endpoint_url}"
             )
-        verify_ssl = os.getenv("EVENT_STORE_SSL_VERIFY", "true").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
+        verify_ssl = bool(get_settings().event_sourcing.event_store_ssl_verify)
 
-        addressing_style = (os.getenv("EVENT_STORE_S3_ADDRESSING_STYLE") or "").strip().lower()
+        addressing_style = (
+            str(get_settings().event_sourcing.event_store_s3_addressing_style or "").strip().lower()
+        )
         if addressing_style in {"path", "virtual"}:
             client_config = Config(s3={"addressing_style": addressing_style})
         else:
@@ -299,9 +301,10 @@ class EventStore:
         if self._sequence_allocator:
             return self._sequence_allocator
 
+        settings = get_settings().event_sourcing
         allocator = AggregateSequenceAllocator(
-            schema=os.getenv("EVENT_STORE_SEQUENCE_SCHEMA", "spice_event_registry"),
-            handler_prefix=os.getenv("EVENT_STORE_SEQUENCE_HANDLER_PREFIX", "write_side"),
+            schema=settings.event_store_sequence_schema,
+            handler_prefix=settings.event_store_sequence_handler_prefix,
         )
         await allocator.connect()
         self._sequence_allocator = allocator
@@ -367,7 +370,7 @@ class EventStore:
             if not isinstance(db_name, str) or not db_name:
                 return int(seed or 0)
 
-            base_branch = os.getenv("BRANCH_VIRTUALIZATION_BASE_BRANCH", "main").strip() or "main"
+            base_branch = get_settings().branch_virtualization.base_branch
 
             base_aggregate_id: Optional[str] = None
             if event.aggregate_type == "Instance":
@@ -639,7 +642,7 @@ class EventStore:
         existing_hash = self._stable_hash(existing_norm)
         incoming_hash = self._stable_hash(incoming_norm)
 
-        mode = os.getenv("EVENT_STORE_IDEMPOTENCY_MISMATCH_MODE", "error").strip().lower()
+        mode = str(get_settings().event_sourcing.event_store_idempotency_mismatch_mode or "").strip().lower() or "error"
         message = (
             f"event_id reuse with different command payload (source={source}) "
             f"event_id={incoming.event_id} existing_sha256={existing_hash} incoming_sha256={incoming_hash}"

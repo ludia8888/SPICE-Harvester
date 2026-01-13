@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import signal
 from collections import Counter
 from contextlib import suppress
@@ -27,7 +26,7 @@ from oms.services.async_terminus import AsyncTerminusService
 from oms.services.ontology_resources import OntologyResourceService
 from shared.config.app_config import AppConfig
 from shared.config.service_config import ServiceConfig
-from shared.config.settings import settings as app_settings
+from shared.config.settings import get_settings
 from shared.errors.enterprise_catalog import is_external_code, resolve_enterprise_error
 from shared.errors.error_types import ErrorCode
 from shared.models.event_envelope import EventEnvelope
@@ -86,8 +85,9 @@ from shared.utils.writeback_paths import (
 )
 from shared.utils.writeback_lifecycle import derive_lifecycle_id
 
+_LOG_LEVEL = get_settings().observability.log_level
 logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
+    level=_LOG_LEVEL,
     format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
 )
 install_trace_context_filter()
@@ -151,6 +151,9 @@ class _ActionProcessingError(Exception):
 
 class ActionWorker:
     def __init__(self) -> None:
+        settings = get_settings()
+        cfg = settings.workers.action
+
         self.running = False
         self.tracing = get_tracing_service("action-worker")
         self.metrics = get_metrics_collector("action-worker")
@@ -158,9 +161,10 @@ class ActionWorker:
         self.consumer: Optional[Consumer] = None
         self.dlq_producer: Optional[Producer] = None
         self.dlq_topic = AppConfig.ACTION_COMMANDS_DLQ_TOPIC
-        self.dlq_flush_timeout_seconds = float(os.getenv("ACTION_WORKER_DLQ_FLUSH_TIMEOUT_SECONDS", "10") or "10")
+        self.dlq_flush_timeout_seconds = float(cfg.dlq_flush_timeout_seconds)
+        self.max_retry_attempts = int(cfg.max_retry_attempts)
 
-        self.enable_processed_event_registry = app_settings.event_sourcing.enable_processed_event_registry
+        self.enable_processed_event_registry = settings.event_sourcing.enable_processed_event_registry
         self.processed_event_registry: Optional[ProcessedEventRegistry] = None
 
         self.action_logs = ActionLogRegistry()
@@ -188,12 +192,15 @@ class ActionWorker:
         self.consumer.subscribe([AppConfig.ACTION_COMMANDS_TOPIC])
         logger.info("ActionWorker subscribed to topic=%s group=%s", AppConfig.ACTION_COMMANDS_TOPIC, group_id)
 
+        settings = get_settings()
+        cfg = settings.workers.action
+        service_name = settings.observability.service_name or "action-worker-dlq"
         self.dlq_producer = Producer(
             {
                 "bootstrap.servers": self.kafka_servers,
-                "client.id": os.getenv("SERVICE_NAME") or "action-worker-dlq",
+                "client.id": service_name,
                 "acks": "all",
-                "retries": int(os.getenv("ACTION_WORKER_DLQ_RETRIES", "10") or "10"),
+                "retries": int(cfg.dlq_retries),
                 "retry.backoff.ms": 250,
                 "linger.ms": 10,
                 "compression.type": "snappy",
@@ -216,12 +223,13 @@ class ActionWorker:
             self.dataset_registry = DatasetRegistry()
             await self.dataset_registry.connect()
 
+        settings = get_settings()
         self.lakefs_client = LakeFSClient()
-        self.lakefs_storage = create_lakefs_storage_service(app_settings)
+        self.lakefs_storage = create_lakefs_storage_service(settings)
         if not self.lakefs_storage:
             raise RuntimeError("LakeFSStorageService unavailable (boto3 missing?)")
 
-        self.base_storage = create_storage_service(app_settings)
+        self.base_storage = create_storage_service(settings)
         if not self.base_storage:
             raise RuntimeError("StorageService unavailable (boto3 missing?)")
 
@@ -230,9 +238,9 @@ class ActionWorker:
 
         connection_info = ConnectionConfig(
             server_url=ServiceConfig.get_terminus_url(),
-            user=app_settings.database.terminus_user,
-            account=app_settings.database.terminus_account,
-            key=app_settings.database.terminus_password,
+            user=settings.database.terminus_user,
+            account=settings.database.terminus_account,
+            key=settings.database.terminus_password,
         )
         self.terminus = AsyncTerminusService(connection_info)
 
@@ -408,7 +416,7 @@ class ActionWorker:
             except _ActionProcessingError as e:
                 cause = e.cause or e
                 attempt_count = int(getattr(e, "attempt_count", 1) or 1)
-                max_attempts = int(os.getenv("ACTION_WORKER_MAX_RETRY_ATTEMPTS", "5") or "5")
+                max_attempts = self.max_retry_attempts
                 retryable = self._is_retryable_error(cause)
 
                 if retryable and attempt_count < max_attempts:

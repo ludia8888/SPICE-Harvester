@@ -18,7 +18,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -31,6 +30,7 @@ from data_connector.google_sheets.service import GoogleSheetsService
 from data_connector.google_sheets.utils import normalize_sheet_data
 from shared.config.app_config import AppConfig
 from shared.config.service_config import ServiceConfig
+from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import (
     attach_context_from_kafka,
@@ -44,7 +44,6 @@ from shared.services.lineage_store import LineageStore
 from shared.services.processed_event_registry import ClaimDecision, ProcessedEventRegistry
 from shared.services.sheet_import_service import FieldMapping, SheetImportService
 from shared.security.auth_utils import get_expected_token
-from shared.utils.env_utils import parse_int_env
 from shared.utils.import_type_normalization import normalize_import_target_type
 from shared.utils.time_utils import utcnow
 
@@ -56,16 +55,19 @@ _BFF_TOKEN_ENV_KEYS = ("BFF_ADMIN_TOKEN", "BFF_WRITE_TOKEN", "ADMIN_API_KEY", "A
 
 class ConnectorSyncWorker:
     def __init__(self) -> None:
+        settings = get_settings()
+        cfg = settings.workers.connector_sync
+
         self.running = False
 
         self.topic = AppConfig.CONNECTOR_UPDATES_TOPIC
         self.dlq_topic = AppConfig.CONNECTOR_UPDATES_DLQ_TOPIC
-        self.group_id = (os.getenv("CONNECTOR_SYNC_GROUP") or "connector-sync-worker-group").strip()
-        self.handler = (os.getenv("CONNECTOR_SYNC_HANDLER") or "connector_sync_worker").strip()
+        self.group_id = str(cfg.group or "connector-sync-worker-group").strip() or "connector-sync-worker-group"
+        self.handler = str(cfg.handler or "connector_sync_worker").strip() or "connector_sync_worker"
 
-        self.max_retries = parse_int_env("CONNECTOR_SYNC_MAX_RETRIES", 5, min_value=1, max_value=100)
-        self.backoff_base = parse_int_env("CONNECTOR_SYNC_BACKOFF_BASE_SECONDS", 2, min_value=0, max_value=300)
-        self.backoff_max = parse_int_env("CONNECTOR_SYNC_BACKOFF_MAX_SECONDS", 60, min_value=1, max_value=3600)
+        self.max_retries = int(cfg.max_retries)
+        self.backoff_base = int(cfg.backoff_base_seconds)
+        self.backoff_max = int(cfg.backoff_max_seconds)
         self.tracing = get_tracing_service("connector-sync-worker")
         self.metrics = get_metrics_collector("connector-sync-worker")
 
@@ -104,7 +106,7 @@ class ConnectorSyncWorker:
             self.lineage = None
 
         # Connector adapter (v1: google sheets)
-        api_key = (os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_SHEETS_API_KEY") or "").strip() or None
+        api_key = get_settings().google_sheets.google_sheets_api_key
         self.sheets = GoogleSheetsService(api_key=api_key)
 
         # HTTP client to call BFF (auth is fail-closed in prod).
@@ -133,7 +135,7 @@ class ConnectorSyncWorker:
         self.dlq_producer = Producer(
             {
                 "bootstrap.servers": ServiceConfig.get_kafka_bootstrap_servers(),
-                "client.id": os.getenv("SERVICE_NAME") or "connector-sync-worker",
+                "client.id": get_settings().observability.service_name or "connector-sync-worker",
                 "acks": "all",
                 "retries": 3,
                 "retry.backoff.ms": 100,
@@ -179,7 +181,7 @@ class ConnectorSyncWorker:
     async def _heartbeat_loop(self, *, handler: str, event_id: str) -> None:
         if not self.processed:
             return
-        interval = parse_int_env("PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS", 30, min_value=1, max_value=600)
+        interval = int(get_settings().event_sourcing.processed_event_heartbeat_interval_seconds)
         while True:
             await asyncio.sleep(interval)
             ok = await self.processed.heartbeat(handler=handler, event_id=event_id)
@@ -607,8 +609,9 @@ class ConnectorSyncWorker:
 
 
 async def _main() -> None:
+    log_level = get_settings().observability.log_level
     logging.basicConfig(
-        level=os.getenv("LOG_LEVEL", "INFO"),
+        level=log_level,
         format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
     )
     install_trace_context_filter()

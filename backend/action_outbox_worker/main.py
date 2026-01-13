@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import signal
 import time
 from contextlib import suppress
@@ -25,7 +24,7 @@ from typing import Any, Dict, Optional
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from shared.config.app_config import AppConfig
-from shared.config.settings import settings as app_settings
+from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
 from shared.models.events import ActionAppliedEvent
 from shared.observability.context_propagation import attach_context_from_carrier, carrier_from_envelope_metadata
@@ -45,8 +44,9 @@ from shared.services.processed_event_registry import (
 from shared.utils.resource_rid import strip_rid_revision
 from shared.utils.writeback_paths import queue_entry_key, ref_key, writeback_patchset_key
 
+_LOG_LEVEL = get_settings().observability.log_level
 logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
+    level=_LOG_LEVEL,
     format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
 )
 install_trace_context_filter()
@@ -110,7 +110,8 @@ class ActionOutboxWorker:
         await event_store.connect()
         await self.action_logs.connect()
 
-        if app_settings.event_sourcing.enable_processed_event_registry:
+        settings = get_settings()
+        if settings.event_sourcing.enable_processed_event_registry:
             self.processed_event_registry = ProcessedEventRegistry()
             try:
                 await self.processed_event_registry.connect()
@@ -119,7 +120,7 @@ class ActionOutboxWorker:
                 self.processed_event_registry = None
 
         self.lakefs_client = LakeFSClient()
-        self.lakefs_storage = create_lakefs_storage_service(app_settings)
+        self.lakefs_storage = create_lakefs_storage_service(settings)
         if not self.lakefs_storage:
             raise RuntimeError("LakeFSStorageService unavailable (boto3 missing?)")
 
@@ -355,8 +356,9 @@ class ActionOutboxWorker:
 
     async def run(self) -> None:
         self.running = True
-        poll_seconds = float(os.getenv("ACTION_OUTBOX_POLL_SECONDS", "2") or "2")
-        batch = int(os.getenv("ACTION_OUTBOX_BATCH_SIZE", "100") or "100")
+        cfg = get_settings().workers.action_outbox
+        poll_seconds = float(cfg.poll_seconds)
+        batch = int(cfg.batch_size)
 
         while self.running:
             try:

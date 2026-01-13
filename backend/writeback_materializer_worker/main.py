@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-import os
 import signal
 import time
 from contextlib import suppress
@@ -19,7 +18,7 @@ from typing import Any, Dict, Optional, Set, Tuple
 from uuid import uuid4
 
 from shared.config.app_config import AppConfig
-from shared.config.settings import settings as app_settings
+from shared.config.settings import get_settings
 from shared.observability.logging import install_trace_context_filter
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
@@ -36,8 +35,9 @@ from shared.utils.writeback_paths import (
     snapshot_object_key,
 )
 
+_LOG_LEVEL = get_settings().observability.log_level
 logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
+    level=_LOG_LEVEL,
     format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
 )
 install_trace_context_filter()
@@ -88,11 +88,12 @@ class WritebackMaterializerWorker:
         self.base_storage: Optional[StorageService] = None
 
     async def initialize(self) -> None:
+        settings = get_settings()
         self.lakefs_client = LakeFSClient()
-        self.lakefs_storage = create_lakefs_storage_service(app_settings)
+        self.lakefs_storage = create_lakefs_storage_service(settings)
         if not self.lakefs_storage:
             raise RuntimeError("LakeFSStorageService unavailable (boto3 missing?)")
-        self.base_storage = create_storage_service(app_settings)
+        self.base_storage = create_storage_service(settings)
         if not self.base_storage:
             raise RuntimeError("StorageService unavailable (boto3 missing?)")
 
@@ -159,7 +160,7 @@ class WritebackMaterializerWorker:
     async def _materialize_db_inner(self, *, db_name: str) -> None:
         repo = AppConfig.ONTOLOGY_WRITEBACK_REPO
         branch = AppConfig.get_ontology_writeback_branch(db_name)
-        base_branch = (os.getenv("WRITEBACK_MATERIALIZER_BASE_BRANCH") or "main").strip() or "main"
+        base_branch = get_settings().workers.writeback_materializer.base_branch
 
         await self._ensure_branch(repository=repo, branch=branch)
 
@@ -319,12 +320,12 @@ class WritebackMaterializerWorker:
 
     async def run(self) -> None:
         self.running = True
-        interval = float(os.getenv("WRITEBACK_MATERIALIZER_INTERVAL_SECONDS", str(6 * 60 * 60)) or str(6 * 60 * 60))
-        run_once = os.getenv("WRITEBACK_MATERIALIZER_RUN_ONCE", "").strip().lower() in {"1", "true", "yes", "on"}
+        cfg = get_settings().workers.writeback_materializer
+        interval = float(cfg.interval_seconds)
+        run_once = bool(cfg.run_once)
 
         while self.running:
-            raw = (os.getenv("WRITEBACK_MATERIALIZER_DB_NAMES") or "").strip()
-            dbs = [p.strip() for p in raw.split(",") if p.strip()]
+            dbs = cfg.db_names_list
             if not dbs:
                 logger.info("WRITEBACK_MATERIALIZER_DB_NAMES is empty; sleeping")
             for db_name in dbs:

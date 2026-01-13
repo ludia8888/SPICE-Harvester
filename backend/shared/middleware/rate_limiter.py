@@ -6,13 +6,13 @@ Based on Context7 recommendations for API security
 
 import hmac
 import hashlib
-import os
 import time
 from typing import Optional, Dict, Any, Tuple, Mapping
 from functools import wraps
 from fastapi import FastAPI, Request, HTTPException, status
 import redis.asyncio as redis
 
+from shared.config.settings import get_settings
 from shared.config.rate_limit_config import rate_limit_config
 from shared.config.service_config import ServiceConfig
 from shared.security.auth_utils import extract_presented_token
@@ -20,23 +20,12 @@ from shared.utils.app_logger import get_logger
 
 logger = get_logger(__name__)
 
-_ADMIN_BYPASS_TOKEN_ENV_KEYS = (
-    "BFF_ADMIN_TOKEN",
-    "BFF_WRITE_TOKEN",
-    "OMS_ADMIN_TOKEN",
-    "OMS_WRITE_TOKEN",
-    "ADMIN_API_KEY",
-    "ADMIN_TOKEN",
-)
-
-
 def _is_valid_admin_bypass_token(headers: Mapping[str, str]) -> bool:
     presented = extract_presented_token(headers)
     if not presented:
         return False
 
-    for key in _ADMIN_BYPASS_TOKEN_ENV_KEYS:
-        expected = (os.getenv(key) or "").strip()
+    for expected in get_settings().auth.admin_bypass_tokens:
         if expected and hmac.compare_digest(presented, expected):
             return True
     return False
@@ -239,8 +228,9 @@ class RateLimiter:
         self.redis_client: Optional[redis.Redis] = None
         self.buckets: Dict[str, TokenBucket] = {}
         self._local_buckets: Dict[str, LocalTokenBucket] = {}
-        self.fail_open = os.getenv("RATE_LIMIT_FAIL_OPEN", "false").lower() in ("true", "1", "yes", "on")
-        self._local_max_entries = int(os.getenv("RATE_LIMIT_LOCAL_MAX_ENTRIES", "10000"))
+        rate_limit = get_settings().rate_limit
+        self.fail_open = bool(rate_limit.fail_open)
+        self._local_max_entries = int(rate_limit.local_max_entries)
         # Redis reconnect guard.
         self._next_retry_at: float = 0.0
         self._last_init_error: Optional[str] = None

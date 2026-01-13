@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
@@ -16,48 +15,29 @@ from typing import Any, Dict, Optional
 import httpx
 from fastapi import FastAPI
 
+from shared.config.settings import get_settings
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.logging import install_trace_context_filter
 from shared.observability.tracing import get_tracing_service
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.service_factory import ServiceInfo, create_fastapi_service
-from shared.utils.env_utils import parse_bool_env, parse_int_env
 from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
-_ALERT_WEBHOOK_ENV_KEYS = ("INGEST_RECONCILER_ALERT_WEBHOOK_URL", "ALERT_WEBHOOK_URL")
-
-
-def _resolve_webhook_url() -> Optional[str]:
-    for key in _ALERT_WEBHOOK_ENV_KEYS:
-        value = (os.getenv(key) or "").strip()
-        if value:
-            return value
-    return None
-
 
 class IngestReconcilerWorker:
     def __init__(self) -> None:
-        self.enabled = bool(parse_bool_env("ENABLE_DATASET_INGEST_RECONCILER", True))
-        self.poll_interval_seconds = parse_int_env(
-            "DATASET_INGEST_RECONCILER_POLL_SECONDS", 60, min_value=5, max_value=3600
-        )
-        self.stale_after_seconds = parse_int_env(
-            "DATASET_INGEST_RECONCILER_STALE_SECONDS", 3600, min_value=60, max_value=86_400
-        )
-        self.limit = parse_int_env("DATASET_INGEST_RECONCILER_LIMIT", 200, min_value=1, max_value=5000)
-        self.alert_published_threshold = parse_int_env(
-            "INGEST_RECONCILER_ALERT_PUBLISHED_THRESHOLD", 1, min_value=0, max_value=1_000_000
-        )
-        self.alert_aborted_threshold = parse_int_env(
-            "INGEST_RECONCILER_ALERT_ABORTED_THRESHOLD", 1, min_value=0, max_value=1_000_000
-        )
-        self.alert_on_error = bool(parse_bool_env("INGEST_RECONCILER_ALERT_ON_ERROR", True))
-        self.alert_cooldown_seconds = parse_int_env(
-            "INGEST_RECONCILER_ALERT_COOLDOWN_SECONDS", 300, min_value=0, max_value=86_400
-        )
-        self.alert_webhook_url = _resolve_webhook_url()
+        cfg = get_settings().workers.ingest_reconciler
+        self.enabled = bool(cfg.enabled)
+        self.poll_interval_seconds = int(cfg.poll_seconds)
+        self.stale_after_seconds = int(cfg.stale_seconds)
+        self.limit = int(cfg.limit)
+        self.alert_published_threshold = int(cfg.alert_published_threshold)
+        self.alert_aborted_threshold = int(cfg.alert_aborted_threshold)
+        self.alert_on_error = bool(cfg.alert_on_error)
+        self.alert_cooldown_seconds = int(cfg.alert_cooldown_seconds)
+        self.alert_webhook_url = cfg.alert_webhook_url
 
         self.dataset_registry: Optional[DatasetRegistry] = None
         self.http: Optional[httpx.AsyncClient] = None
@@ -201,7 +181,7 @@ SERVICE_INFO = ServiceInfo(
     name="ingest-reconciler-worker",
     title="Dataset Ingest Reconciler",
     description="Reconciles ingest atomicity and emits operational metrics.",
-    port=int(os.getenv("INGEST_RECONCILER_PORT", "8012")),
+    port=int(get_settings().workers.ingest_reconciler.port),
     host="0.0.0.0",
 )
 
@@ -237,8 +217,10 @@ app = create_fastapi_service(
 def main() -> None:
     import uvicorn
 
+    settings = get_settings()
+    log_level = settings.observability.log_level
     logging.basicConfig(
-        level=os.getenv("LOG_LEVEL", "INFO"),
+        level=log_level,
         format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
     )
     install_trace_context_filter()
@@ -246,7 +228,7 @@ def main() -> None:
         "ingest_reconciler_worker.main:app",
         host="0.0.0.0",
         port=SERVICE_INFO.port,
-        log_level=os.getenv("LOG_LEVEL", "INFO").lower(),
+        log_level=log_level.lower(),
     )
 
 

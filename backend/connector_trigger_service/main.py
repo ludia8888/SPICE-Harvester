@@ -15,7 +15,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -27,6 +26,7 @@ from data_connector.google_sheets.service import GoogleSheetsService
 from data_connector.google_sheets.utils import calculate_data_hash
 from shared.config.app_config import AppConfig
 from shared.config.service_config import ServiceConfig
+from shared.config.settings import get_settings
 from shared.observability.context_propagation import (
     attach_context_from_carrier,
     carrier_from_envelope_metadata,
@@ -37,7 +37,6 @@ from shared.observability.logging import install_trace_context_filter
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.connector_registry import ConnectorRegistry, ConnectorSource
-from shared.utils.env_utils import parse_int_env
 from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
@@ -45,12 +44,15 @@ logger = logging.getLogger(__name__)
 
 class ConnectorTriggerService:
     def __init__(self) -> None:
+        settings = get_settings()
+        cfg = settings.workers.connector_trigger
+
         self.running = False
         self.topic = AppConfig.CONNECTOR_UPDATES_TOPIC
-        self.source_type = (os.getenv("CONNECTOR_TRIGGER_SOURCE_TYPE") or "google_sheets").strip() or "google_sheets"
-        self.tick_seconds = parse_int_env("CONNECTOR_TRIGGER_TICK_SECONDS", 5, min_value=1, max_value=3600)
-        self.poll_concurrency = parse_int_env("CONNECTOR_TRIGGER_POLL_CONCURRENCY", 5, min_value=1, max_value=100)
-        self.outbox_batch = parse_int_env("CONNECTOR_TRIGGER_OUTBOX_BATCH", 50, min_value=1, max_value=500)
+        self.source_type = str(cfg.source_type or "google_sheets").strip() or "google_sheets"
+        self.tick_seconds = int(cfg.tick_seconds)
+        self.poll_concurrency = int(cfg.poll_concurrency)
+        self.outbox_batch = int(cfg.outbox_batch)
         self.tracing = get_tracing_service("connector-trigger-service")
         self.metrics = get_metrics_collector("connector-trigger-service")
 
@@ -65,13 +67,13 @@ class ConnectorTriggerService:
         await self.registry.initialize()
 
         # Connector library (no polling inside)
-        api_key = (os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_SHEETS_API_KEY") or "").strip() or None
+        api_key = get_settings().google_sheets.google_sheets_api_key
         self.sheets = GoogleSheetsService(api_key=api_key)
 
         # Kafka producer (blocking)
         kafka_config = {
             "bootstrap.servers": ServiceConfig.get_kafka_bootstrap_servers(),
-            "client.id": os.getenv("SERVICE_NAME") or "connector-trigger-service",
+            "client.id": get_settings().observability.service_name or "connector-trigger-service",
             "acks": "all",
             "retries": 3,
             "retry.backoff.ms": 100,
@@ -330,8 +332,9 @@ class ConnectorTriggerService:
 
 
 async def _main() -> None:
+    log_level = get_settings().observability.log_level
     logging.basicConfig(
-        level=os.getenv("LOG_LEVEL", "INFO"),
+        level=log_level,
         format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
     )
     install_trace_context_filter()

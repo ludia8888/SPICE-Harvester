@@ -23,7 +23,7 @@ from shared.config.search_config import (
     get_default_index_settings,
 )
 from shared.config.app_config import AppConfig
-from shared.config.settings import settings as app_settings
+from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
 from shared.models.events import (
     BaseEvent, EventType,
@@ -56,8 +56,9 @@ from shared.observability.context_propagation import attach_context_from_kafka, 
 from shared.observability.logging import install_trace_context_filter
 
 # 로깅 설정
+_LOG_LEVEL = get_settings().observability.log_level
 logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
+    level=_LOG_LEVEL,
     format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
 )
 install_trace_context_filter()
@@ -76,6 +77,9 @@ class ProjectionWorker:
     """
 
     def __init__(self):
+        settings = get_settings()
+        worker_cfg = settings.workers.projection
+
         self.running = False
         self.kafka_servers = ServiceConfig.get_kafka_bootstrap_servers()
         self.consumer: Optional[Consumer] = None
@@ -89,14 +93,12 @@ class ProjectionWorker:
         self.lakefs_storage: Optional[LakeFSStorageService] = None
 
         # Durable idempotency (Postgres)
-        self.enable_processed_event_registry = (
-            os.getenv("ENABLE_PROCESSED_EVENT_REGISTRY", "true").lower() == "true"
-        )
+        self.enable_processed_event_registry = bool(settings.event_sourcing.enable_processed_event_registry)
         self.processed_event_registry: Optional[ProcessedEventRegistry] = None
 
         # First-class provenance/audit (fail-open by default)
-        self.enable_lineage = os.getenv("ENABLE_LINEAGE", "true").strip().lower() in {"1", "true", "yes", "on"}
-        self.enable_audit_logs = os.getenv("ENABLE_AUDIT_LOGS", "true").strip().lower() in {"1", "true", "yes", "on"}
+        self.enable_lineage = bool(settings.observability.enable_lineage)
+        self.enable_audit_logs = bool(settings.observability.enable_audit_logs)
         self.lineage_store: Optional[LineageStore] = None
         self.audit_store: Optional[AuditLogStore] = None
 
@@ -107,7 +109,7 @@ class ProjectionWorker:
         self.dlq_topic = AppConfig.PROJECTION_DLQ_TOPIC
 
         # 재시도 설정
-        self.max_retries = int(os.getenv("PROJECTION_WORKER_MAX_RETRIES", "5"))
+        self.max_retries = int(worker_cfg.max_retries)
         self.retry_count = {}
 
         # Cache Stampede 방지 모니터링 메트릭
@@ -300,8 +302,8 @@ class ProjectionWorker:
                     "origin_service": meta.get("origin_service"),
                     "ontology_ref": meta.get("ontology_ref"),
                     "ontology_commit": meta.get("ontology_commit"),
-                    "run_id": os.getenv("PIPELINE_RUN_ID") or os.getenv("RUN_ID") or os.getenv("EXECUTION_ID"),
-                    "code_sha": os.getenv("CODE_SHA") or os.getenv("GIT_SHA") or os.getenv("COMMIT_SHA"),
+                    "run_id": get_settings().observability.run_id,
+                    "code_sha": get_settings().observability.code_sha,
                 }
                 if ontology_payload:
                     audit_metadata["ontology"] = ontology_payload
@@ -351,7 +353,7 @@ class ProjectionWorker:
     async def _heartbeat_loop(self, *, handler: str, event_id: str) -> None:
         if not self.processed_event_registry:
             return
-        interval = int(os.getenv("PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS", "30"))
+        interval = int(get_settings().event_sourcing.processed_event_heartbeat_interval_seconds)
         while True:
             await asyncio.sleep(interval)
             ok = await self.processed_event_registry.heartbeat(handler=handler, event_id=event_id)
@@ -366,6 +368,7 @@ class ProjectionWorker:
         """워커 초기화"""
         validate_registry_enabled()
         validate_lease_settings()
+        settings = get_settings()
 
         group_id = (AppConfig.PROJECTION_WORKER_GROUP or "projection-worker-group").strip()
 
@@ -392,18 +395,18 @@ class ProjectionWorker:
         })
         
         # Redis 연결 설정 (온톨로지 캐싱용)
-        self.redis_service = create_redis_service(app_settings)
+        self.redis_service = create_redis_service(settings)
         await self.redis_service.connect()
         logger.info("Redis connection established")
         
         # Elasticsearch 연결 설정
-        self.elasticsearch_service = create_elasticsearch_service(app_settings)
+        self.elasticsearch_service = create_elasticsearch_service(settings)
         await self.elasticsearch_service.connect()
         logger.info("Elasticsearch connection established")
 
         # lakeFS storage gateway (required for ActionApplied -> patchset reads). Best-effort on startup.
         try:
-            self.lakefs_storage = create_lakefs_storage_service(app_settings)
+            self.lakefs_storage = create_lakefs_storage_service(settings)
             if self.lakefs_storage:
                 logger.info("lakeFS storage configured for writeback patchset reads")
             else:

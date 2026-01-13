@@ -38,7 +38,7 @@ from shared.services.command_status_service import (
     CommandStatusService as CommandStatusTracker,
     CommandStatus as CommandStatusEnum,
 )
-from shared.config.settings import settings as app_settings
+from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import (
     attach_context_from_kafka,
@@ -66,8 +66,9 @@ from oms.services.async_terminus import AsyncTerminusService
 from oms.services.event_store import EventStore
 from shared.models.config import ConnectionConfig
 
+_LOG_LEVEL = get_settings().observability.log_level
 logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
+    level=_LOG_LEVEL,
     format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
 )
 install_trace_context_filter()
@@ -85,14 +86,18 @@ class StrictInstanceWorker:
     """
     
     def __init__(self):
+        settings = get_settings()
+        worker_cfg = settings.workers.instance
+
         self.running = False
         self.kafka_servers = ServiceConfig.get_kafka_bootstrap_servers()
-        self.enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
+        self.enable_event_sourcing = bool(settings.event_sourcing.enable_event_sourcing)
         self.consumer = None
         self.producer = None
         self.dlq_producer: Optional[Producer] = None
         self.dlq_topic = AppConfig.INSTANCE_COMMANDS_DLQ_TOPIC
-        self.dlq_flush_timeout_seconds = float(os.getenv("INSTANCE_WORKER_DLQ_FLUSH_TIMEOUT_SECONDS", "10") or "10")
+        self.dlq_flush_timeout_seconds = float(worker_cfg.dlq_flush_timeout_seconds)
+        self.max_retry_attempts = int(worker_cfg.max_retry_attempts)
         self.redis_client = None
         self.command_status_service: Optional[CommandStatusTracker] = None
         self.s3_client = None
@@ -100,27 +105,15 @@ class StrictInstanceWorker:
         self.instance_bucket = AppConfig.INSTANCE_BUCKET
 
         # Durable idempotency (Postgres)
-        self.enable_processed_event_registry = (
-            os.getenv("ENABLE_PROCESSED_EVENT_REGISTRY", "true").lower() == "true"
-        )
+        self.enable_processed_event_registry = bool(settings.event_sourcing.enable_processed_event_registry)
         self.processed_event_registry: Optional[ProcessedEventRegistry] = None
         self.event_store: Optional[EventStore] = None
 
         # First-class provenance/audit (fail-open by default)
-        self.enable_lineage = os.getenv("ENABLE_LINEAGE", "true").strip().lower() in {"1", "true", "yes", "on"}
-        self.enable_audit_logs = os.getenv("ENABLE_AUDIT_LOGS", "true").strip().lower() in {"1", "true", "yes", "on"}
-        self.allow_pk_generation = os.getenv("INSTANCE_ALLOW_PK_GENERATION", "false").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
-        self.strict_relationship_schema = os.getenv("INSTANCE_RELATIONSHIP_STRICT", "true").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
+        self.enable_lineage = bool(settings.observability.enable_lineage)
+        self.enable_audit_logs = bool(settings.observability.enable_audit_logs)
+        self.allow_pk_generation = bool(worker_cfg.allow_pk_generation)
+        self.strict_relationship_schema = bool(worker_cfg.relationship_strict)
         self.lineage_store: Optional[LineageStore] = None
         self.audit_store: Optional[AuditLogStore] = None
         self.dataset_registry: Optional[DatasetRegistry] = None
@@ -128,6 +121,8 @@ class StrictInstanceWorker:
         self._consumer_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="instance-worker-kafka")
         self.tracing = get_tracing_service("instance-worker")
         self.metrics = get_metrics_collector("instance-worker")
+        self.run_id = settings.observability.run_id
+        self.code_sha = settings.observability.code_sha
         
         # Lightweight graph principle: only business concepts in graph
         # No system fields or storage details
@@ -166,6 +161,7 @@ class StrictInstanceWorker:
 
         validate_registry_enabled()
         validate_lease_settings()
+        settings = get_settings()
         
         # Kafka Consumer - stable consumer group (at-least-once with manual commit)
         group_id = (AppConfig.INSTANCE_WORKER_GROUP or "instance-worker-group").strip()
@@ -191,7 +187,7 @@ class StrictInstanceWorker:
         
         # Redis (optional - don't fail if not available)
         try:
-            self.redis_service = create_redis_service(app_settings)
+            self.redis_service = create_redis_service(settings)
             await self.redis_service.connect()
             self.redis_client = self.redis_service.client
             self.command_status_service = CommandStatusTracker(self.redis_service)
@@ -235,9 +231,9 @@ class StrictInstanceWorker:
         # TerminusDB
         connection_info = ConnectionConfig(
             server_url=ServiceConfig.get_terminus_url(),
-            user=app_settings.database.terminus_user,
-            account=app_settings.database.terminus_account,
-            key=app_settings.database.terminus_password,
+            user=settings.database.terminus_user,
+            account=settings.database.terminus_account,
+            key=settings.database.terminus_password,
         )
         self.terminus_service = AsyncTerminusService(connection_info)
         await self.terminus_service.connect()
@@ -899,8 +895,8 @@ class StrictInstanceWorker:
                 "service": "instance_worker",
                 "command_id": command_id,
                 "ontology": ontology_version,
-                "run_id": os.getenv("PIPELINE_RUN_ID") or os.getenv("RUN_ID") or os.getenv("EXECUTION_ID"),
-                "code_sha": os.getenv("CODE_SHA") or os.getenv("GIT_SHA") or os.getenv("COMMIT_SHA"),
+                "run_id": self.run_id,
+                "code_sha": self.code_sha,
             },
         )
 
@@ -1235,8 +1231,8 @@ class StrictInstanceWorker:
                     "service": "instance_worker",
                     "command_id": command_id,
                     "ontology": ontology_version,
-                    "run_id": os.getenv("PIPELINE_RUN_ID") or os.getenv("RUN_ID") or os.getenv("EXECUTION_ID"),
-                    "code_sha": os.getenv("CODE_SHA") or os.getenv("GIT_SHA") or os.getenv("COMMIT_SHA"),
+                    "run_id": self.run_id,
+                    "code_sha": self.code_sha,
                 },
             )
 
@@ -1650,7 +1646,7 @@ class StrictInstanceWorker:
         # Branch virtualization: for the *first* write on a non-base branch, the branch stream has no prior domain
         # state. For patch updates, we must rebuild the baseline payload from the base branch stream (typically `main`)
         # at the caller-provided expected_seq boundary.
-        base_branch = (os.getenv("BRANCH_VIRTUALIZATION_BASE_BRANCH") or "main").strip() or "main"
+        base_branch = get_settings().branch_virtualization.base_branch
         try:
             base_branch = validate_branch_name(base_branch)
         except Exception:
@@ -1978,8 +1974,8 @@ class StrictInstanceWorker:
                 "service": "instance_worker",
                 "command_id": command_id,
                 "ontology": ontology_version,
-                "run_id": os.getenv("PIPELINE_RUN_ID") or os.getenv("RUN_ID") or os.getenv("EXECUTION_ID"),
-                "code_sha": os.getenv("CODE_SHA") or os.getenv("GIT_SHA") or os.getenv("COMMIT_SHA"),
+                "run_id": self.run_id,
+                "code_sha": self.code_sha,
             },
         )
 
@@ -2265,8 +2261,8 @@ class StrictInstanceWorker:
                 "service": "instance_worker",
                 "command_id": command_id,
                 "ontology": ontology_version,
-                "run_id": os.getenv("PIPELINE_RUN_ID") or os.getenv("RUN_ID") or os.getenv("EXECUTION_ID"),
-                "code_sha": os.getenv("CODE_SHA") or os.getenv("GIT_SHA") or os.getenv("COMMIT_SHA"),
+                "run_id": self.run_id,
+                "code_sha": self.code_sha,
             },
         )
 
@@ -2566,7 +2562,7 @@ class StrictInstanceWorker:
     async def _heartbeat_loop(self, *, handler: str, event_id: str) -> None:
         if not self.processed_event_registry:
             return
-        interval = int(os.getenv("PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS", "30"))
+        interval = int(get_settings().event_sourcing.processed_event_heartbeat_interval_seconds)
         while True:
             await asyncio.sleep(interval)
             ok = await self.processed_event_registry.heartbeat(handler=handler, event_id=event_id)
@@ -2903,7 +2899,7 @@ class StrictInstanceWorker:
 
                 retryable = self._is_retryable_error(e)
                 attempt_count = int(registry_attempt_count or 1)
-                max_attempts = int(os.getenv("INSTANCE_WORKER_MAX_RETRY_ATTEMPTS", "5"))
+                max_attempts = self.max_retry_attempts
 
                 if retryable and attempt_count < max_attempts:
                     try:

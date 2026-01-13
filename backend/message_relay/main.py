@@ -30,6 +30,7 @@ from confluent_kafka.admin import AdminClient, NewTopic
 
 from shared.config.service_config import ServiceConfig
 from shared.config.app_config import AppConfig
+from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import (
     attach_context_from_carrier,
@@ -41,8 +42,9 @@ from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 
 # 로깅 설정
+_LOG_LEVEL = get_settings().observability.log_level
 logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
+    level=_LOG_LEVEL,
     format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
 )
 install_trace_context_filter()
@@ -97,6 +99,8 @@ class EventPublisher:
     """S3/MinIO Event Store -> Kafka publisher."""
     
     def __init__(self):
+        cfg = get_settings().workers.event_publisher
+
         self.running = False
         self.kafka_servers = ServiceConfig.get_kafka_bootstrap_servers()
         self.producer: Optional[Producer] = None
@@ -107,37 +111,21 @@ class EventPublisher:
         self.secret_key = ServiceConfig.get_minio_secret_key()
         self.session = aioboto3.Session()
 
-        self.checkpoint_key = os.getenv(
-            "EVENT_PUBLISHER_CHECKPOINT_KEY", "checkpoints/event_publisher.json"
-        )
-        self.poll_interval = int(
-            os.getenv("EVENT_PUBLISHER_POLL_INTERVAL")
-            or os.getenv("MESSAGE_RELAY_POLL_INTERVAL")
-            or "3"
-        )
-        self.batch_size = int(
-            os.getenv("EVENT_PUBLISHER_BATCH_SIZE")
-            or os.getenv("MESSAGE_RELAY_BATCH_SIZE")
-            or "200"
-        )
-        self.kafka_flush_batch_size = int(
-            os.getenv("EVENT_PUBLISHER_KAFKA_FLUSH_BATCH_SIZE") or str(self.batch_size)
-        )
-        self.kafka_flush_timeout_s = float(os.getenv("EVENT_PUBLISHER_KAFKA_FLUSH_TIMEOUT_SECONDS", "10"))
-        self.metrics_log_interval_s = int(os.getenv("EVENT_PUBLISHER_METRICS_LOG_INTERVAL_SECONDS", "30"))
-        self.lookback_seconds = int(os.getenv("EVENT_PUBLISHER_LOOKBACK_SECONDS", "600"))
-        self.lookback_max_keys = int(os.getenv("EVENT_PUBLISHER_LOOKBACK_MAX_KEYS", "2000"))
+        self.checkpoint_key = str(cfg.checkpoint_key or "checkpoints/event_publisher.json")
+        self.poll_interval = int(cfg.poll_interval)
+        self.batch_size = int(cfg.batch_size)
+        self.kafka_flush_batch_size = int(cfg.kafka_flush_batch_size_effective)
+        self.kafka_flush_timeout_s = float(cfg.kafka_flush_timeout_seconds)
+        self.metrics_log_interval_s = int(cfg.metrics_log_interval_seconds)
+        self.lookback_seconds = int(cfg.lookback_seconds)
+        self.lookback_max_keys = int(cfg.lookback_max_keys)
         self.tracing = get_tracing_service("message-relay")
         self.metrics = get_metrics_collector("message-relay")
-        if self.lookback_seconds < 0:
-            self.lookback_seconds = 0
-        if self.lookback_max_keys < 0:
-            self.lookback_max_keys = 0
-        self.dedup_max_events = int(os.getenv("EVENT_PUBLISHER_DEDUP_MAX_EVENTS", "10000"))
-        self.dedup_checkpoint_max_events = int(os.getenv("EVENT_PUBLISHER_DEDUP_CHECKPOINT_MAX_EVENTS", "2000"))
+        self.dedup_max_events = int(cfg.dedup_max_events)
+        self.dedup_checkpoint_max_events = int(cfg.dedup_checkpoint_max_events)
         self._recent_published_event_ids = _RecentPublishedEventIds(self.dedup_max_events)
         self._recent_loaded_from_checkpoint = False
-        self.start_timestamp = os.getenv("EVENT_PUBLISHER_START_TIMESTAMP")  # ISO8601 optional
+        self.start_timestamp = cfg.start_timestamp  # ISO8601 optional
 
         self._metrics_total: Dict[str, int] = {
             "index_keys_considered": 0,
@@ -211,7 +199,7 @@ class EventPublisher:
         
     async def ensure_kafka_topics(self):
         """필요한 Kafka 토픽이 존재하는지 확인하고 없으면 생성"""
-        timeout_seconds = int(os.getenv("KAFKA_TOPIC_BOOTSTRAP_TIMEOUT_SECONDS", "120"))
+        timeout_seconds = int(get_settings().workers.event_publisher.kafka_topic_bootstrap_timeout_seconds)
         deadline = time.monotonic() + max(1, timeout_seconds)
         attempt = 0
 

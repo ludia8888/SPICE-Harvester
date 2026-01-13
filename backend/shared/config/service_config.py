@@ -12,9 +12,17 @@ import logging
 import os
 from typing import List, Optional, Tuple
 
-from shared.config.settings import settings as app_settings
+from shared.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+class _SettingsProxy:
+    def __getattr__(self, name: str):  # noqa: ANN001
+        return getattr(get_settings(), name)
+
+
+app_settings = _SettingsProxy()
 
 
 class ServiceConfig:

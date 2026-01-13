@@ -19,7 +19,7 @@ import asyncpg
 
 from shared.config.service_config import ServiceConfig
 from shared.config.app_config import AppConfig
-from shared.config.settings import settings as app_settings
+from shared.config.settings import get_settings
 from shared.models.commands import (
     BaseCommand, CommandType, CommandStatus, 
     OntologyCommand, DatabaseCommand, BranchCommand
@@ -57,8 +57,9 @@ from shared.observability.context_propagation import (
 from shared.observability.logging import install_trace_context_filter
 
 # 로깅 설정
+_LOG_LEVEL = get_settings().observability.log_level
 logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
+    level=_LOG_LEVEL,
     format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
 )
 install_trace_context_filter()
@@ -69,19 +70,22 @@ class OntologyWorker:
     """온톨로지 Command를 처리하는 워커"""
     
     def __init__(self):
+        settings = get_settings()
+        worker_cfg = settings.workers.ontology
+
         self.running = False
         self.kafka_servers = ServiceConfig.get_kafka_bootstrap_servers()
-        self.enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
-        self.enable_processed_event_registry = (
-            os.getenv("ENABLE_PROCESSED_EVENT_REGISTRY", "true").lower() == "true"
-        )
-        self.enable_lineage = os.getenv("ENABLE_LINEAGE", "true").strip().lower() in {"1", "true", "yes", "on"}
-        self.enable_audit_logs = os.getenv("ENABLE_AUDIT_LOGS", "true").strip().lower() in {"1", "true", "yes", "on"}
+        self.enable_event_sourcing = bool(settings.event_sourcing.enable_event_sourcing)
+        self.enable_processed_event_registry = bool(settings.event_sourcing.enable_processed_event_registry)
+        self.enable_lineage = bool(settings.observability.enable_lineage)
+        self.enable_audit_logs = bool(settings.observability.enable_audit_logs)
         self.consumer: Optional[Consumer] = None
         self.producer: Optional[Producer] = None
         self.dlq_producer: Optional[Producer] = None
         self.dlq_topic = AppConfig.ONTOLOGY_COMMANDS_DLQ_TOPIC
-        self.dlq_flush_timeout_seconds = float(os.getenv("ONTOLOGY_WORKER_DLQ_FLUSH_TIMEOUT_SECONDS", "10") or "10")
+        self.dlq_flush_timeout_seconds = float(worker_cfg.dlq_flush_timeout_seconds)
+        self.max_retry_attempts = int(worker_cfg.max_retry_attempts)
+        self.db_ready_poll_seconds = float(worker_cfg.db_ready_poll_seconds)
         self.terminus_service: Optional[AsyncTerminusService] = None
         self.redis_service: Optional[RedisService] = None
         self.command_status_service: Optional[CommandStatusService] = None
@@ -98,7 +102,7 @@ class OntologyWorker:
             return
         loop = asyncio.get_running_loop()
         deadline = loop.time() + float(timeout_seconds)
-        poll = float(os.getenv("ONTOLOGY_WORKER_DB_READY_POLL_SECONDS", "0.5"))
+        poll = float(self.db_ready_poll_seconds)
         last = None
         while loop.time() < deadline:
             last = await self.terminus_service.database_exists(db_name)
@@ -112,7 +116,7 @@ class OntologyWorker:
     async def _heartbeat_loop(self, *, handler: str, event_id: str) -> None:
         if not self.processed_event_registry:
             return
-        interval = int(os.getenv("PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS", "30"))
+        interval = int(get_settings().event_sourcing.processed_event_heartbeat_interval_seconds)
         while True:
             await asyncio.sleep(interval)
             ok = await self.processed_event_registry.heartbeat(handler=handler, event_id=event_id)
@@ -127,6 +131,7 @@ class OntologyWorker:
         """워커 초기화"""
         validate_registry_enabled()
         validate_lease_settings()
+        settings = get_settings()
 
         group_id = (AppConfig.ONTOLOGY_WORKER_GROUP or "ontology-worker-group").strip()
 
@@ -156,16 +161,16 @@ class OntologyWorker:
         # TerminusDB 연결 설정 - 올바른 인증 정보 사용
         connection_info = ConnectionConfig(
             server_url=ServiceConfig.get_terminus_url(),  # Use ServiceConfig for correct endpoint
-            user=app_settings.database.terminus_user,
-            account=app_settings.database.terminus_account,
-            key=app_settings.database.terminus_password,
+            user=settings.database.terminus_user,
+            account=settings.database.terminus_account,
+            key=settings.database.terminus_password,
         )
         self.terminus_service = AsyncTerminusService(connection_info)
         await self.terminus_service.connect()
         
         # Redis 연결 설정 (선택적 - 실패해도 계속 진행)
         try:
-            self.redis_service = create_redis_service(app_settings)
+            self.redis_service = create_redis_service(settings)
             await self.redis_service.connect()
             self.command_status_service = CommandStatusService(self.redis_service)
             logger.info("Redis connection established")
@@ -978,12 +983,13 @@ class OntologyWorker:
         if getattr(event, "command_id", None):
             data.setdefault("command_id", str(event.command_id))
 
+        obs = get_settings().observability
         metadata: Dict[str, Any] = {
             "kind": "domain",
             "kafka_topic": kafka_topic,
             "service": "ontology_worker",
-            "run_id": os.getenv("PIPELINE_RUN_ID") or os.getenv("RUN_ID") or os.getenv("EXECUTION_ID"),
-            "code_sha": os.getenv("CODE_SHA") or os.getenv("GIT_SHA") or os.getenv("COMMIT_SHA"),
+            "run_id": obs.run_id,
+            "code_sha": obs.code_sha,
         }
         if isinstance(event.metadata, dict):
             metadata.update(event.metadata)
@@ -1262,7 +1268,7 @@ class OntologyWorker:
                     # Decide retry vs. skip (avoid poison-pill crash loops).
                     attempt_count = int(registry_attempt_count or 1)
 
-                    max_attempts = int(os.getenv("ONTOLOGY_WORKER_MAX_RETRY_ATTEMPTS", "5"))
+                    max_attempts = self.max_retry_attempts
                     retryable = self._is_retryable_error(e)
 
                     if retryable and attempt_count < max_attempts:

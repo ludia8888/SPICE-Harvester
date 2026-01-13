@@ -11,7 +11,6 @@ import hashlib
 import io
 import json
 import logging
-import os
 import queue as queue_module
 import threading
 import time
@@ -23,7 +22,7 @@ import httpx
 from confluent_kafka import Consumer, KafkaError, Producer, TopicPartition
 
 from shared.config.app_config import AppConfig
-from shared.config.settings import settings as app_settings
+from shared.config.settings import get_settings
 from shared.config.service_config import ServiceConfig
 from shared.models.objectify_job import ObjectifyJob
 from shared.observability.context_propagation import attach_context_from_kafka, kafka_headers_from_current_context
@@ -37,7 +36,6 @@ from shared.services.lakefs_storage_service import create_lakefs_storage_service
 from shared.services.lineage_store import LineageStore
 from shared.services.processed_event_registry import ClaimDecision, ProcessedEventRegistry
 from shared.services.sheet_import_service import FieldMapping, SheetImportService
-from shared.utils.env_utils import parse_int_env
 from shared.utils.import_type_normalization import normalize_import_target_type
 from shared.utils.key_spec import normalize_key_spec
 from shared.utils.ontology_type_normalization import normalize_ontology_base_type
@@ -84,11 +82,14 @@ class ObjectifyWorker:
         "VALUE_CONSTRAINT_FAILED",
     }
     def __init__(self) -> None:
+        settings = get_settings()
+        cfg = settings.workers.objectify
+
         self.running = False
         self.topic = (AppConfig.OBJECTIFY_JOBS_TOPIC or "objectify-jobs").strip() or "objectify-jobs"
         self.dlq_topic = (AppConfig.OBJECTIFY_JOBS_DLQ_TOPIC or "objectify-jobs-dlq").strip() or "objectify-jobs-dlq"
         self.group_id = (AppConfig.OBJECTIFY_JOBS_GROUP or "objectify-worker-group").strip()
-        self.handler = (os.getenv("OBJECTIFY_WORKER_HANDLER") or "objectify_worker").strip()
+        self.handler = str(cfg.worker_handler or "objectify_worker").strip() or "objectify_worker"
         self.consumer: Optional[Consumer] = None
         self.dlq_producer: Optional[Producer] = None
         self.dataset_registry: Optional[DatasetRegistry] = None
@@ -99,20 +100,15 @@ class ObjectifyWorker:
         self.storage = None
         self.http: Optional[httpx.AsyncClient] = None
 
-        self.batch_size_default = parse_int_env("OBJECTIFY_BATCH_SIZE", 500, min_value=1, max_value=5000)
-        self.row_batch_size_default = parse_int_env("OBJECTIFY_ROW_BATCH_SIZE", 1000, min_value=1, max_value=50000)
-        self.bulk_update_batch_size = parse_int_env(
-            "OBJECTIFY_BULK_UPDATE_BATCH_SIZE",
-            self.batch_size_default,
-            min_value=1,
-            max_value=5000,
-        )
-        self.list_page_size = parse_int_env("OBJECTIFY_LIST_PAGE_SIZE", 1000, min_value=10, max_value=10000)
-        self.max_rows_default = parse_int_env("OBJECTIFY_MAX_ROWS", 0, min_value=0, max_value=10_000_000)
-        self.lineage_max_links = parse_int_env("OBJECTIFY_LINEAGE_MAX_LINKS", 1000, min_value=0, max_value=100_000)
-        self.max_retries = parse_int_env("OBJECTIFY_MAX_RETRIES", 5, min_value=1, max_value=100)
-        self.backoff_base = parse_int_env("OBJECTIFY_BACKOFF_BASE_SECONDS", 2, min_value=0, max_value=300)
-        self.backoff_max = parse_int_env("OBJECTIFY_BACKOFF_MAX_SECONDS", 60, min_value=1, max_value=3600)
+        self.batch_size_default = int(cfg.batch_size)
+        self.row_batch_size_default = int(cfg.row_batch_size)
+        self.bulk_update_batch_size = int(cfg.bulk_update_batch_size_effective)
+        self.list_page_size = int(cfg.list_page_size)
+        self.max_rows_default = int(cfg.max_rows)
+        self.lineage_max_links = int(cfg.lineage_max_links)
+        self.max_retries = int(cfg.max_retries)
+        self.backoff_base = int(cfg.backoff_base_seconds)
+        self.backoff_max = int(cfg.backoff_max_seconds)
         self.tracing = get_tracing_service("objectify-worker")
         self.metrics = get_metrics_collector("objectify-worker")
 
@@ -522,7 +518,8 @@ class ObjectifyWorker:
             logger.warning("LineageStore unavailable: %s", exc)
             self.lineage_store = None
 
-        self.storage = create_lakefs_storage_service(app_settings)
+        settings = get_settings()
+        self.storage = create_lakefs_storage_service(settings)
         if self.storage is None:
             raise RuntimeError("LakeFS storage service is required for objectify worker")
 
@@ -548,7 +545,7 @@ class ObjectifyWorker:
         self.dlq_producer = Producer(
             {
                 "bootstrap.servers": ServiceConfig.get_kafka_bootstrap_servers(),
-                "client.id": os.getenv("SERVICE_NAME") or "objectify-worker",
+                "client.id": get_settings().observability.service_name or "objectify-worker",
                 "acks": "all",
                 "retries": 3,
                 "retry.backoff.ms": 100,
@@ -3287,7 +3284,7 @@ class ObjectifyWorker:
     async def _heartbeat_loop(self, *, handler: str, event_id: str) -> None:
         if not self.processed:
             return
-        interval = parse_int_env("PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS", 30, min_value=1, max_value=3600)
+        interval = int(get_settings().event_sourcing.processed_event_heartbeat_interval_seconds)
         while True:
             try:
                 await asyncio.sleep(interval)
@@ -3360,8 +3357,9 @@ class ObjectifyWorker:
 
 
 async def main() -> None:
+    log_level = get_settings().observability.log_level
     logging.basicConfig(
-        level=os.getenv("LOG_LEVEL", "INFO"),
+        level=log_level,
         format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
     )
     install_trace_context_filter()

@@ -38,6 +38,17 @@ def _clamp_int(raw: Any, *, default: int, min_value: int = 0, max_value: int = 1
     return max(min_value, min(max_value, value))
 
 
+def _parse_boolish(raw: Any) -> Optional[bool]:
+    if raw is None:
+        return None
+    value = str(raw).strip().lower()
+    if value in {"true", "1", "yes", "on"}:
+        return True
+    if value in {"false", "0", "no", "off"}:
+        return False
+    return None
+
+
 class Environment(str, Enum):
     """Application environment types"""
     DEVELOPMENT = "development"
@@ -396,6 +407,14 @@ class ObservabilitySettings(BaseSettings):
         default=None,
         description="Service name override (SERVICE_NAME)",
     )
+    enable_lineage: bool = Field(
+        default=True,
+        description="Enable lineage store integration (ENABLE_LINEAGE)",
+    )
+    enable_audit_logs: bool = Field(
+        default=True,
+        description="Enable audit log store integration (ENABLE_AUDIT_LOGS)",
+    )
     run_id: Optional[str] = Field(
         default=None,
         description="Execution/run id (RUN_ID; fallback PIPELINE_RUN_ID/EXECUTION_ID)",
@@ -410,6 +429,12 @@ class ObservabilitySettings(BaseSettings):
     def normalize_log_level(cls, v):  # noqa: ANN001
         raw = str(v or "").strip().upper()
         return raw or "INFO"
+
+    @field_validator("service_name", mode="before")
+    @classmethod
+    def normalize_service_name(cls, v):  # noqa: ANN001
+        value = str(v or "").strip()
+        return value or None
 
     @field_validator("run_id", mode="before")
     @classmethod
@@ -789,6 +814,188 @@ class ClientSettings(BaseSettings):
             if value:
                 return value
         return v
+
+
+class AuthSettings(BaseSettings):
+    """Service auth configuration (BFF/OMS)."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    # Token sources (inbound auth)
+    bff_admin_token: Optional[str] = Field(default=None, description="BFF admin token (BFF_ADMIN_TOKEN)")
+    bff_write_token: Optional[str] = Field(default=None, description="BFF write token (BFF_WRITE_TOKEN)")
+    bff_agent_token: Optional[str] = Field(default=None, description="BFF agent token (BFF_AGENT_TOKEN)")
+
+    oms_admin_token: Optional[str] = Field(default=None, description="OMS admin token (OMS_ADMIN_TOKEN)")
+    oms_write_token: Optional[str] = Field(default=None, description="OMS write token (OMS_WRITE_TOKEN)")
+
+    admin_api_key: Optional[str] = Field(default=None, description="Unified admin API key (ADMIN_API_KEY)")
+    admin_token: Optional[str] = Field(default=None, description="Unified admin token (ADMIN_TOKEN)")
+
+    # Require flags (Optional so 'unset' can use heuristics)
+    bff_require_auth: Optional[bool] = Field(
+        default=None,
+        description="Require auth for BFF (BFF_REQUIRE_AUTH)",
+    )
+    oms_require_auth: Optional[bool] = Field(
+        default=None,
+        description="Require auth for OMS (OMS_REQUIRE_AUTH)",
+    )
+    bff_require_db_scope: bool = Field(
+        default=False,
+        description="Require db scope headers for BFF writes (BFF_REQUIRE_DB_SCOPE)",
+    )
+
+    # Disable-approval flags (fail-closed)
+    allow_insecure_bff_auth_disable: bool = Field(
+        default=False,
+        description="Allow disabling BFF auth (ALLOW_INSECURE_BFF_AUTH_DISABLE)",
+    )
+    allow_insecure_oms_auth_disable: bool = Field(
+        default=False,
+        description="Allow disabling OMS auth (ALLOW_INSECURE_OMS_AUTH_DISABLE)",
+    )
+    allow_insecure_auth_disable: bool = Field(
+        default=False,
+        description="Allow disabling auth globally (ALLOW_INSECURE_AUTH_DISABLE)",
+    )
+
+    # Exempt paths
+    bff_auth_exempt_paths: Optional[str] = Field(
+        default=None,
+        description="Comma-separated exempt paths for BFF (BFF_AUTH_EXEMPT_PATHS)",
+    )
+    oms_auth_exempt_paths: Optional[str] = Field(
+        default=None,
+        description="Comma-separated exempt paths for OMS (OMS_AUTH_EXEMPT_PATHS)",
+    )
+
+    @field_validator(
+        "bff_admin_token",
+        "bff_write_token",
+        "bff_agent_token",
+        "oms_admin_token",
+        "oms_write_token",
+        "admin_api_key",
+        "admin_token",
+        "bff_auth_exempt_paths",
+        "oms_auth_exempt_paths",
+        mode="before",
+    )
+    @classmethod
+    def strip_strings(cls, v):  # noqa: ANN001
+        if v is None:
+            return None
+        value = str(v).strip()
+        return value or None
+
+    @property
+    def bff_auth_disable_allowed(self) -> bool:
+        return bool(self.allow_insecure_bff_auth_disable or self.allow_insecure_auth_disable)
+
+    @property
+    def oms_auth_disable_allowed(self) -> bool:
+        return bool(self.allow_insecure_oms_auth_disable or self.allow_insecure_auth_disable)
+
+    @property
+    def bff_expected_token(self) -> Optional[str]:
+        for value in (
+            self.bff_admin_token,
+            self.bff_write_token,
+            self.admin_api_key,
+            self.admin_token,
+            self.bff_agent_token,
+        ):
+            if value:
+                return value
+        return None
+
+    @property
+    def bff_admin_only_token(self) -> Optional[str]:
+        for value in (self.bff_admin_token, self.admin_api_key, self.admin_token):
+            if value:
+                return value
+        return None
+
+    @property
+    def oms_expected_token(self) -> Optional[str]:
+        for value in (self.oms_admin_token, self.oms_write_token, self.admin_api_key, self.admin_token):
+            if value:
+                return value
+        return None
+
+    @property
+    def admin_bypass_tokens(self) -> set[str]:
+        tokens = (
+            self.bff_admin_token,
+            self.bff_write_token,
+            self.oms_admin_token,
+            self.oms_write_token,
+            self.admin_api_key,
+            self.admin_token,
+        )
+        return {token for token in tokens if token}
+
+    def is_bff_auth_required(self, *, allow_pytest: bool, default_required: bool = True) -> bool:
+        if self.bff_require_auth is not None:
+            return bool(self.bff_require_auth)
+        if allow_pytest and os.environ.get("PYTEST_CURRENT_TEST"):
+            return False
+        if self.bff_expected_token:
+            return True
+        return bool(default_required)
+
+    def is_oms_auth_required(self, *, default_required: bool = True) -> bool:
+        if self.oms_require_auth is not None:
+            return bool(self.oms_require_auth)
+        if self.oms_expected_token:
+            return True
+        return bool(default_required)
+
+    @staticmethod
+    def _parse_exempt_paths(raw: Optional[str], defaults: tuple[str, ...]) -> set[str]:
+        value = (raw or "").strip()
+        if not value:
+            return set(defaults)
+        paths = {path.strip() for path in value.split(",") if path.strip()}
+        return paths or set(defaults)
+
+    def resolve_bff_exempt_paths(self, *, defaults: tuple[str, ...]) -> set[str]:
+        return self._parse_exempt_paths(self.bff_auth_exempt_paths, defaults)
+
+    def resolve_oms_exempt_paths(self, *, defaults: tuple[str, ...]) -> set[str]:
+        return self._parse_exempt_paths(self.oms_auth_exempt_paths, defaults)
+
+
+class RateLimitSettings(BaseSettings):
+    """Rate limiter runtime configuration."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="RATE_LIMIT_",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    fail_open: bool = Field(
+        default=False,
+        description="Fail-open when Redis is unavailable (RATE_LIMIT_FAIL_OPEN)",
+    )
+    local_max_entries: int = Field(
+        default=10_000,
+        description="Local fallback cache max entries (RATE_LIMIT_LOCAL_MAX_ENTRIES)",
+    )
+
+    @field_validator("local_max_entries", mode="before")
+    @classmethod
+    def clamp_local_max_entries(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=10_000, min_value=0, max_value=1_000_000)
 
 
 class MessagingSettings(BaseSettings):
@@ -1187,6 +1394,10 @@ class EventSourcingSettings(BaseSettings):
         default=3,
         description="Command retry count (COMMAND_RETRY_COUNT)",
     )
+    enable_event_sourcing: bool = Field(
+        default=True,
+        description="Enable event sourcing (ENABLE_EVENT_SOURCING)",
+    )
     enable_processed_event_registry: bool = Field(
         default=True,
         description="Enable durable processed-event registry (ENABLE_PROCESSED_EVENT_REGISTRY)",
@@ -1215,6 +1426,815 @@ class EventSourcingSettings(BaseSettings):
         default=None,
         description="Override processed-event registry owner id (PROCESSED_EVENT_OWNER)",
     )
+
+    # Event Store (S3/MinIO) runtime controls
+    event_store_sequence_allocator_mode: str = Field(
+        default="postgres",
+        description="Sequence allocator mode (EVENT_STORE_SEQUENCE_ALLOCATOR_MODE)",
+    )
+    event_store_sequence_schema: str = Field(
+        default="spice_event_registry",
+        description="Sequence schema name (EVENT_STORE_SEQUENCE_SCHEMA)",
+    )
+    event_store_sequence_handler_prefix: str = Field(
+        default="write_side",
+        description="Sequence handler prefix (EVENT_STORE_SEQUENCE_HANDLER_PREFIX)",
+    )
+    event_store_idempotency_mismatch_mode: str = Field(
+        default="error",
+        description="Idempotency mismatch handling (EVENT_STORE_IDEMPOTENCY_MISMATCH_MODE)",
+    )
+    event_store_require_tls: bool = Field(
+        default=False,
+        description="Require TLS for event store endpoint (EVENT_STORE_REQUIRE_TLS)",
+    )
+    event_store_ssl_verify: bool = Field(
+        default=True,
+        description="Verify TLS certs for event store (EVENT_STORE_SSL_VERIFY)",
+    )
+    event_store_s3_addressing_style: Optional[str] = Field(
+        default=None,
+        description="Force S3 addressing style (EVENT_STORE_S3_ADDRESSING_STYLE)",
+    )
+
+    @field_validator(
+        "event_store_sequence_allocator_mode",
+        "event_store_sequence_schema",
+        "event_store_sequence_handler_prefix",
+        "event_store_idempotency_mismatch_mode",
+        "event_store_s3_addressing_style",
+        mode="before",
+    )
+    @classmethod
+    def normalize_event_store_strings(cls, v):  # noqa: ANN001
+        if v is None:
+            return None
+        return str(v).strip()
+
+
+class BranchVirtualizationSettings(BaseSettings):
+    """Branch virtualization defaults (OCC seeding)."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="BRANCH_VIRTUALIZATION_",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    base_branch: str = Field(
+        default="main",
+        description="Base branch to seed OCC when branch has no local events (BRANCH_VIRTUALIZATION_BASE_BRANCH)",
+    )
+
+    @field_validator("base_branch", mode="before")
+    @classmethod
+    def normalize_base_branch(cls, v):  # noqa: ANN001
+        return str(v or "").strip() or "main"
+
+
+class InstanceWorkerSettings(BaseSettings):
+    """Instance worker runtime settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="INSTANCE_WORKER_",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    dlq_flush_timeout_seconds: float = Field(
+        default=10.0,
+        description="DLQ flush timeout seconds (INSTANCE_WORKER_DLQ_FLUSH_TIMEOUT_SECONDS)",
+    )
+    max_retry_attempts: int = Field(
+        default=5,
+        description="Max retry attempts for command processing (INSTANCE_WORKER_MAX_RETRY_ATTEMPTS)",
+    )
+    allow_pk_generation: bool = Field(
+        default=False,
+        description="Allow generating missing PKs (INSTANCE_ALLOW_PK_GENERATION)",
+    )
+    relationship_strict: bool = Field(
+        default=True,
+        description="Strict relationship schema enforcement (INSTANCE_RELATIONSHIP_STRICT)",
+    )
+
+    @field_validator("allow_pk_generation", mode="before")
+    @classmethod
+    def fallback_allow_pk_generation(cls, v):  # noqa: ANN001
+        legacy = _parse_boolish(os.getenv("INSTANCE_ALLOW_PK_GENERATION"))
+        return legacy if legacy is not None else v
+
+    @field_validator("relationship_strict", mode="before")
+    @classmethod
+    def fallback_relationship_strict(cls, v):  # noqa: ANN001
+        legacy = _parse_boolish(os.getenv("INSTANCE_RELATIONSHIP_STRICT"))
+        return legacy if legacy is not None else v
+
+    @field_validator("max_retry_attempts", mode="before")
+    @classmethod
+    def clamp_max_retry_attempts(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=5, min_value=1, max_value=100)
+
+
+class OntologyWorkerSettings(BaseSettings):
+    """Ontology worker runtime settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="ONTOLOGY_WORKER_",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    dlq_flush_timeout_seconds: float = Field(
+        default=10.0,
+        description="DLQ flush timeout seconds (ONTOLOGY_WORKER_DLQ_FLUSH_TIMEOUT_SECONDS)",
+    )
+    db_ready_poll_seconds: float = Field(
+        default=0.5,
+        description="DB readiness poll seconds (ONTOLOGY_WORKER_DB_READY_POLL_SECONDS)",
+    )
+    max_retry_attempts: int = Field(
+        default=5,
+        description="Max retry attempts (ONTOLOGY_WORKER_MAX_RETRY_ATTEMPTS)",
+    )
+
+    @field_validator("max_retry_attempts", mode="before")
+    @classmethod
+    def clamp_max_retry_attempts(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=5, min_value=1, max_value=100)
+
+
+class ProjectionWorkerSettings(BaseSettings):
+    """Projection worker runtime settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="PROJECTION_WORKER_",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    max_retries: int = Field(
+        default=5,
+        description="Max retries for projection worker (PROJECTION_WORKER_MAX_RETRIES)",
+    )
+
+    @field_validator("max_retries", mode="before")
+    @classmethod
+    def clamp_max_retries(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=5, min_value=1, max_value=100)
+
+
+class ActionWorkerSettings(BaseSettings):
+    """Action worker runtime settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="ACTION_WORKER_",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    dlq_flush_timeout_seconds: float = Field(
+        default=10.0,
+        description="DLQ flush timeout seconds (ACTION_WORKER_DLQ_FLUSH_TIMEOUT_SECONDS)",
+    )
+    dlq_retries: int = Field(
+        default=10,
+        description="DLQ producer retries (ACTION_WORKER_DLQ_RETRIES)",
+    )
+    max_retry_attempts: int = Field(
+        default=5,
+        description="Max retry attempts (ACTION_WORKER_MAX_RETRY_ATTEMPTS)",
+    )
+
+    @field_validator("dlq_retries", mode="before")
+    @classmethod
+    def clamp_dlq_retries(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=10, min_value=0, max_value=1_000_000)
+
+    @field_validator("max_retry_attempts", mode="before")
+    @classmethod
+    def clamp_max_retry_attempts(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=5, min_value=1, max_value=100)
+
+
+class ActionOutboxSettings(BaseSettings):
+    """Action outbox worker settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="ACTION_OUTBOX_",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    poll_seconds: float = Field(
+        default=2.0,
+        description="Poll interval seconds (ACTION_OUTBOX_POLL_SECONDS)",
+    )
+    batch_size: int = Field(
+        default=100,
+        description="Batch size for each scan (ACTION_OUTBOX_BATCH_SIZE)",
+    )
+
+    @field_validator("batch_size", mode="before")
+    @classmethod
+    def clamp_batch_size(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=100, min_value=1, max_value=10_000_000)
+
+
+class ConnectorSyncSettings(BaseSettings):
+    """Connector sync worker settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="CONNECTOR_SYNC_",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    group: str = Field(
+        default="connector-sync-worker-group",
+        description="Kafka consumer group id (CONNECTOR_SYNC_GROUP)",
+    )
+    handler: str = Field(
+        default="connector_sync_worker",
+        description="Handler label (CONNECTOR_SYNC_HANDLER)",
+    )
+    max_retries: int = Field(
+        default=5,
+        description="Max retries (CONNECTOR_SYNC_MAX_RETRIES)",
+    )
+    backoff_base_seconds: int = Field(
+        default=2,
+        description="Backoff base seconds (CONNECTOR_SYNC_BACKOFF_BASE_SECONDS)",
+    )
+    backoff_max_seconds: int = Field(
+        default=60,
+        description="Backoff max seconds (CONNECTOR_SYNC_BACKOFF_MAX_SECONDS)",
+    )
+
+    @field_validator("group", "handler", mode="before")
+    @classmethod
+    def strip_strings(cls, v):  # noqa: ANN001
+        if v is None:
+            return v
+        return str(v).strip()
+
+    @field_validator("max_retries", mode="before")
+    @classmethod
+    def clamp_max_retries(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=5, min_value=1, max_value=100)
+
+    @field_validator("backoff_base_seconds", mode="before")
+    @classmethod
+    def clamp_backoff_base_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=2, min_value=0, max_value=300)
+
+    @field_validator("backoff_max_seconds", mode="before")
+    @classmethod
+    def clamp_backoff_max_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=60, min_value=1, max_value=3600)
+
+
+class ConnectorTriggerSettings(BaseSettings):
+    """Connector trigger service settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="CONNECTOR_TRIGGER_",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    source_type: str = Field(
+        default="google_sheets",
+        description="Connector trigger source type (CONNECTOR_TRIGGER_SOURCE_TYPE)",
+    )
+    tick_seconds: int = Field(
+        default=5,
+        description="Tick interval seconds (CONNECTOR_TRIGGER_TICK_SECONDS)",
+    )
+    poll_concurrency: int = Field(
+        default=5,
+        description="Poll concurrency (CONNECTOR_TRIGGER_POLL_CONCURRENCY)",
+    )
+    outbox_batch: int = Field(
+        default=50,
+        description="Outbox batch size (CONNECTOR_TRIGGER_OUTBOX_BATCH)",
+    )
+
+    @field_validator("source_type", mode="before")
+    @classmethod
+    def strip_source_type(cls, v):  # noqa: ANN001
+        return str(v or "").strip() or "google_sheets"
+
+    @field_validator("tick_seconds", mode="before")
+    @classmethod
+    def clamp_tick_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=5, min_value=1, max_value=3600)
+
+    @field_validator("poll_concurrency", mode="before")
+    @classmethod
+    def clamp_poll_concurrency(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=5, min_value=1, max_value=100)
+
+    @field_validator("outbox_batch", mode="before")
+    @classmethod
+    def clamp_outbox_batch(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=50, min_value=1, max_value=500)
+
+
+class SearchProjectionSettings(BaseSettings):
+    """Search projection worker settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="SEARCH_PROJECTION_",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable search projection (ENABLE_SEARCH_PROJECTION)",
+    )
+    handler: str = Field(
+        default="search_projection_worker",
+        description="Handler label (SEARCH_PROJECTION_HANDLER)",
+    )
+    index_name: str = Field(
+        default="objects",
+        description="Search index name (SEARCH_INDEX)",
+    )
+    max_retries: int = Field(
+        default=5,
+        description="Max retries (SEARCH_PROJECTION_MAX_RETRIES)",
+    )
+    backoff_base_seconds: int = Field(
+        default=2,
+        description="Backoff base seconds (SEARCH_PROJECTION_BACKOFF_BASE_SECONDS)",
+    )
+    backoff_max_seconds: int = Field(
+        default=60,
+        description="Backoff max seconds (SEARCH_PROJECTION_BACKOFF_MAX_SECONDS)",
+    )
+
+    @field_validator("enabled", mode="before")
+    @classmethod
+    def fallback_enabled(cls, v):  # noqa: ANN001
+        legacy = _parse_boolish(os.getenv("ENABLE_SEARCH_PROJECTION"))
+        return legacy if legacy is not None else v
+
+    @field_validator("index_name", mode="before")
+    @classmethod
+    def fallback_index_name(cls, v):  # noqa: ANN001
+        legacy = (os.getenv("SEARCH_INDEX") or "").strip()
+        return legacy or v
+
+    @field_validator("handler", mode="before")
+    @classmethod
+    def strip_handler(cls, v):  # noqa: ANN001
+        return str(v or "").strip() or "search_projection_worker"
+
+    @field_validator("max_retries", mode="before")
+    @classmethod
+    def clamp_max_retries(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=5, min_value=1, max_value=100)
+
+    @field_validator("backoff_base_seconds", mode="before")
+    @classmethod
+    def clamp_backoff_base_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=2, min_value=0, max_value=300)
+
+    @field_validator("backoff_max_seconds", mode="before")
+    @classmethod
+    def clamp_backoff_max_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=60, min_value=1, max_value=3600)
+
+
+class ObjectifySettings(BaseSettings):
+    """Objectify worker settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="OBJECTIFY_",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    worker_handler: str = Field(
+        default="objectify_worker",
+        description="Worker handler label (OBJECTIFY_WORKER_HANDLER)",
+    )
+    batch_size: int = Field(
+        default=500,
+        description="Default batch size (OBJECTIFY_BATCH_SIZE)",
+    )
+    row_batch_size: int = Field(
+        default=1000,
+        description="Row batch size (OBJECTIFY_ROW_BATCH_SIZE)",
+    )
+    bulk_update_batch_size: Optional[int] = Field(
+        default=None,
+        description="Bulk update batch size (OBJECTIFY_BULK_UPDATE_BATCH_SIZE; default OBJECTIFY_BATCH_SIZE)",
+    )
+    list_page_size: int = Field(
+        default=1000,
+        description="Pagination page size (OBJECTIFY_LIST_PAGE_SIZE)",
+    )
+    max_rows: int = Field(
+        default=0,
+        description="Max rows limit (0=unlimited) (OBJECTIFY_MAX_ROWS)",
+    )
+    lineage_max_links: int = Field(
+        default=1000,
+        description="Max lineage links emitted (OBJECTIFY_LINEAGE_MAX_LINKS)",
+    )
+    max_retries: int = Field(
+        default=5,
+        description="Max retries (OBJECTIFY_MAX_RETRIES)",
+    )
+    backoff_base_seconds: int = Field(
+        default=2,
+        description="Backoff base seconds (OBJECTIFY_BACKOFF_BASE_SECONDS)",
+    )
+    backoff_max_seconds: int = Field(
+        default=60,
+        description="Backoff max seconds (OBJECTIFY_BACKOFF_MAX_SECONDS)",
+    )
+
+    @field_validator("worker_handler", mode="before")
+    @classmethod
+    def strip_worker_handler(cls, v):  # noqa: ANN001
+        return str(v or "").strip() or "objectify_worker"
+
+    @field_validator("batch_size", mode="before")
+    @classmethod
+    def clamp_batch_size(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=500, min_value=1, max_value=5000)
+
+    @field_validator("row_batch_size", mode="before")
+    @classmethod
+    def clamp_row_batch_size(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=1000, min_value=1, max_value=50_000)
+
+    @field_validator("bulk_update_batch_size", mode="before")
+    @classmethod
+    def clamp_bulk_update_batch_size(cls, v):  # noqa: ANN001
+        if v in (None, ""):
+            return None
+        return _clamp_int(v, default=500, min_value=1, max_value=5000)
+
+    @field_validator("list_page_size", mode="before")
+    @classmethod
+    def clamp_list_page_size(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=1000, min_value=10, max_value=10_000)
+
+    @field_validator("max_rows", mode="before")
+    @classmethod
+    def clamp_max_rows(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=0, min_value=0, max_value=10_000_000)
+
+    @field_validator("lineage_max_links", mode="before")
+    @classmethod
+    def clamp_lineage_max_links(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=1000, min_value=0, max_value=100_000)
+
+    @field_validator("max_retries", mode="before")
+    @classmethod
+    def clamp_max_retries(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=5, min_value=1, max_value=100)
+
+    @field_validator("backoff_base_seconds", mode="before")
+    @classmethod
+    def clamp_backoff_base_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=2, min_value=0, max_value=300)
+
+    @field_validator("backoff_max_seconds", mode="before")
+    @classmethod
+    def clamp_backoff_max_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=60, min_value=1, max_value=3600)
+
+    @property
+    def bulk_update_batch_size_effective(self) -> int:
+        return int(self.bulk_update_batch_size or self.batch_size)
+
+
+class IngestReconcilerSettings(BaseSettings):
+    """Dataset ingest reconciler worker settings."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable ingest reconciler (ENABLE_DATASET_INGEST_RECONCILER)",
+        validation_alias="ENABLE_DATASET_INGEST_RECONCILER",
+    )
+    poll_seconds: int = Field(
+        default=60,
+        description="Poll interval seconds (DATASET_INGEST_RECONCILER_POLL_SECONDS)",
+        validation_alias="DATASET_INGEST_RECONCILER_POLL_SECONDS",
+    )
+    stale_seconds: int = Field(
+        default=3600,
+        description="Stale cutoff seconds (DATASET_INGEST_RECONCILER_STALE_SECONDS)",
+        validation_alias="DATASET_INGEST_RECONCILER_STALE_SECONDS",
+    )
+    limit: int = Field(
+        default=200,
+        description="Max ingest rows per run (DATASET_INGEST_RECONCILER_LIMIT)",
+        validation_alias="DATASET_INGEST_RECONCILER_LIMIT",
+    )
+    alert_published_threshold: int = Field(
+        default=1,
+        description="Alert threshold for published count (INGEST_RECONCILER_ALERT_PUBLISHED_THRESHOLD)",
+    )
+    alert_aborted_threshold: int = Field(
+        default=1,
+        description="Alert threshold for aborted count (INGEST_RECONCILER_ALERT_ABORTED_THRESHOLD)",
+    )
+    alert_on_error: bool = Field(
+        default=True,
+        description="Alert on exceptions (INGEST_RECONCILER_ALERT_ON_ERROR)",
+    )
+    alert_cooldown_seconds: int = Field(
+        default=300,
+        description="Alert cooldown seconds (INGEST_RECONCILER_ALERT_COOLDOWN_SECONDS)",
+    )
+    alert_webhook_url: Optional[str] = Field(
+        default=None,
+        description="Webhook URL (INGEST_RECONCILER_ALERT_WEBHOOK_URL; fallback ALERT_WEBHOOK_URL)",
+    )
+    port: int = Field(
+        default=8012,
+        description="Worker port (INGEST_RECONCILER_PORT)",
+        validation_alias="INGEST_RECONCILER_PORT",
+    )
+
+    @field_validator("alert_webhook_url", mode="before")
+    @classmethod
+    def fallback_alert_webhook_url(cls, v):  # noqa: ANN001
+        value = str(v or "").strip()
+        if value:
+            return value
+        fallback = str(os.getenv("ALERT_WEBHOOK_URL") or "").strip()
+        return fallback or None
+
+    @field_validator("poll_seconds", mode="before")
+    @classmethod
+    def clamp_poll_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=60, min_value=5, max_value=3600)
+
+    @field_validator("stale_seconds", mode="before")
+    @classmethod
+    def clamp_stale_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=3600, min_value=60, max_value=86_400)
+
+    @field_validator("limit", mode="before")
+    @classmethod
+    def clamp_limit(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=200, min_value=1, max_value=5000)
+
+    @field_validator("alert_published_threshold", mode="before")
+    @classmethod
+    def clamp_alert_published_threshold(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=1, min_value=0, max_value=1_000_000)
+
+    @field_validator("alert_aborted_threshold", mode="before")
+    @classmethod
+    def clamp_alert_aborted_threshold(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=1, min_value=0, max_value=1_000_000)
+
+    @field_validator("alert_cooldown_seconds", mode="before")
+    @classmethod
+    def clamp_alert_cooldown_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=300, min_value=0, max_value=86_400)
+
+
+class WritebackMaterializerSettings(BaseSettings):
+    """Writeback materializer worker settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="WRITEBACK_MATERIALIZER_",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    base_branch: str = Field(
+        default="main",
+        description="Base branch (WRITEBACK_MATERIALIZER_BASE_BRANCH)",
+    )
+    interval_seconds: float = Field(
+        default=float(6 * 60 * 60),
+        description="Run interval seconds (WRITEBACK_MATERIALIZER_INTERVAL_SECONDS)",
+    )
+    run_once: bool = Field(
+        default=False,
+        description="Run once and exit (WRITEBACK_MATERIALIZER_RUN_ONCE)",
+    )
+    db_names: Optional[str] = Field(
+        default=None,
+        description="Comma-separated db names to materialize (WRITEBACK_MATERIALIZER_DB_NAMES)",
+    )
+
+    @field_validator("base_branch", mode="before")
+    @classmethod
+    def normalize_base_branch(cls, v):  # noqa: ANN001
+        return str(v or "").strip() or "main"
+
+    @field_validator("db_names", mode="before")
+    @classmethod
+    def normalize_db_names(cls, v):  # noqa: ANN001
+        value = str(v or "").strip()
+        return value or None
+
+    @property
+    def db_names_list(self) -> list[str]:
+        raw = str(self.db_names or "").strip()
+        if not raw:
+            return []
+        return [part.strip() for part in raw.split(",") if part.strip()]
+
+
+class EventPublisherSettings(BaseSettings):
+    """Event publisher (message relay) settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="EVENT_PUBLISHER_",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    checkpoint_key: str = Field(
+        default="checkpoints/event_publisher.json",
+        description="Checkpoint S3 key (EVENT_PUBLISHER_CHECKPOINT_KEY)",
+    )
+    poll_interval: int = Field(
+        default=3,
+        description="Poll interval seconds (EVENT_PUBLISHER_POLL_INTERVAL; legacy MESSAGE_RELAY_POLL_INTERVAL)",
+    )
+    batch_size: int = Field(
+        default=200,
+        description="Batch size (EVENT_PUBLISHER_BATCH_SIZE; legacy MESSAGE_RELAY_BATCH_SIZE)",
+    )
+    kafka_flush_batch_size: Optional[int] = Field(
+        default=None,
+        description="Kafka flush batch size (EVENT_PUBLISHER_KAFKA_FLUSH_BATCH_SIZE; default batch_size)",
+    )
+    kafka_flush_timeout_seconds: float = Field(
+        default=10.0,
+        description="Kafka flush timeout seconds (EVENT_PUBLISHER_KAFKA_FLUSH_TIMEOUT_SECONDS)",
+    )
+    metrics_log_interval_seconds: int = Field(
+        default=30,
+        description="Metrics log interval seconds (EVENT_PUBLISHER_METRICS_LOG_INTERVAL_SECONDS)",
+    )
+    lookback_seconds: int = Field(
+        default=600,
+        description="Lookback seconds (EVENT_PUBLISHER_LOOKBACK_SECONDS)",
+    )
+    lookback_max_keys: int = Field(
+        default=2000,
+        description="Lookback max keys (EVENT_PUBLISHER_LOOKBACK_MAX_KEYS)",
+    )
+    dedup_max_events: int = Field(
+        default=10_000,
+        description="Dedup max events (EVENT_PUBLISHER_DEDUP_MAX_EVENTS)",
+    )
+    dedup_checkpoint_max_events: int = Field(
+        default=2000,
+        description="Dedup checkpoint max events (EVENT_PUBLISHER_DEDUP_CHECKPOINT_MAX_EVENTS)",
+    )
+    start_timestamp: Optional[str] = Field(
+        default=None,
+        description="Optional start timestamp ISO8601 (EVENT_PUBLISHER_START_TIMESTAMP)",
+    )
+    kafka_topic_bootstrap_timeout_seconds: int = Field(
+        default=120,
+        description="Kafka topic bootstrap timeout seconds (KAFKA_TOPIC_BOOTSTRAP_TIMEOUT_SECONDS)",
+    )
+
+    @field_validator("poll_interval", mode="before")
+    @classmethod
+    def fallback_poll_interval(cls, v):  # noqa: ANN001
+        if (os.getenv("EVENT_PUBLISHER_POLL_INTERVAL") or "").strip():
+            return v
+        legacy = (os.getenv("MESSAGE_RELAY_POLL_INTERVAL") or "").strip()
+        return legacy or v
+
+    @field_validator("batch_size", mode="before")
+    @classmethod
+    def fallback_batch_size(cls, v):  # noqa: ANN001
+        if (os.getenv("EVENT_PUBLISHER_BATCH_SIZE") or "").strip():
+            return v
+        legacy = (os.getenv("MESSAGE_RELAY_BATCH_SIZE") or "").strip()
+        return legacy or v
+
+    @field_validator("kafka_topic_bootstrap_timeout_seconds", mode="before")
+    @classmethod
+    def fallback_topic_bootstrap_timeout(cls, v):  # noqa: ANN001
+        raw = (os.getenv("KAFKA_TOPIC_BOOTSTRAP_TIMEOUT_SECONDS") or "").strip()
+        return raw or v
+
+    @field_validator("poll_interval", mode="before")
+    @classmethod
+    def clamp_poll_interval_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=3, min_value=1, max_value=3600)
+
+    @field_validator("batch_size", mode="before")
+    @classmethod
+    def clamp_batch_size(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=200, min_value=1, max_value=100_000)
+
+    @field_validator("kafka_flush_batch_size", mode="before")
+    @classmethod
+    def clamp_kafka_flush_batch_size(cls, v):  # noqa: ANN001
+        if v in (None, ""):
+            return None
+        return _clamp_int(v, default=200, min_value=1, max_value=1_000_000)
+
+    @field_validator("metrics_log_interval_seconds", mode="before")
+    @classmethod
+    def clamp_metrics_log_interval_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=30, min_value=1, max_value=3600)
+
+    @field_validator("lookback_seconds", mode="before")
+    @classmethod
+    def clamp_lookback_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=600, min_value=0, max_value=86_400)
+
+    @field_validator("lookback_max_keys", mode="before")
+    @classmethod
+    def clamp_lookback_max_keys(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=2000, min_value=0, max_value=1_000_000)
+
+    @field_validator("dedup_max_events", mode="before")
+    @classmethod
+    def clamp_dedup_max_events(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=10_000, min_value=0, max_value=1_000_000)
+
+    @field_validator("dedup_checkpoint_max_events", mode="before")
+    @classmethod
+    def clamp_dedup_checkpoint_max_events(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=2000, min_value=0, max_value=1_000_000)
+
+    @field_validator("kafka_topic_bootstrap_timeout_seconds", mode="before")
+    @classmethod
+    def clamp_topic_bootstrap_timeout_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=120, min_value=1, max_value=3600)
+
+    @property
+    def kafka_flush_batch_size_effective(self) -> int:
+        return int(self.kafka_flush_batch_size or self.batch_size)
+
+
+class WorkersSettings(BaseSettings):
+    """Workers/services runtime settings."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    instance: InstanceWorkerSettings = Field(default_factory=InstanceWorkerSettings)
+    ontology: OntologyWorkerSettings = Field(default_factory=OntologyWorkerSettings)
+    projection: ProjectionWorkerSettings = Field(default_factory=ProjectionWorkerSettings)
+    action: ActionWorkerSettings = Field(default_factory=ActionWorkerSettings)
+    action_outbox: ActionOutboxSettings = Field(default_factory=ActionOutboxSettings)
+    connector_sync: ConnectorSyncSettings = Field(default_factory=ConnectorSyncSettings)
+    connector_trigger: ConnectorTriggerSettings = Field(default_factory=ConnectorTriggerSettings)
+    search_projection: SearchProjectionSettings = Field(default_factory=SearchProjectionSettings)
+    objectify: ObjectifySettings = Field(default_factory=ObjectifySettings)
+    ingest_reconciler: IngestReconcilerSettings = Field(default_factory=IngestReconcilerSettings)
+    writeback_materializer: WritebackMaterializerSettings = Field(default_factory=WritebackMaterializerSettings)
+    event_publisher: EventPublisherSettings = Field(default_factory=EventPublisherSettings)
+
 
 
 class WritebackSettings(BaseSettings):
@@ -1357,21 +2377,25 @@ class ApplicationSettings(BaseSettings):
     )
     
     # Nested settings
-    database: DatabaseSettings = DatabaseSettings()
-    services: ServiceSettings = ServiceSettings()
-    observability: ObservabilitySettings = ObservabilitySettings()
-    pipeline: PipelineSettings = PipelineSettings()
-    agent: AgentRuntimeSettings = AgentRuntimeSettings()
-    clients: ClientSettings = ClientSettings()
-    messaging: MessagingSettings = MessagingSettings()
-    event_sourcing: EventSourcingSettings = EventSourcingSettings()
-    storage: StorageSettings = StorageSettings()
-    cache: CacheSettings = CacheSettings()
-    writeback: WritebackSettings = WritebackSettings()
-    security: SecuritySettings = SecuritySettings()
-    performance: PerformanceSettings = PerformanceSettings()
-    test: TestSettings = TestSettings()
-    google_sheets: GoogleSheetsSettings = GoogleSheetsSettings()
+    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    services: ServiceSettings = Field(default_factory=ServiceSettings)
+    observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
+    pipeline: PipelineSettings = Field(default_factory=PipelineSettings)
+    agent: AgentRuntimeSettings = Field(default_factory=AgentRuntimeSettings)
+    clients: ClientSettings = Field(default_factory=ClientSettings)
+    auth: AuthSettings = Field(default_factory=AuthSettings)
+    rate_limit: RateLimitSettings = Field(default_factory=RateLimitSettings)
+    messaging: MessagingSettings = Field(default_factory=MessagingSettings)
+    event_sourcing: EventSourcingSettings = Field(default_factory=EventSourcingSettings)
+    branch_virtualization: BranchVirtualizationSettings = Field(default_factory=BranchVirtualizationSettings)
+    storage: StorageSettings = Field(default_factory=StorageSettings)
+    workers: WorkersSettings = Field(default_factory=WorkersSettings)
+    cache: CacheSettings = Field(default_factory=CacheSettings)
+    writeback: WritebackSettings = Field(default_factory=WritebackSettings)
+    security: SecuritySettings = Field(default_factory=SecuritySettings)
+    performance: PerformanceSettings = Field(default_factory=PerformanceSettings)
+    test: TestSettings = Field(default_factory=TestSettings)
+    google_sheets: GoogleSheetsSettings = Field(default_factory=GoogleSheetsSettings)
 
     @field_validator("environment", mode="before")
     @classmethod
@@ -1424,6 +2448,8 @@ def get_settings() -> ApplicationSettings:
     Returns:
         ApplicationSettings: The global settings instance
     """
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return ApplicationSettings()
     return settings
 
 def reload_settings() -> ApplicationSettings:
