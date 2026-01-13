@@ -118,14 +118,17 @@ def _build_plan_user_prompt(
     goal: str,
     data_scope: Optional[AgentPlanDataScope],
     answers: Optional[Dict[str, Any]],
+    context_pack: Optional[Dict[str, Any]],
     tool_catalog_json: str,
 ) -> str:
     scope_payload = data_scope.model_dump(mode="json") if data_scope is not None else {}
     answers_payload = answers or {}
+    context_payload = context_pack or {}
     return (
         f"Goal:\n{goal}\n\n"
         f"Data scope hints (optional):\n{json.dumps(scope_payload, ensure_ascii=False)}\n\n"
         f"Clarification answers (if any):\n{json.dumps(answers_payload, ensure_ascii=False)}\n\n"
+        f"Operational Memory context pack (safe summary):\n{json.dumps(context_payload, ensure_ascii=False)}\n\n"
         "Tool Catalog (use tool_id ONLY from this list):\n"
         f"{tool_catalog_json}\n"
     )
@@ -154,11 +157,14 @@ def _build_clarifier_user_prompt(
     validation_errors: List[str],
     validation_warnings: List[str],
     data_scope: Optional[AgentPlanDataScope],
+    context_pack: Optional[Dict[str, Any]],
 ) -> str:
     scope_payload = data_scope.model_dump(mode="json") if data_scope is not None else {}
+    context_payload = context_pack or {}
     return (
         f"Goal:\n{goal}\n\n"
         f"Data scope hints:\n{json.dumps(scope_payload, ensure_ascii=False)}\n\n"
+        f"Operational Memory context pack (safe summary):\n{json.dumps(context_payload, ensure_ascii=False)}\n\n"
         "Draft plan (may be invalid):\n"
         f"{json.dumps(draft_plan or {}, ensure_ascii=False)}\n\n"
         f"Server validation errors:\n{json.dumps(validation_errors or [], ensure_ascii=False)}\n\n"
@@ -206,6 +212,7 @@ async def compile_agent_plan(
     goal: str,
     data_scope: Optional[AgentPlanDataScope],
     answers: Optional[Dict[str, Any]],
+    context_pack: Optional[Dict[str, Any]] = None,
     actor: str,
     tool_registry: AgentToolRegistry,
     llm_gateway: LLMGateway,
@@ -249,6 +256,7 @@ async def compile_agent_plan(
                 goal=goal,
                 data_scope=data_scope,
                 answers=answers,
+                context_pack=context_pack,
                 tool_catalog_json=tool_catalog_json,
             ),
             response_model=AgentPlanDraftEnvelope,
@@ -310,6 +318,7 @@ async def compile_agent_plan(
                     validation_errors=validation.errors,
                     validation_warnings=validation.warnings,
                     data_scope=data_scope,
+                    context_pack=context_pack,
                 ),
                 response_model=AgentClarificationPayload,
                 redis_service=redis_service,

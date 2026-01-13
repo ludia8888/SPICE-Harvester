@@ -98,6 +98,7 @@ def _install_common_overrides(*, plan_registry, tool_registry, agent_registry=No
     fake_redis = AsyncMock()
     fake_redis.get_json.return_value = None
     fake_redis.set_json.return_value = None
+    fake_action_logs = AsyncMock()
 
     app.dependency_overrides[get_llm_gateway] = lambda: AsyncMock()
     app.dependency_overrides[get_redis_service] = lambda: fake_redis
@@ -105,6 +106,7 @@ def _install_common_overrides(*, plan_registry, tool_registry, agent_registry=No
 
     app.dependency_overrides[agent_plans_router.get_agent_plan_registry] = lambda: plan_registry
     app.dependency_overrides[agent_plans_router.get_agent_tool_registry] = lambda: tool_registry
+    app.dependency_overrides[agent_plans_router.get_action_log_registry] = lambda: fake_action_logs
     if agent_registry is not None:
         app.dependency_overrides[agent_plans_router.get_agent_registry] = lambda: agent_registry
 
@@ -332,3 +334,59 @@ def test_execute_calls_agent_when_approved(client):
     assert len(steps) == 2
     assert steps[0]["path"].endswith("/simulate")
     assert steps[1]["path"].endswith("/submit")
+
+
+def test_compile_passes_operational_context_pack(client):
+    plan_id = str(uuid4())
+    plan = AgentPlan(
+        plan_id=plan_id,
+        goal="simulate then submit",
+        requires_approval=True,
+        steps=[
+            AgentPlanStep(
+                step_id="s1",
+                tool_id="actions.simulate",
+                path_params={"db_name": "demo", "action_type_id": "A"},
+                idempotency_key="k1",
+            ),
+        ],
+    )
+
+    plan_registry = _FakePlanRegistry()
+    tool_registry = _FakeToolRegistry({})
+    _install_common_overrides(plan_registry=plan_registry, tool_registry=tool_registry)
+
+    fake_pack = {"generated_at": "now", "db_name": "demo", "policy_snapshot": {"catalog_fingerprint": "test"}}
+    captured: dict[str, Any] = {}
+
+    async def _fake_compile_agent_plan(**kwargs):  # noqa: ANN003
+        captured["context_pack"] = kwargs.get("context_pack")
+        return AgentPlanCompileResult(
+            status="success",
+            plan_id=plan_id,
+            plan=plan,
+            validation_errors=[],
+            validation_warnings=[],
+            questions=[],
+            llm_meta=None,
+            planner_confidence=0.9,
+            planner_notes=["ok"],
+        )
+
+    mock_builder = AsyncMock(return_value=fake_pack)
+    with patch("bff.routers.agent_plans.build_operational_context_pack", new=mock_builder), patch(
+        "bff.routers.agent_plans.compile_agent_plan",
+        new=AsyncMock(side_effect=_fake_compile_agent_plan),
+    ):
+        try:
+            res = client.post(
+                "/api/v1/agent-plans/compile",
+                json={"goal": "do it", "data_scope": {"db_name": "demo"}},
+                headers={"X-User-ID": "user:test"},
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+    assert res.status_code == 200
+    assert captured["context_pack"] == fake_pack
+    assert mock_builder.await_args.kwargs["db_name"] == "demo"

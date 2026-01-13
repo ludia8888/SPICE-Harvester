@@ -15,13 +15,16 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from bff.dependencies import get_action_log_registry
 from bff.services.agent_plan_compiler import compile_agent_plan
 from bff.services.agent_plan_validation import validate_agent_plan
+from bff.services.operational_memory import build_operational_context_pack
 from shared.dependencies.providers import AuditLogStoreDep, LLMGatewayDep, RedisServiceDep
 from shared.middleware.rate_limiter import RateLimitPresets, rate_limit
 from shared.models.agent_plan import AgentPlan, AgentPlanDataScope
 from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import sanitize_input
+from shared.services.action_log_registry import ActionLogRegistry
 from shared.services.agent_registry import AgentRegistry
 from shared.services.agent_plan_registry import AgentPlanRegistry
 from shared.services.agent_tool_registry import AgentToolRegistry
@@ -133,6 +136,46 @@ class AgentPlanCompileRequest(BaseModel):
     answers: dict | None = Field(default=None, description="Clarification answers from prior compile response")
 
 
+class AgentContextPackRequest(BaseModel):
+    db_name: str | None = Field(default=None, max_length=200)
+    action_type_id: str | None = Field(default=None, max_length=200)
+    max_decisions: int = Field(default=5, ge=0, le=20)
+    max_simulations: int = Field(default=5, ge=0, le=20)
+
+
+@router.post("/context-pack", response_model=ApiResponse)
+@rate_limit(**RateLimitPresets.STRICT)
+async def build_context_pack(
+    body: AgentContextPackRequest,
+    request: Request,
+    tool_registry: AgentToolRegistry = Depends(get_agent_tool_registry),
+    action_logs: ActionLogRegistry = Depends(get_action_log_registry),
+) -> ApiResponse:
+    payload = sanitize_input(body.model_dump(exclude_none=True))
+    actor = (
+        request.headers.get("X-User-ID")
+        or request.headers.get("X-User")
+        or request.headers.get("X-Actor")
+        or "system"
+    )
+
+    try:
+        pack = await build_operational_context_pack(
+            db_name=str(payload.get("db_name") or "").strip() or None,
+            actor=str(actor),
+            action_type_id=str(payload.get("action_type_id") or "").strip() or None,
+            action_logs=action_logs,
+            tool_registry=tool_registry,
+            max_decisions=int(payload.get("max_decisions") or 5),
+            max_simulations=int(payload.get("max_simulations") or 5),
+        )
+    except Exception as exc:
+        logger.error("Failed to build operational context pack: %s", exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to build context pack") from exc
+
+    return ApiResponse.success(message="Operational context pack built", data=pack)
+
+
 @router.post("/compile", response_model=ApiResponse)
 @rate_limit(**RateLimitPresets.STRICT)
 async def compile_plan(
@@ -143,6 +186,7 @@ async def compile_plan(
     audit_store: AuditLogStoreDep,
     tool_registry: AgentToolRegistry = Depends(get_agent_tool_registry),
     plan_registry: AgentPlanRegistry = Depends(get_agent_plan_registry),
+    action_logs: ActionLogRegistry = Depends(get_action_log_registry),
 ) -> ApiResponse:
     payload = sanitize_input(body.model_dump(exclude_none=True))
     goal = str(payload.get("goal") or "").strip()
@@ -155,10 +199,31 @@ async def compile_plan(
         or "system"
     )
 
+    context_pack: Optional[Dict[str, Any]] = None
+    try:
+        action_type_hint = None
+        if isinstance(answers, dict):
+            action_type_hint = (
+                answers.get("action_type_id")
+                or answers.get("actionTypeId")
+                or answers.get("action_type")
+            )
+        context_pack = await build_operational_context_pack(
+            db_name=(data_scope.db_name if data_scope else None),
+            actor=str(actor),
+            action_type_id=str(action_type_hint) if action_type_hint else None,
+            action_logs=action_logs,
+            tool_registry=tool_registry,
+        )
+    except Exception as exc:
+        logger.warning("Failed to build operational context pack: %s", exc)
+        context_pack = None
+
     result = await compile_agent_plan(
         goal=goal,
         data_scope=data_scope,
         answers=answers if isinstance(answers, dict) else None,
+        context_pack=context_pack,
         actor=str(actor),
         tool_registry=tool_registry,
         llm_gateway=llm,
