@@ -174,7 +174,7 @@ step payload 안에서 `${...}` 템플릿을 사용할 수 있다.
 ### 지원 템플릿
 - `${steps.<step_id>.<key>}`: 이전 step의 응답에서 추출된 값 참조
 - `${context.<key>}`: 실행 시점에 주입된 runtime context 참조 (주의: 실행자가 반드시 제공)
-- `${artifacts.<artifact_key>}`: artifact store 참조 (plan의 `consumes` 선언 필요)
+- `${artifacts.<artifact_key>}`: artifact store 참조 (plan의 `consumes` 선언 필요, 기본적으로 tool 응답의 `data`를 저장)
 
 ### `${steps.*}`에서 사용 가능한 key (표준)
 아래 key들은 runtime이 응답 JSON에서 자동 추출해 `context.step_outputs[step_id]`에 저장한다.

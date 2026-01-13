@@ -50,6 +50,11 @@ _STEP_OUTPUT_KEY_ALIASES: dict[str, tuple[str, ...]] = {
     "deployed_commit_id": ("deployed_commit_id", "deployedCommitId", "merge_commit_id", "mergeCommitId"),
 }
 
+_ARTIFACT_MAX_DEPTH = 6
+_ARTIFACT_MAX_LIST_ITEMS = 80
+_ARTIFACT_MAX_DICT_ITEMS = 120
+_ARTIFACT_MAX_STRING_CHARS = 4000
+
 
 def _clean_url(value: str) -> str:
     return value.rstrip("/")
@@ -168,6 +173,45 @@ def _resolve_templates(obj: Any, context: Dict[str, Any]) -> Any:
     if isinstance(obj, list):
         return [_resolve_templates(value, context) for value in obj]
     return obj
+
+
+def _artifact_value_from_response(payload: Any) -> Any:
+    """
+    Choose the most useful artifact value from a tool response payload.
+
+    Convention: If the payload looks like ApiResponse/CommandResult and has a top-level `data` field,
+    store `data` as the artifact so `${artifacts.*}` is directly usable as a request body.
+    """
+    if isinstance(payload, dict) and "data" in payload:
+        data = payload.get("data")
+        if data not in (None, ""):
+            return data
+    return payload
+
+
+def _compact_artifact_value(obj: Any, *, depth: int = 0) -> Any:
+    if depth > _ARTIFACT_MAX_DEPTH:
+        return "<truncated>"
+    if obj is None or isinstance(obj, (bool, int, float)):
+        return obj
+    if isinstance(obj, str):
+        if len(obj) <= _ARTIFACT_MAX_STRING_CHARS:
+            return obj
+        return obj[: max(0, _ARTIFACT_MAX_STRING_CHARS - 1)] + "…"
+    if isinstance(obj, list):
+        trimmed = [_compact_artifact_value(v, depth=depth + 1) for v in obj[:_ARTIFACT_MAX_LIST_ITEMS]]
+        if len(obj) > _ARTIFACT_MAX_LIST_ITEMS:
+            trimmed.append(f"<truncated:{len(obj) - _ARTIFACT_MAX_LIST_ITEMS}>")
+        return trimmed
+    if isinstance(obj, dict):
+        items = list(obj.items())
+        out: dict[str, Any] = {}
+        for key, value in items[:_ARTIFACT_MAX_DICT_ITEMS]:
+            out[str(key)] = _compact_artifact_value(value, depth=depth + 1)
+        if len(items) > _ARTIFACT_MAX_DICT_ITEMS:
+            out["_truncated_keys"] = len(items) - _ARTIFACT_MAX_DICT_ITEMS
+        return out
+    return str(obj)
 
 
 def _walk_json_for_key(obj: Any, *, wanted_keys: set[str], max_depth: int = 6, max_nodes: int = 500) -> dict[str, Any]:
@@ -1274,6 +1318,56 @@ class AgentRuntime:
                 "error_key": "template_unresolved",
             }
 
+        missing_artifacts: list[str] = []
+        consumes = [str(key).strip() for key in (tool_call.consumes or []) if str(key).strip()]
+        if consumes:
+            artifacts = context.get("artifacts")
+            artifacts = artifacts if isinstance(artifacts, dict) else {}
+            for key in consumes:
+                if key not in artifacts:
+                    missing_artifacts.append(key)
+
+        if missing_artifacts:
+            error = f"missing artifacts: {missing_artifacts}"
+            await self.record_event(
+                event_type="AGENT_TOOL_RESULT",
+                run_id=run_id,
+                actor=actor,
+                status="failure",
+                data={
+                    "step_index": step_index,
+                    "step_id": tool_call.step_id,
+                    "attempt": attempt,
+                    "tool": tool_call.service,
+                    "tool_id": tool_call.tool_id,
+                    "method": tool_call.method,
+                    "path": tool_call.path,
+                    "data_scope": mask_pii(tool_call.data_scope, max_string_chars=200),
+                    "output_digest": None,
+                    "output_preview": None,
+                    "output_size_bytes": None,
+                    "http_status": 400,
+                    "duration_ms": 0,
+                    "error": error,
+                    "error_key": "artifact_missing",
+                    "missing_artifacts": missing_artifacts,
+                },
+                request_id=request_id,
+                step_index=step_index,
+                resource_type="agent_tool",
+                error=error,
+            )
+            return {
+                "status": "failure",
+                "http_status": 400,
+                "output_digest": None,
+                "duration_ms": 0,
+                "data_scope": mask_pii(tool_call.data_scope, max_string_chars=200),
+                "error": error,
+                "error_key": "artifact_missing",
+                "missing_artifacts": missing_artifacts,
+            }
+
         base_url = self._resolve_base_url(tool_call)
         path = tool_call.path if tool_call.path.startswith("/") else f"/{tool_call.path}"
         url = f"{base_url}{path}"
@@ -1302,6 +1396,8 @@ class AgentRuntime:
                 "method": tool_call.method,
                 "path": path,
                 "data_scope": data_scope,
+                "consumes": list(tool_call.consumes or []),
+                "produces": list(tool_call.produces or []),
                 "input_digest": input_digest,
                 "input_preview": input_preview,
                 "input_size_bytes": input_size,
@@ -1579,6 +1675,22 @@ class AgentRuntime:
                     existing = step_outputs.get(step_id) if isinstance(step_outputs.get(step_id), dict) else {}
                     step_outputs[step_id] = {**existing, **extracted}
                     context["latest_step_output"] = {"step_id": step_id, **extracted}
+
+            produces = [str(key).strip() for key in (tool_call.produces or []) if str(key).strip()]
+            if produces:
+                artifacts = context.setdefault("artifacts", {})
+                if isinstance(artifacts, dict):
+                    artifact_value = _artifact_value_from_response(response_payload)
+                    candidate = artifact_value
+                    if self._payload_size(candidate) > self.config.max_payload_bytes:
+                        candidate = _compact_artifact_value(candidate)
+                    if self._payload_size(candidate) > self.config.max_payload_bytes:
+                        candidate = {"_artifact_omitted": True, "digest": digest_for_audit(artifact_value)}
+                    for key in produces:
+                        if _TEMPLATE_KEY_ALLOWED.match(key):
+                            artifacts[key] = candidate
+                    if len(produces) == 1 and _TEMPLATE_KEY_ALLOWED.match(produces[0]):
+                        context["latest_artifact"] = {"key": produces[0], "digest": digest_for_audit(candidate)}
 
         return {
             "status": status,

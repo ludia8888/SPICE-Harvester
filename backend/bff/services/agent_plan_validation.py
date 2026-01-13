@@ -545,6 +545,28 @@ async def validate_agent_plan(
             }
         )
 
+        for artifact in normalized_step.produces:
+            key = str(artifact or "").strip()
+            if not _TEMPLATE_KEY_ALLOWED_RE.match(key):
+                _add_error(
+                    code="invalid_artifact_key",
+                    message=f"step_id={normalized_step.step_id} has invalid artifact key in produces: {artifact}",
+                    step=normalized_step,
+                    field="produces",
+                    fix_hint="Artifact keys must match [A-Za-z0-9._-] (1..200 chars).",
+                )
+
+        for artifact in normalized_step.consumes:
+            key = str(artifact or "").strip()
+            if not _TEMPLATE_KEY_ALLOWED_RE.match(key):
+                _add_error(
+                    code="invalid_artifact_key",
+                    message=f"step_id={normalized_step.step_id} has invalid artifact key in consumes: {artifact}",
+                    step=normalized_step,
+                    field="consumes",
+                    fix_hint="Artifact keys must match [A-Za-z0-9._-] (1..200 chars).",
+                )
+
         # Dataflow: consumes must have been produced previously.
         for artifact in normalized_step.consumes:
             if artifact not in seen_artifacts:
