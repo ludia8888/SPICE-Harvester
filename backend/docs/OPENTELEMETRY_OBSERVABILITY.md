@@ -125,8 +125,12 @@ OTEL_EXPORT_JAEGER=false
 The following libraries are automatically instrumented:
 - FastAPI (HTTP server)
 - HTTPX (HTTP client)
+- Requests (HTTP client; TerminusDB client uses this under the hood)
+- AioHTTP client (HTTP client; AsyncElasticsearch uses this under the hood)
 - AsyncPG (PostgreSQL)
 - Redis
+- Botocore (S3/MinIO; aioboto3 uses botocore under the hood)
+- Asyncio (async task context; best-effort)
 
 Kafka notes:
 - `opentelemetry-instrumentation-kafka` does not cover `confluent_kafka` reliably.
