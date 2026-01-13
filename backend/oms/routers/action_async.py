@@ -25,6 +25,7 @@ from shared.errors.error_types import ErrorCode
 from shared.models.commands import ActionCommand
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import enrich_metadata_with_current_trace
+from shared.observability.request_context import get_correlation_id
 from shared.security.database_access import DOMAIN_MODEL_ROLES, get_database_access_role
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input
 from shared.services.action_log_registry import ActionLogRegistry
@@ -373,6 +374,7 @@ async def submit_action_async(
             }
         registry = ActionLogRegistry()
         await registry.connect()
+        effective_correlation_id = (request.correlation_id or get_correlation_id() or "").strip() or None
         await registry.create_log(
             action_log_id=action_log_id,
             db_name=db_name,
@@ -381,7 +383,7 @@ async def submit_action_async(
             resource_rid=None,
             ontology_commit_id=ontology_commit_id,
             input_payload=audited_log_input,
-            correlation_id=request.correlation_id,
+            correlation_id=effective_correlation_id,
             submitted_by=submitted_by,
             writeback_target=writeback_target,
             metadata=log_metadata,
@@ -396,10 +398,11 @@ async def submit_action_async(
             ontology_commit_id=ontology_commit_id,
             base_branch=resolved_base_branch,
             overlay_branch=overlay_branch_resolved,
+            correlation_id=effective_correlation_id,
             payload=validated_input,
             metadata={
                 **(request.metadata or {}),
-                "correlation_id": request.correlation_id,
+                "correlation_id": effective_correlation_id,
                 "submitted_at": datetime.now(timezone.utc).isoformat(),
                 "ontology": {"ref": f"branch:{resolved_base_branch}", "commit": ontology_commit_id},
             },

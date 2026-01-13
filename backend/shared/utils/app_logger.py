@@ -43,7 +43,7 @@ def get_logger(name: str, level: Optional[str] = None) -> logging.Logger:
     logger.addFilter(trace_filter)
     handler.addFilter(trace_filter)
     formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s - %(message)s"
+        "%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s"
     )
     handler.setFormatter(formatter)
 
@@ -75,7 +75,7 @@ def configure_logging(level: str = "INFO") -> None:
         install_trace_context_filter()
         handler.addFilter(TraceContextFilter())
         formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s - %(message)s"
+            "%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s"
         )
         handler.setFormatter(formatter)
         logging.root.addHandler(handler)

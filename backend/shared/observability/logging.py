@@ -5,12 +5,23 @@ Goals:
 - Add trace correlation fields (`trace_id`, `span_id`) to all log records safely.
 - Be safe when OpenTelemetry isn't installed/enabled (fields still exist with "-").
 - Avoid implicitly initializing tracing providers (no side effects).
+
+Additionally (debuggability):
+- Provide `request_id` / `correlation_id` / `db_name` fields (from ContextVars),
+  so operators can correlate incidents even without a trace backend.
 """
 
 from __future__ import annotations
 
 import logging
 from typing import Optional
+
+from shared.observability.request_context import (
+    get_correlation_id,
+    get_db_name,
+    get_principal,
+    get_request_id,
+)
 
 try:  # OpenTelemetry API (no SDK dependency)
     from opentelemetry import trace as otel_trace
@@ -47,6 +58,26 @@ def install_trace_context_record_factory() -> None:
         # Defaults (stable formatter contract)
         record.trace_id = "-"  # type: ignore[attr-defined]
         record.span_id = "-"  # type: ignore[attr-defined]
+        record.request_id = "-"  # type: ignore[attr-defined]
+        record.correlation_id = "-"  # type: ignore[attr-defined]
+        record.db_name = "-"  # type: ignore[attr-defined]
+        record.principal = "-"  # type: ignore[attr-defined]
+
+        try:
+            request_id = get_request_id()
+            correlation_id = get_correlation_id()
+            db_name = get_db_name()
+            principal = get_principal()
+            if request_id:
+                record.request_id = request_id  # type: ignore[attr-defined]
+            if correlation_id:
+                record.correlation_id = correlation_id  # type: ignore[attr-defined]
+            if db_name:
+                record.db_name = db_name  # type: ignore[attr-defined]
+            if principal:
+                record.principal = principal  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
         if not _HAS_OTEL_API or otel_trace is None:
             return record
@@ -88,6 +119,26 @@ class TraceContextFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         record.trace_id = "-"  # type: ignore[attr-defined]
         record.span_id = "-"  # type: ignore[attr-defined]
+        record.request_id = "-"  # type: ignore[attr-defined]
+        record.correlation_id = "-"  # type: ignore[attr-defined]
+        record.db_name = "-"  # type: ignore[attr-defined]
+        record.principal = "-"  # type: ignore[attr-defined]
+
+        try:
+            request_id = get_request_id()
+            correlation_id = get_correlation_id()
+            db_name = get_db_name()
+            principal = get_principal()
+            if request_id:
+                record.request_id = request_id  # type: ignore[attr-defined]
+            if correlation_id:
+                record.correlation_id = correlation_id  # type: ignore[attr-defined]
+            if db_name:
+                record.db_name = db_name  # type: ignore[attr-defined]
+            if principal:
+                record.principal = principal  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
         if not _HAS_OTEL_API or otel_trace is None:
             return True

@@ -16,6 +16,17 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from typing import Any, Dict, Iterable, Iterator, Mapping, MutableMapping, Optional, Sequence, Tuple
+from urllib.parse import quote
+
+from shared.observability.request_context import (
+    context_from_metadata,
+    parse_baggage_header,
+    get_correlation_id,
+    get_db_name,
+    get_principal,
+    get_request_id,
+    request_context,
+)
 
 _TRACEPARENT = "traceparent"
 _TRACESTATE = "tracestate"
@@ -25,6 +36,8 @@ _KNOWN_KEYS = (_TRACEPARENT, _TRACESTATE, _BAGGAGE)
 
 try:  # OpenTelemetry API (no SDK dependency)
     from opentelemetry import context as otel_context
+    from opentelemetry import trace as otel_trace
+    from opentelemetry import baggage as otel_baggage
     from opentelemetry.baggage.propagation import W3CBaggagePropagator
     from opentelemetry.propagators.composite import CompositePropagator
     from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
@@ -38,6 +51,8 @@ try:  # OpenTelemetry API (no SDK dependency)
     _HAS_OTEL_API = True
 except Exception:  # pragma: no cover - env dependent
     otel_context = None
+    otel_trace = None
+    otel_baggage = None
     _PROPAGATOR = None
     _HAS_OTEL_API = False
 
@@ -56,6 +71,39 @@ def _to_text(value: Any) -> Optional[str]:
         return str(value)
     except Exception:
         return None
+
+
+def _encode_baggage_value(value: str) -> str:
+    return quote(str(value), safe="-._~")
+
+
+def _merge_baggage(
+    existing: Optional[str],
+    *,
+    request_id: Optional[str] = None,
+    correlation_id: Optional[str] = None,
+    db_name: Optional[str] = None,
+) -> Optional[str]:
+    extras = {
+        "request_id": _to_text(request_id),
+        "correlation_id": _to_text(correlation_id),
+        "db_name": _to_text(db_name),
+    }
+    extras = {k: v for k, v in extras.items() if v}
+    if not extras:
+        return existing
+
+    raw_existing = _to_text(existing)
+    if not raw_existing:
+        return ",".join(f"{k}={_encode_baggage_value(v)}" for k, v in extras.items())
+
+    parsed = parse_baggage_header(raw_existing)
+    missing = {k: v for k, v in extras.items() if k not in parsed}
+    if not missing:
+        return raw_existing
+
+    suffix = ",".join(f"{k}={_encode_baggage_value(v)}" for k, v in missing.items())
+    return f"{raw_existing},{suffix}"
 
 
 def carrier_from_kafka_headers(kafka_headers: Optional[Sequence[Tuple[str, Any]]]) -> Dict[str, str]:
@@ -99,6 +147,30 @@ def carrier_from_envelope_metadata(payload_or_metadata: Optional[Mapping[str, An
         text = _to_text(base.get(key))
         if text:
             carrier[key] = text
+
+    # Extra context keys (not part of W3C header set).
+    request_id = _to_text(base.get("request_id"))
+    correlation_id = _to_text(base.get("correlation_id"))
+    db_name = _to_text(base.get("db_name") or base.get("project") or base.get("db"))
+    principal = _to_text(base.get("principal"))
+
+    if request_id:
+        carrier["request_id"] = request_id
+    if correlation_id:
+        carrier["correlation_id"] = correlation_id
+    if db_name:
+        carrier["db_name"] = db_name
+    if principal:
+        carrier["principal"] = principal
+
+    baggage = _merge_baggage(
+        carrier.get(_BAGGAGE),
+        request_id=request_id,
+        correlation_id=correlation_id,
+        db_name=db_name,
+    )
+    if baggage:
+        carrier[_BAGGAGE] = baggage
     return carrier
 
 
@@ -131,6 +203,15 @@ def kafka_headers_from_current_context() -> list[Tuple[str, bytes]]:
         _PROPAGATOR.inject(carrier)
     except Exception:
         return []
+
+    baggage = _merge_baggage(
+        carrier.get(_BAGGAGE),
+        request_id=get_request_id(),
+        correlation_id=get_correlation_id(),
+        db_name=get_db_name(),
+    )
+    if baggage:
+        carrier[_BAGGAGE] = baggage
     return kafka_headers_from_carrier(carrier)
 
 
@@ -149,10 +230,59 @@ def enrich_metadata_with_current_trace(metadata: Any) -> None:
         _PROPAGATOR.inject(carrier)
     except Exception:
         return
+
+    baggage = _merge_baggage(
+        carrier.get(_BAGGAGE),
+        request_id=get_request_id(),
+        correlation_id=get_correlation_id(),
+        db_name=get_db_name(),
+    )
+    if baggage:
+        carrier[_BAGGAGE] = baggage
     for key in _KNOWN_KEYS:
         value = carrier.get(key)
         if value:
             metadata[key] = value
+
+    # Convenience debug fields for operators/audit logs.
+    # (These do not replace W3C headers; they complement them.)
+    try:
+        if otel_trace is not None:
+            span = otel_trace.get_current_span()
+            ctx = span.get_span_context() if span is not None else None
+            is_valid = getattr(ctx, "is_valid", False) if ctx is not None else False
+            if callable(is_valid):
+                is_valid = is_valid()
+            if ctx is not None and is_valid:
+                trace_id = getattr(ctx, "trace_id", 0) or 0
+                span_id = getattr(ctx, "span_id", 0) or 0
+                if trace_id:
+                    metadata.setdefault("trace_id", format(int(trace_id), "032x"))
+                if span_id:
+                    metadata.setdefault("span_id", format(int(span_id), "016x"))
+    except Exception:
+        pass
+
+    try:
+        if otel_baggage is not None:
+            for key in ("request_id", "correlation_id", "db_name"):
+                value = otel_baggage.get_baggage(key)
+                if value:
+                    metadata.setdefault(key, value)
+    except Exception:
+        pass
+
+    try:
+        for key, getter in (
+            ("request_id", get_request_id),
+            ("correlation_id", get_correlation_id),
+            ("db_name", get_db_name),
+        ):
+            value = getter()
+            if value:
+                metadata.setdefault(key, value)
+    except Exception:
+        pass
 
 
 @contextmanager
@@ -182,7 +312,15 @@ def attach_context_from_carrier(
         token = None
 
     try:
-        yield
+        extracted = context_from_metadata(carrier)
+        with request_context(
+            request_id=extracted.get("request_id") or get_request_id(),
+            correlation_id=extracted.get("correlation_id") or get_correlation_id(),
+            db_name=extracted.get("db_name") or get_db_name(),
+            principal=extracted.get("principal") or get_principal(),
+            inject_baggage=False,
+        ):
+            yield
     finally:
         if token is not None:
             try:
@@ -202,9 +340,19 @@ def attach_context_from_kafka(
     Attach trace context from Kafka headers (preferred) or fallback metadata.
     """
     carrier: Dict[str, str] = {}
+    fallback_ctx = context_from_metadata(fallback_metadata) if fallback_metadata else {}
     if fallback_metadata:
         carrier.update(carrier_from_envelope_metadata(fallback_metadata))
     carrier.update(carrier_from_kafka_headers(kafka_headers))
-    with attach_context_from_carrier(carrier or None, service_name=service_name):
-        yield
 
+    # Prefer explicit metadata fields for context vars (correlation_id/request_id),
+    # then let baggage/propagators handle cross-hop propagation.
+    with request_context(
+        request_id=fallback_ctx.get("request_id") or get_request_id(),
+        correlation_id=fallback_ctx.get("correlation_id") or get_correlation_id(),
+        db_name=fallback_ctx.get("db_name") or get_db_name(),
+        principal=fallback_ctx.get("principal") or get_principal(),
+        inject_baggage=False,
+    ):
+        with attach_context_from_carrier(carrier or None, service_name=service_name):
+            yield

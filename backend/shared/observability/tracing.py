@@ -149,6 +149,7 @@ class OpenTelemetryConfig:
 
     # Feature flags
     ENABLE_TRACING = os.getenv("OTEL_ENABLE_TRACING", "true").lower() == "true"
+    ENABLE_ASYNCIO_INSTRUMENTATION = os.getenv("OTEL_INSTRUMENT_ASYNCIO", "false").lower() == "true"
 
 
 class TracingService:
@@ -286,14 +287,21 @@ class TracingService:
         if not HAS_OPENTELEMETRY or not OpenTelemetryConfig.ENABLE_TRACING:
             return
 
-        if AsyncioInstrumentor is not None:
+        # NOTE: opentelemetry-instrumentation-asyncio has historically caused runtime
+        # issues around `asyncio.to_thread` / partial callables in some versions.
+        # Keep this opt-in so observability never breaks control-plane correctness.
+        if AsyncioInstrumentor is None:
+            logger.debug("Asyncio instrumentation not available")
+        elif "PYTEST_CURRENT_TEST" in os.environ:
+            logger.debug("Asyncio instrumentation disabled during tests")
+        elif not OpenTelemetryConfig.ENABLE_ASYNCIO_INSTRUMENTATION:
+            logger.debug("Asyncio instrumentation disabled (OTEL_INSTRUMENT_ASYNCIO=false)")
+        else:
             try:
                 AsyncioInstrumentor().instrument()
                 logger.info("Asyncio instrumented")
             except Exception as e:
                 logger.error(f"Failed to instrument Asyncio: {e}")
-        else:
-            logger.debug("Asyncio instrumentation not available")
 
         if HTTPXClientInstrumentor is not None:
             try:

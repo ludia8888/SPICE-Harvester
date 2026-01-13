@@ -72,6 +72,24 @@ class EventEnvelope(BaseModel):
             "run_id": os.getenv("PIPELINE_RUN_ID") or os.getenv("RUN_ID") or os.getenv("EXECUTION_ID"),
             "code_sha": os.getenv("CODE_SHA") or os.getenv("GIT_SHA") or os.getenv("COMMIT_SHA"),
         }
+        try:
+            correlation_id = getattr(command, "correlation_id", None) or (command.metadata or {}).get("correlation_id")
+            request_id = (command.metadata or {}).get("request_id")
+            if correlation_id:
+                base_metadata.setdefault("correlation_id", str(correlation_id))
+            if request_id:
+                base_metadata.setdefault("request_id", str(request_id))
+
+            from shared.observability.request_context import get_correlation_id, get_request_id
+
+            ctx_corr = get_correlation_id()
+            ctx_req = get_request_id()
+            if ctx_corr and "correlation_id" not in base_metadata:
+                base_metadata["correlation_id"] = ctx_corr
+            if ctx_req and "request_id" not in base_metadata:
+                base_metadata["request_id"] = ctx_req
+        except Exception:
+            pass
         if kafka_topic:
             base_metadata["kafka_topic"] = kafka_topic
         if metadata:

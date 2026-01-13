@@ -13,6 +13,10 @@ from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.errors.enterprise_catalog import is_external_code
 from shared.errors.error_envelope import build_error_envelope
 from shared.security.input_sanitizer import SecurityViolationError
+from shared.observability.request_context import (
+    get_correlation_id as get_context_correlation_id,
+    get_request_id as get_context_request_id,
+)
 from shared.utils.app_logger import get_logger
 
 logger = get_logger(__name__)
@@ -39,7 +43,21 @@ _STATUS_TO_CATEGORY_CODE: Dict[int, Tuple[ErrorCategory, ErrorCode]] = {
 
 
 def _get_request_id(request: Request) -> Optional[str]:
-    return request.headers.get("x-request-id") or request.headers.get("X-Request-ID")
+    return (
+        request.headers.get("x-request-id")
+        or request.headers.get("X-Request-ID")
+        or getattr(request.state, "request_id", None)
+        or get_context_request_id()
+    )
+
+
+def _get_correlation_id(request: Request) -> Optional[str]:
+    return (
+        request.headers.get("x-correlation-id")
+        or request.headers.get("X-Correlation-ID")
+        or getattr(request.state, "correlation_id", None)
+        or get_context_correlation_id()
+    )
 
 
 def _get_origin(request: Request, service_name: str) -> Dict[str, Optional[str]]:
@@ -165,6 +183,7 @@ def _build_payload(
         external_code=external_code,
         origin=_get_origin(request, service_name),
         request_id=_get_request_id(request),
+        correlation_id=_get_correlation_id(request),
         prefer_status_code=True,
     )
 

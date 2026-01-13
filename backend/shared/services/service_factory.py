@@ -21,6 +21,11 @@ from shared.errors.error_response import install_error_handlers
 from shared.models.requests import ApiResponse
 from shared.i18n.middleware import install_i18n_middleware
 from shared.middleware.rate_limiter import install_rate_limit_headers_middleware
+from shared.observability.request_context import (
+    context_from_headers,
+    generate_request_id,
+    request_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -207,11 +212,41 @@ def _add_logging_middleware(app: FastAPI) -> None:
     """Add request logging middleware"""
     @app.middleware("http")
     async def log_requests(request: Request, call_next):
+        extracted = context_from_headers(request.headers)
+        request_id = extracted.get("request_id") or generate_request_id()
+        correlation_id = extracted.get("correlation_id") or request_id
+        db_name = extracted.get("db_name")
+        principal = extracted.get("principal")
+
+        # Allow error handlers and downstream libs to read correlation ids even
+        # when the client did not provide headers.
+        request.state.request_id = request_id
+        request.state.correlation_id = correlation_id
+        request.state.db_name = db_name
+        request.state.principal = principal
+
         start_time = time.time()
-        response = await call_next(request)
+        with request_context(
+            request_id=request_id,
+            correlation_id=correlation_id,
+            db_name=db_name,
+            principal=principal,
+        ):
+            response = await call_next(request)
         process_time = time.time() - start_time
+
+        try:
+            response.headers.setdefault("X-Request-Id", request_id)
+            response.headers.setdefault("X-Correlation-Id", correlation_id)
+        except Exception:
+            pass
+
         logger.info(
-            f'Request: {request.method} {request.url.path} - Response: {response.status_code} - Time: {process_time:.4f}s'
+            "Request: %s %s - Response: %s - Time: %.4fs",
+            request.method,
+            request.url.path,
+            getattr(response, "status_code", "?"),
+            process_time,
         )
         return response
 
@@ -338,12 +373,12 @@ def _get_logging_config(service_name: str) -> Dict[str, Any]:
         "formatters": {
             "default": {
                 "()": "uvicorn.logging.DefaultFormatter",
-                "fmt": "%(levelprefix)s %(asctime)s - trace_id=%(trace_id)s span_id=%(span_id)s - %(message)s",
+                "fmt": "%(levelprefix)s %(asctime)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
                 "datefmt": "%Y-%m-%d %H:%M:%S",
             },
             "access": {
                 "()": "uvicorn.logging.AccessFormatter",
-                "fmt": '%(levelprefix)s %(asctime)s - trace_id=%(trace_id)s span_id=%(span_id)s - %(client_addr)s - "%(request_line)s" %(status_code)s',
+                "fmt": '%(levelprefix)s %(asctime)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(client_addr)s - "%(request_line)s" %(status_code)s',
                 "datefmt": "%Y-%m-%d %H:%M:%S",
             },
         },

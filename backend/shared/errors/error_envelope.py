@@ -62,6 +62,7 @@ def build_error_envelope(
     enterprise: Optional[EnterpriseError] = None,
     origin: Optional[Dict[str, Optional[str]]] = None,
     request_id: Optional[str] = None,
+    correlation_id: Optional[str] = None,
     trace_id: Optional[str] = None,
     prefer_status_code: bool = False,
 ) -> Dict[str, Any]:
@@ -103,6 +104,7 @@ def build_error_envelope(
         "origin": _normalize_origin(service_name=service_name, origin=origin),
         "trace_id": resolved_trace_id,
         "request_id": request_id,
+        "correlation_id": correlation_id,
     }
     if errors:
         payload["errors"] = errors
