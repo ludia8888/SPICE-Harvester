@@ -45,11 +45,17 @@ from shared.dependencies.providers import AuditLogStoreDep, LineageStoreDep
 from shared.services.pipeline_artifact_store import PipelineArtifactStore
 from shared.services.pipeline_profiler import compute_column_stats
 from shared.services.pipeline_schema_utils import normalize_schema_type
-from shared.services.pipeline_graph_utils import normalize_nodes
+from shared.services.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes
 from shared.services.pipeline_dataset_utils import (
     normalize_dataset_selection,
     resolve_dataset_version,
     resolve_fallback_branches,
+)
+from shared.services.pipeline_transform_spec import (
+    SUPPORTED_TRANSFORMS,
+    normalize_operation,
+    normalize_union_mode,
+    resolve_join_spec,
 )
 from shared.services.pipeline_dependency_utils import normalize_dependency_entries
 from shared.services.pipeline_scheduler import _is_valid_cron_expression
@@ -372,6 +378,87 @@ async def _run_pipeline_preflight(
             "blocking_errors": [],
             "has_blocking_errors": False,
         }
+
+
+def _validate_pipeline_definition(*, definition_json: Dict[str, Any], require_output: bool = True) -> list[str]:
+    errors: list[str] = []
+    nodes_raw = definition_json.get("nodes")
+    if not isinstance(nodes_raw, list) or not nodes_raw:
+        errors.append("Pipeline has no nodes")
+        return errors
+    nodes = normalize_nodes(nodes_raw)
+    edges = normalize_edges(definition_json.get("edges"))
+    node_ids = set(nodes.keys())
+    for edge in edges:
+        if edge["from"] not in node_ids or edge["to"] not in node_ids:
+            errors.append(f"Pipeline edge references missing node: {edge['from']}->{edge['to']}")
+    has_output = any(node.get("type") == "output" for node in nodes.values())
+    if require_output and not has_output:
+        errors.append("Pipeline has no output node")
+
+    incoming = build_incoming(edges)
+    supported_ops = SUPPORTED_TRANSFORMS
+    for node_id, node in nodes.items():
+        if node.get("type") != "transform":
+            continue
+        metadata = node.get("metadata") or {}
+        operation = normalize_operation(metadata.get("operation"))
+        if not operation:
+            if len(incoming.get(node_id, [])) >= 2:
+                errors.append(f"transform node {node_id} has multiple inputs but no operation")
+            continue
+        if operation not in supported_ops:
+            errors.append(f"Unsupported operation '{operation}' on node {node_id}")
+            continue
+        if operation in {"filter", "compute"} and not str(metadata.get("expression") or "").strip():
+            errors.append(f"{operation} missing expression on node {node_id}")
+        if operation in {"select", "drop", "sort", "dedupe", "explode"}:
+            columns = metadata.get("columns") or []
+            if not columns:
+                errors.append(f"{operation} missing columns on node {node_id}")
+        if operation == "rename":
+            rename_map = metadata.get("rename") or {}
+            if not rename_map:
+                errors.append(f"rename missing mapping on node {node_id}")
+        if operation == "cast":
+            casts = metadata.get("casts") or []
+            if not casts:
+                errors.append(f"cast missing columns on node {node_id}")
+        if operation in {"groupBy", "aggregate"}:
+            aggregates = metadata.get("aggregates") or []
+            if not isinstance(aggregates, list) or not any(
+                isinstance(item, dict) and item.get("column") and item.get("op") for item in aggregates
+            ):
+                errors.append(f"{operation} missing aggregates on node {node_id}")
+        if operation == "join":
+            if len(incoming.get(node_id, [])) < 2:
+                errors.append(f"join requires two inputs on node {node_id}")
+            join_spec = resolve_join_spec(metadata)
+            if not join_spec.allow_cross_join and not (join_spec.left_key and join_spec.right_key):
+                errors.append(f"join requires leftKey/rightKey (or joinKey) on node {node_id}")
+            if join_spec.allow_cross_join and not (join_spec.left_key and join_spec.right_key):
+                if join_spec.join_type != "cross":
+                    errors.append(f"join allowCrossJoin requires joinType='cross' on node {node_id}")
+        if operation == "union":
+            if len(incoming.get(node_id, [])) < 2:
+                errors.append(f"union requires two inputs on node {node_id}")
+            union_mode = normalize_union_mode(metadata)
+            if union_mode not in {"strict", "common_only", "pad_missing_nulls", "pad"}:
+                errors.append(f"union has invalid unionMode '{union_mode}' on node {node_id}")
+        if operation == "pivot":
+            pivot_meta = metadata.get("pivot") or {}
+            index_cols = pivot_meta.get("index") or []
+            columns_col = pivot_meta.get("columns")
+            values_col = pivot_meta.get("values")
+            if not index_cols or not columns_col or not values_col:
+                errors.append(f"pivot missing fields on node {node_id}")
+        if operation == "window":
+            window_meta = metadata.get("window") or {}
+            order_by = window_meta.get("orderBy") or []
+            if not order_by:
+                errors.append(f"window missing orderBy on node {node_id}")
+
+    return errors
 
 
 async def _maybe_enqueue_objectify_job(
@@ -1983,6 +2070,112 @@ async def get_pipeline_readiness(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+@router.post("/simulate-definition", response_model=ApiResponse)
+@trace_endpoint("simulate_pipeline_definition")
+async def simulate_pipeline_definition(
+    payload: Dict[str, Any],
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    request: Request = None,
+) -> ApiResponse:
+    try:
+        sanitized = sanitize_input(payload)
+        db_name = validate_db_name(str(sanitized.get("db_name") or ""))
+        if request is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="request context is required")
+        try:
+            enforce_db_scope(request.headers, db_name=db_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+        definition_json = sanitized.get("definition_json") if isinstance(sanitized.get("definition_json"), dict) else None
+        if not isinstance(definition_json, dict) or not definition_json:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="definition_json is required")
+
+        node_id = str(sanitized.get("node_id") or "").strip() or None
+        branch = str(sanitized.get("branch") or "main").strip() or "main"
+        limit = int(sanitized.get("limit") or 200)
+        limit = max(1, min(limit, 200))
+
+        preview_definition = dict(definition_json)
+        preview_meta = dict(preview_definition.get("__preview_meta__") or {})
+        preview_meta.setdefault("branch", branch)
+        preview_definition["__preview_meta__"] = preview_meta
+
+        validation_errors = _validate_pipeline_definition(
+            definition_json=preview_definition,
+            require_output=(node_id is None),
+        )
+        preflight = await _run_pipeline_preflight(
+            definition_json=preview_definition,
+            db_name=db_name,
+            branch=branch,
+            dataset_registry=dataset_registry,
+        )
+
+        if validation_errors:
+            return ApiResponse.warning(
+                message="Pipeline definition invalid",
+                data={
+                    "db_name": db_name,
+                    "branch": branch,
+                    "node_id": node_id,
+                    "limit": limit,
+                    "preflight": preflight,
+                    "errors": validation_errors,
+                },
+            ).to_dict()
+
+        if preflight.get("has_blocking_errors"):
+            return ApiResponse.warning(
+                message="Pipeline preflight failed",
+                data={
+                    "db_name": db_name,
+                    "branch": branch,
+                    "node_id": node_id,
+                    "limit": limit,
+                    "preflight": preflight,
+                },
+            ).to_dict()
+
+        executor = PipelineExecutor(dataset_registry)
+        try:
+            preview = await executor.preview(
+                definition=preview_definition,
+                db_name=db_name,
+                node_id=node_id,
+                limit=limit,
+            )
+        except ValueError as exc:
+            return ApiResponse.warning(
+                message="Pipeline definition simulation failed",
+                data={
+                    "db_name": db_name,
+                    "branch": branch,
+                    "node_id": node_id,
+                    "limit": limit,
+                    "preflight": preflight,
+                    "error": str(exc),
+                },
+            ).to_dict()
+
+        return ApiResponse.success(
+            message="Pipeline definition simulated",
+            data={
+                "db_name": db_name,
+                "branch": branch,
+                "node_id": node_id,
+                "limit": limit,
+                "preflight": preflight,
+                "preview": preview,
+            },
+        ).to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to simulate pipeline definition: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
 @router.post("", response_model=ApiResponse)
 @trace_endpoint("create_pipeline")
 async def create_pipeline(
@@ -1994,6 +2187,13 @@ async def create_pipeline(
     sanitized: Dict[str, Any] = {}
     try:
         sanitized = sanitize_input(payload)
+        pipeline_id: Optional[str] = None
+        raw_pipeline_id = sanitized.get("pipeline_id") or sanitized.get("pipelineId")
+        if raw_pipeline_id:
+            try:
+                pipeline_id = str(UUID(str(raw_pipeline_id)))
+            except Exception as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="pipeline_id must be a UUID") from exc
         db_name = validate_db_name(str(sanitized.get("db_name") or ""))
         name = str(sanitized.get("name") or "").strip()
         if not name:
@@ -2066,6 +2266,7 @@ async def create_pipeline(
             proposal_review_comment=proposal_review_comment,
             schedule_interval_seconds=schedule_interval_seconds,
             schedule_cron=schedule_cron,
+            pipeline_id=pipeline_id,
         )
         principal_type, principal_id = _resolve_principal(request)
         await pipeline_registry.grant_permission(
@@ -3795,6 +3996,13 @@ async def create_dataset(
 ) -> ApiResponse:
     try:
         sanitized = sanitize_input(payload)
+        dataset_id: Optional[str] = None
+        raw_dataset_id = sanitized.get("dataset_id") or sanitized.get("datasetId")
+        if raw_dataset_id:
+            try:
+                dataset_id = str(UUID(str(raw_dataset_id)))
+            except Exception as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dataset_id must be a UUID") from exc
         db_name = validate_db_name(str(sanitized.get("db_name") or ""))
         name = str(sanitized.get("name") or "").strip()
         if not name:
@@ -3813,6 +4021,7 @@ async def create_dataset(
             source_ref=source_ref,
             schema_json=schema_json,
             branch=branch,
+            dataset_id=dataset_id,
         )
 
         event = build_command_event(

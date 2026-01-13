@@ -1,5 +1,16 @@
 [
   {
+    "tool_id": "actions.get_log",
+    "method": "GET",
+    "path": "/api/v1/databases/{db_name}/actions/logs/{action_log_id}",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": false,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
     "tool_id": "actions.simulate",
     "method": "POST",
     "path": "/api/v1/databases/{db_name}/actions/{action_type_id}/simulate",
@@ -22,15 +33,69 @@
     "max_payload_bytes": 200000
   },
   {
-    "tool_id": "actions.get_log",
-    "method": "GET",
-    "path": "/api/v1/databases/{db_name}/actions/logs/{action_log_id}",
-    "risk_level": "read",
-    "requires_approval": false,
-    "requires_idempotency_key": false,
+    "tool_id": "pipelines.build",
+    "method": "POST",
+    "path": "/api/v1/pipelines/{pipeline_id}/build",
+    "risk_level": "write",
+    "requires_approval": true,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 500000
+  },
+  {
+    "tool_id": "pipelines.create",
+    "method": "POST",
+    "path": "/api/v1/pipelines",
+    "risk_level": "write",
+    "requires_approval": true,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 500000
+  },
+  {
+    "tool_id": "pipelines.datasets.create",
+    "method": "POST",
+    "path": "/api/v1/pipelines/datasets",
+    "risk_level": "write",
+    "requires_approval": true,
+    "requires_idempotency_key": true,
     "status": "ACTIVE",
     "roles": [],
     "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "pipelines.deploy",
+    "method": "POST",
+    "path": "/api/v1/pipelines/{pipeline_id}/deploy",
+    "risk_level": "write",
+    "requires_approval": true,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 500000
+  },
+  {
+    "tool_id": "pipelines.simulate_definition",
+    "method": "POST",
+    "path": "/api/v1/pipelines/simulate-definition",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 500000
+  },
+  {
+    "tool_id": "pipelines.update",
+    "method": "PUT",
+    "path": "/api/v1/pipelines/{pipeline_id}",
+    "risk_level": "write",
+    "requires_approval": true,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 500000
   }
 ]
-

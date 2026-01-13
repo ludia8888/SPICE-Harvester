@@ -11,7 +11,7 @@ EXPECTED_ENTERPRISE_CATALOG_FINGERPRINT = (
     "sha256:ab9df32ed6bcb4c49bef300f273f3bf9e57acdb7363c9a375c1f388f07f1c67c"
 )
 EXPECTED_AGENT_TOOL_ALLOWLIST_BUNDLE_HASH = (
-    "sha256:6534e4a3a3dceddd99b94b854496b1d274c94114e3a72da99a2b6b456a1d3384"
+    "sha256:cff6fce830158f439f3c3f8ebe018d155842812375cbf5b75c5de6ae55280054"
 )
 
 
@@ -25,4 +25,3 @@ def test_agent_tool_allowlist_bundle_hash_is_pinned() -> None:
     bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
     bundle_sorted = sorted(bundle, key=lambda item: str(item.get("tool_id") or ""))
     assert sha256_canonical_json_prefixed(bundle_sorted) == EXPECTED_AGENT_TOOL_ALLOWLIST_BUNDLE_HASH
-

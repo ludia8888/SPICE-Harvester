@@ -19,6 +19,7 @@ from bff.dependencies import get_action_log_registry
 from bff.services.agent_plan_compiler import compile_agent_plan
 from bff.services.agent_plan_validation import validate_agent_plan
 from bff.services.operational_memory import build_operational_context_pack
+from bff.services.pipeline_context_pack import build_pipeline_context_pack
 from shared.dependencies.providers import AuditLogStoreDep, LLMGatewayDep, RedisServiceDep
 from shared.middleware.rate_limiter import RateLimitPresets, rate_limit
 from shared.models.agent_plan import AgentPlan, AgentPlanDataScope
@@ -29,6 +30,7 @@ from shared.services.action_log_registry import ActionLogRegistry
 from shared.services.agent_registry import AgentRegistry
 from shared.services.agent_plan_registry import AgentPlanRegistry
 from shared.services.agent_tool_registry import AgentToolRegistry
+from shared.services.dataset_registry import DatasetRegistry
 from shared.config.service_config import ServiceConfig
 from shared.utils.json_patch import JsonPatchError, apply_json_patch
 
@@ -123,6 +125,12 @@ async def get_agent_plan_registry() -> AgentPlanRegistry:
     from bff.main import get_agent_plan_registry as _get_agent_plan_registry
 
     return await _get_agent_plan_registry()
+
+
+async def get_dataset_registry() -> DatasetRegistry:
+    from bff.main import get_dataset_registry as _get_dataset_registry
+
+    return await _get_dataset_registry()
 
 
 class AgentPlanApprovalRequest(BaseModel):
@@ -248,6 +256,7 @@ async def compile_plan(
     tool_registry: AgentToolRegistry = Depends(get_agent_tool_registry),
     plan_registry: AgentPlanRegistry = Depends(get_agent_plan_registry),
     action_logs: ActionLogRegistry = Depends(get_action_log_registry),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
 ) -> ApiResponse:
     payload = sanitize_input(body.model_dump(exclude_none=True))
     goal = str(payload.get("goal") or "").strip()
@@ -279,6 +288,33 @@ async def compile_plan(
     except Exception as exc:
         logger.warning("Failed to build operational context pack: %s", exc)
         context_pack = None
+
+    try:
+        if data_scope and data_scope.db_name:
+            dataset_ids: list[Any] = []
+            if data_scope.dataset_id:
+                dataset_ids.append(data_scope.dataset_id)
+            if isinstance(answers, dict):
+                for key in ("dataset_ids", "datasetIds", "dataset_id", "datasetId"):
+                    value = answers.get(key)
+                    if value in (None, ""):
+                        continue
+                    if isinstance(value, list):
+                        dataset_ids.extend(value)
+                    else:
+                        dataset_ids.append(value)
+
+            pipeline_pack = await build_pipeline_context_pack(
+                db_name=str(data_scope.db_name),
+                branch=str(data_scope.branch) if data_scope.branch else None,
+                dataset_ids=[str(item) for item in dataset_ids if item not in (None, "")],
+                dataset_registry=dataset_registry,
+            )
+            if context_pack is None:
+                context_pack = {}
+            context_pack["pipeline_builder"] = pipeline_pack
+    except Exception as exc:
+        logger.warning("Failed to build pipeline context pack: %s", exc)
 
     result = await compile_agent_plan(
         goal=goal,

@@ -15,9 +15,9 @@ import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 
-_EMAIL_RE = re.compile(r"(?i)\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b")
+_EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
 # Loose phone matcher (international/local); we mask long digit runs to reduce PII leakage.
-_LONG_DIGIT_RE = re.compile(r"\\b\\+?\\d[\\d\\s().-]{7,}\\d\\b")
+_LONG_DIGIT_RE = re.compile(r"\b\+?\d[\d\s().-]{7,}\d\b")
 
 
 def sha256_hex(value: Union[str, bytes]) -> str:
@@ -53,7 +53,7 @@ def _mask_email(text: str) -> str:
 def _mask_long_digits(text: str) -> str:
     def _repl(match: re.Match[str]) -> str:
         raw = match.group(0)
-        digits = re.sub(r"\\D+", "", raw)
+        digits = re.sub(r"\D+", "", raw)
         if len(digits) < 8:
             return raw
         digest = sha256_hex(digits)[:10]
@@ -98,4 +98,3 @@ def sample_items(items: List[Any], *, max_items: int) -> List[Any]:
     if max_items <= 0:
         return []
     return items[:max_items]
-
