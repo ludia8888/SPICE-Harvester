@@ -4,6 +4,7 @@ import pytest
 
 from agent.models import AgentToolCall
 from agent.services.agent_runtime import AgentRuntime, AgentRuntimeConfig
+from uuid import UUID
 
 
 class DummyEventStore:
@@ -80,6 +81,7 @@ async def test_agent_runtime_blocks_missing_required_artifacts(monkeypatch: pyte
     assert result["http_status"] == 400
     assert result["error_key"] == "artifact_missing"
     assert result["missing_artifacts"] == ["artifact.required"]
+    assert UUID(str(result["tool_run_id"]))
 
 
 @pytest.mark.unit
@@ -195,6 +197,7 @@ async def test_agent_runtime_stores_produced_artifacts_and_resolves_templates(
         request_id="req-1",
     )
     assert result1["status"] == "success"
+    assert UUID(str(result1["tool_run_id"]))
 
     artifacts = context.get("artifacts")
     assert isinstance(artifacts, dict)
@@ -215,6 +218,7 @@ async def test_agent_runtime_stores_produced_artifacts_and_resolves_templates(
         request_id="req-1",
     )
     assert result2["status"] == "success"
+    assert UUID(str(result2["tool_run_id"]))
 
     assert captured == [
         {
@@ -228,4 +232,3 @@ async def test_agent_runtime_stores_produced_artifacts_and_resolves_templates(
             },
         }
     ]
-

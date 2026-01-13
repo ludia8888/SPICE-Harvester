@@ -4,6 +4,7 @@ import pytest
 
 from agent.models import AgentToolCall
 from agent.services.agent_runtime import AgentRuntime, AgentRuntimeConfig
+from uuid import UUID
 
 
 class DummyEventStore:
@@ -129,4 +130,7 @@ async def test_agent_runtime_waits_for_pipeline_job_completion(monkeypatch: pyte
     assert result["status"] == "success"
     assert result["pipeline_job_id"] == "build-1"
     assert result["pipeline_run_status"] == "SUCCESS"
+    assert UUID(str(result["tool_run_id"]))
+    assert result["side_effect_summary"]["pipeline_job_id"] == "build-1"
+    assert result["side_effect_summary"]["pipeline_run_status"] == "SUCCESS"
     assert any(call[0] == "get" for call in captured["calls"])

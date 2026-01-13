@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import quote
+from uuid import UUID, uuid4, uuid5
 
 import aiohttp
 import httpx
@@ -62,6 +63,19 @@ def _clean_url(value: str) -> str:
 
 def _safe_json(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=True, separators=(",", ":"), default=str)
+
+
+def _compute_tool_run_id(*, run_id: str, step_id: Optional[str], step_index: int, attempt: int) -> str:
+    """
+    Deterministic-ish tool run id for observability.
+
+    We keep this stable across retries by including attempt, so each attempt is distinguishable.
+    """
+    base = f"{(step_id or f'step_{step_index}').strip()}:{int(attempt)}"
+    try:
+        return str(uuid5(UUID(str(run_id)), base))
+    except Exception:
+        return str(uuid4())
 
 
 def _extract_retry_after_ms(headers: Dict[str, str]) -> Optional[int]:
@@ -1243,6 +1257,12 @@ class AgentRuntime:
         request_id: Optional[str],
     ) -> Dict[str, Any]:
         context = context if isinstance(context, dict) else {}
+        tool_run_id = _compute_tool_run_id(
+            run_id=run_id,
+            step_id=tool_call.step_id,
+            step_index=step_index,
+            attempt=attempt,
+        )
         try:
             resolved_path = _resolve_templates(tool_call.path, context)
             if not isinstance(resolved_path, str):
@@ -1289,6 +1309,7 @@ class AgentRuntime:
                 data={
                     "step_index": step_index,
                     "step_id": tool_call.step_id,
+                    "tool_run_id": tool_run_id,
                     "attempt": attempt,
                     "tool": tool_call.service,
                     "tool_id": tool_call.tool_id,
@@ -1311,6 +1332,7 @@ class AgentRuntime:
             return {
                 "status": "failure",
                 "http_status": 400,
+                "tool_run_id": tool_run_id,
                 "output_digest": None,
                 "duration_ms": 0,
                 "data_scope": mask_pii(tool_call.data_scope, max_string_chars=200),
@@ -1337,6 +1359,7 @@ class AgentRuntime:
                 data={
                     "step_index": step_index,
                     "step_id": tool_call.step_id,
+                    "tool_run_id": tool_run_id,
                     "attempt": attempt,
                     "tool": tool_call.service,
                     "tool_id": tool_call.tool_id,
@@ -1360,6 +1383,7 @@ class AgentRuntime:
             return {
                 "status": "failure",
                 "http_status": 400,
+                "tool_run_id": tool_run_id,
                 "output_digest": None,
                 "duration_ms": 0,
                 "data_scope": mask_pii(tool_call.data_scope, max_string_chars=200),
@@ -1390,6 +1414,7 @@ class AgentRuntime:
             data={
                 "step_index": step_index,
                 "step_id": tool_call.step_id,
+                "tool_run_id": tool_run_id,
                 "attempt": attempt,
                 "tool": tool_call.service,
                 "tool_id": tool_call.tool_id,
@@ -1417,6 +1442,7 @@ class AgentRuntime:
                 data={
                     "step_index": step_index,
                     "step_id": tool_call.step_id,
+                    "tool_run_id": tool_run_id,
                     "attempt": attempt,
                     "tool": tool_call.service,
                     "tool_id": tool_call.tool_id,
@@ -1438,6 +1464,7 @@ class AgentRuntime:
             return {
                 "status": "failure",
                 "http_status": 400,
+                "tool_run_id": tool_run_id,
                 "output_digest": None,
                 "duration_ms": 0,
                 "data_scope": data_scope,
@@ -1449,6 +1476,7 @@ class AgentRuntime:
             return {
                 "status": "skipped",
                 "http_status": None,
+                "tool_run_id": tool_run_id,
                 "output_digest": None,
                 "duration_ms": 0,
                 "data_scope": data_scope,
@@ -1467,6 +1495,7 @@ class AgentRuntime:
                     data={
                         "step_index": step_index,
                         "step_id": tool_call.step_id,
+                        "tool_run_id": tool_run_id,
                         "attempt": attempt,
                         "tool": tool_call.service,
                         "tool_id": tool_call.tool_id,
@@ -1488,6 +1517,7 @@ class AgentRuntime:
                 return {
                     "status": "failure",
                     "http_status": 409,
+                    "tool_run_id": tool_run_id,
                     "output_digest": None,
                     "duration_ms": 0,
                     "data_scope": data_scope,
@@ -1621,6 +1651,15 @@ class AgentRuntime:
             if output_size <= self.config.max_payload_bytes
             else f"<omitted: {output_size} bytes>"
         )
+        side_effect_summary: dict[str, Any] = {}
+        if command_id:
+            side_effect_summary["command_id"] = command_id
+        if pipeline_job_id:
+            side_effect_summary["pipeline_job_id"] = pipeline_job_id
+        if pipeline_run_status:
+            side_effect_summary["pipeline_run_status"] = pipeline_run_status
+        if isinstance(signals, dict) and signals:
+            side_effect_summary["signals"] = dict(signals)
 
         status = "failure" if error else "success"
         await self.record_event(
@@ -1631,6 +1670,7 @@ class AgentRuntime:
             data={
                 "step_index": step_index,
                 "step_id": tool_call.step_id,
+                "tool_run_id": tool_run_id,
                 "attempt": attempt,
                 "tool": tool_call.service,
                 "tool_id": tool_call.tool_id,
@@ -1653,6 +1693,7 @@ class AgentRuntime:
                 "enterprise": enterprise,
                 "retryable": retryable,
                 "retry_after_ms": retry_after_ms,
+                "side_effect_summary": side_effect_summary,
             },
             request_id=request_id,
             step_index=step_index,
@@ -1695,7 +1736,9 @@ class AgentRuntime:
         return {
             "status": status,
             "http_status": http_status,
+            "tool_run_id": tool_run_id,
             "output_digest": output_digest,
+            "payload_preview": output_preview,
             "duration_ms": duration_ms,
             "data_scope": data_scope,
             "command_id": command_id,
@@ -1710,4 +1753,5 @@ class AgentRuntime:
             "retryable": retryable,
             "retry_after_ms": retry_after_ms,
             "signals": signals,
+            "side_effect_summary": side_effect_summary,
         }
