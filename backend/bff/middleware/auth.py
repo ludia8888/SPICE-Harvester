@@ -23,6 +23,7 @@ _DELEGATED_AUTH_HEADER = "X-Delegated-Authorization"
 _USER_CONTEXT_REQUIRED_PREFIXES = (
     "/api/v1/agent",
     "/api/v1/agent-plans",
+    "/api/v1/agent-sessions",
 )
 _AGENT_TOOL_ID_HEADER = "X-Agent-Tool-ID"
 _AGENT_TOOL_RUN_ID_HEADER = "X-Agent-Tool-Run-ID"

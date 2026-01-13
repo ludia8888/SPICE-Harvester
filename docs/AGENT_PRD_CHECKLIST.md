@@ -27,12 +27,12 @@
 
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
-| SESS-001 | TODO | (없음) | Agent Session CRUD API 필요. |
+| SESS-001 | DONE | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_session_registry.py`, `backend/bff/main.py`, `backend/bff/tests/test_agent_sessions_router.py` |  |
 | SESS-002 | PARTIAL | `backend/shared/services/agent_registry.py`(runs/steps/approvals), `backend/agent/services/agent_runtime.py`(events) | “세션” 단위 저장(메시지/컨텍스트 첨부/모델/툴 활성화/비용) 미구현. |
 | SESS-003 | TODO | (없음) | 세션 시작 시 clean context 보장 필요. |
 | SESS-004 | TODO | (없음) | 세션 요약/구간 제거 + 감사 추적(원본 digest 보존) 미구현. |
 | SESS-005 | TODO | (없음) | 세션 상태 머신(ACTIVE/WAITING_APPROVAL/...) 미구현. |
-| SESS-006 | PARTIAL | `backend/bff/routers/agent_proxy.py`, `backend/shared/services/agent_registry.py` | “세션 내 Job” 모델은 없음. 다만 run_id(AgentRun)가 job에 해당(확장 필요). |
+| SESS-006 | PARTIAL | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_session_registry.py` | Job 상태(run_id 연동, 완료 반영), 이벤트/진행률 스트리밍까지 확장 필요. |
 
 ---
 
