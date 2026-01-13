@@ -26,6 +26,85 @@ _SAFE_BUILTINS: Dict[str, Any] = {
 }
 
 
+_DISALLOWED_AST_NODES = (
+    ast.Import,
+    ast.ImportFrom,
+    ast.AsyncFunctionDef,
+    ast.ClassDef,
+    ast.With,
+    ast.AsyncWith,
+    ast.Try,
+    ast.Raise,
+    ast.Global,
+    ast.Nonlocal,
+    ast.While,
+    ast.For,
+    ast.AsyncFor,
+    ast.Lambda,
+    ast.Await,
+    ast.Yield,
+    ast.YieldFrom,
+)
+
+_DISALLOWED_AST_NODE_MESSAGES = {
+    ast.Import: "UDF code cannot import modules",
+    ast.ImportFrom: "UDF code cannot import modules",
+    ast.AsyncFunctionDef: "UDF code cannot define async functions",
+    ast.ClassDef: "UDF code cannot define classes",
+    ast.With: "UDF code cannot use 'with' statements",
+    ast.AsyncWith: "UDF code cannot use 'with' statements",
+    ast.Try: "UDF code cannot use try/except",
+    ast.Raise: "UDF code cannot raise exceptions",
+    ast.Global: "UDF code cannot declare global variables",
+    ast.Nonlocal: "UDF code cannot declare nonlocal variables",
+    ast.While: "UDF code cannot use while loops",
+    ast.For: "UDF code cannot use for loops",
+    ast.AsyncFor: "UDF code cannot use for loops",
+    ast.Lambda: "UDF code cannot define lambdas",
+    ast.Await: "UDF code cannot use await",
+    ast.Yield: "UDF code cannot use yield",
+    ast.YieldFrom: "UDF code cannot use yield from",
+}
+
+
+class _UdfAstValidator(ast.NodeVisitor):
+    def generic_visit(self, node: ast.AST) -> None:
+        if isinstance(node, _DISALLOWED_AST_NODES):
+            message = _DISALLOWED_AST_NODE_MESSAGES.get(type(node))
+            raise PipelineUdfError(message or f"UDF code uses disallowed syntax: {type(node).__name__}")
+        super().generic_visit(node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        # Prevent common sandbox escapes via dunder and frame/coroutine attributes
+        # like __class__/__mro__/__subclasses__/gi_frame/f_globals/etc.
+        if "_" in node.attr:
+            raise PipelineUdfError("UDF code cannot access private attributes")
+        self.generic_visit(node)
+
+
+def _validate_udf_ast(tree: ast.AST) -> None:
+    if not isinstance(tree, ast.Module):  # pragma: no cover
+        raise PipelineUdfError("Invalid UDF AST")
+
+    # Disallow any top-level statements besides function definitions and an optional module docstring.
+    has_transform = False
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str):
+            continue
+        if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+            raise PipelineUdfError("UDF code cannot import modules")
+        if isinstance(stmt, ast.FunctionDef):
+            if stmt.name == "transform":
+                has_transform = True
+            continue
+        raise PipelineUdfError("UDF code may only contain function definitions (no top-level statements)")
+
+    if not has_transform:
+        raise PipelineUdfError("UDF must define callable transform(row)")
+
+    _UdfAstValidator().visit(tree)
+
+
 def compile_row_udf(code: str) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
     """
     Compile a Python UDF for row-level transforms.
@@ -44,9 +123,7 @@ def compile_row_udf(code: str) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
     except SyntaxError as exc:  # pragma: no cover
         raise PipelineUdfError(f"Invalid UDF syntax: {exc}") from exc
 
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            raise PipelineUdfError("UDF code cannot import modules")
+    _validate_udf_ast(tree)
 
     globals_dict: Dict[str, Any] = {"__builtins__": dict(_SAFE_BUILTINS)}
     locals_dict: Dict[str, Any] = {}
@@ -63,4 +140,3 @@ def compile_row_udf(code: str) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
         return out
 
     return _wrapped
-

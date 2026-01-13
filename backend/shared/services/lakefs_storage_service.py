@@ -34,9 +34,18 @@ def create_lakefs_storage_service(settings: ApplicationSettings) -> Optional[Lak
     if not access or not secret:
         raise RuntimeError("LakeFSStorageService requires LAKEFS_ACCESS_KEY_ID and LAKEFS_SECRET_ACCESS_KEY")
 
+    use_ssl = endpoint.startswith("https")
+    verify = None
+    ca_bundle = (getattr(settings.storage, "lakefs_s3_ssl_ca_bundle", None) or "").strip()
+    if ca_bundle:
+        verify = ca_bundle
+    elif use_ssl and getattr(settings.storage, "lakefs_s3_ssl_verify", None) is not None:
+        verify = settings.storage.lakefs_s3_ssl_verify
+
     return LakeFSStorageService(
         endpoint_url=endpoint,
         access_key=access,
         secret_key=secret,
-        use_ssl=endpoint.startswith("https"),
+        use_ssl=use_ssl,
+        ssl_verify=verify,
     )

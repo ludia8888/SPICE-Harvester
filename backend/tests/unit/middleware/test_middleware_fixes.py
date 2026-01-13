@@ -103,3 +103,39 @@ def test_bff_auth_middleware_blocks_unsafe_methods():
 
         resp = client.post("/write", headers={"X-Admin-Token": "secret"})
         assert resp.status_code == 200
+
+
+@pytest.mark.unit
+def test_rate_limit_admin_bypass_requires_valid_token():
+    def _build_app():
+        app = FastAPI()
+        install_rate_limit_headers_middleware(app)
+
+        @app.post("/limited")
+        @rate_limit(requests=2, window=60)
+        async def limited(request: Request):  # noqa: ARG001
+            return {"ok": True}
+
+        return app
+
+    with _set_env(REDIS_URL="redis://127.0.0.1:6399", RATE_LIMIT_FAIL_OPEN="false", BFF_ADMIN_TOKEN="secret"):
+        # No token: rate limit enforced.
+        client = TestClient(_build_app())
+        headers = {"X-Forwarded-For": "203.0.113.10"}
+        assert client.post("/limited", headers=headers).status_code == 200
+        assert client.post("/limited", headers=headers).status_code == 200
+        assert client.post("/limited", headers=headers).status_code == 429
+
+        # Wrong token: still enforced.
+        client = TestClient(_build_app())
+        headers = {"X-Forwarded-For": "203.0.113.11", "X-Admin-Token": "wrong"}
+        assert client.post("/limited", headers=headers).status_code == 200
+        assert client.post("/limited", headers=headers).status_code == 200
+        assert client.post("/limited", headers=headers).status_code == 429
+
+        # Valid token: bypass after exhaustion.
+        client = TestClient(_build_app())
+        headers = {"X-Forwarded-For": "203.0.113.12", "X-Admin-Token": "secret"}
+        assert client.post("/limited", headers=headers).status_code == 200
+        assert client.post("/limited", headers=headers).status_code == 200
+        assert client.post("/limited", headers=headers).status_code == 200

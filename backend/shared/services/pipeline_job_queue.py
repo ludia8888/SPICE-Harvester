@@ -14,6 +14,7 @@ from typing import Optional
 
 from confluent_kafka import Producer
 
+from shared.config.app_config import AppConfig
 from shared.config.service_config import ServiceConfig
 from shared.models.pipeline_job import PipelineJob
 from shared.observability.context_propagation import kafka_headers_from_current_context
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 class PipelineJobQueue:
     def __init__(self) -> None:
         self._producer: Optional[Producer] = None
-        self.topic = (os.getenv("PIPELINE_JOBS_TOPIC") or "pipeline-jobs").strip() or "pipeline-jobs"
+        self.topic = AppConfig.PIPELINE_JOBS_TOPIC
         self.flush_timeout_seconds = float(os.getenv("PIPELINE_JOB_QUEUE_FLUSH_TIMEOUT_SECONDS", "5") or "5")
 
     def _producer_instance(self) -> Producer:

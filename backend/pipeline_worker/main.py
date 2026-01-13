@@ -26,6 +26,7 @@ from pyspark.sql.window import Window
 from pyspark.sql.types import StructType
 
 from data_connector.google_sheets.service import GoogleSheetsService
+from shared.config.app_config import AppConfig
 from shared.config.service_config import ServiceConfig
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode
@@ -279,8 +280,8 @@ def _resolve_partition_columns(
 class PipelineWorker:
     def __init__(self) -> None:
         self.running = False
-        self.topic = (os.getenv("PIPELINE_JOBS_TOPIC") or "pipeline-jobs").strip() or "pipeline-jobs"
-        self.dlq_topic = (os.getenv("PIPELINE_JOBS_DLQ_TOPIC") or "pipeline-jobs-dlq").strip() or "pipeline-jobs-dlq"
+        self.topic = AppConfig.PIPELINE_JOBS_TOPIC
+        self.dlq_topic = AppConfig.PIPELINE_JOBS_DLQ_TOPIC
         self.group_id = (os.getenv("PIPELINE_JOBS_GROUP") or "pipeline-worker-group").strip()
         self.handler = (os.getenv("PIPELINE_WORKER_HANDLER") or "pipeline_worker").strip()
         self.pipeline_label = (os.getenv("PIPELINE_WORKER_NAME") or "pipeline_worker").strip()

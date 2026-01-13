@@ -14,7 +14,7 @@ PERF_DIR="$EVIDENCE_DIR/perf"
 mkdir -p "$EVIDENCE_DIR" "$E2E_DIR" "$PERF_DIR"
 
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-platform-checklist}"
-export SPICE_NETWORK_NAME="${SPICE_NETWORK_NAME:-${COMPOSE_PROJECT_NAME}_network}"
+COMPOSE_NETWORK_NAME="${COMPOSE_PROJECT_NAME}_spice_network"
 
 # Prefer repo-provided .env for port overrides and tokens. If missing, set safe defaults.
 if [[ -f "$ROOT_DIR/.env" ]]; then
@@ -106,7 +106,7 @@ for name in names:
 PY
 )
 
-docker network rm "${SPICE_NETWORK_NAME:-spice_network}" >/dev/null 2>&1 || true
+docker network rm "${COMPOSE_NETWORK_NAME}" >/dev/null 2>&1 || true
 
 log_section "Docker volume cleanup" >>"$EVIDENCE_DIR/compose_cleanup.log"
 while IFS= read -r volume; do

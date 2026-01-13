@@ -36,10 +36,11 @@ logger = logging.getLogger(__name__)
 class SearchProjectionWorker:
     def __init__(self) -> None:
         self.enabled = bool(parse_bool_env("ENABLE_SEARCH_PROJECTION", False))
-        self.topic = (os.getenv("INSTANCE_EVENTS_TOPIC") or AppConfig.INSTANCE_EVENTS_TOPIC).strip()
+        self.topic = (AppConfig.INSTANCE_EVENTS_TOPIC or "").strip() or "instance_events"
         self.dlq_topic = (
-            (os.getenv("SEARCH_PROJECTION_DLQ_TOPIC") or os.getenv("PROJECTION_DLQ_TOPIC") or AppConfig.PROJECTION_DLQ_TOPIC).strip()
-            or AppConfig.PROJECTION_DLQ_TOPIC
+            (AppConfig.SEARCH_PROJECTION_DLQ_TOPIC or "").strip()
+            or (AppConfig.PROJECTION_DLQ_TOPIC or "").strip()
+            or "projection_failures_dlq"
         )
         self.group_id = (os.getenv("SEARCH_PROJECTION_GROUP") or "search-projection-worker").strip()
         self.handler = (os.getenv("SEARCH_PROJECTION_HANDLER") or "search_projection_worker").strip()

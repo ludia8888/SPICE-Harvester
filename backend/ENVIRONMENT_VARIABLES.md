@@ -114,11 +114,19 @@ MINIO_SECRET_KEY=minioadmin123
 EVENT_STORE_BUCKET=spice-event-store
 INSTANCE_BUCKET=instance-events
 
+# TLS verification (only when using https endpoints)
+# MINIO_SSL_VERIFY=true
+# MINIO_SSL_CA_BUNDLE=/path/to/ca.pem
+
 # lakeFS
 LAKEFS_API_URL=http://localhost:48080
 LAKEFS_S3_ENDPOINT_URL=http://localhost:48080
 LAKEFS_ACCESS_KEY_ID=spice-lakefs-admin
 LAKEFS_SECRET_ACCESS_KEY=spice-lakefs-admin-secret
+
+# lakeFS S3 gateway TLS verification (only when using https endpoints)
+# LAKEFS_S3_SSL_VERIFY=true
+# LAKEFS_S3_SSL_CA_BUNDLE=/path/to/ca.pem
 ```
 
 ## Event Sourcing Correctness
@@ -149,6 +157,13 @@ EVENT_PUBLISHER_DEDUP_CHECKPOINT_MAX_EVENTS=2000
 ## Pipeline / Objectify
 
 ```bash
+INSTANCE_EVENTS_TOPIC=instance_events
+ONTOLOGY_EVENTS_TOPIC=ontology_events
+ACTION_EVENTS_TOPIC=action_events
+
+PROJECTION_DLQ_TOPIC=projection_failures_dlq
+SEARCH_PROJECTION_DLQ_TOPIC=projection_failures_dlq
+
 PIPELINE_JOBS_TOPIC=pipeline-jobs
 PIPELINE_JOBS_DLQ_TOPIC=pipeline-jobs-dlq
 PIPELINE_EVENTS_TOPIC=pipeline-events
@@ -165,6 +180,7 @@ OBJECTIFY_ROW_BATCH_SIZE=1000
 # Command topics (SSoT EventStore -> message-relay -> Kafka -> workers)
 INSTANCE_COMMANDS_TOPIC=instance_commands
 ONTOLOGY_COMMANDS_TOPIC=ontology_commands
+DATABASE_COMMANDS_TOPIC=database_commands
 ACTION_COMMANDS_TOPIC=action_commands
 
 # Command DLQ topics (poison/non-retryable/max-retry exceeded)
@@ -178,12 +194,36 @@ ONTOLOGY_WORKER_MAX_RETRY_ATTEMPTS=5
 ACTION_WORKER_MAX_RETRY_ATTEMPTS=5
 ```
 
+## Writeback / Overlay (lakeFS)
+
+```bash
+ONTOLOGY_WRITEBACK_REPO=ontology-writeback
+ONTOLOGY_WRITEBACK_BRANCH_PREFIX=writeback
+ONTOLOGY_WRITEBACK_DATASET_ID=
+
+WRITEBACK_ENFORCE=false
+WRITEBACK_ENFORCE_GOVERNANCE=false
+WRITEBACK_READ_OVERLAY=false
+WRITEBACK_ENABLED_OBJECT_TYPES=
+WRITEBACK_DATASET_ACL_SCOPE=dataset_acl
+```
+
+## Cache TTLs (Redis)
+
+```bash
+CLASS_LABEL_CACHE_TTL=3600
+COMMAND_STATUS_CACHE_TTL=86400
+USER_SESSION_CACHE_TTL=7200
+WEBSOCKET_CONNECTION_TTL=3600
+```
+
 ## Outbox / Reconciler
 
 ```bash
 # Dataset ingest outbox + reconciler
 ENABLE_DATASET_INGEST_OUTBOX_WORKER=true
 DATASET_INGEST_OUTBOX_POLL_SECONDS=5
+DATASET_INGEST_OUTBOX_DLQ_TOPIC=dataset-ingest-outbox-dlq
 ENABLE_DATASET_INGEST_RECONCILER=true
 DATASET_INGEST_RECONCILER_POLL_SECONDS=60
 DATASET_INGEST_RECONCILER_STALE_SECONDS=3600

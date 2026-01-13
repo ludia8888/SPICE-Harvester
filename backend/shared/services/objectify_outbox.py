@@ -9,6 +9,7 @@ from typing import Optional
 
 from confluent_kafka import Producer
 
+from shared.config.app_config import AppConfig
 from shared.config.service_config import ServiceConfig
 from shared.observability.context_propagation import (
     attach_context_from_carrier,
@@ -31,7 +32,7 @@ class ObjectifyOutboxPublisher:
         batch_size: int = 50,
     ) -> None:
         self.registry = objectify_registry
-        self.topic = (topic or os.getenv("OBJECTIFY_JOBS_TOPIC") or "objectify-jobs").strip() or "objectify-jobs"
+        self.topic = (topic or AppConfig.OBJECTIFY_JOBS_TOPIC or "objectify-jobs").strip() or "objectify-jobs"
         self.batch_size = batch_size
         self.flush_timeout_seconds = float(os.getenv("OBJECTIFY_OUTBOX_FLUSH_TIMEOUT_SECONDS", "10") or "10")
         self.backoff_base = parse_int_env("OBJECTIFY_OUTBOX_BACKOFF_BASE_SECONDS", 2, min_value=1, max_value=300)

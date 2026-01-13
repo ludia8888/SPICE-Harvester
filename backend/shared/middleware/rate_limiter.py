@@ -4,19 +4,42 @@ Implements Token Bucket algorithm with Redis backend
 Based on Context7 recommendations for API security
 """
 
+import hmac
 import hashlib
 import os
 import time
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, Mapping
 from functools import wraps
 from fastapi import FastAPI, Request, HTTPException, status
 import redis.asyncio as redis
 
 from shared.config.rate_limit_config import rate_limit_config
 from shared.config.service_config import ServiceConfig
+from shared.security.auth_utils import extract_presented_token
 from shared.utils.app_logger import get_logger
 
 logger = get_logger(__name__)
+
+_ADMIN_BYPASS_TOKEN_ENV_KEYS = (
+    "BFF_ADMIN_TOKEN",
+    "BFF_WRITE_TOKEN",
+    "OMS_ADMIN_TOKEN",
+    "OMS_WRITE_TOKEN",
+    "ADMIN_API_KEY",
+    "ADMIN_TOKEN",
+)
+
+
+def _is_valid_admin_bypass_token(headers: Mapping[str, str]) -> bool:
+    presented = extract_presented_token(headers)
+    if not presented:
+        return False
+
+    for key in _ADMIN_BYPASS_TOKEN_ENV_KEYS:
+        expected = (os.getenv(key) or "").strip()
+        if expected and hmac.compare_digest(presented, expected):
+            return True
+    return False
 
 
 class TokenBucket:
@@ -427,7 +450,7 @@ def rate_limit(
 
             bypass_rate_limit = False
             if request is not None:
-                if request.headers.get("X-Admin-Token"):
+                if _is_valid_admin_bypass_token(request.headers):
                     bypass_rate_limit = True
                 else:
                     try:

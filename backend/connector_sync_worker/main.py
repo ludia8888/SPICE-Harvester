@@ -29,6 +29,7 @@ from confluent_kafka import Consumer, KafkaError, Producer
 
 from data_connector.google_sheets.service import GoogleSheetsService
 from data_connector.google_sheets.utils import normalize_sheet_data
+from shared.config.app_config import AppConfig
 from shared.config.service_config import ServiceConfig
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import (
@@ -57,10 +58,8 @@ class ConnectorSyncWorker:
     def __init__(self) -> None:
         self.running = False
 
-        self.topic = (os.getenv("CONNECTOR_UPDATES_TOPIC") or "connector-updates").strip() or "connector-updates"
-        self.dlq_topic = (
-            (os.getenv("CONNECTOR_UPDATES_DLQ_TOPIC") or "connector-updates-dlq").strip() or "connector-updates-dlq"
-        )
+        self.topic = AppConfig.CONNECTOR_UPDATES_TOPIC
+        self.dlq_topic = AppConfig.CONNECTOR_UPDATES_DLQ_TOPIC
         self.group_id = (os.getenv("CONNECTOR_SYNC_GROUP") or "connector-sync-worker-group").strip()
         self.handler = (os.getenv("CONNECTOR_SYNC_HANDLER") or "connector_sync_worker").strip()
 

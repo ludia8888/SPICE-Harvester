@@ -25,6 +25,7 @@ from confluent_kafka import Producer
 
 from data_connector.google_sheets.service import GoogleSheetsService
 from data_connector.google_sheets.utils import calculate_data_hash
+from shared.config.app_config import AppConfig
 from shared.config.service_config import ServiceConfig
 from shared.observability.context_propagation import (
     attach_context_from_carrier,
@@ -45,7 +46,7 @@ logger = logging.getLogger(__name__)
 class ConnectorTriggerService:
     def __init__(self) -> None:
         self.running = False
-        self.topic = (os.getenv("CONNECTOR_UPDATES_TOPIC") or "connector-updates").strip() or "connector-updates"
+        self.topic = AppConfig.CONNECTOR_UPDATES_TOPIC
         self.source_type = (os.getenv("CONNECTOR_TRIGGER_SOURCE_TYPE") or "google_sheets").strip() or "google_sheets"
         self.tick_seconds = parse_int_env("CONNECTOR_TRIGGER_TICK_SECONDS", 5, min_value=1, max_value=3600)
         self.poll_concurrency = parse_int_env("CONNECTOR_TRIGGER_POLL_CONCURRENCY", 5, min_value=1, max_value=100)

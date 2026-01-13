@@ -3,9 +3,10 @@ Application Configuration
 애플리케이션 전체 설정 중앙 관리
 """
 
-import os
 import re
 from typing import Optional
+
+from .settings import settings as app_settings
 
 
 class AppConfig:
@@ -20,27 +21,30 @@ class AppConfig:
     # Kafka Topics
     # ======================
     # Event Topics (used by workers to publish events)
-    INSTANCE_EVENTS_TOPIC = "instance_events"
-    ONTOLOGY_EVENTS_TOPIC = "ontology_events"
-    ACTION_EVENTS_TOPIC = os.getenv("ACTION_EVENTS_TOPIC", "action_events")
-    PROJECTION_DLQ_TOPIC = "projection_failures_dlq"
-    CONNECTOR_UPDATES_TOPIC = "connector-updates"
-    CONNECTOR_UPDATES_DLQ_TOPIC = "connector-updates-dlq"
-    PIPELINE_JOBS_TOPIC = os.getenv("PIPELINE_JOBS_TOPIC", "pipeline-jobs")
-    PIPELINE_JOBS_DLQ_TOPIC = os.getenv("PIPELINE_JOBS_DLQ_TOPIC", "pipeline-jobs-dlq")
-    PIPELINE_EVENTS_TOPIC = os.getenv("PIPELINE_EVENTS_TOPIC", "pipeline-events")
-    DATASET_INGEST_OUTBOX_DLQ_TOPIC = os.getenv("DATASET_INGEST_OUTBOX_DLQ_TOPIC", "dataset-ingest-outbox-dlq")
+    INSTANCE_EVENTS_TOPIC = app_settings.messaging.instance_events_topic
+    ONTOLOGY_EVENTS_TOPIC = app_settings.messaging.ontology_events_topic
+    ACTION_EVENTS_TOPIC = app_settings.messaging.action_events_topic
+    PROJECTION_DLQ_TOPIC = app_settings.messaging.projection_dlq_topic
+    SEARCH_PROJECTION_DLQ_TOPIC = app_settings.messaging.search_projection_dlq_topic
+    CONNECTOR_UPDATES_TOPIC = app_settings.messaging.connector_updates_topic
+    CONNECTOR_UPDATES_DLQ_TOPIC = app_settings.messaging.connector_updates_dlq_topic
+    PIPELINE_JOBS_TOPIC = app_settings.messaging.pipeline_jobs_topic
+    PIPELINE_JOBS_DLQ_TOPIC = app_settings.messaging.pipeline_jobs_dlq_topic
+    PIPELINE_EVENTS_TOPIC = app_settings.messaging.pipeline_events_topic
+    DATASET_INGEST_OUTBOX_DLQ_TOPIC = app_settings.messaging.dataset_ingest_outbox_dlq_topic
+    OBJECTIFY_JOBS_TOPIC = app_settings.messaging.objectify_jobs_topic
+    OBJECTIFY_JOBS_DLQ_TOPIC = app_settings.messaging.objectify_jobs_dlq_topic
     
     # Command Topics (used by workers to consume commands)
-    INSTANCE_COMMANDS_TOPIC = "instance_commands"
-    ONTOLOGY_COMMANDS_TOPIC = "ontology_commands"
-    DATABASE_COMMANDS_TOPIC = "database_commands"
-    ACTION_COMMANDS_TOPIC = os.getenv("ACTION_COMMANDS_TOPIC", "action_commands")
+    INSTANCE_COMMANDS_TOPIC = app_settings.messaging.instance_commands_topic
+    ONTOLOGY_COMMANDS_TOPIC = app_settings.messaging.ontology_commands_topic
+    DATABASE_COMMANDS_TOPIC = app_settings.messaging.database_commands_topic
+    ACTION_COMMANDS_TOPIC = app_settings.messaging.action_commands_topic
 
     # Command DLQ Topics (poison/non-retryable or max-retry exceeded)
-    INSTANCE_COMMANDS_DLQ_TOPIC = os.getenv("INSTANCE_COMMANDS_DLQ_TOPIC", "instance-commands-dlq")
-    ONTOLOGY_COMMANDS_DLQ_TOPIC = os.getenv("ONTOLOGY_COMMANDS_DLQ_TOPIC", "ontology-commands-dlq")
-    ACTION_COMMANDS_DLQ_TOPIC = os.getenv("ACTION_COMMANDS_DLQ_TOPIC", "action-commands-dlq")
+    INSTANCE_COMMANDS_DLQ_TOPIC = app_settings.messaging.instance_commands_dlq_topic
+    ONTOLOGY_COMMANDS_DLQ_TOPIC = app_settings.messaging.ontology_commands_dlq_topic
+    ACTION_COMMANDS_DLQ_TOPIC = app_settings.messaging.action_commands_dlq_topic
     
     # Kafka Consumer Groups
     PROJECTION_WORKER_GROUP = "projection-worker-group"
@@ -50,7 +54,7 @@ class AppConfig:
     # S3 Storage
     # ======================
     # S3 버킷 이름 (환경변수로 오버라이드 가능)
-    INSTANCE_BUCKET = os.getenv("INSTANCE_BUCKET", "instance-events")
+    INSTANCE_BUCKET = app_settings.storage.instance_bucket
     
     # S3 Key Patterns
     @staticmethod
@@ -139,41 +143,31 @@ class AppConfig:
     # Event Sourcing & CQRS
     # ======================
     # Event Store 설정
-    EVENT_STORE_RETENTION_DAYS = int(os.getenv("EVENT_STORE_RETENTION_DAYS", "365"))
+    EVENT_STORE_RETENTION_DAYS = app_settings.event_sourcing.event_store_retention_days
     
     # Projection Worker 설정
-    PROJECTION_BATCH_SIZE = int(os.getenv("PROJECTION_BATCH_SIZE", "1000"))
-    PROJECTION_SCROLL_TIMEOUT = os.getenv("PROJECTION_SCROLL_TIMEOUT", "5m")
+    PROJECTION_BATCH_SIZE = app_settings.event_sourcing.projection_batch_size
+    PROJECTION_SCROLL_TIMEOUT = app_settings.event_sourcing.projection_scroll_timeout
     
     # Command 처리 설정
-    COMMAND_TIMEOUT_SECONDS = int(os.getenv("COMMAND_TIMEOUT_SECONDS", "300"))  # 5분
-    COMMAND_RETRY_COUNT = int(os.getenv("COMMAND_RETRY_COUNT", "3"))
+    COMMAND_TIMEOUT_SECONDS = app_settings.event_sourcing.command_timeout_seconds
+    COMMAND_RETRY_COUNT = app_settings.event_sourcing.command_retry_count
 
     # ======================
     # Ontology Writeback Defaults
     # ======================
     # lakeFS repository ids must match `^[a-z0-9][a-z0-9-]{2,62}$` (no underscores).
-    ONTOLOGY_WRITEBACK_REPO = os.getenv("ONTOLOGY_WRITEBACK_REPO", "ontology-writeback")
-    ONTOLOGY_WRITEBACK_BRANCH_PREFIX = os.getenv("ONTOLOGY_WRITEBACK_BRANCH_PREFIX", "writeback")
-    ONTOLOGY_WRITEBACK_DATASET_ID = (os.getenv("ONTOLOGY_WRITEBACK_DATASET_ID") or "").strip() or None
+    ONTOLOGY_WRITEBACK_REPO = app_settings.writeback.ontology_writeback_repo
+    ONTOLOGY_WRITEBACK_BRANCH_PREFIX = app_settings.writeback.ontology_writeback_branch_prefix
+    ONTOLOGY_WRITEBACK_DATASET_ID = app_settings.writeback.ontology_writeback_dataset_id
 
     # Writeback feature flags (ACTION_WRITEBACK_DESIGN.md)
     # NOTE: Defaults are intentionally conservative; enable explicitly per environment.
-    WRITEBACK_ENFORCE = os.getenv("WRITEBACK_ENFORCE", "false").strip().lower() in {"1", "true", "yes", "on"}
-    WRITEBACK_ENFORCE_GOVERNANCE = os.getenv("WRITEBACK_ENFORCE_GOVERNANCE", "false").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    WRITEBACK_READ_OVERLAY = os.getenv("WRITEBACK_READ_OVERLAY", "false").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    WRITEBACK_ENABLED_OBJECT_TYPES_RAW = os.getenv("WRITEBACK_ENABLED_OBJECT_TYPES", "").strip()
-    WRITEBACK_DATASET_ACL_SCOPE = (os.getenv("WRITEBACK_DATASET_ACL_SCOPE") or "").strip() or "dataset_acl"
+    WRITEBACK_ENFORCE = app_settings.writeback.writeback_enforce
+    WRITEBACK_ENFORCE_GOVERNANCE = app_settings.writeback.writeback_enforce_governance
+    WRITEBACK_READ_OVERLAY = app_settings.writeback.writeback_read_overlay
+    WRITEBACK_ENABLED_OBJECT_TYPES_RAW = app_settings.writeback.writeback_enabled_object_types
+    WRITEBACK_DATASET_ACL_SCOPE = app_settings.writeback.writeback_dataset_acl_scope
 
     @staticmethod
     def _normalize_object_type_id(value: str) -> str:
@@ -245,34 +239,34 @@ class AppConfig:
     # Cache & TTL Settings
     # ======================
     # Redis TTL 설정 (초 단위)
-    CLASS_LABEL_CACHE_TTL = int(os.getenv("CLASS_LABEL_CACHE_TTL", "3600"))      # 1시간
-    COMMAND_STATUS_CACHE_TTL = int(os.getenv("COMMAND_STATUS_CACHE_TTL", "86400"))  # 24시간
-    USER_SESSION_CACHE_TTL = int(os.getenv("USER_SESSION_CACHE_TTL", "7200"))    # 2시간
-    WEBSOCKET_CONNECTION_TTL = int(os.getenv("WEBSOCKET_CONNECTION_TTL", "3600"))  # 1시간
+    CLASS_LABEL_CACHE_TTL = app_settings.cache.class_label_cache_ttl
+    COMMAND_STATUS_CACHE_TTL = app_settings.cache.command_status_cache_ttl
+    USER_SESSION_CACHE_TTL = app_settings.cache.user_session_cache_ttl
+    WEBSOCKET_CONNECTION_TTL = app_settings.cache.websocket_connection_ttl
     
     # ======================
     # Security Settings
     # ======================
     # 입력 검증 제한
-    MAX_SEARCH_QUERY_LENGTH = int(os.getenv("MAX_SEARCH_QUERY_LENGTH", "100"))
-    MAX_DB_NAME_LENGTH = int(os.getenv("MAX_DB_NAME_LENGTH", "50"))
-    MAX_CLASS_ID_LENGTH = int(os.getenv("MAX_CLASS_ID_LENGTH", "100"))
-    MAX_INSTANCE_ID_LENGTH = int(os.getenv("MAX_INSTANCE_ID_LENGTH", "255"))
+    MAX_SEARCH_QUERY_LENGTH = app_settings.security.max_search_query_length
+    MAX_DB_NAME_LENGTH = app_settings.security.max_db_name_length
+    MAX_CLASS_ID_LENGTH = app_settings.security.max_class_id_length
+    MAX_INSTANCE_ID_LENGTH = app_settings.security.max_instance_id_length
     
     # WebSocket 보안 설정
-    MAX_CLIENT_ID_LENGTH = int(os.getenv("MAX_CLIENT_ID_LENGTH", "50"))
-    MAX_USER_ID_LENGTH = int(os.getenv("MAX_USER_ID_LENGTH", "50"))
+    MAX_CLIENT_ID_LENGTH = app_settings.security.max_client_id_length
+    MAX_USER_ID_LENGTH = app_settings.security.max_user_id_length
     
     # ======================
     # Performance Settings
     # ======================
     # 동시 처리 제한
-    MAX_CONCURRENT_COMMANDS = int(os.getenv("MAX_CONCURRENT_COMMANDS", "100"))
-    MAX_WEBSOCKET_CONNECTIONS = int(os.getenv("MAX_WEBSOCKET_CONNECTIONS", "1000"))
+    MAX_CONCURRENT_COMMANDS = app_settings.performance.max_concurrent_commands
+    MAX_WEBSOCKET_CONNECTIONS = app_settings.performance.max_websocket_connections
     
     # 데이터 크기 제한
-    MAX_ONTOLOGY_SIZE = int(os.getenv("MAX_ONTOLOGY_SIZE", "10485760"))  # 10MB
-    MAX_INSTANCE_SIZE = int(os.getenv("MAX_INSTANCE_SIZE", "1048576"))   # 1MB
+    MAX_ONTOLOGY_SIZE = app_settings.performance.max_ontology_size
+    MAX_INSTANCE_SIZE = app_settings.performance.max_instance_size
     
     # ======================
     # Validation Methods
@@ -309,17 +303,20 @@ class AppConfig:
     @classmethod
     def get_all_topics(cls) -> list[str]:
         """모든 Kafka 토픽 목록 반환"""
-        return [
+        topics = [
             cls.INSTANCE_EVENTS_TOPIC,
             cls.ONTOLOGY_EVENTS_TOPIC,
             cls.ACTION_EVENTS_TOPIC,
             cls.PROJECTION_DLQ_TOPIC,
+            cls.SEARCH_PROJECTION_DLQ_TOPIC,
             cls.CONNECTOR_UPDATES_TOPIC,
             cls.CONNECTOR_UPDATES_DLQ_TOPIC,
             cls.PIPELINE_JOBS_TOPIC,
             cls.PIPELINE_JOBS_DLQ_TOPIC,
             cls.PIPELINE_EVENTS_TOPIC,
             cls.DATASET_INGEST_OUTBOX_DLQ_TOPIC,
+            cls.OBJECTIFY_JOBS_TOPIC,
+            cls.OBJECTIFY_JOBS_DLQ_TOPIC,
             cls.INSTANCE_COMMANDS_TOPIC,
             cls.ONTOLOGY_COMMANDS_TOPIC,
             cls.DATABASE_COMMANDS_TOPIC,
@@ -328,6 +325,14 @@ class AppConfig:
             cls.ONTOLOGY_COMMANDS_DLQ_TOPIC,
             cls.ACTION_COMMANDS_DLQ_TOPIC,
         ]
+        deduped: list[str] = []
+        for name in topics:
+            if not name:
+                continue
+            if name in deduped:
+                continue
+            deduped.append(name)
+        return deduped
     
     @classmethod
     def get_config_summary(cls) -> dict:

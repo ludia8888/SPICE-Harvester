@@ -9,7 +9,7 @@ import os
 import asyncio
 from urllib.parse import urlparse
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, AsyncIterator, Tuple, BinaryIO
+from typing import Any, Dict, Optional, AsyncIterator, Tuple, BinaryIO, Union
 
 try:
     import boto3
@@ -57,7 +57,8 @@ class StorageService:
         access_key: str,
         secret_key: str,
         region: str = "us-east-1",
-        use_ssl: bool = False
+        use_ssl: bool = False,
+        ssl_verify: Optional[Union[bool, str]] = None,
     ):
         """
         스토리지 서비스 초기화
@@ -85,16 +86,18 @@ class StorageService:
             "lakefs",
         } or host.endswith(".localhost")
         client_config = Config(s3={"addressing_style": "path"}) if use_path_style else None
-        self.client: BaseClient = boto3.client(
-            's3',
-            endpoint_url=endpoint_url,
-            aws_access_key_id=access_key,
-            aws_secret_access_key=secret_key,
-            region_name=region,
-            use_ssl=use_ssl,
-            verify=False,  # MinIO 로컬 개발 시 SSL 검증 비활성화
-            config=client_config,
-        )
+        client_kwargs: Dict[str, Any] = {
+            "endpoint_url": endpoint_url,
+            "aws_access_key_id": access_key,
+            "aws_secret_access_key": secret_key,
+            "region_name": region,
+            "use_ssl": use_ssl,
+            "config": client_config,
+        }
+        if use_ssl and ssl_verify is not None:
+            client_kwargs["verify"] = ssl_verify
+
+        self.client = boto3.client("s3", **client_kwargs)
         
     async def create_bucket(self, bucket_name: str) -> bool:
         """
@@ -847,11 +850,19 @@ def create_storage_service(settings: 'ApplicationSettings') -> Optional[StorageS
         # S3 storage is optional for local development
         return None
         
+    verify: Optional[Union[bool, str]] = None
+    ca_bundle = (getattr(settings.storage, "minio_ssl_ca_bundle", None) or "").strip()
+    if ca_bundle:
+        verify = ca_bundle
+    elif getattr(settings.storage, "minio_ssl_verify", None) is not None:
+        verify = settings.storage.minio_ssl_verify
+
     return StorageService(
         endpoint_url=settings.storage.minio_endpoint_url,
         access_key=settings.storage.minio_access_key,
         secret_key=settings.storage.minio_secret_key,
-        use_ssl=settings.storage.use_ssl
+        use_ssl=settings.storage.use_ssl,
+        ssl_verify=verify,
     )
 
 
@@ -879,9 +890,18 @@ def create_storage_service_legacy(
     access = os.getenv('MINIO_ACCESS_KEY', access_key or 'minioadmin')
     secret = os.getenv('MINIO_SECRET_KEY', secret_key or 'minioadmin123')
     
+    use_ssl = endpoint.startswith("https")
+    verify: Optional[Union[bool, str]] = None
+    ca_bundle = (os.getenv("MINIO_SSL_CA_BUNDLE") or "").strip()
+    if ca_bundle:
+        verify = ca_bundle
+    elif use_ssl and (raw := os.getenv("MINIO_SSL_VERIFY")) is not None:
+        verify = raw.strip().lower() in {"1", "true", "yes", "on"}
+
     return StorageService(
         endpoint_url=endpoint,
         access_key=access,
         secret_key=secret,
-        use_ssl=endpoint.startswith('https')
+        use_ssl=use_ssl,
+        ssl_verify=verify,
     )

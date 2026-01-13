@@ -24,7 +24,6 @@ from shared.security.input_sanitizer import (
     validate_branch_name,
     validate_db_name,
 )
-from shared.security.database_access import ensure_database_access_table
 from shared.utils.branch_utils import protected_branch_write_message
 
 # Add shared path for common utilities
@@ -93,7 +92,7 @@ async def _fetch_database_access(db_names: List[str]) -> Dict[str, List[Dict[str
                 db_names,
             )
         except asyncpg.UndefinedTableError:
-            await ensure_database_access_table(conn)
+            # Treat missing table as "unconfigured" (migrations not applied yet).
             rows = []
     finally:
         await conn.close()
@@ -140,23 +139,8 @@ async def _upsert_database_owner(
                 principal_name,
             )
         except asyncpg.UndefinedTableError:
-            await ensure_database_access_table(conn)
-            await conn.execute(
-                """
-                INSERT INTO database_access (
-                    db_name, principal_type, principal_id, principal_name, role, created_at, updated_at
-                ) VALUES ($1, $2, $3, $4, 'Owner', NOW(), NOW())
-                ON CONFLICT (db_name, principal_type, principal_id)
-                DO UPDATE SET
-                    principal_name = EXCLUDED.principal_name,
-                    role = EXCLUDED.role,
-                    updated_at = NOW()
-                """,
-                db_name,
-                principal_type,
-                principal_id,
-                principal_name,
-            )
+            # Treat missing table as "unconfigured" (migrations not applied yet).
+            return
     finally:
         await conn.close()
 

@@ -67,14 +67,14 @@ class FunnelDataProcessor:
 
         # Google Sheets service 호출 (실제로는 의존성 주입으로 처리)
         # 여기서는 직접 HTTP 요청으로 시뮬레이션
-        async with httpx.AsyncClient() as client:
+        timeout = httpx.Timeout(30.0, connect=5.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(
                 f"{ServiceConfig.get_bff_url()}/api/v1/data-connectors/google-sheets/preview",
                 json=preview_request.model_dump(),
             )
 
-            if response.status_code != 200:
-                raise Exception(f"Failed to fetch Google Sheets data: {response.text}")
+            response.raise_for_status()
 
             sheets_preview = GoogleSheetPreviewResponse(**response.json())
 

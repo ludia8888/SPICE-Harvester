@@ -22,6 +22,7 @@ from uuid import NAMESPACE_URL, uuid5
 import httpx
 from confluent_kafka import Consumer, KafkaError, Producer, TopicPartition
 
+from shared.config.app_config import AppConfig
 from shared.config.service_config import ServiceConfig
 from shared.models.objectify_job import ObjectifyJob
 from shared.observability.context_propagation import attach_context_from_kafka, kafka_headers_from_current_context
@@ -83,10 +84,8 @@ class ObjectifyWorker:
     }
     def __init__(self) -> None:
         self.running = False
-        self.topic = (os.getenv("OBJECTIFY_JOBS_TOPIC") or "objectify-jobs").strip() or "objectify-jobs"
-        self.dlq_topic = (
-            (os.getenv("OBJECTIFY_JOBS_DLQ_TOPIC") or "objectify-jobs-dlq").strip() or "objectify-jobs-dlq"
-        )
+        self.topic = (AppConfig.OBJECTIFY_JOBS_TOPIC or "objectify-jobs").strip() or "objectify-jobs"
+        self.dlq_topic = (AppConfig.OBJECTIFY_JOBS_DLQ_TOPIC or "objectify-jobs-dlq").strip() or "objectify-jobs-dlq"
         self.group_id = (os.getenv("OBJECTIFY_JOBS_GROUP") or "objectify-worker-group").strip()
         self.handler = (os.getenv("OBJECTIFY_WORKER_HANDLER") or "objectify_worker").strip()
         self.consumer: Optional[Consumer] = None

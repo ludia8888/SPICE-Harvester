@@ -367,6 +367,101 @@ class ServiceSettings(BaseSettings):
         except (json.JSONDecodeError, TypeError):
             return ["*"]  # Fallback to allow all origins
 
+
+class MessagingSettings(BaseSettings):
+    """Kafka topic/group configuration settings"""
+
+    model_config = SettingsConfigDict(
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    # Topics (keep env var names stable: *_TOPIC)
+    instance_events_topic: str = Field(
+        default="instance_events",
+        description="Kafka topic for instance domain events (INSTANCE_EVENTS_TOPIC)",
+    )
+    ontology_events_topic: str = Field(
+        default="ontology_events",
+        description="Kafka topic for ontology domain events (ONTOLOGY_EVENTS_TOPIC)",
+    )
+    action_events_topic: str = Field(
+        default="action_events",
+        description="Kafka topic for action events (ACTION_EVENTS_TOPIC)",
+    )
+    projection_dlq_topic: str = Field(
+        default="projection_failures_dlq",
+        description="Kafka DLQ topic for projection failures (PROJECTION_DLQ_TOPIC)",
+    )
+    search_projection_dlq_topic: str = Field(
+        default="projection_failures_dlq",
+        description="Kafka DLQ topic for search projection failures (SEARCH_PROJECTION_DLQ_TOPIC)",
+    )
+    connector_updates_topic: str = Field(
+        default="connector-updates",
+        description="Kafka topic for connector updates (CONNECTOR_UPDATES_TOPIC)",
+    )
+    connector_updates_dlq_topic: str = Field(
+        default="connector-updates-dlq",
+        description="Kafka DLQ topic for connector updates (CONNECTOR_UPDATES_DLQ_TOPIC)",
+    )
+    pipeline_jobs_topic: str = Field(
+        default="pipeline-jobs",
+        description="Kafka topic for pipeline jobs (PIPELINE_JOBS_TOPIC)",
+    )
+    pipeline_jobs_dlq_topic: str = Field(
+        default="pipeline-jobs-dlq",
+        description="Kafka DLQ topic for pipeline jobs (PIPELINE_JOBS_DLQ_TOPIC)",
+    )
+    pipeline_events_topic: str = Field(
+        default="pipeline-events",
+        description="Kafka topic for pipeline control-plane events (PIPELINE_EVENTS_TOPIC)",
+    )
+    dataset_ingest_outbox_dlq_topic: str = Field(
+        default="dataset-ingest-outbox-dlq",
+        description="Kafka DLQ topic for dataset ingest outbox (DATASET_INGEST_OUTBOX_DLQ_TOPIC)",
+    )
+    objectify_jobs_topic: str = Field(
+        default="objectify-jobs",
+        description="Kafka topic for objectify jobs (OBJECTIFY_JOBS_TOPIC)",
+    )
+    objectify_jobs_dlq_topic: str = Field(
+        default="objectify-jobs-dlq",
+        description="Kafka DLQ topic for objectify jobs (OBJECTIFY_JOBS_DLQ_TOPIC)",
+    )
+
+    # Command topics
+    instance_commands_topic: str = Field(
+        default="instance_commands",
+        description="Kafka topic for instance commands (INSTANCE_COMMANDS_TOPIC)",
+    )
+    ontology_commands_topic: str = Field(
+        default="ontology_commands",
+        description="Kafka topic for ontology commands (ONTOLOGY_COMMANDS_TOPIC)",
+    )
+    database_commands_topic: str = Field(
+        default="database_commands",
+        description="Kafka topic for database commands (DATABASE_COMMANDS_TOPIC)",
+    )
+    action_commands_topic: str = Field(
+        default="action_commands",
+        description="Kafka topic for action commands (ACTION_COMMANDS_TOPIC)",
+    )
+    instance_commands_dlq_topic: str = Field(
+        default="instance-commands-dlq",
+        description="Kafka DLQ topic for instance commands (INSTANCE_COMMANDS_DLQ_TOPIC)",
+    )
+    ontology_commands_dlq_topic: str = Field(
+        default="ontology-commands-dlq",
+        description="Kafka DLQ topic for ontology commands (ONTOLOGY_COMMANDS_DLQ_TOPIC)",
+    )
+    action_commands_dlq_topic: str = Field(
+        default="action-commands-dlq",
+        description="Kafka DLQ topic for action commands (ACTION_COMMANDS_DLQ_TOPIC)",
+    )
+
 class StorageSettings(BaseSettings):
     """Storage configuration settings"""
     
@@ -392,6 +487,17 @@ class StorageSettings(BaseSettings):
         default="minioadmin123",
         description="MinIO/S3 secret key"
     )
+    minio_ssl_verify: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Verify SSL certificates for MinIO/S3 when using https (MINIO_SSL_VERIFY). "
+            "When unset, botocore defaults apply."
+        ),
+    )
+    minio_ssl_ca_bundle: Optional[str] = Field(
+        default=None,
+        description="CA bundle path for MinIO/S3 TLS verification (MINIO_SSL_CA_BUNDLE).",
+    )
 
     # lakeFS (S3 gateway + REST auth shares credentials)
     lakefs_api_url: Optional[str] = Field(
@@ -413,6 +519,14 @@ class StorageSettings(BaseSettings):
     lakefs_secret_access_key: Optional[str] = Field(
         default=None,
         description="lakeFS secret access key",
+    )
+    lakefs_s3_ssl_verify: Optional[bool] = Field(
+        default=None,
+        description="Verify SSL certificates for lakeFS S3 gateway when using https (LAKEFS_S3_SSL_VERIFY).",
+    )
+    lakefs_s3_ssl_ca_bundle: Optional[str] = Field(
+        default=None,
+        description="CA bundle path for lakeFS S3 gateway TLS verification (LAKEFS_S3_SSL_CA_BUNDLE).",
     )
     
     # S3 Buckets
@@ -462,8 +576,16 @@ class CacheSettings(BaseSettings):
         description="Class label cache TTL in seconds"
     )
     command_status_cache_ttl: int = Field(
-        default=300,
+        default=86400,
         description="Command status cache TTL in seconds"
+    )
+    user_session_cache_ttl: int = Field(
+        default=7200,
+        description="User session cache TTL in seconds"
+    )
+    websocket_connection_ttl: int = Field(
+        default=3600,
+        description="WebSocket connection TTL in seconds"
     )
     mapping_cache_ttl: int = Field(
         default=1800,
@@ -493,6 +615,32 @@ class SecuritySettings(BaseSettings):
     access_token_expire_minutes: int = Field(
         default=30,
         description="JWT access token expiry in minutes"
+    )
+
+    # Input validation limits
+    max_search_query_length: int = Field(
+        default=100,
+        description="Maximum search query length (MAX_SEARCH_QUERY_LENGTH)",
+    )
+    max_db_name_length: int = Field(
+        default=50,
+        description="Maximum database name length (MAX_DB_NAME_LENGTH)",
+    )
+    max_class_id_length: int = Field(
+        default=100,
+        description="Maximum class id length (MAX_CLASS_ID_LENGTH)",
+    )
+    max_instance_id_length: int = Field(
+        default=255,
+        description="Maximum instance id length (MAX_INSTANCE_ID_LENGTH)",
+    )
+    max_client_id_length: int = Field(
+        default=50,
+        description="Maximum websocket client id length (MAX_CLIENT_ID_LENGTH)",
+    )
+    max_user_id_length: int = Field(
+        default=50,
+        description="Maximum user id length (MAX_USER_ID_LENGTH)",
     )
 
 
@@ -525,6 +673,125 @@ class PerformanceSettings(BaseSettings):
         default=60,
         description="Requests per minute limit"
     )
+
+    # Concurrency limits
+    max_concurrent_commands: int = Field(
+        default=100,
+        description="Max concurrent commands (MAX_CONCURRENT_COMMANDS)",
+    )
+    max_websocket_connections: int = Field(
+        default=1000,
+        description="Max websocket connections (MAX_WEBSOCKET_CONNECTIONS)",
+    )
+
+    # Payload size limits (bytes)
+    max_ontology_size: int = Field(
+        default=10485760,
+        description="Max ontology payload size in bytes (MAX_ONTOLOGY_SIZE)",
+    )
+    max_instance_size: int = Field(
+        default=1048576,
+        description="Max instance payload size in bytes (MAX_INSTANCE_SIZE)",
+    )
+
+
+class EventSourcingSettings(BaseSettings):
+    """Event sourcing / CQRS tuning settings"""
+
+    model_config = SettingsConfigDict(
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    event_store_retention_days: int = Field(
+        default=365,
+        description="Event store retention in days (EVENT_STORE_RETENTION_DAYS)",
+    )
+    projection_batch_size: int = Field(
+        default=1000,
+        description="Projection worker batch size (PROJECTION_BATCH_SIZE)",
+    )
+    projection_scroll_timeout: str = Field(
+        default="5m",
+        description="Elasticsearch scroll timeout for projections (PROJECTION_SCROLL_TIMEOUT)",
+    )
+    command_timeout_seconds: int = Field(
+        default=300,
+        description="Command processing timeout in seconds (COMMAND_TIMEOUT_SECONDS)",
+    )
+    command_retry_count: int = Field(
+        default=3,
+        description="Command retry count (COMMAND_RETRY_COUNT)",
+    )
+
+
+class WritebackSettings(BaseSettings):
+    """Ontology writeback + read overlay settings"""
+
+    model_config = SettingsConfigDict(
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    ontology_writeback_repo: str = Field(
+        default="ontology-writeback",
+        description="lakeFS repository for writeback (ONTOLOGY_WRITEBACK_REPO)",
+    )
+    ontology_writeback_branch_prefix: str = Field(
+        default="writeback",
+        description="Branch prefix for writeback branches (ONTOLOGY_WRITEBACK_BRANCH_PREFIX)",
+    )
+    ontology_writeback_dataset_id: Optional[str] = Field(
+        default=None,
+        description="Optional dataset id for writeback scope (ONTOLOGY_WRITEBACK_DATASET_ID)",
+    )
+
+    # Writeback feature flags (ACTION_WRITEBACK_DESIGN.md)
+    writeback_enforce: bool = Field(
+        default=False,
+        description="Enforce writeback policy checks (WRITEBACK_ENFORCE)",
+    )
+    writeback_enforce_governance: bool = Field(
+        default=False,
+        description="Enforce governance checks for writeback (WRITEBACK_ENFORCE_GOVERNANCE)",
+    )
+    writeback_read_overlay: bool = Field(
+        default=False,
+        description="Enable overlay reads from lakeFS branches (WRITEBACK_READ_OVERLAY)",
+    )
+    writeback_enabled_object_types: str = Field(
+        default="",
+        description="Comma-separated allowed object types for writeback/overlay (WRITEBACK_ENABLED_OBJECT_TYPES)",
+    )
+    writeback_dataset_acl_scope: str = Field(
+        default="dataset_acl",
+        description="ACL scope name for writeback dataset access (WRITEBACK_DATASET_ACL_SCOPE)",
+    )
+
+    @field_validator(
+        "ontology_writeback_repo",
+        "ontology_writeback_branch_prefix",
+        "writeback_enabled_object_types",
+        "writeback_dataset_acl_scope",
+        mode="before",
+    )
+    @classmethod
+    def strip_strings(cls, v):  # noqa: ANN001
+        if v is None:
+            return v
+        return str(v).strip()
+
+    @field_validator("ontology_writeback_dataset_id", mode="before")
+    @classmethod
+    def blank_to_none(cls, v):  # noqa: ANN001
+        if v is None:
+            return None
+        value = str(v).strip()
+        return value or None
 
 
 class TestSettings(BaseSettings):
@@ -590,8 +857,11 @@ class ApplicationSettings(BaseSettings):
     # Nested settings
     database: DatabaseSettings = DatabaseSettings()
     services: ServiceSettings = ServiceSettings()
+    messaging: MessagingSettings = MessagingSettings()
+    event_sourcing: EventSourcingSettings = EventSourcingSettings()
     storage: StorageSettings = StorageSettings()
     cache: CacheSettings = CacheSettings()
+    writeback: WritebackSettings = WritebackSettings()
     security: SecuritySettings = SecuritySettings()
     performance: PerformanceSettings = PerformanceSettings()
     test: TestSettings = TestSettings()

@@ -59,6 +59,8 @@ def normalize_database_role(value: Optional[str]) -> Optional[str]:
 
 
 async def ensure_database_access_table(conn: asyncpg.Connection) -> None:
+    # Prefer migrations in production (`backend/database/migrations/008_database_access.sql`).
+    # This helper remains for local/dev/test bootstrapping.
     await conn.execute(
         """
         CREATE TABLE IF NOT EXISTS database_access (
@@ -74,13 +76,15 @@ async def ensure_database_access_table(conn: asyncpg.Connection) -> None:
         """
     )
     await conn.execute(
-        "ALTER TABLE database_access DROP CONSTRAINT IF EXISTS database_access_role_check"
-    )
-    await conn.execute(
         """
-        ALTER TABLE database_access
-            ADD CONSTRAINT database_access_role_check
-            CHECK (role IN ('Owner', 'Editor', 'Viewer', 'DomainModeler', 'DataEngineer', 'Security'))
+        DO $$
+        BEGIN
+            ALTER TABLE database_access
+                ADD CONSTRAINT database_access_role_check
+                CHECK (role IN ('Owner', 'Editor', 'Viewer', 'DomainModeler', 'DataEngineer', 'Security'));
+        EXCEPTION
+            WHEN duplicate_object THEN NULL;
+        END $$;
         """
     )
     await conn.execute(
@@ -99,17 +103,20 @@ async def get_database_access_role(
 ) -> Optional[str]:
     conn = await asyncpg.connect(ServiceConfig.get_postgres_url())
     try:
-        await ensure_database_access_table(conn)
-        row = await conn.fetchrow(
-            """
-            SELECT role
-            FROM database_access
-            WHERE db_name = $1 AND principal_type = $2 AND principal_id = $3
-            """,
-            db_name,
-            principal_type,
-            principal_id,
-        )
+        try:
+            row = await conn.fetchrow(
+                """
+                SELECT role
+                FROM database_access
+                WHERE db_name = $1 AND principal_type = $2 AND principal_id = $3
+                """,
+                db_name,
+                principal_type,
+                principal_id,
+            )
+        except asyncpg.UndefinedTableError:
+            # Treat missing table as "unconfigured" (migrations not applied yet).
+            return None
     finally:
         await conn.close()
 
@@ -121,11 +128,13 @@ async def get_database_access_role(
 async def has_database_access_config(*, db_name: str) -> bool:
     conn = await asyncpg.connect(ServiceConfig.get_postgres_url())
     try:
-        await ensure_database_access_table(conn)
-        row = await conn.fetchrow(
-            "SELECT 1 FROM database_access WHERE db_name = $1 LIMIT 1",
-            db_name,
-        )
+        try:
+            row = await conn.fetchrow(
+                "SELECT 1 FROM database_access WHERE db_name = $1 LIMIT 1",
+                db_name,
+            )
+        except asyncpg.UndefinedTableError:
+            return False
     finally:
         await conn.close()
     return bool(row)
