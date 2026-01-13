@@ -101,6 +101,7 @@ LLM이 다루는 산출물은 항상 스키마가 있는 객체여야 한다.
   - 성공 시 `AgentPlanRegistry`에 `COMPILED`로 저장
   - Operational Memory context pack(안전 요약)을 자동 생성해 Planner 입력에 포함
   - 컴파일 결과에 `compilation_report`(PlanCompilationReport) 포함: errors/warnings + 서버 제안 patch
+  - **서버는 auto-applicable patch를 자동 적용**(bounded)하고 재검증한다. 적용 내역은 `validation_warnings`에 `server_auto_applied_patches`로 노출한다.
 - Plan 조회: `GET /api/v1/agent-plans/{plan_id}`
 - Plan 미리보기(Preview-safe step만 실행): `POST /api/v1/agent-plans/{plan_id}/preview`
   - `simulate`/`GET`/read-risk만 실행하고 submit/write 단계 전에 중단

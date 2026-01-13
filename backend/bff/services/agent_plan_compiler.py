@@ -32,6 +32,7 @@ from shared.services.llm_gateway import (
     LLMUnavailableError,
 )
 from shared.services.redis_service import RedisService
+from shared.utils.json_patch import JsonPatchError, apply_json_patch
 
 
 class AgentClarificationQuestion(BaseModel):
@@ -315,6 +316,31 @@ async def compile_agent_plan(
     )
 
     validation = await validate_agent_plan(plan=plan, tool_registry=tool_registry)
+    auto_applied_patches: list[str] = []
+
+    if validation.errors:
+        candidate_plan = validation.plan
+        for _ in range(5):
+            report = validation.compilation_report
+            auto_patches = [
+                patch
+                for patch in (report.patches or [])
+                if patch.auto_applicable and patch.operations and patch.patch_id not in auto_applied_patches
+            ]
+            if not auto_patches:
+                break
+            patch = auto_patches[0]
+            ops = [op.model_dump(mode="json", by_alias=True) for op in (patch.operations or [])]
+            try:
+                patched_obj = apply_json_patch(candidate_plan.model_dump(mode="json"), ops)
+                candidate_plan = AgentPlan.model_validate(patched_obj)
+            except (JsonPatchError, ValidationError):
+                break
+            auto_applied_patches.append(str(patch.patch_id))
+            validation = await validate_agent_plan(plan=candidate_plan, tool_registry=tool_registry)
+            if not validation.errors:
+                break
+
     if validation.errors:
         questions: List[AgentClarificationQuestion] = []
         clarification_meta: Optional[LLMCallMeta] = None
@@ -324,7 +350,7 @@ async def compile_agent_plan(
                 system_prompt=_build_clarifier_system_prompt(),
                 user_prompt=_build_clarifier_user_prompt(
                     goal=goal,
-                    draft_plan=draft_plan_obj,
+                    draft_plan=validation.plan.model_dump(mode="json"),
                     validation_errors=validation.errors,
                     validation_warnings=validation.warnings,
                     data_scope=data_scope,
@@ -348,7 +374,10 @@ async def compile_agent_plan(
             plan_id=plan_id,
             plan=validation.plan,
             validation_errors=validation.errors,
-            validation_warnings=validation.warnings,
+            validation_warnings=(
+                list(validation.warnings or [])
+                + ([f"server_auto_applied_patches: {auto_applied_patches}"] if auto_applied_patches else [])
+            ),
             questions=questions,
             compilation_report=validation.compilation_report,
             llm_meta=llm_meta,
@@ -361,7 +390,10 @@ async def compile_agent_plan(
         plan_id=plan_id,
         plan=validation.plan,
         validation_errors=[],
-        validation_warnings=validation.warnings,
+        validation_warnings=(
+            list(validation.warnings or [])
+            + ([f"server_auto_applied_patches: {auto_applied_patches}"] if auto_applied_patches else [])
+        ),
         questions=[],
         compilation_report=validation.compilation_report,
         llm_meta=llm_meta,
