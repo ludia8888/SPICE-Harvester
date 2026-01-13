@@ -56,6 +56,8 @@ _ARTIFACT_MAX_LIST_ITEMS = 80
 _ARTIFACT_MAX_DICT_ITEMS = 120
 _ARTIFACT_MAX_STRING_CHARS = 4000
 
+_DELEGATED_AUTH_HEADER = "X-Delegated-Authorization"
+
 
 def _clean_url(value: str) -> str:
     return value.rstrip("/")
@@ -793,6 +795,13 @@ class AgentRuntime:
             return 0
 
     def _forward_headers(self, headers: Dict[str, str], actor: str) -> Dict[str, str]:
+        def _get_header(name: str) -> Optional[str]:
+            for variant in (name, name.lower(), name.upper()):
+                value = headers.get(variant)
+                if value:
+                    return value
+            return None
+
         allowlist = {
             "x-user-id",
             "x-user",
@@ -809,8 +818,21 @@ class AgentRuntime:
             key: value for key, value in headers.items() if key.lower() in allowlist and value
         }
         output["X-Spice-Caller"] = "agent"
+        delegated = _get_header(_DELEGATED_AUTH_HEADER) or _get_header("Authorization")
+        delegated_token = delegated.strip() if isinstance(delegated, str) else ""
+        if delegated_token.lower().startswith("bearer "):
+            delegated_token = delegated_token.split(" ", 1)[1].strip()
+        if delegated_token:
+            output[_DELEGATED_AUTH_HEADER] = f"Bearer {delegated_token}"
+            for key in list(output.keys()):
+                if key.lower() == _DELEGATED_AUTH_HEADER.lower() and key != _DELEGATED_AUTH_HEADER:
+                    output.pop(key, None)
+
         if self.config.bff_token:
-            output["Authorization"] = f"Bearer {self.config.bff_token}"
+            output["X-Admin-Token"] = self.config.bff_token
+            for key in list(output.keys()):
+                if key.lower() == "x-admin-token" and key != "X-Admin-Token":
+                    output.pop(key, None)
         output.setdefault("X-Actor", actor)
         return output
 
@@ -962,7 +984,8 @@ class AgentRuntime:
             ws_url = self._resolve_ws_url(command_id, token)
             try:
                 async with aiohttp.ClientSession() as session:
-                    async with session.ws_connect(ws_url, heartbeat=30, timeout=10) as ws:
+                    ws_headers = self._forward_headers(request_headers, actor)
+                    async with session.ws_connect(ws_url, heartbeat=30, timeout=10, headers=ws_headers) as ws:
                         while time.monotonic() < deadline:
                             timeout = min(ws_idle, max(0.1, deadline - time.monotonic()))
                             try:

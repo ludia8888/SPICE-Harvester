@@ -2,6 +2,7 @@ import os
 from contextlib import contextmanager
 
 import pytest
+from jose import jwt
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
@@ -139,3 +140,79 @@ def test_rate_limit_admin_bypass_requires_valid_token():
         assert client.post("/limited", headers=headers).status_code == 200
         assert client.post("/limited", headers=headers).status_code == 200
         assert client.post("/limited", headers=headers).status_code == 200
+
+
+@pytest.mark.unit
+def test_bff_auth_allows_user_jwt_when_enabled():
+    token = jwt.encode({"sub": "user-1"}, "secret", algorithm="HS256")
+    with _set_env(BFF_REQUIRE_AUTH="true", USER_JWT_ENABLED="true", USER_JWT_HS256_SECRET="secret"):
+        app = FastAPI()
+        install_bff_auth_middleware(app)
+
+        @app.get("/hello")
+        async def hello():  # noqa: ANN001
+            return {"ok": True}
+
+        client = TestClient(app)
+        resp = client.get("/hello", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 200
+
+
+@pytest.mark.unit
+def test_bff_agent_auth_requires_delegated_user_jwt_when_enabled():
+    token = jwt.encode({"sub": "user-1"}, "secret", algorithm="HS256")
+    with _set_env(
+        BFF_REQUIRE_AUTH="true",
+        BFF_AGENT_TOKEN="agent-secret",
+        USER_JWT_ENABLED="true",
+        USER_JWT_HS256_SECRET="secret",
+    ):
+        app = FastAPI()
+        install_bff_auth_middleware(app)
+
+        @app.get("/hello")
+        async def hello():  # noqa: ANN001
+            return {"ok": True}
+
+        client = TestClient(app)
+
+        resp = client.get("/hello", headers={"X-Admin-Token": "agent-secret"})
+        assert resp.status_code == 401
+
+        resp = client.get(
+            "/hello",
+            headers={
+                "X-Admin-Token": "agent-secret",
+                "X-Delegated-Authorization": f"Bearer {token}",
+            },
+        )
+        assert resp.status_code == 200
+
+
+@pytest.mark.unit
+def test_bff_admin_token_requires_user_jwt_for_agent_endpoints_when_enabled():
+    user_token = jwt.encode({"sub": "user-1"}, "jwt-secret", algorithm="HS256")
+    with _set_env(
+        BFF_REQUIRE_AUTH="true",
+        BFF_ADMIN_TOKEN="admin-secret",
+        USER_JWT_ENABLED="true",
+        USER_JWT_HS256_SECRET="jwt-secret",
+    ):
+        app = FastAPI()
+        install_bff_auth_middleware(app)
+
+        @app.get("/api/v1/agent/hello")
+        async def hello(request: Request):  # noqa: ANN001
+            return {"user_id": request.headers.get("X-User-ID")}
+
+        client = TestClient(app)
+
+        resp = client.get("/api/v1/agent/hello", headers={"X-Admin-Token": "admin-secret"})
+        assert resp.status_code == 401
+
+        resp = client.get(
+            "/api/v1/agent/hello",
+            headers={"X-Admin-Token": "admin-secret", "Authorization": f"Bearer {user_token}"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["user_id"] == "user-1"

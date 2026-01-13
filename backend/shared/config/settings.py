@@ -870,6 +870,36 @@ class AuthSettings(BaseSettings):
     admin_api_key: Optional[str] = Field(default=None, description="Unified admin API key (ADMIN_API_KEY)")
     admin_token: Optional[str] = Field(default=None, description="Unified admin token (ADMIN_TOKEN)")
 
+    # End-user auth (JWT/OIDC) - enterprise mode
+    user_jwt_enabled: bool = Field(
+        default=False,
+        description="Enable end-user JWT auth (USER_JWT_ENABLED)",
+    )
+    user_jwt_issuer: Optional[str] = Field(
+        default=None,
+        description="Expected JWT issuer (USER_JWT_ISSUER)",
+    )
+    user_jwt_audience: Optional[str] = Field(
+        default=None,
+        description="Expected JWT audience (USER_JWT_AUDIENCE)",
+    )
+    user_jwt_jwks_url: Optional[str] = Field(
+        default=None,
+        description="JWKS URL for JWT verification (USER_JWT_JWKS_URL)",
+    )
+    user_jwt_public_key: Optional[str] = Field(
+        default=None,
+        description="PEM public key for JWT verification (USER_JWT_PUBLIC_KEY)",
+    )
+    user_jwt_hs256_secret: Optional[str] = Field(
+        default=None,
+        description="HS256 shared secret for JWT verification (USER_JWT_HS256_SECRET)",
+    )
+    user_jwt_algorithms: Optional[str] = Field(
+        default=None,
+        description="Comma-separated accepted JWT algorithms (USER_JWT_ALGORITHMS)",
+    )
+
     # Require flags (Optional so 'unset' can use heuristics)
     bff_require_auth: Optional[bool] = Field(
         default=None,
@@ -916,6 +946,12 @@ class AuthSettings(BaseSettings):
         "oms_write_token",
         "admin_api_key",
         "admin_token",
+        "user_jwt_issuer",
+        "user_jwt_audience",
+        "user_jwt_jwks_url",
+        "user_jwt_public_key",
+        "user_jwt_hs256_secret",
+        "user_jwt_algorithms",
         "bff_auth_exempt_paths",
         "oms_auth_exempt_paths",
         mode="before",

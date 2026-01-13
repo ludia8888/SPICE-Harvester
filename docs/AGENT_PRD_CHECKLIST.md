@@ -15,9 +15,9 @@
 
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
-| AUTH-001 | PARTIAL | `backend/bff/middleware/auth.py`, `backend/agent/services/agent_runtime.py` | “현재 로그인 사용자”의 검증 가능한 보안 컨텍스트(JWT/OIDC)가 아직 SSoT가 아님(헤더 spoof 가능). Delegated auth 필요. |
+| AUTH-001 | DONE | `backend/bff/middleware/auth.py`, `backend/shared/security/user_context.py`, `backend/agent/services/agent_runtime.py`, `backend/tests/unit/middleware/test_middleware_fixes.py`, `backend/tests/unit/services/test_agent_runtime_delegated_auth.py` |  |
 | AUTH-002 | TODO | `backend/shared/security/auth_utils.py`(DB scope only) | RBAC/ABAC(권한 엔진) + 실패 시 표준 오류 코드 반환 미구현. |
-| AUTH-003 | PARTIAL | `backend/bff/middleware/auth.py`(agent token 분리), `backend/bff/services/agent_plan_validation.py`(승인 강제) | service token 기반 호출이 “사용자 권한”을 우회하지 않도록 delegation contract 강제 필요. |
+| AUTH-003 | PARTIAL | `backend/bff/middleware/auth.py`, `backend/agent/services/agent_runtime.py` | 전 서비스/워커 경로에서 “service token only” 실행이 없도록 정리 + RBAC/ABAC로 최종 보장 필요. |
 | AUTH-004 | TODO | (header key 일부만 존재) | 테넌트 격리(세션/로그/아티팩트/레이트리밋) 미구현. |
 | AUTH-005 | PARTIAL | `backend/shared/services/agent_tool_registry.py`(툴 allowlist 전역) | org/user 단위 모델/툴 allowlist + 자동 승인 규칙 + 데이터 정책 미구현. |
 
