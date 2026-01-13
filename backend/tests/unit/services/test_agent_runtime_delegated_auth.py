@@ -4,6 +4,7 @@ import pytest
 
 from agent.models import AgentToolCall
 from agent.services.agent_runtime import AgentRuntime, AgentRuntimeConfig
+from uuid import UUID
 
 
 class DummyEventStore:
@@ -99,3 +100,5 @@ async def test_agent_runtime_sends_service_token_and_delegated_user_token(monkey
     assert isinstance(headers, dict)
     assert headers.get("X-Admin-Token") == "agent-secret"
     assert headers.get("X-Delegated-Authorization") == "Bearer user-jwt"
+    assert headers.get("X-Agent-Tool-ID") == "bff.health"
+    assert UUID(str(headers.get("X-Agent-Tool-Run-ID")))

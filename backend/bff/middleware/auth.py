@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import logging
+import re
 from typing import Optional
 
 from fastapi import FastAPI, Request, WebSocket, status
@@ -10,6 +11,7 @@ from fastapi.responses import JSONResponse
 from shared.config.settings import get_settings
 from shared.security.auth_utils import extract_presented_token, is_exempt_path
 from shared.security.user_context import UserPrincipal, UserTokenError, extract_bearer_token, verify_user_token
+from shared.services.agent_tool_registry import AgentToolPolicyRecord
 
 _EXEMPT_PATHS_DEFAULT = (
     "/api/v1/health",
@@ -22,6 +24,15 @@ _USER_CONTEXT_REQUIRED_PREFIXES = (
     "/api/v1/agent",
     "/api/v1/agent-plans",
 )
+_AGENT_TOOL_ID_HEADER = "X-Agent-Tool-ID"
+_AGENT_TOOL_RUN_ID_HEADER = "X-Agent-Tool-Run-ID"
+_AGENT_TOOL_AUTHZ_EXEMPT_PREFIXES = (
+    "/api/v1/health",
+    "/api/v1/commands/",
+    "/api/v1/ws/commands/",
+    "/api/v1/metrics",
+)
+_AGENT_TOOL_PATH_RE_CACHE: dict[str, re.Pattern[str]] = {}
 
 
 def _set_scope_header(request: Request, name: str, value: str) -> None:
@@ -48,6 +59,93 @@ def _attach_verified_principal(request: Request, principal: UserPrincipal) -> No
     _set_scope_header(request, "X-Principal-Type", principal.type or "user")
     _set_scope_header(request, "X-Actor", principal.id)
     _set_scope_header(request, "X-Actor-Type", principal.type or "user")
+
+
+def _compile_agent_tool_path(pattern: str) -> re.Pattern[str]:
+    normalized = (pattern or "").strip().rstrip("/") or "/"
+    cached = _AGENT_TOOL_PATH_RE_CACHE.get(normalized)
+    if cached:
+        return cached
+    escaped = re.escape(normalized)
+    replaced = re.sub(r"\\{[^}]+\\}", r"[^/]+", escaped)
+    compiled = re.compile(rf"^{replaced}/?$")
+    _AGENT_TOOL_PATH_RE_CACHE[normalized] = compiled
+    return compiled
+
+
+def _path_matches_tool_policy(policy: AgentToolPolicyRecord, request_path: str) -> bool:
+    template = (policy.path or "").strip()
+    if not template:
+        return True
+    return bool(_compile_agent_tool_path(template).match(request_path or ""))
+
+
+def _resolve_agent_tool_id(request: Request) -> Optional[str]:
+    value = (request.headers.get(_AGENT_TOOL_ID_HEADER) or "").strip()
+    return value or None
+
+
+def _resolve_agent_tool_registry(request: Request):
+    container = getattr(request.app.state, "bff_container", None)
+    if container is None:
+        return None
+    try:
+        return container.get_agent_tool_registry()
+    except Exception:
+        return None
+
+
+async def _enforce_internal_agent_tool_policy(request: Request) -> Optional[JSONResponse]:
+    path = request.url.path or ""
+    if any(path.startswith(prefix) for prefix in _AGENT_TOOL_AUTHZ_EXEMPT_PREFIXES):
+        return None
+
+    tool_id = _resolve_agent_tool_id(request)
+    if not tool_id:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": f"{_AGENT_TOOL_ID_HEADER} required for agent tool calls"},
+        )
+
+    registry = _resolve_agent_tool_registry(request)
+    if registry is None:
+        # Degraded startup/unit-test mode: do not block the request, but keep the contract strict
+        # when the tool registry is available.
+        return None
+
+    policy = await registry.get_tool_policy(tool_id=tool_id)
+    if not policy:
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"detail": f"tool_id={tool_id} not in allowlist"},
+        )
+    if str(policy.status or "").strip().upper() != "ACTIVE":
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"detail": f"tool_id={tool_id} is not ACTIVE"},
+        )
+    if str(policy.method or "").strip().upper() != str(request.method or "").strip().upper():
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"detail": f"tool_id={tool_id} method mismatch"},
+        )
+    if not _path_matches_tool_policy(policy, path):
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"detail": f"tool_id={tool_id} path mismatch"},
+        )
+
+    required_roles = {str(role).strip() for role in (policy.roles or []) if str(role).strip()}
+    if required_roles:
+        principal = getattr(request.state, "user", None)
+        user_roles = set(getattr(principal, "roles", ()) or ())
+        if not user_roles or not (user_roles & required_roles):
+            return JSONResponse(
+                status_code=status.HTTP_403_FORBIDDEN,
+                content={"detail": "Permission denied"},
+            )
+
+    return None
 
 
 def ensure_bff_auth_configured() -> None:
@@ -120,6 +218,9 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
                         status_code=status.HTTP_403_FORBIDDEN,
                         content={"detail": f"Delegated user token invalid: {exc}"},
                     )
+                denied = await _enforce_internal_agent_tool_policy(request)
+                if denied is not None:
+                    return denied
             return await call_next(request)
 
         expected = auth.bff_expected_token

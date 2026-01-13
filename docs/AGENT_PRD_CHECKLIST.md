@@ -16,7 +16,7 @@
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
 | AUTH-001 | DONE | `backend/bff/middleware/auth.py`, `backend/shared/security/user_context.py`, `backend/agent/services/agent_runtime.py`, `backend/tests/unit/middleware/test_middleware_fixes.py`, `backend/tests/unit/services/test_agent_runtime_delegated_auth.py` |  |
-| AUTH-002 | TODO | `backend/shared/security/auth_utils.py`(DB scope only) | RBAC/ABAC(권한 엔진) + 실패 시 표준 오류 코드 반환 미구현. |
+| AUTH-002 | PARTIAL | `backend/bff/middleware/auth.py`, `backend/shared/services/agent_tool_registry.py`, `backend/agent/services/agent_runtime.py`, `backend/tests/unit/middleware/test_middleware_fixes.py` | tool_id 기반 런타임 allowlist+role gating은 추가됨. DB Access(RBAC)·ABAC(리소스 스코프)·표준 오류 코드(envelope)로 확장 필요. |
 | AUTH-003 | PARTIAL | `backend/bff/middleware/auth.py`, `backend/agent/services/agent_runtime.py` | 전 서비스/워커 경로에서 “service token only” 실행이 없도록 정리 + RBAC/ABAC로 최종 보장 필요. |
 | AUTH-004 | TODO | (header key 일부만 존재) | 테넌트 격리(세션/로그/아티팩트/레이트리밋) 미구현. |
 | AUTH-005 | PARTIAL | `backend/shared/services/agent_tool_registry.py`(툴 allowlist 전역) | org/user 단위 모델/툴 allowlist + 자동 승인 규칙 + 데이터 정책 미구현. |

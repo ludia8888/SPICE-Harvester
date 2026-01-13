@@ -1,5 +1,6 @@
 import os
 from contextlib import contextmanager
+from datetime import datetime, timezone
 
 import pytest
 from jose import jwt
@@ -7,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from bff.middleware.auth import install_bff_auth_middleware
+from shared.services.agent_tool_registry import AgentToolPolicyRecord
 from shared.i18n.middleware import install_i18n_middleware
 from shared.middleware.rate_limiter import rate_limit, install_rate_limit_headers_middleware
 
@@ -184,6 +186,7 @@ def test_bff_agent_auth_requires_delegated_user_jwt_when_enabled():
             headers={
                 "X-Admin-Token": "agent-secret",
                 "X-Delegated-Authorization": f"Bearer {token}",
+                "X-Agent-Tool-ID": "unit.test",
             },
         )
         assert resp.status_code == 200
@@ -216,3 +219,87 @@ def test_bff_admin_token_requires_user_jwt_for_agent_endpoints_when_enabled():
         )
         assert resp.status_code == 200
         assert resp.json()["user_id"] == "user-1"
+
+
+@pytest.mark.unit
+def test_bff_agent_tool_policy_enforced_via_tool_registry():
+    user_token = jwt.encode({"sub": "user-1", "roles": ["Owner"]}, "jwt-secret", algorithm="HS256")
+
+    class StubToolRegistry:
+        def __init__(self, policy):  # noqa: ANN001
+            self._policy = policy
+
+        async def get_tool_policy(self, *, tool_id: str):  # noqa: ANN001
+            return self._policy.get(tool_id)
+
+    class StubContainer:
+        def __init__(self, registry):  # noqa: ANN001
+            self._registry = registry
+
+        def get_agent_tool_registry(self):  # noqa: ANN001
+            return self._registry
+
+    now = datetime.now(timezone.utc)
+    policy = AgentToolPolicyRecord(
+        tool_id="pipelines.build",
+        method="POST",
+        path="/api/v1/pipelines/{pipeline_id}/build",
+        risk_level="write",
+        requires_approval=True,
+        requires_idempotency_key=True,
+        status="ACTIVE",
+        roles=["Owner"],
+        max_payload_bytes=200000,
+        created_at=now,
+        updated_at=now,
+    )
+
+    with _set_env(
+        BFF_REQUIRE_AUTH="true",
+        BFF_AGENT_TOKEN="agent-secret",
+        USER_JWT_ENABLED="true",
+        USER_JWT_HS256_SECRET="jwt-secret",
+    ):
+        app = FastAPI()
+        app.state.bff_container = StubContainer(StubToolRegistry({"pipelines.build": policy}))
+        install_bff_auth_middleware(app)
+
+        @app.post("/api/v1/pipelines/{pipeline_id}/build")
+        async def build(pipeline_id: str):  # noqa: ANN001
+            return {"pipeline_id": pipeline_id}
+
+        client = TestClient(app)
+
+        resp = client.post(
+            "/api/v1/pipelines/123/build",
+            headers={
+                "X-Admin-Token": "agent-secret",
+                "X-Delegated-Authorization": f"Bearer {user_token}",
+                "X-Agent-Tool-ID": "pipelines.build",
+                "X-Agent-Tool-Run-ID": "11111111-1111-1111-1111-111111111111",
+            },
+        )
+        assert resp.status_code == 200
+
+        # Unknown tool_id => denied.
+        resp = client.post(
+            "/api/v1/pipelines/123/build",
+            headers={
+                "X-Admin-Token": "agent-secret",
+                "X-Delegated-Authorization": f"Bearer {user_token}",
+                "X-Agent-Tool-ID": "pipelines.deploy",
+            },
+        )
+        assert resp.status_code == 403
+
+        # Role mismatch => denied.
+        user_no_role = jwt.encode({"sub": "user-2", "roles": ["Viewer"]}, "jwt-secret", algorithm="HS256")
+        resp = client.post(
+            "/api/v1/pipelines/123/build",
+            headers={
+                "X-Admin-Token": "agent-secret",
+                "X-Delegated-Authorization": f"Bearer {user_no_role}",
+                "X-Agent-Tool-ID": "pipelines.build",
+            },
+        )
+        assert resp.status_code == 403

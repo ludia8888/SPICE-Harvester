@@ -1568,12 +1568,15 @@ class AgentRuntime:
         signals: dict[str, Any] = {}
         try:
             async with httpx.AsyncClient(timeout=self.config.timeout_s) as client:
+                request_headers_payload = {**self._forward_headers(request_headers, actor), **tool_call.headers}
+                request_headers_payload["X-Agent-Tool-ID"] = str(tool_call.tool_id or "").strip()
+                request_headers_payload["X-Agent-Tool-Run-ID"] = tool_run_id
                 response = await client.request(
                     tool_call.method,
                     url,
                     params=tool_call.query or None,
                     json=tool_call.body,
-                    headers={**self._forward_headers(request_headers, actor), **tool_call.headers},
+                    headers=request_headers_payload,
                 )
             http_status = response.status_code
             content_type = response.headers.get("content-type", "")
