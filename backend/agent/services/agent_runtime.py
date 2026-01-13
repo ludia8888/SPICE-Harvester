@@ -355,6 +355,113 @@ def _extract_action_log_signals(payload: Any) -> dict[str, Any]:
     return {k: v for k, v in signals.items() if v not in (None, "", [], {})}
 
 
+def _extract_action_simulation_signals(payload: Any) -> dict[str, Any]:
+    """
+    Extract minimal, policy-relevant signals from ActionSimulation responses.
+
+    Note: OMS/BFF simulate endpoints often return HTTP 200 even when the *effective* scenario is REJECTED,
+    so we must inspect the body to drive safe automation decisions.
+    """
+
+    if not isinstance(payload, dict):
+        return {}
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return {}
+    results = data.get("results")
+    if not isinstance(results, list):
+        return {}
+    if "simulation_id" not in data and "preview_action_log_id" not in data:
+        return {}
+
+    scenario_summaries: list[dict[str, Any]] = []
+    effective: Optional[dict[str, Any]] = None
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        scenario_id = str(item.get("scenario_id") or "default").strip() or "default"
+        status = str(item.get("status") or "").strip().upper() or None
+        conflict_override = item.get("conflict_policy_override")
+        scenario_summaries.append(
+            {
+                "scenario_id": scenario_id,
+                "status": status,
+                "conflict_policy_override": conflict_override,
+            }
+        )
+        if effective is None and (conflict_override is None) and scenario_id in {"default", "effective"}:
+            effective = item
+
+    if effective is None and scenario_summaries:
+        effective = next((i for i in results if isinstance(i, dict)), None)
+
+    effective_status = str((effective or {}).get("status") or "").strip().upper() or None
+    signals: dict[str, Any] = {
+        "action_simulation_id": str(data.get("simulation_id") or "").strip() or None,
+        "action_simulation_version": data.get("version"),
+        "action_simulation_preview_action_log_id": str(data.get("preview_action_log_id") or "").strip() or None,
+        "action_simulation_effective_status": effective_status,
+        "action_simulation_scenarios": scenario_summaries[:20] if scenario_summaries else None,
+    }
+
+    error_payload = (effective or {}).get("error")
+    if effective_status == "REJECTED" and isinstance(error_payload, dict):
+        reason = error_payload.get("reason")
+        if isinstance(reason, str) and reason.strip():
+            signals["action_log_reason"] = reason.strip()
+        reasons = error_payload.get("reasons")
+        if reasons not in (None, "", [], {}):
+            signals["action_log_reasons"] = reasons
+
+    return {k: v for k, v in signals.items() if v not in (None, "", [], {})}
+
+
+def _extract_action_simulation_rejection(payload: Any) -> tuple[Optional[str], Optional[dict[str, Any]], Optional[str]]:
+    """
+    If the payload is an ActionSimulation response and the effective scenario is REJECTED,
+    return (error_key, enterprise, message).
+    """
+
+    if not isinstance(payload, dict):
+        return None, None, None
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return None, None, None
+    results = data.get("results")
+    if not isinstance(results, list) or not results:
+        return None, None, None
+
+    effective: Optional[dict[str, Any]] = None
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        if (item.get("conflict_policy_override") is None) and str(item.get("scenario_id") or "").strip() in {
+            "",
+            "default",
+            "effective",
+        }:
+            effective = item
+            break
+    if effective is None:
+        first = results[0]
+        effective = first if isinstance(first, dict) else None
+
+    if not effective:
+        return None, None, None
+    status = str(effective.get("status") or "").strip().upper()
+    if status != "REJECTED":
+        return None, None, None
+
+    err = effective.get("error")
+    if not isinstance(err, dict):
+        return "action_simulation_rejected", None, "simulation rejected"
+
+    error_key = str(err.get("error") or "action_simulation_rejected").strip() or "action_simulation_rejected"
+    enterprise = err.get("enterprise") if isinstance(err.get("enterprise"), dict) else None
+    message = str(err.get("message") or "simulation rejected").strip() or "simulation rejected"
+    return error_key, (dict(enterprise) if enterprise else None), message
+
+
 @dataclass(frozen=True)
 class AgentRuntimeConfig:
     bff_url: str
@@ -893,6 +1000,7 @@ class AgentRuntime:
         enterprise: Optional[dict[str, Any]] = None
         retryable: Optional[bool] = None
         retry_after_ms: Optional[int] = None
+        signals: dict[str, Any] = {}
         try:
             async with httpx.AsyncClient(timeout=self.config.timeout_s) as client:
                 response = await client.request(
@@ -923,6 +1031,21 @@ class AgentRuntime:
                 enterprise = _extract_enterprise(response_payload)
                 retryable = _extract_retryable(response_payload)
                 retry_after_ms = _extract_retry_after_ms(dict(response.headers))
+
+            signals = _extract_action_log_signals(response_payload)
+            simulation_signals = _extract_action_simulation_signals(response_payload)
+            if simulation_signals:
+                signals = {**signals, **simulation_signals}
+
+            simulation_error_key, simulation_enterprise, simulation_message = _extract_action_simulation_rejection(
+                response_payload
+            )
+            if simulation_error_key and error is None:
+                error_key = simulation_error_key
+                if simulation_enterprise:
+                    enterprise = simulation_enterprise
+                    retryable = _extract_retryable({"enterprise": enterprise})
+                error = simulation_message or "simulation rejected"
 
             legacy_code = _extract_enterprise_legacy_code(response_payload)
             if legacy_code == "overlay_degraded" and isinstance(context, dict):
@@ -1012,5 +1135,5 @@ class AgentRuntime:
             "enterprise": enterprise,
             "retryable": retryable,
             "retry_after_ms": retry_after_ms,
-            "signals": _extract_action_log_signals(response_payload),
+            "signals": signals,
         }

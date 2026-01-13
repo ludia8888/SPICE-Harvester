@@ -58,6 +58,7 @@ class AgentPlanDraftEnvelope(BaseModel):
 @dataclass(frozen=True)
 class AgentPlanCompileResult:
     status: str  # success|clarification_required|error
+    plan_id: str
     plan: Optional[AgentPlan]
     validation_errors: List[str]
     validation_warnings: List[str]
@@ -215,6 +216,7 @@ async def compile_agent_plan(
     if not goal:
         return AgentPlanCompileResult(
             status="error",
+            plan_id=str(uuid4()),
             plan=None,
             validation_errors=["goal is required"],
             validation_warnings=[],
@@ -225,6 +227,7 @@ async def compile_agent_plan(
     if not policies:
         return AgentPlanCompileResult(
             status="error",
+            plan_id=str(uuid4()),
             plan=None,
             validation_errors=["No ACTIVE agent tool policies found (configure allowlist first)."],
             validation_warnings=[],
@@ -261,6 +264,7 @@ async def compile_agent_plan(
         questions = _fallback_questions_from_errors([str(exc)])
         return AgentPlanCompileResult(
             status="clarification_required",
+            plan_id=plan_id,
             plan=None,
             validation_errors=[str(exc)],
             validation_warnings=[],
@@ -275,6 +279,7 @@ async def compile_agent_plan(
         questions = _fallback_questions_from_errors(errors)
         return AgentPlanCompileResult(
             status="clarification_required",
+            plan_id=plan_id,
             plan=None,
             validation_errors=errors,
             validation_warnings=[],
@@ -283,6 +288,13 @@ async def compile_agent_plan(
             planner_confidence=float(draft.confidence) if draft is not None else None,
             planner_notes=draft.notes if draft is not None else None,
         )
+
+    plan = plan.model_copy(
+        update={
+            "plan_id": plan.plan_id or plan_id,
+            "created_by": plan.created_by or actor,
+        }
+    )
 
     validation = await validate_agent_plan(plan=plan, tool_registry=tool_registry)
     if validation.errors:
@@ -314,6 +326,7 @@ async def compile_agent_plan(
 
         return AgentPlanCompileResult(
             status="clarification_required",
+            plan_id=plan_id,
             plan=validation.plan,
             validation_errors=validation.errors,
             validation_warnings=validation.warnings,
@@ -325,6 +338,7 @@ async def compile_agent_plan(
 
     return AgentPlanCompileResult(
         status="success",
+        plan_id=plan_id,
         plan=validation.plan,
         validation_errors=[],
         validation_warnings=validation.warnings,
@@ -333,4 +347,3 @@ async def compile_agent_plan(
         planner_confidence=float(draft.confidence) if draft is not None else None,
         planner_notes=draft.notes if draft is not None else None,
     )
-

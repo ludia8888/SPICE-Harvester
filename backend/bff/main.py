@@ -57,6 +57,7 @@ from shared.services.service_factory import BFF_SERVICE_INFO, create_fastapi_ser
 from shared.services.connector_registry import ConnectorRegistry
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.agent_registry import AgentRegistry
+from shared.services.agent_plan_registry import AgentPlanRegistry
 from shared.services.agent_tool_registry import AgentToolRegistry
 from shared.services.pipeline_registry import PipelineRegistry
 from shared.services.pipeline_executor import PipelineExecutor
@@ -198,6 +199,9 @@ class BFFServiceContainer:
 
         # 11. Initialize Agent Tool Registry (allowlist/policy)
         await self._initialize_agent_tool_registry()
+
+        # 12. Initialize Agent Plan Registry (compiled plan persistence)
+        await self._initialize_agent_plan_registry()
 
         # 12. Initialize Pipeline Executor (preview/build engine)
         await self._initialize_pipeline_executor()
@@ -356,6 +360,17 @@ class BFFServiceContainer:
         except Exception as e:
             logger.error(f"Failed to initialize AgentToolRegistry: {e}")
 
+    async def _initialize_agent_plan_registry(self) -> None:
+        """Initialize Postgres-backed agent plan registry."""
+        try:
+            logger.info("Initializing AgentPlanRegistry (Postgres)...")
+            registry = AgentPlanRegistry()
+            await registry.initialize()
+            self._bff_services["agent_plan_registry"] = registry
+            logger.info("AgentPlanRegistry initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize AgentPlanRegistry: {e}")
+
     async def _initialize_pipeline_executor(self) -> None:
         """Initialize pipeline executor (preview/build engine)."""
         try:
@@ -486,6 +501,13 @@ class BFFServiceContainer:
             except Exception as e:
                 logger.error(f"Error closing AgentToolRegistry: {e}")
 
+        if "agent_plan_registry" in self._bff_services:
+            try:
+                await self._bff_services["agent_plan_registry"].close()
+                logger.info("AgentPlanRegistry closed")
+            except Exception as e:
+                logger.error(f"Error closing AgentPlanRegistry: {e}")
+
         if "pipeline_executor" in self._bff_services:
             self._bff_services.pop("pipeline_executor", None)
         
@@ -545,6 +567,12 @@ class BFFServiceContainer:
         if "agent_tool_registry" not in self._bff_services:
             raise RuntimeError("AgentToolRegistry not initialized")
         return self._bff_services["agent_tool_registry"]
+
+    def get_agent_plan_registry(self) -> AgentPlanRegistry:
+        """Get agent plan registry instance"""
+        if "agent_plan_registry" not in self._bff_services:
+            raise RuntimeError("AgentPlanRegistry not initialized")
+        return self._bff_services["agent_plan_registry"]
 
     def get_pipeline_executor(self) -> PipelineExecutor:
         """Get pipeline executor instance"""
@@ -819,6 +847,12 @@ async def get_agent_tool_registry() -> AgentToolRegistry:
     if _bff_container is None:
         raise RuntimeError("BFF container not initialized")
     return _bff_container.get_agent_tool_registry()
+
+
+async def get_agent_plan_registry() -> AgentPlanRegistry:
+    if _bff_container is None:
+        raise RuntimeError("BFF container not initialized")
+    return _bff_container.get_agent_plan_registry()
 
 
 async def get_pipeline_executor() -> PipelineExecutor:
