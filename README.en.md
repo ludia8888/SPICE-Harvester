@@ -101,7 +101,7 @@ flowchart LR
   BFF --> LFS[(lakeFS + MinIO)]
 
   OMS -->|append command| EventStore[(S3/MinIO Event Store)]
-  EventStore --> Relay[message-relay (S3 tail to Kafka)]
+  EventStore --> Relay[message-relay: S3 tail to Kafka]
   Relay --> Kafka[(Kafka)]
 
   Kafka --> OntologyWorker[ontology-worker]
