@@ -22,6 +22,8 @@ _RISK_ORDER = {
     AgentPlanRiskLevel.destructive: 3,
 }
 _WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+_ACTION_SUBMIT_SUFFIX = "/actions/{action_type_id}/submit"
+_ACTION_SIMULATE_SUFFIX = "/actions/{action_type_id}/simulate"
 
 
 @dataclass(frozen=True)
@@ -89,6 +91,48 @@ def _normalize_step(
     return normalized_step, risk
 
 
+def _is_action_submit(policy: AgentToolPolicyRecord) -> bool:
+    path = (policy.path or "").rstrip("/")
+    return policy.method.upper() == "POST" and path.endswith(_ACTION_SUBMIT_SUFFIX)
+
+
+def _is_action_simulate(policy: AgentToolPolicyRecord) -> bool:
+    path = (policy.path or "").rstrip("/")
+    return policy.method.upper() == "POST" and path.endswith(_ACTION_SIMULATE_SUFFIX)
+
+
+def _enforce_action_simulate_first(
+    *,
+    steps: List[AgentPlanStep],
+    policies: List[AgentToolPolicyRecord],
+    errors: List[str],
+) -> None:
+    """
+    Ensure action writeback submit is preceded by simulate for the same db_name + action_type_id.
+
+    This enforces the "always simulate → approve → submit" rule for writeback workflows.
+    """
+
+    seen_simulate: set[tuple[str, str]] = set()
+    for step, policy in zip(steps, policies):
+        if _is_action_simulate(policy):
+            db_name = str(step.path_params.get("db_name") or "").strip()
+            action_type_id = str(step.path_params.get("action_type_id") or "").strip()
+            if db_name and action_type_id:
+                seen_simulate.add((db_name, action_type_id))
+
+        if _is_action_submit(policy):
+            db_name = str(step.path_params.get("db_name") or "").strip()
+            action_type_id = str(step.path_params.get("action_type_id") or "").strip()
+            if not db_name or not action_type_id:
+                continue
+            if (db_name, action_type_id) not in seen_simulate:
+                errors.append(
+                    f"tool_id={step.tool_id} action submit requires prior simulate step for "
+                    f"db_name={db_name} action_type_id={action_type_id}"
+                )
+
+
 async def validate_agent_plan(
     *,
     plan: AgentPlan,
@@ -97,6 +141,7 @@ async def validate_agent_plan(
     errors: List[str] = []
     warnings: List[str] = []
     normalized_steps: List[AgentPlanStep] = []
+    normalized_policies: List[AgentToolPolicyRecord] = []
     risk_levels: List[AgentPlanRiskLevel] = []
 
     for step in plan.steps:
@@ -116,7 +161,11 @@ async def validate_agent_plan(
             errors.append(f"tool_id={step.tool_id} invalid risk_level: {exc}")
             continue
         normalized_steps.append(normalized_step)
+        normalized_policies.append(policy)
         risk_levels.append(risk)
+
+    if normalized_steps and normalized_policies:
+        _enforce_action_simulate_first(steps=normalized_steps, policies=normalized_policies, errors=errors)
 
     plan_risk = _max_risk(risk_levels)
     plan_requires_approval = plan.requires_approval or any(

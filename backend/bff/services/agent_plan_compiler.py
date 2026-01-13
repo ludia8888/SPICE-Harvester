@@ -1,0 +1,336 @@
+"""
+LLM-native agent plan compiler (write-capable planner, enterprise-safe).
+
+This module implements the "Planner + Clarifier loop" described in:
+- docs/LLM_NATIVE_CONTROL_PLANE.md
+
+Notes:
+- The LLM never executes tools; it only proposes a typed plan object.
+- The server validates/normalizes the plan using the allowlist tool registry.
+- If validation fails, we ask clarifying questions (or return a safe fallback).
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+from uuid import uuid4
+
+from pydantic import BaseModel, Field, ValidationError
+
+from bff.services.agent_plan_validation import validate_agent_plan
+from shared.models.agent_plan import AgentPlan, AgentPlanDataScope
+from shared.services.agent_tool_registry import AgentToolPolicyRecord, AgentToolRegistry
+from shared.services.audit_log_store import AuditLogStore
+from shared.services.llm_gateway import (
+    LLMCallMeta,
+    LLMGateway,
+    LLMOutputValidationError,
+    LLMRequestError,
+    LLMUnavailableError,
+)
+from shared.services.redis_service import RedisService
+
+
+class AgentClarificationQuestion(BaseModel):
+    id: str = Field(..., min_length=1, max_length=100)
+    question: str = Field(..., min_length=1, max_length=2000)
+    required: bool = Field(default=True)
+    type: str = Field(default="string", description="string|enum|boolean|number|object")
+    options: Optional[List[str]] = None
+    default: Optional[Any] = None
+
+
+class AgentClarificationPayload(BaseModel):
+    questions: List[AgentClarificationQuestion] = Field(default_factory=list)
+    assumptions: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
+class AgentPlanDraftEnvelope(BaseModel):
+    plan: Dict[str, Any] = Field(default_factory=dict)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    notes: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class AgentPlanCompileResult:
+    status: str  # success|clarification_required|error
+    plan: Optional[AgentPlan]
+    validation_errors: List[str]
+    validation_warnings: List[str]
+    questions: List[AgentClarificationQuestion]
+    llm_meta: Optional[LLMCallMeta] = None
+    planner_confidence: Optional[float] = None
+    planner_notes: Optional[List[str]] = None
+
+
+def _policy_summary(policy: AgentToolPolicyRecord) -> Dict[str, Any]:
+    return {
+        "tool_id": policy.tool_id,
+        "method": policy.method,
+        "path": policy.path,
+        "risk_level": policy.risk_level,
+        "requires_approval": bool(policy.requires_approval),
+        "requires_idempotency_key": bool(policy.requires_idempotency_key),
+        "roles": policy.roles,
+        "max_payload_bytes": policy.max_payload_bytes,
+        "status": policy.status,
+    }
+
+
+def _build_tool_catalog_prompt(policies: List[AgentToolPolicyRecord], *, max_tools: int = 120) -> str:
+    trimmed = policies[: max(0, int(max_tools))]
+    catalog = [_policy_summary(p) for p in trimmed]
+    return json.dumps(catalog, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def _build_plan_system_prompt() -> str:
+    return (
+        "You are a STRICT enterprise automation planner for SPICE-Harvester.\n"
+        "You MUST output a single JSON object only (no markdown, no commentary).\n"
+        "You MUST plan using ONLY tool_id values from the provided Tool Catalog.\n"
+        "Do NOT invent tool_ids. Do NOT call any admin/debug endpoints.\n"
+        "\n"
+        "You are NOT executing anything. You are producing a plan draft that the server will validate.\n"
+        "\n"
+        "Hard safety rules:\n"
+        "- Any write method (POST/PUT/PATCH/DELETE) MUST include idempotency_key.\n"
+        "- Any write-capable plan MUST set requires_approval=true.\n"
+        "- For action writeback submit, ALWAYS include a simulate step before submit for the same db_name + action_type_id.\n"
+        "- Keep steps minimal; ask clarifying questions via notes/warnings only if needed.\n"
+        "\n"
+        "Output schema:\n"
+        "{\n"
+        '  \"plan\": {AgentPlan JSON},\n'
+        '  \"confidence\": number (0..1),\n'
+        '  \"notes\": string[],\n'
+        '  \"warnings\": string[]\n'
+        "}\n"
+    )
+
+
+def _build_plan_user_prompt(
+    *,
+    goal: str,
+    data_scope: Optional[AgentPlanDataScope],
+    answers: Optional[Dict[str, Any]],
+    tool_catalog_json: str,
+) -> str:
+    scope_payload = data_scope.model_dump(mode="json") if data_scope is not None else {}
+    answers_payload = answers or {}
+    return (
+        f"Goal:\n{goal}\n\n"
+        f"Data scope hints (optional):\n{json.dumps(scope_payload, ensure_ascii=False)}\n\n"
+        f"Clarification answers (if any):\n{json.dumps(answers_payload, ensure_ascii=False)}\n\n"
+        "Tool Catalog (use tool_id ONLY from this list):\n"
+        f"{tool_catalog_json}\n"
+    )
+
+
+def _build_clarifier_system_prompt() -> str:
+    return (
+        "You are a STRICT clarification generator for SPICE-Harvester.\n"
+        "You MUST output a single JSON object only (no markdown, no commentary).\n"
+        "Your job is to ask the MINIMUM set of questions needed to fix server validation errors.\n"
+        "Do NOT propose a plan. Do NOT include any tool calls.\n"
+        "\n"
+        "Output schema:\n"
+        "{\n"
+        '  \"questions\": [{\"id\": string, \"question\": string, \"required\": boolean, \"type\": string, \"options\": string[]|null, \"default\": any|null}],\n'
+        '  \"assumptions\": string[],\n'
+        '  \"warnings\": string[]\n'
+        "}\n"
+    )
+
+
+def _build_clarifier_user_prompt(
+    *,
+    goal: str,
+    draft_plan: Dict[str, Any],
+    validation_errors: List[str],
+    validation_warnings: List[str],
+    data_scope: Optional[AgentPlanDataScope],
+) -> str:
+    scope_payload = data_scope.model_dump(mode="json") if data_scope is not None else {}
+    return (
+        f"Goal:\n{goal}\n\n"
+        f"Data scope hints:\n{json.dumps(scope_payload, ensure_ascii=False)}\n\n"
+        "Draft plan (may be invalid):\n"
+        f"{json.dumps(draft_plan or {}, ensure_ascii=False)}\n\n"
+        f"Server validation errors:\n{json.dumps(validation_errors or [], ensure_ascii=False)}\n\n"
+        f"Server validation warnings:\n{json.dumps(validation_warnings or [], ensure_ascii=False)}\n"
+    )
+
+
+def _fallback_questions_from_errors(errors: List[str]) -> List[AgentClarificationQuestion]:
+    questions: List[AgentClarificationQuestion] = []
+    missing_params = [e for e in errors if "missing path_params" in e]
+    if missing_params:
+        questions.append(
+            AgentClarificationQuestion(
+                id="missing_path_params",
+                question="실행에 필요한 path_params(예: db_name, action_type_id 등)가 누락되었습니다. 어떤 값으로 채울까요?",
+                required=True,
+                type="object",
+            )
+        )
+    simulate_required = [e for e in errors if "requires prior simulate" in e.lower()]
+    if simulate_required:
+        questions.append(
+            AgentClarificationQuestion(
+                id="simulate_first",
+                question="writeback submit 전에 simulate(미리보기)를 먼저 실행해야 합니다. 시뮬레이션을 먼저 수행할까요?",
+                required=True,
+                type="boolean",
+                default=True,
+            )
+        )
+    if not questions:
+        questions.append(
+            AgentClarificationQuestion(
+                id="clarify",
+                question="요청이 모호합니다. 대상 범위(db/branch/대상 객체)와 원하는 결과를 더 구체적으로 알려주세요.",
+                required=True,
+                type="string",
+            )
+        )
+    return questions
+
+
+async def compile_agent_plan(
+    *,
+    goal: str,
+    data_scope: Optional[AgentPlanDataScope],
+    answers: Optional[Dict[str, Any]],
+    actor: str,
+    tool_registry: AgentToolRegistry,
+    llm_gateway: LLMGateway,
+    redis_service: Optional[RedisService],
+    audit_store: Optional[AuditLogStore],
+) -> AgentPlanCompileResult:
+    goal = str(goal or "").strip()
+    if not goal:
+        return AgentPlanCompileResult(
+            status="error",
+            plan=None,
+            validation_errors=["goal is required"],
+            validation_warnings=[],
+            questions=[],
+        )
+
+    policies = await tool_registry.list_tool_policies(status="ACTIVE", limit=200)
+    if not policies:
+        return AgentPlanCompileResult(
+            status="error",
+            plan=None,
+            validation_errors=["No ACTIVE agent tool policies found (configure allowlist first)."],
+            validation_warnings=[],
+            questions=[],
+        )
+
+    plan_id = str(uuid4())
+    tool_catalog_json = _build_tool_catalog_prompt(policies)
+
+    llm_meta: Optional[LLMCallMeta] = None
+    draft: Optional[AgentPlanDraftEnvelope] = None
+    draft_plan_obj: Dict[str, Any] = {}
+
+    try:
+        draft, llm_meta = await llm_gateway.complete_json(
+            task="AGENT_PLAN_COMPILE_V1",
+            system_prompt=_build_plan_system_prompt(),
+            user_prompt=_build_plan_user_prompt(
+                goal=goal,
+                data_scope=data_scope,
+                answers=answers,
+                tool_catalog_json=tool_catalog_json,
+            ),
+            response_model=AgentPlanDraftEnvelope,
+            redis_service=redis_service,
+            audit_store=audit_store,
+            audit_partition_key=f"agent_plan:{plan_id}",
+            audit_actor=actor,
+            audit_resource_id=plan_id,
+            audit_metadata={"kind": "agent_plan_compile", "schema": "AgentPlan"},
+        )
+        draft_plan_obj = dict(draft.plan or {})
+    except (LLMUnavailableError, LLMRequestError, LLMOutputValidationError) as exc:
+        questions = _fallback_questions_from_errors([str(exc)])
+        return AgentPlanCompileResult(
+            status="clarification_required",
+            plan=None,
+            validation_errors=[str(exc)],
+            validation_warnings=[],
+            questions=questions,
+            llm_meta=llm_meta,
+        )
+
+    try:
+        plan = AgentPlan.model_validate(draft_plan_obj)
+    except ValidationError as exc:
+        errors = [str(e.get("msg") or e) for e in exc.errors()]
+        questions = _fallback_questions_from_errors(errors)
+        return AgentPlanCompileResult(
+            status="clarification_required",
+            plan=None,
+            validation_errors=errors,
+            validation_warnings=[],
+            questions=questions,
+            llm_meta=llm_meta,
+            planner_confidence=float(draft.confidence) if draft is not None else None,
+            planner_notes=draft.notes if draft is not None else None,
+        )
+
+    validation = await validate_agent_plan(plan=plan, tool_registry=tool_registry)
+    if validation.errors:
+        questions: List[AgentClarificationQuestion] = []
+        clarification_meta: Optional[LLMCallMeta] = None
+        try:
+            clarification, clarification_meta = await llm_gateway.complete_json(
+                task="AGENT_PLAN_CLARIFY_V1",
+                system_prompt=_build_clarifier_system_prompt(),
+                user_prompt=_build_clarifier_user_prompt(
+                    goal=goal,
+                    draft_plan=draft_plan_obj,
+                    validation_errors=validation.errors,
+                    validation_warnings=validation.warnings,
+                    data_scope=data_scope,
+                ),
+                response_model=AgentClarificationPayload,
+                redis_service=redis_service,
+                audit_store=audit_store,
+                audit_partition_key=f"agent_plan:{plan_id}",
+                audit_actor=actor,
+                audit_resource_id=plan_id,
+                audit_metadata={"kind": "agent_plan_clarify"},
+            )
+            questions = list(clarification.questions or [])
+            llm_meta = clarification_meta or llm_meta
+        except Exception:
+            questions = _fallback_questions_from_errors(validation.errors)
+
+        return AgentPlanCompileResult(
+            status="clarification_required",
+            plan=validation.plan,
+            validation_errors=validation.errors,
+            validation_warnings=validation.warnings,
+            questions=questions,
+            llm_meta=llm_meta,
+            planner_confidence=float(draft.confidence) if draft is not None else None,
+            planner_notes=draft.notes if draft is not None else None,
+        )
+
+    return AgentPlanCompileResult(
+        status="success",
+        plan=validation.plan,
+        validation_errors=[],
+        validation_warnings=validation.warnings,
+        questions=[],
+        llm_meta=llm_meta,
+        planner_confidence=float(draft.confidence) if draft is not None else None,
+        planner_notes=draft.notes if draft is not None else None,
+    )
+

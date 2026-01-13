@@ -4,8 +4,6 @@ Agent plan validation API (BFF).
 Validates planner output against allowlist + risk policy.
 """
 
-from __future__ import annotations
-
 import logging
 
 from datetime import datetime, timezone
@@ -14,8 +12,11 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from bff.services.agent_plan_compiler import compile_agent_plan
 from bff.services.agent_plan_validation import validate_agent_plan
-from shared.models.agent_plan import AgentPlan
+from shared.dependencies.providers import AuditLogStoreDep, LLMGatewayDep, RedisServiceDep
+from shared.middleware.rate_limiter import RateLimitPresets, rate_limit
+from shared.models.agent_plan import AgentPlan, AgentPlanDataScope
 from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import sanitize_input
 from shared.services.agent_registry import AgentRegistry
@@ -43,6 +44,77 @@ class AgentPlanApprovalRequest(BaseModel):
     step_id: str | None = Field(default=None, max_length=200)
     comment: str | None = Field(default=None, max_length=2000)
     metadata: dict | None = Field(default=None)
+
+
+class AgentPlanCompileRequest(BaseModel):
+    goal: str = Field(..., min_length=1, max_length=2000)
+    data_scope: AgentPlanDataScope | None = Field(default=None)
+    answers: dict | None = Field(default=None, description="Clarification answers from prior compile response")
+
+
+@router.post("/compile", response_model=ApiResponse)
+@rate_limit(**RateLimitPresets.STRICT)
+async def compile_plan(
+    body: AgentPlanCompileRequest,
+    request: Request,
+    llm: LLMGatewayDep,
+    redis_service: RedisServiceDep,
+    audit_store: AuditLogStoreDep,
+    tool_registry: AgentToolRegistry = Depends(get_agent_tool_registry),
+) -> ApiResponse:
+    payload = sanitize_input(body.model_dump(exclude_none=True))
+    goal = str(payload.get("goal") or "").strip()
+    data_scope = body.data_scope
+    answers = payload.get("answers")
+    actor = (
+        request.headers.get("X-User-ID")
+        or request.headers.get("X-User")
+        or request.headers.get("X-Actor")
+        or "system"
+    )
+
+    result = await compile_agent_plan(
+        goal=goal,
+        data_scope=data_scope,
+        answers=answers if isinstance(answers, dict) else None,
+        actor=str(actor),
+        tool_registry=tool_registry,
+        llm_gateway=llm,
+        redis_service=redis_service,
+        audit_store=audit_store,
+    )
+
+    response_data = {
+        "status": result.status,
+        "plan": result.plan.model_dump(mode="json") if result.plan else None,
+        "validation_errors": list(result.validation_errors or []),
+        "validation_warnings": list(result.validation_warnings or []),
+        "questions": [q.model_dump(mode="json") for q in (result.questions or [])],
+        "planner": {
+            "confidence": result.planner_confidence,
+            "notes": result.planner_notes,
+        },
+        "llm": (
+            {
+                "provider": result.llm_meta.provider,
+                "model": result.llm_meta.model,
+                "cache_hit": result.llm_meta.cache_hit,
+                "latency_ms": result.llm_meta.latency_ms,
+            }
+            if result.llm_meta
+            else None
+        ),
+    }
+
+    if result.status == "success":
+        return ApiResponse.success(message="Agent plan compiled", data=response_data)
+    if result.status == "clarification_required":
+        return ApiResponse.warning(message="Clarification required", data=response_data)
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={"errors": result.validation_errors, "warnings": result.validation_warnings},
+    )
 
 
 @router.post("/validate", response_model=ApiResponse)
