@@ -128,8 +128,14 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/agent/runs/{run_id}/events`
 
 ### Agent Plans
+- `POST /api/v1/agent-plans/compile`
+- `POST /api/v1/agent-plans/context-pack`
 - `POST /api/v1/agent-plans/validate`
+- `GET /api/v1/agent-plans/{plan_id}`
+- `POST /api/v1/agent-plans/{plan_id}/apply-patch`
 - `POST /api/v1/agent-plans/{plan_id}/approvals`
+- `POST /api/v1/agent-plans/{plan_id}/execute`
+- `POST /api/v1/agent-plans/{plan_id}/preview`
 
 ### Agent Tool Admin
 - `GET /api/v1/admin/agent-tools`

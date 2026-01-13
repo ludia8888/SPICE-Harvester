@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 _TOOL_ID_ALLOWED = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+_ARTIFACT_REF_ALLOWED = _TOOL_ID_ALLOWED
 
 
 class AgentPlanRiskLevel(str, Enum):
@@ -43,6 +44,14 @@ class AgentPlanStep(BaseModel):
     path_params: Dict[str, Any] = Field(default_factory=dict)
     query: Dict[str, Any] = Field(default_factory=dict)
     body: Optional[Dict[str, Any]] = None
+    produces: List[str] = Field(
+        default_factory=list,
+        description="Artifact keys produced by this step (minimal dataflow contract).",
+    )
+    consumes: List[str] = Field(
+        default_factory=list,
+        description="Artifact keys consumed by this step (must be produced by prior steps).",
+    )
     requires_approval: bool = Field(default=False)
     idempotency_key: Optional[str] = None
     data_scope: Dict[str, Any] = Field(default_factory=dict)
@@ -59,6 +68,22 @@ class AgentPlanStep(BaseModel):
             if ch not in _TOOL_ID_ALLOWED:
                 raise ValueError("tool_id must match [A-Za-z0-9._-]+")
         return stripped
+
+    @field_validator("produces", "consumes")
+    @classmethod
+    def _validate_artifact_refs(cls, value: List[str]) -> List[str]:
+        refs: List[str] = []
+        for item in value or []:
+            raw = str(item or "").strip()
+            if not raw:
+                continue
+            if len(raw) > 200:
+                raise ValueError("artifact refs must be <= 200 chars")
+            for ch in raw:
+                if ch not in _ARTIFACT_REF_ALLOWED:
+                    raise ValueError("artifact refs must match [A-Za-z0-9._-]+")
+            refs.append(raw)
+        return refs
 
     @field_validator("method")
     @classmethod

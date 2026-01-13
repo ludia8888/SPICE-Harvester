@@ -1,0 +1,36 @@
+[
+  {
+    "tool_id": "actions.simulate",
+    "method": "POST",
+    "path": "/api/v1/databases/{db_name}/actions/{action_type_id}/simulate",
+    "risk_level": "write",
+    "requires_approval": true,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "actions.submit",
+    "method": "POST",
+    "path": "/api/v1/databases/{db_name}/actions/{action_type_id}/submit",
+    "risk_level": "write",
+    "requires_approval": true,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "actions.get_log",
+    "method": "GET",
+    "path": "/api/v1/databases/{db_name}/actions/logs/{action_log_id}",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": false,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  }
+]
+

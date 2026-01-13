@@ -156,6 +156,7 @@ def test_compile_stores_plan_and_returns_plan_id(client):
 
 def test_preview_stops_before_submit(client):
     plan_id = str(uuid4())
+    sim_id = "44444444-4444-4444-4444-444444444444"
     plan_registry = _FakePlanRegistry()
     tool_registry = _FakeToolRegistry(
         {
@@ -176,8 +177,22 @@ def test_preview_stops_before_submit(client):
         goal="simulate then submit",
         requires_approval=True,
         steps=[
-            AgentPlanStep(step_id="s1", tool_id="actions.simulate", path_params={"db_name": "demo", "action_type_id": "A"}, idempotency_key="k1"),
-            AgentPlanStep(step_id="s2", tool_id="actions.submit", path_params={"db_name": "demo", "action_type_id": "A"}, idempotency_key="k2"),
+            AgentPlanStep(
+                step_id="s1",
+                tool_id="actions.simulate",
+                path_params={"db_name": "demo", "action_type_id": "A"},
+                body={"input": {}, "simulation_id": sim_id},
+                produces=[f"action_simulation.id.{sim_id}", f"action_simulation.effective.{sim_id}"],
+                idempotency_key="k1",
+            ),
+            AgentPlanStep(
+                step_id="s2",
+                tool_id="actions.submit",
+                path_params={"db_name": "demo", "action_type_id": "A"},
+                body={"input": {}, "metadata": {"simulation_id": sim_id}},
+                consumes=[f"action_simulation.id.{sim_id}", f"action_simulation.effective.{sim_id}"],
+                idempotency_key="k2",
+            ),
         ],
     )
     now = datetime.now(timezone.utc)
@@ -215,6 +230,7 @@ def test_preview_stops_before_submit(client):
 
 def test_execute_requires_approval(client):
     plan_id = str(uuid4())
+    sim_id = "55555555-5555-5555-5555-555555555555"
     plan_registry = _FakePlanRegistry()
     agent_registry = _FakeAgentRegistry()
     tool_registry = _FakeToolRegistry(
@@ -235,8 +251,22 @@ def test_execute_requires_approval(client):
         plan_id=plan_id,
         goal="submit only",
         steps=[
-            AgentPlanStep(step_id="s1", tool_id="actions.simulate", path_params={"db_name": "demo", "action_type_id": "A"}, idempotency_key="k0"),
-            AgentPlanStep(step_id="s2", tool_id="actions.submit", path_params={"db_name": "demo", "action_type_id": "A"}, idempotency_key="k1"),
+            AgentPlanStep(
+                step_id="s1",
+                tool_id="actions.simulate",
+                path_params={"db_name": "demo", "action_type_id": "A"},
+                body={"input": {}, "simulation_id": sim_id},
+                produces=[f"action_simulation.id.{sim_id}", f"action_simulation.effective.{sim_id}"],
+                idempotency_key="k0",
+            ),
+            AgentPlanStep(
+                step_id="s2",
+                tool_id="actions.submit",
+                path_params={"db_name": "demo", "action_type_id": "A"},
+                body={"input": {}, "metadata": {"simulation_id": sim_id}},
+                consumes=[f"action_simulation.id.{sim_id}", f"action_simulation.effective.{sim_id}"],
+                idempotency_key="k1",
+            ),
         ],
     )
     now = datetime.now(timezone.utc)
@@ -264,6 +294,7 @@ def test_execute_requires_approval(client):
 
 def test_execute_calls_agent_when_approved(client):
     plan_id = str(uuid4())
+    sim_id = "66666666-6666-6666-6666-666666666666"
     plan_registry = _FakePlanRegistry()
     agent_registry = _FakeAgentRegistry()
     tool_registry = _FakeToolRegistry(
@@ -285,8 +316,22 @@ def test_execute_calls_agent_when_approved(client):
         goal="simulate then submit",
         requires_approval=True,
         steps=[
-            AgentPlanStep(step_id="s1", tool_id="actions.simulate", path_params={"db_name": "demo", "action_type_id": "A"}, idempotency_key="k1"),
-            AgentPlanStep(step_id="s2", tool_id="actions.submit", path_params={"db_name": "demo", "action_type_id": "A"}, idempotency_key="k2"),
+            AgentPlanStep(
+                step_id="s1",
+                tool_id="actions.simulate",
+                path_params={"db_name": "demo", "action_type_id": "A"},
+                body={"input": {}, "simulation_id": sim_id},
+                produces=[f"action_simulation.id.{sim_id}", f"action_simulation.effective.{sim_id}"],
+                idempotency_key="k1",
+            ),
+            AgentPlanStep(
+                step_id="s2",
+                tool_id="actions.submit",
+                path_params={"db_name": "demo", "action_type_id": "A"},
+                body={"input": {}, "metadata": {"simulation_id": sim_id}},
+                consumes=[f"action_simulation.id.{sim_id}", f"action_simulation.effective.{sim_id}"],
+                idempotency_key="k2",
+            ),
         ],
     )
     now = datetime.now(timezone.utc)

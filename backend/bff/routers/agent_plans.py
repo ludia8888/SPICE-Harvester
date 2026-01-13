@@ -22,6 +22,7 @@ from bff.services.operational_memory import build_operational_context_pack
 from shared.dependencies.providers import AuditLogStoreDep, LLMGatewayDep, RedisServiceDep
 from shared.middleware.rate_limiter import RateLimitPresets, rate_limit
 from shared.models.agent_plan import AgentPlan, AgentPlanDataScope
+from shared.models.agent_plan_report import PlanPatchOp
 from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import sanitize_input
 from shared.services.action_log_registry import ActionLogRegistry
@@ -29,6 +30,7 @@ from shared.services.agent_registry import AgentRegistry
 from shared.services.agent_plan_registry import AgentPlanRegistry
 from shared.services.agent_tool_registry import AgentToolRegistry
 from shared.config.service_config import ServiceConfig
+from shared.utils.json_patch import JsonPatchError, apply_json_patch
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +145,10 @@ class AgentContextPackRequest(BaseModel):
     max_simulations: int = Field(default=5, ge=0, le=20)
 
 
+class AgentPlanApplyPatchRequest(BaseModel):
+    patch: List[PlanPatchOp] = Field(default_factory=list, description="JSON patch operations to apply")
+
+
 @router.post("/context-pack", response_model=ApiResponse)
 @rate_limit(**RateLimitPresets.STRICT)
 async def build_context_pack(
@@ -174,6 +180,61 @@ async def build_context_pack(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to build context pack") from exc
 
     return ApiResponse.success(message="Operational context pack built", data=pack)
+
+
+@router.post("/{plan_id}/apply-patch", response_model=ApiResponse)
+async def apply_plan_patch(
+    plan_id: str,
+    body: AgentPlanApplyPatchRequest,
+    plan_registry: AgentPlanRegistry = Depends(get_agent_plan_registry),
+    tool_registry: AgentToolRegistry = Depends(get_agent_tool_registry),
+) -> ApiResponse:
+    try:
+        plan_id = str(UUID(plan_id))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="plan_id must be a UUID") from exc
+
+    record = await plan_registry.get_plan(plan_id=plan_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent plan not found")
+
+    patch_ops = [op.model_dump(mode="json", by_alias=True) for op in (body.patch or [])]
+    if not patch_ops:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="patch must not be empty")
+
+    try:
+        patched = apply_json_patch(record.plan, patch_ops)
+    except JsonPatchError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    try:
+        patched_plan = AgentPlan.model_validate(patched)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Patched plan invalid: {exc}") from exc
+
+    validation = await validate_agent_plan(plan=patched_plan, tool_registry=tool_registry)
+    new_status = "COMPILED" if not validation.errors else "DRAFT"
+    await plan_registry.upsert_plan(
+        plan_id=plan_id,
+        status=new_status,
+        goal=str(validation.plan.goal or ""),
+        risk_level=str(validation.plan.risk_level.value if hasattr(validation.plan.risk_level, "value") else validation.plan.risk_level),
+        requires_approval=bool(validation.plan.requires_approval),
+        plan=validation.plan.model_dump(mode="json"),
+        created_by=record.created_by,
+    )
+
+    return ApiResponse.success(
+        message="Agent plan patched",
+        data={
+            "plan_id": plan_id,
+            "status": new_status,
+            "plan": validation.plan.model_dump(mode="json"),
+            "validation_errors": validation.errors,
+            "validation_warnings": validation.warnings,
+            "compilation_report": validation.compilation_report.model_dump(mode="json"),
+        },
+    )
 
 
 @router.post("/compile", response_model=ApiResponse)
@@ -238,6 +299,7 @@ async def compile_plan(
         "validation_errors": list(result.validation_errors or []),
         "validation_warnings": list(result.validation_warnings or []),
         "questions": [q.model_dump(mode="json") for q in (result.questions or [])],
+        "compilation_report": result.compilation_report.model_dump(mode="json") if result.compilation_report else None,
         "planner": {
             "confidence": result.planner_confidence,
             "notes": result.planner_notes,
@@ -267,6 +329,16 @@ async def compile_plan(
             )
         return ApiResponse.success(message="Agent plan compiled", data=response_data)
     if result.status == "clarification_required":
+        if result.plan:
+            await plan_registry.upsert_plan(
+                plan_id=result.plan_id,
+                status="DRAFT",
+                goal=str(result.plan.goal or ""),
+                risk_level=str(result.plan.risk_level.value if hasattr(result.plan.risk_level, "value") else result.plan.risk_level),
+                requires_approval=bool(result.plan.requires_approval),
+                plan=result.plan.model_dump(mode="json"),
+                created_by=str(actor),
+            )
         return ApiResponse.warning(message="Clarification required", data=response_data)
 
     raise HTTPException(
@@ -446,12 +518,17 @@ async def validate_plan(
         if result.errors:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"errors": result.errors, "warnings": result.warnings},
+                detail={
+                    "errors": result.errors,
+                    "warnings": result.warnings,
+                    "compilation_report": result.compilation_report.model_dump(mode="json"),
+                },
             )
         message = "Agent plan validated"
         data = {
             "plan": result.plan.model_dump(mode="json"),
             "warnings": result.warnings,
+            "compilation_report": result.compilation_report.model_dump(mode="json"),
         }
         if result.warnings:
             return ApiResponse.warning(message=message, data=data)

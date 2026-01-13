@@ -16,6 +16,13 @@ class _FakeToolRegistry:
     async def get_tool_policy(self, *, tool_id: str):
         return self._policies.get(tool_id)
 
+    async def list_tool_policies(self, *, status=None, limit: int = 200):  # noqa: ANN001
+        records = list(self._policies.values())
+        if status:
+            wanted = str(status).strip().upper()
+            records = [p for p in records if str(p.status or "").strip().upper() == wanted]
+        return records[: int(limit)]
+
 
 def _policy(*, tool_id: str, method: str, path: str) -> AgentToolPolicyRecord:
     now = datetime.now(timezone.utc)
@@ -46,6 +53,7 @@ async def test_action_submit_requires_prior_simulate():
         }
     )
 
+    sim_id = "11111111-1111-1111-1111-111111111111"
     plan = AgentPlan(
         goal="submit without simulate",
         requires_approval=True,
@@ -54,7 +62,8 @@ async def test_action_submit_requires_prior_simulate():
                 step_id="s1",
                 tool_id="actions.submit",
                 path_params={"db_name": "demo", "action_type_id": "ApproveTicket"},
-                body={"input": {"ticket_id": "T-1"}},
+                body={"input": {"ticket_id": "T-1"}, "metadata": {"simulation_id": sim_id}},
+                consumes=[f"action_simulation.id.{sim_id}", f"action_simulation.effective.{sim_id}"],
                 idempotency_key="k-submit",
             )
         ],
@@ -81,6 +90,7 @@ async def test_action_submit_ok_when_simulate_precedes_submit():
         }
     )
 
+    sim_id = "22222222-2222-2222-2222-222222222222"
     plan = AgentPlan(
         goal="simulate then submit",
         requires_approval=True,
@@ -89,14 +99,16 @@ async def test_action_submit_ok_when_simulate_precedes_submit():
                 step_id="s1",
                 tool_id="actions.simulate",
                 path_params={"db_name": "demo", "action_type_id": "ApproveTicket"},
-                body={"input": {"ticket_id": "T-1"}},
+                body={"input": {"ticket_id": "T-1"}, "simulation_id": sim_id},
+                produces=[f"action_simulation.id.{sim_id}", f"action_simulation.effective.{sim_id}"],
                 idempotency_key="k-sim",
             ),
             AgentPlanStep(
                 step_id="s2",
                 tool_id="actions.submit",
                 path_params={"db_name": "demo", "action_type_id": "ApproveTicket"},
-                body={"input": {"ticket_id": "T-1"}},
+                body={"input": {"ticket_id": "T-1"}, "metadata": {"simulation_id": sim_id}},
+                consumes=[f"action_simulation.id.{sim_id}", f"action_simulation.effective.{sim_id}"],
                 idempotency_key="k-submit",
             ),
         ],
@@ -123,6 +135,7 @@ async def test_action_submit_simulate_mismatch_action_type_id_is_error():
         }
     )
 
+    sim_id = "33333333-3333-3333-3333-333333333333"
     plan = AgentPlan(
         goal="simulate different action",
         requires_approval=True,
@@ -131,14 +144,16 @@ async def test_action_submit_simulate_mismatch_action_type_id_is_error():
                 step_id="s1",
                 tool_id="actions.simulate",
                 path_params={"db_name": "demo", "action_type_id": "OtherAction"},
-                body={"input": {"ticket_id": "T-1"}},
+                body={"input": {"ticket_id": "T-1"}, "simulation_id": sim_id},
+                produces=[f"action_simulation.id.{sim_id}", f"action_simulation.effective.{sim_id}"],
                 idempotency_key="k-sim",
             ),
             AgentPlanStep(
                 step_id="s2",
                 tool_id="actions.submit",
                 path_params={"db_name": "demo", "action_type_id": "ApproveTicket"},
-                body={"input": {"ticket_id": "T-1"}},
+                body={"input": {"ticket_id": "T-1"}, "metadata": {"simulation_id": sim_id}},
+                consumes=[f"action_simulation.id.{sim_id}", f"action_simulation.effective.{sim_id}"],
                 idempotency_key="k-submit",
             ),
         ],
@@ -146,4 +161,3 @@ async def test_action_submit_simulate_mismatch_action_type_id_is_error():
 
     result = await validate_agent_plan(plan=plan, tool_registry=registry)  # type: ignore[arg-type]
     assert any("requires prior simulate" in e.lower() for e in result.errors)
-

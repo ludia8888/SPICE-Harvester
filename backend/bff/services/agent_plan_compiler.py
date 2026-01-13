@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from bff.services.agent_plan_validation import validate_agent_plan
 from shared.models.agent_plan import AgentPlan, AgentPlanDataScope
+from shared.models.agent_plan_report import PlanCompilationReport
 from shared.services.agent_tool_registry import AgentToolPolicyRecord, AgentToolRegistry
 from shared.services.audit_log_store import AuditLogStore
 from shared.services.llm_gateway import (
@@ -63,6 +64,7 @@ class AgentPlanCompileResult:
     validation_errors: List[str]
     validation_warnings: List[str]
     questions: List[AgentClarificationQuestion]
+    compilation_report: Optional[PlanCompilationReport] = None
     llm_meta: Optional[LLMCallMeta] = None
     planner_confidence: Optional[float] = None
     planner_notes: Optional[List[str]] = None
@@ -340,6 +342,7 @@ async def compile_agent_plan(
             validation_errors=validation.errors,
             validation_warnings=validation.warnings,
             questions=questions,
+            compilation_report=validation.compilation_report,
             llm_meta=llm_meta,
             planner_confidence=float(draft.confidence) if draft is not None else None,
             planner_notes=draft.notes if draft is not None else None,
@@ -352,6 +355,7 @@ async def compile_agent_plan(
         validation_errors=[],
         validation_warnings=validation.warnings,
         questions=[],
+        compilation_report=validation.compilation_report,
         llm_meta=llm_meta,
         planner_confidence=float(draft.confidence) if draft is not None else None,
         planner_notes=draft.notes if draft is not None else None,
