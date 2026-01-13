@@ -40,7 +40,10 @@ from shared.services.command_status_service import (
 )
 from shared.config.settings import ApplicationSettings
 from shared.models.event_envelope import EventEnvelope
-from shared.observability.context_propagation import attach_context_from_kafka
+from shared.observability.context_propagation import (
+    attach_context_from_kafka,
+    kafka_headers_from_current_context,
+)
 from shared.observability.logging import install_trace_context_filter
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
@@ -87,6 +90,9 @@ class StrictPalantirInstanceWorker:
         self.enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
         self.consumer = None
         self.producer = None
+        self.dlq_producer: Optional[Producer] = None
+        self.dlq_topic = AppConfig.INSTANCE_COMMANDS_DLQ_TOPIC
+        self.dlq_flush_timeout_seconds = float(os.getenv("INSTANCE_WORKER_DLQ_FLUSH_TIMEOUT_SECONDS", "10") or "10")
         self.redis_client = None
         self.command_status_service: Optional[CommandStatusTracker] = None
         self.s3_client = None
@@ -181,6 +187,7 @@ class StrictPalantirInstanceWorker:
             'bootstrap.servers': self.kafka_servers,
             'client.id': 'strict-palantir-instance-worker-producer',
         })
+        self.dlq_producer = self.producer
         
         # Redis (optional - don't fail if not available)
         settings = ApplicationSettings()
@@ -2591,6 +2598,69 @@ class StrictPalantirInstanceWorker:
         if "api error: 400" in msg:
             return False
         return not any(marker in msg for marker in non_retryable_markers)
+
+    async def _send_to_dlq(
+        self,
+        *,
+        msg: Any,
+        stage: str,
+        error: str,
+        attempt_count: int,
+        payload_text: Optional[str],
+        payload_obj: Optional[Dict[str, Any]],
+        kafka_headers: Optional[Any] = None,
+        fallback_metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not self.dlq_producer:
+            raise RuntimeError("DLQ producer not configured")
+
+        try:
+            original_value = payload_text if payload_text is not None else msg.value().decode("utf-8", errors="replace")
+        except Exception:
+            original_value = "<unavailable>"
+
+        dlq_message: Dict[str, Any] = {
+            "original_topic": msg.topic(),
+            "original_partition": msg.partition(),
+            "original_offset": msg.offset(),
+            "original_timestamp": msg.timestamp()[1] if msg.timestamp() else None,
+            "original_key": msg.key().decode("utf-8", errors="replace") if msg.key() else None,
+            "original_value": original_value,
+            "stage": stage,
+            "error": (error or "").strip()[:4000],
+            "attempt_count": int(attempt_count),
+            "worker": "instance-worker",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if payload_obj is not None:
+            dlq_message["parsed_payload"] = payload_obj
+
+        key = f"{msg.topic()}:{msg.partition()}:{msg.offset()}".encode("utf-8")
+        value = json.dumps(dlq_message, ensure_ascii=False, default=str).encode("utf-8")
+
+        with attach_context_from_kafka(
+            kafka_headers=kafka_headers,
+            fallback_metadata=fallback_metadata if isinstance(fallback_metadata, dict) else None,
+            service_name="instance-worker",
+        ):
+            headers = kafka_headers_from_current_context()
+            with self.tracing.span(
+                "instance_worker.dlq_produce",
+                attributes={
+                    "messaging.system": "kafka",
+                    "messaging.destination": self.dlq_topic,
+                    "messaging.destination_kind": "topic",
+                    "messaging.kafka.partition": msg.partition(),
+                    "messaging.kafka.offset": msg.offset(),
+                },
+            ):
+                self.dlq_producer.produce(self.dlq_topic, key=key, value=value, headers=headers or None)
+                await asyncio.to_thread(self.dlq_producer.flush, self.dlq_flush_timeout_seconds)
+
+        try:
+            self.metrics.record_event("INSTANCE_COMMAND_DLQ", action="published")
+        except Exception:
+            pass
         
     async def run(self):
         """Main processing loop"""
@@ -2627,20 +2697,61 @@ class StrictPalantirInstanceWorker:
 
             try:
                 logger.info("📨 Received message from Kafka!")
+                raw_message: Any = {}
                 try:
                     raw_message = json.loads(msg.value().decode("utf-8"))
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse Kafka message JSON: {e}")
-                    # Poison pill: commit to avoid infinite retry loop.
-                    await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
+                    kafka_headers = None
+                    with suppress(Exception):
+                        kafka_headers = msg.headers()
+                    try:
+                        await self._send_to_dlq(
+                            msg=msg,
+                            stage="parse_json",
+                            error=str(e),
+                            attempt_count=1,
+                            payload_text=None,
+                            payload_obj=None,
+                            kafka_headers=kafka_headers,
+                            fallback_metadata=None,
+                        )
+                        await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
+                    except Exception as dlq_err:
+                        logger.error("Failed to publish invalid JSON to DLQ; retrying: %s", dlq_err, exc_info=True)
+                        await asyncio.sleep(2)
+                        await self._consumer_call(
+                            self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
+                        )
                     continue
 
                 # Extract the actual command payload (canonical EventEnvelope only)
                 try:
                     command = await self.extract_payload_from_message(raw_message)
                 except Exception as e:
-                    logger.error(f"Invalid command envelope; committing offset to avoid poison pill: {e}")
-                    await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
+                    logger.error(f"Invalid command envelope on instance command topic: {e}")
+                    kafka_headers = None
+                    with suppress(Exception):
+                        kafka_headers = msg.headers()
+                    fallback_metadata = raw_message.get("metadata") if isinstance(raw_message, dict) else None
+                    try:
+                        await self._send_to_dlq(
+                            msg=msg,
+                            stage="validate_envelope",
+                            error=str(e),
+                            attempt_count=1,
+                            payload_text=json.dumps(raw_message, ensure_ascii=False, default=str),
+                            payload_obj=raw_message if isinstance(raw_message, dict) else None,
+                            kafka_headers=kafka_headers,
+                            fallback_metadata=fallback_metadata if isinstance(fallback_metadata, dict) else None,
+                        )
+                        await self._consumer_call(self.consumer.commit, msg, asynchronous=False)
+                    except Exception as dlq_err:
+                        logger.error("Failed to publish invalid envelope to DLQ; retrying: %s", dlq_err, exc_info=True)
+                        await asyncio.sleep(2)
+                        await self._consumer_call(
+                            self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
+                        )
                     continue
 
                 kafka_headers = msg.headers()
@@ -2830,7 +2941,30 @@ class StrictPalantirInstanceWorker:
                     f"Skipping failed command event_id={registry_event_id} after {attempt_count} attempts "
                     f"(retryable={retryable}); committing offset to avoid poison pill"
                 )
-                await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
+                kafka_headers = None
+                with suppress(Exception):
+                    kafka_headers = msg.headers()
+                fallback_metadata = None
+                with suppress(Exception):
+                    fallback_metadata = raw_message.get("metadata") if isinstance(raw_message, dict) else None
+                try:
+                    await self._send_to_dlq(
+                        msg=msg,
+                        stage="process_command",
+                        error=str(e),
+                        attempt_count=attempt_count,
+                        payload_text=None,
+                        payload_obj=command if isinstance(command, dict) and command else raw_message,
+                        kafka_headers=kafka_headers,
+                        fallback_metadata=fallback_metadata if isinstance(fallback_metadata, dict) else None,
+                    )
+                    await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
+                except Exception as dlq_err:
+                    logger.error("Failed to publish to instance DLQ; retrying: %s", dlq_err, exc_info=True)
+                    await asyncio.sleep(2)
+                    await self._consumer_call(
+                        self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
+                    )
                 continue
 
             finally:

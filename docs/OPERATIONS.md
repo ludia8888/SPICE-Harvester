@@ -110,6 +110,10 @@ RUN_PIPELINE_TRANSFORM_E2E=true PYTHON_BIN=python3.12 ./backend/run_production_t
 - **Event store errors**: confirm MinIO health and bucket existence.
 - **LakeFS failures**: confirm lakeFS health endpoint and MinIO credentials.
 - **Rate limiter errors**: Redis unavailable triggers degraded mode; check Redis connectivity.
+- **DLQ (poison/non-retryable/max-retry)**:
+  - 주요 DLQ 토픽: `pipeline-jobs-dlq`, `objectify-jobs-dlq`, `projection_failures_dlq`, `connector-updates-dlq`, `dataset-ingest-outbox-dlq`, `instance-commands-dlq`, `ontology-commands-dlq`, `action-commands-dlq`
+  - 재처리(Replay): `python3 scripts/replay_dlq.py --dlq-topic instance-commands-dlq --max-messages 50`
+  - 원인 확인: DLQ payload의 `error`/`stage`/`attempt_count` 및 trace(`traceparent` header 또는 envelope `metadata`)로 상관관계 추적
 
 ## 10) Production Hardening (Checklist)
 

@@ -159,6 +159,25 @@ OBJECTIFY_MAX_RETRIES=5
 OBJECTIFY_ROW_BATCH_SIZE=1000
 ```
 
+## Commands (Instance/Ontology/Action)
+
+```bash
+# Command topics (SSoT EventStore -> message-relay -> Kafka -> workers)
+INSTANCE_COMMANDS_TOPIC=instance_commands
+ONTOLOGY_COMMANDS_TOPIC=ontology_commands
+ACTION_COMMANDS_TOPIC=action_commands
+
+# Command DLQ topics (poison/non-retryable/max-retry exceeded)
+INSTANCE_COMMANDS_DLQ_TOPIC=instance-commands-dlq
+ONTOLOGY_COMMANDS_DLQ_TOPIC=ontology-commands-dlq
+ACTION_COMMANDS_DLQ_TOPIC=action-commands-dlq
+
+# Retry controls
+INSTANCE_WORKER_MAX_RETRY_ATTEMPTS=5
+ONTOLOGY_WORKER_MAX_RETRY_ATTEMPTS=5
+ACTION_WORKER_MAX_RETRY_ATTEMPTS=5
+```
+
 ## Outbox / Reconciler
 
 ```bash

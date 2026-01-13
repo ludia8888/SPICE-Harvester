@@ -36,6 +36,11 @@ class AppConfig:
     ONTOLOGY_COMMANDS_TOPIC = "ontology_commands"
     DATABASE_COMMANDS_TOPIC = "database_commands"
     ACTION_COMMANDS_TOPIC = os.getenv("ACTION_COMMANDS_TOPIC", "action_commands")
+
+    # Command DLQ Topics (poison/non-retryable or max-retry exceeded)
+    INSTANCE_COMMANDS_DLQ_TOPIC = os.getenv("INSTANCE_COMMANDS_DLQ_TOPIC", "instance-commands-dlq")
+    ONTOLOGY_COMMANDS_DLQ_TOPIC = os.getenv("ONTOLOGY_COMMANDS_DLQ_TOPIC", "ontology-commands-dlq")
+    ACTION_COMMANDS_DLQ_TOPIC = os.getenv("ACTION_COMMANDS_DLQ_TOPIC", "action-commands-dlq")
     
     # Kafka Consumer Groups
     PROJECTION_WORKER_GROUP = "projection-worker-group"
@@ -319,6 +324,9 @@ class AppConfig:
             cls.ONTOLOGY_COMMANDS_TOPIC,
             cls.DATABASE_COMMANDS_TOPIC,
             cls.ACTION_COMMANDS_TOPIC,
+            cls.INSTANCE_COMMANDS_DLQ_TOPIC,
+            cls.ONTOLOGY_COMMANDS_DLQ_TOPIC,
+            cls.ACTION_COMMANDS_DLQ_TOPIC,
         ]
     
     @classmethod

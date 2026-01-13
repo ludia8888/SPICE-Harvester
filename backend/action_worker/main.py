@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from confluent_kafka import Consumer, KafkaError, TopicPartition
+from confluent_kafka import Consumer, KafkaError, Producer, TopicPartition
 
 from oms.services.async_terminus import AsyncTerminusService
 from oms.services.ontology_resources import OntologyResourceService
@@ -32,7 +32,10 @@ from shared.errors.enterprise_catalog import is_external_code, resolve_enterpris
 from shared.errors.error_types import ErrorCode
 from shared.models.event_envelope import EventEnvelope
 from shared.models.events import ActionAppliedEvent
-from shared.observability.context_propagation import attach_context_from_kafka
+from shared.observability.context_propagation import (
+    attach_context_from_kafka,
+    kafka_headers_from_current_context,
+)
 from shared.observability.logging import install_trace_context_filter
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
@@ -123,6 +126,29 @@ class _ActionRejected(Exception):
     """Used to short-circuit retries when the ActionLog is already finalized with a rejection result."""
 
 
+class _ActionCommandInProgress(Exception):
+    """Raised when a command is leased by another worker (retry later)."""
+
+
+class _ActionProcessingError(Exception):
+    def __init__(
+        self,
+        message: str,
+        *,
+        attempt_count: int,
+        envelope: Optional[EventEnvelope],
+        raw_payload: Optional[str],
+        stage: str,
+        cause: Optional[BaseException] = None,
+    ) -> None:
+        super().__init__(message)
+        self.attempt_count = int(attempt_count or 1)
+        self.envelope = envelope
+        self.raw_payload = raw_payload
+        self.stage = stage
+        self.cause = cause
+
+
 class ActionWorker:
     def __init__(self) -> None:
         self.running = False
@@ -130,6 +156,9 @@ class ActionWorker:
         self.metrics = get_metrics_collector("action-worker")
         self.kafka_servers = ServiceConfig.get_kafka_bootstrap_servers()
         self.consumer: Optional[Consumer] = None
+        self.dlq_producer: Optional[Producer] = None
+        self.dlq_topic = AppConfig.ACTION_COMMANDS_DLQ_TOPIC
+        self.dlq_flush_timeout_seconds = float(os.getenv("ACTION_WORKER_DLQ_FLUSH_TIMEOUT_SECONDS", "10") or "10")
 
         self.enable_processed_event_registry = os.getenv("ENABLE_PROCESSED_EVENT_REGISTRY", "true").lower() == "true"
         self.processed_event_registry: Optional[ProcessedEventRegistry] = None
@@ -158,6 +187,20 @@ class ActionWorker:
         )
         self.consumer.subscribe([AppConfig.ACTION_COMMANDS_TOPIC])
         logger.info("ActionWorker subscribed to topic=%s group=%s", AppConfig.ACTION_COMMANDS_TOPIC, group_id)
+
+        self.dlq_producer = Producer(
+            {
+                "bootstrap.servers": self.kafka_servers,
+                "client.id": os.getenv("SERVICE_NAME") or "action-worker-dlq",
+                "acks": "all",
+                "retries": int(os.getenv("ACTION_WORKER_DLQ_RETRIES", "10") or "10"),
+                "retry.backoff.ms": 250,
+                "linger.ms": 10,
+                "compression.type": "snappy",
+                "enable.idempotence": True,
+                "max.in.flight.requests.per.connection": 5,
+            }
+        )
 
         if self.enable_processed_event_registry:
             self.processed_event_registry = ProcessedEventRegistry()
@@ -198,6 +241,11 @@ class ActionWorker:
         self.running = False
         if self.consumer:
             self.consumer.close()
+        if self.dlq_producer:
+            try:
+                await asyncio.to_thread(self.dlq_producer.flush, self.dlq_flush_timeout_seconds)
+            except Exception as exc:
+                logger.warning("DLQ producer flush failed during shutdown: %s", exc, exc_info=True)
         if self.processed_event_registry:
             await self.processed_event_registry.close()
         await self.action_logs.close()
@@ -224,6 +272,99 @@ class ActionWorker:
             TopicPartition(msg.topic(), msg.partition(), msg.offset()),
         )
 
+    @staticmethod
+    def _is_retryable_error(exc: BaseException) -> bool:
+        if isinstance(exc, _ActionRejected):
+            return False
+        if isinstance(exc, PermissionError):
+            return False
+        if isinstance(exc, ValueError):
+            return False
+        msg = str(exc).lower()
+        non_retryable_markers = [
+            "permission denied",
+            "validation",
+            "schema",
+            "bad request",
+            "invalid",
+            "missing",
+        ]
+        if any(marker in msg for marker in non_retryable_markers):
+            return False
+        retryable_markers = [
+            "timeout",
+            "temporarily",
+            "unavailable",
+            "connection",
+            "reset",
+            "broken pipe",
+            "429",
+            "rate limit",
+            "too many requests",
+            "500",
+            "502",
+            "503",
+            "504",
+        ]
+        if any(marker in msg for marker in retryable_markers):
+            return True
+        # Default to retryable: unknown failures are more likely to be infra/transient.
+        return True
+
+    async def _send_to_dlq(
+        self,
+        *,
+        msg: Any,
+        stage: str,
+        error: str,
+        attempt_count: int,
+        payload_text: Optional[str],
+        payload_obj: Optional[dict[str, Any]],
+    ) -> None:
+        if not self.dlq_producer:
+            raise RuntimeError("DLQ producer not configured")
+
+        try:
+            original_value = payload_text if payload_text is not None else msg.value().decode("utf-8", errors="replace")
+        except Exception:
+            original_value = "<unavailable>"
+
+        dlq_message: dict[str, Any] = {
+            "original_topic": msg.topic(),
+            "original_partition": msg.partition(),
+            "original_offset": msg.offset(),
+            "original_timestamp": msg.timestamp()[1] if msg.timestamp() else None,
+            "original_key": msg.key().decode("utf-8", errors="replace") if msg.key() else None,
+            "original_value": original_value,
+            "stage": stage,
+            "error": (error or "").strip()[:4000],
+            "attempt_count": int(attempt_count),
+            "worker": "action-worker",
+            "timestamp": _utcnow().isoformat(),
+        }
+        if payload_obj is not None:
+            dlq_message["parsed_payload"] = payload_obj
+
+        key = f"{msg.topic()}:{msg.partition()}:{msg.offset()}".encode("utf-8")
+        value = json.dumps(dlq_message, ensure_ascii=False, default=str).encode("utf-8")
+        headers = kafka_headers_from_current_context()
+        with self.tracing.span(
+            "action_worker.dlq_produce",
+            attributes={
+                "messaging.system": "kafka",
+                "messaging.destination": self.dlq_topic,
+                "messaging.destination_kind": "topic",
+                "messaging.kafka.partition": msg.partition(),
+                "messaging.kafka.offset": msg.offset(),
+            },
+        ):
+            self.dlq_producer.produce(self.dlq_topic, key=key, value=value, headers=headers or None)
+            await asyncio.to_thread(self.dlq_producer.flush, self.dlq_flush_timeout_seconds)
+        try:
+            self.metrics.record_event("ACTION_COMMAND_DLQ", action="published")
+        except Exception:
+            pass
+
     async def run(self) -> None:
         self.running = True
         while self.running:
@@ -239,8 +380,21 @@ class ActionWorker:
             try:
                 raw_message = json.loads(msg.value().decode("utf-8"))
             except Exception as e:
-                logger.error("Invalid JSON message; committing offset to avoid poison pill: %s", e)
-                await self._commit(msg)
+                logger.error("Invalid JSON message on action command topic: %s", e)
+                try:
+                    await self._send_to_dlq(
+                        msg=msg,
+                        stage="parse_json",
+                        error=str(e),
+                        attempt_count=1,
+                        payload_text=None,
+                        payload_obj=None,
+                    )
+                    await self._commit(msg)
+                except Exception as dlq_err:
+                    logger.error("Failed to DLQ invalid JSON payload; retrying: %s", dlq_err, exc_info=True)
+                    await asyncio.sleep(2)
+                    await self._seek_retry(msg)
                 continue
 
             try:
@@ -249,9 +403,51 @@ class ActionWorker:
                     kafka_headers = msg.headers()
                 await self._process_message(raw_message, kafka_headers=kafka_headers)
                 await self._commit(msg)
+            except _ActionCommandInProgress:
+                await asyncio.sleep(2)
+                await self._seek_retry(msg)
+            except _ActionProcessingError as e:
+                cause = e.cause or e
+                attempt_count = int(getattr(e, "attempt_count", 1) or 1)
+                max_attempts = int(os.getenv("ACTION_WORKER_MAX_RETRY_ATTEMPTS", "5") or "5")
+                retryable = self._is_retryable_error(cause)
+
+                if retryable and attempt_count < max_attempts:
+                    backoff_s = min(2 ** max(attempt_count - 1, 0), 60)
+                    logger.warning(
+                        "Retrying action command (attempt %s/%s, backoff=%ss): %s",
+                        attempt_count,
+                        max_attempts,
+                        backoff_s,
+                        cause,
+                    )
+                    await asyncio.sleep(backoff_s)
+                    await self._seek_retry(msg)
+                    continue
+
+                logger.error(
+                    "Action command failed (attempt %s/%s, retryable=%s); sending to DLQ and committing offset: %s",
+                    attempt_count,
+                    max_attempts,
+                    retryable,
+                    cause,
+                )
+                try:
+                    await self._send_to_dlq(
+                        msg=msg,
+                        stage=e.stage,
+                        error=str(cause),
+                        attempt_count=attempt_count,
+                        payload_text=e.raw_payload,
+                        payload_obj=e.envelope.model_dump(mode="json") if e.envelope else raw_message,
+                    )
+                    await self._commit(msg)
+                except Exception as dlq_err:
+                    logger.error("Failed to publish to DLQ; retrying: %s", dlq_err, exc_info=True)
+                    await asyncio.sleep(2)
+                    await self._seek_retry(msg)
             except Exception as e:
-                logger.error("Error processing action command: %s", e, exc_info=True)
-                # Retry with backoff by seeking back to current offset.
+                logger.error("Unexpected error processing action command: %s", e, exc_info=True)
                 await asyncio.sleep(2)
                 await self._seek_retry(msg)
 
@@ -261,7 +457,18 @@ class ActionWorker:
         *,
         kafka_headers: Optional[Any] = None,
     ) -> None:
-        envelope = EventEnvelope.model_validate(envelope_json)
+        envelope = None
+        try:
+            envelope = EventEnvelope.model_validate(envelope_json)
+        except Exception as exc:
+            raise _ActionProcessingError(
+                "Invalid EventEnvelope on action command topic",
+                attempt_count=1,
+                envelope=None,
+                raw_payload=json.dumps(envelope_json, ensure_ascii=False, default=str),
+                stage="parse_envelope",
+                cause=exc,
+            ) from exc
         metadata = envelope.metadata if isinstance(envelope.metadata, dict) else {}
 
         start_time = datetime.now(timezone.utc)
@@ -271,10 +478,10 @@ class ActionWorker:
             service_name="action-worker",
         ):
             with self.tracing.span(
-                "action_worker.process_message",
-                attributes={
-                    "messaging.system": "kafka",
-                    "messaging.operation": "process",
+                    "action_worker.process_message",
+                    attributes={
+                        "messaging.system": "kafka",
+                        "messaging.operation": "process",
                     "event.id": str(envelope.event_id or ""),
                     "event.type": str(envelope.event_type or ""),
                     "event.aggregate_type": str(envelope.aggregate_type or ""),
@@ -300,9 +507,17 @@ class ActionWorker:
                 action_log_id = _safe_str(command_data.get("action_log_id"))
                 db_name = _safe_str(command_data.get("db_name"))
                 if not action_log_id or not db_name:
-                    raise ValueError("action_log_id and db_name are required on ActionCommand")
+                    raise _ActionProcessingError(
+                        "action_log_id and db_name are required on ActionCommand",
+                        attempt_count=1,
+                        envelope=envelope,
+                        raw_payload=envelope.model_dump_json(),
+                        stage="validate_command",
+                        cause=ValueError("action_log_id and db_name are required on ActionCommand"),
+                    )
 
                 claimed = False
+                attempt_count = 1
                 if self.processed_event_registry:
                     claim = await self.processed_event_registry.claim(
                         handler="action_worker",
@@ -310,6 +525,7 @@ class ActionWorker:
                         aggregate_id=str(envelope.aggregate_id) if envelope.aggregate_id else None,
                         sequence_number=int(envelope.sequence_number) if envelope.sequence_number is not None else None,
                     )
+                    attempt_count = int(claim.attempt_count or 1)
                     if claim.decision in {ClaimDecision.DUPLICATE_DONE, ClaimDecision.STALE}:
                         logger.info(
                             "Skipping %s action command event_id=%s (aggregate_id=%s)",
@@ -323,7 +539,7 @@ class ActionWorker:
                             "Action command is in progress elsewhere; retry later (event_id=%s)",
                             envelope.event_id,
                         )
-                        raise RuntimeError("action_command_in_progress_elsewhere")
+                        raise _ActionCommandInProgress("action_command_in_progress_elsewhere")
                     claimed = True
 
                 try:
@@ -344,7 +560,14 @@ class ActionWorker:
                                 event_id=str(envelope.event_id),
                                 error=str(e),
                             )
-                    raise
+                    raise _ActionProcessingError(
+                        "Action command processing failed",
+                        attempt_count=attempt_count,
+                        envelope=envelope,
+                        raw_payload=envelope.model_dump_json(),
+                        stage="execute_action",
+                        cause=e,
+                    ) from e
 
                 if claimed and self.processed_event_registry:
                     await self.processed_event_registry.mark_done(

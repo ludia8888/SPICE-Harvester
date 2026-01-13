@@ -50,7 +50,10 @@ from oms.exceptions import DuplicateOntologyError, DatabaseError
 # Observability imports
 from shared.observability.tracing import get_tracing_service, trace_endpoint
 from shared.observability.metrics import get_metrics_collector
-from shared.observability.context_propagation import attach_context_from_kafka
+from shared.observability.context_propagation import (
+    attach_context_from_kafka,
+    kafka_headers_from_current_context,
+)
 from shared.observability.logging import install_trace_context_filter
 
 # 로깅 설정
@@ -76,6 +79,9 @@ class OntologyWorker:
         self.enable_audit_logs = os.getenv("ENABLE_AUDIT_LOGS", "true").strip().lower() in {"1", "true", "yes", "on"}
         self.consumer: Optional[Consumer] = None
         self.producer: Optional[Producer] = None
+        self.dlq_producer: Optional[Producer] = None
+        self.dlq_topic = AppConfig.ONTOLOGY_COMMANDS_DLQ_TOPIC
+        self.dlq_flush_timeout_seconds = float(os.getenv("ONTOLOGY_WORKER_DLQ_FLUSH_TIMEOUT_SECONDS", "10") or "10")
         self.terminus_service: Optional[AsyncTerminusService] = None
         self.redis_service: Optional[RedisService] = None
         self.command_status_service: Optional[CommandStatusService] = None
@@ -143,6 +149,7 @@ class OntologyWorker:
             'retries': 3,
             'compression.type': 'snappy',
         })
+        self.dlq_producer = self.producer
         
         # TerminusDB 연결 설정 - 올바른 인증 정보 사용
         connection_info = ConnectionConfig(
@@ -213,6 +220,69 @@ class OntologyWorker:
         self.metrics_collector = get_metrics_collector("ontology-worker")
         
         logger.info("Ontology Worker initialized successfully")
+
+    async def _send_to_dlq(
+        self,
+        *,
+        msg: Any,
+        stage: str,
+        error: str,
+        attempt_count: int,
+        payload_text: Optional[str],
+        payload_obj: Optional[Dict[str, Any]],
+        kafka_headers: Optional[Any] = None,
+        fallback_metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not self.dlq_producer:
+            raise RuntimeError("DLQ producer not configured")
+
+        try:
+            original_value = payload_text if payload_text is not None else msg.value().decode("utf-8", errors="replace")
+        except Exception:
+            original_value = "<unavailable>"
+
+        dlq_message: Dict[str, Any] = {
+            "original_topic": msg.topic(),
+            "original_partition": msg.partition(),
+            "original_offset": msg.offset(),
+            "original_timestamp": msg.timestamp()[1] if msg.timestamp() else None,
+            "original_key": msg.key().decode("utf-8", errors="replace") if msg.key() else None,
+            "original_value": original_value,
+            "stage": stage,
+            "error": (error or "").strip()[:4000],
+            "attempt_count": int(attempt_count),
+            "worker": "ontology-worker",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if payload_obj is not None:
+            dlq_message["parsed_payload"] = payload_obj
+
+        key = f"{msg.topic()}:{msg.partition()}:{msg.offset()}".encode("utf-8")
+        value = json.dumps(dlq_message, ensure_ascii=False, default=str).encode("utf-8")
+
+        with attach_context_from_kafka(
+            kafka_headers=kafka_headers,
+            fallback_metadata=fallback_metadata if isinstance(fallback_metadata, dict) else None,
+            service_name="ontology-worker",
+        ):
+            headers = kafka_headers_from_current_context()
+            with self.tracing_service.span(
+                "ontology_worker.dlq_produce",
+                attributes={
+                    "messaging.system": "kafka",
+                    "messaging.destination": self.dlq_topic,
+                    "messaging.destination_kind": "topic",
+                    "messaging.kafka.partition": msg.partition(),
+                    "messaging.kafka.offset": msg.offset(),
+                },
+            ):
+                self.dlq_producer.produce(self.dlq_topic, key=key, value=value, headers=headers or None)
+                await asyncio.to_thread(self.dlq_producer.flush, self.dlq_flush_timeout_seconds)
+
+        try:
+            self.metrics_collector.record_event("ONTOLOGY_COMMAND_DLQ", action="published")
+        except Exception:
+            pass
         
     async def process_command(self, command_data: Dict[str, Any]) -> None:
         """Command 처리"""
@@ -997,20 +1067,58 @@ class OntologyWorker:
                     registry_claimed = False
                     registry_attempt_count = 1
                     command_data: Dict[str, Any] = {}
+                    envelope: Optional[EventEnvelope] = None
+                    kafka_headers = None
 
                     try:
                         envelope = EventEnvelope.model_validate_json(msg.value())
                     except Exception as e:
                         logger.error(f"Failed to parse EventEnvelope JSON: {e}")
-                        # Poison pill: commit to avoid infinite retry loop.
-                        await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
+                        with suppress(Exception):
+                            kafka_headers = msg.headers()
+                        try:
+                            await self._send_to_dlq(
+                                msg=msg,
+                                stage="parse_envelope",
+                                error=str(e),
+                                attempt_count=1,
+                                payload_text=None,
+                                payload_obj=None,
+                                kafka_headers=kafka_headers,
+                                fallback_metadata=None,
+                            )
+                            await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
+                        except Exception as dlq_err:
+                            logger.error("Failed to publish invalid envelope to DLQ; retrying: %s", dlq_err, exc_info=True)
+                            await asyncio.sleep(2)
+                            await self._consumer_call(
+                                self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
+                            )
                         continue
 
                     kind = envelope.metadata.get("kind") if isinstance(envelope.metadata, dict) else None
                     if kind != "command":
                         logger.error(f"Unexpected envelope kind for command topic: {kind}")
-                        # Poison pill: commit to avoid infinite retry loop.
-                        await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
+                        with suppress(Exception):
+                            kafka_headers = msg.headers()
+                        try:
+                            await self._send_to_dlq(
+                                msg=msg,
+                                stage="validate_envelope",
+                                error=f"unexpected_envelope_kind:{kind}",
+                                attempt_count=1,
+                                payload_text=envelope.model_dump_json(),
+                                payload_obj=envelope.model_dump(mode="json"),
+                                kafka_headers=kafka_headers,
+                                fallback_metadata=envelope.metadata if isinstance(envelope.metadata, dict) else None,
+                            )
+                            await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
+                        except Exception as dlq_err:
+                            logger.error("Failed to publish invalid kind to DLQ; retrying: %s", dlq_err, exc_info=True)
+                            await asyncio.sleep(2)
+                            await self._consumer_call(
+                                self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
+                            )
                         continue
 
                     command_data = dict(envelope.data or {})
@@ -1106,8 +1214,26 @@ class OntologyWorker:
                     
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse message: {e}")
-                    # 파싱 실패해도 오프셋은 커밋 (무한 루프 방지)
-                    await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
+                    with suppress(Exception):
+                        kafka_headers = msg.headers()
+                    try:
+                        await self._send_to_dlq(
+                            msg=msg,
+                            stage="parse_json",
+                            error=str(e),
+                            attempt_count=1,
+                            payload_text=None,
+                            payload_obj=None,
+                            kafka_headers=kafka_headers,
+                            fallback_metadata=envelope.metadata if envelope and isinstance(envelope.metadata, dict) else None,
+                        )
+                        await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
+                    except Exception as dlq_err:
+                        logger.error("Failed to publish JSON decode error to DLQ; retrying: %s", dlq_err, exc_info=True)
+                        await asyncio.sleep(2)
+                        await self._consumer_call(
+                            self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
+                        )
                 except Exception as e:
                     logger.error(f"Error processing command: {e}")
                     if registry_claimed and self.processed_event_registry and registry_event_id:
@@ -1151,10 +1277,32 @@ class OntologyWorker:
                         continue
 
                     logger.error(
-                        f"Skipping failed command event_id={registry_event_id} after {attempt_count} attempts "
-                        f"(retryable={retryable}); committing offset to avoid poison pill"
+                        "Ontology command failed (event_id=%s attempt=%s/%s retryable=%s); sending to DLQ and committing offset",
+                        registry_event_id,
+                        attempt_count,
+                        max_attempts,
+                        retryable,
                     )
-                    await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
+                    with suppress(Exception):
+                        kafka_headers = msg.headers()
+                    try:
+                        await self._send_to_dlq(
+                            msg=msg,
+                            stage="process_command",
+                            error=str(e),
+                            attempt_count=attempt_count,
+                            payload_text=envelope.model_dump_json() if envelope else None,
+                            payload_obj=envelope.model_dump(mode="json") if envelope else command_data,
+                            kafka_headers=kafka_headers,
+                            fallback_metadata=envelope.metadata if envelope and isinstance(envelope.metadata, dict) else None,
+                        )
+                        await self._consumer_call(self.consumer.commit, message=msg, asynchronous=False)
+                    except Exception as dlq_err:
+                        logger.error("Failed to publish to ontology DLQ; retrying: %s", dlq_err, exc_info=True)
+                        await asyncio.sleep(2)
+                        await self._consumer_call(
+                            self.consumer.seek, TopicPartition(msg.topic(), msg.partition(), msg.offset())
+                        )
                     continue
                     
         except KeyboardInterrupt:

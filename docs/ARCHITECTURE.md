@@ -141,6 +141,19 @@ graph TD
 
 ---
 
+## 1.2) DLQ (Kafka) (현재 구현)
+
+- Kafka consumer는 **poison/non-retryable** 또는 **max-retry 초과** 시 DLQ 토픽에 원본 메시지(`original_topic/partition/offset/value`)와 오류(`error/stage/attempt_count`)를 기록하고 offset을 commit한다.
+- 주요 DLQ 토픽:
+  - **Commands**: `instance-commands-dlq`, `ontology-commands-dlq`, `action-commands-dlq`
+  - **Pipeline/Objectify**: `pipeline-jobs-dlq`, `objectify-jobs-dlq`
+  - **Projection/Search**: `projection_failures_dlq`
+  - **Connectors**: `connector-updates-dlq`
+  - **Outbox**: `dataset-ingest-outbox-dlq`
+- 운영 재처리(Replay): `scripts/replay_dlq.py` (DLQ → 원 토픽 publish)
+
+---
+
 ## 2) Event Sourcing Write Flow (실제 코드 기준)
 
 ```mermaid
