@@ -104,7 +104,7 @@ python validate_environment.py
 - **SQL 초기화**: `/backend/database/init/01_init.sql`
 - **검증 스크립트**: `/backend/validate_environment.py`
 
-### 10. Palantir 아키텍처 구현 ✅
+### 10. 경량 그래프 아키텍처 구현 ✅
 - **TerminusDB**: 경량 노드 (ID + 관계만 저장)
 - **Elasticsearch**: 전체 도메인 데이터 저장
 - **Graph Federation**: BFF에서 두 소스 결합

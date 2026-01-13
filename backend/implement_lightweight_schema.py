@@ -394,7 +394,7 @@ async def implement_lightweight_architecture():
         print("   • NO dummy/placeholder values")
         print("   • Business key as the ONLY required field")
         
-        print("\n🔥 This is TRUE Palantir/Foundry architecture!")
+        print("\n🔥 This matches the intended lightweight + federated architecture!")
         print(f"\n📌 Database name for testing: {db_name}")
 
 print("\n🚀 Starting TRUE lightweight architecture implementation...")

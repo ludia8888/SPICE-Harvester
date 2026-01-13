@@ -726,7 +726,7 @@ def _collect_required_items_issues(
 def _collect_permission_policy_issues(policy: Dict[str, Any]) -> List[Dict[str, Any]]:
     issues: List[Dict[str, Any]] = []
 
-    # New (Foundry-aligned) shape: { effect: "ALLOW|DENY", principals: ["role:...","user:..."], conditions?: {} }
+    # New (policy) shape: { effect: "ALLOW|DENY", principals: ["role:...","user:..."], conditions?: {} }
     if any(key in policy for key in ("effect", "principals")):
         effect = policy.get("effect")
         principals = policy.get("principals")

@@ -1,5 +1,5 @@
 """
-TerminusDB to Foundry Conflict Format Converter
+TerminusDB Conflict Format Converter
 JSON-LD 경로 매핑 및 충돌 형식 변환
 """
 
@@ -57,7 +57,7 @@ class ConflictAnalysis:
 
 
 class ConflictConverter:
-    """TerminusDB 충돌을 Foundry 스타일로 변환하는 클래스"""
+    """TerminusDB 충돌을 UI/클라이언트 친화적 포맷으로 변환하는 클래스"""
 
     def __init__(self):
         # JSON-LD 네임스페이스 매핑
@@ -85,7 +85,7 @@ class ConflictConverter:
             "owl:disjointWith": "서로소 클래스",
         }
 
-    async def convert_conflicts_to_foundry_format(
+    async def convert_conflicts_to_ui_format(
         self,
         terminus_conflicts: List[Dict[str, Any]],
         db_name: str,
@@ -93,7 +93,7 @@ class ConflictConverter:
         target_branch: str,
     ) -> List[Dict[str, Any]]:
         """
-        TerminusDB 충돌을 Foundry 스타일로 변환
+        TerminusDB 충돌을 UI/클라이언트 친화적 포맷으로 변환
 
         Args:
             terminus_conflicts: TerminusDB 형식의 충돌 목록
@@ -102,24 +102,24 @@ class ConflictConverter:
             target_branch: 대상 브랜치
 
         Returns:
-            Foundry 스타일 충돌 목록
+            UI 친화적 충돌 목록
         """
-        foundry_conflicts = []
+        ui_conflicts = []
 
         for i, conflict in enumerate(terminus_conflicts):
             try:
-                foundry_conflict = await self._convert_single_conflict(
+                ui_conflict = await self._convert_single_conflict(
                     conflict, i + 1, db_name, source_branch, target_branch
                 )
-                foundry_conflicts.append(foundry_conflict)
+                ui_conflicts.append(ui_conflict)
 
             except Exception as e:
                 logger.warning(f"Failed to convert conflict {i}: {e}")
                 # 변환 실패 시 기본 충돌 정보 생성
                 fallback_conflict = self._create_fallback_conflict(conflict, i + 1)
-                foundry_conflicts.append(fallback_conflict)
+                ui_conflicts.append(fallback_conflict)
 
-        return foundry_conflicts
+        return ui_conflicts
 
     async def _convert_single_conflict(
         self,
@@ -129,7 +129,7 @@ class ConflictConverter:
         source_branch: str,
         target_branch: str,
     ) -> Dict[str, Any]:
-        """단일 충돌을 Foundry 형식으로 변환"""
+        """단일 충돌을 UI 포맷으로 변환"""
 
         # 1. JSON-LD 경로 분석
         path_info = await self._analyze_jsonld_path(conflict.get("path", "unknown"))
@@ -145,8 +145,8 @@ class ConflictConverter:
         source_value, source_type = self._extract_value_and_type(source_change)
         target_value, target_type = self._extract_value_and_type(target_change)
 
-        # 5. Foundry 충돌 객체 생성
-        foundry_conflict = {
+        # 5. UI 충돌 객체 생성
+        ui_conflict = {
             "id": f"conflict_{conflict_id}",
             "type": conflict_analysis.conflict_type,
             "severity": conflict_analysis.severity.value,
@@ -194,7 +194,7 @@ class ConflictConverter:
             },
         }
 
-        return foundry_conflict
+        return ui_conflict
 
     async def _analyze_jsonld_path(self, path: str) -> JsonLdPath:
         """JSON-LD 경로 분석"""

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-🔥 THINK ULTRA: 팔란티어 스타일 아키텍처 완전 검증
+🔥 THINK ULTRA: 아키텍처 완전 검증
 단 하나의 거짓 없이 전체 user flow 시뮬레이션
 """
 
@@ -16,7 +16,7 @@ import pytest
 # Configuration
 OMS_URL = "http://localhost:8000"
 BFF_URL = "http://localhost:8002"
-TEST_DB = f"palantir_test_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+TEST_DB = f"arch_test_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
 
 @pytest.mark.integration
@@ -28,7 +28,7 @@ async def test_complete_user_flow():
     """완전한 user flow 테스트"""
     
     print("=" * 80)
-    print("🔥 THINK ULTRA: 팔란티어 스타일 아키텍처 검증")
+    print("🔥 THINK ULTRA: 아키텍처 검증")
     print("=" * 80)
     
     connector = aiohttp.TCPConnector(force_close=True, limit=0)
@@ -41,7 +41,7 @@ async def test_complete_user_flow():
             f"{OMS_URL}/api/v1/database/create",
             json={
                 "name": TEST_DB,
-                "description": "Palantir architecture test"
+                "description": "Architecture e2e test"
             },
             headers=headers,
         ) as create_db_response:
@@ -137,8 +137,8 @@ async def test_complete_user_flow():
         # Create Client instance
         client_data = {
             "client_id": "CL-001",
-            "name": "Palantir Technologies",
-            "email": "contact@palantir.com"
+            "name": "Example Technologies",
+            "email": "contact@example.com"
         }
         
         async with session.post(
@@ -160,7 +160,7 @@ async def test_complete_user_flow():
         products = [
             {
                 "product_id": "PROD-001",
-                "name": "Foundry Platform",
+                "name": "Platform Core",
                 "category": "Data Integration",
                 "price": 1000000,
                 "owned_by": "Client/CL-001"  # Relationship
@@ -322,7 +322,7 @@ async def test_complete_user_flow():
         
         # 9. 아키텍처 원칙 검증 결과
         print("\n" + "=" * 80)
-        print("📊 팔란티어 스타일 아키텍처 검증 결과")
+        print("📊 아키텍처 검증 결과")
         print("=" * 80)
         
         verifications = {
@@ -343,7 +343,7 @@ async def test_complete_user_flow():
         
         print("\n" + "=" * 80)
         if all_passed:
-            print("🎉 모든 검증 통과! 팔란티어 스타일 아키텍처가 정상 작동합니다.")
+            print("🎉 모든 검증 통과! 아키텍처가 정상 작동합니다.")
             print("✅ 중복 제거 완료")
             print("✅ CQRS 패턴 구현 확인")
             print("✅ WOQL 기반 그래프 쿼리 작동")
@@ -365,6 +365,6 @@ async def test_complete_user_flow():
 
 
 if __name__ == "__main__":
-    print("🚀 팔란티어 스타일 아키텍처 검증 시작...")
+    print("🚀 아키텍처 검증 시작...")
     result = asyncio.run(test_complete_user_flow())
     exit(0 if result else 1)

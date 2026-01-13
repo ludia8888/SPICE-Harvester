@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from shared.config.service_config import ServiceConfig
+from shared.config.settings import settings
 
 
 class LakeFSError(RuntimeError):
@@ -41,9 +41,9 @@ class LakeFSConfig:
 
     @staticmethod
     def from_env() -> "LakeFSConfig":
-        api_url = (os.getenv("LAKEFS_API_URL") or ServiceConfig.get_lakefs_api_url()).rstrip("/")
-        access_key_id = str(os.getenv("LAKEFS_ACCESS_KEY_ID") or "").strip()
-        secret_access_key = str(os.getenv("LAKEFS_SECRET_ACCESS_KEY") or "").strip()
+        api_url = settings.storage.lakefs_api_url_effective
+        access_key_id = str(settings.storage.lakefs_access_key_id or "").strip()
+        secret_access_key = str(settings.storage.lakefs_secret_access_key or "").strip()
         if not access_key_id or not secret_access_key:
             raise LakeFSAuthError(
                 "LAKEFS_ACCESS_KEY_ID and LAKEFS_SECRET_ACCESS_KEY are required to use lakeFS"

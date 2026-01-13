@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test Palantir-style Federation with clean TerminusDB schemas
+Test graph federation with clean TerminusDB schemas
 Verifies:
 1. TerminusDB only has business concepts (no system fields)
 2. Elasticsearch has full data with terminus_id
@@ -56,17 +56,17 @@ async def _request_json(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_palantir_federation():
-    print("🔥 TESTING PALANTIR-STYLE FEDERATION")
+async def test_graph_federation():
+    print("🔥 TESTING GRAPH FEDERATION")
     print("=" * 70)
     
     admin_token = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "").strip()
     if not admin_token:
-        raise RuntimeError("ADMIN_TOKEN is required for palantir federation test")
+        raise RuntimeError("ADMIN_TOKEN is required for federation test")
     headers = {"X-Admin-Token": admin_token}
     async with aiohttp.ClientSession(headers=headers) as session:
         # Test database name
-        db_name = f"palantir_test_{int(time.time())}"
+        db_name = f"federation_test_{int(time.time())}"
         
         # 1. Create test database
         print(f"\n1️⃣ Creating test database: {db_name}")
@@ -74,7 +74,7 @@ async def test_palantir_federation():
             session,
             "POST",
             f"{OMS_URL}/api/v1/database/create",
-            json={'name': db_name, 'description': 'Palantir Federation Test'},
+            json={'name': db_name, 'description': 'Federation Test'},
         )
         if status in (200, 201, 202):
             print("   ✅ Database creation accepted")
@@ -123,7 +123,7 @@ async def test_palantir_federation():
         product_data = {
             'data': {
                 'product_id': 'PROD-TEST-001',
-                'name': 'Palantir Test Product',
+                'name': 'Federation Test Product',
                 'price': 99.99
             }
         }
@@ -246,7 +246,7 @@ async def test_palantir_federation():
         # 7. Summary
         print("\n7️⃣ ARCHITECTURE VERIFICATION SUMMARY")
         print("   " + "=" * 50)
-        print("   📌 Palantir Principles:")
+        print("   📌 Federation Principles:")
         print("   • TerminusDB: Lightweight nodes only ✅")
         print("   • No system fields in graph schema ✅")
         print("   • Elasticsearch: Full domain data ✅")
@@ -254,5 +254,5 @@ async def test_palantir_federation():
         print("   • Clean separation of concerns ✅")
 
 if __name__ == "__main__":
-    print("\n🚀 Running Palantir Federation test...")
-    asyncio.run(test_palantir_federation())
+    print("\n🚀 Running federation test...")
+    asyncio.run(test_graph_federation())

@@ -9,7 +9,7 @@ services:
   # Zookeeper (Kafka dependency)
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
-    container_name: spice-foundry-zookeeper
+    container_name: spice-harvester-zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
@@ -31,7 +31,7 @@ services:
   # Kafka
   kafka:
     image: confluentinc/cp-kafka:7.5.0
-    container_name: spice-foundry-kafka
+    container_name: spice-harvester-kafka
     depends_on:
       zookeeper:
         condition: service_healthy
@@ -67,12 +67,12 @@ services:
   # Kafka UI (optional, for monitoring)
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
-    container_name: spice-foundry-kafka-ui
+    container_name: spice-harvester-kafka-ui
     depends_on:
       - kafka
       - zookeeper
     environment:
-      KAFKA_CLUSTERS_0_NAME: spice-foundry-cluster
+      KAFKA_CLUSTERS_0_NAME: spice-harvester-cluster
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
       KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
     ports:

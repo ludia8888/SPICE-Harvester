@@ -1,7 +1,7 @@
 """
 Google Sheets Connector - Service Layer (connector library).
 
-Foundry policy:
+Connector policy:
 - This module is *only* responsible for I/O (read/preview) and normalization helpers.
 - Change detection (polling/webhooks), durable registries, and auto-import live in:
   - `connector_trigger_service`

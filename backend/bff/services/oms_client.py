@@ -486,7 +486,7 @@ class OMSClient:
             raise
 
     async def get_version_head(self, db_name: str, *, branch: str = "main") -> Dict[str, Any]:
-        """브랜치 head 커밋 ID 조회 (Foundry-style deploy gate)."""
+        """브랜치 head 커밋 ID 조회 (deploy gate)."""
         try:
             response = await self.client.get(
                 f"/api/v1/version/{db_name}/head",

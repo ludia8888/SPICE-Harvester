@@ -7,13 +7,13 @@ PYTHON_BIN="${PYTHON_BIN:-python3.11}"
 if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   PYTHON_BIN="python3"
 fi
-EVIDENCE_DIR="$ROOT_DIR/docs/foundry_checklist/evidence"
+EVIDENCE_DIR="$ROOT_DIR/docs/platform_checklist/evidence"
 E2E_DIR="$EVIDENCE_DIR/e2e_results"
 PERF_DIR="$EVIDENCE_DIR/perf"
 
 mkdir -p "$EVIDENCE_DIR" "$E2E_DIR" "$PERF_DIR"
 
-export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-foundry-checklist}"
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-platform-checklist}"
 export SPICE_NETWORK_NAME="${SPICE_NETWORK_NAME:-${COMPOSE_PROJECT_NAME}_network}"
 
 # Prefer repo-provided .env for port overrides and tokens. If missing, set safe defaults.
@@ -116,7 +116,7 @@ done < <("$PYTHON_BIN" - <<'PY'
 import os
 import subprocess
 
-prefix = f"{os.environ.get('COMPOSE_PROJECT_NAME', 'foundry-checklist')}_"
+prefix = f"{os.environ.get('COMPOSE_PROJECT_NAME', 'platform-checklist')}_"
 out = subprocess.check_output(["docker", "volume", "ls", "--format", "{{.Name}}"], text=True)
 for line in out.splitlines():
     name = line.strip()
@@ -340,14 +340,14 @@ def _tcp_check(host: str, port: int, timeout_seconds: float = 1.0) -> None:
 
 
 checks = [
-    ContainerCheck("spice-foundry-postgres"),
-    ContainerCheck("spice-foundry-redis"),
-    ContainerCheck("spice-foundry-elasticsearch"),
-    ContainerCheck("spice-foundry-minio"),
-    ContainerCheck("spice-foundry-lakefs"),
+    ContainerCheck("spice-harvester-postgres"),
+    ContainerCheck("spice-harvester-redis"),
+    ContainerCheck("spice-harvester-elasticsearch"),
+    ContainerCheck("spice-harvester-minio"),
+    ContainerCheck("spice-harvester-lakefs"),
     ContainerCheck("spice_terminusdb"),
-    ContainerCheck("spice-foundry-zookeeper"),
-    ContainerCheck("spice-foundry-kafka"),
+    ContainerCheck("spice-harvester-zookeeper"),
+    ContainerCheck("spice-harvester-kafka"),
     ContainerCheck("spice_oms"),
     ContainerCheck("spice_bff"),
     ContainerCheck("spice_funnel"),
@@ -375,7 +375,7 @@ print("expected_lakefs_tcp=", f"127.0.0.1:{lakefs_host_port}")
 
 # Validate kafka advertised listeners matches the host bootstrap we rely on for host-run tests.
 try:
-    advertised = _env_var("spice-foundry-kafka", "KAFKA_ADVERTISED_LISTENERS")
+    advertised = _env_var("spice-harvester-kafka", "KAFKA_ADVERTISED_LISTENERS")
 except subprocess.CalledProcessError as e:
     print("ERROR: failed to inspect kafka container. docker output:")
     print(e.output)
@@ -391,7 +391,7 @@ if advertised:
 else:
     print("WARNING: KAFKA_ADVERTISED_LISTENERS not found in kafka container env")
 
-published_ports = _published_host_ports("spice-foundry-kafka", "9092/tcp")
+published_ports = _published_host_ports("spice-harvester-kafka", "9092/tcp")
 if not published_ports:
     raise SystemExit("Kafka port 9092/tcp is not published to the host (no bindings found in docker inspect)")
 if str(kafka_host_port) not in published_ports:
@@ -567,7 +567,7 @@ def _ensure_lakefs_setup() -> tuple[str, str]:
         [
             "docker",
             "exec",
-            "spice-foundry-lakefs",
+            "spice-harvester-lakefs",
             "lakefs",
             "setup",
             "--no-check",
@@ -786,7 +786,7 @@ while True:
 PY
 
 log_section "Backend tests" >"$EVIDENCE_DIR/backend_test.log"
-VENV_DIR="$ROOT_DIR/.venv_foundry_checklist"
+VENV_DIR="$ROOT_DIR/.venv_platform_checklist"
 "$PYTHON_BIN" -c "import sys; print(sys.version)" >>"$EVIDENCE_DIR/backend_test.log"
 rm -rf "$VENV_DIR"
 "$PYTHON_BIN" -m venv "$VENV_DIR"
@@ -827,7 +827,7 @@ popd >/dev/null
 log_section "Frontend e2e tests" >"$EVIDENCE_DIR/e2e_test.log"
 rm -rf "$E2E_DIR" && mkdir -p "$E2E_DIR"
 pushd "$ROOT_DIR/frontend" >/dev/null
-export PLAYWRIGHT_OUTPUT_DIR="../docs/foundry_checklist/evidence/e2e_results"
+export PLAYWRIGHT_OUTPUT_DIR="../docs/platform_checklist/evidence/e2e_results"
 export PLAYWRIGHT_SCREENSHOT="on"
 export PLAYWRIGHT_TRACE="on"
 export PLAYWRIGHT_BFF_BASE_URL="http://127.0.0.1:8002"
@@ -842,9 +842,9 @@ from pathlib import Path
 
 import yaml
 
-matrix_path = Path("docs/foundry_checklist/FOUNDARY_CHECKLIST_MATRIX.yml")
+matrix_path = Path("docs/platform_checklist/PLATFORM_CHECKLIST_MATRIX.yml")
 if not matrix_path.exists():
-    raise SystemExit("Missing checklist matrix: docs/foundry_checklist/FOUNDARY_CHECKLIST_MATRIX.yml")
+    raise SystemExit("Missing checklist matrix: docs/platform_checklist/PLATFORM_CHECKLIST_MATRIX.yml")
 
 entries = yaml.safe_load(matrix_path.read_text(encoding="utf-8"))
 if not isinstance(entries, list):

@@ -108,7 +108,7 @@ POST /api/v1/data-connectors/google-sheets/register
 
 #### 등록 정보 저장 방식 (중요)
 
-- 등록 정보/상태는 **Postgres**에 영속 저장됩니다. (Foundry-style)
+- 등록 정보/상태는 **Postgres**에 영속 저장됩니다. (durable registry)
   - `connector_sources`: source_type/source_id + config_json + enabled
   - `connector_mappings`: Source → Ontology 매핑(초안/확정) + enabled
   - `connector_sync_state`: last cursor/hash, last_success/failure, 재시도 등 운영 상태
@@ -228,7 +228,7 @@ curl -X POST http://localhost:8002/api/v1/data-connectors/google-sheets/register
 - 현재는 공개 시트만 지원 (OAuth2는 개발 중)
 - 미리보기는 기본 `limit=10` (필요 시 쿼리 파라미터로 조정)
 - `polling_interval`은 seconds 단위이며 너무 짧으면 외부 API/비용 이슈가 생길 수 있음
-- `auto_import`는 “변경 감지 → bulk-create 제출”까지의 최소 파이프라인입니다. 업서트/삭제/PK 전략은 `connector_mappings`로 제품화(Foundry-style)하는 것이 안전합니다.
+- `auto_import`는 “변경 감지 → bulk-create 제출”까지의 최소 파이프라인입니다. 업서트/삭제/PK 전략은 `connector_mappings`로 제품화(운영 안전)하는 것이 안전합니다.
 - `auto_import`에서 중복 생성을 피하려면, 시트에 안정적인 식별자 컬럼(예: `customer_id`)을 포함시키는 것을 권장합니다.
 
 ## 🔮 향후 계획

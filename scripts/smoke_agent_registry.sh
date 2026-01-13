@@ -4,7 +4,7 @@ set -euo pipefail
 HOST="${HOST:-127.0.0.1}"
 BFF_URL="${BFF_URL:-http://${HOST}:8002}"
 ADMIN_TOKEN="${ADMIN_TOKEN:-${BFF_ADMIN_TOKEN:-test-token}}"
-POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-spice-foundry-postgres}"
+POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-spice-harvester-postgres}"
 PSQL_USER="${PSQL_USER:-spiceadmin}"
 PSQL_DB="${PSQL_DB:-spicedb}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"

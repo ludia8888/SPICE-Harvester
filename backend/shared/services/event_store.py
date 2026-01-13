@@ -3,7 +3,7 @@
 
 This is the Single Source of Truth (SSoT) for all events.
 
-Aligned with Palantir Foundry architecture:
+Aligned with the system architecture:
 - S3/MinIO = Immutable event log (SSoT)
 - TerminusDB = Graph relationships  
 - Elasticsearch = Search indexes
@@ -63,7 +63,7 @@ class EventStore:
         self.access_key = ServiceConfig.get_minio_access_key()
         self.secret_key = ServiceConfig.get_minio_secret_key()
         # Keep consistent with EventPublisher (message_relay)
-        self.bucket_name = os.getenv("EVENT_STORE_BUCKET", "spice-event-store")  # The SSoT bucket
+        self.bucket_name = ServiceConfig.get_event_store_bucket()  # The SSoT bucket
         self.session = None
         self.s3_client = None
         self._sequence_allocator: Optional[AggregateSequenceAllocator] = None

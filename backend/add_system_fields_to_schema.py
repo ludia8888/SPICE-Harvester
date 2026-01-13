@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Add system fields to TerminusDB schema for lightweight nodes
-These fields are needed for Palantir-style architecture
+These fields are needed for the lightweight + federated architecture
 """
 
 import asyncio
@@ -129,7 +129,7 @@ async def main():
         "integration_test_db"
     ]
     
-    print("🚀 Adding System Fields for Palantir Architecture")
+    print("🚀 Adding System Fields for Lightweight Graph Architecture")
     print("=" * 60)
     
     for db_name in databases:

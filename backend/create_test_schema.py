@@ -15,15 +15,15 @@ async def create_test_environment():
     
     async with aiohttp.ClientSession() as session:
         # 1. Create test database
-        db_name = "palantir_test_db"
+        db_name = "schema_test_db"
         print(f"\n1️⃣ Creating database: {db_name}")
         
         async with session.post(
             f"http://localhost:8000/api/v1/database/create",
             json={
                 "name": db_name,
-                "description": "Test database for Palantir architecture",
-                "label": "Palantir Test DB"
+                "description": "Test database for lightweight graph architecture",
+                "label": "Schema Test DB"
             }
         ) as resp:
             if resp.status in [200, 202]:
@@ -40,7 +40,7 @@ async def create_test_environment():
         product_ontology = {
             "id": "Product",
             "label": "Product",
-            "description": "Product with system fields for Palantir architecture",
+            "description": "Product with system fields for lightweight graph architecture",
             "properties": [
                 # Domain properties
                 {"name": "product_id", "type": "string", "label": "Product ID", "required": True},

@@ -556,7 +556,7 @@ async def register_google_sheet(
         sheet_id = preview.sheet_id
         resolved_worksheet = preview.worksheet_name
 
-        # Foundry policy: durable registry is Postgres (connector_sources + mappings).
+        # Connector policy: durable registry is Postgres (connector_sources + mappings).
         source = await connector_registry.upsert_source(
             source_type="google_sheets",
             source_id=str(sheet_id),

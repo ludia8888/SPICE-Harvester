@@ -1,5 +1,5 @@
 """
-Integration Tests for Foundry-style Merge Conflict Resolution
+Integration Tests for Merge Conflict Resolution (UI-friendly conflict format)
 실제 OMS와 TerminusDB 연동 테스트
 """
 
@@ -63,8 +63,8 @@ class TestMergeConflictIntegration:
         }
 
     @pytest.fixture
-    def expected_foundry_conflict(self):
-        """예상되는 Foundry 스타일 충돌"""
+    def expected_ui_conflict(self):
+        """예상되는 UI/클라이언트 친화 충돌"""
         return {
             "id": "conflict_1",
             "type": "modify_modify_conflict",
@@ -296,14 +296,14 @@ class TestMergeConflictIntegration:
             }
         ]
 
-        # Foundry 형식으로 변환
-        foundry_conflicts = await converter.convert_conflicts_to_foundry_format(
+        # UI/클라이언트 친화 포맷으로 변환
+        ui_conflicts = await converter.convert_conflicts_to_ui_format(
             terminus_conflicts, "test-db", "feature-branch", "main"
         )
 
-        assert len(foundry_conflicts) == 1
+        assert len(ui_conflicts) == 1
 
-        conflict = foundry_conflicts[0]
+        conflict = ui_conflicts[0]
         assert conflict["id"] == "conflict_1"
         assert conflict["type"] == "modify_modify_conflict"
         assert conflict["path"]["human_readable"] == "이름"

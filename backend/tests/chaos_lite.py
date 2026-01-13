@@ -321,7 +321,7 @@ def _psql_scalar(sql: str) -> str:
         [
             "docker",
             "exec",
-            "spice-foundry-postgres",
+            "spice-harvester-postgres",
             "psql",
             "-U",
             "spiceadmin",
@@ -400,7 +400,7 @@ def _kafka_produce_json(*, topic: str, key: str, payload: Dict[str, Any]) -> Non
             "docker",
             "exec",
             "-i",
-            "spice-foundry-kafka",
+            "spice-harvester-kafka",
             "kafka-console-producer",
             "--bootstrap-server",
             # Use the intra-cluster listener so the producer sees routable broker endpoints.

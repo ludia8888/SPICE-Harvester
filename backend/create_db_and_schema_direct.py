@@ -19,7 +19,7 @@ async def create_database_direct(db_name: str):
     # Database creation payload
     db_payload = {
         "label": db_name,
-        "comment": f"Test database for Palantir architecture with system fields",
+        "comment": f"Test database for lightweight graph architecture with system fields",
         "prefixes": {
             "@base": f"terminusdb:///admin/{db_name}/data/",
             "@schema": f"terminusdb:///admin/{db_name}/schema#"
@@ -55,7 +55,7 @@ async def create_schema_with_system_fields(db_name: str):
         "@id": "@schema:Product",
         "@type": "owl:Class",
         "@documentation": {
-            "@comment": "Product class with system fields for Palantir architecture",
+            "@comment": "Product class with system fields for lightweight graph architecture",
             "@properties": {
                 "product_id": "Product unique identifier",
                 "name": "Product name",
@@ -232,7 +232,7 @@ async def main():
     print("🚀 Creating Database and Schema Directly in TerminusDB")
     print("=" * 60)
     
-    db_name = "palantir_schema_test"
+    db_name = "schema_test"
     
     # Create database
     await create_database_direct(db_name)

@@ -243,6 +243,7 @@ The full stack collects traces/metrics via `otel-collector-config.yml`.
 - Jaeger: traces (see ports in `docs/ARCHITECTURE.md`)
 - Prometheus/Grafana: metrics/dashboards
 - Cross-service correlation keys: `request_id`, `actor`, `plan_id`, `action_log_id`, etc.
+- ⚠️ Limitation: batch/scheduler flows that start without an HTTP request may log `corr_id` as `-`. In that case, start tracing from `event_id`/`job_id` (or `command_id`).
 
 Ops guide: `docs/OPERATIONS.md`
 

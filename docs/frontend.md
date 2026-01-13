@@ -2,10 +2,10 @@
 > Status: UI/UX **design spec** (target). Current frontend implementation is partial.  
 > Current API contract: `docs/API_REFERENCE.md`
 
-아래 문서는 BFF v1 레퍼런스 기준으로 작성된 **Blueprint.js(팔란티어 스타일)** UI/UX 기획서입니다.
+아래 문서는 BFF v1 레퍼런스 기준으로 작성된 **Blueprint.js(엔터프라이즈 스타일)** UI/UX 기획서입니다.
 	•	버전: UI Spec v1.0
 	•	기준 API: BFF /api/v1 only
-	•	디자인: Blueprint.js + Palantir 3‑pane (Left Nav / Main / Right Inspector)
+	•	디자인: Blueprint.js + 3‑pane 레이아웃 (Left Nav / Main / Right Inspector)
 	•	목적: 사용자가 raw → 스키마/매핑 → 임포트 → 그래프+검색 페더레이션 조회까지 “제품 안에서” 완주
 
 ⸻

@@ -12,6 +12,8 @@ import logging
 import os
 from typing import List, Optional, Tuple
 
+from shared.config.settings import settings as app_settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,45 +36,42 @@ class ServiceConfig:
     @staticmethod
     def get_oms_port() -> int:
         """Get OMS (Ontology Management Service) port from environment or default."""
-        return int(os.getenv("OMS_PORT", str(ServiceConfig.DEFAULT_OMS_PORT)))
+        return app_settings.services.oms_port
 
     @staticmethod
     def get_bff_port() -> int:
         """Get BFF (Backend for Frontend) port from environment or default."""
-        return int(os.getenv("BFF_PORT", str(ServiceConfig.DEFAULT_BFF_PORT)))
+        return app_settings.services.bff_port
 
     @staticmethod
     def get_funnel_port() -> int:
         """Get Funnel service port from environment or default."""
-        return int(os.getenv("FUNNEL_PORT", str(ServiceConfig.DEFAULT_FUNNEL_PORT)))
+        return app_settings.services.funnel_port
 
     @staticmethod
     def get_agent_port() -> int:
         """Get Agent service port from environment or default."""
-        return int(os.getenv("AGENT_PORT", str(ServiceConfig.DEFAULT_AGENT_PORT)))
+        return app_settings.services.agent_port
 
     @staticmethod
     def get_oms_host() -> str:
         """Get OMS host from environment or default."""
-        # FIXED: Use 127.0.0.1 instead of localhost to avoid IPv6 issues
-        return os.getenv("OMS_HOST", "127.0.0.1")
+        return app_settings.services.oms_host
 
     @staticmethod
     def get_bff_host() -> str:
         """Get BFF host from environment or default."""
-        # FIXED: Use 127.0.0.1 instead of localhost to avoid IPv6 issues
-        return os.getenv("BFF_HOST", "127.0.0.1")
+        return app_settings.services.bff_host
 
     @staticmethod
     def get_funnel_host() -> str:
         """Get Funnel host from environment or default."""
-        # FIXED: Use 127.0.0.1 instead of localhost to avoid IPv6 issues
-        return os.getenv("FUNNEL_HOST", "127.0.0.1")
+        return app_settings.services.funnel_host
 
     @staticmethod
     def get_agent_host() -> str:
         """Get Agent host from environment or default."""
-        return os.getenv("AGENT_HOST", "127.0.0.1")
+        return app_settings.services.agent_host
 
     @staticmethod
     def get_oms_url() -> str:
@@ -84,13 +83,7 @@ class ServiceConfig:
         2. Constructed from OMS_HOST and OMS_PORT
         3. Default: http://localhost:8000
         """
-        if base_url := os.getenv("OMS_BASE_URL"):
-            return base_url.rstrip("/")
-
-        host = ServiceConfig.get_oms_host()
-        port = ServiceConfig.get_oms_port()
-        protocol = ServiceConfig.get_protocol()
-        return f"{protocol}://{host}:{port}"
+        return app_settings.services.oms_base_url
 
     @staticmethod
     def get_bff_url() -> str:
@@ -102,13 +95,7 @@ class ServiceConfig:
         2. Constructed from BFF_HOST and BFF_PORT
         3. Default: http://localhost:8002
         """
-        if base_url := os.getenv("BFF_BASE_URL"):
-            return base_url.rstrip("/")
-
-        host = ServiceConfig.get_bff_host()
-        port = ServiceConfig.get_bff_port()
-        protocol = ServiceConfig.get_protocol()
-        return f"{protocol}://{host}:{port}"
+        return app_settings.services.bff_base_url
 
     @staticmethod
     def get_funnel_url() -> str:
@@ -120,13 +107,7 @@ class ServiceConfig:
         2. Constructed from FUNNEL_HOST and FUNNEL_PORT
         3. Default: http://localhost:8003
         """
-        if base_url := os.getenv("FUNNEL_BASE_URL"):
-            return base_url.rstrip("/")
-
-        host = ServiceConfig.get_funnel_host()
-        port = ServiceConfig.get_funnel_port()
-        protocol = ServiceConfig.get_protocol()
-        return f"{protocol}://{host}:{port}"
+        return app_settings.services.funnel_base_url
 
     @staticmethod
     def get_agent_url() -> str:
@@ -138,100 +119,52 @@ class ServiceConfig:
         2. Constructed from AGENT_HOST and AGENT_PORT
         3. Default: http://localhost:8004
         """
-        if base_url := os.getenv("AGENT_BASE_URL"):
-            return base_url.rstrip("/")
-
-        host = ServiceConfig.get_agent_host()
-        port = ServiceConfig.get_agent_port()
-        protocol = ServiceConfig.get_protocol()
-        return f"{protocol}://{host}:{port}"
+        return app_settings.services.agent_base_url
 
     @staticmethod
     def get_terminus_url() -> str:
         """Get TerminusDB URL from environment or default."""
-        if url := os.getenv("TERMINUS_SERVER_URL"):
-            return url.rstrip("/")
-        protocol = ServiceConfig.get_protocol()
-        # Use Docker service names when running in container
-        host = "terminusdb" if ServiceConfig.is_docker_environment() else "127.0.0.1"
-        return f"{protocol}://{host}:6363"
+        return app_settings.database.terminus_url.rstrip("/")
     
     @staticmethod
     def get_postgres_url() -> str:
         """Get PostgreSQL connection URL from environment or default."""
-        if url := os.getenv("POSTGRES_URL"):
-            return url
-        
-        # FIXED: Use 127.0.0.1 instead of localhost to avoid IPv6 issues
-        host = os.getenv("POSTGRES_HOST", "postgres" if ServiceConfig.is_docker_environment() else "127.0.0.1")
-        port = os.getenv("POSTGRES_PORT") or ("5432" if ServiceConfig.is_docker_environment() else "5433")
-        user = os.getenv("POSTGRES_USER", "spiceadmin")
-        password = os.getenv("POSTGRES_PASSWORD", "spicepass123")
-        database = os.getenv("POSTGRES_DB", "spicedb")
-        
-        return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+        return app_settings.database.postgres_url
     
     @staticmethod
     def get_kafka_bootstrap_servers() -> str:
         """Get Kafka bootstrap servers from environment or default."""
-        if servers := os.getenv("KAFKA_BOOTSTRAP_SERVERS"):
-            return servers
-        
-        # FIXED: Use 127.0.0.1 instead of localhost to avoid IPv6 issues
-        host = os.getenv("KAFKA_HOST", "kafka" if ServiceConfig.is_docker_environment() else "127.0.0.1")
-        port = os.getenv(
-            "KAFKA_PORT",
-            "29092" if ServiceConfig.is_docker_environment() else "9092",
-        )
-        return f"{host}:{port}"
+        return app_settings.database.kafka_servers
     
     @staticmethod
     def get_redis_host() -> str:
         """Get Redis host from environment or default."""
-        # FIXED: Use 127.0.0.1 instead of localhost to avoid IPv6 issues
-        return os.getenv("REDIS_HOST", "redis" if ServiceConfig.is_docker_environment() else "127.0.0.1")
+        return app_settings.database.redis_host
     
     @staticmethod
     def get_redis_port() -> int:
         """Get Redis port from environment or default."""
-        return int(os.getenv("REDIS_PORT", "6379"))
+        return app_settings.database.redis_port
     
     @staticmethod
     def get_redis_url() -> str:
         """Get Redis connection URL from environment or construct from host/port."""
-        if url := os.getenv("REDIS_URL"):
-            return url
-        host = ServiceConfig.get_redis_host()
-        port = ServiceConfig.get_redis_port()
-        password = os.getenv("REDIS_PASSWORD")
-        if password is None and ServiceConfig.is_docker_environment():
-            password = "spicepass123"
-        password = (password or "").strip()
-        if not password:
-            return f"redis://{host}:{port}"
-        return f"redis://:{password}@{host}:{port}"
+        return app_settings.database.redis_url
 
     @staticmethod
     def get_elasticsearch_host() -> str:
         """Get Elasticsearch host from environment or default."""
-        return os.getenv(
-            "ELASTICSEARCH_HOST",
-            "elasticsearch" if ServiceConfig.is_docker_environment() else "127.0.0.1",
-        )
+        return app_settings.database.elasticsearch_host
 
     @staticmethod
     def get_elasticsearch_port() -> int:
         """Get Elasticsearch port from environment or default."""
-        return int(os.getenv("ELASTICSEARCH_PORT", str(ServiceConfig.DEFAULT_ELASTICSEARCH_PORT)))
+        return app_settings.database.elasticsearch_port
 
     @staticmethod
     def get_elasticsearch_url() -> str:
         """Get Elasticsearch base URL from environment or construct from host/port."""
-        if base_url := os.getenv("ELASTICSEARCH_URL"):
-            return base_url.rstrip("/")
-        host = ServiceConfig.get_elasticsearch_host()
-        port = ServiceConfig.get_elasticsearch_port()
-        return f"http://{host}:{port}"
+        return app_settings.database.elasticsearch_url
 
     @staticmethod
     def is_docker_environment() -> bool:
@@ -249,20 +182,22 @@ class ServiceConfig:
     @staticmethod
     def get_minio_endpoint() -> str:
         """Get MinIO/S3 endpoint URL."""
-        if url := os.getenv("MINIO_ENDPOINT_URL"):
-            return url
-        host = "spice-minio" if ServiceConfig.is_docker_environment() else "127.0.0.1"
-        return f"http://{host}:9000"
+        return app_settings.storage.minio_endpoint_url
     
     @staticmethod
     def get_minio_access_key() -> str:
         """Get MinIO/S3 access key."""
-        return os.getenv("MINIO_ACCESS_KEY", "minioadmin")
+        return app_settings.storage.minio_access_key
     
     @staticmethod
     def get_minio_secret_key() -> str:
         """Get MinIO/S3 secret key."""
-        return os.getenv("MINIO_SECRET_KEY", "minioadmin123")
+        return app_settings.storage.minio_secret_key
+
+    @staticmethod
+    def get_event_store_bucket() -> str:
+        """Get S3/MinIO bucket name for immutable event store."""
+        return app_settings.storage.event_store_bucket
 
     @staticmethod
     def get_lakefs_api_url() -> str:
@@ -273,12 +208,7 @@ class ServiceConfig:
         - lakeFS commonly serves both the REST API and the S3 Gateway on the same port.
         - This returns the base server URL (without /api/v1).
         """
-        if base_url := os.getenv("LAKEFS_API_URL"):
-            return base_url.rstrip("/")
-        host = "lakefs" if ServiceConfig.is_docker_environment() else "127.0.0.1"
-        port = int(os.getenv("LAKEFS_API_PORT", str(ServiceConfig.DEFAULT_LAKEFS_PORT)))
-        protocol = "http"
-        return f"{protocol}://{host}:{port}"
+        return app_settings.storage.lakefs_api_url_effective
 
     @staticmethod
     def get_lakefs_s3_endpoint() -> str:
@@ -287,9 +217,7 @@ class ServiceConfig:
 
         By default, this matches the lakeFS API host/port unless overridden.
         """
-        if url := os.getenv("LAKEFS_S3_ENDPOINT_URL"):
-            return url.rstrip("/")
-        return ServiceConfig.get_lakefs_api_url()
+        return app_settings.storage.lakefs_s3_endpoint_effective
 
     @staticmethod
     def get_service_url(service_name: str) -> str:
@@ -360,17 +288,17 @@ class ServiceConfig:
         Returns:
             True if HTTPS is enabled, False otherwise
         """
-        return os.getenv("USE_HTTPS", "false").lower() in ("true", "1", "yes", "on")
+        return app_settings.services.use_https
 
     @staticmethod
     def is_production() -> bool:
         """Check if running in production environment."""
-        return os.getenv("ENVIRONMENT", "development").lower() in ("production", "prod")
+        return app_settings.is_production
 
     @staticmethod
     def is_debug_endpoints_enabled() -> bool:
         """Enable opt-in debug endpoints (never on by default)."""
-        return os.getenv("ENABLE_DEBUG_ENDPOINTS", "false").lower() in ("true", "1", "yes", "on")
+        return app_settings.services.enable_debug_endpoints
 
     @staticmethod
     def get_ssl_cert_path() -> Optional[str]:
@@ -380,8 +308,9 @@ class ServiceConfig:
         Returns:
             Path to SSL certificate file or None if not configured
         """
-        default_path = "./ssl/common/server.crt" if ServiceConfig.use_https() else None
-        return os.getenv("SSL_CERT_PATH", default_path)
+        if not ServiceConfig.use_https():
+            return None
+        return app_settings.services.ssl_cert_path
 
     @staticmethod
     def get_ssl_key_path() -> Optional[str]:
@@ -391,8 +320,9 @@ class ServiceConfig:
         Returns:
             Path to SSL key file or None if not configured
         """
-        default_path = "./ssl/common/server.key" if ServiceConfig.use_https() else None
-        return os.getenv("SSL_KEY_PATH", default_path)
+        if not ServiceConfig.use_https():
+            return None
+        return app_settings.services.ssl_key_path
 
     @staticmethod
     def get_ssl_ca_path() -> Optional[str]:
@@ -402,8 +332,9 @@ class ServiceConfig:
         Returns:
             Path to CA certificate file or None if not configured
         """
-        default_path = "./ssl/ca.crt" if ServiceConfig.use_https() else None
-        return os.getenv("SSL_CA_PATH", default_path)
+        if not ServiceConfig.use_https():
+            return None
+        return app_settings.services.ssl_ca_path
 
     @staticmethod
     def verify_ssl() -> bool:
@@ -418,7 +349,7 @@ class ServiceConfig:
         """
         if ServiceConfig.is_production():
             return True
-        return os.getenv("VERIFY_SSL", "false").lower() in ("true", "1", "yes", "on")
+        return app_settings.services.verify_ssl
 
     @staticmethod
     def get_protocol() -> str:
@@ -625,7 +556,7 @@ class ServiceConfig:
         Returns:
             True if CORS is enabled, False otherwise
         """
-        return os.getenv("CORS_ENABLED", "true").lower() in ("true", "1", "yes", "on")
+        return app_settings.services.cors_enabled
 
     @staticmethod
     def get_cors_debug_info() -> dict:

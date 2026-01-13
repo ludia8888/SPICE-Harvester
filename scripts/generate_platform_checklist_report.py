@@ -15,8 +15,8 @@ def _as_list(value: object) -> list[str]:
 
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
-    matrix_path = root / "docs/foundry_checklist/FOUNDARY_CHECKLIST_MATRIX.yml"
-    report_path = root / "docs/foundry_checklist/VERIFICATION_REPORT.md"
+    matrix_path = root / "docs/platform_checklist/PLATFORM_CHECKLIST_MATRIX.yml"
+    report_path = root / "docs/platform_checklist/VERIFICATION_REPORT.md"
 
     if not matrix_path.exists():
         raise SystemExit(f"Missing matrix: {matrix_path}")
@@ -37,11 +37,11 @@ def main() -> int:
             counts[priority]["pass"] += 1
 
     lines: list[str] = []
-    lines.append("# Foundry Checklist Verification Report")
+    lines.append("# Platform Checklist Verification Report")
     lines.append("")
     lines.append("- Checklist: `docs/PipelineBuilder_checklist.md`")
-    lines.append("- Matrix: `docs/foundry_checklist/FOUNDARY_CHECKLIST_MATRIX.yml`")
-    lines.append("- Evidence dir: `docs/foundry_checklist/evidence/`")
+    lines.append("- Matrix: `docs/platform_checklist/PLATFORM_CHECKLIST_MATRIX.yml`")
+    lines.append("- Evidence dir: `docs/platform_checklist/evidence/`")
     lines.append("")
     lines.append("## Current Status")
     lines.append(f"- P0: {counts['P0']['pass']}/{counts['P0']['total']} PASS")
@@ -50,7 +50,7 @@ def main() -> int:
     lines.append("")
     lines.append("## How to Reproduce")
     lines.append("```bash")
-    lines.append("./scripts/verify_foundry_checklist.sh")
+    lines.append("./scripts/verify_platform_checklist.sh")
     lines.append("```")
     lines.append("")
     lines.append("## Per-Item Results")
@@ -102,4 +102,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

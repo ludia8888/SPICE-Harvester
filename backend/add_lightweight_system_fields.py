@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-🔥 THINK ULTRA: Add Palantir-style system fields to TerminusDB schemas
+🔥 THINK ULTRA: Add system fields to TerminusDB schemas (lightweight graph)
 
 This script adds essential system fields to enable lightweight node storage
 in TerminusDB while keeping full data in Elasticsearch.
 
-Palantir Architecture:
+Lightweight graph architecture:
 - TerminusDB: Stores ONLY lightweight nodes (IDs + relationships + system metadata)
 - Elasticsearch: Stores ALL domain data (full documents)
 - S3: Stores large binary data (files, images, etc.)
@@ -19,8 +19,8 @@ from datetime import datetime
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# System fields required for Palantir architecture
-PALANTIR_SYSTEM_FIELDS = [
+# System fields required for lightweight graph federation
+LIGHTWEIGHT_SYSTEM_FIELDS = [
     {
         "name": "es_doc_id",
         "type": "xsd:string",
@@ -71,7 +71,7 @@ async def add_system_fields_to_ontology(
     class_id: str,
     terminus_service: Any
 ) -> Dict[str, Any]:
-    """Add Palantir system fields to a specific ontology class"""
+    """Add lightweight system fields to a specific ontology class"""
     
     try:
         # Get existing ontology
@@ -98,7 +98,7 @@ async def add_system_fields_to_ontology(
         
         # Add system fields that don't exist yet
         added_fields = []
-        for field in PALANTIR_SYSTEM_FIELDS:
+        for field in LIGHTWEIGHT_SYSTEM_FIELDS:
             if field['name'] not in existing_prop_names:
                 existing_properties.append(field)
                 added_fields.append(field['name'])
@@ -144,7 +144,7 @@ async def add_system_fields_to_ontology(
 
 
 async def add_system_fields_to_all_ontologies(db_name: str) -> Dict[str, Any]:
-    """Add Palantir system fields to all ontologies in a database"""
+    """Add lightweight system fields to all ontologies in a database"""
     
     # Initialize TerminusDB connection
     from oms.services.async_terminus import AsyncTerminusService
@@ -227,29 +227,29 @@ async def add_system_fields_to_all_ontologies(db_name: str) -> Dict[str, Any]:
         await terminus_service.disconnect()
 
 
-async def verify_palantir_architecture(db_name: str = "spice_3pl_synthetic"):
-    """Verify that the Palantir architecture is properly configured"""
+async def verify_lightweight_architecture(db_name: str = "spice_3pl_synthetic"):
+    """Verify that the lightweight graph architecture is properly configured"""
     
     logger.info("\n" + "="*60)
-    logger.info("🔥 THINK ULTRA: VERIFYING PALANTIR ARCHITECTURE")
+    logger.info("🔥 THINK ULTRA: VERIFYING LIGHTWEIGHT GRAPH ARCHITECTURE")
     logger.info("="*60)
     
     # Add system fields to all ontologies
     result = await add_system_fields_to_all_ontologies(db_name)
     
     if result['status'] == 'completed':
-        logger.info("\n✅ Palantir system fields added successfully!")
+        logger.info("\n✅ Lightweight system fields added successfully!")
         logger.info("🎯 Next steps:")
         logger.info("   1. Instance Worker will now store lightweight nodes in TerminusDB")
         logger.info("   2. Full data will be stored in Elasticsearch")
         logger.info("   3. Large files will be stored in S3")
-        logger.info("\n🚀 Ready for end-to-end Palantir architecture testing!")
+        logger.info("\n🚀 Ready for end-to-end architecture testing!")
     else:
-        logger.error(f"\n❌ Failed to configure Palantir architecture: {result.get('message', 'Unknown error')}")
+        logger.error(f"\n❌ Failed to configure lightweight graph architecture: {result.get('message', 'Unknown error')}")
     
     return result
 
 
 if __name__ == "__main__":
     # Test with spice_3pl_synthetic database
-    asyncio.run(verify_palantir_architecture("spice_3pl_synthetic"))
+    asyncio.run(verify_lightweight_architecture("spice_3pl_synthetic"))

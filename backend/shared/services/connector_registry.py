@@ -1,5 +1,5 @@
 """
-Connector Registry (Foundry-style) - durable state in Postgres.
+Connector Registry - durable state in Postgres.
 
 This service stores:
 - connector sources (type/id + config + enabled)

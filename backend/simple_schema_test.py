@@ -160,7 +160,7 @@ async def test_create_instance(db_name: str):
 
 @pytest.fixture
 def db_name() -> str:
-    return f"palantir_schema_test_{uuid.uuid4().hex[:8]}"
+    return f"schema_test_{uuid.uuid4().hex[:8]}"
 
 async def main():
     """Main function"""
@@ -168,7 +168,7 @@ async def main():
     print("🚀 Creating Schema with WOQL AddTriple")
     print("=" * 60)
     
-    db_name = "palantir_schema_test"
+    db_name = "schema_test"
     
     # Create schema
     await create_simple_schema(db_name)

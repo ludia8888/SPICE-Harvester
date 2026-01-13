@@ -60,7 +60,7 @@ def _resolve_redis_container() -> str:
         if explicit not in names:
             raise AssertionError(f"REDIS_CONTAINER={explicit} is not running")
         return explicit
-    match = _match_container(names, ("spice_redis", "spice-foundry-redis"))
+    match = _match_container(names, ("spice_redis", "spice-harvester-redis"))
     if match:
         return match
     raise AssertionError("Redis container not found. Set REDIS_CONTAINER to the running Redis container name.")
@@ -80,7 +80,7 @@ def _resolve_postgres_container() -> str:
         if explicit not in names:
             raise AssertionError(f"POSTGRES_CONTAINER={explicit} is not running")
         return explicit
-    match = _match_container(names, ("spice_postgres", "spice-foundry-postgres"))
+    match = _match_container(names, ("spice_postgres", "spice-harvester-postgres"))
     if match:
         return match
     raise AssertionError("Postgres container not found. Set POSTGRES_CONTAINER to the running Postgres container name.")

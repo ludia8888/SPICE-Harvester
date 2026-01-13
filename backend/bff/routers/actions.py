@@ -215,7 +215,7 @@ async def submit_action(
         if not action_type_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="action_type_id is required")
 
-        # Permission gate (Foundry-aligned minimum): domain model roles for operational writeback.
+        # Permission gate (minimum governance baseline): domain model roles for operational writeback.
         try:
             await enforce_database_role(headers=http_request.headers, db_name=db_name, required_roles=DOMAIN_MODEL_ROLES)
         except ValueError as exc:

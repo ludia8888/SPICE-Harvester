@@ -1,12 +1,12 @@
 """
-Connector Sync Worker (Foundry-style shared runtime).
+Connector Sync Worker (shared runtime).
 
 Consumes Kafka `connector-updates` events (EventEnvelope; metadata.kind='connector_update').
 
 When a confirmed mapping exists, fetches + normalizes data via connector adapters and submits
 write commands to the platform engine (BFF/OMS async 202 path).
 
-Core policies (Foundry-style tradeoffs):
+Core policies (operational tradeoffs):
 - At-least-once + idempotent: ProcessedEventRegistry claims side-effects.
 - Mapping-gated: no mapping → no writes.
 - Queueing + backoff + DLQ: defaults to safe operational behavior.

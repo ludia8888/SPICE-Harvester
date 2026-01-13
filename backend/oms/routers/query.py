@@ -1,6 +1,6 @@
 """
 Query Router for CQRS Read Side
-Palantir-style architecture: Query from Elasticsearch with TerminusDB graph federation
+CQRS read path: Query from Elasticsearch with TerminusDB graph federation
 
 🔥 THINK ULTRA: This implements the correct query patterns:
 1. Simple queries → Direct from Elasticsearch

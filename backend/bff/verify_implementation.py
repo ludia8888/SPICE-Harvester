@@ -9,8 +9,8 @@ import importlib.util
 import json
 
 
-def test_core_foundry_conflict_system():
-    """핵심 Foundry 충돌 시스템 검증"""
+def test_core_conflict_system():
+    """핵심 충돌 시스템 검증 (UI/클라이언트 친화 포맷)"""
 
     print("🔥 THINK ULTRA! 실제 작동하는 구현 검증")
     print("=" * 60)
@@ -66,16 +66,16 @@ def test_core_foundry_conflict_system():
         ]
 
         async def test_conversion():
-            return await converter.convert_conflicts_to_foundry_format(
+            return await converter.convert_conflicts_to_ui_format(
                 terminus_conflicts, "production-ontology-db", "feature/new-classes", "main"
             )
 
-        foundry_conflicts = asyncio.run(test_conversion())
+        ui_conflicts = asyncio.run(test_conversion())
 
-        print(f"✅ 변환 성공: {len(foundry_conflicts)}개 충돌")
+        print(f"✅ 변환 성공: {len(ui_conflicts)}개 충돌")
 
         # 상세 검증
-        for i, conflict in enumerate(foundry_conflicts, 1):
+        for i, conflict in enumerate(ui_conflicts, 1):
             print(f"\n🔥 충돌 {i}: {conflict['id']}")
             print(f"   📍 타입: {conflict['type']}")
             print(f"   📍 심각도: {conflict['severity']}")
@@ -97,7 +97,7 @@ def test_core_foundry_conflict_system():
             assert "target" in conflict["sides"]
             assert "options" in conflict["resolution"]
 
-        print("✅ 모든 Foundry 충돌 형식 검증 완료")
+        print("✅ 모든 UI/클라이언트 친화 충돌 형식 검증 완료")
 
     except Exception as e:
         print(f"❌ ConflictConverter 검증 실패: {e}")
@@ -234,12 +234,12 @@ def test_core_foundry_conflict_system():
 
     # 5. 종합 평가
     print("\n" + "=" * 60)
-    print("🏆 FOUNDRY-STYLE MERGE CONFLICT 시스템 종합 평가")
+    print("🏆 MERGE CONFLICT 시스템 종합 평가")
     print("=" * 60)
 
     features = {
         "✅ 3-way 병합 충돌 감지": "완전 구현",
-        "✅ TerminusDB → Foundry 형식 변환": "완전 구현",
+        "✅ TerminusDB → UI/클라이언트 포맷 변환": "완전 구현",
         "✅ JSON-LD 경로 매핑": "완전 구현",
         "✅ 한국어 속성명 지원": "완전 구현",
         "✅ 충돌 심각도 평가": "완전 구현",
@@ -256,7 +256,7 @@ def test_core_foundry_conflict_system():
 
     print("\n🎯 핵심 성과:")
     print("   • TerminusDB 네이티브 diff/merge API 활용")
-    print("   • Foundry-style 직관적 충돌 해결 UX")
+    print("   • UI/클라이언트 친화 충돌 해결 UX")
     print("   • 완전한 JSON-LD 온톨로지 지원")
     print("   • 프로덕션 레벨 에러 처리")
     print("   • 확장 가능한 아키텍처")
@@ -307,7 +307,7 @@ def test_real_world_scenario():
         converter = ConflictConverter()
 
         async def resolve_scenario():
-            return await converter.convert_conflicts_to_foundry_format(
+            return await converter.convert_conflicts_to_ui_format(
                 conflicts_data,
                 scenario["데이터베이스"],
                 scenario["소스_브랜치"],
@@ -331,11 +331,11 @@ def test_real_world_scenario():
 
 
 if __name__ == "__main__":
-    success = test_core_foundry_conflict_system()
+    success = test_core_conflict_system()
     test_real_world_scenario()
 
     if success:
-        print("\n🎉 최종 결과: FOUNDRY-STYLE MERGE CONFLICT 시스템 완전 구현!")
+        print("\n🎉 최종 결과: MERGE CONFLICT 시스템 완전 구현!")
         print("   실제 작동하는 프로덕션 레벨 구현 완성 ✅")
     else:
         print("\n⚠️ 일부 기능에서 문제 발견")

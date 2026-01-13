@@ -164,9 +164,9 @@ async def test_ontology_worker_send_to_dlq_payload_shape() -> None:
 
 @pytest.mark.asyncio
 async def test_instance_worker_send_to_dlq_payload_shape() -> None:
-    from instance_worker.main import StrictPalantirInstanceWorker
+    from instance_worker.main import StrictInstanceWorker
 
-    worker = StrictPalantirInstanceWorker()
+    worker = StrictInstanceWorker()
     worker.tracing = _NoopTracing()
     worker.metrics = _NoopMetrics()
 
@@ -205,4 +205,3 @@ async def test_instance_worker_send_to_dlq_payload_shape() -> None:
     assert payload["worker"] == "instance-worker"
 
     worker._consumer_executor.shutdown(wait=False, cancel_futures=True)
-

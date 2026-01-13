@@ -1,5 +1,5 @@
 """
-Connector Trigger Service (Foundry-style).
+Connector Trigger Service (shared runtime).
 
 Responsibilities:
 - Read connector sources from Postgres registry

@@ -78,7 +78,7 @@ def _rollback_enabled() -> bool:
     """
     Rollback is effectively a "force-push/reset" of the ontology graph.
 
-    Palantir/Foundry-style 운영 원칙:
+    운영 원칙(권장):
     - 온톨로지 스키마는 앞으로만 진화 (forward-only)
     - 과거 판단은 과거 의미 체계로 재현 (Versioning + Recompute)
 
@@ -97,7 +97,7 @@ async def get_branch_head_commit(
     """
     브랜치 HEAD 커밋 ID 조회
 
-    Foundry-style 운영 관점에서 "데이터/산출물 버전"과 "온톨로지 버전"의 정확 일치를
+    운영 관점에서 "데이터/산출물 버전"과 "온톨로지 버전"의 정확 일치를
     배포 게이트로 사용하기 위한 최소 API.
     """
     try:

@@ -18,6 +18,16 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from enum import Enum
 
+
+def _is_docker_environment() -> bool:
+    docker_env = (os.getenv("DOCKER_CONTAINER") or "").strip().lower()
+    if docker_env in ("false", "0", "no", "off"):
+        return False
+    if docker_env in ("true", "1", "yes", "on"):
+        return True
+    return os.path.exists("/.dockerenv")
+
+
 class Environment(str, Enum):
     """Application environment types"""
     DEVELOPMENT = "development"
@@ -37,7 +47,9 @@ class DatabaseSettings(BaseSettings):
     
     # TerminusDB Configuration
     terminus_url: str = Field(
-        default="http://localhost:6363",
+        default_factory=lambda: (
+            "http://terminusdb:6363" if _is_docker_environment() else "http://127.0.0.1:6363"
+        ),
         description="TerminusDB server URL"
     )
     terminus_user: str = Field(
@@ -95,11 +107,11 @@ class DatabaseSettings(BaseSettings):
     
     # PostgreSQL Configuration
     postgres_host: str = Field(
-        default="localhost",
+        default_factory=lambda: ("postgres" if _is_docker_environment() else "127.0.0.1"),
         description="PostgreSQL host"
     )
     postgres_port: int = Field(
-        default=5432,
+        default_factory=lambda: (5432 if _is_docker_environment() else 5433),
         description="PostgreSQL port"
     )
     postgres_user: str = Field(
@@ -117,7 +129,7 @@ class DatabaseSettings(BaseSettings):
     
     # Redis Configuration
     redis_host: str = Field(
-        default="localhost",
+        default_factory=lambda: ("redis" if _is_docker_environment() else "127.0.0.1"),
         description="Redis host"
     )
     redis_port: int = Field(
@@ -131,7 +143,7 @@ class DatabaseSettings(BaseSettings):
     
     # Elasticsearch Configuration
     elasticsearch_host: str = Field(
-        default="localhost",
+        default_factory=lambda: ("elasticsearch" if _is_docker_environment() else "127.0.0.1"),
         description="Elasticsearch host"
     )
     elasticsearch_port: int = Field(
@@ -153,11 +165,11 @@ class DatabaseSettings(BaseSettings):
     
     # Kafka Configuration
     kafka_host: str = Field(
-        default="localhost",
+        default_factory=lambda: ("kafka" if _is_docker_environment() else "127.0.0.1"),
         description="Kafka host"
     )
     kafka_port: int = Field(
-        default=9092,
+        default_factory=lambda: (29092 if _is_docker_environment() else 9092),
         description="Kafka port"
     )
     kafka_bootstrap_servers: Optional[str] = Field(
@@ -168,6 +180,8 @@ class DatabaseSettings(BaseSettings):
     @property
     def postgres_url(self) -> str:
         """Construct PostgreSQL connection URL"""
+        if override := (os.getenv("POSTGRES_URL") or "").strip():
+            return override
         return f"postgresql://{self.postgres_user}:{self.postgres_password}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
     
     @property
@@ -180,6 +194,8 @@ class DatabaseSettings(BaseSettings):
     @property
     def elasticsearch_url(self) -> str:
         """Construct Elasticsearch URL with authentication"""
+        if override := (os.getenv("ELASTICSEARCH_URL") or "").strip():
+            return override.rstrip("/")
         if self.elasticsearch_username and self.elasticsearch_password:
             return f"http://{self.elasticsearch_username}:{self.elasticsearch_password}@{self.elasticsearch_host}:{self.elasticsearch_port}"
         return f"http://{self.elasticsearch_host}:{self.elasticsearch_port}"
@@ -187,6 +203,8 @@ class DatabaseSettings(BaseSettings):
     @property
     def redis_url(self) -> str:
         """Construct Redis URL"""
+        if override := (os.getenv("REDIS_URL") or "").strip():
+            return override
         # If Redis password is empty, don't include auth
         if not self.redis_password:
             return f"redis://{self.redis_host}:{self.redis_port}"
@@ -204,28 +222,52 @@ class ServiceSettings(BaseSettings):
     
     # Service Hosts and Ports
     oms_host: str = Field(
-        default="localhost",
+        default="127.0.0.1",
         description="OMS service host"
     )
     oms_port: int = Field(
         default=8000,
         description="OMS service port"
     )
+    oms_base_url_override: Optional[str] = Field(
+        default=None,
+        description="OMS base URL override (OMS_BASE_URL)"
+    )
     bff_host: str = Field(
-        default="localhost",
+        default="127.0.0.1",
         description="BFF service host"
     )
     bff_port: int = Field(
         default=8002,
         description="BFF service port"
     )
+    bff_base_url_override: Optional[str] = Field(
+        default=None,
+        description="BFF base URL override (BFF_BASE_URL)"
+    )
     funnel_host: str = Field(
-        default="localhost",
+        default="127.0.0.1",
         description="Funnel service host"
     )
     funnel_port: int = Field(
         default=8003,
         description="Funnel service port"
+    )
+    funnel_base_url_override: Optional[str] = Field(
+        default=None,
+        description="Funnel base URL override (FUNNEL_BASE_URL)"
+    )
+    agent_host: str = Field(
+        default="127.0.0.1",
+        description="Agent service host"
+    )
+    agent_port: int = Field(
+        default=8004,
+        description="Agent service port"
+    )
+    agent_base_url_override: Optional[str] = Field(
+        default=None,
+        description="Agent base URL override (AGENT_BASE_URL)"
     )
     
     # SSL Configuration
@@ -259,24 +301,62 @@ class ServiceSettings(BaseSettings):
         default='["http://localhost:3000", "http://localhost:3001", "http://localhost:8080"]',
         description="CORS allowed origins (JSON array string)"
     )
+    enable_debug_endpoints: bool = Field(
+        default=False,
+        description="Enable opt-in debug endpoints (ENABLE_DEBUG_ENDPOINTS)"
+    )
+
+    @field_validator("oms_base_url_override", mode="before")
+    @classmethod
+    def get_oms_base_url_override(cls, v):
+        return os.getenv("OMS_BASE_URL", v)
+
+    @field_validator("bff_base_url_override", mode="before")
+    @classmethod
+    def get_bff_base_url_override(cls, v):
+        return os.getenv("BFF_BASE_URL", v)
+
+    @field_validator("funnel_base_url_override", mode="before")
+    @classmethod
+    def get_funnel_base_url_override(cls, v):
+        return os.getenv("FUNNEL_BASE_URL", v)
+
+    @field_validator("agent_base_url_override", mode="before")
+    @classmethod
+    def get_agent_base_url_override(cls, v):
+        return os.getenv("AGENT_BASE_URL", v)
     
     @property
     def oms_base_url(self) -> str:
         """Construct OMS base URL"""
+        if self.oms_base_url_override:
+            return self.oms_base_url_override.rstrip("/")
         protocol = "https" if self.use_https else "http"
         return f"{protocol}://{self.oms_host}:{self.oms_port}"
     
     @property
     def bff_base_url(self) -> str:
         """Construct BFF base URL"""
+        if self.bff_base_url_override:
+            return self.bff_base_url_override.rstrip("/")
         protocol = "https" if self.use_https else "http"
         return f"{protocol}://{self.bff_host}:{self.bff_port}"
     
     @property
     def funnel_base_url(self) -> str:
         """Construct Funnel base URL"""
+        if self.funnel_base_url_override:
+            return self.funnel_base_url_override.rstrip("/")
         protocol = "https" if self.use_https else "http"
         return f"{protocol}://{self.funnel_host}:{self.funnel_port}"
+
+    @property
+    def agent_base_url(self) -> str:
+        """Construct Agent base URL"""
+        if self.agent_base_url_override:
+            return self.agent_base_url_override.rstrip("/")
+        protocol = "https" if self.use_https else "http"
+        return f"{protocol}://{self.agent_host}:{self.agent_port}"
     
     @property
     def cors_origins_list(self) -> List[str]:
@@ -299,7 +379,9 @@ class StorageSettings(BaseSettings):
     
     # MinIO/S3 Configuration
     minio_endpoint_url: str = Field(
-        default="http://localhost:9000",
+        default_factory=lambda: (
+            "http://spice-minio:9000" if _is_docker_environment() else "http://127.0.0.1:9000"
+        ),
         description="MinIO/S3 endpoint URL"
     )
     minio_access_key: str = Field(
@@ -312,9 +394,17 @@ class StorageSettings(BaseSettings):
     )
 
     # lakeFS (S3 gateway + REST auth shares credentials)
+    lakefs_api_url: Optional[str] = Field(
+        default=None,
+        description="lakeFS API base URL (e.g. http://localhost:48080)",
+    )
     lakefs_s3_endpoint_url: Optional[str] = Field(
         default=None,
         description="lakeFS S3 gateway endpoint URL (e.g. http://localhost:8000)",
+    )
+    lakefs_api_port: int = Field(
+        default_factory=lambda: (8000 if _is_docker_environment() else 48080),
+        description="lakeFS API port (used when LAKEFS_API_URL is unset)",
     )
     lakefs_access_key_id: Optional[str] = Field(
         default=None,
@@ -326,6 +416,10 @@ class StorageSettings(BaseSettings):
     )
     
     # S3 Buckets
+    event_store_bucket: str = Field(
+        default="spice-event-store",
+        description="S3 bucket for immutable event store (EVENT_STORE_BUCKET)",
+    )
     instance_bucket: str = Field(
         default="instance-events",
         description="S3 bucket for instance events"
@@ -335,6 +429,21 @@ class StorageSettings(BaseSettings):
     def use_ssl(self) -> bool:
         """Determine if SSL should be used based on endpoint URL"""
         return self.minio_endpoint_url.startswith("https://")
+
+    @property
+    def lakefs_api_url_effective(self) -> str:
+        """Return lakeFS API base URL (without /api/v1)."""
+        if self.lakefs_api_url:
+            return self.lakefs_api_url.rstrip("/")
+        host = "lakefs" if _is_docker_environment() else "127.0.0.1"
+        return f"http://{host}:{self.lakefs_api_port}"
+
+    @property
+    def lakefs_s3_endpoint_effective(self) -> str:
+        """Return lakeFS S3 Gateway endpoint URL."""
+        if self.lakefs_s3_endpoint_url:
+            return self.lakefs_s3_endpoint_url.rstrip("/")
+        return self.lakefs_api_url_effective
 
 
 class CacheSettings(BaseSettings):
@@ -487,6 +596,28 @@ class ApplicationSettings(BaseSettings):
     performance: PerformanceSettings = PerformanceSettings()
     test: TestSettings = TestSettings()
     google_sheets: GoogleSheetsSettings = GoogleSheetsSettings()
+
+    @field_validator("environment", mode="before")
+    @classmethod
+    def normalize_environment(cls, v):
+        if isinstance(v, Environment):
+            return v
+        if isinstance(v, str):
+            normalized = v.strip().lower()
+            aliases = {
+                "dev": Environment.DEVELOPMENT,
+                "development": Environment.DEVELOPMENT,
+                "local": Environment.DEVELOPMENT,
+                "stage": Environment.STAGING,
+                "staging": Environment.STAGING,
+                "prod": Environment.PRODUCTION,
+                "production": Environment.PRODUCTION,
+                "test": Environment.TEST,
+                "testing": Environment.TEST,
+            }
+            if normalized in aliases:
+                return aliases[normalized]
+        return v
     
     @property
     def is_development(self) -> bool:

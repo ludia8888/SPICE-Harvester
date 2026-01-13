@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-01-13T11:55:29.874469Z
+> Generated: 2026-01-13T15:30:45.093151Z
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
@@ -33,36 +33,41 @@
 
 ### `backend/action_worker/main.py`
 - **Functions**
-  - `_utcnow()` (line 94): no docstring
-  - `_safe_str(value)` (line 98): no docstring
-  - `_action_applied_event_id(action_log_id)` (line 104): no docstring
-  - `_is_noop_changes(changes)` (line 109): no docstring
-  - `async main()` (line 1585): no docstring
+  - `_utcnow()` (line 97): no docstring
+  - `_safe_str(value)` (line 101): no docstring
+  - `_action_applied_event_id(action_log_id)` (line 107): no docstring
+  - `_is_noop_changes(changes)` (line 112): no docstring
+  - `async main()` (line 1808): no docstring
 - **Classes**
-  - `_ActionRejected` (line 122): Used to short-circuit retries when the ActionLog is already finalized with a rejection result.
-  - `ActionWorker` (line 126): no docstring
-    - `__init__(self)` (line 127): no docstring
-    - `async initialize(self)` (line 144): no docstring
-    - `async shutdown(self)` (line 197): no docstring
-    - `async _poll(self, timeout)` (line 209): no docstring
-    - `async _commit(self, msg)` (line 214): no docstring
-    - `async _seek_retry(self, msg)` (line 219): no docstring
-    - `async run(self)` (line 227): no docstring
-    - `async _process_message(self, envelope_json, kafka_headers)` (line 258): no docstring
-    - `async _enforce_permission(self, db_name, submitted_by, submitted_by_type, action_spec)` (line 363): no docstring
-    - `async _check_writeback_dataset_acl_alignment(self, db_name, submitted_by, submitted_by_type, actor_role, ontology_commit_id, resources, class_ids)` (line 387): no docstring
-    - `async _execute_action(self, db_name, action_log_id, command, envelope)` (line 592): no docstring
-    - `async _ensure_branch(self, repository, branch)` (line 1430): no docstring
-    - `async _write_patchset_commit(self, repository, branch, action_log_id, patchset, metadata_doc)` (line 1438): no docstring
-    - `async _append_queue_entries(self, repository, branch, patchset_commit_id, action_log_id, action_applied_seq)` (line 1484): no docstring
+  - `_ActionRejected` (line 125): Used to short-circuit retries when the ActionLog is already finalized with a rejection result.
+  - `_ActionCommandInProgress` (line 129): Raised when a command is leased by another worker (retry later).
+  - `_ActionProcessingError` (line 133): no docstring
+    - `__init__(self, message, attempt_count, envelope, raw_payload, stage, cause)` (line 134): no docstring
+  - `ActionWorker` (line 152): no docstring
+    - `__init__(self)` (line 153): no docstring
+    - `async initialize(self)` (line 173): no docstring
+    - `async shutdown(self)` (line 240): no docstring
+    - `async _poll(self, timeout)` (line 257): no docstring
+    - `async _commit(self, msg)` (line 262): no docstring
+    - `async _seek_retry(self, msg)` (line 267): no docstring
+    - `_is_retryable_error(exc)` (line 276): no docstring
+    - `async _send_to_dlq(self, msg, stage, error, attempt_count, payload_text, payload_obj)` (line 314): no docstring
+    - `async run(self)` (line 368): no docstring
+    - `async _process_message(self, envelope_json, kafka_headers)` (line 454): no docstring
+    - `async _enforce_permission(self, db_name, submitted_by, submitted_by_type, action_spec)` (line 586): no docstring
+    - `async _check_writeback_dataset_acl_alignment(self, db_name, submitted_by, submitted_by_type, actor_role, ontology_commit_id, resources, class_ids)` (line 610): no docstring
+    - `async _execute_action(self, db_name, action_log_id, command, envelope)` (line 815): no docstring
+    - `async _ensure_branch(self, repository, branch)` (line 1653): no docstring
+    - `async _write_patchset_commit(self, repository, branch, action_log_id, patchset, metadata_doc)` (line 1661): no docstring
+    - `async _append_queue_entries(self, repository, branch, patchset_commit_id, action_log_id, action_applied_seq)` (line 1707): no docstring
 
-## add_palantir_system_fields.py
+## add_lightweight_system_fields.py
 
-### `backend/add_palantir_system_fields.py`
+### `backend/add_lightweight_system_fields.py`
 - **Functions**
-  - `async add_system_fields_to_ontology(db_name, class_id, terminus_service)` (line 69): Add Palantir system fields to a specific ontology class
-  - `async add_system_fields_to_all_ontologies(db_name)` (line 146): Add Palantir system fields to all ontologies in a database
-  - `async verify_palantir_architecture(db_name)` (line 230): Verify that the Palantir architecture is properly configured
+  - `async add_system_fields_to_ontology(db_name, class_id, terminus_service)` (line 69): Add lightweight system fields to a specific ontology class
+  - `async add_system_fields_to_all_ontologies(db_name)` (line 146): Add lightweight system fields to all ontologies in a database
+  - `async verify_lightweight_architecture(db_name)` (line 230): Verify that the lightweight graph architecture is properly configured
 
 ## add_system_fields_direct.py
 
@@ -642,7 +647,7 @@
   - `async simulate_merge(db_name, request, oms_client)` (line 52): 병합 시뮬레이션 - 실제 병합 없이 충돌 감지
   - `async resolve_merge_conflicts(db_name, request, oms_client)` (line 216): 수동 병합 충돌 해결
   - `async _detect_merge_conflicts(source_changes, target_changes, common_ancestor, db_name, oms_client)` (line 303): 3-way 병합 충돌 감지 엔진 (공통 조상 기반)
-  - `async _convert_resolution_to_terminus_format(resolution)` (line 405): Foundry 해결책을 TerminusDB 형식으로 변환
+  - `async _convert_resolution_to_terminus_format(resolution)` (line 405): 클라이언트 해결책을 TerminusDB 형식으로 변환
 
 ### `backend/bff/routers/object_types.py`
 - **Functions**
@@ -1039,7 +1044,7 @@
     - `async get_ontology_health(self, db_name, branch)` (line 455): 온톨로지 헬스 체크
     - `async create_branch(self, db_name, branch_data)` (line 468): 브랜치 생성
     - `async get_version_history(self, db_name)` (line 478): 버전 히스토리 조회
-    - `async get_version_head(self, db_name, branch)` (line 488): 브랜치 head 커밋 ID 조회 (Foundry-style deploy gate).
+    - `async get_version_head(self, db_name, branch)` (line 488): 브랜치 head 커밋 ID 조회 (deploy gate).
     - `async update_ontology(self, db_name, class_id, update_data, expected_seq, branch, headers)` (line 501): 온톨로지 업데이트
     - `async validate_ontology_update(self, db_name, class_id, update_data, branch)` (line 525): 온톨로지 업데이트 검증 (no write).
     - `async delete_ontology(self, db_name, class_id, expected_seq, branch, headers)` (line 546): 온톨로지 삭제
@@ -1313,7 +1318,7 @@
     - `client(self)` (line 22): FastAPI 테스트 클라이언트
     - `mock_oms_client(self)` (line 27): Mock OMS Client
     - `sample_conflict_data(self)` (line 34): 샘플 충돌 데이터
-    - `expected_foundry_conflict(self)` (line 66): 예상되는 Foundry 스타일 충돌
+    - `expected_ui_conflict(self)` (line 66): 예상되는 UI/클라이언트 친화 충돌
     - `async test_merge_simulation_success(self, client, mock_oms_client, sample_conflict_data)` (line 95): 병합 시뮬레이션 성공 테스트
     - `async test_merge_simulation_with_conflicts(self, client, mock_oms_client, sample_conflict_data)` (line 164): 충돌이 있는 병합 시뮬레이션 테스트
     - `async test_conflict_resolution_success(self, client, mock_oms_client)` (line 234): 충돌 해결 성공 테스트
@@ -1767,10 +1772,10 @@
   - `PathType` (line 25): JSON-LD 경로 타입
   - `JsonLdPath` (line 37): JSON-LD 경로 분석 결과
   - `ConflictAnalysis` (line 49): 충돌 분석 결과
-  - `ConflictConverter` (line 59): TerminusDB 충돌을 Foundry 스타일로 변환하는 클래스
+  - `ConflictConverter` (line 59): TerminusDB 충돌을 UI/클라이언트 친화적 포맷으로 변환하는 클래스
     - `__init__(self)` (line 62): no docstring
-    - `async convert_conflicts_to_foundry_format(self, terminus_conflicts, db_name, source_branch, target_branch)` (line 88): TerminusDB 충돌을 Foundry 스타일로 변환
-    - `async _convert_single_conflict(self, conflict, conflict_id, db_name, source_branch, target_branch)` (line 124): 단일 충돌을 Foundry 형식으로 변환
+    - `async convert_conflicts_to_ui_format(self, terminus_conflicts, db_name, source_branch, target_branch)` (line 88): TerminusDB 충돌을 UI/클라이언트 친화적 포맷으로 변환
+    - `async _convert_single_conflict(self, conflict, conflict_id, db_name, source_branch, target_branch)` (line 124): 단일 충돌을 UI 포맷으로 변환
     - `async _analyze_jsonld_path(self, path)` (line 199): JSON-LD 경로 분석
     - `_split_namespace_and_property(self, path)` (line 240): 네임스페이스와 속성명 분리
     - `_determine_path_type(self, full_path, property_name)` (line 266): 경로 타입 결정
@@ -1790,7 +1795,7 @@
 
 ### `backend/bff/verify_implementation.py`
 - **Functions**
-  - `test_core_foundry_conflict_system()` (line 12): 핵심 Foundry 충돌 시스템 검증
+  - `test_core_conflict_system()` (line 12): 핵심 충돌 시스템 검증 (UI/클라이언트 친화 포맷)
   - `test_real_world_scenario()` (line 269): 실제 시나리오 시뮬레이션
 
 ## check_graph_data.py
@@ -2428,36 +2433,37 @@
 
 ### `backend/instance_worker/main.py`
 - **Functions**
-  - `async main()` (line 2864): Main entry point
+  - `async main()` (line 2998): Main entry point
 - **Classes**
-  - `StrictPalantirInstanceWorker` (line 76): STRICT Palantir-style Instance Worker
-    - `__init__(self)` (line 84): no docstring
-    - `_is_ingest_metadata(metadata)` (line 130): no docstring
-    - `_writeback_guard_blocks(cls, command)` (line 136): no docstring
-    - `async initialize(self)` (line 157): Initialize all connections
-    - `async _s3_call(self, func, *args, **kwargs)` (line 301): no docstring
-    - `async _s3_read_body(self, body)` (line 304): no docstring
-    - `async _consumer_call(self, func, *args, **kwargs)` (line 307): no docstring
-    - `async extract_payload_from_message(self, message)` (line 311): Unwrap a command from the canonical EventEnvelope message.
-    - `get_primary_key_value(self, class_id, payload, allow_generate)` (line 340): Extract primary key value dynamically based on class naming convention
-    - `_is_objectify_command(command)` (line 371): no docstring
-    - `async extract_relationships(self, db_name, class_id, payload, branch, allow_pattern_fallback, strict_schema)` (line 380): Extract ONLY relationship fields from payload
-    - `async extract_required_properties(self, db_name, class_id, branch)` (line 594): Extract required property names from the class schema.
-    - `async _apply_create_instance_side_effects(self, command_id, db_name, class_id, branch, payload, instance_id, command_log, ontology_version, created_by, allow_pattern_fallback)` (line 646): Apply the create-instance side-effects without touching command status.
-    - `async process_create_instance(self, command)` (line 913): Process CREATE_INSTANCE command - STRICT Palantir style
-    - `async process_bulk_create_instances(self, command)` (line 1283): Process BULK_CREATE_INSTANCES command (idempotent per event_id; no sequence-guard).
-    - `async process_bulk_update_instances(self, command)` (line 1413): Process BULK_UPDATE_INSTANCES command (updates multiple instances).
-    - `async process_update_instance(self, command, skip_status)` (line 1518): Process UPDATE_INSTANCE command (idempotent + ordered via registry claim).
-    - `async process_delete_instance(self, command)` (line 2019): Process DELETE_INSTANCE command (idempotent delete).
-    - `async _record_instance_edit(self, db_name, class_id, instance_id, edit_type, fields, metadata)` (line 2307): no docstring
-    - `async _resolve_instance_payload(self, db_name, branch, class_id, instance_id)` (line 2331): no docstring
-    - `async _enqueue_link_reindex(self, db_name, link_type_id)` (line 2401): no docstring
-    - `async _apply_relationship_object_link_edits(self, db_name, branch, class_id, instance_id, current_payload, previous_payload)` (line 2412): no docstring
-    - `async set_command_status(self, command_id, status, result)` (line 2492): Set command status using CommandStatusService (preserves history + pubsub).
-    - `async _heartbeat_loop(self, handler, event_id)` (line 2560): no docstring
-    - `_is_retryable_error(exc)` (line 2571): no docstring
-    - `async run(self)` (line 2595): Main processing loop
-    - `async shutdown(self)` (line 2842): Graceful shutdown
+  - `StrictInstanceWorker` (line 79): STRICT Lightweight Instance Worker
+    - `__init__(self)` (line 87): no docstring
+    - `_is_ingest_metadata(metadata)` (line 136): no docstring
+    - `_writeback_guard_blocks(cls, command)` (line 142): no docstring
+    - `async initialize(self)` (line 163): Initialize all connections
+    - `async _s3_call(self, func, *args, **kwargs)` (line 308): no docstring
+    - `async _s3_read_body(self, body)` (line 311): no docstring
+    - `async _consumer_call(self, func, *args, **kwargs)` (line 314): no docstring
+    - `async extract_payload_from_message(self, message)` (line 318): Unwrap a command from the canonical EventEnvelope message.
+    - `get_primary_key_value(self, class_id, payload, allow_generate)` (line 347): Extract primary key value dynamically based on class naming convention
+    - `_is_objectify_command(command)` (line 378): no docstring
+    - `async extract_relationships(self, db_name, class_id, payload, branch, allow_pattern_fallback, strict_schema)` (line 387): Extract ONLY relationship fields from payload
+    - `async extract_required_properties(self, db_name, class_id, branch)` (line 601): Extract required property names from the class schema.
+    - `async _apply_create_instance_side_effects(self, command_id, db_name, class_id, branch, payload, instance_id, command_log, ontology_version, created_by, allow_pattern_fallback)` (line 653): Apply the create-instance side-effects without touching command status.
+    - `async process_create_instance(self, command)` (line 920): Process CREATE_INSTANCE command - strict lightweight mode.
+    - `async process_bulk_create_instances(self, command)` (line 1290): Process BULK_CREATE_INSTANCES command (idempotent per event_id; no sequence-guard).
+    - `async process_bulk_update_instances(self, command)` (line 1420): Process BULK_UPDATE_INSTANCES command (updates multiple instances).
+    - `async process_update_instance(self, command, skip_status)` (line 1525): Process UPDATE_INSTANCE command (idempotent + ordered via registry claim).
+    - `async process_delete_instance(self, command)` (line 2026): Process DELETE_INSTANCE command (idempotent delete).
+    - `async _record_instance_edit(self, db_name, class_id, instance_id, edit_type, fields, metadata)` (line 2314): no docstring
+    - `async _resolve_instance_payload(self, db_name, branch, class_id, instance_id)` (line 2338): no docstring
+    - `async _enqueue_link_reindex(self, db_name, link_type_id)` (line 2408): no docstring
+    - `async _apply_relationship_object_link_edits(self, db_name, branch, class_id, instance_id, current_payload, previous_payload)` (line 2419): no docstring
+    - `async set_command_status(self, command_id, status, result)` (line 2499): Set command status using CommandStatusService (preserves history + pubsub).
+    - `async _heartbeat_loop(self, handler, event_id)` (line 2567): no docstring
+    - `_is_retryable_error(exc)` (line 2578): no docstring
+    - `async _send_to_dlq(self, msg, stage, error, attempt_count, payload_text, payload_obj, kafka_headers, fallback_metadata)` (line 2602): no docstring
+    - `async run(self)` (line 2665): Main processing loop
+    - `async shutdown(self)` (line 2976): Graceful shutdown
 
 ## mcp
 
@@ -2798,19 +2804,19 @@
 
 ### `backend/oms/routers/action_async.py`
 - **Functions**
-  - `_resolve_writeback_target(db_name, raw_target)` (line 159): no docstring
-  - `async submit_action_async(db_name, action_type_id, request, base_branch, terminus, event_store)` (line 180): Submit an Action for async execution.
-  - `async simulate_action_async(db_name, action_type_id, request, terminus)` (line 435): Simulate an Action writeback (dry-run).
+  - `_resolve_writeback_target(db_name, raw_target)` (line 160): no docstring
+  - `async submit_action_async(db_name, action_type_id, request, base_branch, terminus, event_store)` (line 181): Submit an Action for async execution.
+  - `async simulate_action_async(db_name, action_type_id, request, terminus)` (line 438): Simulate an Action writeback (dry-run).
 - **Classes**
-  - `ActionSubmitRequest` (line 68): no docstring
-  - `ActionSubmitResponse` (line 79): no docstring
-  - `ActionSimulateScenarioRequest` (line 90): no docstring
-  - `ActionSimulateStatePatch` (line 98): Patch-like state override for decision simulation (what-if).
-    - `_reject_delete(cls, value)` (line 109): no docstring
-  - `ActionSimulateObservedBaseOverrides` (line 115): Override observed_base snapshot fields/links to simulate stale reads.
-  - `ActionSimulateTargetAssumption` (line 122): no docstring
-  - `ActionSimulateAssumptions` (line 129): no docstring
-  - `ActionSimulateRequest` (line 136): no docstring
+  - `ActionSubmitRequest` (line 69): no docstring
+  - `ActionSubmitResponse` (line 80): no docstring
+  - `ActionSimulateScenarioRequest` (line 91): no docstring
+  - `ActionSimulateStatePatch` (line 99): Patch-like state override for decision simulation (what-if).
+    - `_reject_delete(cls, value)` (line 110): no docstring
+  - `ActionSimulateObservedBaseOverrides` (line 116): Override observed_base snapshot fields/links to simulate stale reads.
+  - `ActionSimulateTargetAssumption` (line 123): no docstring
+  - `ActionSimulateAssumptions` (line 130): no docstring
+  - `ActionSimulateRequest` (line 137): no docstring
 
 ### `backend/oms/routers/branch.py`
 - **Functions**
@@ -3499,26 +3505,27 @@
 
 ### `backend/ontology_worker/main.py`
 - **Functions**
-  - `async main()` (line 1186): 메인 진입점
+  - `async main()` (line 1334): 메인 진입점
 - **Classes**
-  - `OntologyWorker` (line 65): 온톨로지 Command를 처리하는 워커
-    - `__init__(self)` (line 68): no docstring
-    - `async _wait_for_database_exists(self, db_name, expected, timeout_seconds)` (line 90): no docstring
-    - `async _heartbeat_loop(self, handler, event_id)` (line 106): no docstring
-    - `async _consumer_call(self, func, *args, **kwargs)` (line 116): no docstring
-    - `async initialize(self)` (line 120): 워커 초기화
-    - `async process_command(self, command_data)` (line 217): Command 처리
-    - `_is_retryable_error(exc)` (line 263): no docstring
-    - `async handle_create_ontology(self, command_data)` (line 275): 온톨로지 생성 처리
-    - `async handle_update_ontology(self, command_data)` (line 456): 온톨로지 업데이트 처리
-    - `async handle_delete_ontology(self, command_data)` (line 631): 온톨로지 삭제 처리
-    - `async handle_create_database(self, command_data)` (line 777): 데이터베이스 생성 처리
-    - `async handle_delete_database(self, command_data)` (line 845): 데이터베이스 삭제 처리
-    - `_to_domain_envelope(self, event, kafka_topic)` (line 896): no docstring
-    - `async publish_event(self, event)` (line 939): 이벤트 발행 (Event Sourcing: S3/MinIO -> EventPublisher -> Kafka).
-    - `async publish_failure_event(self, command_data, error)` (line 951): 실패 이벤트 발행
-    - `async run(self)` (line 972): 메인 실행 루프
-    - `async shutdown(self)` (line 1165): 워커 종료
+  - `OntologyWorker` (line 68): 온톨로지 Command를 처리하는 워커
+    - `__init__(self)` (line 71): no docstring
+    - `async _wait_for_database_exists(self, db_name, expected, timeout_seconds)` (line 96): no docstring
+    - `async _heartbeat_loop(self, handler, event_id)` (line 112): no docstring
+    - `async _consumer_call(self, func, *args, **kwargs)` (line 122): no docstring
+    - `async initialize(self)` (line 126): 워커 초기화
+    - `async _send_to_dlq(self, msg, stage, error, attempt_count, payload_text, payload_obj, kafka_headers, fallback_metadata)` (line 224): no docstring
+    - `async process_command(self, command_data)` (line 287): Command 처리
+    - `_is_retryable_error(exc)` (line 333): no docstring
+    - `async handle_create_ontology(self, command_data)` (line 345): 온톨로지 생성 처리
+    - `async handle_update_ontology(self, command_data)` (line 526): 온톨로지 업데이트 처리
+    - `async handle_delete_ontology(self, command_data)` (line 701): 온톨로지 삭제 처리
+    - `async handle_create_database(self, command_data)` (line 847): 데이터베이스 생성 처리
+    - `async handle_delete_database(self, command_data)` (line 915): 데이터베이스 삭제 처리
+    - `_to_domain_envelope(self, event, kafka_topic)` (line 966): no docstring
+    - `async publish_event(self, event)` (line 1009): 이벤트 발행 (Event Sourcing: S3/MinIO -> EventPublisher -> Kafka).
+    - `async publish_failure_event(self, command_data, error)` (line 1021): 실패 이벤트 발행
+    - `async run(self)` (line 1042): 메인 실행 루프
+    - `async shutdown(self)` (line 1313): 워커 종료
 
 ## perf
 
@@ -3541,7 +3548,7 @@
 
 ### `backend/pipeline_scheduler/main.py`
 - **Functions**
-  - `async main()` (line 20): no docstring
+  - `async main()` (line 21): no docstring
 
 ## pipeline_worker
 
@@ -3792,27 +3799,27 @@
 ### `backend/shared/config/app_config.py`
 - **Classes**
   - `AppConfig` (line 11): SPICE HARVESTER 애플리케이션 전체 설정 중앙 관리 클래스
-    - `get_instance_command_key(db_name, command_id)` (line 52): 인스턴스 Command S3 키 생성
-    - `get_instance_latest_key(db_name, instance_id)` (line 57): 인스턴스 최신 상태 S3 키 생성 (deprecated - 순수 append-only로 변경됨)
-    - `get_command_status_key(command_id)` (line 65): Command 상태 Redis 키 생성
-    - `get_command_result_key(command_id)` (line 70): Command 결과 Redis 키 생성
-    - `get_command_status_pattern()` (line 75): 모든 Command 상태 키 패턴
-    - `get_class_label_key(db_name, class_id, branch)` (line 80): 클래스 라벨 캐시 Redis 키 생성 (branch-aware).
-    - `get_user_session_key(user_id)` (line 87): 사용자 세션 Redis 키 생성
-    - `get_websocket_connection_key(client_id)` (line 92): WebSocket 연결 Redis 키 생성
-    - `get_instances_index_name(db_name, version)` (line 101): 인스턴스 Elasticsearch 인덱스 이름 생성
-    - `get_ontologies_index_name(db_name, version)` (line 107): 온톨로지 Elasticsearch 인덱스 이름 생성
-    - `get_oms_url()` (line 116): OMS 서비스 URL
-    - `get_bff_url()` (line 122): BFF 서비스 URL
-    - `get_funnel_url()` (line 128): Funnel 서비스 URL
-    - `_normalize_object_type_id(value)` (line 174): no docstring
-    - `get_writeback_enabled_object_types(cls)` (line 188): no docstring
-    - `is_writeback_enabled_object_type(cls, class_id)` (line 197): no docstring
-    - `get_ontology_writeback_branch(cls, db_name)` (line 207): Return a lakeFS-compatible writeback branch id.
-    - `sanitize_lakefs_branch_id(value)` (line 222): no docstring
-    - `validate_config(cls)` (line 276): 설정값들의 유효성 검증
-    - `get_all_topics(cls)` (line 305): 모든 Kafka 토픽 목록 반환
-    - `get_config_summary(cls)` (line 325): 현재 설정 요약 반환 (디버깅용)
+    - `get_instance_command_key(db_name, command_id)` (line 57): 인스턴스 Command S3 키 생성
+    - `get_instance_latest_key(db_name, instance_id)` (line 62): 인스턴스 최신 상태 S3 키 생성 (deprecated - 순수 append-only로 변경됨)
+    - `get_command_status_key(command_id)` (line 70): Command 상태 Redis 키 생성
+    - `get_command_result_key(command_id)` (line 75): Command 결과 Redis 키 생성
+    - `get_command_status_pattern()` (line 80): 모든 Command 상태 키 패턴
+    - `get_class_label_key(db_name, class_id, branch)` (line 85): 클래스 라벨 캐시 Redis 키 생성 (branch-aware).
+    - `get_user_session_key(user_id)` (line 92): 사용자 세션 Redis 키 생성
+    - `get_websocket_connection_key(client_id)` (line 97): WebSocket 연결 Redis 키 생성
+    - `get_instances_index_name(db_name, version)` (line 106): 인스턴스 Elasticsearch 인덱스 이름 생성
+    - `get_ontologies_index_name(db_name, version)` (line 112): 온톨로지 Elasticsearch 인덱스 이름 생성
+    - `get_oms_url()` (line 121): OMS 서비스 URL
+    - `get_bff_url()` (line 127): BFF 서비스 URL
+    - `get_funnel_url()` (line 133): Funnel 서비스 URL
+    - `_normalize_object_type_id(value)` (line 179): no docstring
+    - `get_writeback_enabled_object_types(cls)` (line 193): no docstring
+    - `is_writeback_enabled_object_type(cls, class_id)` (line 202): no docstring
+    - `get_ontology_writeback_branch(cls, db_name)` (line 212): Return a lakeFS-compatible writeback branch id.
+    - `sanitize_lakefs_branch_id(value)` (line 227): no docstring
+    - `validate_config(cls)` (line 281): 설정값들의 유효성 검증
+    - `get_all_topics(cls)` (line 310): 모든 Kafka 토픽 목록 반환
+    - `get_config_summary(cls)` (line 333): 현재 설정 요약 반환 (디버깅용)
 
 ### `backend/shared/config/kafka_config.py`
 - **Functions**
@@ -3855,90 +3862,99 @@
 
 ### `backend/shared/config/service_config.py`
 - **Functions**
-  - `get_oms_url()` (line 648): Get OMS URL - convenience function.
-  - `get_bff_url()` (line 653): Get BFF URL - convenience function.
-  - `get_funnel_url()` (line 658): Get Funnel URL - convenience function.
-  - `get_agent_url()` (line 663): Get Agent URL - convenience function.
+  - `get_oms_url()` (line 581): Get OMS URL - convenience function.
+  - `get_bff_url()` (line 586): Get BFF URL - convenience function.
+  - `get_funnel_url()` (line 591): Get Funnel URL - convenience function.
+  - `get_agent_url()` (line 596): Get Agent URL - convenience function.
 - **Classes**
-  - `ServiceConfig` (line 18): Centralized service configuration management.
-    - `get_oms_port()` (line 35): Get OMS (Ontology Management Service) port from environment or default.
-    - `get_bff_port()` (line 40): Get BFF (Backend for Frontend) port from environment or default.
-    - `get_funnel_port()` (line 45): Get Funnel service port from environment or default.
-    - `get_agent_port()` (line 50): Get Agent service port from environment or default.
-    - `get_oms_host()` (line 55): Get OMS host from environment or default.
-    - `get_bff_host()` (line 61): Get BFF host from environment or default.
+  - `ServiceConfig` (line 20): Centralized service configuration management.
+    - `get_oms_port()` (line 37): Get OMS (Ontology Management Service) port from environment or default.
+    - `get_bff_port()` (line 42): Get BFF (Backend for Frontend) port from environment or default.
+    - `get_funnel_port()` (line 47): Get Funnel service port from environment or default.
+    - `get_agent_port()` (line 52): Get Agent service port from environment or default.
+    - `get_oms_host()` (line 57): Get OMS host from environment or default.
+    - `get_bff_host()` (line 62): Get BFF host from environment or default.
     - `get_funnel_host()` (line 67): Get Funnel host from environment or default.
-    - `get_agent_host()` (line 73): Get Agent host from environment or default.
-    - `get_oms_url()` (line 78): Get complete OMS URL from environment or construct from host/port.
-    - `get_bff_url()` (line 96): Get complete BFF URL from environment or construct from host/port.
-    - `get_funnel_url()` (line 114): Get complete Funnel URL from environment or construct from host/port.
-    - `get_agent_url()` (line 132): Get complete Agent URL from environment or construct from host/port.
-    - `get_terminus_url()` (line 150): Get TerminusDB URL from environment or default.
-    - `get_postgres_url()` (line 160): Get PostgreSQL connection URL from environment or default.
-    - `get_kafka_bootstrap_servers()` (line 175): Get Kafka bootstrap servers from environment or default.
-    - `get_redis_host()` (line 189): Get Redis host from environment or default.
-    - `get_redis_port()` (line 195): Get Redis port from environment or default.
-    - `get_redis_url()` (line 200): Get Redis connection URL from environment or construct from host/port.
-    - `get_elasticsearch_host()` (line 215): Get Elasticsearch host from environment or default.
-    - `get_elasticsearch_port()` (line 223): Get Elasticsearch port from environment or default.
-    - `get_elasticsearch_url()` (line 228): Get Elasticsearch base URL from environment or construct from host/port.
-    - `is_docker_environment()` (line 237): Check if running in Docker environment.
-    - `get_minio_endpoint()` (line 250): Get MinIO/S3 endpoint URL.
-    - `get_minio_access_key()` (line 258): Get MinIO/S3 access key.
-    - `get_minio_secret_key()` (line 263): Get MinIO/S3 secret key.
-    - `get_lakefs_api_url()` (line 268): Get lakeFS API base URL.
-    - `get_lakefs_s3_endpoint()` (line 284): Get lakeFS S3 Gateway endpoint URL.
-    - `get_service_url(service_name)` (line 295): Get URL for a specific service by name.
-    - `get_all_service_urls()` (line 322): Get all service URLs as a dictionary.
-    - `validate_configuration()` (line 333): Validate that all required configuration is present.
-    - `use_https()` (line 356): Check if HTTPS should be used for service communication.
-    - `is_production()` (line 366): Check if running in production environment.
-    - `is_debug_endpoints_enabled()` (line 371): Enable opt-in debug endpoints (never on by default).
-    - `get_ssl_cert_path()` (line 376): Get SSL certificate path from environment.
-    - `get_ssl_key_path()` (line 387): Get SSL key path from environment.
-    - `get_ssl_ca_path()` (line 398): Get SSL CA certificate path from environment.
-    - `verify_ssl()` (line 409): Check if SSL certificate verification should be enabled.
-    - `get_protocol()` (line 424): Get the protocol to use for service communication.
-    - `get_ssl_config()` (line 434): Get complete SSL configuration as a dictionary.
-    - `get_client_ssl_config()` (line 461): Get SSL configuration for HTTP clients (requests, httpx).
-    - `get_cors_origins()` (line 480): Get CORS allowed origins from environment variables.
-    - `_get_environment_default_origins()` (line 535): Get environment-based default CORS origins.
-    - `_get_dev_cors_origins()` (line 554): Get development CORS origins for common frontend ports.
-    - `get_cors_config()` (line 581): Get complete CORS configuration for FastAPI middleware.
-    - `is_cors_enabled()` (line 621): Check if CORS should be enabled.
-    - `get_cors_debug_info()` (line 631): Get CORS configuration debug information.
+    - `get_agent_host()` (line 72): Get Agent host from environment or default.
+    - `get_oms_url()` (line 77): Get complete OMS URL from environment or construct from host/port.
+    - `get_bff_url()` (line 89): Get complete BFF URL from environment or construct from host/port.
+    - `get_funnel_url()` (line 101): Get complete Funnel URL from environment or construct from host/port.
+    - `get_agent_url()` (line 113): Get complete Agent URL from environment or construct from host/port.
+    - `get_terminus_url()` (line 125): Get TerminusDB URL from environment or default.
+    - `get_postgres_url()` (line 130): Get PostgreSQL connection URL from environment or default.
+    - `get_kafka_bootstrap_servers()` (line 135): Get Kafka bootstrap servers from environment or default.
+    - `get_redis_host()` (line 140): Get Redis host from environment or default.
+    - `get_redis_port()` (line 145): Get Redis port from environment or default.
+    - `get_redis_url()` (line 150): Get Redis connection URL from environment or construct from host/port.
+    - `get_elasticsearch_host()` (line 155): Get Elasticsearch host from environment or default.
+    - `get_elasticsearch_port()` (line 160): Get Elasticsearch port from environment or default.
+    - `get_elasticsearch_url()` (line 165): Get Elasticsearch base URL from environment or construct from host/port.
+    - `is_docker_environment()` (line 170): Check if running in Docker environment.
+    - `get_minio_endpoint()` (line 183): Get MinIO/S3 endpoint URL.
+    - `get_minio_access_key()` (line 188): Get MinIO/S3 access key.
+    - `get_minio_secret_key()` (line 193): Get MinIO/S3 secret key.
+    - `get_lakefs_api_url()` (line 198): Get lakeFS API base URL.
+    - `get_lakefs_s3_endpoint()` (line 214): Get lakeFS S3 Gateway endpoint URL.
+    - `get_service_url(service_name)` (line 225): Get URL for a specific service by name.
+    - `get_all_service_urls()` (line 252): Get all service URLs as a dictionary.
+    - `validate_configuration()` (line 263): Validate that all required configuration is present.
+    - `use_https()` (line 286): Check if HTTPS should be used for service communication.
+    - `is_production()` (line 296): Check if running in production environment.
+    - `is_debug_endpoints_enabled()` (line 301): Enable opt-in debug endpoints (never on by default).
+    - `get_ssl_cert_path()` (line 306): Get SSL certificate path from environment.
+    - `get_ssl_key_path()` (line 318): Get SSL key path from environment.
+    - `get_ssl_ca_path()` (line 330): Get SSL CA certificate path from environment.
+    - `verify_ssl()` (line 342): Check if SSL certificate verification should be enabled.
+    - `get_protocol()` (line 357): Get the protocol to use for service communication.
+    - `get_ssl_config()` (line 367): Get complete SSL configuration as a dictionary.
+    - `get_client_ssl_config()` (line 394): Get SSL configuration for HTTP clients (requests, httpx).
+    - `get_cors_origins()` (line 413): Get CORS allowed origins from environment variables.
+    - `_get_environment_default_origins()` (line 468): Get environment-based default CORS origins.
+    - `_get_dev_cors_origins()` (line 487): Get development CORS origins for common frontend ports.
+    - `get_cors_config()` (line 514): Get complete CORS configuration for FastAPI middleware.
+    - `is_cors_enabled()` (line 554): Check if CORS should be enabled.
+    - `get_cors_debug_info()` (line 564): Get CORS configuration debug information.
 
 ### `backend/shared/config/settings.py`
 - **Functions**
-  - `get_settings()` (line 510): Get the global settings instance
-  - `reload_settings()` (line 522): Reload settings from environment (useful for testing)
+  - `_is_docker_environment()` (line 22): no docstring
+  - `get_settings()` (line 637): Get the global settings instance
+  - `reload_settings()` (line 649): Reload settings from environment (useful for testing)
 - **Classes**
-  - `Environment` (line 21): Application environment types
-  - `DatabaseSettings` (line 28): Database configuration settings
-    - `get_terminus_url(cls, v)` (line 58): no docstring
-    - `get_terminus_user(cls, v)` (line 63): no docstring
-    - `get_terminus_password(cls, v)` (line 68): no docstring
-    - `get_terminus_account(cls, v)` (line 73): no docstring
-    - `postgres_url(self)` (line 169): Construct PostgreSQL connection URL
-    - `kafka_servers(self)` (line 174): Get Kafka bootstrap servers
-    - `elasticsearch_url(self)` (line 181): Construct Elasticsearch URL with authentication
-    - `redis_url(self)` (line 188): Construct Redis URL
-  - `ServiceSettings` (line 195): Service configuration settings
-    - `oms_base_url(self)` (line 264): Construct OMS base URL
-    - `bff_base_url(self)` (line 270): Construct BFF base URL
-    - `funnel_base_url(self)` (line 276): Construct Funnel base URL
-    - `cors_origins_list(self)` (line 282): Parse CORS origins from JSON string
-  - `StorageSettings` (line 290): Storage configuration settings
-    - `use_ssl(self)` (line 335): Determine if SSL should be used based on endpoint URL
-  - `CacheSettings` (line 340): Cache and TTL configuration settings
-  - `SecuritySettings` (line 365): Security configuration settings
-  - `PerformanceSettings` (line 390): Performance and optimization settings
-  - `TestSettings` (line 421): Test environment configuration
-  - `GoogleSheetsSettings` (line 441): Google Sheets integration settings
-  - `ApplicationSettings` (line 461): Main application settings - aggregates all other settings
-    - `is_development(self)` (line 492): Check if running in development mode
-    - `is_production(self)` (line 497): Check if running in production mode
-    - `is_test(self)` (line 502): Check if running in test mode
+  - `Environment` (line 31): Application environment types
+  - `DatabaseSettings` (line 38): Database configuration settings
+    - `get_terminus_url(cls, v)` (line 70): no docstring
+    - `get_terminus_user(cls, v)` (line 75): no docstring
+    - `get_terminus_password(cls, v)` (line 80): no docstring
+    - `get_terminus_account(cls, v)` (line 85): no docstring
+    - `postgres_url(self)` (line 181): Construct PostgreSQL connection URL
+    - `kafka_servers(self)` (line 188): Get Kafka bootstrap servers
+    - `elasticsearch_url(self)` (line 195): Construct Elasticsearch URL with authentication
+    - `redis_url(self)` (line 204): Construct Redis URL
+  - `ServiceSettings` (line 213): Service configuration settings
+    - `get_oms_base_url_override(cls, v)` (line 311): no docstring
+    - `get_bff_base_url_override(cls, v)` (line 316): no docstring
+    - `get_funnel_base_url_override(cls, v)` (line 321): no docstring
+    - `get_agent_base_url_override(cls, v)` (line 326): no docstring
+    - `oms_base_url(self)` (line 330): Construct OMS base URL
+    - `bff_base_url(self)` (line 338): Construct BFF base URL
+    - `funnel_base_url(self)` (line 346): Construct Funnel base URL
+    - `agent_base_url(self)` (line 354): Construct Agent base URL
+    - `cors_origins_list(self)` (line 362): Parse CORS origins from JSON string
+  - `StorageSettings` (line 370): Storage configuration settings
+    - `use_ssl(self)` (line 425): Determine if SSL should be used based on endpoint URL
+    - `lakefs_api_url_effective(self)` (line 430): Return lakeFS API base URL (without /api/v1).
+    - `lakefs_s3_endpoint_effective(self)` (line 438): Return lakeFS S3 Gateway endpoint URL.
+  - `CacheSettings` (line 445): Cache and TTL configuration settings
+  - `SecuritySettings` (line 470): Security configuration settings
+  - `PerformanceSettings` (line 495): Performance and optimization settings
+  - `TestSettings` (line 526): Test environment configuration
+  - `GoogleSheetsSettings` (line 546): Google Sheets integration settings
+  - `ApplicationSettings` (line 566): Main application settings - aggregates all other settings
+    - `normalize_environment(cls, v)` (line 598): no docstring
+    - `is_development(self)` (line 619): Check if running in development mode
+    - `is_production(self)` (line 624): Check if running in production mode
+    - `is_test(self)` (line 629): Check if running in test mode
 
 ### `backend/shared/dependencies/__init__.py`
 
@@ -4031,21 +4047,22 @@
 - **Functions**
   - `_normalize_origin(service_name, origin)` (line 31): no docstring
   - `_derive_category_code(enterprise)` (line 44): no docstring
-  - `build_error_envelope(service_name, message, detail, code, category, status_code, errors, context, external_code, objectify_error, enterprise, origin, request_id, trace_id, prefer_status_code)` (line 50): no docstring
+  - `build_error_envelope(service_name, message, detail, code, category, status_code, errors, context, external_code, objectify_error, enterprise, origin, request_id, correlation_id, trace_id, prefer_status_code)` (line 50): no docstring
 
 ### `backend/shared/errors/error_response.py`
 - **Functions**
-  - `_get_request_id(request)` (line 41): no docstring
-  - `_get_origin(request, service_name)` (line 45): no docstring
-  - `_normalize_message(detail)` (line 58): no docstring
-  - `_extract_upstream_metadata(body)` (line 70): no docstring
-  - `_extract_external_code(detail)` (line 85): no docstring
-  - `_classify_upstream_url(url, status_code)` (line 100): no docstring
-  - `_classify_db_error(exc)` (line 122): no docstring
-  - `_build_payload(request, service_name, code, category, status_code, message, detail, errors, context, external_code)` (line 143): no docstring
-  - `_build_response(request, service_name, code, category, status_code, message, detail, errors, context, external_code)` (line 172): no docstring
-  - `_resolve_validation_error(exc)` (line 200): no docstring
-  - `install_error_handlers(app, service_name, validation_status)` (line 207): no docstring
+  - `_get_request_id(request)` (line 45): no docstring
+  - `_get_correlation_id(request)` (line 54): no docstring
+  - `_get_origin(request, service_name)` (line 63): no docstring
+  - `_normalize_message(detail)` (line 76): no docstring
+  - `_extract_upstream_metadata(body)` (line 88): no docstring
+  - `_extract_external_code(detail)` (line 103): no docstring
+  - `_classify_upstream_url(url, status_code)` (line 118): no docstring
+  - `_classify_db_error(exc)` (line 140): no docstring
+  - `_build_payload(request, service_name, code, category, status_code, message, detail, errors, context, external_code)` (line 161): no docstring
+  - `_build_response(request, service_name, code, category, status_code, message, detail, errors, context, external_code)` (line 191): no docstring
+  - `_resolve_validation_error(exc)` (line 219): no docstring
+  - `install_error_handlers(app, service_name, validation_status)` (line 226): no docstring
 
 ### `backend/shared/errors/error_types.py`
 - **Classes**
@@ -4239,10 +4256,10 @@
   - `EventEnvelope` (line 22): Canonical event envelope.
     - `_normalize_datetime(value)` (line 50): no docstring
     - `from_command(cls, command, actor, event_type, kafka_topic, metadata)` (line 56): no docstring
-    - `from_base_event(cls, event, kafka_topic, metadata)` (line 92): no docstring
-    - `from_connector_update(cls, source_type, source_id, cursor, previous_cursor, sequence_number, occurred_at, event_type, actor, kafka_topic, data, metadata)` (line 127): Build a canonical connector update envelope.
-    - `as_kafka_key(self)` (line 199): no docstring
-    - `as_json(self)` (line 203): no docstring
+    - `from_base_event(cls, event, kafka_topic, metadata)` (line 110): no docstring
+    - `from_connector_update(cls, source_type, source_id, cursor, previous_cursor, sequence_number, occurred_at, event_type, actor, kafka_topic, data, metadata)` (line 145): Build a canonical connector update envelope.
+    - `as_kafka_key(self)` (line 217): no docstring
+    - `as_json(self)` (line 221): no docstring
 
 ### `backend/shared/models/events.py`
 - **Classes**
@@ -4497,23 +4514,25 @@
 
 ### `backend/shared/observability/context_propagation.py`
 - **Functions**
-  - `_to_text(value)` (line 45): no docstring
-  - `carrier_from_kafka_headers(kafka_headers)` (line 61): Extract a W3C carrier dict from confluent_kafka headers.
-  - `carrier_from_envelope_metadata(payload_or_metadata)` (line 80): Extract a W3C carrier dict from an EventEnvelope.metadata-like dict.
-  - `kafka_headers_from_carrier(carrier)` (line 105): no docstring
-  - `kafka_headers_from_envelope_metadata(payload_or_metadata)` (line 118): no docstring
-  - `kafka_headers_from_current_context()` (line 123): Build Kafka headers (W3C Trace Context + baggage) from the current OTel context.
-  - `enrich_metadata_with_current_trace(metadata)` (line 137): Mutate a metadata/payload dict by adding W3C trace context keys.
-  - `attach_context_from_carrier(carrier, service_name)` (line 159): Attach an extracted context for the duration of the `with` block.
-  - `attach_context_from_kafka(kafka_headers, fallback_metadata, service_name)` (line 195): Attach trace context from Kafka headers (preferred) or fallback metadata.
+  - `_to_text(value)` (line 60): no docstring
+  - `_encode_baggage_value(value)` (line 76): no docstring
+  - `_merge_baggage(existing, request_id, correlation_id, db_name)` (line 80): no docstring
+  - `carrier_from_kafka_headers(kafka_headers)` (line 109): Extract a W3C carrier dict from confluent_kafka headers.
+  - `carrier_from_envelope_metadata(payload_or_metadata)` (line 128): Extract a W3C carrier dict from an EventEnvelope.metadata-like dict.
+  - `kafka_headers_from_carrier(carrier)` (line 177): no docstring
+  - `kafka_headers_from_envelope_metadata(payload_or_metadata)` (line 190): no docstring
+  - `kafka_headers_from_current_context()` (line 195): Build Kafka headers (W3C Trace Context + baggage) from the current OTel context.
+  - `enrich_metadata_with_current_trace(metadata)` (line 218): Mutate a metadata/payload dict by adding W3C trace context keys.
+  - `attach_context_from_carrier(carrier, service_name)` (line 289): Attach an extracted context for the duration of the `with` block.
+  - `attach_context_from_kafka(kafka_headers, fallback_metadata, service_name)` (line 333): Attach trace context from Kafka headers (preferred) or fallback metadata.
 
 ### `backend/shared/observability/logging.py`
 - **Functions**
-  - `install_trace_context_record_factory()` (line 28): Install a global LogRecord factory that always provides `trace_id`/`span_id`.
-  - `install_trace_context_filter(logger)` (line 122): Install TraceContextFilter on the given logger (default: root logger).
+  - `install_trace_context_record_factory()` (line 39): Install a global LogRecord factory that always provides `trace_id`/`span_id`.
+  - `install_trace_context_filter(logger)` (line 173): Install TraceContextFilter on the given logger (default: root logger).
 - **Classes**
-  - `TraceContextFilter` (line 81): Attach `trace_id` and `span_id` fields to every LogRecord.
-    - `filter(self, record)` (line 88): no docstring
+  - `TraceContextFilter` (line 112): Attach `trace_id` and `span_id` fields to every LogRecord.
+    - `filter(self, record)` (line 119): no docstring
 
 ### `backend/shared/observability/metrics.py`
 - **Functions**
@@ -4522,49 +4541,62 @@
   - `_prom_counter(name, description, labelnames)` (line 137): no docstring
   - `_prom_histogram(name, description, labelnames)` (line 145): no docstring
   - `_prom_gauge(name, description, labelnames)` (line 153): no docstring
-  - `measure_time(metric_name, collector)` (line 641): Decorator for measuring function execution time
-  - `prometheus_latest()` (line 754): Render Prometheus metrics for `/metrics`.
-  - `get_metrics_collector(service_name)` (line 768): Get or create global metrics collector
+  - `measure_time(metric_name, collector)` (line 658): Decorator for measuring function execution time
+  - `prometheus_latest()` (line 771): Render Prometheus metrics for `/metrics`.
+  - `get_metrics_collector(service_name)` (line 785): Get or create global metrics collector
 - **Classes**
   - `OpenTelemetryMetricsConfig` (line 40): no docstring
   - `MetricsCollector` (line 161): Centralized metrics collection based on Context7 patterns
     - `__init__(self, service_name)` (line 166): Initialize metrics collector
     - `_initialize_metrics(self)` (line 179): Initialize all metrics
-    - `record_request(self, method, endpoint, status_code, duration, request_size, response_size)` (line 390): Record HTTP request metrics
-    - `record_db_query(self, operation, table, duration, success)` (line 439): Record database query metrics
-    - `record_cache_access(self, hit, cache_name)` (line 478): Record cache access
-    - `record_event(self, event_type, action, duration)` (line 503): Record event sourcing metrics
-    - `record_rate_limit(self, endpoint, rejected, strategy)` (line 541): Record rate limiting metrics
-    - `record_business_metric(self, metric_name, value, attributes)` (line 578): Record custom business metrics
-    - `timer(self, metric_name, attributes)` (line 614): Context manager for timing operations
-  - `RequestMetricsMiddleware` (line 695): FastAPI middleware for automatic request metrics collection
-    - `__init__(self, metrics_collector)` (line 700): Initialize middleware
-    - `async __call__(self, request, call_next)` (line 710): Process request and collect metrics
+    - `record_request(self, method, endpoint, status_code, duration, request_size, response_size)` (line 407): Record HTTP request metrics
+    - `record_db_query(self, operation, table, duration, success)` (line 456): Record database query metrics
+    - `record_cache_access(self, hit, cache_name)` (line 495): Record cache access
+    - `record_event(self, event_type, action, duration)` (line 520): Record event sourcing metrics
+    - `record_rate_limit(self, endpoint, rejected, strategy)` (line 558): Record rate limiting metrics
+    - `record_business_metric(self, metric_name, value, attributes)` (line 595): Record custom business metrics
+    - `timer(self, metric_name, attributes)` (line 631): Context manager for timing operations
+  - `RequestMetricsMiddleware` (line 712): FastAPI middleware for automatic request metrics collection
+    - `__init__(self, metrics_collector)` (line 717): Initialize middleware
+    - `async __call__(self, request, call_next)` (line 727): Process request and collect metrics
+
+### `backend/shared/observability/request_context.py`
+- **Functions**
+  - `_norm(value)` (line 42): no docstring
+  - `generate_request_id()` (line 49): no docstring
+  - `get_request_id()` (line 53): no docstring
+  - `get_correlation_id()` (line 57): no docstring
+  - `get_db_name()` (line 61): no docstring
+  - `get_principal()` (line 65): no docstring
+  - `parse_baggage_header(header_value)` (line 69): Best-effort parser for W3C `baggage` header.
+  - `context_from_headers(headers)` (line 102): no docstring
+  - `context_from_metadata(metadata)` (line 119): no docstring
+  - `request_context(request_id, correlation_id, db_name, principal, inject_baggage)` (line 142): Attach request/debug context for the duration of a `with` block.
 
 ### `backend/shared/observability/tracing.py`
 - **Functions**
-  - `get_tracing_service(service_name)` (line 399): no docstring
-  - `trace_endpoint(name)` (line 408): Lazily create a tracing decorator for request handlers.
-  - `trace_db_operation(name)` (line 421): no docstring
-  - `trace_external_call(name)` (line 427): no docstring
-  - `_lazy_trace(name, kind, attributes)` (line 432): no docstring
+  - `get_tracing_service(service_name)` (line 463): no docstring
+  - `trace_endpoint(name)` (line 472): Lazily create a tracing decorator for request handlers.
+  - `trace_db_operation(name)` (line 485): no docstring
+  - `trace_external_call(name)` (line 491): no docstring
+  - `_lazy_trace(name, kind, attributes)` (line 496): no docstring
 - **Classes**
-  - `OpenTelemetryConfig` (line 108): no docstring
-  - `TracingService` (line 134): Distributed tracing facade.
-    - `__init__(self, service_name)` (line 142): no docstring
-    - `_log_no_op_once(self, reason)` (line 151): no docstring
-    - `initialize(self)` (line 157): no docstring
-    - `instrument_fastapi(self, app)` (line 249): no docstring
-    - `instrument_clients(self)` (line 265): no docstring
-    - `span(self, name, kind, attributes)` (line 306): no docstring
-    - `trace(self, name, kind, attributes)` (line 321): no docstring
-    - `get_current_span(self)` (line 341): no docstring
-    - `record_exception(self, exception)` (line 346): no docstring
-    - `set_span_attribute(self, key, value)` (line 353): no docstring
-    - `get_trace_id(self)` (line 359): no docstring
-    - `get_span_id(self)` (line 368): no docstring
-    - `inject_trace_context(self, headers)` (line 377): no docstring
-    - `extract_trace_context(self, headers)` (line 386): no docstring
+  - `OpenTelemetryConfig` (line 128): no docstring
+  - `TracingService` (line 155): Distributed tracing facade.
+    - `__init__(self, service_name)` (line 163): no docstring
+    - `_log_no_op_once(self, reason)` (line 172): no docstring
+    - `initialize(self)` (line 178): no docstring
+    - `instrument_fastapi(self, app)` (line 270): no docstring
+    - `instrument_clients(self)` (line 286): no docstring
+    - `span(self, name, kind, attributes)` (line 370): no docstring
+    - `trace(self, name, kind, attributes)` (line 385): no docstring
+    - `get_current_span(self)` (line 405): no docstring
+    - `record_exception(self, exception)` (line 410): no docstring
+    - `set_span_attribute(self, key, value)` (line 417): no docstring
+    - `get_trace_id(self)` (line 423): no docstring
+    - `get_span_id(self)` (line 432): no docstring
+    - `inject_trace_context(self, headers)` (line 441): no docstring
+    - `extract_trace_context(self, headers)` (line 450): no docstring
 
 ### `backend/shared/routers/__init__.py`
 
@@ -5188,7 +5220,7 @@
     - `_schema_range_for_predicate(schema_doc, predicate)` (line 117): no docstring
     - `async _validate_hop_semantics(self, db_name, branch, start_class, hops)` (line 130): no docstring
     - `async multi_hop_query(self, db_name, start_class, hops, base_branch, overlay_branch, strict_overlay, filters, limit, offset, max_nodes, max_edges, include_paths, max_paths, no_cycles, include_documents, include_audit)` (line 159): Execute multi-hop graph query with ES federation using REAL WOQL
-    - `async simple_graph_query(self, db_name, class_name, base_branch, overlay_branch, strict_overlay, filters, include_documents, include_audit)` (line 450): Simple single-class query - PALANTIR STYLE
+    - `async simple_graph_query(self, db_name, class_name, base_branch, overlay_branch, strict_overlay, filters, include_documents, include_audit)` (line 450): Simple single-class query - lightweight graph federation
     - `_build_simple_woql(self, class_name, filters)` (line 539): Build WOQL query for simple class query
     - `_build_multi_hop_woql(self, start_class, hops, filters)` (line 579): Build WOQL query for multi-hop traversal
     - `_extract_es_doc_id(self, instance_id)` (line 690): Extract ES document ID from instance ID
@@ -5658,24 +5690,24 @@
 
 ### `backend/shared/services/pipeline_scheduler.py`
 - **Functions**
-  - `_should_run_schedule(now, last_run, interval, cron)` (line 361): no docstring
-  - `_cron_matches(now, expression)` (line 378): no docstring
-  - `_cron_field_matches(field, value)` (line 393): no docstring
-  - `_normalize_dependencies(raw)` (line 427): no docstring
-  - `async _dependencies_satisfied(registry, dependencies)` (line 431): no docstring
-  - `async _evaluate_dependencies(registry, dependencies)` (line 439): no docstring
-  - `_is_valid_cron_expression(expression)` (line 474): no docstring
-  - `_is_valid_cron_field(field)` (line 481): no docstring
+  - `_should_run_schedule(now, last_run, interval, cron)` (line 382): no docstring
+  - `_cron_matches(now, expression)` (line 399): no docstring
+  - `_cron_field_matches(field, value)` (line 414): no docstring
+  - `_normalize_dependencies(raw)` (line 448): no docstring
+  - `async _dependencies_satisfied(registry, dependencies)` (line 452): no docstring
+  - `async _evaluate_dependencies(registry, dependencies)` (line 460): no docstring
+  - `_is_valid_cron_expression(expression)` (line 495): no docstring
+  - `_is_valid_cron_field(field)` (line 502): no docstring
 - **Classes**
   - `ScheduledPipeline` (line 28): no docstring
   - `DependencyEvaluation` (line 37): no docstring
   - `PipelineScheduler` (line 43): no docstring
-    - `__init__(self, registry, queue, poll_seconds, tracing)` (line 44): no docstring
-    - `async run(self)` (line 58): no docstring
-    - `async stop(self)` (line 78): no docstring
-    - `async _tick(self)` (line 81): no docstring
-    - `async _record_scheduler_config_error(self, pipeline_id, now, error_key, detail, extra)` (line 270): no docstring
-    - `async _record_scheduler_ignored(self, pipeline_id, now, reason, detail, extra)` (line 314): no docstring
+    - `__init__(self, registry, queue, poll_seconds, tracing, metrics)` (line 44): no docstring
+    - `async run(self)` (line 60): no docstring
+    - `async stop(self)` (line 90): no docstring
+    - `async _tick(self)` (line 93): no docstring
+    - `async _record_scheduler_config_error(self, pipeline_id, now, error_key, detail, extra)` (line 291): no docstring
+    - `async _record_scheduler_ignored(self, pipeline_id, now, reason, detail, extra)` (line 335): no docstring
 
 ### `backend/shared/services/pipeline_schema_utils.py`
 - **Functions**
@@ -5753,7 +5785,7 @@
 
 ### `backend/shared/services/projection_manager.py`
 - **Classes**
-  - `ProjectionManager` (line 23): 팔란티어 스타일 프로젝션 관리
+  - `ProjectionManager` (line 23): 프로젝션 기반 조회 최적화
     - `__init__(self, graph_service, es_service, redis_service)` (line 33): no docstring
     - `async initialize(self)` (line 52): 프로젝션 매니저 초기화
     - `async register_projection(self, db_name, view_name, start_class, hops, filters, refresh_interval)` (line 80): 새로운 프로젝션 등록
@@ -5842,19 +5874,19 @@
 
 ### `backend/shared/services/service_factory.py`
 - **Functions**
-  - `create_fastapi_service(service_info, custom_lifespan, include_health_check, include_logging_middleware, custom_tags, include_error_handlers, validation_error_status)` (line 50): Create a standardized FastAPI application with common configurations.
-  - `_install_openapi_language_contract(app)` (line 142): Add `?lang=en|ko` and `Accept-Language` to OpenAPI so clients discover i18n support.
-  - `_configure_cors(app)` (line 192): Configure CORS middleware based on environment variables
-  - `_add_logging_middleware(app)` (line 206): Add request logging middleware
-  - `_add_health_check(app, service_info)` (line 219): Add standardized health check endpoints
-  - `_add_debug_endpoints(app)` (line 243): Add debug endpoints for development environment
-  - `_install_observability(app, service_info)` (line 252): Install tracing + metrics in a way that is:
-  - `create_uvicorn_config(service_info, reload)` (line 295): Create standardized uvicorn configuration.
-  - `_get_logging_config(service_name)` (line 328): Get standardized logging configuration for uvicorn
-  - `run_service(app, service_info, app_module_path, reload)` (line 373): Run the service with standardized uvicorn configuration.
+  - `create_fastapi_service(service_info, custom_lifespan, include_health_check, include_logging_middleware, custom_tags, include_error_handlers, validation_error_status)` (line 55): Create a standardized FastAPI application with common configurations.
+  - `_install_openapi_language_contract(app)` (line 147): Add `?lang=en|ko` and `Accept-Language` to OpenAPI so clients discover i18n support.
+  - `_configure_cors(app)` (line 197): Configure CORS middleware based on environment variables
+  - `_add_logging_middleware(app)` (line 211): Add request logging middleware
+  - `_add_health_check(app, service_info)` (line 254): Add standardized health check endpoints
+  - `_add_debug_endpoints(app)` (line 278): Add debug endpoints for development environment
+  - `_install_observability(app, service_info)` (line 287): Install tracing + metrics in a way that is:
+  - `create_uvicorn_config(service_info, reload)` (line 330): Create standardized uvicorn configuration.
+  - `_get_logging_config(service_name)` (line 363): Get standardized logging configuration for uvicorn
+  - `run_service(app, service_info, app_module_path, reload)` (line 408): Run the service with standardized uvicorn configuration.
 - **Classes**
-  - `ServiceInfo` (line 28): Service configuration container
-    - `__init__(self, name, title, description, version, port, host, tags)` (line 31): no docstring
+  - `ServiceInfo` (line 33): Service configuration container
+    - `__init__(self, name, title, description, version, port, host, tags)` (line 36): no docstring
 
 ### `backend/shared/services/sheet_grid_parser.py`
 - **Classes**
@@ -6295,7 +6327,7 @@
 ### `backend/shared/utils/principal_policy.py`
 - **Functions**
   - `build_principal_tags(principal_type, principal_id, user_id, role)` (line 11): no docstring
-  - `policy_allows(policy, principal_tags)` (line 35): Evaluate a minimal Foundry-style principal policy:
+  - `policy_allows(policy, principal_tags)` (line 35): Evaluate a minimal principal policy:
 - **Classes**
   - `PrincipalPolicyError` (line 7): no docstring
 
@@ -6651,6 +6683,12 @@
   - `stop_services(processes)` (line 75): Stop all services
   - `main()` (line 89): no docstring
 
+## test_architecture_verification.py
+
+### `backend/test_architecture_verification.py`
+- **Functions**
+  - `async test_complete_user_flow()` (line 24): no docstring
+
 ## test_full_api_integration_ultra.py
 
 ### `backend/test_full_api_integration_ultra.py`
@@ -6660,6 +6698,13 @@
   - `_extract_command_id(result)` (line 102): no docstring
   - `async _wait_for_bff_query(session, url, payload, timeout_seconds)` (line 107): no docstring
   - `async test_full_api_integration()` (line 136): no docstring
+
+## test_graph_federation.py
+
+### `backend/test_graph_federation.py`
+- **Functions**
+  - `async _request_json(session, method, url, retries, retry_sleep, **kwargs)` (line 27): no docstring
+  - `async test_graph_federation()` (line 59): no docstring
 
 ## test_lightweight_nodes_ultra.py
 
@@ -6673,19 +6718,6 @@
 ### `backend/test_ontology_issue.py`
 - **Functions**
   - `async test_ontology_creation()` (line 13): no docstring
-
-## test_palantir_architecture_verification.py
-
-### `backend/test_palantir_architecture_verification.py`
-- **Functions**
-  - `async test_complete_user_flow()` (line 24): no docstring
-
-## test_palantir_federation.py
-
-### `backend/test_palantir_federation.py`
-- **Functions**
-  - `async _request_json(session, method, url, retries, retry_sleep, **kwargs)` (line 27): no docstring
-  - `async test_palantir_federation()` (line 59): no docstring
 
 ## test_real_production_flow.py
 
@@ -7090,6 +7122,10 @@
   - `test_registry_disable_rejected()` (line 53): no docstring
   - `async test_heartbeat_not_blocked_by_poll()` (line 61): no docstring
 
+### `backend/tests/unit/config/test_app_config_topics.py`
+- **Functions**
+  - `test_get_all_topics_includes_command_dlqs()` (line 6): no docstring
+
 ### `backend/tests/unit/config/test_kafka_config.py`
 - **Functions**
   - `test_kafka_eos_producer_config(monkeypatch)` (line 33): no docstring
@@ -7140,6 +7176,15 @@
 - **Functions**
   - `test_kafka_headers_roundtrip_via_attached_context()` (line 11): no docstring
   - `test_kafka_headers_from_envelope_metadata_only_emits_known_keys()` (line 33): no docstring
+
+### `backend/tests/unit/observability/test_request_context.py`
+- **Functions**
+  - `test_parse_baggage_header_best_effort()` (line 7): no docstring
+  - `test_trace_context_filter_includes_request_context_fields()` (line 20): no docstring
+  - `test_carrier_from_envelope_metadata_appends_baggage_from_fields()` (line 44): no docstring
+  - `test_attach_context_from_kafka_uses_fallback_metadata_for_contextvars()` (line 65): no docstring
+  - `test_event_envelope_from_command_includes_context_correlation_id()` (line 77): no docstring
+  - `test_event_envelope_from_command_prefers_command_metadata_over_context()` (line 92): no docstring
 
 ### `backend/tests/unit/observability/test_tracing_config.py`
 - **Functions**
@@ -7244,6 +7289,30 @@
   - `_ensure_topic(topic)` (line 21): no docstring
   - `async test_dlq_handler_retry_and_poison_flow()` (line 35): no docstring
   - `async test_dlq_handler_retry_success_records_recovery()` (line 80): no docstring
+
+### `backend/tests/unit/services/test_dlq_payload_shapes.py`
+- **Functions**
+  - `async test_action_worker_send_to_dlq_payload_shape()` (line 77): no docstring
+  - `async test_ontology_worker_send_to_dlq_payload_shape()` (line 123): no docstring
+  - `async test_instance_worker_send_to_dlq_payload_shape()` (line 166): no docstring
+- **Classes**
+  - `_DummyMsg` (line 10): no docstring
+    - `__init__(self, topic, partition, offset, value, key, timestamp_ms, headers)` (line 11): no docstring
+    - `topic(self)` (line 30): no docstring
+    - `partition(self)` (line 33): no docstring
+    - `offset(self)` (line 36): no docstring
+    - `value(self)` (line 39): no docstring
+    - `key(self)` (line 42): no docstring
+    - `timestamp(self)` (line 45): no docstring
+    - `headers(self)` (line 50): no docstring
+  - `_CaptureProducer` (line 54): no docstring
+    - `__init__(self)` (line 55): no docstring
+    - `produce(self, topic, key, value, headers, **kwargs)` (line 58): no docstring
+    - `flush(self, *_args, **_kwargs)` (line 61): no docstring
+  - `_NoopTracing` (line 65): no docstring
+    - `span(self, *_args, **_kwargs)` (line 67): no docstring
+  - `_NoopMetrics` (line 71): no docstring
+    - `record_event(self, *_args, **_kwargs)` (line 72): no docstring
 
 ### `backend/tests/unit/services/test_event_replay.py`
 - **Functions**

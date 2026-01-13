@@ -4,12 +4,12 @@
 > Status: design/target spec. 일부 항목은 아직 코드에 완전 반영되지 않았습니다.  
 > Current behavior: `docs/ARCHITECTURE.md` + BFF/OMS OpenAPI.
 
-Foundry-style split: TerminusDB holds **definitions + compiled snapshot**, Postgres holds **control-plane state** (proposal/approve/deploy/health/outbox). This doc fixes P0 schemas for Terminus.
+Platform-style split: TerminusDB holds **definitions + compiled snapshot**, Postgres holds **control-plane state** (proposal/approve/deploy/health/outbox). This doc fixes P0 schemas for Terminus.
 
-## Decision framework (Foundry docs vs implementation choices)
+## Decision framework (reference docs vs implementation choices)
 두 층으로 판단한다:
-1) Foundry 공식 문서에서 “명시적으로 말하는 철학/행동” (반드시 맞아야 함)
-2) Foundry가 내부 구현을 공개하지 않는 영역 (정렬 가능한 구현 선택이면 OK)
+1) 외부 레퍼런스 문서에서 “명시적으로 말하는 철학/행동” (반드시 맞아야 함)
+2) 레퍼런스가 내부 구현을 공개하지 않는 영역 (정렬 가능한 구현 선택이면 OK)
 
 ### 1) 공식 문서와 강하게 정렬되는 부분 (must align)
 A. Object type은 backing datasource로 property 값을 생성한다
@@ -42,7 +42,8 @@ F. Protected branch + proposal workflow는 운영의 기본 모델이다
 - `rid(kind:id@rev)` 포맷
 - compiled snapshot idempotency hash
 - deploy outbox/retry/dlq 설계
-✅ 판정: 공식 문서 근거는 없으므로 “Foundry도 이렇게 한다”는 주장만 피한다. 대신 거버넌스/재현성/운영 안정성이라는 Foundry 가치에 정렬되는 구현이면 충분히 타당하다.
+✅ 판정: 공식 문서 근거는 없으므로 “특정 벤더 플랫폼도 이렇게 한다” 같은 주장은 피한다. 대신 거버넌스/재현성/운영 안정성이라는 엔터프라이즈 플랫폼의 가치에 정렬되는 구현이면 충분히 타당하다.
+✅ 판정: 공식 문서 근거는 없으므로 “특정 벤더도 이렇게 한다”는 주장만 피한다. 대신 거버넌스/재현성/운영 안정성이라는 플랫폼 가치에 정렬되는 구현이면 충분히 타당하다.
 
 ### 의사결정 기준 (trade-offs)
 - Governance: protected branch + proposal/approval gate를 깨지 않는가?
@@ -52,7 +53,8 @@ F. Protected branch + proposal workflow는 운영의 기본 모델이다
 - Forward compatibility: project-based permissions(Compass 등)과의 정렬 여지가 남는가?
 
 ### 주의 지점 (문서 기반 리스크)
-A. Roles를 온톨로지 리소스로 두는 건 가능하나, Foundry는 project-based permissions 방향을 병행한다
+A. Roles를 온톨로지 리소스로 두는 건 가능하나, 상용 플랫폼들은 project-based permissions 방향을 병행하는 경우가 많다
+A. Roles를 온톨로지 리소스로 두는 건 가능하나, 일부 상용 플랫폼은 project-based permissions 방향을 병행한다
 - 권장: ontology_role를 유지하되 “장기적으로 project-based permissioning과 정렬” 문장을 명시.
 
 B. Writeback dataset 권한/노출 정책을 control-plane에 고정해야 한다

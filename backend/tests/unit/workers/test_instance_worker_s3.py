@@ -3,13 +3,13 @@ import time
 
 import pytest
 
-from instance_worker.main import StrictPalantirInstanceWorker
+from instance_worker.main import StrictInstanceWorker
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_s3_call_does_not_block_event_loop():
-    worker = StrictPalantirInstanceWorker()
+    worker = StrictInstanceWorker()
     ticks = 0
 
     async def ticker():

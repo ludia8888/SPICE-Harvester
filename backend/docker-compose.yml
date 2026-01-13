@@ -15,11 +15,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./database/init:/docker-entrypoint-initdb.d
     networks:
-      spice_network:
-        aliases:
-          - spice-minio
-          - spice_minio
-          - minio
+      - spice_network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-spiceadmin} -d ${POSTGRES_DB:-spicedb}"]
       interval: 30s
@@ -133,6 +129,7 @@ services:
       spice_network:
         aliases:
           - spice-minio
+          - spice_minio
     command: server /data --console-address ":9001"
     healthcheck:
       # MinIO image doesn't ship with curl; use bash TCP check.
@@ -338,7 +335,7 @@ services:
       timeout: 10s
       retries: 5
 
-  # Connector Trigger Service (Foundry-style; polls + emits connector-updates)
+  # Connector Trigger Service (polls + emits connector-updates)
   connector-trigger-service:
     build:
       context: .
@@ -367,7 +364,7 @@ services:
       - spice_network
     restart: unless-stopped
 
-  # Connector Sync Worker (Foundry-style; consumes connector-updates and submits writes)
+  # Connector Sync Worker (consumes connector-updates and submits writes)
   connector-sync-worker:
     build:
       context: .

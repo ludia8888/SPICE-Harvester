@@ -1,8 +1,8 @@
-# Foundry Checklist Verification Report
+# Platform Checklist Verification Report
 
 - Checklist: `docs/PipelineBuilder_checklist.md`
-- Matrix: `docs/foundry_checklist/FOUNDARY_CHECKLIST_MATRIX.yml`
-- Evidence dir: `docs/foundry_checklist/evidence/`
+- Matrix: `docs/platform_checklist/PLATFORM_CHECKLIST_MATRIX.yml`
+- Evidence dir: `docs/platform_checklist/evidence/`
 
 ## Current Status
 - P0: 41/45 PASS
@@ -11,7 +11,7 @@
 
 ## How to Reproduce
 ```bash
-./scripts/verify_foundry_checklist.sh
+./scripts/verify_platform_checklist.sh
 ```
 
 ## Per-Item Results
@@ -23,16 +23,16 @@
 - Tests:
   - `frontend/tests/e2e/pipeline-builder-live.spec.ts`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
-  - `cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/foundry_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-live.spec.ts`
+  - `./scripts/verify_platform_checklist.sh`
+  - `cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/platform_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-live.spec.ts`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/e2e_test.log`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip`
+  - `docs/platform_checklist/evidence/e2e_test.log`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/e2e_test.log`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip`
+  - `docs/platform_checklist/evidence/e2e_test.log`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip`
 
 ### CL-002 (P0) — PASS
 
@@ -41,16 +41,16 @@
 - Tests:
   - `frontend/tests/e2e/pipeline-builder-live.spec.ts`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
-  - `cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/foundry_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-live.spec.ts`
+  - `./scripts/verify_platform_checklist.sh`
+  - `cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/platform_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-live.spec.ts`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/e2e_test.log`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip`
+  - `docs/platform_checklist/evidence/e2e_test.log`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/e2e_test.log`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip`
+  - `docs/platform_checklist/evidence/e2e_test.log`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip`
 
 ### CL-003 (P0) — PASS
 
@@ -59,16 +59,16 @@
 - Tests:
   - `frontend/tests/e2e/pipeline-builder-live.spec.ts`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
-  - `cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/foundry_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-live.spec.ts`
+  - `./scripts/verify_platform_checklist.sh`
+  - `cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/platform_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-live.spec.ts`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/e2e_test.log`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip`
+  - `docs/platform_checklist/evidence/e2e_test.log`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/e2e_test.log`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip`
+  - `docs/platform_checklist/evidence/e2e_test.log`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip`
 
 ### CL-004 (P0) — PASS
 
@@ -77,16 +77,16 @@
 - Tests:
   - `frontend/tests/e2e/pipeline-builder-large-graph.spec.ts`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
-  - `cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/foundry_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-large-graph.spec.ts 2>&1 | tee ../docs/foundry_checklist/evidence/e2e_large_graph.log`
+  - `./scripts/verify_platform_checklist.sh`
+  - `cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/platform_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-large-graph.spec.ts 2>&1 | tee ../docs/platform_checklist/evidence/e2e_large_graph.log`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/e2e_large_graph.log`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-large-f46a1-eline-via-search-focus-mode/test-finished-1.png`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-large-f46a1-eline-via-search-focus-mode/trace.zip`
+  - `docs/platform_checklist/evidence/e2e_large_graph.log`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-large-f46a1-eline-via-search-focus-mode/test-finished-1.png`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-large-f46a1-eline-via-search-focus-mode/trace.zip`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/e2e_large_graph.log`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-large-f46a1-eline-via-search-focus-mode/test-finished-1.png`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-large-f46a1-eline-via-search-focus-mode/trace.zip`
+  - `docs/platform_checklist/evidence/e2e_large_graph.log`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-large-f46a1-eline-via-search-focus-mode/test-finished-1.png`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-large-f46a1-eline-via-search-focus-mode/trace.zip`
 
 ### CL-005 (P0) — PASS
 
@@ -95,12 +95,12 @@
 - Tests:
   - `backend/tests/unit/services/test_pipeline_executor_preview.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
-  - `pytest -q backend/tests/unit/services/test_pipeline_executor_preview.py 2>&1 | tee docs/foundry_checklist/evidence/backend_cl005_test.log`
+  - `./scripts/verify_platform_checklist.sh`
+  - `pytest -q backend/tests/unit/services/test_pipeline_executor_preview.py 2>&1 | tee docs/platform_checklist/evidence/backend_cl005_test.log`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_cl005_test.log`
+  - `docs/platform_checklist/evidence/backend_cl005_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_cl005_test.log`
+  - `docs/platform_checklist/evidence/backend_cl005_test.log`
 
 ### CL-006 (P0) — PASS
 
@@ -109,11 +109,11 @@
 - Tests:
   - `backend/tests/test_pipeline_type_mismatch_guard_e2e.py`
 - Commands:
-  - `PYTHONPATH=backend ADMIN_TOKEN=test-token pytest -q backend/tests/test_pipeline_type_mismatch_guard_e2e.py 2>&1 | tee docs/foundry_checklist/evidence/backend_cl006_test.log`
+  - `PYTHONPATH=backend ADMIN_TOKEN=test-token pytest -q backend/tests/test_pipeline_type_mismatch_guard_e2e.py 2>&1 | tee docs/platform_checklist/evidence/backend_cl006_test.log`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_cl006_test.log`
+  - `docs/platform_checklist/evidence/backend_cl006_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_cl006_test.log`
+  - `docs/platform_checklist/evidence/backend_cl006_test.log`
 
 ### CL-007 (P0) — PASS
 
@@ -122,11 +122,11 @@
 - Tests:
   - `backend/tests/unit/services/test_pipeline_executor_function_categories.py`
 - Commands:
-  - `PYTHONPATH=backend pytest -q backend/tests/unit/services/test_pipeline_executor_function_categories.py 2>&1 | tee docs/foundry_checklist/evidence/backend_cl007_test.log`
+  - `PYTHONPATH=backend pytest -q backend/tests/unit/services/test_pipeline_executor_function_categories.py 2>&1 | tee docs/platform_checklist/evidence/backend_cl007_test.log`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_cl007_test.log`
+  - `docs/platform_checklist/evidence/backend_cl007_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_cl007_test.log`
+  - `docs/platform_checklist/evidence/backend_cl007_test.log`
 
 ### CL-008 (P0) — PASS
 
@@ -135,12 +135,12 @@
 - Tests:
   - `backend/tests/unit/services/test_pipeline_executor_transform_safety.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
+  - `./scripts/verify_platform_checklist.sh`
   - `pytest -q backend/tests/unit/services/test_pipeline_executor_transform_safety.py`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 
 ### CL-009 (P0) — PASS
 
@@ -149,12 +149,12 @@
 - Tests:
   - `backend/tests/unit/services/test_pipeline_executor_transform_safety.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
+  - `./scripts/verify_platform_checklist.sh`
   - `pytest -q backend/tests/unit/services/test_pipeline_executor_transform_safety.py`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 
 ### CL-010 (P0) — PASS
 
@@ -163,16 +163,16 @@
 - Tests:
   - `frontend/tests/e2e/pipeline-builder-live.spec.ts`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
-  - `cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/foundry_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-live.spec.ts`
+  - `./scripts/verify_platform_checklist.sh`
+  - `cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/platform_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-live.spec.ts`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/e2e_test.log`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip`
+  - `docs/platform_checklist/evidence/e2e_test.log`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/e2e_test.log`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip`
+  - `docs/platform_checklist/evidence/e2e_test.log`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/test-finished-1.png`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--d9848-t-with-immediate-validation/trace.zip`
 
 ### CL-011 (P0) — PASS
 
@@ -183,11 +183,11 @@
 - Commands:
   - `pytest -q backend/tests/unit/services/test_pipeline_udf_versioning.py`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_cl011_test_before.log`
-  - `docs/foundry_checklist/evidence/backend_cl011_test_after.log`
+  - `docs/platform_checklist/evidence/backend_cl011_test_before.log`
+  - `docs/platform_checklist/evidence/backend_cl011_test_after.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_cl011_test_before.log`
-  - `docs/foundry_checklist/evidence/backend_cl011_test_after.log`
+  - `docs/platform_checklist/evidence/backend_cl011_test_before.log`
+  - `docs/platform_checklist/evidence/backend_cl011_test_after.log`
 
 ### CL-012 (P0) — PASS
 
@@ -196,16 +196,16 @@
 - Tests:
   - `frontend/tests/e2e/pipeline-builder-live.spec.ts`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
-  - `cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/foundry_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-live.spec.ts -g "csv upload input"`
+  - `./scripts/verify_platform_checklist.sh`
+  - `cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/platform_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-live.spec.ts -g "csv upload input"`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/e2e_test.log`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/test-finished-1.png`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/trace.zip`
+  - `docs/platform_checklist/evidence/e2e_test.log`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/test-finished-1.png`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/trace.zip`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/e2e_test.log`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/test-finished-1.png`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/trace.zip`
+  - `docs/platform_checklist/evidence/e2e_test.log`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/test-finished-1.png`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/trace.zip`
 
 ### CL-013 (P0) — PASS
 
@@ -214,16 +214,16 @@
 - Tests:
   - `frontend/tests/e2e/pipeline-builder-live.spec.ts`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
-  - `cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/foundry_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-live.spec.ts -g "csv upload input"`
+  - `./scripts/verify_platform_checklist.sh`
+  - `cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/platform_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-live.spec.ts -g "csv upload input"`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/e2e_test.log`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/test-finished-1.png`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/trace.zip`
+  - `docs/platform_checklist/evidence/e2e_test.log`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/test-finished-1.png`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/trace.zip`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/e2e_test.log`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/test-finished-1.png`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/trace.zip`
+  - `docs/platform_checklist/evidence/e2e_test.log`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/test-finished-1.png`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--01cc2-hema-aware-join-suggestions/trace.zip`
 
 ### CL-014 (P0) — PASS
 
@@ -232,16 +232,16 @@
 - Tests:
   - `frontend/tests/e2e/pipeline-builder-live.spec.ts`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
-  - `cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/foundry_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-live.spec.ts -g "media upload input"`
+  - `./scripts/verify_platform_checklist.sh`
+  - `cd frontend && PLAYWRIGHT_OUTPUT_DIR=../docs/platform_checklist/evidence/e2e_results PLAYWRIGHT_SCREENSHOT=on PLAYWRIGHT_TRACE=on npx playwright test tests/e2e/pipeline-builder-live.spec.ts -g "media upload input"`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/e2e_test.log`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--f7b7a-ructured-dataset-references/test-finished-1.png`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--f7b7a-ructured-dataset-references/trace.zip`
+  - `docs/platform_checklist/evidence/e2e_test.log`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--f7b7a-ructured-dataset-references/test-finished-1.png`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--f7b7a-ructured-dataset-references/trace.zip`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/e2e_test.log`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--f7b7a-ructured-dataset-references/test-finished-1.png`
-  - `docs/foundry_checklist/evidence/e2e_results/e2e-pipeline-builder-live--f7b7a-ructured-dataset-references/trace.zip`
+  - `docs/platform_checklist/evidence/e2e_test.log`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--f7b7a-ructured-dataset-references/test-finished-1.png`
+  - `docs/platform_checklist/evidence/e2e_results/e2e-pipeline-builder-live--f7b7a-ructured-dataset-references/trace.zip`
 
 ### CL-015 (P0) — PASS
 
@@ -250,12 +250,12 @@
 - Tests:
   - `backend/tests/test_pipeline_execution_semantics_e2e.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
-  - `PYTHONPATH=backend ADMIN_TOKEN=test-token BFF_ADMIN_TOKEN=test-token KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:39092 pytest -q backend/tests/test_pipeline_execution_semantics_e2e.py 2>&1 | tee docs/foundry_checklist/evidence/backend_cl015016_test.log`
+  - `./scripts/verify_platform_checklist.sh`
+  - `PYTHONPATH=backend ADMIN_TOKEN=test-token BFF_ADMIN_TOKEN=test-token KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:39092 pytest -q backend/tests/test_pipeline_execution_semantics_e2e.py 2>&1 | tee docs/platform_checklist/evidence/backend_cl015016_test.log`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_cl015016_test.log`
+  - `docs/platform_checklist/evidence/backend_cl015016_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_cl015016_test.log`
+  - `docs/platform_checklist/evidence/backend_cl015016_test.log`
 
 ### CL-016 (P0) — PASS
 
@@ -264,12 +264,12 @@
 - Tests:
   - `backend/tests/test_pipeline_execution_semantics_e2e.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
-  - `PYTHONPATH=backend ADMIN_TOKEN=test-token BFF_ADMIN_TOKEN=test-token KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:39092 pytest -q backend/tests/test_pipeline_execution_semantics_e2e.py 2>&1 | tee docs/foundry_checklist/evidence/backend_cl015016_test.log`
+  - `./scripts/verify_platform_checklist.sh`
+  - `PYTHONPATH=backend ADMIN_TOKEN=test-token BFF_ADMIN_TOKEN=test-token KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:39092 pytest -q backend/tests/test_pipeline_execution_semantics_e2e.py 2>&1 | tee docs/platform_checklist/evidence/backend_cl015016_test.log`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_cl015016_test.log`
+  - `docs/platform_checklist/evidence/backend_cl015016_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_cl015016_test.log`
+  - `docs/platform_checklist/evidence/backend_cl015016_test.log`
 
 ### CL-017 (P0) — PASS
 
@@ -278,12 +278,12 @@
 - Tests:
   - `backend/tests/test_pipeline_streaming_semantics_e2e.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
-  - `PYTHONPATH=backend ADMIN_TOKEN=test-token BFF_ADMIN_TOKEN=test-token pytest -q backend/tests/test_pipeline_streaming_semantics_e2e.py 2>&1 | tee docs/foundry_checklist/evidence/backend_cl017_test.log`
+  - `./scripts/verify_platform_checklist.sh`
+  - `PYTHONPATH=backend ADMIN_TOKEN=test-token BFF_ADMIN_TOKEN=test-token pytest -q backend/tests/test_pipeline_streaming_semantics_e2e.py 2>&1 | tee docs/platform_checklist/evidence/backend_cl017_test.log`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_cl017_test.log`
+  - `docs/platform_checklist/evidence/backend_cl017_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_cl017_test.log`
+  - `docs/platform_checklist/evidence/backend_cl017_test.log`
 
 ### CL-018 (P0) — PASS
 
@@ -292,12 +292,12 @@
 - Tests:
   - `backend/bff/tests/test_pipeline_promotion_semantics.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
+  - `./scripts/verify_platform_checklist.sh`
   - `pytest -q backend/bff/tests/test_pipeline_promotion_semantics.py`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 
 ### CL-019 (P0) — PASS
 
@@ -306,12 +306,12 @@
 - Tests:
   - `backend/bff/tests/test_pipeline_promotion_semantics.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
+  - `./scripts/verify_platform_checklist.sh`
   - `pytest -q backend/bff/tests/test_pipeline_promotion_semantics.py`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 
 ### CL-020 (P0) — PASS
 
@@ -320,12 +320,12 @@
 - Tests:
   - `backend/tests/unit/services/test_pipeline_expectations_and_contracts.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
+  - `./scripts/verify_platform_checklist.sh`
   - `pytest -q backend/tests/unit/services/test_pipeline_expectations_and_contracts.py`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 
 ### CL-021 (P0) — PASS
 
@@ -334,12 +334,12 @@
 - Tests:
   - `backend/bff/tests/test_pipeline_promotion_semantics.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
+  - `./scripts/verify_platform_checklist.sh`
   - `pytest -q backend/bff/tests/test_pipeline_promotion_semantics.py`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 
 ### CL-022 (P0) — PASS
 
@@ -348,12 +348,12 @@
 - Tests:
   - `backend/bff/tests/test_pipeline_promotion_semantics.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
+  - `./scripts/verify_platform_checklist.sh`
   - `pytest -q backend/bff/tests/test_pipeline_promotion_semantics.py`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 
 ### CL-023 (P0) — PASS
 
@@ -362,12 +362,12 @@
 - Tests:
   - `backend/tests/unit/services/test_pipeline_expectations_and_contracts.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
+  - `./scripts/verify_platform_checklist.sh`
   - `pytest -q backend/tests/unit/services/test_pipeline_expectations_and_contracts.py`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 
 ### CL-024 (P0) — PASS
 
@@ -376,12 +376,12 @@
 - Tests:
   - `backend/tests/unit/services/test_pipeline_expectations_and_contracts.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
+  - `./scripts/verify_platform_checklist.sh`
   - `pytest -q backend/tests/unit/services/test_pipeline_expectations_and_contracts.py`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 
 ### CL-025 (P0) — PASS
 
@@ -390,12 +390,12 @@
 - Tests:
   - `backend/tests/unit/services/test_pipeline_unit_test_runner.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
+  - `./scripts/verify_platform_checklist.sh`
   - `PYTHONPATH=backend pytest -q backend/tests/unit/services/test_pipeline_unit_test_runner.py`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 
 ### CL-026 (P0) — PASS
 
@@ -404,12 +404,12 @@
 - Tests:
   - `backend/tests/unit/services/test_pipeline_unit_test_runner.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
+  - `./scripts/verify_platform_checklist.sh`
   - `PYTHONPATH=backend pytest -q backend/tests/unit/services/test_pipeline_unit_test_runner.py`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 
 ### CL-027 (P1) — FAIL
 
@@ -434,13 +434,13 @@
   - `backend/tests/unit/services/test_pipeline_executor_preview.py`
   - `backend/bff/tests/test_pipeline_promotion_semantics.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
+  - `./scripts/verify_platform_checklist.sh`
   - `pytest -q backend/tests/unit/services/test_pipeline_executor_preview.py`
   - `pytest -q backend/bff/tests/test_pipeline_promotion_semantics.py`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 
 ### CL-031 (P0) — PASS
 
@@ -449,12 +449,12 @@
 - Tests:
   - `backend/tests/unit/services/test_pipeline_profiler.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
+  - `./scripts/verify_platform_checklist.sh`
   - `pytest -q backend/tests/unit/services/test_pipeline_profiler.py`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 
 ### CL-032 (P0) — PASS
 
@@ -463,12 +463,12 @@
 - Tests:
   - `backend/tests/unit/services/test_pipeline_executor_preview.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
+  - `./scripts/verify_platform_checklist.sh`
   - `pytest -q backend/tests/unit/services/test_pipeline_executor_preview.py`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 
 ### CL-033 (P0) — PASS
 
@@ -477,12 +477,12 @@
 - Tests:
   - `backend/bff/tests/test_pipeline_promotion_semantics.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
+  - `./scripts/verify_platform_checklist.sh`
   - `pytest -q backend/bff/tests/test_pipeline_promotion_semantics.py`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 
 ### CL-034 (P0) — FAIL
 
@@ -547,12 +547,12 @@
   - `backend/tests/unit/services/test_pipeline_scheduler_ignored_runs.py`
   - `backend/tests/unit/services/test_pipeline_scheduler_validation.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
+  - `./scripts/verify_platform_checklist.sh`
   - `pytest -q backend/tests/unit/services/test_pipeline_scheduler_ignored_runs.py`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 
 ### CL-046 (P0) — PASS
 
@@ -561,12 +561,12 @@
 - Tests:
   - `backend/tests/unit/services/test_pipeline_scheduler_ignored_runs.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
+  - `./scripts/verify_platform_checklist.sh`
   - `pytest -q backend/tests/unit/services/test_pipeline_scheduler_ignored_runs.py`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 
 ### CL-047 (P0) — PASS
 
@@ -576,12 +576,12 @@
   - `backend/tests/unit/services/test_pipeline_scheduler_ignored_runs.py`
   - `backend/tests/unit/services/test_pipeline_scheduler_validation.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
+  - `./scripts/verify_platform_checklist.sh`
   - `pytest -q backend/tests/unit/services/test_pipeline_scheduler_ignored_runs.py`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 
 ### CL-048 (P0) — PASS
 
@@ -592,9 +592,9 @@
 - Commands:
   - `pytest backend/tests/integration/test_pipeline_branch_lifecycle.py -q`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log`
+  - `docs/platform_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log`
+  - `docs/platform_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log`
 
 ### CL-049 (P0) — PASS
 
@@ -605,9 +605,9 @@
 - Commands:
   - `pytest backend/bff/tests/test_pipeline_proposal_governance.py -q`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log`
+  - `docs/platform_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log`
+  - `docs/platform_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log`
 
 ### CL-050 (P0) — PASS
 
@@ -618,9 +618,9 @@
 - Commands:
   - `pytest backend/bff/tests/test_pipeline_proposal_governance.py -q`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log`
+  - `docs/platform_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log`
+  - `docs/platform_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log`
 
 ### CL-051 (P0) — PASS
 
@@ -631,9 +631,9 @@
 - Commands:
   - `pytest backend/bff/tests/test_pipeline_proposal_governance.py -q`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log`
+  - `docs/platform_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log`
+  - `docs/platform_checklist/evidence/backend_cl048_cl049_cl050_cl051_tests.log`
 
 ### CL-052 (P1) — FAIL
 
@@ -642,7 +642,7 @@
 
 ### CL-053 (P1) — FAIL
 
-- Original: •	☐ 저지연(특히 15분 이하) 워크로드 최적화 옵션(Foundry의 faster pipelines 포지션에 대응).
+- Original: •	☐ 저지연(특히 15분 이하) 워크로드 최적화 옵션(상용 플랫폼의 faster pipelines 포지션에 대응).
 - Verification type: `unit`
 
 ### CL-054 (P0) — PASS
@@ -652,12 +652,12 @@
 - Tests:
   - `backend/bff/tests/test_pipeline_promotion_semantics.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
+  - `./scripts/verify_platform_checklist.sh`
   - `pytest -q backend/bff/tests/test_pipeline_promotion_semantics.py`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 
 ### CL-055 (P0) — FAIL
 
@@ -748,9 +748,9 @@
 - Commands:
   - `pytest backend/bff/tests/test_pipeline_audit_logging.py -q`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_cl071_cl072_tests.log`
+  - `docs/platform_checklist/evidence/backend_cl071_cl072_tests.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_cl071_cl072_tests.log`
+  - `docs/platform_checklist/evidence/backend_cl071_cl072_tests.log`
 
 ### CL-072 (P0) — PASS
 
@@ -761,9 +761,9 @@
 - Commands:
   - `pytest backend/bff/tests/test_pipeline_permissions_enforced.py -q`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_cl071_cl072_tests.log`
+  - `docs/platform_checklist/evidence/backend_cl071_cl072_tests.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_cl071_cl072_tests.log`
+  - `docs/platform_checklist/evidence/backend_cl071_cl072_tests.log`
 
 ### CL-073 (P0) — PASS
 
@@ -772,14 +772,14 @@
 - Tests:
   - `backend/bff/tests/test_pipeline_promotion_semantics.py`
 - Commands:
-  - `./scripts/verify_foundry_checklist.sh`
+  - `./scripts/verify_platform_checklist.sh`
   - `pytest -q backend/bff/tests/test_pipeline_promotion_semantics.py -k expectations_failed`
 - Artifacts:
-  - `docs/foundry_checklist/evidence/backend_cl073_test.log`
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_cl073_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 - Evidence links:
-  - `docs/foundry_checklist/evidence/backend_cl073_test.log`
-  - `docs/foundry_checklist/evidence/backend_test.log`
+  - `docs/platform_checklist/evidence/backend_cl073_test.log`
+  - `docs/platform_checklist/evidence/backend_test.log`
 
 ### CL-074 (P2) — FAIL
 

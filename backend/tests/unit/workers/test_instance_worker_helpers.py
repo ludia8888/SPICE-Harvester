@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from instance_worker.main import StrictPalantirInstanceWorker
+from instance_worker.main import StrictInstanceWorker
 from shared.models.event_envelope import EventEnvelope
 
 
 @pytest.mark.asyncio
 async def test_extract_payload_from_message_success() -> None:
-    worker = StrictPalantirInstanceWorker()
+    worker = StrictInstanceWorker()
     envelope = EventEnvelope(
         event_type="COMMAND",
         aggregate_type="instance",
@@ -24,7 +24,7 @@ async def test_extract_payload_from_message_success() -> None:
 
 @pytest.mark.asyncio
 async def test_extract_payload_from_message_rejects_non_command() -> None:
-    worker = StrictPalantirInstanceWorker()
+    worker = StrictInstanceWorker()
     envelope = EventEnvelope(
         event_type="DOMAIN",
         aggregate_type="instance",
@@ -38,7 +38,7 @@ async def test_extract_payload_from_message_rejects_non_command() -> None:
 
 
 def test_primary_key_and_objectify_helpers() -> None:
-    worker = StrictPalantirInstanceWorker()
+    worker = StrictInstanceWorker()
 
     payload = {"customer_id": "c1"}
     assert worker.get_primary_key_value("Customer", payload) == "c1"
@@ -54,5 +54,5 @@ def test_primary_key_and_objectify_helpers() -> None:
 
 
 def test_retryable_error_detection() -> None:
-    assert StrictPalantirInstanceWorker._is_retryable_error(Exception("references_untyped_object")) is True
-    assert StrictPalantirInstanceWorker._is_retryable_error(Exception("invalid payload")) is False
+    assert StrictInstanceWorker._is_retryable_error(Exception("references_untyped_object")) is True
+    assert StrictInstanceWorker._is_retryable_error(Exception("invalid payload")) is False

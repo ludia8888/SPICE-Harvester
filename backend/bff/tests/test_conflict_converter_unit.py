@@ -261,13 +261,13 @@ class TestConflictConverter:
     async def test_complete_conflict_conversion(self, converter, sample_terminus_conflict):
         """완전한 충돌 변환 테스트"""
 
-        foundry_conflicts = await converter.convert_conflicts_to_foundry_format(
+        ui_conflicts = await converter.convert_conflicts_to_ui_format(
             [sample_terminus_conflict], "test-db", "feature-branch", "main"
         )
 
-        assert len(foundry_conflicts) == 1
+        assert len(ui_conflicts) == 1
 
-        conflict = foundry_conflicts[0]
+        conflict = ui_conflicts[0]
 
         # 기본 구조 검증
         required_fields = [
@@ -373,18 +373,18 @@ class TestConflictConverter:
             },
         ]
 
-        foundry_conflicts = await converter.convert_conflicts_to_foundry_format(
+        ui_conflicts = await converter.convert_conflicts_to_ui_format(
             multiple_conflicts, "test-db", "feature", "main"
         )
 
-        assert len(foundry_conflicts) == 2
+        assert len(ui_conflicts) == 2
 
         # ID 유니크성 확인
-        ids = [conflict["id"] for conflict in foundry_conflicts]
+        ids = [conflict["id"] for conflict in ui_conflicts]
         assert len(set(ids)) == len(ids)
 
         # 다른 충돌 타입 확인
-        types = [conflict["type"] for conflict in foundry_conflicts]
+        types = [conflict["type"] for conflict in ui_conflicts]
         assert "modify_modify_conflict" in types
         assert "add_add_conflict" in types
 

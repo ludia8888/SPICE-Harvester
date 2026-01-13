@@ -1,6 +1,6 @@
 """
 BFF Merge Conflict Router
-Foundry-style 병합 충돌 해결 API
+병합 충돌 해결 API (클라이언트 친화 포맷)
 """
 
 import inspect
@@ -56,7 +56,7 @@ async def simulate_merge(
     병합 시뮬레이션 - 실제 병합 없이 충돌 감지
 
     TerminusDB의 diff API를 사용하여 충돌 가능성을 미리 확인합니다.
-    Foundry-style 충돌 감지 및 미리보기 기능을 제공합니다.
+    UI/클라이언트 친화적 충돌 감지 및 미리보기 기능을 제공합니다.
 
     Args:
         db_name: 데이터베이스 이름
@@ -162,18 +162,18 @@ async def simulate_merge(
             oms_client=oms_client,
         )
 
-        # 6. Foundry 스타일 충돌 형식으로 변환
+        # 6. 클라이언트 친화 충돌 형식으로 변환
         converter = ConflictConverter()
-        foundry_conflicts = await converter.convert_conflicts_to_foundry_format(
+        ui_conflicts = await converter.convert_conflicts_to_ui_format(
             conflicts, db_name, source_branch, target_branch
         )
 
         # 7. 병합 통계 계산
         merge_stats = {
             "changes_to_apply": len(source_changes),
-            "conflicts_detected": len(foundry_conflicts),
-            "mergeable": len(foundry_conflicts) == 0,
-            "requires_manual_resolution": len(foundry_conflicts) > 0,
+            "conflicts_detected": len(ui_conflicts),
+            "mergeable": len(ui_conflicts) == 0,
+            "requires_manual_resolution": len(ui_conflicts) > 0,
         }
 
         logger.info(f"Merge simulation completed: {merge_stats}")
@@ -190,7 +190,7 @@ async def simulate_merge(
                         if hasattr(request.strategy, "value")
                         else str(request.strategy)
                     ),
-                    "conflicts": foundry_conflicts,
+                    "conflicts": ui_conflicts,
                     "changes": source_changes,
                     "statistics": merge_stats,
                 }
@@ -404,10 +404,10 @@ async def _detect_merge_conflicts(
 
 async def _convert_resolution_to_terminus_format(resolution: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Foundry 해결책을 TerminusDB 형식으로 변환
+    클라이언트 해결책을 TerminusDB 형식으로 변환
 
     Args:
-        resolution: Foundry 스타일 해결책
+        resolution: UI/클라이언트 친화 해결책
 
     Returns:
         TerminusDB 형식 해결책

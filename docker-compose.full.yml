@@ -184,7 +184,7 @@ services:
       - kafka
       - otel-collector
 
-  # Foundry-style connector runtime (trigger + sync)
+  # Connector runtime (trigger + sync)
   connector-trigger-service:
     extends:
       file: backend/docker-compose.yml

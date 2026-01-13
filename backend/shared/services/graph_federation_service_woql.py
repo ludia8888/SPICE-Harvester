@@ -460,14 +460,14 @@ class GraphFederationServiceWOQL:
         include_audit: bool = False
     ) -> Dict[str, Any]:
         """
-        Simple single-class query - PALANTIR STYLE
+        Simple single-class query - lightweight graph federation
         TerminusDB has lightweight nodes (IDs + relationships),
         Elasticsearch has full domain data
         """
         base_branch = validate_branch_name(base_branch or "main")
-        logger.info(f"📊 PALANTIR Query: {class_name} via WOQL -> ES enrichment")
+        logger.info(f"📊 Query: {class_name} via WOQL -> ES enrichment")
         
-        # PALANTIR PRINCIPLE: Lightweight nodes in TerminusDB, full data in ES
+        # Lightweight principle: lightweight nodes in TerminusDB, full data in ES
         # Step 1: Query TerminusDB for instance IDs using WOQL
         
         # Step 1: Build WOQL query to get instance IDs from TerminusDB

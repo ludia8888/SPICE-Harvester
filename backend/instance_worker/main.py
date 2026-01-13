@@ -1,12 +1,12 @@
 """
-STRICT Palantir-style Instance Worker
+STRICT Lightweight Instance Worker
 경량 그래프 원칙을 100% 준수하는 구현
 
 Kafka message contract:
 - Commands arrive as EventEnvelope JSON (metadata.kind == "command")
 - Domain events are appended to the S3/MinIO Event Store and relayed to Kafka
 
-PALANTIR RULES:
+LIGHTWEIGHT GRAPH RULES:
 1. Graph stores ONLY: @id, @type, primary_key + relationships
 2. NO domain fields in graph (no name, price, description, etc.)
 3. ALL domain data goes to ES and S3 only
@@ -76,9 +76,9 @@ logger = logging.getLogger(__name__)
 _BFF_TOKEN_ENV_KEYS = ("BFF_ADMIN_TOKEN", "BFF_WRITE_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN")
 
 
-class StrictPalantirInstanceWorker:
+class StrictInstanceWorker:
     """
-    STRICT Palantir-style Instance Worker
+    STRICT Lightweight Instance Worker
     Graph는 관계와 참조만, 데이터는 ES/S3에만
 
     Command input is consumed exclusively as EventEnvelope JSON.
@@ -129,7 +129,7 @@ class StrictPalantirInstanceWorker:
         self.tracing = get_tracing_service("instance-worker")
         self.metrics = get_metrics_collector("instance-worker")
         
-        # PALANTIR PRINCIPLE: Only business concepts in graph
+        # Lightweight graph principle: only business concepts in graph
         # No system fields or storage details
 
     @staticmethod
@@ -162,7 +162,7 @@ class StrictPalantirInstanceWorker:
         
     async def initialize(self):
         """Initialize all connections"""
-        logger.info("Initializing STRICT Palantir Instance Worker...")
+        logger.info("Initializing STRICT Instance Worker...")
 
         validate_registry_enabled()
         validate_lease_settings()
@@ -185,7 +185,7 @@ class StrictPalantirInstanceWorker:
         # Kafka Producer for events
         self.producer = Producer({
             'bootstrap.servers': self.kafka_servers,
-            'client.id': 'strict-palantir-instance-worker-producer',
+            'client.id': 'strict-instance-worker-producer',
         })
         self.dlq_producer = self.producer
         
@@ -303,7 +303,7 @@ class StrictPalantirInstanceWorker:
         # Subscribe to Kafka topic
         await self._consumer_call(self.consumer.subscribe, [AppConfig.INSTANCE_COMMANDS_TOPIC])
         
-        logger.info("✅ STRICT Palantir Instance Worker initialized")
+        logger.info("✅ STRICT Instance Worker initialized")
 
     async def _s3_call(self, func, *args, **kwargs):
         return await asyncio.to_thread(func, *args, **kwargs)
@@ -918,7 +918,7 @@ class StrictPalantirInstanceWorker:
         }
         
     async def process_create_instance(self, command: Dict[str, Any]):
-        """Process CREATE_INSTANCE command - STRICT Palantir style"""
+        """Process CREATE_INSTANCE command - strict lightweight mode."""
         db_name = command.get('db_name')
         class_id = command.get('class_id')
         command_id = command.get('command_id')
@@ -988,7 +988,7 @@ class StrictPalantirInstanceWorker:
             else:
                 command_meta["ontology"] = dict(ontology_version)
 
-            logger.info(f"🔷 STRICT Palantir: Creating {class_id}/{instance_id}")
+            logger.info(f"🔷 STRICT: Creating {class_id}/{instance_id}")
 
             # 1. Save FULL data to S3 (Event Store)
             s3_path = f"{db_name}/{branch}/{class_id}/{instance_id}/{command_id}.json"
@@ -1097,7 +1097,7 @@ class StrictPalantirInstanceWorker:
                 if field in payload:
                     graph_node[field] = payload[field]
                 
-            # PALANTIR PRINCIPLE: NO domain attributes in TerminusDB!
+            # Lightweight graph principle: NO domain attributes in TerminusDB!
             # TerminusDB stores ONLY lightweight nodes (IDs + relationships)
             # All domain data goes to Elasticsearch
             
@@ -1280,7 +1280,7 @@ class StrictPalantirInstanceWorker:
                 except Exception as exc:
                     logger.debug("Relationship object link sync failed: %s", exc, exc_info=True)
             
-            logger.info(f"✅ STRICT Palantir: Instance created successfully")
+            logger.info("✅ STRICT: Instance created successfully")
             
         except Exception as e:
             logger.error(f"❌ Failed to create instance: {e}")
@@ -2665,7 +2665,7 @@ class StrictPalantirInstanceWorker:
     async def run(self):
         """Main processing loop"""
         self.running = True
-        logger.info("🚀 STRICT Palantir Instance Worker started")
+        logger.info("🚀 STRICT Instance Worker started")
         logger.info(f"  Subscribed to topic: {AppConfig.INSTANCE_COMMANDS_TOPIC}")
         
         poll_count = 0
@@ -2975,7 +2975,7 @@ class StrictPalantirInstanceWorker:
                 
     async def shutdown(self):
         """Graceful shutdown"""
-        logger.info("Shutting down STRICT Palantir Instance Worker...")
+        logger.info("Shutting down STRICT Instance Worker...")
         self.running = False
         
         if self.consumer:
@@ -2997,7 +2997,7 @@ class StrictPalantirInstanceWorker:
 
 async def main():
     """Main entry point"""
-    worker = StrictPalantirInstanceWorker()
+    worker = StrictInstanceWorker()
     
     try:
         await worker.initialize()

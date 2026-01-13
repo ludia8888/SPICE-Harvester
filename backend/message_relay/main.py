@@ -100,7 +100,7 @@ class EventPublisher:
         self.running = False
         self.kafka_servers = ServiceConfig.get_kafka_bootstrap_servers()
         self.producer: Optional[Producer] = None
-        self.bucket_name = os.getenv("EVENT_STORE_BUCKET", "spice-event-store")
+        self.bucket_name = ServiceConfig.get_event_store_bucket()
 
         self.endpoint_url = ServiceConfig.get_minio_endpoint()
         self.access_key = ServiceConfig.get_minio_access_key()

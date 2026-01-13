@@ -5,7 +5,7 @@ BFF_URL="${BFF_URL:-http://localhost:8002}"
 ADMIN_TOKEN="${ADMIN_TOKEN:?ADMIN_TOKEN is required}"
 DB_NAME="${DB_NAME:-demo_db}"
 BRANCH="${BRANCH:-main}"
-E2E_DIR="${E2E_DIR:-docs/foundry_checklist/evidence/pipeline_artifact_e2e}"
+E2E_DIR="${E2E_DIR:-docs/platform_checklist/evidence/pipeline_artifact_e2e}"
 
 RUN_ID=$(python - <<'PY'
 import uuid

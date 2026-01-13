@@ -94,7 +94,7 @@ class S3EventStoreDashboard:
     def __init__(self):
         self.session = aioboto3.Session()
         self.endpoint_url = ServiceConfig.get_minio_endpoint()
-        self.bucket_name = os.getenv("EVENT_STORE_BUCKET", "spice-event-store")
+        self.bucket_name = ServiceConfig.get_event_store_bucket()
         self.checkpoint_key = os.getenv("EVENT_PUBLISHER_CHECKPOINT_KEY", "checkpoints/event_publisher.json")
         self.metrics_cache = defaultdict(dict)
         self.last_update = datetime.now(timezone.utc)

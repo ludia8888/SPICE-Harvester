@@ -34,7 +34,7 @@ def build_principal_tags(
 
 def policy_allows(*, policy: Any, principal_tags: Set[str]) -> bool:
     """
-    Evaluate a minimal Foundry-style principal policy:
+    Evaluate a minimal principal policy:
 
       { "effect": "ALLOW"|"DENY", "principals": ["user:alice", "role:DomainModeler"] }
     """

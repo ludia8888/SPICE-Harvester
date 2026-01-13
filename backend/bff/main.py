@@ -182,7 +182,7 @@ class BFFServiceContainer:
         # 5. Initialize Rate Limiter
         await self._initialize_rate_limiter()
 
-        # 6. Initialize Connector Registry (Postgres; Foundry-style durability)
+        # 6. Initialize Connector Registry (Postgres; durable registry)
         await self._initialize_connector_registry()
 
         # 7. Initialize Dataset Registry (Postgres; pipeline artifacts)
@@ -399,7 +399,7 @@ class BFFServiceContainer:
             # Get Google API key from settings
             google_api_key = (self.settings.google_sheets.google_sheets_api_key or "").strip() or None
             
-            # Foundry policy: connector library does only I/O (preview/fetch/normalize).
+            # Connector policy: connector library does only I/O (preview/fetch/normalize).
             # Change detection belongs to the Trigger layer.
             google_sheets_service = GoogleSheetsService(api_key=google_api_key)
             

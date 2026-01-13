@@ -417,7 +417,7 @@ class TerminusService:
         except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
             raise RuntimeError(f"브랜치 정보 조회 실패 ({db_name}/{branch_name}): {e}")
 
-    # Merge conflict related methods (Foundry-style)
+    # Merge conflict related methods
     async def simulate_merge(
         self, db_name: str, source_branch: str, target_branch: str, strategy: str = "merge"
     ):

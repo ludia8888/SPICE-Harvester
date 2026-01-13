@@ -1,5 +1,5 @@
 """
-Pipeline Registry (Foundry-style) - durable pipeline metadata in Postgres.
+Pipeline Registry - durable pipeline metadata in Postgres.
 
 Stores pipeline definitions, versions, and latest preview/build status.
 """
@@ -18,6 +18,7 @@ import asyncpg
 from cryptography.fernet import Fernet, InvalidToken
 
 from shared.config.service_config import ServiceConfig
+from shared.config.settings import settings as global_settings
 from shared.services.lakefs_client import (
     LakeFSClient,
     LakeFSConfig,
@@ -472,11 +473,11 @@ class PipelineRegistry:
             raise RuntimeError(
                 f"lakeFS credentials not configured in Postgres for service principal '{service_principal}'. "
                 "Use the admin API to upsert credentials."
-            )
+        )
 
         # env fallback (dev/test)
-        access_key_id = str(os.getenv("LAKEFS_ACCESS_KEY_ID") or "").strip()
-        secret_access_key = str(os.getenv("LAKEFS_SECRET_ACCESS_KEY") or "").strip()
+        access_key_id = str(global_settings.storage.lakefs_access_key_id or "").strip()
+        secret_access_key = str(global_settings.storage.lakefs_secret_access_key or "").strip()
         if not access_key_id or not secret_access_key:
             raise RuntimeError("lakeFS credentials are required (LAKEFS_ACCESS_KEY_ID/LAKEFS_SECRET_ACCESS_KEY)")
         now = utcnow()
@@ -492,7 +493,7 @@ class PipelineRegistry:
 
     async def get_lakefs_client(self, *, user_id: Optional[str] = None) -> LakeFSClient:
         creds = await self.resolve_lakefs_credentials(user_id=user_id)
-        api_url = (os.getenv("LAKEFS_API_URL") or ServiceConfig.get_lakefs_api_url()).rstrip("/")
+        api_url = ServiceConfig.get_lakefs_api_url()
         return LakeFSClient(
             config=LakeFSConfig(
                 api_url=api_url,

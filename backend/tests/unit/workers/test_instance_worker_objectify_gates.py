@@ -1,10 +1,10 @@
 import pytest
 
-from instance_worker.main import StrictPalantirInstanceWorker
+from instance_worker.main import StrictInstanceWorker
 
 
 def test_primary_key_required_when_generation_disabled():
-    worker = StrictPalantirInstanceWorker()
+    worker = StrictInstanceWorker()
 
     with pytest.raises(ValueError):
         worker.get_primary_key_value("Product", {"name": "Widget"}, allow_generate=False)
@@ -12,7 +12,7 @@ def test_primary_key_required_when_generation_disabled():
 
 @pytest.mark.asyncio
 async def test_relationship_fallback_can_be_disabled():
-    worker = StrictPalantirInstanceWorker()
+    worker = StrictInstanceWorker()
     worker.terminus_service = None
     payload = {"linked_to": "Target/abc123"}
 

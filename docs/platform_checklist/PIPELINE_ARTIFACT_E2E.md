@@ -4,7 +4,7 @@
 
 ## Purpose
 - Validate the artifact-first loop: ingest -> preview artifact -> build artifact -> deploy promotion -> dataset_version link -> lineage.
-- Produce evidence files under `docs/foundry_checklist/evidence/pipeline_artifact_e2e/`.
+- Produce evidence files under `docs/platform_checklist/evidence/pipeline_artifact_e2e/`.
 
 ## Prereqs
 - Running services: BFF, pipeline_worker, lakeFS, Kafka, Postgres.
@@ -23,7 +23,7 @@ ADMIN_TOKEN=... ./scripts/run_pipeline_artifact_e2e.sh
 ```
 
 Outputs:
-- Summary file: `docs/foundry_checklist/evidence/pipeline_artifact_e2e/summary_<run_id>.txt`
+- Summary file: `docs/platform_checklist/evidence/pipeline_artifact_e2e/summary_<run_id>.txt`
 - Input CSV + pipeline definition: same directory.
 
 ## Manual API Flow (Curl)

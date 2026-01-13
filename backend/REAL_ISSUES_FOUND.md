@@ -36,7 +36,7 @@
 - **파일들**:
   - create_integration_schema.py: key="admin" → key="spice123!"
   - migrate_es_to_terminus_lightweight.py: key="admin" → key="spice123!"
-  - add_palantir_system_fields.py: key="admin" → key="spice123!"
+  - add_lightweight_system_fields.py: key="admin" → key="spice123!"
 - **수정**: 모두 spice123!로 수정
 
 ### 6. ❌ PostgreSQL 포트 문제 (이미 수정했다고 거짓말)

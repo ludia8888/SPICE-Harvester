@@ -823,7 +823,7 @@ async def graph_service_health(
         }
 
 
-# ========== PROJECTION/VIEW ENDPOINTS (팔란티어 스타일) ==========
+# ========== PROJECTION/VIEW ENDPOINTS (Materialized Views) ==========
 
 class ProjectionRegistrationRequest(BaseModel):
     """프로젝션 등록 요청"""

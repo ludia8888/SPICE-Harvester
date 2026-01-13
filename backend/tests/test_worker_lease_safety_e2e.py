@@ -15,7 +15,7 @@ from contextlib import contextmanager
 
 import pytest
 
-from instance_worker.main import StrictPalantirInstanceWorker
+from instance_worker.main import StrictInstanceWorker
 from shared.services.processed_event_registry import validate_lease_settings, validate_registry_enabled
 
 
@@ -59,7 +59,7 @@ def test_registry_disable_rejected():
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_heartbeat_not_blocked_by_poll():
-    worker = StrictPalantirInstanceWorker()
+    worker = StrictInstanceWorker()
     ticks = 0
 
     async def ticker():

@@ -1,5 +1,5 @@
 """
-Dataset Registry (Foundry-style) - durable dataset metadata in Postgres.
+Dataset Registry - durable dataset metadata in Postgres.
 
 Stores dataset metadata + versions (artifact references + samples).
 """

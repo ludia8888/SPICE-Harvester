@@ -1,6 +1,6 @@
 """
 Projection Manager Service
-THINK ULTRA³ - 팔란티어 스타일 프로젝션/뷰 Materialization
+THINK ULTRA³ - 프로젝션/뷰 Materialization
 
 빈번한 멀티홉 WOQL 쿼리를 주기적으로 실행하여 ES에 캐싱
 CQRS 읽기 경로 최적화를 위한 Materialized View 관리
@@ -22,12 +22,12 @@ logger = logging.getLogger(__name__)
 
 class ProjectionManager:
     """
-    팔란티어 스타일 프로젝션 관리
+    프로젝션 기반 조회 최적화
     
     핵심 원칙:
     1. 빈번한 고비용 멀티홉 = 프로젝션/뷰 materialize
     2. WOQL 정의 질의를 주기/트리거 기반으로 결과를 문서화
-    3. 저비용 조회로 전환 (팔란티어 파운드리식 "리파인드 뷰")
+    3. 저비용 조회로 전환 (materialized view / refined view)
     """
     
     def __init__(

@@ -7,7 +7,7 @@ Welcome to the SPICE HARVESTER project documentation. This directory contains al
 ### Core Documentation
 
 - **[System Architecture](ARCHITECTURE.md)** - Comprehensive system architecture with microservices design, implementation status, and performance metrics
-- **[Frontend UI/UX Spec](frontend.md)** - BFF-aligned frontend implementation spec (Blueprint.js + Palantir 3-pane)
+- **[Frontend UI/UX Spec](frontend.md)** - BFF-aligned frontend implementation spec (Blueprint.js + 3-pane layout)
 - **[Frontend Policies](FRONTEND_POLICIES.md)** - Frontend state/auth/query/command tracking policies
 - **[API Reference](API_REFERENCE.md)** - BFF API documentation (frontend contract)
 - **[Operations Manual](OPERATIONS.md)** - Deployment, maintenance, and operational procedures
@@ -112,7 +112,7 @@ backend/docs/              # Backend-specific documentation
 
 ### Frontend Technology Stack
 - **React 18 + TypeScript 5** - Modern UI framework with strict typing
-- **Blueprint.js 6** - Palantir's enterprise UI toolkit
+- **Blueprint.js 6** - Enterprise-grade UI toolkit
 - **Vite 7** - Fast build tool and development server
 - **State Management** - Zustand + TanStack Query
 - **UI Icons** - @blueprintjs/icons

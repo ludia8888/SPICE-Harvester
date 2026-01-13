@@ -203,7 +203,8 @@ This section fixes the minimum **executable** ActionType contract so that:
 - audit data stays structured and learnable (ActionLog as ontology object),
 - governance/permission gates can run without ambiguity.
 
-This contract is inspired by the Foundry ActionType mental model (rules/functions + submission criteria + action logs),
+This contract is inspired by well-known ActionType mental models used in enterprise ontology platforms
+(rules/functions + submission criteria + action logs),
 but is strictly constrained to the capabilities of this codebase (lakeFS patchset + ES overlay).
 
 #### 1) `input_schema` (type system + validation)
@@ -458,7 +459,7 @@ Notes:
 ### Action log (Postgres)
 Action logs are the audit SSoT for writeback decisions.
 
-Foundry-aligned exposure:
+Governance-aligned exposure:
 - ActionLog is also exposed as an Ontology object type (first-class resource) for read/ACL/governance.
 - Postgres is the backing store for that object type (or dual-write with verification).
 - `can_modify(action_log)` is evaluated against the object type permission model, not just service/table ACLs.
@@ -469,9 +470,9 @@ Why this matters (meta-cognition / agents):
   principal context), future agents can learn decision patterns (“how did we resolve conflicts before?”) and build
   higher-order operational behavior (self-reflection / meta-cognition) on top of the system’s own history.
 
-Palantir/Foundry note (safety): Foundry public docs explicitly describe an **Action Log object type** (audit/decision
-records as object data). We align with that documented philosophy; we do **not** assume or claim Palantir’s internal
-storage/implementation details beyond what’s documented.
+Safety note: Some enterprise ontology platforms document an **Action Log object type** (audit/decision records as
+object data). We align with that documented philosophy, but we do **not** assume or claim any vendor’s internal
+storage/implementation details beyond what’s publicly documented.
 
 Proposed table (aligns with `docs/ontology_resource_design.md`):
 ```
@@ -669,7 +670,7 @@ ES outage fallback:
 Goal: bound queue growth and provide a durable merged dataset for rebuilds.
 `writeback_merged_snapshot` is an official reproducible artifact for downstream reads/rebuilds, not a best-effort cache.
 
-Trigger conditions (Foundry-aligned):
+Trigger conditions (governance-aligned):
 - New datasource transaction detected (fresh base data version).
 - Edits detected since last snapshot (queue not empty).
 - Periodic schedule (default: every 6 hours).
@@ -746,7 +747,7 @@ Conflict metadata is stored in:
 
 ## Delete / recreate semantics
 
-Foundry-aligned rules:
+Delete/recreate rules:
 - Delete is not an edit; it is a tombstone operation.
 - If an object is deleted and later re-created, prior writeback edits are not inherited.
 
@@ -770,7 +771,7 @@ Alignment with current code:
 
 If either check fails, the Action is rejected before any writeback.
 
-Permission evaluator (Foundry-aligned):
+Permission evaluator (governance-aligned):
 - `can_modify(target_objects)` is evaluated as the AND of:
   - `action_type.permission_policy`
   - dataset ACL for the backing dataset (read/write)

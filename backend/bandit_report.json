@@ -1806,7 +1806,7 @@
       "test_name": "assert_used"
     },
     {
-      "code": "251         \n252         assert len(foundry_conflicts) == 1\n253         \n",
+      "code": "251         \n252         assert len(ui_conflicts) == 1\n253         \n",
       "col_offset": 8,
       "end_col_offset": 42,
       "filename": "bff/tests/test_conflict_converter_unit.py",
@@ -2226,7 +2226,7 @@
       "test_name": "assert_used"
     },
     {
-      "code": "350         \n351         assert len(foundry_conflicts) == 2\n352         \n",
+      "code": "350         \n351         assert len(ui_conflicts) == 2\n352         \n",
       "col_offset": 8,
       "end_col_offset": 42,
       "filename": "bff/tests/test_conflict_converter_unit.py",
@@ -2246,7 +2246,7 @@
       "test_name": "assert_used"
     },
     {
-      "code": "354         ids = [conflict[\"id\"] for conflict in foundry_conflicts]\n355         assert len(set(ids)) == len(ids)\n356         \n",
+      "code": "354         ids = [conflict[\"id\"] for conflict in ui_conflicts]\n355         assert len(set(ids)) == len(ids)\n356         \n",
       "col_offset": 8,
       "end_col_offset": 40,
       "filename": "bff/tests/test_conflict_converter_unit.py",
@@ -2266,7 +2266,7 @@
       "test_name": "assert_used"
     },
     {
-      "code": "358         types = [conflict[\"type\"] for conflict in foundry_conflicts]\n359         assert \"modify_modify_conflict\" in types\n360         assert \"add_add_conflict\" in types\n",
+      "code": "358         types = [conflict[\"type\"] for conflict in ui_conflicts]\n359         assert \"modify_modify_conflict\" in types\n360         assert \"add_add_conflict\" in types\n",
       "col_offset": 8,
       "end_col_offset": 48,
       "filename": "bff/tests/test_conflict_converter_unit.py",
@@ -2806,7 +2806,7 @@
       "test_name": "assert_used"
     },
     {
-      "code": "338         \n339         assert len(foundry_conflicts) == 1\n340         \n",
+      "code": "338         \n339         assert len(ui_conflicts) == 1\n340         \n",
       "col_offset": 8,
       "end_col_offset": 42,
       "filename": "bff/tests/test_merge_conflict_integration.py",
@@ -2826,7 +2826,7 @@
       "test_name": "assert_used"
     },
     {
-      "code": "341         conflict = foundry_conflicts[0]\n342         assert conflict[\"id\"] == \"conflict_1\"\n343         assert conflict[\"type\"] == \"modify_modify_conflict\"\n",
+      "code": "341         conflict = ui_conflicts[0]\n342         assert conflict[\"id\"] == \"conflict_1\"\n343         assert conflict[\"type\"] == \"modify_modify_conflict\"\n",
       "col_offset": 8,
       "end_col_offset": 45,
       "filename": "bff/tests/test_merge_conflict_integration.py",
