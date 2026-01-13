@@ -28,6 +28,7 @@ from pyspark.sql.types import StructType
 from data_connector.google_sheets.service import GoogleSheetsService
 from shared.config.app_config import AppConfig
 from shared.config.service_config import ServiceConfig
+from shared.config.settings import get_settings
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.models.event_envelope import EventEnvelope
@@ -75,8 +76,6 @@ from shared.services.processed_event_registry import ProcessedEventRegistry, Cla
 from shared.services.pipeline_lock import PipelineLock, PipelineLockError
 from shared.services.redis_service import RedisService, create_redis_service_legacy
 from shared.services.storage_service import StorageService
-from shared.security.auth_utils import get_expected_token
-from shared.utils.env_utils import parse_bool_env, parse_int_env
 from shared.utils.path_utils import safe_lakefs_ref
 from shared.utils.s3_uri import build_s3_uri, parse_s3_uri
 from shared.utils.schema_hash import compute_schema_hash
@@ -96,15 +95,9 @@ _SENSITIVE_CONF_TOKENS = (
     "credentials",
 )
 
-_BFF_TOKEN_ENV_KEYS = ("BFF_ADMIN_TOKEN", "BFF_WRITE_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN")
-
 
 def _resolve_code_version() -> Optional[str]:
-    for key in ("CODE_SHA", "GIT_SHA", "COMMIT_SHA"):
-        value = (os.getenv(key) or "").strip()
-        if value:
-            return value
-    return None
+    return get_settings().observability.code_sha
 
 
 def _is_sensitive_conf_key(key: str) -> bool:
@@ -113,10 +106,8 @@ def _is_sensitive_conf_key(key: str) -> bool:
 
 
 def _resolve_lakefs_repository() -> str:
-    repo = (os.getenv("LAKEFS_ARTIFACTS_REPOSITORY") or "").strip()
-    if repo:
-        return repo
-    return "pipeline-artifacts"
+    repo = str(get_settings().storage.lakefs_artifacts_repository or "").strip()
+    return repo or "pipeline-artifacts"
 
 
 
@@ -279,16 +270,19 @@ def _resolve_partition_columns(
 
 class PipelineWorker:
     def __init__(self) -> None:
+        settings = get_settings()
+        pipeline_settings = settings.pipeline
+
         self.running = False
         self.topic = AppConfig.PIPELINE_JOBS_TOPIC
         self.dlq_topic = AppConfig.PIPELINE_JOBS_DLQ_TOPIC
-        self.group_id = (os.getenv("PIPELINE_JOBS_GROUP") or "pipeline-worker-group").strip()
-        self.handler = (os.getenv("PIPELINE_WORKER_HANDLER") or "pipeline_worker").strip()
-        self.pipeline_label = (os.getenv("PIPELINE_WORKER_NAME") or "pipeline_worker").strip()
+        self.group_id = pipeline_settings.jobs_group
+        self.handler = pipeline_settings.worker_handler
+        self.pipeline_label = pipeline_settings.worker_name
 
-        self.max_retries = parse_int_env("PIPELINE_JOBS_MAX_RETRIES", 5, min_value=1, max_value=100)
-        self.backoff_base = parse_int_env("PIPELINE_JOBS_BACKOFF_BASE_SECONDS", 2, min_value=0, max_value=300)
-        self.backoff_max = parse_int_env("PIPELINE_JOBS_BACKOFF_MAX_SECONDS", 60, min_value=1, max_value=3600)
+        self.max_retries = pipeline_settings.jobs_max_retries
+        self.backoff_base = pipeline_settings.jobs_backoff_base_seconds
+        self.backoff_max = pipeline_settings.jobs_backoff_max_seconds
 
         self.consumer: Optional[Consumer] = None
         self.dlq_producer: Optional[Producer] = None
@@ -304,20 +298,18 @@ class PipelineWorker:
         self.http: Optional[httpx.AsyncClient] = None
         self.spark: Optional[SparkSession] = None
         self.redis: Optional[RedisService] = None
-        self.lock_enabled = parse_bool_env("PIPELINE_LOCKS_ENABLED", True)
-        self.lock_required = parse_bool_env("PIPELINE_LOCKS_REQUIRED", True)
-        self.lock_ttl_seconds = parse_int_env(
-            "PIPELINE_LOCK_TTL_SECONDS", 3600, min_value=60, max_value=86_400
-        )
-        self.lock_renew_seconds = parse_int_env(
-            "PIPELINE_LOCK_RENEW_SECONDS", 300, min_value=10, max_value=3_600
-        )
-        self.lock_retry_seconds = parse_int_env(
-            "PIPELINE_LOCK_RETRY_SECONDS", 5, min_value=1, max_value=600
-        )
-        self.lock_acquire_timeout_seconds = parse_int_env(
-            "PIPELINE_LOCK_ACQUIRE_TIMEOUT_SECONDS", 3600, min_value=30, max_value=86_400
-        )
+        self.lock_enabled = pipeline_settings.locks_enabled
+        self.lock_required = pipeline_settings.locks_required
+        self.lock_ttl_seconds = pipeline_settings.lock_ttl_seconds
+        self.lock_renew_seconds = pipeline_settings.lock_renew_seconds
+        self.lock_retry_seconds = pipeline_settings.lock_retry_seconds
+        self.lock_acquire_timeout_seconds = pipeline_settings.lock_acquire_timeout_seconds
+
+        self.spark_ansi_enabled = pipeline_settings.spark_ansi_enabled
+        self.use_lakefs_diff = pipeline_settings.lakefs_diff_enabled
+        self.processed_event_heartbeat_interval_seconds = settings.event_sourcing.processed_event_heartbeat_interval_seconds
+        self.service_name = (settings.observability.service_name or "").strip() or None
+        self.bff_admin_token = (settings.clients.bff_admin_token or "").strip() or None
         self.tracing = get_tracing_service("pipeline-worker")
         self.metrics = get_metrics_collector("pipeline-worker")
 
@@ -396,10 +388,10 @@ class PipelineWorker:
         self.storage = await self.pipeline_registry.get_lakefs_storage()
         self.lakefs_client = await self.pipeline_registry.get_lakefs_client()
 
-        api_key = (os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_SHEETS_API_KEY") or "").strip() or None
+        api_key = (get_settings().google_sheets.google_sheets_api_key or "").strip() or None
         self.sheets = GoogleSheetsService(api_key=api_key)
 
-        token = get_expected_token(_BFF_TOKEN_ENV_KEYS)
+        token = self.bff_admin_token
         headers: Dict[str, str] = {}
         if token:
             headers["Authorization"] = f"Bearer {token}"
@@ -435,7 +427,7 @@ class PipelineWorker:
         self.dlq_producer = Producer(
             {
                 "bootstrap.servers": ServiceConfig.get_kafka_bootstrap_servers(),
-                "client.id": os.getenv("SERVICE_NAME") or "pipeline-worker-dlq",
+                "client.id": self.service_name or "pipeline-worker-dlq",
                 "acks": "all",
                 "retries": 3,
                 "retry.backoff.ms": 100,
@@ -488,9 +480,7 @@ class PipelineWorker:
             .config("spark.sql.session.timeZone", "UTC")
             .config(
                 "spark.sql.ansi.enabled",
-                "true"
-                if (os.getenv("PIPELINE_SPARK_ANSI_ENABLED") or "true").strip().lower() in {"1", "true", "yes", "on"}
-                else "false",
+                "true" if self.spark_ansi_enabled else "false",
             )
             .getOrCreate()
         )
@@ -706,7 +696,7 @@ class PipelineWorker:
     async def _heartbeat_loop(self, *, handler: str, event_id: str) -> None:
         if not self.processed:
             return
-        interval = parse_int_env("PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS", 30, min_value=1, max_value=3600)
+        interval = self.processed_event_heartbeat_interval_seconds
         while True:
             try:
                 await asyncio.sleep(interval)
@@ -1022,7 +1012,7 @@ class PipelineWorker:
         is_build = job_mode == "build"
         run_mode = "preview" if is_preview else "build" if is_build else "deploy"
         preview_sampling_seed = self._preview_sampling_seed(job.job_id)
-        use_lakefs_diff = parse_bool_env("PIPELINE_LAKEFS_DIFF_ENABLED", True)
+        use_lakefs_diff = self.use_lakefs_diff
 
         async def emit_job_event(
             *,
@@ -3761,7 +3751,7 @@ def _list_part_files(path: str, *, extensions: Optional[set[str]] = None) -> Lis
 
 async def main() -> None:
     logging.basicConfig(
-        level=os.getenv("LOG_LEVEL", "INFO"),
+        level=get_settings().observability.log_level,
         format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s req_id=%(request_id)s corr_id=%(correlation_id)s db=%(db_name)s - %(message)s",
     )
     install_trace_context_filter()

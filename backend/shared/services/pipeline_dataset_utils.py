@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import os
 from typing import Any, Mapping, Optional, Sequence, List
+
+from shared.config.settings import get_settings
 
 
 @dataclass(frozen=True)
@@ -28,7 +29,7 @@ class DatasetResolution:
 def resolve_fallback_branches(fallback_raw: Optional[str] = None) -> List[str]:
     raw = fallback_raw
     if raw is None:
-        raw = os.getenv("PIPELINE_FALLBACK_BRANCHES", "main")
+        return list(get_settings().pipeline.fallback_branches_list)
     if not isinstance(raw, str):
         raw = str(raw)
     branches = [item.strip() for item in raw.split(",") if item.strip()]

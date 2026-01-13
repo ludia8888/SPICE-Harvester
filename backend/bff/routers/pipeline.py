@@ -10,7 +10,6 @@ import hashlib
 import io
 import json
 import logging
-import os
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -61,7 +60,6 @@ from shared.services.pipeline_dependency_utils import normalize_dependency_entri
 from shared.services.pipeline_scheduler import _is_valid_cron_expression
 from shared.services.pipeline_preflight_utils import compute_pipeline_preflight
 from shared.services.redis_service import create_redis_service_legacy
-from shared.utils.env_utils import parse_bool_env, parse_int_env
 from shared.utils.schema_hash import compute_schema_hash
 from shared.utils.s3_uri import build_s3_uri, parse_s3_uri
 from shared.utils.event_utils import build_command_event
@@ -73,6 +71,7 @@ from shared.security.input_sanitizer import sanitize_input, validate_db_name
 from shared.security.auth_utils import enforce_db_scope
 from shared.observability.tracing import trace_endpoint
 from shared.config.app_config import AppConfig
+from shared.config.settings import get_settings
 from bff.dependencies import get_oms_client
 from bff.services.oms_client import OMSClient
 
@@ -99,15 +98,15 @@ class FunnelAnalysisApiResponse(BaseModel):
 
 
 def _resolve_pipeline_protected_branches() -> set[str]:
-    raw = os.getenv("PIPELINE_PROTECTED_BRANCHES", "main")
-    return {branch.strip() for branch in raw.split(",") if branch.strip()}
+    return get_settings().pipeline.protected_branches_set
 
 
 def _pipeline_requires_proposal(branch: str) -> bool:
-    if not parse_bool_env("PIPELINE_REQUIRE_PROPOSALS", False):
+    settings = get_settings()
+    if not settings.pipeline.require_proposals:
         return False
     resolved = (branch or "").strip() or "main"
-    return resolved in _resolve_pipeline_protected_branches()
+    return resolved in settings.pipeline.protected_branches_set
 
 
 def _normalize_mapping_spec_ids(raw: Any) -> list[str]:
@@ -578,16 +577,21 @@ async def _acquire_pipeline_publish_lock(
     branch: str,
     job_id: str,
 ) -> Optional[tuple[Any, str, str]]:
-    if not parse_bool_env("PIPELINE_LOCKS_ENABLED", True):
+    pipeline_settings = get_settings().pipeline
+    if not pipeline_settings.locks_enabled:
         return None
     redis_service = create_redis_service_legacy()
-    await redis_service.connect()
+    try:
+        await redis_service.connect()
+    except Exception as exc:
+        if pipeline_settings.locks_required:
+            raise
+        logger.warning("Pipeline locks disabled (redis unavailable): %s", exc)
+        return None
     lock_key = f"pipeline-lock:{pipeline_id}:{safe_lakefs_ref(branch)}"
-    ttl_seconds = parse_int_env("PIPELINE_LOCK_TTL_SECONDS", 3600, min_value=60, max_value=86_400)
-    retry_seconds = parse_int_env("PIPELINE_LOCK_RETRY_SECONDS", 5, min_value=1, max_value=600)
-    timeout_seconds = parse_int_env(
-        "PIPELINE_LOCK_ACQUIRE_TIMEOUT_SECONDS", 30, min_value=5, max_value=3600
-    )
+    ttl_seconds = pipeline_settings.lock_ttl_seconds
+    retry_seconds = pipeline_settings.lock_retry_seconds
+    timeout_seconds = pipeline_settings.publish_lock_acquire_timeout_seconds
     token = f"{job_id}:{uuid4().hex}"
     start = time.monotonic()
     while True:
@@ -1272,7 +1276,7 @@ def _sanitize_s3_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, str]:
 
 
 def _resolve_lakefs_raw_repository() -> str:
-    repo = (os.getenv("LAKEFS_RAW_REPOSITORY") or "").strip()
+    repo = str(get_settings().storage.lakefs_raw_repository or "").strip()
     return repo or "raw-datasets"
 
 

@@ -28,6 +28,16 @@ def _is_docker_environment() -> bool:
     return os.path.exists("/.dockerenv")
 
 
+def _clamp_int(raw: Any, *, default: int, min_value: int = 0, max_value: int = 1_000_000) -> int:
+    if raw is None:
+        return default
+    try:
+        value = int(str(raw).strip())
+    except Exception:
+        return default
+    return max(min_value, min(max_value, value))
+
+
 class Environment(str, Enum):
     """Application environment types"""
     DEVELOPMENT = "development"
@@ -368,6 +378,419 @@ class ServiceSettings(BaseSettings):
             return ["*"]  # Fallback to allow all origins
 
 
+class ObservabilitySettings(BaseSettings):
+    """Logging/observability settings (shared across services/workers)."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    log_level: str = Field(
+        default="INFO",
+        description="Python logging level (LOG_LEVEL)",
+    )
+    service_name: Optional[str] = Field(
+        default=None,
+        description="Service name override (SERVICE_NAME)",
+    )
+    run_id: Optional[str] = Field(
+        default=None,
+        description="Execution/run id (RUN_ID; fallback PIPELINE_RUN_ID/EXECUTION_ID)",
+    )
+    code_sha: Optional[str] = Field(
+        default=None,
+        description="Code SHA for audit/tracing (CODE_SHA; fallback GIT_SHA/COMMIT_SHA)",
+    )
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def normalize_log_level(cls, v):  # noqa: ANN001
+        raw = str(v or "").strip().upper()
+        return raw or "INFO"
+
+    @field_validator("run_id", mode="before")
+    @classmethod
+    def fallback_run_id(cls, v):  # noqa: ANN001
+        if os.getenv("RUN_ID") not in (None, ""):
+            return v
+        for key in ("PIPELINE_RUN_ID", "EXECUTION_ID"):
+            value = (os.getenv(key) or "").strip()
+            if value:
+                return value
+        return v
+
+    @field_validator("code_sha", mode="before")
+    @classmethod
+    def fallback_code_sha(cls, v):  # noqa: ANN001
+        if os.getenv("CODE_SHA") not in (None, ""):
+            return v
+        for key in ("GIT_SHA", "COMMIT_SHA"):
+            value = (os.getenv(key) or "").strip()
+            if value:
+                return value
+        return v
+
+
+class PipelineSettings(BaseSettings):
+    """Pipeline Builder + pipeline worker settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="PIPELINE_",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    # Pipeline Builder governance
+    require_proposals: bool = Field(
+        default=False,
+        description="Require proposals on protected branches (PIPELINE_REQUIRE_PROPOSALS)",
+    )
+    protected_branches: str = Field(
+        default="main",
+        description="Comma-separated protected branches (PIPELINE_PROTECTED_BRANCHES)",
+    )
+    fallback_branches: str = Field(
+        default="main",
+        description="Comma-separated fallback branches for dataset resolution (PIPELINE_FALLBACK_BRANCHES)",
+    )
+
+    # Distributed locks (Redis)
+    locks_enabled: bool = Field(
+        default=True,
+        description="Enable pipeline locks (PIPELINE_LOCKS_ENABLED)",
+    )
+    locks_required: bool = Field(
+        default=True,
+        description="Require lock acquisition (PIPELINE_LOCKS_REQUIRED)",
+    )
+    lock_ttl_seconds: int = Field(
+        default=3600,
+        description="Lock TTL seconds (PIPELINE_LOCK_TTL_SECONDS)",
+    )
+    lock_renew_seconds: int = Field(
+        default=300,
+        description="Lock renew interval seconds (PIPELINE_LOCK_RENEW_SECONDS)",
+    )
+    lock_retry_seconds: int = Field(
+        default=5,
+        description="Lock acquire retry sleep seconds (PIPELINE_LOCK_RETRY_SECONDS)",
+    )
+    lock_acquire_timeout_seconds: int = Field(
+        default=3600,
+        description="Worker lock acquire timeout seconds (PIPELINE_LOCK_ACQUIRE_TIMEOUT_SECONDS)",
+    )
+    publish_lock_acquire_timeout_seconds: int = Field(
+        default=30,
+        description=(
+            "BFF publish lock acquire timeout seconds "
+            "(PIPELINE_PUBLISH_LOCK_ACQUIRE_TIMEOUT_SECONDS; fallback PIPELINE_LOCK_ACQUIRE_TIMEOUT_SECONDS)"
+        ),
+    )
+
+    # Pipeline execution toggles
+    lakefs_diff_enabled: bool = Field(
+        default=True,
+        description="Enable lakeFS diff during pipeline execution (PIPELINE_LAKEFS_DIFF_ENABLED)",
+    )
+    spark_ansi_enabled: bool = Field(
+        default=True,
+        description="Enable Spark ANSI mode (PIPELINE_SPARK_ANSI_ENABLED)",
+    )
+
+    # Worker identity / retries
+    jobs_group: str = Field(
+        default="pipeline-worker-group",
+        description="Kafka consumer group id (PIPELINE_JOBS_GROUP)",
+    )
+    worker_handler: str = Field(
+        default="pipeline_worker",
+        description="Worker handler label (PIPELINE_WORKER_HANDLER)",
+    )
+    worker_name: str = Field(
+        default="pipeline_worker",
+        description="Worker service name label (PIPELINE_WORKER_NAME)",
+    )
+    jobs_max_retries: int = Field(
+        default=5,
+        description="Pipeline job max retries (PIPELINE_JOBS_MAX_RETRIES)",
+    )
+    jobs_backoff_base_seconds: int = Field(
+        default=2,
+        description="Pipeline job retry backoff base seconds (PIPELINE_JOBS_BACKOFF_BASE_SECONDS)",
+    )
+    jobs_backoff_max_seconds: int = Field(
+        default=60,
+        description="Pipeline job retry backoff max seconds (PIPELINE_JOBS_BACKOFF_MAX_SECONDS)",
+    )
+
+    # Scheduler
+    scheduler_poll_seconds: int = Field(
+        default=30,
+        description="Pipeline scheduler poll interval seconds (PIPELINE_SCHEDULER_POLL_SECONDS)",
+    )
+
+    @field_validator(
+        "protected_branches",
+        "fallback_branches",
+        "jobs_group",
+        "worker_handler",
+        "worker_name",
+        mode="before",
+    )
+    @classmethod
+    def strip_strings(cls, v):  # noqa: ANN001
+        if v is None:
+            return v
+        return str(v).strip()
+
+    @field_validator("publish_lock_acquire_timeout_seconds", mode="before")
+    @classmethod
+    def fallback_publish_lock_timeout(cls, v):  # noqa: ANN001
+        # Backward compatible: historically BFF used PIPELINE_LOCK_ACQUIRE_TIMEOUT_SECONDS.
+        if os.getenv("PIPELINE_PUBLISH_LOCK_ACQUIRE_TIMEOUT_SECONDS") not in (None, ""):
+            return v
+        legacy = (os.getenv("PIPELINE_LOCK_ACQUIRE_TIMEOUT_SECONDS") or "").strip()
+        return legacy or v
+
+    @field_validator("jobs_max_retries", mode="before")
+    @classmethod
+    def clamp_jobs_max_retries(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=5, min_value=1, max_value=100)
+
+    @field_validator("jobs_backoff_base_seconds", mode="before")
+    @classmethod
+    def clamp_jobs_backoff_base_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=2, min_value=0, max_value=300)
+
+    @field_validator("jobs_backoff_max_seconds", mode="before")
+    @classmethod
+    def clamp_jobs_backoff_max_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=60, min_value=1, max_value=3600)
+
+    @field_validator("lock_ttl_seconds", mode="before")
+    @classmethod
+    def clamp_lock_ttl_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=3600, min_value=60, max_value=86_400)
+
+    @field_validator("lock_renew_seconds", mode="before")
+    @classmethod
+    def clamp_lock_renew_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=300, min_value=10, max_value=3_600)
+
+    @field_validator("lock_retry_seconds", mode="before")
+    @classmethod
+    def clamp_lock_retry_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=5, min_value=1, max_value=600)
+
+    @field_validator("lock_acquire_timeout_seconds", mode="before")
+    @classmethod
+    def clamp_lock_acquire_timeout_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=3600, min_value=30, max_value=86_400)
+
+    @field_validator("publish_lock_acquire_timeout_seconds", mode="before")
+    @classmethod
+    def clamp_publish_lock_acquire_timeout_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=30, min_value=5, max_value=3_600)
+
+    @field_validator("scheduler_poll_seconds", mode="before")
+    @classmethod
+    def clamp_scheduler_poll_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=30, min_value=1, max_value=3_600)
+
+    @property
+    def protected_branches_set(self) -> set[str]:
+        raw = str(self.protected_branches or "").strip() or "main"
+        branches = {branch.strip() for branch in raw.split(",") if branch.strip()}
+        branches.add("main")
+        return branches
+
+    @property
+    def fallback_branches_list(self) -> List[str]:
+        raw = str(self.fallback_branches or "").strip() or "main"
+        branches = [branch.strip() for branch in raw.split(",") if branch.strip()]
+        if "main" not in branches:
+            branches.append("main")
+        return branches
+
+
+class AgentRuntimeSettings(BaseSettings):
+    """Agent runtime settings (LangGraph executor)."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="AGENT_",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    bff_base_url: Optional[str] = Field(
+        default=None,
+        description="Override BFF base URL for tool calls (AGENT_BFF_BASE_URL)",
+    )
+    bff_token: Optional[str] = Field(
+        default=None,
+        description="Bearer token for BFF tool calls (AGENT_BFF_TOKEN; fallback BFF_AGENT_TOKEN)",
+    )
+    service_name: str = Field(
+        default="agent",
+        description="Service name for audit/events (AGENT_SERVICE_NAME)",
+    )
+    run_max_steps: int = Field(
+        default=50,
+        description="Max steps per agent run (AGENT_RUN_MAX_STEPS)",
+    )
+    require_event_store: bool = Field(
+        default=True,
+        description="Require event store availability (AGENT_REQUIRE_EVENT_STORE)",
+    )
+
+    tool_timeout_seconds: float = Field(
+        default=30.0,
+        description="HTTP timeout for tool calls (AGENT_TOOL_TIMEOUT_SECONDS)",
+    )
+    tool_max_payload_bytes: int = Field(
+        default=200000,
+        description="Max tool payload bytes (AGENT_TOOL_MAX_PAYLOAD_BYTES)",
+    )
+    audit_max_preview_chars: int = Field(
+        default=2000,
+        description="Max chars stored in audit previews (AGENT_AUDIT_MAX_PREVIEW_CHARS)",
+    )
+
+    command_timeout_seconds: float = Field(
+        default=600.0,
+        description=(
+            "Wait timeout for async commands/pipeline jobs "
+            "(AGENT_COMMAND_TIMEOUT_SECONDS; fallback PIPELINE_RUN_TIMEOUT_SECONDS/PIPELINE_RUN_TIMEOUT)"
+        ),
+    )
+    command_poll_interval_seconds: float = Field(
+        default=2.0,
+        description="Poll interval seconds for command status (AGENT_COMMAND_POLL_INTERVAL_SECONDS)",
+    )
+    command_ws_idle_seconds: float = Field(
+        default=5.0,
+        description="WebSocket idle poll seconds (AGENT_COMMAND_WS_IDLE_SECONDS)",
+    )
+    command_ws_enabled: bool = Field(
+        default=True,
+        description="Enable command WebSocket progress (AGENT_COMMAND_WS_ENABLED)",
+    )
+
+    pipeline_wait_enabled: bool = Field(
+        default=True,
+        description="Wait for pipeline build/deploy job completion (AGENT_PIPELINE_WAIT_ENABLED)",
+    )
+    block_writes_on_overlay_degraded: bool = Field(
+        default=True,
+        description="Block writes when overlay is degraded (AGENT_BLOCK_WRITES_ON_OVERLAY_DEGRADED)",
+    )
+    allow_degraded_writes: bool = Field(
+        default=False,
+        description="Allow writes even if overlay degraded (AGENT_ALLOW_DEGRADED_WRITES)",
+    )
+
+    auto_retry_enabled: bool = Field(
+        default=True,
+        description="Enable auto retries for tool calls (AGENT_AUTO_RETRY_ENABLED)",
+    )
+    auto_retry_max_attempts: int = Field(
+        default=3,
+        description="Auto retry max attempts (AGENT_AUTO_RETRY_MAX_ATTEMPTS)",
+    )
+    auto_retry_base_delay_seconds: float = Field(
+        default=0.5,
+        description="Auto retry base delay seconds (AGENT_AUTO_RETRY_BASE_DELAY_SECONDS)",
+    )
+    auto_retry_max_delay_seconds: float = Field(
+        default=8.0,
+        description="Auto retry max delay seconds (AGENT_AUTO_RETRY_MAX_DELAY_SECONDS)",
+    )
+    auto_retry_allow_writes: bool = Field(
+        default=False,
+        description="Allow auto retries on write methods (AGENT_AUTO_RETRY_ALLOW_WRITES)",
+    )
+
+    @field_validator("bff_token", mode="before")
+    @classmethod
+    def fallback_bff_token(cls, v):  # noqa: ANN001
+        if os.getenv("AGENT_BFF_TOKEN") not in (None, ""):
+            return v
+        fallback = (os.getenv("BFF_AGENT_TOKEN") or "").strip()
+        return fallback or v
+
+    @field_validator("command_timeout_seconds", mode="before")
+    @classmethod
+    def fallback_command_timeout(cls, v):  # noqa: ANN001
+        if os.getenv("AGENT_COMMAND_TIMEOUT_SECONDS") not in (None, ""):
+            return v
+        for key in ("PIPELINE_RUN_TIMEOUT_SECONDS", "PIPELINE_RUN_TIMEOUT"):
+            raw = (os.getenv(key) or "").strip()
+            if raw:
+                return raw
+        return v
+
+
+class ClientSettings(BaseSettings):
+    """Internal service-to-service client settings (BFF/OMS/etc)."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    oms_client_timeout_seconds: float = Field(
+        default=60.0,
+        description="OMS client timeout seconds (OMS_CLIENT_TIMEOUT_SECONDS)",
+    )
+    oms_client_token: Optional[str] = Field(
+        default=None,
+        description="OMS client admin token (OMS_CLIENT_TOKEN; fallback OMS_ADMIN_TOKEN/ADMIN_API_KEY/ADMIN_TOKEN)",
+    )
+    oms_client_debug_payload: bool = Field(
+        default=False,
+        description="Log OMS request payloads (OMS_CLIENT_DEBUG_PAYLOAD)",
+    )
+    agent_proxy_timeout_seconds: float = Field(
+        default=30.0,
+        description="BFF -> Agent proxy timeout seconds (AGENT_PROXY_TIMEOUT_SECONDS)",
+    )
+    bff_admin_token: Optional[str] = Field(
+        default=None,
+        description="BFF admin token for internal calls (BFF_ADMIN_TOKEN; fallback BFF_WRITE_TOKEN/ADMIN_API_KEY/ADMIN_TOKEN)",
+    )
+
+    @field_validator("oms_client_token", mode="before")
+    @classmethod
+    def fallback_oms_client_token(cls, v):  # noqa: ANN001
+        if os.getenv("OMS_CLIENT_TOKEN") not in (None, ""):
+            return v
+        for key in ("OMS_ADMIN_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN"):
+            value = (os.getenv(key) or "").strip()
+            if value:
+                return value
+        return v
+
+    @field_validator("bff_admin_token", mode="before")
+    @classmethod
+    def fallback_bff_admin_token(cls, v):  # noqa: ANN001
+        if os.getenv("BFF_ADMIN_TOKEN") not in (None, ""):
+            return v
+        for key in ("BFF_WRITE_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN"):
+            value = (os.getenv(key) or "").strip()
+            if value:
+                return value
+        return v
+
+
 class MessagingSettings(BaseSettings):
     """Kafka topic/group configuration settings"""
 
@@ -557,6 +980,15 @@ class StorageSettings(BaseSettings):
     lakefs_s3_ssl_ca_bundle: Optional[str] = Field(
         default=None,
         description="CA bundle path for lakeFS S3 gateway TLS verification (LAKEFS_S3_SSL_CA_BUNDLE).",
+    )
+
+    lakefs_raw_repository: str = Field(
+        default="raw-datasets",
+        description="lakeFS repository for raw datasets (LAKEFS_RAW_REPOSITORY)",
+    )
+    lakefs_artifacts_repository: str = Field(
+        default="pipeline-artifacts",
+        description="lakeFS repository for pipeline artifacts (LAKEFS_ARTIFACTS_REPOSITORY)",
     )
     
     # S3 Buckets
@@ -895,6 +1327,14 @@ class GoogleSheetsSettings(BaseSettings):
         description="Google Sheets service account credentials path"
     )
 
+    @field_validator("google_sheets_api_key", mode="before")
+    @classmethod
+    def fallback_google_api_key(cls, v):  # noqa: ANN001
+        if os.getenv("GOOGLE_SHEETS_API_KEY") not in (None, ""):
+            return v
+        fallback = (os.getenv("GOOGLE_API_KEY") or "").strip()
+        return fallback or v
+
 
 class ApplicationSettings(BaseSettings):
     """Main application settings - aggregates all other settings"""
@@ -919,6 +1359,10 @@ class ApplicationSettings(BaseSettings):
     # Nested settings
     database: DatabaseSettings = DatabaseSettings()
     services: ServiceSettings = ServiceSettings()
+    observability: ObservabilitySettings = ObservabilitySettings()
+    pipeline: PipelineSettings = PipelineSettings()
+    agent: AgentRuntimeSettings = AgentRuntimeSettings()
+    clients: ClientSettings = ClientSettings()
     messaging: MessagingSettings = MessagingSettings()
     event_sourcing: EventSourcingSettings = EventSourcingSettings()
     storage: StorageSettings = StorageSettings()

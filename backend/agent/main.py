@@ -8,12 +8,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
 from agent.routers.agent import router as agent_router
+from shared.config.settings import get_settings
 from shared.middleware.rate_limiter import RateLimiter
 from shared.services.audit_log_store import AuditLogStore
 from shared.services.agent_registry import AgentRegistry
@@ -24,17 +24,10 @@ from shared.utils.app_logger import get_logger
 logger = get_logger(__name__)
 
 
-def _env_bool(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize dependencies."""
-    require_event_store = _env_bool("AGENT_REQUIRE_EVENT_STORE", True)
+    require_event_store = get_settings().agent.require_event_store
     try:
         await event_store.connect()
         app.state.event_store = event_store

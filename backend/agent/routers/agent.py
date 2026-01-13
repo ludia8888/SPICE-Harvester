@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
@@ -11,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from agent.models import AgentRunRequest, AgentToolCall
 from agent.services.agent_graph import AgentState, run_agent_graph
 from agent.services.agent_runtime import AgentRuntime
+from shared.config.settings import get_settings
 from shared.services.agent_registry import AgentRegistry
 from shared.models.responses import ApiResponse
 from shared.utils.llm_safety import digest_for_audit, mask_pii
@@ -237,7 +237,7 @@ async def _execute_agent_run(
 async def create_agent_run(request: Request, body: AgentRunRequest) -> Dict[str, Any]:
     if not body.steps:
         raise HTTPException(status_code=400, detail="steps are required")
-    max_steps = int(os.getenv("AGENT_RUN_MAX_STEPS", "50"))
+    max_steps = get_settings().agent.run_max_steps
     if len(body.steps) > max_steps:
         raise HTTPException(status_code=400, detail="steps exceed AGENT_RUN_MAX_STEPS")
 

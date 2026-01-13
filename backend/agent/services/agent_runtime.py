@@ -4,7 +4,6 @@ import asyncio
 import contextlib
 import json
 import logging
-import os
 import re
 import time
 from dataclasses import dataclass
@@ -17,6 +16,7 @@ import aiohttp
 import httpx
 
 from agent.models import AgentToolCall
+from shared.config.settings import get_settings
 from shared.config.service_config import ServiceConfig
 from shared.models.event_envelope import EventEnvelope
 from shared.services.audit_log_store import AuditLogStore
@@ -32,33 +32,6 @@ _COMMAND_STATUSES = _COMMAND_PENDING_STATUSES | _COMMAND_TERMINAL_STATUSES
 _PIPELINE_PENDING_STATUSES = {"QUEUED", "RUNNING", "PENDING", "PROCESSING"}
 _PIPELINE_TERMINAL_STATUSES = {"SUCCESS", "FAILED", "CANCELLED", "DEPLOYED"}
 _PIPELINE_STATUSES = _PIPELINE_PENDING_STATUSES | _PIPELINE_TERMINAL_STATUSES
-
-
-def _env_bool(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _env_int(name: str, default: int) -> int:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        return default
-
-
-def _env_float(name: str, default: float) -> float:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        return float(raw)
-    except ValueError:
-        return default
 
 
 def _clean_url(value: str) -> str:
@@ -528,6 +501,7 @@ class AgentRuntimeConfig:
     command_poll_interval_s: float
     command_ws_idle_s: float
     command_ws_enabled: bool
+    pipeline_wait_enabled: bool
     block_writes_on_overlay_degraded: bool
     allow_degraded_writes: bool
     auto_retry_enabled: bool
@@ -556,44 +530,34 @@ class AgentRuntime:
         event_store: EventStore,
         audit_store: Optional[AuditLogStore],
     ) -> "AgentRuntime":
-        bff_url = _clean_url(os.getenv("AGENT_BFF_BASE_URL") or ServiceConfig.get_bff_url())
-        bff_token = (os.getenv("AGENT_BFF_TOKEN") or os.getenv("BFF_AGENT_TOKEN") or "").strip() or None
-        allowed_services = ("bff",)
-        command_timeout_raw = (
-            os.getenv("AGENT_COMMAND_TIMEOUT_SECONDS")
-            or os.getenv("PIPELINE_RUN_TIMEOUT_SECONDS")
-            or os.getenv("PIPELINE_RUN_TIMEOUT")
-            or "600"
-        )
-        try:
-            command_timeout = float(command_timeout_raw)
-        except ValueError:
-            command_timeout = 600.0
+        settings = get_settings()
+        agent_settings = settings.agent
 
-        block_writes_on_overlay_degraded = _env_bool("AGENT_BLOCK_WRITES_ON_OVERLAY_DEGRADED", True)
-        allow_degraded_writes = _env_bool("AGENT_ALLOW_DEGRADED_WRITES", False)
-        auto_retry_enabled = _env_bool("AGENT_AUTO_RETRY_ENABLED", True)
-        auto_retry_allow_writes = _env_bool("AGENT_AUTO_RETRY_ALLOW_WRITES", False)
+        bff_url_raw = (agent_settings.bff_base_url or "").strip() or ServiceConfig.get_bff_url()
+        bff_url = _clean_url(bff_url_raw)
+        bff_token = (agent_settings.bff_token or "").strip() or None
+        allowed_services = ("bff",)
 
         config = AgentRuntimeConfig(
             bff_url=bff_url,
             allowed_services=allowed_services,
-            max_preview_chars=_env_int("AGENT_AUDIT_MAX_PREVIEW_CHARS", 2000),
-            max_payload_bytes=_env_int("AGENT_TOOL_MAX_PAYLOAD_BYTES", 200000),
-            timeout_s=float(os.getenv("AGENT_TOOL_TIMEOUT_SECONDS", "30")),
-            service_name=os.getenv("AGENT_SERVICE_NAME", "agent"),
+            max_preview_chars=agent_settings.audit_max_preview_chars,
+            max_payload_bytes=agent_settings.tool_max_payload_bytes,
+            timeout_s=agent_settings.tool_timeout_seconds,
+            service_name=agent_settings.service_name,
             bff_token=bff_token,
-            command_timeout_s=command_timeout,
-            command_poll_interval_s=float(os.getenv("AGENT_COMMAND_POLL_INTERVAL_SECONDS", "2")),
-            command_ws_idle_s=float(os.getenv("AGENT_COMMAND_WS_IDLE_SECONDS", "5")),
-            command_ws_enabled=_env_bool("AGENT_COMMAND_WS_ENABLED", True),
-            block_writes_on_overlay_degraded=block_writes_on_overlay_degraded,
-            allow_degraded_writes=allow_degraded_writes,
-            auto_retry_enabled=auto_retry_enabled,
-            auto_retry_max_attempts=_env_int("AGENT_AUTO_RETRY_MAX_ATTEMPTS", 3),
-            auto_retry_base_delay_s=_env_float("AGENT_AUTO_RETRY_BASE_DELAY_SECONDS", 0.5),
-            auto_retry_max_delay_s=_env_float("AGENT_AUTO_RETRY_MAX_DELAY_SECONDS", 8.0),
-            auto_retry_allow_writes=auto_retry_allow_writes,
+            command_timeout_s=agent_settings.command_timeout_seconds,
+            command_poll_interval_s=agent_settings.command_poll_interval_seconds,
+            command_ws_idle_s=agent_settings.command_ws_idle_seconds,
+            command_ws_enabled=agent_settings.command_ws_enabled,
+            pipeline_wait_enabled=agent_settings.pipeline_wait_enabled,
+            block_writes_on_overlay_degraded=agent_settings.block_writes_on_overlay_degraded,
+            allow_degraded_writes=agent_settings.allow_degraded_writes,
+            auto_retry_enabled=agent_settings.auto_retry_enabled,
+            auto_retry_max_attempts=agent_settings.auto_retry_max_attempts,
+            auto_retry_base_delay_s=agent_settings.auto_retry_base_delay_seconds,
+            auto_retry_max_delay_s=agent_settings.auto_retry_max_delay_seconds,
+            auto_retry_allow_writes=agent_settings.auto_retry_allow_writes,
         )
         return cls(event_store=event_store, audit_store=audit_store, config=config)
 
@@ -1295,7 +1259,7 @@ class AgentRuntime:
             if (
                 not error
                 and pipeline_job_id
-                and _env_bool("AGENT_PIPELINE_WAIT_ENABLED", True)
+                and self.config.pipeline_wait_enabled
                 and _tool_call_expects_pipeline_job(tool_id=tool_call.tool_id, path=path)
             ):
                 resolved_pipeline_id = _extract_pipeline_id(response_payload) or _extract_pipeline_id_from_path(path)

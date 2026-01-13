@@ -4,12 +4,12 @@ BFF에서 OMS와 통신하기 위한 HTTP 클라이언트
 """
 
 import logging
-import os
 from typing import Any, Dict, List, Optional
 
 import httpx
 
 from shared.config.service_config import ServiceConfig
+from shared.config.settings import get_settings
 
 # shared 모델 import
 from shared.models.ontology import (
@@ -25,6 +25,9 @@ class OMSClient:
     """OMS HTTP 클라이언트"""
 
     def __init__(self, base_url: Optional[str] = None):
+        settings = get_settings()
+        client_settings = settings.clients
+
         # ServiceConfig에서 OMS URL 가져오기
         self.base_url = base_url or ServiceConfig.get_oms_url()
 
@@ -36,7 +39,8 @@ class OMSClient:
         auth_token = self._get_auth_token()
         if auth_token:
             headers["X-Admin-Token"] = auth_token
-        timeout_seconds = float(os.getenv("OMS_CLIENT_TIMEOUT_SECONDS", "60") or "60")
+        timeout_seconds = client_settings.oms_client_timeout_seconds
+        self._debug_payload = client_settings.oms_client_debug_payload
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
             timeout=timeout_seconds,
@@ -48,11 +52,8 @@ class OMSClient:
 
     @staticmethod
     def _get_auth_token() -> Optional[str]:
-        for key in ("OMS_CLIENT_TOKEN", "OMS_ADMIN_TOKEN", "ADMIN_API_KEY", "ADMIN_TOKEN"):
-            value = (os.getenv(key) or "").strip()
-            if value:
-                return value
-        return None
+        token = get_settings().clients.oms_client_token
+        return (token or "").strip() or None
 
     async def close(self):
         """클라이언트 연결 종료"""
@@ -172,8 +173,7 @@ class OMSClient:
     ) -> Dict[str, Any]:
         """온톨로지 생성"""
         try:
-            debug_payload = os.getenv("OMS_CLIENT_DEBUG_PAYLOAD", "").strip().lower() in {"1", "true", "yes", "on"}
-            if debug_payload:
+            if self._debug_payload:
                 import json
 
                 logger.debug("OMS create_ontology payload: %s", json.dumps(ontology_data, ensure_ascii=False))
