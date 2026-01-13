@@ -59,6 +59,7 @@ from shared.services.dataset_registry import DatasetRegistry
 from shared.services.agent_registry import AgentRegistry
 from shared.services.agent_plan_registry import AgentPlanRegistry
 from shared.services.agent_tool_registry import AgentToolRegistry
+from shared.services.agent_tool_allowlist import bootstrap_agent_tool_allowlist
 from shared.services.pipeline_registry import PipelineRegistry
 from shared.services.pipeline_executor import PipelineExecutor
 from shared.services.objectify_registry import ObjectifyRegistry
@@ -356,6 +357,14 @@ class BFFServiceContainer:
             registry = AgentToolRegistry()
             await registry.initialize()
             self._bff_services["agent_tool_registry"] = registry
+
+            if getattr(self.settings, "agent_plan", None) and self.settings.agent_plan.allowlist_bootstrap_enabled:
+                result = await bootstrap_agent_tool_allowlist(
+                    tool_registry=registry,
+                    bundle_path=self.settings.agent_plan.allowlist_bundle_path,
+                    only_if_empty=self.settings.agent_plan.allowlist_bootstrap_only_if_empty,
+                )
+                logger.info("Agent tool allowlist bootstrap: %s", result.get("status"))
             logger.info("AgentToolRegistry initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize AgentToolRegistry: {e}")

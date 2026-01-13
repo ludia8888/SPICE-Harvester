@@ -36,6 +36,12 @@ _RISK_ORDER = {
 _WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 _ACTION_SUBMIT_SUFFIX = "/actions/{action_type_id}/submit"
 _ACTION_SIMULATE_SUFFIX = "/actions/{action_type_id}/simulate"
+_PIPELINE_SIMULATE_DEFINITION_TOOL_ID = "pipelines.simulate_definition"
+_PIPELINE_PREVIEW_TOOL_ID = "pipelines.preview"
+_PIPELINE_CREATE_TOOL_ID = "pipelines.create"
+_PIPELINE_UPDATE_TOOL_ID = "pipelines.update"
+_PIPELINE_BUILD_TOOL_ID = "pipelines.build"
+_PIPELINE_DEPLOY_TOOL_ID = "pipelines.deploy"
 
 
 @dataclass(frozen=True)
@@ -196,11 +202,18 @@ def _action_simulation_artifacts(simulation_id: str) -> list[str]:
     return [f"action_simulation.id.{sid}", f"action_simulation.effective.{sid}"]
 
 
-def _derive_required_controls(*, plan: AgentPlan, contains_action_submit: bool) -> list[PlanRequiredControl]:
+def _derive_required_controls(
+    *,
+    plan: AgentPlan,
+    contains_action_submit: bool,
+    contains_pipeline_write: bool,
+) -> list[PlanRequiredControl]:
     controls: list[PlanRequiredControl] = []
     if contains_action_submit:
         controls.append(PlanRequiredControl.simulate_first)
         controls.append(PlanRequiredControl.artifact_flow_declared)
+    if contains_pipeline_write:
+        controls.append(PlanRequiredControl.pipeline_simulate_first)
     if plan.requires_approval or plan.risk_level != AgentPlanRiskLevel.read:
         controls.append(PlanRequiredControl.approval_required)
         controls.append(PlanRequiredControl.idempotency_key_required)
@@ -325,6 +338,9 @@ async def validate_agent_plan(
     seen_simulate: set[tuple[str, str]] = set()
     simulation_by_key: dict[tuple[str, str], str] = {}
     contains_action_submit = False
+    seen_pipeline_simulate_definition = False
+    previewed_pipeline_ids: set[str] = set()
+    contains_pipeline_write = False
 
     for idx, step in enumerate(plan.steps):
         policy = policy_by_tool_id.get(step.tool_id)
@@ -651,6 +667,150 @@ async def validate_agent_plan(
                         operations=[PlanPatchOp(op="replace", path=f"/steps/{idx}/body", value=patched_body)],
                     )
 
+        # Pipeline Builder: enforce simulate/preview before write operations.
+        if normalized_step.tool_id == _PIPELINE_SIMULATE_DEFINITION_TOOL_ID:
+            seen_pipeline_simulate_definition = True
+
+        if normalized_step.tool_id == _PIPELINE_PREVIEW_TOOL_ID:
+            pipeline_id_value = str(normalized_step.path_params.get("pipeline_id") or "").strip()
+            if pipeline_id_value:
+                previewed_pipeline_ids.add(pipeline_id_value)
+
+        if normalized_step.tool_id == _PIPELINE_CREATE_TOOL_ID:
+            contains_pipeline_write = True
+            if not seen_pipeline_simulate_definition:
+                patch_id = f"insert_pipeline_simulate_before.{normalized_step.step_id}"
+                _add_error(
+                    code="pipeline_simulate_first_required",
+                    message=f"tool_id={normalized_step.tool_id} requires prior pipelines.simulate_definition",
+                    step=normalized_step,
+                    fix_hint="Add a pipelines.simulate_definition step before creating the pipeline.",
+                    patch_id=patch_id,
+                )
+                simulate_policy = policy_by_tool_id.get(_PIPELINE_SIMULATE_DEFINITION_TOOL_ID)
+                if simulate_policy and str(simulate_policy.status or "").strip().upper() == "ACTIVE":
+                    body = normalized_step.body if isinstance(normalized_step.body, dict) else {}
+                    definition_json = body.get("definition_json") if isinstance(body.get("definition_json"), dict) else None
+                    if definition_json is None and isinstance(body.get("definitionJson"), dict):
+                        definition_json = body.get("definitionJson")
+                    db_name = str(body.get("db_name") or body.get("dbName") or plan.data_scope.db_name or "").strip()
+                    branch = str(body.get("branch") or plan.data_scope.branch or "main").strip() or "main"
+                    if db_name and isinstance(definition_json, dict) and definition_json:
+                        simulate_step_id = f"simulate_definition_before_{normalized_step.step_id}"[:200]
+                        simulate_step = {
+                            "step_id": simulate_step_id,
+                            "tool_id": simulate_policy.tool_id,
+                            "method": "POST",
+                            "path_params": {},
+                            "body": {
+                                "db_name": db_name,
+                                "branch": branch,
+                                "definition_json": definition_json,
+                                "limit": 200,
+                            },
+                            "produces": [],
+                            "consumes": [],
+                            "requires_approval": False,
+                            "idempotency_key": str(uuid4()),
+                            "data_scope": dict(normalized_step.data_scope or {}),
+                            "description": "server-suggested: simulate definition before create",
+                        }
+                        _maybe_add_patch(
+                            patch_id=patch_id,
+                            title=f"Insert simulate_definition before {normalized_step.step_id}",
+                            description="Adds a pipelines.simulate_definition step to validate the definition before creating the pipeline.",
+                            auto_applicable=True,
+                            operations=[PlanPatchOp(op="add", path=f"/steps/{idx}", value=simulate_step)],
+                        )
+
+        if normalized_step.tool_id == _PIPELINE_UPDATE_TOOL_ID:
+            body = normalized_step.body if isinstance(normalized_step.body, dict) else {}
+            has_definition_update = any(
+                isinstance(body.get(key), dict) and body.get(key)
+                for key in ("definition_json", "definitionJson")
+            )
+            if has_definition_update:
+                contains_pipeline_write = True
+                if not seen_pipeline_simulate_definition:
+                    patch_id = f"insert_pipeline_simulate_before.{normalized_step.step_id}"
+                    _add_error(
+                        code="pipeline_simulate_first_required",
+                        message=f"tool_id={normalized_step.tool_id} definition update requires prior pipelines.simulate_definition",
+                        step=normalized_step,
+                        fix_hint="Add a pipelines.simulate_definition step before updating the pipeline definition.",
+                        patch_id=patch_id,
+                    )
+                    simulate_policy = policy_by_tool_id.get(_PIPELINE_SIMULATE_DEFINITION_TOOL_ID)
+                    if simulate_policy and str(simulate_policy.status or "").strip().upper() == "ACTIVE":
+                        definition_json = body.get("definition_json") if isinstance(body.get("definition_json"), dict) else None
+                        if definition_json is None and isinstance(body.get("definitionJson"), dict):
+                            definition_json = body.get("definitionJson")
+                        db_name = str(body.get("db_name") or body.get("dbName") or plan.data_scope.db_name or "").strip()
+                        branch = str(body.get("branch") or plan.data_scope.branch or "main").strip() or "main"
+                        if db_name and isinstance(definition_json, dict) and definition_json:
+                            simulate_step_id = f"simulate_definition_before_{normalized_step.step_id}"[:200]
+                            simulate_step = {
+                                "step_id": simulate_step_id,
+                                "tool_id": simulate_policy.tool_id,
+                                "method": "POST",
+                                "path_params": {},
+                                "body": {
+                                    "db_name": db_name,
+                                    "branch": branch,
+                                    "definition_json": definition_json,
+                                    "limit": 200,
+                                },
+                                "produces": [],
+                                "consumes": [],
+                                "requires_approval": False,
+                                "idempotency_key": str(uuid4()),
+                                "data_scope": dict(normalized_step.data_scope or {}),
+                                "description": "server-suggested: simulate definition before update",
+                            }
+                            _maybe_add_patch(
+                                patch_id=patch_id,
+                                title=f"Insert simulate_definition before {normalized_step.step_id}",
+                                description="Adds a pipelines.simulate_definition step to validate the updated definition before applying it.",
+                                auto_applicable=True,
+                                operations=[PlanPatchOp(op="add", path=f"/steps/{idx}", value=simulate_step)],
+                            )
+
+        if normalized_step.tool_id in {_PIPELINE_BUILD_TOOL_ID, _PIPELINE_DEPLOY_TOOL_ID}:
+            contains_pipeline_write = True
+            pipeline_id_value = str(normalized_step.path_params.get("pipeline_id") or "").strip()
+            if pipeline_id_value and pipeline_id_value not in previewed_pipeline_ids and not seen_pipeline_simulate_definition:
+                patch_id = f"insert_pipeline_preview_before.{normalized_step.step_id}"
+                _add_error(
+                    code="pipeline_preview_first_required",
+                    message=f"tool_id={normalized_step.tool_id} requires prior pipelines.preview for pipeline_id={pipeline_id_value}",
+                    step=normalized_step,
+                    fix_hint="Add a pipelines.preview step before build/deploy.",
+                    patch_id=patch_id,
+                )
+                preview_policy = policy_by_tool_id.get(_PIPELINE_PREVIEW_TOOL_ID)
+                if preview_policy and str(preview_policy.status or "").strip().upper() == "ACTIVE":
+                    preview_step_id = f"preview_before_{normalized_step.step_id}"[:200]
+                    preview_step = {
+                        "step_id": preview_step_id,
+                        "tool_id": preview_policy.tool_id,
+                        "method": "POST",
+                        "path_params": {"pipeline_id": pipeline_id_value},
+                        "body": {"limit": 200},
+                        "produces": [],
+                        "consumes": [],
+                        "requires_approval": False,
+                        "idempotency_key": str(uuid4()),
+                        "data_scope": dict(normalized_step.data_scope or {}),
+                        "description": "server-suggested: preview before build/deploy",
+                    }
+                    _maybe_add_patch(
+                        patch_id=patch_id,
+                        title=f"Insert preview before {normalized_step.step_id}",
+                        description="Adds a pipelines.preview step to validate pipeline inputs before build/deploy.",
+                        auto_applicable=True,
+                        operations=[PlanPatchOp(op="add", path=f"/steps/{idx}", value=preview_step)],
+                    )
+
         # Update produced artifacts after validations.
         for artifact in normalized_step.produces:
             seen_artifacts.add(artifact)
@@ -671,7 +831,11 @@ async def validate_agent_plan(
         }
     )
 
-    required_controls = _derive_required_controls(plan=normalized_plan, contains_action_submit=contains_action_submit)
+    required_controls = _derive_required_controls(
+        plan=normalized_plan,
+        contains_action_submit=contains_action_submit,
+        contains_pipeline_write=contains_pipeline_write,
+    )
     report_status = "success" if not errors else "clarification_required"
     report = PlanCompilationReport(
         plan_id=str(normalized_plan.plan_id or plan.plan_id or ""),

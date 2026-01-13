@@ -762,6 +762,39 @@ class AgentRuntimeSettings(BaseSettings):
         return v
 
 
+class AgentPlanSettings(BaseSettings):
+    """LLM-native control plane settings (planner + allowlist bootstrap)."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="AGENT_PLAN_",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    allowlist_bundle_path: Optional[str] = Field(
+        default=None,
+        description="Path to agent tool allowlist bundle JSON (AGENT_PLAN_ALLOWLIST_BUNDLE_PATH)",
+    )
+    allowlist_bootstrap_enabled: bool = Field(
+        default=False,
+        description="Bootstrap allowlist bundle into Postgres on startup (AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ENABLED)",
+    )
+    allowlist_bootstrap_only_if_empty: bool = Field(
+        default=True,
+        description="Only bootstrap if DB table is empty (AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ONLY_IF_EMPTY)",
+    )
+
+    @field_validator("allowlist_bundle_path", mode="before")
+    @classmethod
+    def strip_allowlist_bundle_path(cls, v):  # noqa: ANN001
+        if v is None:
+            return None
+        value = str(v).strip()
+        return value or None
+
+
 class ClientSettings(BaseSettings):
     """Internal service-to-service client settings (BFF/OMS/etc)."""
 
@@ -2382,6 +2415,7 @@ class ApplicationSettings(BaseSettings):
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     pipeline: PipelineSettings = Field(default_factory=PipelineSettings)
     agent: AgentRuntimeSettings = Field(default_factory=AgentRuntimeSettings)
+    agent_plan: AgentPlanSettings = Field(default_factory=AgentPlanSettings)
     clients: ClientSettings = Field(default_factory=ClientSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     rate_limit: RateLimitSettings = Field(default_factory=RateLimitSettings)

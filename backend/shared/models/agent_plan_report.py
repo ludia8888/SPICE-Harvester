@@ -85,6 +85,7 @@ class PlanDiagnostic(BaseModel):
 
 class PlanRequiredControl(str, Enum):
     simulate_first = "simulate_first"
+    pipeline_simulate_first = "pipeline_simulate_first"
     approval_required = "approval_required"
     idempotency_key_required = "idempotency_key_required"
     artifact_flow_declared = "artifact_flow_declared"
@@ -110,4 +111,3 @@ class PlanCompilationReport(BaseModel):
     required_controls: List[PlanRequiredControl] = Field(default_factory=list)
     diagnostics: List[PlanDiagnostic] = Field(default_factory=list)
     patches: List[PlanPatchProposal] = Field(default_factory=list)
-

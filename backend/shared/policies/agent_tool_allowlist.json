@@ -11,6 +11,17 @@
     "max_payload_bytes": 200000
   },
   {
+    "tool_id": "actions.list_logs",
+    "method": "GET",
+    "path": "/api/v1/databases/{db_name}/actions/logs",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": false,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
     "tool_id": "actions.simulate",
     "method": "POST",
     "path": "/api/v1/databases/{db_name}/actions/{action_type_id}/simulate",
@@ -25,6 +36,61 @@
     "tool_id": "actions.submit",
     "method": "POST",
     "path": "/api/v1/databases/{db_name}/actions/{action_type_id}/submit",
+    "risk_level": "write",
+    "requires_approval": true,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "graph.query",
+    "method": "POST",
+    "path": "/api/v1/graph-query/{db_name}",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "graph.query.simple",
+    "method": "POST",
+    "path": "/api/v1/graph-query/{db_name}/simple",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "objectify.mapping_specs.create",
+    "method": "POST",
+    "path": "/api/v1/objectify/mapping-specs",
+    "risk_level": "write",
+    "requires_approval": true,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 500000
+  },
+  {
+    "tool_id": "objectify.mapping_specs.list",
+    "method": "GET",
+    "path": "/api/v1/objectify/mapping-specs",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": false,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "objectify.run",
+    "method": "POST",
+    "path": "/api/v1/objectify/datasets/{dataset_id}/run",
     "risk_level": "write",
     "requires_approval": true,
     "requires_idempotency_key": true,
@@ -55,12 +121,67 @@
     "max_payload_bytes": 500000
   },
   {
+    "tool_id": "pipelines.datasets.approve_schema",
+    "method": "POST",
+    "path": "/api/v1/pipelines/datasets/ingest-requests/{ingest_request_id}/schema/approve",
+    "risk_level": "write",
+    "requires_approval": true,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
     "tool_id": "pipelines.datasets.create",
     "method": "POST",
     "path": "/api/v1/pipelines/datasets",
     "risk_level": "write",
     "requires_approval": true,
     "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "pipelines.datasets.create_version",
+    "method": "POST",
+    "path": "/api/v1/pipelines/datasets/{dataset_id}/versions",
+    "risk_level": "write",
+    "requires_approval": true,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 500000
+  },
+  {
+    "tool_id": "pipelines.datasets.funnel_analysis",
+    "method": "POST",
+    "path": "/api/v1/pipelines/datasets/{dataset_id}/versions/{version_id}/funnel-analysis",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "pipelines.datasets.get_ingest_request",
+    "method": "GET",
+    "path": "/api/v1/pipelines/datasets/ingest-requests/{ingest_request_id}",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": false,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "pipelines.datasets.list",
+    "method": "GET",
+    "path": "/api/v1/pipelines/datasets",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": false,
     "status": "ACTIVE",
     "roles": [],
     "max_payload_bytes": 200000
@@ -75,6 +196,127 @@
     "status": "ACTIVE",
     "roles": [],
     "max_payload_bytes": 500000
+  },
+  {
+    "tool_id": "pipelines.get",
+    "method": "GET",
+    "path": "/api/v1/pipelines/{pipeline_id}",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": false,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "pipelines.list",
+    "method": "GET",
+    "path": "/api/v1/pipelines",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": false,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "pipelines.preview",
+    "method": "POST",
+    "path": "/api/v1/pipelines/{pipeline_id}/preview",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "pipelines.proposals.approve",
+    "method": "POST",
+    "path": "/api/v1/pipelines/{pipeline_id}/proposals/approve",
+    "risk_level": "write",
+    "requires_approval": true,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "pipelines.proposals.list",
+    "method": "GET",
+    "path": "/api/v1/pipelines/proposals",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": false,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "pipelines.proposals.reject",
+    "method": "POST",
+    "path": "/api/v1/pipelines/{pipeline_id}/proposals/reject",
+    "risk_level": "write",
+    "requires_approval": true,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "pipelines.proposals.submit",
+    "method": "POST",
+    "path": "/api/v1/pipelines/{pipeline_id}/proposals",
+    "risk_level": "write",
+    "requires_approval": true,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "pipelines.readiness",
+    "method": "GET",
+    "path": "/api/v1/pipelines/{pipeline_id}/readiness",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": false,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "pipelines.runs",
+    "method": "GET",
+    "path": "/api/v1/pipelines/{pipeline_id}/runs",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": false,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "pipelines.artifacts.list",
+    "method": "GET",
+    "path": "/api/v1/pipelines/{pipeline_id}/artifacts",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": false,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "pipelines.artifacts.get",
+    "method": "GET",
+    "path": "/api/v1/pipelines/{pipeline_id}/artifacts/{artifact_id}",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": false,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
   },
   {
     "tool_id": "pipelines.simulate_definition",
@@ -97,5 +339,27 @@
     "status": "ACTIVE",
     "roles": [],
     "max_payload_bytes": 500000
+  },
+  {
+    "tool_id": "query.run",
+    "method": "POST",
+    "path": "/api/v1/databases/{db_name}/query",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "query.raw",
+    "method": "POST",
+    "path": "/api/v1/databases/{db_name}/query/raw",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
   }
 ]
