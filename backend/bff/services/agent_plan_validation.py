@@ -43,6 +43,23 @@ _PIPELINE_UPDATE_TOOL_ID = "pipelines.update"
 _PIPELINE_BUILD_TOOL_ID = "pipelines.build"
 _PIPELINE_DEPLOY_TOOL_ID = "pipelines.deploy"
 
+_TEMPLATE_TOKEN_RE = re.compile(r"\$\{([^{}]+)\}")
+_TEMPLATE_KEY_ALLOWED_RE = re.compile(r"^[A-Za-z0-9._-]{1,200}$")
+_TEMPLATE_STEP_OUTPUT_KEYS = {
+    "pipeline_id",
+    "dataset_id",
+    "dataset_version_id",
+    "job_id",
+    "artifact_id",
+    "ingest_request_id",
+    "mapping_spec_id",
+    "action_log_id",
+    "simulation_id",
+    "command_id",
+    "deployed_commit_id",
+    "pipeline_run_status",
+}
+
 
 @dataclass(frozen=True)
 class AgentPlanValidationResult:
@@ -202,6 +219,61 @@ def _action_simulation_artifacts(simulation_id: str) -> list[str]:
     return [f"action_simulation.id.{sid}", f"action_simulation.effective.{sid}"]
 
 
+def _iter_template_tokens(value: Any) -> list[str]:
+    tokens: list[str] = []
+    if value is None:
+        return tokens
+    if isinstance(value, str):
+        for match in _TEMPLATE_TOKEN_RE.finditer(value):
+            token = str(match.group(1) or "").strip()
+            if token:
+                tokens.append(token)
+        return tokens
+    if isinstance(value, dict):
+        for nested in value.values():
+            tokens.extend(_iter_template_tokens(nested))
+        return tokens
+    if isinstance(value, list):
+        for nested in value:
+            tokens.extend(_iter_template_tokens(nested))
+        return tokens
+    return tokens
+
+
+def _parse_steps_token(token: str) -> Optional[tuple[str, str]]:
+    if not token.startswith("steps."):
+        return None
+    rest = token[len("steps."):]
+    parts = rest.split(".")
+    if len(parts) < 2:
+        return None
+    step_id = ".".join(parts[:-1])
+    key = parts[-1]
+    if not _TEMPLATE_KEY_ALLOWED_RE.match(step_id):
+        return None
+    if not _TEMPLATE_KEY_ALLOWED_RE.match(key):
+        return None
+    return step_id, key
+
+
+def _parse_artifact_token(token: str) -> Optional[str]:
+    if not token.startswith("artifacts."):
+        return None
+    artifact_key = token[len("artifacts."):]
+    if not _TEMPLATE_KEY_ALLOWED_RE.match(artifact_key):
+        return None
+    return artifact_key
+
+
+def _parse_context_token(token: str) -> Optional[str]:
+    if not token.startswith("context."):
+        return None
+    key = token[len("context."):]
+    if not _TEMPLATE_KEY_ALLOWED_RE.match(key):
+        return None
+    return key
+
+
 def _derive_required_controls(
     *,
     plan: AgentPlan,
@@ -341,6 +413,7 @@ async def validate_agent_plan(
     seen_pipeline_simulate_definition = False
     previewed_pipeline_ids: set[str] = set()
     contains_pipeline_write = False
+    step_id_to_index = {step.step_id: idx for idx, step in enumerate(plan.steps)}
 
     for idx, step in enumerate(plan.steps):
         policy = policy_by_tool_id.get(step.tool_id)
@@ -484,6 +557,89 @@ async def validate_agent_plan(
                     details={"artifact": artifact},
                     fix_hint="Add a prior step that produces this artifact or adjust consumes.",
                 )
+
+        # Runtime template tokens: validate references are well-formed and point to earlier steps/artifacts.
+        template_tokens: list[str] = []
+        for source in (
+            normalized_step.path_params,
+            normalized_step.query,
+            normalized_step.body,
+            normalized_step.data_scope,
+        ):
+            template_tokens.extend(_iter_template_tokens(source))
+
+        for token in template_tokens:
+            parsed_steps = _parse_steps_token(token)
+            if parsed_steps:
+                ref_step_id, ref_key = parsed_steps
+                ref_index = step_id_to_index.get(ref_step_id)
+                if ref_index is None:
+                    _add_error(
+                        code="template_step_unknown",
+                        message=f"step_id={normalized_step.step_id} references unknown template step: {ref_step_id}",
+                        step=normalized_step,
+                        field="template",
+                        fix_hint="Reference an earlier step_id using ${steps.<step_id>.<field>}.",
+                    )
+                elif ref_index >= idx:
+                    _add_error(
+                        code="template_step_order",
+                        message=f"step_id={normalized_step.step_id} references a future step in template: {ref_step_id}",
+                        step=normalized_step,
+                        field="template",
+                        fix_hint="Templates may only reference outputs from earlier steps.",
+                    )
+                else:
+                    if ref_key not in _TEMPLATE_STEP_OUTPUT_KEYS:
+                        _add_warning(
+                            code="template_step_key_unknown",
+                            message=f"step_id={normalized_step.step_id} references non-standard step output key: {ref_key}",
+                            step=normalized_step,
+                            field="template",
+                            fix_hint=f"Prefer one of: {sorted(_TEMPLATE_STEP_OUTPUT_KEYS)}",
+                        )
+                continue
+
+            artifact_key = _parse_artifact_token(token)
+            if artifact_key:
+                if artifact_key not in set(normalized_step.consumes):
+                    patch_id = f"add_consumes_for_artifact.{normalized_step.step_id}.{artifact_key}"[:100]
+                    _add_error(
+                        code="template_artifact_missing_consumes",
+                        message=f"step_id={normalized_step.step_id} uses artifact template {artifact_key} but does not declare it in consumes",
+                        step=normalized_step,
+                        field="consumes",
+                        fix_hint="Add the referenced artifact to consumes for explicit dataflow.",
+                        patch_id=patch_id,
+                    )
+                    merged = sorted(set(normalized_step.consumes) | {artifact_key})
+                    _maybe_add_patch(
+                        patch_id=patch_id,
+                        title=f"Declare consumes for {artifact_key} on step {normalized_step.step_id}",
+                        description="Adds the referenced artifact to consumes so the plan explicitly declares dependencies.",
+                        auto_applicable=True,
+                        operations=[PlanPatchOp(op="replace", path=f"/steps/{idx}/consumes", value=merged)],
+                    )
+                continue
+
+            context_key = _parse_context_token(token)
+            if context_key:
+                _add_warning(
+                    code="template_context_reference",
+                    message=f"step_id={normalized_step.step_id} references runtime context key: {context_key}",
+                    step=normalized_step,
+                    field="template",
+                    fix_hint="Ensure this context key is provided at execution time.",
+                )
+                continue
+
+            _add_error(
+                code="template_token_unsupported",
+                message=f"step_id={normalized_step.step_id} contains unsupported template token: {token}",
+                step=normalized_step,
+                field="template",
+                fix_hint="Supported: ${steps.<step_id>.<field>}, ${artifacts.<artifact_key>}, ${context.<key>}.",
+            )
 
         if _is_action_simulate(policy):
             db_name = str(normalized_step.path_params.get("db_name") or "").strip()

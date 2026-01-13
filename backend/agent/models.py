@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 
 class AgentToolCall(BaseModel):
+    step_id: Optional[str] = Field(default=None, description="Stable step id (from AgentPlan)")
     tool_id: Optional[str] = Field(default=None, description="Allowlist tool id")
     service: Literal["bff"] = Field(..., description="Target service (BFF only)")
     method: Literal["GET", "POST", "PUT", "PATCH", "DELETE"] = Field(
@@ -15,6 +16,8 @@ class AgentToolCall(BaseModel):
     path: str = Field(..., description="HTTP path (e.g. /api/v1/pipelines)")
     query: Dict[str, Any] = Field(default_factory=dict, description="Query parameters")
     body: Optional[Dict[str, Any]] = Field(default=None, description="JSON body")
+    produces: List[str] = Field(default_factory=list, description="Artifact keys produced by this step")
+    consumes: List[str] = Field(default_factory=list, description="Artifact keys consumed by this step")
     headers: Dict[str, str] = Field(default_factory=dict, description="Extra headers")
     base_url: Optional[str] = Field(default=None, description="Base URL for custom service")
     data_scope: Dict[str, Any] = Field(default_factory=dict, description="Data scope hints")

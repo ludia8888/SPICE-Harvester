@@ -166,6 +166,37 @@
 
 ---
 
+## 4.1 Runtime Binding (템플릿 변수 치환)
+
+Plan step 간에 **서버가 생성한 ID(pipeline_id, dataset_id 등)** 를 안정적으로 이어붙이기 위해,
+step payload 안에서 `${...}` 템플릿을 사용할 수 있다.
+
+### 지원 템플릿
+- `${steps.<step_id>.<key>}`: 이전 step의 응답에서 추출된 값 참조
+- `${context.<key>}`: 실행 시점에 주입된 runtime context 참조 (주의: 실행자가 반드시 제공)
+- `${artifacts.<artifact_key>}`: artifact store 참조 (plan의 `consumes` 선언 필요)
+
+### `${steps.*}`에서 사용 가능한 key (표준)
+아래 key들은 runtime이 응답 JSON에서 자동 추출해 `context.step_outputs[step_id]`에 저장한다.
+- `pipeline_id`, `dataset_id`, `dataset_version_id`, `job_id`
+- `artifact_id`, `ingest_request_id`, `mapping_spec_id`, `action_log_id`
+- `simulation_id`, `command_id`, `deployed_commit_id`
+
+### 예시
+```json
+{
+  "step_id": "preview_pipeline",
+  "tool_id": "pipelines.preview",
+  "path": "/api/v1/pipelines/${steps.create_pipeline.pipeline_id}/preview"
+}
+```
+
+### 안전장치
+- BFF validate 단계에서 **미정의 step 참조/미래 step 참조**를 에러로 차단한다.
+- runtime에서 템플릿을 해석할 수 없으면 해당 step은 `template_unresolved`로 실패 처리한다.
+
+---
+
 ## 5) 실행 플로우 (요약)
 
 ```mermaid

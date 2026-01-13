@@ -33,6 +33,23 @@ _PIPELINE_PENDING_STATUSES = {"QUEUED", "RUNNING", "PENDING", "PROCESSING"}
 _PIPELINE_TERMINAL_STATUSES = {"SUCCESS", "FAILED", "CANCELLED", "DEPLOYED"}
 _PIPELINE_STATUSES = _PIPELINE_PENDING_STATUSES | _PIPELINE_TERMINAL_STATUSES
 
+_TEMPLATE_TOKEN_RE = re.compile(r"\$\{([^{}]+)\}")
+_TEMPLATE_KEY_ALLOWED = re.compile(r"^[A-Za-z0-9._-]{1,200}$")
+
+_STEP_OUTPUT_KEY_ALIASES: dict[str, tuple[str, ...]] = {
+    "pipeline_id": ("pipeline_id", "pipelineId"),
+    "dataset_id": ("dataset_id", "datasetId"),
+    "dataset_version_id": ("dataset_version_id", "datasetVersionId", "version_id", "versionId"),
+    "job_id": ("job_id", "jobId"),
+    "artifact_id": ("artifact_id", "artifactId"),
+    "ingest_request_id": ("ingest_request_id", "ingestRequestId"),
+    "mapping_spec_id": ("mapping_spec_id", "mappingSpecId"),
+    "action_log_id": ("action_log_id", "actionLogId"),
+    "simulation_id": ("simulation_id", "simulationId"),
+    "command_id": ("command_id", "commandId"),
+    "deployed_commit_id": ("deployed_commit_id", "deployedCommitId", "merge_commit_id", "mergeCommitId"),
+}
+
 
 def _clean_url(value: str) -> str:
     return value.rstrip("/")
@@ -70,6 +87,143 @@ def _extract_retry_after_ms(headers: Dict[str, str]) -> Optional[int]:
 def _is_agent_proxy_path(path: str) -> bool:
     normalized = path if path.startswith("/") else f"/{path}"
     return normalized.startswith("/api/v1/agent")
+
+
+def _resolve_template_token(token: str, context: Dict[str, Any]) -> Any:
+    token = str(token or "").strip()
+    if not token:
+        raise ValueError("empty template token")
+
+    if token.startswith("steps."):
+        rest = token[len("steps."):]
+        parts = rest.split(".")
+        if len(parts) < 2:
+            raise ValueError(f"invalid steps token: {token}")
+        step_id = ".".join(parts[:-1])
+        key = parts[-1]
+        if not _TEMPLATE_KEY_ALLOWED.match(step_id):
+            raise ValueError(f"invalid step_id in token: {token}")
+        if not _TEMPLATE_KEY_ALLOWED.match(key):
+            raise ValueError(f"invalid key in token: {token}")
+        step_outputs = context.get("step_outputs")
+        if not isinstance(step_outputs, dict):
+            raise ValueError(f"missing step_outputs for token: {token}")
+        step_payload = step_outputs.get(step_id)
+        if not isinstance(step_payload, dict) or key not in step_payload:
+            raise ValueError(f"missing value for token: {token}")
+        return step_payload.get(key)
+
+    if token.startswith("context."):
+        key = token[len("context."):]
+        if not _TEMPLATE_KEY_ALLOWED.match(key):
+            raise ValueError(f"invalid context key token: {token}")
+        if key not in context:
+            raise ValueError(f"missing context value for token: {token}")
+        return context.get(key)
+
+    if token.startswith("artifacts."):
+        key = token[len("artifacts."):]
+        if not _TEMPLATE_KEY_ALLOWED.match(key):
+            raise ValueError(f"invalid artifact token: {token}")
+        artifacts = context.get("artifacts")
+        if not isinstance(artifacts, dict) or key not in artifacts:
+            raise ValueError(f"missing artifact for token: {token}")
+        return artifacts.get(key)
+
+    raise ValueError(f"unsupported template token: {token}")
+
+
+def _resolve_template_string(value: str, context: Dict[str, Any]) -> Any:
+    raw = str(value or "")
+    if "${" not in raw:
+        return value
+
+    matches = list(_TEMPLATE_TOKEN_RE.finditer(raw))
+    if not matches:
+        return value
+
+    if len(matches) == 1 and matches[0].start() == 0 and matches[0].end() == len(raw):
+        token = matches[0].group(1)
+        return _resolve_template_token(token, context)
+
+    out_parts: list[str] = []
+    cursor = 0
+    for match in matches:
+        out_parts.append(raw[cursor:match.start()])
+        token = match.group(1)
+        resolved = _resolve_template_token(token, context)
+        out_parts.append("" if resolved is None else str(resolved))
+        cursor = match.end()
+    out_parts.append(raw[cursor:])
+    return "".join(out_parts)
+
+
+def _resolve_templates(obj: Any, context: Dict[str, Any]) -> Any:
+    if obj is None:
+        return None
+    if isinstance(obj, str):
+        return _resolve_template_string(obj, context)
+    if isinstance(obj, dict):
+        return {key: _resolve_templates(value, context) for key, value in obj.items()}
+    if isinstance(obj, list):
+        return [_resolve_templates(value, context) for value in obj]
+    return obj
+
+
+def _walk_json_for_key(obj: Any, *, wanted_keys: set[str], max_depth: int = 6, max_nodes: int = 500) -> dict[str, Any]:
+    found: dict[str, Any] = {}
+    if not wanted_keys:
+        return found
+
+    queue: list[tuple[Any, int]] = [(obj, 0)]
+    visited = 0
+    while queue and visited < max_nodes and len(found) < len(wanted_keys):
+        current, depth = queue.pop(0)
+        visited += 1
+        if depth > max_depth:
+            continue
+        if isinstance(current, dict):
+            for key in wanted_keys:
+                if key in found:
+                    continue
+                if key in current and current[key] not in (None, ""):
+                    found[key] = current[key]
+            for value in current.values():
+                if isinstance(value, (dict, list)):
+                    queue.append((value, depth + 1))
+        elif isinstance(current, list):
+            for value in current[:50]:
+                if isinstance(value, (dict, list)):
+                    queue.append((value, depth + 1))
+    return found
+
+
+def _coerce_scalar(value: Any) -> Any:
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    if value is None:
+        return None
+    if isinstance(value, (dict, list)):
+        return None
+    return str(value)
+
+
+def _extract_step_outputs(payload: Any) -> dict[str, Any]:
+    outputs: dict[str, Any] = {}
+    if not isinstance(payload, (dict, list)):
+        return outputs
+    wanted = {alias for aliases in _STEP_OUTPUT_KEY_ALIASES.values() for alias in aliases}
+    found = _walk_json_for_key(payload, wanted_keys=wanted)
+    for canonical, aliases in _STEP_OUTPUT_KEY_ALIASES.items():
+        value = None
+        for alias in aliases:
+            if alias in found:
+                value = found.get(alias)
+                break
+        scalar = _coerce_scalar(value)
+        if scalar not in (None, ""):
+            outputs[canonical] = scalar
+    return outputs
 
 
 def _extract_scope(context: Dict[str, Any]) -> Dict[str, Any]:
@@ -1044,6 +1198,82 @@ class AgentRuntime:
         request_headers: Dict[str, str],
         request_id: Optional[str],
     ) -> Dict[str, Any]:
+        context = context if isinstance(context, dict) else {}
+        try:
+            resolved_path = _resolve_templates(tool_call.path, context)
+            if not isinstance(resolved_path, str):
+                raise ValueError("resolved path must be a string")
+            resolved_query = _resolve_templates(tool_call.query, context)
+            if resolved_query is None:
+                resolved_query = {}
+            if not isinstance(resolved_query, dict):
+                raise ValueError("resolved query must be an object")
+            resolved_body = _resolve_templates(tool_call.body, context) if tool_call.body is not None else None
+            if resolved_body is not None and not isinstance(resolved_body, dict):
+                raise ValueError("resolved body must be an object")
+            resolved_headers = _resolve_templates(tool_call.headers, context)
+            if resolved_headers is None:
+                resolved_headers = {}
+            if not isinstance(resolved_headers, dict):
+                raise ValueError("resolved headers must be an object")
+            normalized_headers: Dict[str, str] = {}
+            for key, value in resolved_headers.items():
+                if value in (None, ""):
+                    continue
+                normalized_headers[str(key)] = str(value)
+            resolved_data_scope = _resolve_templates(tool_call.data_scope, context)
+            if resolved_data_scope is None:
+                resolved_data_scope = {}
+            if not isinstance(resolved_data_scope, dict):
+                raise ValueError("resolved data_scope must be an object")
+            tool_call = tool_call.model_copy(
+                update={
+                    "path": resolved_path,
+                    "query": resolved_query,
+                    "body": resolved_body,
+                    "headers": normalized_headers,
+                    "data_scope": resolved_data_scope,
+                }
+            )
+        except Exception as exc:
+            error = f"template resolution failed: {exc}"
+            await self.record_event(
+                event_type="AGENT_TOOL_RESULT",
+                run_id=run_id,
+                actor=actor,
+                status="failure",
+                data={
+                    "step_index": step_index,
+                    "step_id": tool_call.step_id,
+                    "attempt": attempt,
+                    "tool": tool_call.service,
+                    "tool_id": tool_call.tool_id,
+                    "method": tool_call.method,
+                    "path": tool_call.path,
+                    "data_scope": mask_pii(tool_call.data_scope, max_string_chars=200),
+                    "output_digest": None,
+                    "output_preview": None,
+                    "output_size_bytes": None,
+                    "http_status": 400,
+                    "duration_ms": 0,
+                    "error": error,
+                    "error_key": "template_unresolved",
+                },
+                request_id=request_id,
+                step_index=step_index,
+                resource_type="agent_tool",
+                error=error,
+            )
+            return {
+                "status": "failure",
+                "http_status": 400,
+                "output_digest": None,
+                "duration_ms": 0,
+                "data_scope": mask_pii(tool_call.data_scope, max_string_chars=200),
+                "error": error,
+                "error_key": "template_unresolved",
+            }
+
         base_url = self._resolve_base_url(tool_call)
         path = tool_call.path if tool_call.path.startswith("/") else f"/{tool_call.path}"
         url = f"{base_url}{path}"
@@ -1065,8 +1295,10 @@ class AgentRuntime:
             status="success",
             data={
                 "step_index": step_index,
+                "step_id": tool_call.step_id,
                 "attempt": attempt,
                 "tool": tool_call.service,
+                "tool_id": tool_call.tool_id,
                 "method": tool_call.method,
                 "path": path,
                 "data_scope": data_scope,
@@ -1088,8 +1320,10 @@ class AgentRuntime:
                 status="failure",
                 data={
                     "step_index": step_index,
+                    "step_id": tool_call.step_id,
                     "attempt": attempt,
                     "tool": tool_call.service,
+                    "tool_id": tool_call.tool_id,
                     "method": tool_call.method,
                     "path": path,
                     "data_scope": data_scope,
@@ -1136,8 +1370,10 @@ class AgentRuntime:
                     status="failure",
                     data={
                         "step_index": step_index,
+                        "step_id": tool_call.step_id,
                         "attempt": attempt,
                         "tool": tool_call.service,
+                        "tool_id": tool_call.tool_id,
                         "method": tool_call.method,
                         "path": path,
                         "data_scope": data_scope,
@@ -1298,8 +1534,10 @@ class AgentRuntime:
             status=status,
             data={
                 "step_index": step_index,
+                "step_id": tool_call.step_id,
                 "attempt": attempt,
                 "tool": tool_call.service,
+                "tool_id": tool_call.tool_id,
                 "method": tool_call.method,
                 "path": path,
                 "data_scope": data_scope,
@@ -1325,6 +1563,22 @@ class AgentRuntime:
             resource_type="agent_tool",
             error=error,
         )
+
+        if not error and isinstance(context, dict):
+            step_id = str(tool_call.step_id or "").strip() or f"step_{step_index}"
+            if _TEMPLATE_KEY_ALLOWED.match(step_id):
+                extracted = _extract_step_outputs(response_payload)
+                if command_id:
+                    extracted.setdefault("command_id", command_id)
+                if pipeline_job_id:
+                    extracted.setdefault("job_id", pipeline_job_id)
+                if pipeline_run_status:
+                    extracted.setdefault("pipeline_run_status", pipeline_run_status)
+                step_outputs = context.setdefault("step_outputs", {})
+                if isinstance(step_outputs, dict):
+                    existing = step_outputs.get(step_id) if isinstance(step_outputs.get(step_id), dict) else {}
+                    step_outputs[step_id] = {**existing, **extracted}
+                    context["latest_step_output"] = {"step_id": step_id, **extracted}
 
         return {
             "status": status,

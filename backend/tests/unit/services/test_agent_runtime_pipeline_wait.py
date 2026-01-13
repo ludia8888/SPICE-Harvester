@@ -35,6 +35,7 @@ async def test_agent_runtime_waits_for_pipeline_job_completion(monkeypatch: pyte
             command_poll_interval_s=0.1,
             command_ws_idle_s=0.1,
             command_ws_enabled=False,
+            pipeline_wait_enabled=True,
             block_writes_on_overlay_degraded=False,
             allow_degraded_writes=True,
             auto_retry_enabled=False,
@@ -129,4 +130,3 @@ async def test_agent_runtime_waits_for_pipeline_job_completion(monkeypatch: pyte
     assert result["pipeline_job_id"] == "build-1"
     assert result["pipeline_run_status"] == "SUCCESS"
     assert any(call[0] == "get" for call in captured["calls"])
-

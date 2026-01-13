@@ -32,6 +32,7 @@ async def test_agent_blocks_write_when_overlay_degraded() -> None:
             command_poll_interval_s=0.1,
             command_ws_idle_s=0.1,
             command_ws_enabled=False,
+            pipeline_wait_enabled=False,
             block_writes_on_overlay_degraded=True,
             allow_degraded_writes=False,
             auto_retry_enabled=True,

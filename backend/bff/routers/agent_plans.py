@@ -445,6 +445,7 @@ async def preview_plan(
             headers["Idempotency-Key"] = str(step.idempotency_key)
         steps_payload.append(
             {
+                "step_id": step.step_id,
                 "tool_id": step.tool_id,
                 "service": "bff",
                 "method": step.method or policy.method,
@@ -454,6 +455,8 @@ async def preview_plan(
                 "headers": headers,
                 "data_scope": {**(validation.plan.data_scope.model_dump(mode="json") or {}), **(step.data_scope or {})},
                 "description": step.description,
+                "produces": list(step.produces or []),
+                "consumes": list(step.consumes or []),
             }
         )
 
@@ -517,6 +520,7 @@ async def execute_plan(
             headers["Idempotency-Key"] = str(step.idempotency_key)
         steps_payload.append(
             {
+                "step_id": step.step_id,
                 "tool_id": step.tool_id,
                 "service": "bff",
                 "method": step.method or policy.method,
@@ -526,6 +530,8 @@ async def execute_plan(
                 "headers": headers,
                 "data_scope": {**(validation.plan.data_scope.model_dump(mode="json") or {}), **(step.data_scope or {})},
                 "description": step.description,
+                "produces": list(step.produces or []),
+                "consumes": list(step.consumes or []),
             }
         )
 
