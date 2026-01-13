@@ -5,9 +5,9 @@
 
 ## 상태 표기
 
-- ✅ `DONE`: 구현 + 최소 1개 검증(테스트/리그레션/운영 메트릭) 근거 존재
-- 🟡 `PARTIAL`: 일부 구현 존재(근거 있음)이나 요구사항 전체를 만족하지 못함
-- ❌ `TODO`: 구현/검증 근거 없음 (백지 또는 설계만)
+- `DONE`: 구현 + 최소 1개 검증(테스트/리그레션/운영 메트릭) 근거 존재
+- `PARTIAL`: 일부 구현 존재(근거 있음)이나 요구사항 전체를 만족하지 못함
+- `TODO`: 구현/검증 근거 없음 (백지 또는 설계만)
 
 ---
 
@@ -15,11 +15,11 @@
 
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
-| AUTH-001 | 🟡 | `backend/bff/middleware/auth.py`, `backend/agent/services/agent_runtime.py` | “현재 로그인 사용자”의 **검증 가능한 보안 컨텍스트(JWT/OIDC)** 가 아직 SSoT가 아님(헤더 spoof 가능). Delegated auth 필요. |
-| AUTH-002 | ❌ | `backend/shared/security/auth_utils.py`(DB scope only) | RBAC/ABAC(권한 엔진) + 실패 시 표준 오류 코드 반환 미구현. |
-| AUTH-003 | 🟡 | `backend/bff/middleware/auth.py`(agent token 분리), `backend/bff/services/agent_plan_validation.py`(승인 강제) | service token 기반 호출이 “사용자 권한”을 우회하지 않도록 **delegation contract** 강제 필요. |
-| AUTH-004 | ❌ | (header key 일부만 존재) | 테넌트 격리(세션/로그/아티팩트/레이트리밋) 미구현. |
-| AUTH-005 | 🟡 | `backend/shared/services/agent_tool_registry.py`(툴 allowlist 전역) | org/user 단위 모델/툴 allowlist + 자동 승인 규칙 + 데이터 정책 미구현. |
+| AUTH-001 | PARTIAL | `backend/bff/middleware/auth.py`, `backend/agent/services/agent_runtime.py` | “현재 로그인 사용자”의 검증 가능한 보안 컨텍스트(JWT/OIDC)가 아직 SSoT가 아님(헤더 spoof 가능). Delegated auth 필요. |
+| AUTH-002 | TODO | `backend/shared/security/auth_utils.py`(DB scope only) | RBAC/ABAC(권한 엔진) + 실패 시 표준 오류 코드 반환 미구현. |
+| AUTH-003 | PARTIAL | `backend/bff/middleware/auth.py`(agent token 분리), `backend/bff/services/agent_plan_validation.py`(승인 강제) | service token 기반 호출이 “사용자 권한”을 우회하지 않도록 delegation contract 강제 필요. |
+| AUTH-004 | TODO | (header key 일부만 존재) | 테넌트 격리(세션/로그/아티팩트/레이트리밋) 미구현. |
+| AUTH-005 | PARTIAL | `backend/shared/services/agent_tool_registry.py`(툴 allowlist 전역) | org/user 단위 모델/툴 allowlist + 자동 승인 규칙 + 데이터 정책 미구현. |
 
 ---
 
@@ -27,12 +27,12 @@
 
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
-| SESS-001 | ❌ | (없음) | Agent Session CRUD API 필요. |
-| SESS-002 | 🟡 | `backend/shared/services/agent_registry.py`(runs/steps/approvals), `backend/agent/services/agent_runtime.py`(events) | “세션” 단위 저장(메시지/컨텍스트 첨부/모델/툴 활성화/비용) 미구현. |
-| SESS-003 | ❌ | (없음) | 세션 시작 시 clean context 보장 필요. |
-| SESS-004 | ❌ | (없음) | 세션 요약/구간 제거 + 감사 추적(원본 digest 보존) 미구현. |
-| SESS-005 | ❌ | (없음) | 세션 상태 머신(ACTIVE/WAITING_APPROVAL/...) 미구현. |
-| SESS-006 | 🟡 | `backend/bff/routers/agent_proxy.py`, `backend/shared/services/agent_registry.py` | “세션 내 Job” 모델은 없음. 다만 run_id(AgentRun)가 job에 해당(확장 필요). |
+| SESS-001 | TODO | (없음) | Agent Session CRUD API 필요. |
+| SESS-002 | PARTIAL | `backend/shared/services/agent_registry.py`(runs/steps/approvals), `backend/agent/services/agent_runtime.py`(events) | “세션” 단위 저장(메시지/컨텍스트 첨부/모델/툴 활성화/비용) 미구현. |
+| SESS-003 | TODO | (없음) | 세션 시작 시 clean context 보장 필요. |
+| SESS-004 | TODO | (없음) | 세션 요약/구간 제거 + 감사 추적(원본 digest 보존) 미구현. |
+| SESS-005 | TODO | (없음) | 세션 상태 머신(ACTIVE/WAITING_APPROVAL/...) 미구현. |
+| SESS-006 | PARTIAL | `backend/bff/routers/agent_proxy.py`, `backend/shared/services/agent_registry.py` | “세션 내 Job” 모델은 없음. 다만 run_id(AgentRun)가 job에 해당(확장 필요). |
 
 ---
 
@@ -40,12 +40,12 @@
 
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
-| LLM-001 | 🟡 | `backend/shared/services/llm_gateway.py` | provider 확장(Anthropic/Google/자체) 필요. |
-| LLM-002 | ❌ | (없음) | org allowlist 모델 선택/검증 미구현. |
-| LLM-003 | ❌ | (없음) | 세션 단위 모델 지정/변경 + 정책 고정 미구현. |
-| LLM-004 | 🟡 | `backend/shared/services/llm_gateway.py`(JSON-only), `backend/bff/services/agent_plan_compiler.py`(planner) | native function/tool 호출(복수 호출/병렬 계획) 미구현. |
-| LLM-005 | ❌ | (없음) | 모델 capability 메타/자동 폴백 미구현. |
-| LLM-006 | 🟡 | `backend/shared/services/llm_gateway.py`(timeout/cache) | circuit breaker/재시도 정책(멱등성 조건부) 미구현. |
+| LLM-001 | PARTIAL | `backend/shared/services/llm_gateway.py` | provider 확장(Anthropic/Google/자체) 필요. |
+| LLM-002 | TODO | (없음) | org allowlist 모델 선택/검증 미구현. |
+| LLM-003 | TODO | (없음) | 세션 단위 모델 지정/변경 + 정책 고정 미구현. |
+| LLM-004 | PARTIAL | `backend/shared/services/llm_gateway.py`(JSON-only), `backend/bff/services/agent_plan_compiler.py`(planner) | native function/tool 호출(복수 호출/병렬 계획) 미구현. |
+| LLM-005 | TODO | (없음) | 모델 capability 메타/자동 폴백 미구현. |
+| LLM-006 | PARTIAL | `backend/shared/services/llm_gateway.py`(timeout/cache) | circuit breaker/재시도 정책(멱등성 조건부) 미구현. |
 
 ---
 
@@ -53,12 +53,12 @@
 
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
-| AGT-001 | 🟡 | `backend/bff/routers/agent_plans.py`, `backend/agent/services/agent_graph.py` | 현재는 “Plan → 실행” 중심. 대화형 prompt-to-action session loop는 미구현. |
-| AGT-002 | 🟡 | `backend/agent/services/agent_runtime.py`(AGENT_TOOL_* events) | 이벤트는 있으나 “세션/메시지 이벤트”까지 통합 필요. |
-| AGT-003 | 🟡 | `backend/agent/services/agent_graph.py`(순차), `backend/bff/services/agent_plan_compiler.py`(compile/clarify) | 런타임 re-plan(툴 결과 기반 step 재구성) 미구현. |
-| AGT-004 | 🟡 | `backend/bff/routers/agent_plans.py`(preview), `backend/bff/services/agent_plan_validation.py`(simulate/preview 강제) | 검증 단계 확장(예: CI 확인/코드 프리뷰) 필요. |
-| AGT-005 | 🟡 | `backend/agent/services/agent_policy.py`, `backend/agent/services/agent_runtime.py` | 부분 성공 처리/clarification 전환은 제한적(세션 기반 UX 필요). |
-| AGT-006 | ❌ | (없음) | 병렬 실행 + 의존성 그래프 + 동시성 제한 미구현. |
+| AGT-001 | PARTIAL | `backend/bff/routers/agent_plans.py`, `backend/agent/services/agent_graph.py` | 현재는 “Plan → 실행” 중심. 대화형 prompt-to-action session loop는 미구현. |
+| AGT-002 | PARTIAL | `backend/agent/services/agent_runtime.py`(AGENT_TOOL_* events) | 이벤트는 있으나 “세션/메시지 이벤트”까지 통합 필요. |
+| AGT-003 | PARTIAL | `backend/agent/services/agent_graph.py`(순차), `backend/bff/services/agent_plan_compiler.py`(compile/clarify) | 런타임 re-plan(툴 결과 기반 step 재구성) 미구현. |
+| AGT-004 | PARTIAL | `backend/bff/routers/agent_plans.py`(preview), `backend/bff/services/agent_plan_validation.py`(simulate/preview 강제) | 검증 단계 확장(예: CI 확인/코드 프리뷰) 필요. |
+| AGT-005 | PARTIAL | `backend/agent/services/agent_policy.py`, `backend/agent/services/agent_runtime.py` | 부분 성공 처리/clarification 전환은 제한적(세션 기반 UX 필요). |
+| AGT-006 | TODO | (없음) | 병렬 실행 + 의존성 그래프 + 동시성 제한 미구현. |
 
 ---
 
@@ -66,13 +66,13 @@
 
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
-| TOOL-001 | 🟡 | `backend/shared/services/agent_tool_registry.py`, `backend/shared/policies/agent_tool_allowlist.json` | tool version / input-output schema / 권한 선언 / retry 정책 메타 확장 필요. |
-| TOOL-002 | ❌ | (없음) | 세션 단위 활성 툴 목록 저장 + 런타임 차단 미구현. |
-| TOOL-003 | 🟡 | `backend/bff/routers/agent_plans.py`(Idempotency-Key), `backend/agent/services/agent_runtime.py`(tool_run_id) | tool_run_id는 추가됨(관측용). “중복 실행 방지”는 API/스토리지 멱등성 계약까지 확장 필요. |
-| TOOL-004 | 🟡 | `backend/agent/services/agent_runtime.py`(payload_preview/side_effect_summary) | 표준 응답 스키마(에러 코드 체계/side effect taxonomy) 고도화 필요. |
-| TOOL-005 | 🟡 | `docs/API_REFERENCE.md`(Actions/Graph/Pipeline/Objectify/Commands), `backend/shared/policies/agent_tool_allowlist.json` | Function/SessionVariableUpdate/Clarification 툴은 미구현(또는 allowlist 확장 필요). |
-| TOOL-006 | 🟡 | `backend/agent/services/agent_runtime.py`(mask/audit/events), `backend/shared/utils/llm_safety.py` | hooks는 런타임에 존재하나 tool plugin 레이어/세션 정책 연결 필요. |
-| TOOL-007 | 🟡 | `backend/bff/routers/agent_plans.py`(preview), `backend/bff/routers/actions.py`(simulate) | “프리뷰 결과 분리 저장”은 일부만 충족(범용화 필요). |
+| TOOL-001 | PARTIAL | `backend/shared/services/agent_tool_registry.py`, `backend/shared/policies/agent_tool_allowlist.json` | tool version / input-output schema / 권한 선언 / retry 정책 메타 확장 필요. |
+| TOOL-002 | TODO | (없음) | 세션 단위 활성 툴 목록 저장 + 런타임 차단 미구현. |
+| TOOL-003 | PARTIAL | `backend/bff/routers/agent_plans.py`(Idempotency-Key), `backend/agent/services/agent_runtime.py`(tool_run_id) | tool_run_id는 추가됨(관측용). “중복 실행 방지”는 API/스토리지 멱등성 계약까지 확장 필요. |
+| TOOL-004 | PARTIAL | `backend/agent/services/agent_runtime.py`(payload_preview/side_effect_summary) | 표준 응답 스키마(에러 코드 체계/side effect taxonomy) 고도화 필요. |
+| TOOL-005 | PARTIAL | `docs/API_REFERENCE.md`(Actions/Graph/Pipeline/Objectify/Commands), `backend/shared/policies/agent_tool_allowlist.json` | Function/SessionVariableUpdate/Clarification 툴은 미구현(또는 allowlist 확장 필요). |
+| TOOL-006 | PARTIAL | `backend/agent/services/agent_runtime.py`(mask/audit/events), `backend/shared/utils/llm_safety.py` | hooks는 런타임에 존재하나 tool plugin 레이어/세션 정책 연결 필요. |
+| TOOL-007 | PARTIAL | `backend/bff/routers/agent_plans.py`(preview), `backend/bff/routers/actions.py`(simulate) | “프리뷰 결과 분리 저장”은 일부만 충족(범용화 필요). |
 
 ---
 
@@ -80,12 +80,12 @@
 
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
-| APR-001 | 🟡 | `backend/bff/services/agent_plan_validation.py` | 정책 엔진이 risk/allowlist 기반으로만 동작(조직 정책/컨텍스트 기반 확장 필요). |
-| APR-002 | 🟡 | `backend/bff/services/agent_plan_validation.py`, `backend/bff/routers/pipeline.py`(protected branch) | “대규모/비가역” 분류/강제 고도화 필요. |
-| APR-003 | ❌ | (없음) | 승인 요청 객체(툴/파라미터 요약, 변경 범위, 롤백 제안) 미구현. |
-| APR-004 | ✅ | `backend/bff/routers/agent_plans.py`(execute 시 approval 체크), `backend/shared/services/agent_registry.py`(approvals) |  |
-| APR-005 | ❌ | (없음) | 자동 승인 allowlist 규칙 미구현. |
-| APR-006 | ❌ | (없음) | WAITING_APPROVAL 상태 + 승인 수신 후 흐름 재개(세션 기반) 미구현. |
+| APR-001 | PARTIAL | `backend/bff/services/agent_plan_validation.py` | 정책 엔진이 risk/allowlist 기반으로만 동작(조직 정책/컨텍스트 기반 확장 필요). |
+| APR-002 | PARTIAL | `backend/bff/services/agent_plan_validation.py`, `backend/bff/routers/pipeline.py`(protected branch) | “대규모/비가역” 분류/강제 고도화 필요. |
+| APR-003 | TODO | (없음) | 승인 요청 객체(툴/파라미터 요약, 변경 범위, 롤백 제안) 미구현. |
+| APR-004 | DONE | `backend/bff/routers/agent_plans.py`(execute 시 approval 체크), `backend/shared/services/agent_registry.py`(approvals) |  |
+| APR-005 | TODO | (없음) | 자동 승인 allowlist 규칙 미구현. |
+| APR-006 | TODO | (없음) | WAITING_APPROVAL 상태 + 승인 수신 후 흐름 재개(세션 기반) 미구현. |
 
 ---
 
@@ -93,12 +93,12 @@
 
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
-| CHG-001 | 🟡 | `backend/bff/routers/pipeline.py`(branches/proposals), `backend/bff/routers/ontology_extensions.py`(ontology proposals) | 코드 변경(PR)까지 강제되는 “통합 격리”는 미구현. |
-| CHG-002 | 🟡 | `backend/bff/routers/pipeline.py`, `backend/bff/routers/ontology_extensions.py` | PR 생성/연결은 미구현(현재는 pipeline/ontology 중심). |
-| CHG-003 | ❌ | (없음) | PR/프로포절에 session/tool history 연결 미구현. |
-| CHG-004 | ❌ | (없음) | CI 결과 수집/표준화/후속 루프 입력 미구현. |
-| CHG-005 | 🟡 | `backend/shared/services/action_simulation_registry.py`, `backend/bff/routers/pipeline.py`(preview/build artifacts) | 세션 단위 재참조 UX/조회 API 미구현. |
-| CHG-006 | 🟡 | pipeline/ontology proposal APIs | cross-domain 표준 링크 스키마(artifact link contract) 미구현. |
+| CHG-001 | PARTIAL | `backend/bff/routers/pipeline.py`(branches/proposals), `backend/bff/routers/ontology_extensions.py`(ontology proposals) | 코드 변경(PR)까지 강제되는 “통합 격리”는 미구현. |
+| CHG-002 | PARTIAL | `backend/bff/routers/pipeline.py`, `backend/bff/routers/ontology_extensions.py` | PR 생성/연결은 미구현(현재는 pipeline/ontology 중심). |
+| CHG-003 | TODO | (없음) | PR/프로포절에 session/tool history 연결 미구현. |
+| CHG-004 | TODO | (없음) | CI 결과 수집/표준화/후속 루프 입력 미구현. |
+| CHG-005 | PARTIAL | `backend/shared/services/action_simulation_registry.py`, `backend/bff/routers/pipeline.py`(preview/build artifacts) | 세션 단위 재참조 UX/조회 API 미구현. |
+| CHG-006 | PARTIAL | pipeline/ontology proposal APIs | cross-domain 표준 링크 스키마(artifact link contract) 미구현. |
 
 ---
 
@@ -106,13 +106,13 @@
 
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
-| CTX-001 | ❌ | (없음) | 세션 컨텍스트 첨부/제거/목록 API 미구현. |
-| CTX-002 | ❌ | (없음) | “명시적 첨부만 프롬프트 포함” 강제 미구현. |
-| CTX-003 | ❌ | (없음) | 항목별 포함 방식(전량/요약/검색) 미구현. |
-| CTX-004 | 🟡 | `backend/bff/routers/context7.py` | citation 포함/문서 번들 모델 명확화 필요. |
-| CTX-005 | 🟡 | `backend/bff/routers/context7.py`(suggestions/search) | 온톨로지/데이터 기반 컨텍스트 추출 툴로 정식화 필요. |
-| CTX-006 | 🟡 | `backend/bff/routers/pipeline.py`(file upload) | 바이러스 검사/보존기간/텍스트 추출 정책 미구현. |
-| CTX-007 | ❌ | (없음) | 토큰 예산/기여량 계산 + 요약/제거 후보 산출 미구현. |
+| CTX-001 | TODO | (없음) | 세션 컨텍스트 첨부/제거/목록 API 미구현. |
+| CTX-002 | TODO | (없음) | “명시적 첨부만 프롬프트 포함” 강제 미구현. |
+| CTX-003 | TODO | (없음) | 항목별 포함 방식(전량/요약/검색) 미구현. |
+| CTX-004 | PARTIAL | `backend/bff/routers/context7.py` | citation 포함/문서 번들 모델 명확화 필요. |
+| CTX-005 | PARTIAL | `backend/bff/routers/context7.py`(suggestions/search) | 온톨로지/데이터 기반 컨텍스트 추출 툴로 정식화 필요. |
+| CTX-006 | PARTIAL | `backend/bff/routers/pipeline.py`(file upload) | 바이러스 검사/보존기간/텍스트 추출 정책 미구현. |
+| CTX-007 | TODO | (없음) | 토큰 예산/기여량 계산 + 요약/제거 후보 산출 미구현. |
 
 ---
 
@@ -120,10 +120,10 @@
 
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
-| PRM-001 | 🟡 | `backend/bff/services/agent_plan_compiler.py`, `backend/bff/routers/ai.py` | 세션 정책/툴 활성화 상태를 반영한 컴파일 미구현. |
-| PRM-002 | ❌ | (없음) | 세션별 활성 툴과 tool 설명/제약 1:1 정합성 강제 미구현. |
-| PRM-003 | 🟡 | `backend/bff/routers/agent_plans.py`(plan-only compile/validate), `backend/shared/services/llm_gateway.py`(JSON) | 통합 “대화 응답 + tool plan” 프로토콜/스트리밍 미구현. |
-| PRM-004 | 🟡 | `backend/bff/services/agent_plan_validation.py`, `backend/agent/services/agent_runtime.py` | schema mismatch 시 “재생성 루프”는 제한적(compile 단계에만 존재). |
+| PRM-001 | PARTIAL | `backend/bff/services/agent_plan_compiler.py`, `backend/bff/routers/ai.py` | 세션 정책/툴 활성화 상태를 반영한 컴파일 미구현. |
+| PRM-002 | TODO | (없음) | 세션별 활성 툴과 tool 설명/제약 1:1 정합성 강제 미구현. |
+| PRM-003 | PARTIAL | `backend/bff/routers/agent_plans.py`(plan-only compile/validate), `backend/shared/services/llm_gateway.py`(JSON) | 통합 “대화 응답 + tool plan” 프로토콜/스트리밍 미구현. |
+| PRM-004 | PARTIAL | `backend/bff/services/agent_plan_validation.py`, `backend/agent/services/agent_runtime.py` | schema mismatch 시 “재생성 루프”는 제한적(compile 단계에만 존재). |
 
 ---
 
@@ -131,13 +131,13 @@
 
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
-| OBS-001 | 🟡 | `backend/agent/services/agent_runtime.py`(events), `backend/shared/services/audit_log_store.py` | “세션 단위” 감사/추적 + 사용자 검증 컨텍스트 필요. |
-| OBS-002 | 🟡 | `backend/shared/services/agent_registry.py`(approvals), `backend/agent/services/agent_policy.py`(policy) | 변경 아티팩트(PR/프로포절) 링크를 audit에 연결 미구현. |
-| OBS-003 | 🟡 | `docs/API_REFERENCE.md`(Agent events), `backend/bff/routers/agent_proxy.py` | 메시지/승인 대기 이벤트 스트림까지 확장 필요. |
-| OBS-004 | ❌ | (없음) | 토큰 사용량 저장/조회 미구현. |
-| OBS-005 | ❌ | (없음) | 모델/사용자/조직 비용 집계 미구현. |
-| OBS-006 | 🟡 | `backend/shared/observability/request_context.py`, `backend/shared/services/service_factory.py` | 분산 트레이싱/상관관계 id를 agent tool 실행까지 end-to-end 연결 고도화 필요. |
-| OBS-007 | 🟡 | `backend/shared/observability/*`, `backend/shared/middleware/rate_limiter.py` | 성공률/승인 대기/LLM latency 등 AIP 핵심 KPI 대시보드화 미구현. |
+| OBS-001 | PARTIAL | `backend/agent/services/agent_runtime.py`(events), `backend/shared/services/audit_log_store.py` | “세션 단위” 감사/추적 + 사용자 검증 컨텍스트 필요. |
+| OBS-002 | PARTIAL | `backend/shared/services/agent_registry.py`(approvals), `backend/agent/services/agent_policy.py`(policy) | 변경 아티팩트(PR/프로포절) 링크를 audit에 연결 미구현. |
+| OBS-003 | PARTIAL | `docs/API_REFERENCE.md`(Agent events), `backend/bff/routers/agent_proxy.py` | 메시지/승인 대기 이벤트 스트림까지 확장 필요. |
+| OBS-004 | TODO | (없음) | 토큰 사용량 저장/조회 미구현. |
+| OBS-005 | TODO | (없음) | 모델/사용자/조직 비용 집계 미구현. |
+| OBS-006 | PARTIAL | `backend/shared/observability/request_context.py`, `backend/shared/services/service_factory.py` | 분산 트레이싱/상관관계 id를 agent tool 실행까지 end-to-end 연결 고도화 필요. |
+| OBS-007 | PARTIAL | `backend/shared/observability/*`, `backend/shared/middleware/rate_limiter.py` | 성공률/승인 대기/LLM latency 등 AIP 핵심 KPI 대시보드화 미구현. |
 
 ---
 
@@ -145,11 +145,11 @@
 
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
-| SEC-001 | ✅ | `backend/shared/services/llm_gateway.py`(mask_pii_text), `backend/shared/utils/llm_safety.py` |  |
-| SEC-002 | ❌ | (없음) | provider별 “저장 금지/로그 최소화” 정책 강제 미구현. |
-| SEC-003 | ❌ | (없음) | 데이터 분류(기밀 등급) 기반 LLM 송신 차단 미구현. |
-| SEC-004 | 🟡 | `docs/SECURITY.md`(운영 문서), 서비스별 TLS 옵션 | 저장 암호화/키 관리/비밀 로테이션 체계 고도화 필요. |
-| SEC-005 | ❌ | (없음) | retention 설정 + 만료 자동 삭제/비식별화 미구현. |
+| SEC-001 | DONE | `backend/shared/services/llm_gateway.py`(mask_pii_text), `backend/shared/utils/llm_safety.py` |  |
+| SEC-002 | TODO | (없음) | provider별 “저장 금지/로그 최소화” 정책 강제 미구현. |
+| SEC-003 | TODO | (없음) | 데이터 분류(기밀 등급) 기반 LLM 송신 차단 미구현. |
+| SEC-004 | PARTIAL | `docs/SECURITY.md`(운영 문서), 서비스별 TLS 옵션 | 저장 암호화/키 관리/비밀 로테이션 체계 고도화 필요. |
+| SEC-005 | TODO | (없음) | retention 설정 + 만료 자동 삭제/비식별화 미구현. |
 
 ---
 
@@ -157,10 +157,10 @@
 
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
-| INT-001 | 🟡 | `docs/API_REFERENCE.md` | session/message/context API가 빠져있음(신규 필요). |
-| INT-002 | 🟡 | `docs/API_REFERENCE.md`(datasets/ontology/branches 등) | 통합 connector 계층(메타데이터 표준화) 고도화 필요. |
-| INT-003 | 🟡 | `backend/bff/routers/context7.py` | citation contract/문서 번들 모델 확정 필요. |
-| INT-004 | ❌ | (없음) | CI 결과 수집/표준화(웹훅/폴링) 미구현. |
+| INT-001 | PARTIAL | `docs/API_REFERENCE.md` | session/message/context API가 빠져있음(신규 필요). |
+| INT-002 | PARTIAL | `docs/API_REFERENCE.md`(datasets/ontology/branches 등) | 통합 connector 계층(메타데이터 표준화) 고도화 필요. |
+| INT-003 | PARTIAL | `backend/bff/routers/context7.py` | citation contract/문서 번들 모델 확정 필요. |
+| INT-004 | TODO | (없음) | CI 결과 수집/표준화(웹훅/폴링) 미구현. |
 
 ---
 
@@ -168,11 +168,10 @@
 
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
-| NFR-001 | 🟡 | `backend/shared/services/llm_gateway.py`(timeout), `backend/agent/services/agent_runtime.py`(timeout) | 타임아웃 시 세션 상태 복구(세션 모델 필요). |
-| NFR-002 | 🟡 | `docs/API_REFERENCE.md`(commands/tasks/agent runs) | 세션-Job 분리 + UI-friendly progress API 필요. |
-| NFR-003 | 🟡 | `backend/shared/services/event_store.py`(ordering), worker processed_events(idempotency) | 동일 세션 내 동시 실행 제어(락/큐) 미구현. |
-| NFR-004 | 🟡 | `backend/shared/middleware/rate_limiter.py` | 사용자/조직/모델 단위 쿼터 분리 미구현. |
-| NFR-005 | 🟡 | 각 서비스 degraded mode + require_* 설정 | 폴백 전략을 세션/UX에 반영(알림/대안 제안) 필요. |
-| NFR-006 | ❌ | (없음) | 백업/복구(runbook + 자동화) 미구현. |
-| NFR-007 | 🟡 | `backend/shared/config/settings.py`, tool allowlist admin API | “배포 없이 정책/툴/모델 관리”는 일부(툴만) 구현. |
-
+| NFR-001 | PARTIAL | `backend/shared/services/llm_gateway.py`(timeout), `backend/agent/services/agent_runtime.py`(timeout) | 타임아웃 시 세션 상태 복구(세션 모델 필요). |
+| NFR-002 | PARTIAL | `docs/API_REFERENCE.md`(commands/tasks/agent runs) | 세션-Job 분리 + UI-friendly progress API 필요. |
+| NFR-003 | PARTIAL | `backend/shared/services/event_store.py`(ordering), worker processed_events(idempotency) | 동일 세션 내 동시 실행 제어(락/큐) 미구현. |
+| NFR-004 | PARTIAL | `backend/shared/middleware/rate_limiter.py` | 사용자/조직/모델 단위 쿼터 분리 미구현. |
+| NFR-005 | PARTIAL | 각 서비스 degraded mode + require_* 설정 | 폴백 전략을 세션/UX에 반영(알림/대안 제안) 필요. |
+| NFR-006 | TODO | (없음) | 백업/복구(runbook + 자동화) 미구현. |
+| NFR-007 | PARTIAL | `backend/shared/config/settings.py`, tool allowlist admin API | “배포 없이 정책/툴/모델 관리”는 일부(툴만) 구현. |
