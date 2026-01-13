@@ -1,126 +1,273 @@
 # SPICE HARVESTER
 
-[한국어 README](README.md)
+> Ontology + Event Sourcing + Data Plane + LLM-native Control Plane
 
-## 1) What it is
+- Korean README (canonical): `README.md`
+- Docs index: `docs/README.md`
+- API reference (auto-generated): `docs/API_REFERENCE.md`
+- Architecture (includes auto-generated sections): `docs/ARCHITECTURE.md`
+- Action writeback design/philosophy: `docs/ACTION_WRITEBACK_DESIGN.md`
+- LLM-native control plane (Planner/Memory/Evals): `docs/LLM_NATIVE_CONTROL_PLANE.md`
 
-SPICE HARVESTER is an **Event Sourcing + CQRS** platform that combines:
-- **Ontology + graph relationships** (TerminusDB)
-- **Search/read projections** (Elasticsearch)
-- **Data plane** for raw ingest → pipeline transforms → objectify into ontology instances (lakeFS + Spark pipeline worker)
-- **Governance + lineage + audit** so every change is traceable and reproducible
+---
 
-It is designed to survive **at-least-once** delivery (Kafka redeliveries, worker restarts, replays) without duplicate side effects.
+## Table of contents
 
-## 2) Who it’s for / Use cases
+- [1) One-liner](#1-one-liner)
+- [2) What problems it solves](#2-what-problems-it-solves)
+- [3) Core philosophy: deterministic core + falsifiable decisions](#3-core-philosophy-deterministic-core--falsifiable-decisions)
+- [4) System building blocks (services / SSoT / planes)](#4-system-building-blocks-services--ssot--planes)
+- [5) Key capabilities (current implementation)](#5-key-capabilities-current-implementation)
+- [6) Action writeback + Decision Simulation (what-if)](#6-action-writeback--decision-simulation-what-if)
+- [7) LLM-native Control Plane (Agent Plans)](#7-llm-native-control-plane-agent-plans)
+- [8) Security / governance / audit](#8-security--governance--audit)
+- [9) Observability (OpenTelemetry)](#9-observability-opentelemetry)
+- [10) Local quickstart](#10-local-quickstart)
+- [11) Tests](#11-tests)
+- [12) Docs automation (keep docs in sync)](#12-docs-automation-keep-docs-in-sync)
+- [13) Repo layout](#13-repo-layout)
+- [14) Limitations / roadmap](#14-limitations--roadmap)
+- [15) Hands-on demos (curl)](#15-hands-on-demos-curl)
 
-- Teams building a **knowledge graph** (product ↔ supplier ↔ customer, lineage, ownership, dependencies)
-- Data platform teams that need **raw ingest → ETL/cleansing → ontology mapping → search**
-- Data governance / platform teams needing **auditability** and reproducible state
-- “Spreadsheet-first” operations that want to **infer schema**, map columns, and import to a governed model
-- Systems integrating multiple upstream sources where **retries/duplicates are normal** and correctness must be enforced
-- PoCs that must later graduate to production without rewriting the core data model
+---
 
-## 3) What makes it different
+## 1) One-liner
 
-- **Correctness-first**: durable idempotency (`processed_events`) + ordering guard (`aggregate_versions`) + write-side OCC (`expected_seq`) are enforced and tested with no mocks.
-- **Lineage-first**: provenance/audit are first-class concepts (event → artifact links) so you can explain *why* a node/edge exists.
-- **Rebuildable**: read models (ES, lineage/audit projections) can be (re)materialized by replaying the Event Store instead of treating ES as truth.
-- **Data plane separation**: lakeFS + dataset registries manage raw/cleaned artifacts independent of the graph store.
+SPICE HARVESTER combines **ontology/graph (SSoT) + immutable event logs + a versioned data plane (lakeFS)** and adds an **LLM-native control plane (typed plans + compile/validate + HITL + policy enforcement)** so that operational/data changes become **simulation-first, auditable, and reproducible**.
 
-## 3.1) Feature inventory (current implementation)
+---
 
-- **Ontology & graph**: class/property/relationship CRUD, branches/merge/rollback, query, and relationship validation via OMS/BFF.
-- **Relationship modeling**: LinkType + RelationshipSpec (FK, join table, object-backed), link indexing with dangling policies, and link edits overlay.
-- **Governance**: protected branches, proposals/approval, merge checks, health gates, and schema migration planning for object/backing changes.
-- **Data plane ingest**: CSV/Excel/media uploads, Google Sheets connector, Funnel type inference/profiling, lakeFS dataset versioning, dataset registry + ingest outbox + reconciler.
-- **Pipeline execution**: preview/build/deploy, Spark transforms (filter/join/compute/cast/rename/union/dedupe/groupBy/aggregate/window/pivot), schema contracts + expectations, pipeline scheduler.
-- **Objectify**: mapping spec versioning, auto/suggested mapping, KeySpec (primary/title) enforcement, PK uniqueness gates, edits migration.
-- **Event sourcing correctness**: S3/MinIO Event Store, message-relay to Kafka, processed_event_registry, sequence allocator, command status (HTTP + WS), admin replay/recompute tools.
-- **Query & projection**: Elasticsearch projections, graph query federation + label query, optional search-projection worker.
-- **Access policy**: row/column masking applied to instance/query/graph reads via dataset-level policies.
-- **Ops & security**: audit logs, lineage graph, health/config/monitoring endpoints, tracing/metrics, rate limiting + input sanitizer, auth token guard.
-- **AI/LLM**: natural-language query plan/answer endpoints + Context7 knowledge base integration + optional Agent (LangGraph) orchestration service (internal, via BFF).
+## 2) What problems it solves
 
-Full API list: `docs/API_REFERENCE.md`
+Real data/operations are adversarial by default:
 
-## 4) Architecture
+1) **At-least-once delivery is normal**: Kafka redeliveries, worker restarts, retries.
+2) **Silent last-write-wins is an incident**: concurrency conflicts must be explicit (not silent overwrites).
+3) **Messy inputs**: spreadsheet-first workflows and constantly changing schemas.
+4) **Policy + permissions + state are entangled**: “Can we do this?” depends on the current state and governance.
+5) **Partial failures are normal**: index lag, degraded overlays, missing permissions, stale reads.
+
+SPICE HARVESTER addresses this by:
+- enforcing a **correctness layer** (idempotency/ordering/OCC) on Postgres,
+- treating Elasticsearch as a **rebuildable read model** (never the truth),
+- forcing writes through **simulate → approve (HITL) → submit (async)** to preserve accountability and reproducibility.
+
+---
+
+## 3) Core philosophy: deterministic core + falsifiable decisions
+
+### 3.1 Split: Data Plane / Control Plane / Read Model
+
+- **Data Plane (versioned artifacts)**: raw ingest → transforms → datasets → materialization (lakeFS + MinIO)
+- **Control Plane (policy/approval/orchestration)**: plan/approval/simulate/submit/run/registry (Postgres)
+- **Read Model (search/projection)**: Elasticsearch overlay + lineage/audit projections
+
+“LLM-native” does not mean the LLM executes arbitrary actions. It means:
+- the LLM only produces a **typed plan**,
+- the system enforces **validation / policy / approvals / simulation-first** before any execution.
+
+### 3.2 Sources of truth (SSoT)
+
+- Graph/ontology authority: **TerminusDB**
+- Immutable log (commands + domain events): **S3/MinIO Event Store**
+- Correctness + registries + gates + approvals: **Postgres**
+- Data artifact versions: **lakeFS + MinIO**
+- Elasticsearch is a **materialized view** (rebuildable)
+
+---
+
+## 4) System building blocks (services / SSoT / planes)
+
+### 4.1 Microservices (local default ports)
+
+- **BFF (8002)**: external entrypoint (frontend contract), routing, policy/rate limits, agent-plans control plane
+- **OMS (8000)**: ontology/graph management (internal; use debug ports when needed)
+- **Funnel (8003)**: type inference/profiling (internal)
+- **Agent**: LangGraph-based runner (internal; tool calls go through BFF)
+- **Workers**: pipeline/objectify/instance/projection/action-worker (event-driven)
+- **Infra**: Kafka, Postgres, Redis, MinIO(S3), lakeFS, Elasticsearch, OTel collector, Jaeger/Prometheus/Grafana
+
+See `docs/ARCHITECTURE.md` for the full compose inventory.
+
+### 4.2 High-level architecture
 
 ```mermaid
 flowchart LR
   Client --> BFF
-  BFF --> Agent
   BFF --> OMS
   BFF --> Funnel
-  BFF --> PG[(Postgres: registry/outbox)]
+  BFF --> Agent
+  BFF --> PG[(Postgres: registry/outbox/gates)]
   BFF --> LFS[(lakeFS + MinIO)]
-
-  Agent --> BFF
-  Agent --> PG
-  Agent --> EventStore
 
   OMS -->|append command| EventStore[(S3/MinIO Event Store)]
   EventStore --> Relay[message-relay (S3 tail -> Kafka)]
   Relay --> Kafka[(Kafka)]
 
-  Kafka --> InstanceWorker[instance-worker]
   Kafka --> OntologyWorker[ontology-worker]
+  Kafka --> InstanceWorker[instance-worker]
   Kafka --> ProjectionWorker[projection-worker]
+  Kafka --> ActionWorker[action-worker]
 
-  InstanceWorker -->|write graph| TerminusDB[(TerminusDB)]
-  InstanceWorker -->|append domain events| EventStore
-  InstanceWorker --> PG
-
-  OntologyWorker -->|write schema| TerminusDB
-  OntologyWorker -->|append domain events| EventStore
-  OntologyWorker --> PG
-
+  OntologyWorker --> TerminusDB[(TerminusDB)]
+  InstanceWorker --> TerminusDB
   ProjectionWorker --> ES[(Elasticsearch)]
-  ProjectionWorker --> Redis[(Redis)]
-  ProjectionWorker --> PG
 
-  LFS --> PipelineWorker[pipeline-worker]
-  PipelineWorker --> LFS
-  PG --> ObjectifyWorker[objectify-worker]
-  ObjectifyWorker --> Kafka
+  ActionWorker --> LFS
+  ActionWorker --> EventStore
+  ActionWorker --> ES
+
+  Agent --> BFF
+  Agent --> PG
+  Agent --> EventStore
 ```
 
-**Truth sources (SSoT)**:
-- Graph/schema authority: TerminusDB
-- Immutable log: S3/MinIO Event Store (commands + domain events)
-- Control plane: Postgres (registries, outbox, idempotency, ordering, gates)
-- Data plane: lakeFS + MinIO (dataset/artifact versions)
+---
 
-## 5) Reliability Contract (short)
+## 5) Key capabilities (current implementation)
 
-1) **Delivery**: Publisher/Kafka are **at-least-once**. Consumers must be idempotent.  
-2) **Idempotency key**: the global idempotency key is `event_id` (same `event_id` must create side effects at most once).  
-3) **Ordering**: aggregate-level `sequence_number` is the truth; stale events must be ignored.  
-4) **OCC**: write-side commands carry `expected_seq`; mismatch is a real conflict (**409**) not a “silent last-write-wins”.
+### 5.1 Ontology / graph
+- Class/property/relationship CRUD, branching/merge/rollback
+- Relationship modeling: LinkType + RelationshipSpec (FK / join table / object-backed), dangling policies, link edits overlay
+- Graph query federation (multi-hop), label-based query
+
+### 5.2 Data plane (ingest → pipeline → objectify)
+- CSV/Excel/media upload, Google Sheets connector
+- Funnel type inference/profiling
+- lakeFS dataset versioning + dataset registry/outbox/reconciler
+- Spark transforms (filter/join/compute/cast/rename/union/dedupe/groupBy/aggregate/window/pivot)
+- Objectify: mapping spec versioning + KeySpec (primary/title) + PK uniqueness gates + edits migration
+
+### 5.3 Correctness (idempotency/ordering/OCC) + replayability
+- `processed_event_registry` (idempotency), `aggregate_versions` (ordering), `expected_seq` (OCC) as a hard contract
+- Event Store (S3/MinIO) + message-relay → Kafka for replayable pipelines
+- ES/projections are rebuildable read models
 
 Full contract: `docs/IDEMPOTENCY_CONTRACT.md`
 
-## 6) Quick Start (5 min)
+### 5.4 Ops / audit / lineage
+- Audit logs / lineage graph / health/config/monitoring endpoints
+- Enterprise error taxonomy (structured `enterprise.*` payload) for deterministic ops/agent branching
+- OpenTelemetry tracing/metrics (collector + jaeger/prometheus/grafana)
 
-Prereq: Docker + Docker Compose.
+---
+
+## 6) Action writeback + Decision Simulation (what-if)
+
+Core idea: writes are declared as **intent-only**, then executed safely via **simulate → approve → submit**.
+
+### 6.1 ActionLog is an ontology object (not just a DB row)
+
+ActionLog captures:
+- what decision was made,
+- why it was made (policy/inputs/context),
+- and what happened (conflicts, criteria failures, permission denials) in a structured schema.
+
+This makes “learning from past decisions” and meta-cognition (pattern analysis) possible.
+
+See: `docs/ACTION_WRITEBACK_DESIGN.md`
+
+### 6.2 End-to-end flow
+
+1) **simulate (dry-run)**: evaluate policy/permissions/criteria/conflicts, compute diffs (overlay/lakeFS/ES effects)
+2) **HITL approval**: human approves/rejects based on the simulation output
+3) **submit (async)**: worker applies lakeFS commit + appends EventStore event + writes ES overlay docs
+4) **read path**: BFF reads use overlay and can represent “pending/partial/degraded”
+
+### 6.3 Decision simulation levels
+
+- **Level 1 (input injection)**: vary input variables (e.g. `discount_rate=10%` vs `15%`, conflict policy, branch options)
+- **Level 2 (base-state injection, safely)**: inject assumptions into `observed_base` / base snapshots for what-if
+  - assumptions never become SSoT
+  - injected fields are explicitly included in the simulation result for accountability
+
+---
+
+## 7) LLM-native Control Plane (Agent Plans)
+
+LLM is a runner only in the sense of producing a **typed plan**; the server is the executor and policy enforcer.
+
+### 7.1 Guarantees
+
+- LLM produces **plan JSON (typed)**, server validates and enforces policy.
+- All write plans are forced to **simulate-first** and require explicit approvals.
+- Validation returns a **PlanCompilationReport** (not just errors/warnings):
+  - why the plan was rejected,
+  - what can/should be changed,
+  - (optional) server-proposed plan patch (diff) that the user must explicitly accept.
+
+### 7.2 Key endpoints (summary)
+
+- `POST /api/v1/agent-plans/compile`: natural language → plan draft (LLM) + server validate + plan registry
+- `POST /api/v1/agent-plans/validate`: static validation + `compilation_report`
+- `POST /api/v1/agent-plans/{plan_id}/apply-patch`: apply server-suggested patch only with explicit acceptance (re-validate included)
+- `POST /api/v1/agent-plans/{plan_id}/preview`: run preview-safe steps (simulate/GET/READ-risk)
+- `POST /api/v1/agent-plans/{plan_id}/execute`: blocked (403) until approval is recorded; starts agent run after approval
+- `POST /api/v1/agent-plans/{plan_id}/approvals`: record approvals
+- `POST /api/v1/agent-plans/context-pack`: build a safe context pack (operational memory summary)
+
+Full list: `docs/API_REFERENCE.md`
+
+### 7.3 Step dataflow (minimal spec): produces / consumes
+
+To safely wire step outputs into step inputs, each step declares:
+- `produces`: artifact keys it produces
+- `consumes`: artifact keys it depends on
+
+The server blocks:
+- consuming an artifact that has not been produced previously,
+- submitting without a preceding simulation,
+- mismatched `simulation_id` references.
+
+### 7.4 Policy drift prevention (test-enforced)
+
+Enterprise catalog fingerprint + allowlist bundle hash are pinned in tests so that policy changes break CI unless tests are updated intentionally.
+
+- Drift guard test: `backend/tests/unit/errors/test_policy_drift_guards.py`
+
+---
+
+## 8) Security / governance / audit
+
+- Access policy: row/column masking and filtering on instance/query/graph reads
+- Input sanitizer: rule-based prompt-injection and malicious payload reduction
+- Admin endpoints: guarded via `X-Admin-Token` (disabled when unset)
+- Audit/trace: trace context preserved on ActionLog/AgentRun for “who/when/why” reconstruction
+
+---
+
+## 9) Observability (OpenTelemetry)
+
+The full stack collects traces/metrics via `otel-collector-config.yml`.
+
+- Jaeger: traces (see ports in `docs/ARCHITECTURE.md`)
+- Prometheus/Grafana: metrics/dashboards
+- Cross-service correlation keys: `request_id`, `actor`, `plan_id`, `action_log_id`, etc.
+
+Ops guide: `docs/OPERATIONS.md`
+
+---
+
+## 10) Local quickstart
+
+### 10.1 Backend stack (5–10 min)
+
+Prereq: Docker + Docker Compose
 
 ```bash
 git clone https://github.com/ludia8888/SPICE-Harvester.git
 cd SPICE-Harvester
-
-# Optional: avoid local port conflicts (example only)
-cp .env.example .env
-
+cp .env.example .env  # optional
 docker compose -f docker-compose.full.yml up -d
 ```
 
-Health (BFF is the only external port by default):
+Health check (BFF is the only external endpoint by default):
 
 ```bash
 curl -fsS http://localhost:8002/api/v1/health
 ```
 
-Need direct OMS/Funnel access for debugging?
+Need direct OMS/Funnel access for debugging? (debug ports):
 
 ```bash
 docker compose -f docker-compose.full.yml -f backend/docker-compose.debug-ports.yml up -d
@@ -128,9 +275,9 @@ curl -fsS http://localhost:8000/health
 curl -fsS http://localhost:8003/health
 ```
 
-## 6.1) Frontend (Vite + React)
+### 10.2 Frontend dev (Vite + React)
 
-Prereq: Node 20+.
+Prereq: Node 20+
 
 ```bash
 cd frontend
@@ -150,9 +297,66 @@ npm run build
 npm run preview
 ```
 
-## 7) E2E demo (single PoC scenario)
+---
 
-Scenario: **Customer + Product(owned_by Customer)**, then query the relationship via multi-hop federation.
+## 11) Tests
+
+Fast unit tests (no docker required):
+
+```bash
+make backend-unit
+```
+
+Production gate (requires the full local stack):
+
+```bash
+make backend-prod-full
+```
+
+Coverage:
+
+```bash
+make backend-coverage
+```
+
+---
+
+## 12) Docs automation (keep docs in sync)
+
+Some docs are generated from code to reduce drift:
+
+```bash
+python scripts/generate_api_reference.py
+python scripts/generate_architecture_reference.py
+python scripts/generate_backend_methods.py
+python scripts/generate_error_taxonomy.py
+```
+
+---
+
+## 13) Repo layout
+
+- `backend/`: BFF/OMS/Funnel/Agent + shared + workers
+- `frontend/`: React + Blueprint.js UI
+- `docs/`: system docs (design/ops/security/architecture/api)
+- `scripts/`: doc generation / smoke tests / utilities
+- `docker-compose.*.yml`: local stack
+
+---
+
+## 14) Limitations / roadmap
+
+- The default is **simulate-first + HITL + policy enforcement**, not “fully autonomous execution”.
+- Production hardening still needs environment-specific work: authn/authz, tenant isolation, secrets, retention/partitioning, quotas, SLAs.
+- See: `docs/ARCHITECTURE.md`, `docs/OPERATIONS.md`, `docs/SECURITY.md`, `docs/LLM_NATIVE_CONTROL_PLANE.md`
+
+---
+
+## 15) Hands-on demos (curl)
+
+### 15.1 E2E demo: Customer → Product(owned_by Customer) + multi-hop query
+
+Scenario: create a DB, define `Customer` + `Product` ontology (with `owned_by`), create instances, then query via federation.
 
 Tip: examples below use `jq` for convenience.
 
@@ -173,8 +377,8 @@ CUST_ONTO_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/databases/${DB}/
     "id":"Customer",
     "label":"Customer",
     "properties":[
-      {"name":"customer_id","type":"string","required":true},
-      {"name":"name","type":"string","required":true}
+      {"name":"customer_id","type":"xsd:string","label":"Customer ID","required":true},
+      {"name":"name","type":"xsd:string","label":"Name","required":true}
     ],
     "relationships":[]
   }' | jq -r '.data.command_id')
@@ -185,8 +389,8 @@ PROD_ONTO_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/databases/${DB}/
     "id":"Product",
     "label":"Product",
     "properties":[
-      {"name":"product_id","type":"string","required":true},
-      {"name":"name","type":"string","required":true}
+      {"name":"product_id","type":"xsd:string","label":"Product ID","required":true},
+      {"name":"name","type":"xsd:string","label":"Name","required":true}
     ],
     "relationships":[
       {"predicate":"owned_by","target":"Customer","label":"Owned By","cardinality":"n:1"}
@@ -196,20 +400,19 @@ PROD_ONTO_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/databases/${DB}/
 curl -fsS "http://localhost:8002/api/v1/commands/${CUST_ONTO_CMD}/status" | jq .
 curl -fsS "http://localhost:8002/api/v1/commands/${PROD_ONTO_CMD}/status" | jq .
 
-# 3) Create instances (BFF label API; async 202) and capture command_ids
+# 3) Create instances (BFF label API; async 202)
 CUST_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/databases/${DB}/instances/Customer/create" \
   -H 'Content-Type: application/json' \
-  -d '{"data":{"customer_id":"cust_001","name":"Alice"}}' | jq -r '.command_id')
+  -d '{"data":{"customer_id":"cust_001","name":"Alice"}}' | jq -r '.data.command_id // .command_id')
 
 PROD_CMD=$(curl -fsS -X POST "http://localhost:8002/api/v1/databases/${DB}/instances/Product/create" \
   -H 'Content-Type: application/json' \
-  -d '{"data":{"product_id":"prod_001","name":"Shirt","owned_by":"Customer/cust_001"}}' | jq -r '.command_id')
+  -d '{"data":{"product_id":"prod_001","name":"Shirt","owned_by":"Customer/cust_001"}}' | jq -r '.data.command_id // .command_id')
 
-# 4) Observe async completion (BFF command status proxy)
 curl -fsS "http://localhost:8002/api/v1/commands/${CUST_CMD}/status" | jq .
 curl -fsS "http://localhost:8002/api/v1/commands/${PROD_CMD}/status" | jq .
 
-# 5) Multi-hop query (BFF federation)
+# 4) Multi-hop query (BFF federation)
 curl -fsS -X POST "http://localhost:8002/api/v1/graph-query/${DB}" \
   -H 'Content-Type: application/json' \
   -d '{
@@ -225,15 +428,13 @@ curl -fsS -X POST "http://localhost:8002/api/v1/graph-query/${DB}" \
   }' | jq .
 ```
 
-Expected: the response includes nodes/edges and each node exposes `data_status=FULL|PARTIAL|MISSING` so UI can distinguish “index lag” from “missing entity”.
+Expected: the response includes nodes/edges and each node exposes `data_status=FULL|PARTIAL|MISSING` so the UI can distinguish “index lag” from “missing entity”.
 
-## 7.1) Branch-based what-if (no data copy)
+### 15.2 Branch-based what-if (no data copy)
 
 Branch virtualization lets you run “what if we change X?” simulations without copying data:
 - Graph/schema reads run on a TerminusDB branch (copy-on-write).
 - ES payload resolves with overlay: branch index → fallback to main index (best-effort).
-- Branch deletes are tombstoned to prevent fallback resurrection (tombstoned nodes return `data_status=MISSING` + `index_status.tombstoned=true`).
-- Deletion is terminal per aggregate (recreating the same ID on the same branch is blocked by OCC and returns 409).
 
 ```bash
 # 1) Create a branch from main
@@ -252,65 +453,3 @@ curl -fsS -X PUT "http://localhost:8002/api/v1/databases/${DB}/instances/Product
   -d '{"data":{"name":"Shirt (WhatIf)"}}'
 ```
 
-## 8) Testing (no mocks)
-
-Fast unit tests (no docker):
-
-```bash
-make backend-unit
-```
-
-Production gate:
-
-```bash
-PYTHON_BIN=python3.12 ./backend/run_production_tests.sh --full
-```
-
-Pipeline transform/cleansing E2E (full stack required):
-
-```bash
-RUN_PIPELINE_TRANSFORM_E2E=true PYTHON_BIN=python3.12 ./backend/run_production_tests.sh --full
-```
-
-Chaos (destructive; stops/restarts infra and crashes workers on purpose):
-
-```bash
-PYTHON_BIN=python3.12 ./backend/run_production_tests.sh --full --chaos-lite
-PYTHON_BIN=python3.12 ./backend/run_production_tests.sh --full --chaos-out-of-order
-PYTHON_BIN=python3.12 SOAK_SECONDS=600 SOAK_SEED=123 ./backend/run_production_tests.sh --full --chaos-soak
-```
-
-### Coverage (pytest-cov + Codecov)
-
-```bash
-make backend-coverage
-```
-
-CI: `.github/workflows/ci.yml` uploads `coverage.xml` to Codecov.  
-For private repos, set `CODECOV_TOKEN` in GitHub Actions secrets.
-
-### Performance (k6)
-
-Requires the full docker stack running.
-
-```bash
-make backend-perf-k6-smoke
-```
-
-See `backend/perf/README.md` for tuning / cleanup.
-
-## 9) Limitations / PoC vs Production
-
-- **No Saga/compensation orchestration yet** (planned): failures are observable via command status, but automated compensation is not shipped.
-- **No automated drift reconciliation/backfill pipeline yet** (planned): projections can be replayed, but fully managed “reindex/backfill jobs + SLAs” are not turnkey.
-- **DLQ is a topic, not a full ops workflow by default**: projection sends to DLQ after retries, but continuous DLQ reprocessing/alerting needs production wiring.
-- **Security model is PoC-grade** unless you harden it (authn/authz, tenant isolation, secrets, rate limits, audit retention).
-- **Capacity planning** (indexes/retention/partitioning) must be done before high TPS (especially Postgres registry growth).
-
-## 10) Docs
-
-- Index: `docs/README.md`
-- Architecture: `docs/ARCHITECTURE.md`
-- Reliability contract: `docs/IDEMPOTENCY_CONTRACT.md`
-- Ops/runbook: `docs/OPERATIONS.md`, `backend/PRODUCTION_MIGRATION_RUNBOOK.md`
-- Production tests: `backend/docs/testing/OMS_PRODUCTION_TEST_README.md`
