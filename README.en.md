@@ -101,7 +101,7 @@ flowchart LR
   BFF --> LFS[(lakeFS + MinIO)]
 
   OMS -->|append command| EventStore[(S3/MinIO Event Store)]
-  EventStore --> Relay[message-relay (S3 tail -> Kafka)]
+  EventStore --> Relay[message-relay (S3 tail to Kafka)]
   Relay --> Kafka[(Kafka)]
 
   Kafka --> OntologyWorker[ontology-worker]
@@ -452,4 +452,3 @@ curl -fsS -X PUT "http://localhost:8002/api/v1/databases/${DB}/instances/Product
   -H 'Content-Type: application/json' \
   -d '{"data":{"name":"Shirt (WhatIf)"}}'
 ```
-
