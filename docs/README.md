@@ -13,6 +13,7 @@ Welcome to the SPICE HARVESTER project documentation. This directory contains al
 - **[Operations Manual](OPERATIONS.md)** - Deployment, maintenance, and operational procedures
 - **[DevOps Risk & Cost Report](DEVOPS_MSA_RISK_COST_REPORT.md)** - Senior DevOps 관점 운영 리스크/코스트 분석 및 우선순위 개선안
 - **[LLM Integration Blueprint](LLM_INTEGRATION.md)** - LLM을 Funnel/OMS/Graph/Lineage에 안전하게 결합하는 설계(도메인 중립)
+- **[LLM-Native Control Plane](LLM_NATIVE_CONTROL_PLANE.md)** - LLM을 “대화형 컴파일러”로 올리는 설계(Write Planner/Operational Memory/Policy E2E Evals)
 - **[Security Documentation](SECURITY.md)** - Security architecture, guidelines, and compliance
 - **[Data Lineage](DATA_LINEAGE.md)** - Provenance/lineage 그래프 설계 및 운영(백필/지표 포함)
 - **[Audit Logs](AUDIT_LOGS.md)** - 감사 로그 스키마/보장(guarantees) 및 운영 가이드
