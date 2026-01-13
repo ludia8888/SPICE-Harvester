@@ -8,12 +8,21 @@
 
 ## 0) TL;DR
 
-- **Planner**는 LLM이 아니라 “검증 가능한 JSON 계획”을 만든다. 계획은 서버에서 강제 검증된다.
+- **Planner**는 LLM/rule 기반으로 “검증 가능한 JSON 계획(AgentPlan)”을 만든다. 실행은 서버가 강제 검증한다.
 - **툴 allowlist**는 “BFF 경유만” 허용하며, 역할/환경/브랜치에 따라 실행 가능한 경로가 달라진다.
 - **승인 게이트**는 write/위험 작업을 사람 승인 없이 실행하지 못하게 막는다.
 - **실행**은 기존 Agent runtime의 순차 step executor를 유지하고, 정책/승인/제한 체크를 추가한다.
 - **감사/라인리지**는 Agent 이벤트와 audit log를 분리 저장하며, 모든 행위에 책임 주체를 남긴다.
-- **상태**: 설계 문서이며, 구현은 단계적으로 진행한다.
+- **상태**: 핵심 경로(Plan 컴파일/검증/저장/승인/실행)가 구현되었고, 나머지는 단계적으로 고도화한다.
+
+### 현재 구현 API (요약)
+- `POST /api/v1/agent-plans/compile`: LLM planner가 plan draft 생성 → 서버 validate → Plan registry 저장
+- `POST /api/v1/agent-plans/validate`: plan 정적 검증 + `PlanCompilationReport`(진단/patch 제안) 반환
+- `POST /api/v1/agent-plans/{plan_id}/apply-patch`: 서버 제안 patch를 사용자가 수락한 경우에만 적용(재검증 포함)
+- `POST /api/v1/agent-plans/{plan_id}/preview`: preview-safe step만 실행(시뮬레이션/GET/READ risk)
+- `POST /api/v1/agent-plans/{plan_id}/execute`: 승인 기록 없으면 403, 승인 후 Agent run 시작
+- `POST /api/v1/agent-plans/{plan_id}/approvals`: 승인 기록
+- `POST /api/v1/agent-plans/context-pack`: 운영 메모리(context pack) 안전 요약
 
 ---
 
@@ -24,7 +33,8 @@
 - BFF는 `X-Spice-Caller: agent` 호출을 **agent proxy에서 차단**해 루프를 막는다. (`backend/bff/routers/agent_proxy.py`)
 - 내부 호출은 **Agent service token**을 사용한다. (`backend/bff/middleware/auth.py`)
 - Agent 이벤트는 core Event Store와 **분리된 버킷**에 기록한다. (`AGENT_EVENT_STORE_BUCKET` → `EVENT_STORE_BUCKET`)
-- LLM은 현재 **읽기 전용 계획/요약**만 제공한다. (`backend/bff/routers/ai.py`)
+- `/api/v1/ai/*`는 **읽기 전용 계획/요약**만 제공한다. (`backend/bff/routers/ai.py`)
+- 별도 control plane으로 `/api/v1/agent-plans/compile`이 LLM을 사용해 **Plan-only(실행 불가)** 를 생성한다. 실행은 validate/승인/시뮬레이션 게이트를 통과해야 한다.
 
 ---
 
@@ -136,12 +146,15 @@
       "path_params": { "pipeline_id": "..." },
       "query": {},
       "body": { "node_id": "..." },
+      "produces": ["artifact.preview.1"],
+      "consumes": [],
       "requires_approval": false,
       "expected_output": "preview sample"
     },
     {
       "step_id": "s2",
       "tool_id": "pipeline.deploy",
+      "consumes": ["artifact.preview.1"],
       "requires_approval": true,
       "idempotency_key": "..."
     }
@@ -162,15 +175,16 @@ sequenceDiagram
   participant Agent
   participant Approver
 
-  UI->>BFF: /api/v1/agent/plan (goal)
-  BFF->>Agent: plan 요청 (LLM or rule-based)
-  Agent-->>BFF: Plan JSON
-  BFF->>BFF: validate + allowlist + policy
-  BFF-->>UI: plan + approval_required
+  UI->>BFF: /api/v1/agent-plans/compile (goal)
+  BFF->>BFF: (optional) context pack + LLM compile
+  BFF->>BFF: validate + allowlist + policy + simulate-first
+  BFF-->>UI: plan + compilation_report(patches)
+  UI->>BFF: /api/v1/agent-plans/{plan_id}/apply-patch (accept patch)
   UI->>BFF: approve step(s)
   Approver->>BFF: 승인 기록
-  UI->>BFF: /api/v1/agent/runs (plan_id)
-  BFF->>Agent: execute steps
+  UI->>BFF: /api/v1/agent-plans/{plan_id}/preview (optional)
+  UI->>BFF: /api/v1/agent-plans/{plan_id}/execute
+  BFF->>Agent: /api/v1/agent/runs (execute steps)
   Agent->>BFF: tool 호출
   BFF-->>Agent: 결과
   Agent-->>BFF: run status
@@ -239,8 +253,9 @@ sequenceDiagram
 ## 11) Plan/Approval 저장소 계약 (제안)
 
 Planner/Approval 확장에 필요한 최소 상태 저장 계약을 명시한다.
-실제 구현 시점까지는 문서 계약으로만 유지한다.
+현재는 아래 테이블이 구현되어 있으며, plan digest/승인/실행 재현을 위해 유지한다.
 
-- `agent_runs`: `run_id`, `plan_id`, `status`, `started_at`, `finished_at`, `requester`, `delegated_actor`, `risk_level`
-- `agent_steps`: `run_id`, `step_id`, `tool_id`, `status`, `command_id`/`task_id`, `input_digest`, `output_digest`, `error`
-- `agent_approvals`: `plan_id`, `step_id?`, `approved_by`, `approved_at`, `decision`, `comment`
+- `agent_plans` (Plan Registry): `plan_id`, `status`, `goal`, `risk_level`, `requires_approval`, `plan`(JSONB), `plan_digest`, `created_by`, `created_at`, `updated_at`
+- `agent_runs`: `run_id`, `plan_id`, `status`, `risk_level`, `requester`, `delegated_actor`, `context`(JSONB), `plan_snapshot`(JSONB), `started_at`, `finished_at`
+- `agent_steps`: `run_id`, `step_id`, `tool_id`, `status`, `command_id`, `task_id`, `input_digest`, `output_digest`, `error`, `metadata`(JSONB), `started_at`, `finished_at`
+- `agent_approvals`: `approval_id`, `plan_id`, `step_id?`, `decision`, `approved_by`, `approved_at`, `comment`, `metadata`(JSONB)

@@ -8,8 +8,8 @@
 
 ## 0) 한 줄 요약
 
-LLM은 **결정(Write)** 이 아니라 **추천/설명/보조 판정(Assist)** 에만 사용한다.  
-최종 반영은 항상 **검증기(Validation) + 정책(Guardrails) + (대부분) 사용자 승인**을 통과해야 한다.
+LLM은 **직접 실행/직접 write**를 하지 않고, **추천/설명/계획(Plan) 생성**에만 사용한다.  
+최종 반영은 항상 **검증(Validation) + 정책(Guardrails) + 시뮬레이션(Simulate) + 사용자 승인(HITL)** 을 통과해야 한다.
 
 ---
 
@@ -45,8 +45,14 @@ LLM 결합의 출발점은 “이미 되는 것”과 “사람이 힘든 것”
 - BFF AI 라우터: `POST /api/v1/ai/query/{db_name}`, `POST /api/v1/ai/translate/query-plan/{db_name}`
 - Context7 라우터: `/api/v1/context7/*` (검색/컨텍스트/지식/링크/온톨로지 분석)
 - Agent 서비스(옵션): `/api/v1/agent/*` (내부 오케스트레이션, BFF 경유 실행, 감사 이벤트 기록)
+- Agent Plans(LLM-native control plane): `/api/v1/agent-plans/*`
+  - `POST /compile`: 자연어 → `AgentPlan`(typed) 생성(LLM) + 서버 validate + Plan registry 저장
+  - `POST /validate`: allowlist/risk/idempotency/simulate-first 검증 + `PlanCompilationReport` 반환
+  - `POST /{plan_id}/apply-patch`: 서버 제안 patch를 사용자가 수락한 경우에만 적용(재검증 포함)
+  - `POST /{plan_id}/preview` / `POST /{plan_id}/execute`: 승인/시뮬레이션 게이트를 통과해야 실행
 
-위 라우터는 “추천/보조” 역할이며, 최종 반영은 항상 서버 검증/승인 흐름을 통과해야 합니다.
+위 라우터는 “추천/보조/계획” 역할이며, 최종 반영은 항상 서버 검증/승인 흐름을 통과해야 합니다.  
+상세 설계/철학: `docs/LLM_NATIVE_CONTROL_PLANE.md`
 
 ---
 
@@ -74,7 +80,8 @@ LLM은 “규칙으로 커버하기 어려운 **언어/의미/모호성**”에 
   - 타입 호환성/스키마 존재 여부
   - 중복/충돌(1:N 매핑 등)
   - max_depth/limit 같은 안전 제한
-- 검증 실패 시 **fail-open**(LLM 없이 기존 경로로 진행)
+- write/workflow의 경우에도 LLM은 “계획(Plan)”만 만들고, 서버가 `simulate→approve→submit`을 강제
+- 검증 실패 시 **reject + patch 제안**(투명성/책임) 또는 **fail-open**(LLM 없이 기존 경로로 진행)
 
 ### 3.2 도메인 중립(편향 최소화)
 - 기본값: **업종별 상식/용어집을 내장하지 않는다**

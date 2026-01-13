@@ -1,6 +1,6 @@
 # Enterprise Error Taxonomy
 
-> Updated: 2026-01-12
+> Updated: 2026-01-13
 
 This file is auto-generated from `backend/shared/errors/enterprise_catalog.py`.
 Run: `python scripts/generate_error_taxonomy.py`.
@@ -227,6 +227,8 @@ Run: `python scripts/generate_error_taxonomy.py`.
 | action_type_input_schema_invalid | SHV-{SUBSYS}-ONT-VAL-3002 | ontology | validation | error | Action type input schema invalid | false | none | 1 | 0 | 0 | none | false | true | action_type_input_schema_invalid | request_human | 400 |
 | action_type_missing_writeback_target | SHV-{SUBSYS}-ONT-VAL-3001 | ontology | validation | error | Action type writeback target missing | false | none | 1 | 0 | 0 | none | false | true | action_type_missing_writeback_target | request_human | 400 |
 | action_type_not_found | SHV-{SUBSYS}-ONT-NOT-3003 | ontology | not_found | error | Action type not found | false | none | 1 | 0 | 0 | none | false | true | action_type_not_found | request_human | 404 |
+| base_instance_not_found | SHV-{SUBSYS}-DAT-NOT-3003 | data | not_found | error | Base instance not found | false | none | 1 | 0 | 0 | none | false | true | base_instance_not_found | request_human | 404 |
+| base_instance_state_unavailable | SHV-{SUBSYS}-SYS-INT-3001 | system | internal | error | Base instance state unavailable | false | none | 1 | 0 | 0 | none | false | true | base_instance_state_unavailable | request_human | 500 |
 | conflict_detected | SHV-{SUBSYS}-CNF-CON-3001 | conflict | conflict | error | Conflict detected | false | none | 1 | 0 | 0 | none | false | true | conflict_detected | request_human | 409 |
 | context7_unavailable | SHV-{SUBSYS}-UPS-UNA-3001 | upstream | unavailable | error | Context7 unavailable | true | backoff | 3 | 500 | 10000 | deterministic_equal_jitter | false | false | context7_unavailable | retry_backoff | 503 |
 | data_access_denied | SHV-{SUBSYS}-ACC-PER-3001 | access | permission | error | Data access denied | false | none | 1 | 0 | 0 | none | false | true | data_access_denied | request_human | 403 |
@@ -235,6 +237,9 @@ Run: `python scripts/generate_error_taxonomy.py`.
 | overlay_degraded | SHV-{SUBSYS}-SYS-UNA-3001 | system | unavailable | error | Overlay degraded | false | none | 1 | 0 | 0 | none | false | true | overlay_degraded | safe_mode,request_human | 503 |
 | rate_limiter_unavailable | SHV-{SUBSYS}-RAT-UNA-2001 | rate_limit | unavailable | error | Rate limiter unavailable | true | backoff | 3 | 500 | 10000 | deterministic_equal_jitter | false | false | rate_limiter_unavailable | retry_backoff | 503 |
 | reconciler_timeout | SHV-{SUBSYS}-SYS-TMO-2002 | system | timeout | error | Reconciler timed out | true | backoff | 3 | 500 | 10000 | deterministic_equal_jitter | false | false | reconciler_timeout | retry_backoff | 504 |
+| simulation_assumption_forbidden_field | SHV-{SUBSYS}-INP-VAL-3011 | input | validation | error | Simulation assumptions include forbidden fields | false | none | 1 | 0 | 0 | none | false | true | simulation_assumption_forbidden_field | request_human | 400 |
+| simulation_assumption_invalid | SHV-{SUBSYS}-INP-VAL-3010 | input | validation | error | Simulation assumptions invalid | false | none | 1 | 0 | 0 | none | false | true | simulation_assumption_invalid | request_human | 400 |
+| simulation_assumption_target_not_found | SHV-{SUBSYS}-INP-VAL-3012 | input | validation | error | Simulation assumption target not found | false | none | 1 | 0 | 0 | none | false | true | simulation_assumption_target_not_found | request_human | 400 |
 | submission_criteria_error | SHV-{SUBSYS}-ONT-VAL-3007 | ontology | validation | error | Submission criteria invalid | false | none | 1 | 0 | 0 | none | false | true | submission_criteria_error | request_human | 400 |
 | submission_criteria_failed | SHV-{SUBSYS}-ACC-PER-3004 | access | permission | error | Submission criteria failed | false | none | 1 | 0 | 0 | none | false | true | submission_criteria_failed | request_human | 403 |
 | submission_criteria_missing_user | SHV-{SUBSYS}-INP-VAL-3003 | input | validation | error | Submission criteria missing user | false | none | 1 | 0 | 0 | none | false | true | submission_criteria_missing_user | request_human | 400 |
