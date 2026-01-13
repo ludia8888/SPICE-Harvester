@@ -1,6 +1,6 @@
 # Backend Method Index
 
-> Generated: 2026-01-13T11:33:54.236205Z
+> Generated: 2026-01-13T11:55:29.874469Z
 > Scope: backend/**/*.py (including scripts and tests, excluding __pycache__)
 
 ## action_outbox_worker
