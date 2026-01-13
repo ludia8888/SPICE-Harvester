@@ -27,7 +27,7 @@ from shared.security.database_access import DOMAIN_MODEL_ROLES, enforce_database
 from shared.services.elasticsearch_service import ElasticsearchService
 from shared.config.search_config import get_instances_index_name
 from shared.config.app_config import AppConfig
-from shared.config.settings import ApplicationSettings
+from shared.config.settings import settings as app_settings
 from shared.services.action_log_registry import ActionLogRecord, ActionLogRegistry
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.lakefs_storage_service import create_lakefs_storage_service
@@ -745,9 +745,8 @@ async def get_instance(
         overlay_status = "DISABLED" if not resolved_overlay_branch else "ACTIVE"
 
         async def _server_merge_fallback() -> Dict[str, Any]:
-            settings = ApplicationSettings()
-            base_storage = create_storage_service(settings)
-            lakefs_storage = create_lakefs_storage_service(settings)
+            base_storage = create_storage_service(app_settings)
+            lakefs_storage = create_lakefs_storage_service(app_settings)
             if not base_storage or not lakefs_storage:
                 raise RuntimeError("server_merge_unavailable")
 

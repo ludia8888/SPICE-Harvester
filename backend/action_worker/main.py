@@ -27,7 +27,7 @@ from oms.services.async_terminus import AsyncTerminusService
 from oms.services.ontology_resources import OntologyResourceService
 from shared.config.app_config import AppConfig
 from shared.config.service_config import ServiceConfig
-from shared.config.settings import ApplicationSettings
+from shared.config.settings import settings as app_settings
 from shared.errors.enterprise_catalog import is_external_code, resolve_enterprise_error
 from shared.errors.error_types import ErrorCode
 from shared.models.event_envelope import EventEnvelope
@@ -160,7 +160,7 @@ class ActionWorker:
         self.dlq_topic = AppConfig.ACTION_COMMANDS_DLQ_TOPIC
         self.dlq_flush_timeout_seconds = float(os.getenv("ACTION_WORKER_DLQ_FLUSH_TIMEOUT_SECONDS", "10") or "10")
 
-        self.enable_processed_event_registry = os.getenv("ENABLE_PROCESSED_EVENT_REGISTRY", "true").lower() == "true"
+        self.enable_processed_event_registry = app_settings.event_sourcing.enable_processed_event_registry
         self.processed_event_registry: Optional[ProcessedEventRegistry] = None
 
         self.action_logs = ActionLogRegistry()
@@ -174,7 +174,7 @@ class ActionWorker:
         validate_registry_enabled()
         validate_lease_settings()
 
-        group_id = os.getenv("ACTION_WORKER_GROUP", "action-worker-group")
+        group_id = (AppConfig.ACTION_WORKER_GROUP or "action-worker-group").strip()
         self.consumer = Consumer(
             {
                 "bootstrap.servers": self.kafka_servers,
@@ -217,12 +217,11 @@ class ActionWorker:
             await self.dataset_registry.connect()
 
         self.lakefs_client = LakeFSClient()
-        settings = ApplicationSettings()
-        self.lakefs_storage = create_lakefs_storage_service(settings)
+        self.lakefs_storage = create_lakefs_storage_service(app_settings)
         if not self.lakefs_storage:
             raise RuntimeError("LakeFSStorageService unavailable (boto3 missing?)")
 
-        self.base_storage = create_storage_service(settings)
+        self.base_storage = create_storage_service(app_settings)
         if not self.base_storage:
             raise RuntimeError("StorageService unavailable (boto3 missing?)")
 
@@ -231,9 +230,9 @@ class ActionWorker:
 
         connection_info = ConnectionConfig(
             server_url=ServiceConfig.get_terminus_url(),
-            user=os.getenv("TERMINUS_USER", "admin"),
-            account=os.getenv("TERMINUS_ACCOUNT", "admin"),
-            key=os.getenv("TERMINUS_KEY", "admin"),
+            user=app_settings.database.terminus_user,
+            account=app_settings.database.terminus_account,
+            key=app_settings.database.terminus_password,
         )
         self.terminus = AsyncTerminusService(connection_info)
 

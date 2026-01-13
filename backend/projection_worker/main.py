@@ -23,7 +23,7 @@ from shared.config.search_config import (
     get_default_index_settings,
 )
 from shared.config.app_config import AppConfig
-from shared.config.settings import ApplicationSettings
+from shared.config.settings import settings as app_settings
 from shared.models.event_envelope import EventEnvelope
 from shared.models.events import (
     BaseEvent, EventType,
@@ -367,12 +367,14 @@ class ProjectionWorker:
         validate_registry_enabled()
         validate_lease_settings()
 
+        group_id = (AppConfig.PROJECTION_WORKER_GROUP or "projection-worker-group").strip()
+
         # Kafka Consumer 설정 (멀티 토픽 구독)
         self.consumer = await self._consumer_call(
             Consumer,
             {
                 'bootstrap.servers': self.kafka_servers,
-                'group.id': 'projection-worker-group',
+                'group.id': group_id,
                 'auto.offset.reset': 'earliest',
                 'enable.auto.commit': False,
                 'max.poll.interval.ms': 300000,  # 5분
@@ -390,19 +392,18 @@ class ProjectionWorker:
         })
         
         # Redis 연결 설정 (온톨로지 캐싱용)
-        settings = ApplicationSettings()
-        self.redis_service = create_redis_service(settings)
+        self.redis_service = create_redis_service(app_settings)
         await self.redis_service.connect()
         logger.info("Redis connection established")
         
         # Elasticsearch 연결 설정
-        self.elasticsearch_service = create_elasticsearch_service(settings)
+        self.elasticsearch_service = create_elasticsearch_service(app_settings)
         await self.elasticsearch_service.connect()
         logger.info("Elasticsearch connection established")
 
         # lakeFS storage gateway (required for ActionApplied -> patchset reads). Best-effort on startup.
         try:
-            self.lakefs_storage = create_lakefs_storage_service(settings)
+            self.lakefs_storage = create_lakefs_storage_service(app_settings)
             if self.lakefs_storage:
                 logger.info("lakeFS storage configured for writeback patchset reads")
             else:

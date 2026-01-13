@@ -462,6 +462,36 @@ class MessagingSettings(BaseSettings):
         description="Kafka DLQ topic for action commands (ACTION_COMMANDS_DLQ_TOPIC)",
     )
 
+    # Consumer groups
+    projection_worker_group: str = Field(
+        default="projection-worker-group",
+        description="Kafka consumer group for projection worker (PROJECTION_WORKER_GROUP)",
+    )
+    message_relay_group: str = Field(
+        default="message-relay-group",
+        description="Kafka consumer group for message relay (MESSAGE_RELAY_GROUP)",
+    )
+    instance_worker_group: str = Field(
+        default="instance-worker-group",
+        description="Kafka consumer group for instance worker (INSTANCE_WORKER_GROUP)",
+    )
+    ontology_worker_group: str = Field(
+        default="ontology-worker-group",
+        description="Kafka consumer group for ontology worker (ONTOLOGY_WORKER_GROUP)",
+    )
+    action_worker_group: str = Field(
+        default="action-worker-group",
+        description="Kafka consumer group for action worker (ACTION_WORKER_GROUP)",
+    )
+    objectify_jobs_group: str = Field(
+        default="objectify-worker-group",
+        description="Kafka consumer group for objectify jobs (OBJECTIFY_JOBS_GROUP)",
+    )
+    search_projection_group: str = Field(
+        default="search-projection-worker",
+        description="Kafka consumer group for search projection worker (SEARCH_PROJECTION_GROUP)",
+    )
+
 class StorageSettings(BaseSettings):
     """Storage configuration settings"""
     
@@ -725,6 +755,34 @@ class EventSourcingSettings(BaseSettings):
         default=3,
         description="Command retry count (COMMAND_RETRY_COUNT)",
     )
+    enable_processed_event_registry: bool = Field(
+        default=True,
+        description="Enable durable processed-event registry (ENABLE_PROCESSED_EVENT_REGISTRY)",
+    )
+    processed_event_lease_timeout_seconds: int = Field(
+        default=900,
+        description="Processed-event lease timeout seconds (PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS)",
+    )
+    processed_event_heartbeat_interval_seconds: int = Field(
+        default=30,
+        description="Processed-event heartbeat interval seconds (PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS)",
+    )
+    processed_event_pg_pool_min: int = Field(
+        default=1,
+        description="Processed-event Postgres pool min size (PROCESSED_EVENT_PG_POOL_MIN)",
+    )
+    processed_event_pg_pool_max: int = Field(
+        default=5,
+        description="Processed-event Postgres pool max size (PROCESSED_EVENT_PG_POOL_MAX)",
+    )
+    processed_event_pg_command_timeout: int = Field(
+        default=30,
+        description="Processed-event Postgres command timeout seconds (PROCESSED_EVENT_PG_COMMAND_TIMEOUT)",
+    )
+    processed_event_owner: Optional[str] = Field(
+        default=None,
+        description="Override processed-event registry owner id (PROCESSED_EVENT_OWNER)",
+    )
 
 
 class WritebackSettings(BaseSettings):
@@ -770,6 +828,10 @@ class WritebackSettings(BaseSettings):
     writeback_dataset_acl_scope: str = Field(
         default="dataset_acl",
         description="ACL scope name for writeback dataset access (WRITEBACK_DATASET_ACL_SCOPE)",
+    )
+    writeback_submission_snapshot_max_targets: int = Field(
+        default=200,
+        description="Max targets to snapshot during writeback submission (WRITEBACK_SUBMISSION_SNAPSHOT_MAX_TARGETS)",
     )
 
     @field_validator(

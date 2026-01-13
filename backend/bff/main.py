@@ -379,10 +379,8 @@ class BFFServiceContainer:
             storage_service = None
             try:
                 from shared.services.storage_service import create_storage_service
-                from shared.config.settings import ApplicationSettings
 
-                settings = ApplicationSettings()
-                storage_service = create_storage_service(settings)
+                storage_service = create_storage_service(self.settings)
             except Exception as exc:
                 logger.warning("Storage service unavailable for preview: %s", exc)
             executor = PipelineExecutor(dataset_registry, storage_service=storage_service)

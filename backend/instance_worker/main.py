@@ -38,7 +38,7 @@ from shared.services.command_status_service import (
     CommandStatusService as CommandStatusTracker,
     CommandStatus as CommandStatusEnum,
 )
-from shared.config.settings import ApplicationSettings
+from shared.config.settings import settings as app_settings
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import (
     attach_context_from_kafka,
@@ -168,7 +168,7 @@ class StrictInstanceWorker:
         validate_lease_settings()
         
         # Kafka Consumer - stable consumer group (at-least-once with manual commit)
-        group_id = os.getenv("INSTANCE_WORKER_GROUP", "instance-worker-group")
+        group_id = (AppConfig.INSTANCE_WORKER_GROUP or "instance-worker-group").strip()
         self.consumer = await self._consumer_call(
             Consumer,
             {
@@ -190,9 +190,8 @@ class StrictInstanceWorker:
         self.dlq_producer = self.producer
         
         # Redis (optional - don't fail if not available)
-        settings = ApplicationSettings()
         try:
-            self.redis_service = create_redis_service(settings)
+            self.redis_service = create_redis_service(app_settings)
             await self.redis_service.connect()
             self.redis_client = self.redis_service.client
             self.command_status_service = CommandStatusTracker(self.redis_service)
@@ -236,9 +235,9 @@ class StrictInstanceWorker:
         # TerminusDB
         connection_info = ConnectionConfig(
             server_url=ServiceConfig.get_terminus_url(),
-            user=os.getenv('TERMINUS_USER', 'admin'),
-            account=os.getenv('TERMINUS_ACCOUNT', 'admin'),
-            key=os.getenv('TERMINUS_KEY', 'admin')
+            user=app_settings.database.terminus_user,
+            account=app_settings.database.terminus_account,
+            key=app_settings.database.terminus_password,
         )
         self.terminus_service = AsyncTerminusService(connection_info)
         await self.terminus_service.connect()

@@ -42,7 +42,7 @@ class SearchProjectionWorker:
             or (AppConfig.PROJECTION_DLQ_TOPIC or "").strip()
             or "projection_failures_dlq"
         )
-        self.group_id = (os.getenv("SEARCH_PROJECTION_GROUP") or "search-projection-worker").strip()
+        self.group_id = (AppConfig.SEARCH_PROJECTION_GROUP or "search-projection-worker").strip()
         self.handler = (os.getenv("SEARCH_PROJECTION_HANDLER") or "search_projection_worker").strip()
         self.index_name = (os.getenv("SEARCH_INDEX") or "objects").strip() or "objects"
         self.max_retries = parse_int_env("SEARCH_PROJECTION_MAX_RETRIES", 5, min_value=1, max_value=100)

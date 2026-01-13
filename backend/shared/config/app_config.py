@@ -47,8 +47,13 @@ class AppConfig:
     ACTION_COMMANDS_DLQ_TOPIC = app_settings.messaging.action_commands_dlq_topic
     
     # Kafka Consumer Groups
-    PROJECTION_WORKER_GROUP = "projection-worker-group"
-    MESSAGE_RELAY_GROUP = "message-relay-group"
+    PROJECTION_WORKER_GROUP = app_settings.messaging.projection_worker_group
+    MESSAGE_RELAY_GROUP = app_settings.messaging.message_relay_group
+    INSTANCE_WORKER_GROUP = app_settings.messaging.instance_worker_group
+    ONTOLOGY_WORKER_GROUP = app_settings.messaging.ontology_worker_group
+    ACTION_WORKER_GROUP = app_settings.messaging.action_worker_group
+    OBJECTIFY_JOBS_GROUP = app_settings.messaging.objectify_jobs_group
+    SEARCH_PROJECTION_GROUP = app_settings.messaging.search_projection_group
     
     # ======================
     # S3 Storage

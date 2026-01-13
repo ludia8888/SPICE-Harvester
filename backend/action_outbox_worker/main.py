@@ -25,6 +25,7 @@ from typing import Any, Dict, Optional
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from shared.config.app_config import AppConfig
+from shared.config.settings import settings as app_settings
 from shared.models.event_envelope import EventEnvelope
 from shared.models.events import ActionAppliedEvent
 from shared.observability.context_propagation import attach_context_from_carrier, carrier_from_envelope_metadata
@@ -109,7 +110,7 @@ class ActionOutboxWorker:
         await event_store.connect()
         await self.action_logs.connect()
 
-        if os.getenv("ENABLE_PROCESSED_EVENT_REGISTRY", "true").strip().lower() in {"1", "true", "yes", "on"}:
+        if app_settings.event_sourcing.enable_processed_event_registry:
             self.processed_event_registry = ProcessedEventRegistry()
             try:
                 await self.processed_event_registry.connect()
@@ -118,10 +119,7 @@ class ActionOutboxWorker:
                 self.processed_event_registry = None
 
         self.lakefs_client = LakeFSClient()
-        from shared.config.settings import ApplicationSettings
-
-        settings = ApplicationSettings()
-        self.lakefs_storage = create_lakefs_storage_service(settings)
+        self.lakefs_storage = create_lakefs_storage_service(app_settings)
         if not self.lakefs_storage:
             raise RuntimeError("LakeFSStorageService unavailable (boto3 missing?)")
 

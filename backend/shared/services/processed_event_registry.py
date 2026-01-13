@@ -19,6 +19,7 @@ from uuid import uuid4
 import asyncpg
 
 from shared.config.service_config import ServiceConfig
+from shared.config.settings import settings as app_settings
 
 
 class ClaimDecision(str, Enum):
@@ -54,10 +55,15 @@ class ProcessedEventRegistry:
         self._dsn = dsn or ServiceConfig.get_postgres_url()
         self._schema = schema
         self._pool: Optional[asyncpg.Pool] = None
-        self._lease_timeout = timedelta(
-            seconds=int(os.getenv("PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS", str(lease_timeout_seconds or 900)))
+        lease_timeout = (
+            int(lease_timeout_seconds)
+            if lease_timeout_seconds is not None
+            else int(app_settings.event_sourcing.processed_event_lease_timeout_seconds)
         )
-        self._owner = os.getenv("PROCESSED_EVENT_OWNER") or (
+        self._lease_timeout = timedelta(seconds=lease_timeout)
+
+        owner_override = (app_settings.event_sourcing.processed_event_owner or "").strip()
+        self._owner = owner_override or (
             f"{os.getenv('SERVICE_NAME') or os.getenv('HOSTNAME') or 'worker'}:"
             f"{os.getpid()}:{uuid4().hex[:8]}"
         )
@@ -68,9 +74,9 @@ class ProcessedEventRegistry:
 
         self._pool = await asyncpg.create_pool(
             self._dsn,
-            min_size=int(os.getenv("PROCESSED_EVENT_PG_POOL_MIN", "1")),
-            max_size=int(os.getenv("PROCESSED_EVENT_PG_POOL_MAX", "5")),
-            command_timeout=int(os.getenv("PROCESSED_EVENT_PG_COMMAND_TIMEOUT", "30")),
+            min_size=int(app_settings.event_sourcing.processed_event_pg_pool_min),
+            max_size=int(app_settings.event_sourcing.processed_event_pg_pool_max),
+            command_timeout=int(app_settings.event_sourcing.processed_event_pg_command_timeout),
         )
         await self.ensure_schema()
 
@@ -515,16 +521,8 @@ class ProcessedEventRegistry:
 
 
 def validate_lease_settings() -> None:
-    heartbeat_raw = os.getenv("PROCESSED_EVENT_HEARTBEAT_INTERVAL_SECONDS", "30")
-    lease_raw = os.getenv("PROCESSED_EVENT_LEASE_TIMEOUT_SECONDS", "900")
-    try:
-        heartbeat = int(heartbeat_raw)
-        lease = int(lease_raw)
-    except ValueError as exc:
-        raise RuntimeError(
-            "ProcessedEventRegistry lease settings must be integers. "
-            f"Got heartbeat={heartbeat_raw!r}, lease={lease_raw!r}."
-        ) from exc
+    heartbeat = int(app_settings.event_sourcing.processed_event_heartbeat_interval_seconds)
+    lease = int(app_settings.event_sourcing.processed_event_lease_timeout_seconds)
 
     if heartbeat <= 0 or lease <= 0:
         raise RuntimeError(
@@ -540,12 +538,7 @@ def validate_lease_settings() -> None:
 
 
 def validate_registry_enabled() -> None:
-    enabled = os.getenv("ENABLE_PROCESSED_EVENT_REGISTRY", "true").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    enabled = bool(app_settings.event_sourcing.enable_processed_event_registry)
     if not enabled:
         raise RuntimeError(
             "ENABLE_PROCESSED_EVENT_REGISTRY=false is not supported. "

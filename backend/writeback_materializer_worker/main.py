@@ -19,7 +19,7 @@ from typing import Any, Dict, Optional, Set, Tuple
 from uuid import uuid4
 
 from shared.config.app_config import AppConfig
-from shared.config.settings import ApplicationSettings
+from shared.config.settings import settings as app_settings
 from shared.observability.logging import install_trace_context_filter
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
@@ -88,12 +88,11 @@ class WritebackMaterializerWorker:
         self.base_storage: Optional[StorageService] = None
 
     async def initialize(self) -> None:
-        settings = ApplicationSettings()
         self.lakefs_client = LakeFSClient()
-        self.lakefs_storage = create_lakefs_storage_service(settings)
+        self.lakefs_storage = create_lakefs_storage_service(app_settings)
         if not self.lakefs_storage:
             raise RuntimeError("LakeFSStorageService unavailable (boto3 missing?)")
-        self.base_storage = create_storage_service(settings)
+        self.base_storage = create_storage_service(app_settings)
         if not self.base_storage:
             raise RuntimeError("StorageService unavailable (boto3 missing?)")
 

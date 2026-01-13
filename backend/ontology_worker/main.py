@@ -19,7 +19,7 @@ import asyncpg
 
 from shared.config.service_config import ServiceConfig
 from shared.config.app_config import AppConfig
-from shared.config.settings import ApplicationSettings
+from shared.config.settings import settings as app_settings
 from shared.models.commands import (
     BaseCommand, CommandType, CommandStatus, 
     OntologyCommand, DatabaseCommand, BranchCommand
@@ -128,12 +128,14 @@ class OntologyWorker:
         validate_registry_enabled()
         validate_lease_settings()
 
+        group_id = (AppConfig.ONTOLOGY_WORKER_GROUP or "ontology-worker-group").strip()
+
         # Kafka Consumer 설정
         self.consumer = await self._consumer_call(
             Consumer,
             {
                 'bootstrap.servers': self.kafka_servers,
-                'group.id': 'ontology-worker-group',
+                'group.id': group_id,
                 'auto.offset.reset': 'earliest',
                 'enable.auto.commit': False,
                 'max.poll.interval.ms': 300000,  # 5분
@@ -154,17 +156,16 @@ class OntologyWorker:
         # TerminusDB 연결 설정 - 올바른 인증 정보 사용
         connection_info = ConnectionConfig(
             server_url=ServiceConfig.get_terminus_url(),  # Use ServiceConfig for correct endpoint
-            user=os.getenv("TERMINUS_USER", "admin"),
-            account=os.getenv("TERMINUS_ACCOUNT", "admin"),
-            key=os.getenv("TERMINUS_KEY", "admin"),
+            user=app_settings.database.terminus_user,
+            account=app_settings.database.terminus_account,
+            key=app_settings.database.terminus_password,
         )
         self.terminus_service = AsyncTerminusService(connection_info)
         await self.terminus_service.connect()
         
         # Redis 연결 설정 (선택적 - 실패해도 계속 진행)
         try:
-            settings = ApplicationSettings()
-            self.redis_service = create_redis_service(settings)
+            self.redis_service = create_redis_service(app_settings)
             await self.redis_service.connect()
             self.command_status_service = CommandStatusService(self.redis_service)
             logger.info("Redis connection established")

@@ -23,6 +23,7 @@ import httpx
 from confluent_kafka import Consumer, KafkaError, Producer, TopicPartition
 
 from shared.config.app_config import AppConfig
+from shared.config.settings import settings as app_settings
 from shared.config.service_config import ServiceConfig
 from shared.models.objectify_job import ObjectifyJob
 from shared.observability.context_propagation import attach_context_from_kafka, kafka_headers_from_current_context
@@ -86,7 +87,7 @@ class ObjectifyWorker:
         self.running = False
         self.topic = (AppConfig.OBJECTIFY_JOBS_TOPIC or "objectify-jobs").strip() or "objectify-jobs"
         self.dlq_topic = (AppConfig.OBJECTIFY_JOBS_DLQ_TOPIC or "objectify-jobs-dlq").strip() or "objectify-jobs-dlq"
-        self.group_id = (os.getenv("OBJECTIFY_JOBS_GROUP") or "objectify-worker-group").strip()
+        self.group_id = (AppConfig.OBJECTIFY_JOBS_GROUP or "objectify-worker-group").strip()
         self.handler = (os.getenv("OBJECTIFY_WORKER_HANDLER") or "objectify_worker").strip()
         self.consumer: Optional[Consumer] = None
         self.dlq_producer: Optional[Producer] = None
@@ -521,9 +522,7 @@ class ObjectifyWorker:
             logger.warning("LineageStore unavailable: %s", exc)
             self.lineage_store = None
 
-        from shared.config.settings import ApplicationSettings
-
-        self.storage = create_lakefs_storage_service(ApplicationSettings())
+        self.storage = create_lakefs_storage_service(app_settings)
         if self.storage is None:
             raise RuntimeError("LakeFS storage service is required for objectify worker")
 
