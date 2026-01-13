@@ -48,11 +48,13 @@ class PipelineScheduler:
         poll_seconds: int = 30,
         *,
         tracing: Any = None,
+        metrics: Any = None,
     ) -> None:
         self.registry = registry
         self.queue = queue
         self.poll_seconds = poll_seconds
         self.tracing = tracing
+        self.metrics = metrics
         self._running = False
 
     async def run(self) -> None:
@@ -70,9 +72,19 @@ class PipelineScheduler:
                     else nullcontext()
                 )
                 with ctx:
+                    if self.metrics and hasattr(self.metrics, "record_business_metric"):
+                        try:
+                            self.metrics.record_business_metric("pipeline_scheduler_ticks", 1)
+                        except Exception:
+                            pass
                     await self._tick()
             except Exception as exc:
                 logger.error("PipelineScheduler tick failed: %s", exc)
+                if self.metrics and hasattr(self.metrics, "record_business_metric"):
+                    try:
+                        self.metrics.record_business_metric("pipeline_scheduler_tick_errors", 1)
+                    except Exception:
+                        pass
             await asyncio.sleep(self.poll_seconds)
 
     async def stop(self) -> None:
@@ -251,6 +263,15 @@ class PipelineScheduler:
             )
             with ctx:
                 await self.queue.publish(job)
+                if self.metrics and hasattr(self.metrics, "record_business_metric"):
+                    try:
+                        self.metrics.record_business_metric(
+                            "pipeline_scheduler_enqueued_jobs",
+                            1,
+                            attributes={"trigger": trigger_reason},
+                        )
+                    except Exception:
+                        pass
                 await emit_pipeline_control_plane_event(
                     event_type="PIPELINE_SCHEDULE_TRIGGERED",
                     pipeline_id=str(pipeline.get("pipeline_id") or ""),

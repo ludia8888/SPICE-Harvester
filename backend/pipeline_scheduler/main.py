@@ -11,6 +11,7 @@ import logging
 import os
 
 from shared.observability.logging import install_trace_context_filter
+from shared.observability.metrics import get_metrics_collector
 from shared.observability.tracing import get_tracing_service
 from shared.services.pipeline_job_queue import PipelineJobQueue
 from shared.services.pipeline_registry import PipelineRegistry
@@ -24,11 +25,12 @@ async def main() -> None:
     )
     install_trace_context_filter()
     tracing = get_tracing_service("pipeline-scheduler")
+    metrics = get_metrics_collector("pipeline-scheduler")
     registry = PipelineRegistry()
     await registry.initialize()
     queue = PipelineJobQueue()
     poll_seconds = int(os.getenv("PIPELINE_SCHEDULER_POLL_SECONDS", "30"))
-    scheduler = PipelineScheduler(registry, queue, poll_seconds=poll_seconds, tracing=tracing)
+    scheduler = PipelineScheduler(registry, queue, poll_seconds=poll_seconds, tracing=tracing, metrics=metrics)
     await scheduler.run()
 
 

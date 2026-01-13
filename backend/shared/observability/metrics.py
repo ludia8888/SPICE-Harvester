@@ -287,6 +287,23 @@ class MetricsCollector:
                 unit="1"
             )
 
+            # Pipeline scheduler metrics
+            self._metrics["pipeline_scheduler_ticks"] = self.meter.create_counter(
+                name="pipeline_scheduler_ticks_total",
+                description="Total pipeline scheduler ticks",
+                unit="1",
+            )
+            self._metrics["pipeline_scheduler_tick_errors"] = self.meter.create_counter(
+                name="pipeline_scheduler_tick_errors_total",
+                description="Total pipeline scheduler tick errors",
+                unit="1",
+            )
+            self._metrics["pipeline_scheduler_enqueued_jobs"] = self.meter.create_counter(
+                name="pipeline_scheduler_enqueued_jobs_total",
+                description="Total pipeline jobs enqueued by scheduler",
+                unit="1",
+            )
+
             # Ingest reconciler metrics
             self._metrics["ingest_reconciler_runs"] = self.meter.create_counter(
                 name="ingest_reconciler_runs_total",

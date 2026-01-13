@@ -100,6 +100,26 @@ except Exception:  # pragma: no cover - depends on environment
     RedisInstrumentor = None
 
 try:  # optional
+    from opentelemetry.instrumentation.asyncio import AsyncioInstrumentor
+except Exception:  # pragma: no cover - depends on environment
+    AsyncioInstrumentor = None
+
+try:  # optional
+    from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrumentor
+except Exception:  # pragma: no cover - depends on environment
+    AioHttpClientInstrumentor = None
+
+try:  # optional
+    from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
+except Exception:  # pragma: no cover - depends on environment
+    BotocoreInstrumentor = None
+
+try:  # optional
+    from opentelemetry.instrumentation.requests import RequestsInstrumentor
+except Exception:  # pragma: no cover - depends on environment
+    RequestsInstrumentor = None
+
+try:  # optional
     from opentelemetry.instrumentation.kafka import KafkaInstrumentor
 except Exception:  # pragma: no cover - depends on environment
     KafkaInstrumentor = None
@@ -266,6 +286,15 @@ class TracingService:
         if not HAS_OPENTELEMETRY or not OpenTelemetryConfig.ENABLE_TRACING:
             return
 
+        if AsyncioInstrumentor is not None:
+            try:
+                AsyncioInstrumentor().instrument()
+                logger.info("Asyncio instrumented")
+            except Exception as e:
+                logger.error(f"Failed to instrument Asyncio: {e}")
+        else:
+            logger.debug("Asyncio instrumentation not available")
+
         if HTTPXClientInstrumentor is not None:
             try:
                 HTTPXClientInstrumentor().instrument()
@@ -274,6 +303,33 @@ class TracingService:
                 logger.error(f"Failed to instrument HTTPX: {e}")
         else:
             logger.debug("HTTPX instrumentation not available")
+
+        if RequestsInstrumentor is not None:
+            try:
+                RequestsInstrumentor().instrument()
+                logger.info("Requests instrumented")
+            except Exception as e:
+                logger.error(f"Failed to instrument Requests: {e}")
+        else:
+            logger.debug("Requests instrumentation not available")
+
+        if AioHttpClientInstrumentor is not None:
+            try:
+                AioHttpClientInstrumentor().instrument()
+                logger.info("AioHttpClient instrumented")
+            except Exception as e:
+                logger.error(f"Failed to instrument AioHttpClient: {e}")
+        else:
+            logger.debug("AioHttpClient instrumentation not available")
+
+        if BotocoreInstrumentor is not None:
+            try:
+                BotocoreInstrumentor().instrument()
+                logger.info("Botocore instrumented")
+            except Exception as e:
+                logger.error(f"Failed to instrument Botocore: {e}")
+        else:
+            logger.debug("Botocore instrumentation not available")
 
         if AsyncPGInstrumentor is not None:
             try:
