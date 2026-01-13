@@ -20,6 +20,71 @@ from shared.config.service_config import ServiceConfig
 from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
 
 
+SESSION_STATUS_ACTIVE = "ACTIVE"
+SESSION_STATUS_WAITING_APPROVAL = "WAITING_APPROVAL"
+SESSION_STATUS_RUNNING_TOOL = "RUNNING_TOOL"
+SESSION_STATUS_ERROR = "ERROR"
+SESSION_STATUS_COMPLETED = "COMPLETED"
+SESSION_STATUS_TERMINATED = "TERMINATED"
+
+_SESSION_STATUSES = {
+    SESSION_STATUS_ACTIVE,
+    SESSION_STATUS_WAITING_APPROVAL,
+    SESSION_STATUS_RUNNING_TOOL,
+    SESSION_STATUS_ERROR,
+    SESSION_STATUS_COMPLETED,
+    SESSION_STATUS_TERMINATED,
+}
+
+_SESSION_STATUS_TRANSITIONS = {
+    SESSION_STATUS_ACTIVE: {
+        SESSION_STATUS_ACTIVE,
+        SESSION_STATUS_WAITING_APPROVAL,
+        SESSION_STATUS_RUNNING_TOOL,
+        SESSION_STATUS_ERROR,
+        SESSION_STATUS_COMPLETED,
+        SESSION_STATUS_TERMINATED,
+    },
+    SESSION_STATUS_WAITING_APPROVAL: {
+        SESSION_STATUS_WAITING_APPROVAL,
+        SESSION_STATUS_RUNNING_TOOL,
+        SESSION_STATUS_ACTIVE,
+        SESSION_STATUS_ERROR,
+        SESSION_STATUS_TERMINATED,
+    },
+    SESSION_STATUS_RUNNING_TOOL: {
+        SESSION_STATUS_RUNNING_TOOL,
+        SESSION_STATUS_COMPLETED,
+        SESSION_STATUS_ERROR,
+        SESSION_STATUS_TERMINATED,
+        SESSION_STATUS_ACTIVE,
+    },
+    SESSION_STATUS_ERROR: {
+        SESSION_STATUS_ERROR,
+        SESSION_STATUS_ACTIVE,
+        SESSION_STATUS_TERMINATED,
+    },
+    SESSION_STATUS_COMPLETED: {
+        SESSION_STATUS_COMPLETED,
+        SESSION_STATUS_ACTIVE,
+        SESSION_STATUS_TERMINATED,
+    },
+    SESSION_STATUS_TERMINATED: {SESSION_STATUS_TERMINATED},
+}
+
+
+def validate_session_status_transition(*, current_status: str, next_status: str) -> None:
+    current = str(current_status or "").strip().upper()
+    nxt = str(next_status or "").strip().upper()
+    if not current or current not in _SESSION_STATUSES:
+        raise ValueError(f"unknown current session status: {current_status}")
+    if not nxt or nxt not in _SESSION_STATUSES:
+        raise ValueError(f"unknown next session status: {next_status}")
+    allowed = _SESSION_STATUS_TRANSITIONS.get(current, set())
+    if nxt not in allowed:
+        raise ValueError(f"invalid session status transition: {current} -> {nxt}")
+
+
 @dataclass(frozen=True)
 class AgentSessionRecord:
     session_id: str
@@ -43,6 +108,10 @@ class AgentSessionMessageRecord:
     role: str
     content: str
     content_digest: Optional[str]
+    is_removed: bool
+    removed_at: Optional[datetime]
+    removed_by: Optional[str]
+    removed_reason: Optional[str]
     token_count: Optional[int]
     cost_estimate: Optional[float]
     latency_ms: Optional[int]
@@ -146,6 +215,10 @@ class AgentSessionRegistry:
                     role TEXT NOT NULL,
                     content TEXT NOT NULL,
                     content_digest TEXT,
+                    is_removed BOOLEAN NOT NULL DEFAULT false,
+                    removed_at TIMESTAMPTZ,
+                    removed_by TEXT,
+                    removed_reason TEXT,
                     token_count INTEGER,
                     cost_estimate DOUBLE PRECISION,
                     latency_ms INTEGER,
@@ -154,8 +227,24 @@ class AgentSessionRegistry:
                 )
                 """
             )
+            # Forward/backward compatible schema upgrades.
+            await conn.execute(
+                f"ALTER TABLE {self._schema}.agent_session_messages ADD COLUMN IF NOT EXISTS is_removed BOOLEAN NOT NULL DEFAULT false"
+            )
+            await conn.execute(
+                f"ALTER TABLE {self._schema}.agent_session_messages ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ"
+            )
+            await conn.execute(
+                f"ALTER TABLE {self._schema}.agent_session_messages ADD COLUMN IF NOT EXISTS removed_by TEXT"
+            )
+            await conn.execute(
+                f"ALTER TABLE {self._schema}.agent_session_messages ADD COLUMN IF NOT EXISTS removed_reason TEXT"
+            )
             await conn.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_agent_session_messages_session ON {self._schema}.agent_session_messages(session_id)"
+            )
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_agent_session_messages_removed ON {self._schema}.agent_session_messages(session_id, is_removed)"
             )
 
             await conn.execute(
@@ -206,6 +295,10 @@ class AgentSessionRegistry:
             role=str(row["role"]),
             content=str(row["content"]),
             content_digest=row["content_digest"],
+            is_removed=bool(row.get("is_removed") or False),
+            removed_at=row.get("removed_at"),
+            removed_by=row.get("removed_by"),
+            removed_reason=row.get("removed_reason"),
             token_count=row["token_count"],
             cost_estimate=row["cost_estimate"],
             latency_ms=row["latency_ms"],
@@ -334,6 +427,13 @@ class AgentSessionRegistry:
         if not self._pool:
             raise RuntimeError("AgentSessionRegistry not connected")
 
+        current = await self.get_session(session_id=session_id, tenant_id=tenant_id)
+        if not current:
+            return None
+
+        if status is not None:
+            validate_session_status_transition(current_status=current.status, next_status=status)
+
         enabled_tools_payload = (
             normalize_json_payload([t for t in (enabled_tools or []) if str(t).strip()])
             if enabled_tools is not None
@@ -422,6 +522,7 @@ class AgentSessionRegistry:
         tenant_id: str,
         limit: int = 200,
         offset: int = 0,
+        include_removed: bool = False,
     ) -> List[AgentSessionMessageRecord]:
         if not self._pool:
             raise RuntimeError("AgentSessionRegistry not connected")
@@ -429,13 +530,18 @@ class AgentSessionRegistry:
         if not existing:
             raise ValueError("session not found")
 
+        where = "session_id = $1::uuid"
+        if not include_removed:
+            where += " AND is_removed = false"
+
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
                 SELECT message_id, session_id, role, content, content_digest,
+                       is_removed, removed_at, removed_by, removed_reason,
                        token_count, cost_estimate, latency_ms, metadata, created_at
                 FROM {self._schema}.agent_session_messages
-                WHERE session_id = $1::uuid
+                WHERE {where}
                 ORDER BY created_at ASC
                 LIMIT $2
                 OFFSET $3
@@ -445,6 +551,95 @@ class AgentSessionRegistry:
                 int(offset),
             )
         return [self._row_to_message(row) for row in rows]
+
+    async def get_messages_by_ids(
+        self,
+        *,
+        session_id: str,
+        tenant_id: str,
+        message_ids: List[str],
+        include_removed: bool = True,
+    ) -> List[AgentSessionMessageRecord]:
+        if not self._pool:
+            raise RuntimeError("AgentSessionRegistry not connected")
+        existing = await self.get_session(session_id=session_id, tenant_id=tenant_id)
+        if not existing:
+            raise ValueError("session not found")
+
+        unique_ids = [mid for mid in dict.fromkeys(message_ids or []) if mid]
+        if not unique_ids:
+            return []
+
+        where = "m.session_id = $1::uuid AND m.message_id = ANY($2::uuid[])"
+        if not include_removed:
+            where += " AND m.is_removed = false"
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT m.message_id, m.session_id, m.role, m.content, m.content_digest,
+                       m.is_removed, m.removed_at, m.removed_by, m.removed_reason,
+                       m.token_count, m.cost_estimate, m.latency_ms, m.metadata, m.created_at
+                FROM {self._schema}.agent_session_messages m
+                JOIN {self._schema}.agent_sessions s
+                  ON m.session_id = s.session_id
+                WHERE {where}
+                  AND s.tenant_id = $3
+                ORDER BY m.created_at ASC
+                """,
+                session_id,
+                unique_ids,
+                tenant_id,
+            )
+        return [self._row_to_message(row) for row in rows]
+
+    async def mark_messages_removed(
+        self,
+        *,
+        session_id: str,
+        tenant_id: str,
+        message_ids: List[str],
+        removed_by: str,
+        removed_reason: Optional[str] = None,
+        removed_at: Optional[datetime] = None,
+        placeholder: str = "<removed>",
+    ) -> int:
+        if not self._pool:
+            raise RuntimeError("AgentSessionRegistry not connected")
+        existing = await self.get_session(session_id=session_id, tenant_id=tenant_id)
+        if not existing:
+            raise ValueError("session not found")
+
+        unique_ids = [mid for mid in dict.fromkeys(message_ids or []) if mid]
+        if not unique_ids:
+            return 0
+
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                f"""
+                UPDATE {self._schema}.agent_session_messages m
+                SET content = $4,
+                    is_removed = true,
+                    removed_at = COALESCE($5, NOW()),
+                    removed_by = $6,
+                    removed_reason = $7
+                FROM {self._schema}.agent_sessions s
+                WHERE m.session_id = s.session_id
+                  AND m.session_id = $1::uuid
+                  AND m.message_id = ANY($2::uuid[])
+                  AND s.tenant_id = $3
+                """,
+                session_id,
+                unique_ids,
+                tenant_id,
+                str(placeholder or "<removed>"),
+                removed_at,
+                str(removed_by or "").strip() or None,
+                str(removed_reason or "").strip() or None,
+            )
+        try:
+            return int(str(result).split()[-1])
+        except Exception:  # pragma: no cover
+            return 0
 
     async def create_job(
         self,
@@ -578,4 +773,3 @@ class AgentSessionRegistry:
                 int(offset),
             )
         return [self._row_to_job(row) for row in rows]
-

@@ -87,6 +87,8 @@ async def test_agent_sessions_crud_round_trip() -> None:
     created = await create_session(AgentSessionCreateRequest(), request=req, sessions=sessions)
     assert created.status == "created"
     session_id = created.data["session"]["session_id"]
+    assert created.data["session"]["enabled_tools"] == []
+    assert created.data["session"]["terminated_at"] is None
 
     listed = await list_sessions(request=req, sessions=sessions, limit=50, offset=0)
     assert listed.status == "success"
@@ -96,6 +98,7 @@ async def test_agent_sessions_crud_round_trip() -> None:
     fetched = await get_session(session_id=session_id, request=req, sessions=sessions, include_messages=False, messages_limit=200)
     assert fetched.status == "success"
     assert fetched.data["session"]["session_id"] == session_id
+    assert fetched.data["session"]["summary"] is None
 
     terminated = await terminate_session(session_id=session_id, request=req, sessions=sessions)
     assert terminated.status == "success"
@@ -124,4 +127,3 @@ async def test_agent_sessions_rejects_invalid_session_id() -> None:
     with pytest.raises(HTTPException) as exc_info:
         await get_session(session_id="not-a-uuid", request=req, sessions=sessions, include_messages=False, messages_limit=200)
     assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
-

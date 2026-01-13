@@ -9,6 +9,7 @@ These endpoints provide the enterprise-grade session boundary required by AGENT_
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -30,6 +31,7 @@ from shared.services.agent_plan_registry import AgentPlanRegistry
 from shared.services.agent_registry import AgentRegistry
 from shared.services.agent_session_registry import AgentSessionRegistry
 from shared.services.agent_tool_registry import AgentToolRegistry
+from shared.services.llm_gateway import LLMUnavailableError
 from shared.utils.llm_safety import digest_for_audit
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,17 @@ class AgentSessionMessageRequest(BaseModel):
 
 class AgentSessionJobCreateRequest(BaseModel):
     plan_id: str = Field(..., description="Agent plan id (UUID)")
+
+
+class AgentSessionSummarizeRequest(BaseModel):
+    max_messages: int = Field(default=200, ge=1, le=2000)
+
+
+class AgentSessionRemoveMessagesRequest(BaseModel):
+    message_ids: list[str] | None = Field(default=None, description="Explicit message UUIDs to remove")
+    start_message_id: str | None = Field(default=None, description="Remove inclusive range (by created_at order)")
+    end_message_id: str | None = Field(default=None, description="Remove inclusive range (by created_at order)")
+    reason: str | None = Field(default=None, max_length=500)
 
 
 def _resolve_verified_principal(request: Request) -> tuple[str, str, str]:
@@ -284,6 +297,226 @@ async def terminate_session(
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
     return ApiResponse.success(message="Agent session terminated", data={"session_id": record.session_id, "status": record.status})
+
+
+@router.post("/{session_id}/summarize", response_model=ApiResponse)
+async def summarize_session(
+    session_id: str,
+    body: AgentSessionSummarizeRequest,
+    request: Request,
+    llm: LLMGatewayDep,
+    audit_store: AuditLogStoreDep,
+    sessions: AgentSessionRegistry = Depends(get_agent_session_registry),
+) -> ApiResponse:
+    tenant_id, user_id, actor = _resolve_verified_principal(request)
+    try:
+        session_id = str(UUID(session_id))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id must be a UUID") from exc
+
+    record = await sessions.get_session(session_id=session_id, tenant_id=tenant_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+
+    payload = sanitize_input(body.model_dump(exclude_none=True))
+    max_messages = int(payload.get("max_messages") or 200)
+    messages = await sessions.list_messages(
+        session_id=session_id,
+        tenant_id=tenant_id,
+        limit=max_messages,
+        offset=0,
+        include_removed=False,
+    )
+    if not messages:
+        return ApiResponse.success(message="No messages to summarize", data={"session_id": session_id, "summary": record.summary})
+
+    transcript = "\n".join([f"{m.role}: {m.content}" for m in messages if m.content])
+
+    class _SummaryEnvelope(BaseModel):
+        summary: str = Field(..., min_length=1, max_length=10_000)
+        key_points: list[str] = Field(default_factory=list)
+
+    system_prompt = (
+        "You are a STRICT session summarizer.\n"
+        "Return a single JSON object only.\n"
+        "Do not include any tool calls.\n"
+        "Summarize the conversation for enterprise audit and future context.\n"
+        "Focus on: user goal, constraints, decisions, and current progress.\n"
+    )
+    user_prompt = f"Session transcript:\n{transcript}\n"
+
+    started = datetime.now(timezone.utc)
+    try:
+        summary_obj, meta = await llm.complete_json(
+            task="SESSION_SUMMARY",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=_SummaryEnvelope,
+            audit_store=audit_store,
+            audit_partition_key=f"agent_session:{session_id}",
+            audit_actor=actor,
+            audit_resource_id=session_id,
+            audit_metadata={"tenant_id": tenant_id, "session_id": session_id},
+        )
+        latency_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+        summary_text = str(summary_obj.summary or "").strip()
+        await sessions.update_session(session_id=session_id, tenant_id=tenant_id, summary=summary_text)
+        await sessions.add_message(
+            message_id=str(uuid4()),
+            session_id=session_id,
+            tenant_id=tenant_id,
+            role="system",
+            content=summary_text,
+            content_digest=digest_for_audit({"summary": summary_text}),
+            latency_ms=latency_ms,
+            metadata={
+                "kind": "session_summary",
+                "provider": meta.provider,
+                "model": meta.model,
+                "cache_hit": meta.cache_hit,
+            },
+            created_at=datetime.now(timezone.utc),
+        )
+        return ApiResponse.success(
+            message="Session summarized",
+            data={
+                "session_id": session_id,
+                "summary": summary_text,
+                "key_points": list(summary_obj.key_points or []),
+                "llm": meta.__dict__,
+            },
+        )
+    except LLMUnavailableError as exc:
+        summary_text = (transcript[:4000] + "…") if len(transcript) > 4000 else transcript
+        summary_text = summary_text.strip() or "No content to summarize"
+        await sessions.update_session(session_id=session_id, tenant_id=tenant_id, summary=summary_text)
+        await sessions.add_message(
+            message_id=str(uuid4()),
+            session_id=session_id,
+            tenant_id=tenant_id,
+            role="system",
+            content=summary_text,
+            content_digest=digest_for_audit({"summary": summary_text}),
+            latency_ms=int((datetime.now(timezone.utc) - started).total_seconds() * 1000),
+            metadata={"kind": "session_summary", "provider": "fallback", "error": str(exc)},
+            created_at=datetime.now(timezone.utc),
+        )
+        return ApiResponse.warning(
+            message="LLM unavailable; stored heuristic summary",
+            data={"session_id": session_id, "summary": summary_text, "llm_error": str(exc)},
+        )
+    except Exception as exc:
+        try:
+            await audit_store.log(
+                partition_key=f"agent_session:{session_id}",
+                actor=actor,
+                action="SESSION_SUMMARY",
+                status="failure",
+                resource_type="agent_session",
+                resource_id=session_id,
+                metadata={"tenant_id": tenant_id, "session_id": session_id, "error": str(exc)},
+                error=str(exc),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to summarize session") from exc
+
+
+@router.post("/{session_id}/messages/remove", response_model=ApiResponse)
+async def remove_messages(
+    session_id: str,
+    body: AgentSessionRemoveMessagesRequest,
+    request: Request,
+    audit_store: AuditLogStoreDep,
+    sessions: AgentSessionRegistry = Depends(get_agent_session_registry),
+) -> ApiResponse:
+    tenant_id, user_id, actor = _resolve_verified_principal(request)
+    try:
+        session_id = str(UUID(session_id))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id must be a UUID") from exc
+
+    record = await sessions.get_session(session_id=session_id, tenant_id=tenant_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+
+    payload = sanitize_input(body.model_dump(exclude_none=True))
+    message_ids = payload.get("message_ids")
+    start_id = payload.get("start_message_id")
+    end_id = payload.get("end_message_id")
+    reason = str(payload.get("reason") or "").strip() or None
+
+    selected_ids: list[str] = []
+    if message_ids:
+        selected_ids = [str(mid) for mid in message_ids]
+    elif start_id and end_id:
+        try:
+            start_uuid = str(UUID(str(start_id)))
+            end_uuid = str(UUID(str(end_id)))
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="start/end_message_id must be UUID") from exc
+        all_messages = await sessions.list_messages(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            limit=2000,
+            offset=0,
+            include_removed=True,
+        )
+        ids_in_order = [m.message_id for m in all_messages]
+        if start_uuid not in ids_in_order or end_uuid not in ids_in_order:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="start/end_message_id not found")
+        start_idx = ids_in_order.index(start_uuid)
+        end_idx = ids_in_order.index(end_uuid)
+        lo, hi = sorted((start_idx, end_idx))
+        selected_ids = ids_in_order[lo : hi + 1]
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="message_ids or start/end_message_id required")
+
+    normalized_ids: list[str] = []
+    for mid in selected_ids:
+        try:
+            normalized_ids.append(str(UUID(str(mid))))
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="message_ids must be UUIDs") from exc
+
+    to_audit = await sessions.get_messages_by_ids(
+        session_id=session_id,
+        tenant_id=tenant_id,
+        message_ids=normalized_ids,
+        include_removed=True,
+    )
+    audit_payload = [{"message_id": m.message_id, "digest": m.content_digest, "role": m.role} for m in to_audit]
+    removed_count = await sessions.mark_messages_removed(
+        session_id=session_id,
+        tenant_id=tenant_id,
+        message_ids=normalized_ids,
+        removed_by=user_id,
+        removed_reason=reason,
+        removed_at=datetime.now(timezone.utc),
+    )
+
+    with contextlib.suppress(Exception):
+        await audit_store.log(
+            partition_key=f"agent_session:{session_id}",
+            actor=actor,
+            action="SESSION_MESSAGES_REMOVE",
+            status="success",
+            resource_type="agent_session",
+            resource_id=session_id,
+            metadata={
+                "tenant_id": tenant_id,
+                "session_id": session_id,
+                "removed_by": user_id,
+                "reason": reason,
+                "removed_count": removed_count,
+                "messages": audit_payload,
+            },
+        )
+
+    return ApiResponse.success(
+        message="Messages removed",
+        data={"session_id": session_id, "removed_count": removed_count, "message_ids": normalized_ids},
+    )
 
 
 @router.post("/{session_id}/messages", response_model=ApiResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -632,4 +865,3 @@ async def get_job(
             }
         },
     )
-

@@ -21,7 +21,6 @@ from typing import Any, Dict, Optional, Type, TypeVar
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from shared.models.audit_log import AuditStatus
 from shared.services.audit_log_store import AuditLogStore
 from shared.services.redis_service import RedisService
 from shared.utils.llm_safety import digest_for_audit, mask_pii_text, sha256_hex, stable_json_dumps
@@ -257,7 +256,7 @@ class LLMGateway:
                         partition_key=audit_partition_key,
                         actor=audit_actor,
                         action=f"LLM_{task}",
-                        status=AuditStatus.SUCCESS if error is None else AuditStatus.FAILURE,
+                        status="success" if error is None else "failure",
                         resource_type="llm_request",
                         resource_id=audit_resource_id or f"llm:{task}:{prompt_hash[:12]}",
                         metadata={
