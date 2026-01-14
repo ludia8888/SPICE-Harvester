@@ -141,6 +141,7 @@ class LLMGateway:
         system_prompt: str,
         user_prompt: str,
         response_model: Type[T],
+        model: Optional[str] = None,
         redis_service: Optional[RedisService] = None,
         audit_store: Optional[AuditLogStore] = None,
         audit_partition_key: Optional[str] = None,
@@ -150,10 +151,21 @@ class LLMGateway:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
     ) -> tuple[T, LLMCallMeta]:
-        if not self.is_enabled():
-            raise LLMUnavailableError(
-                "LLM is disabled or not configured (set LLM_PROVIDER/openai_compat and LLM_BASE_URL/LLM_MODEL)"
-            )
+        provider = self.provider
+        if provider in {"", "disabled", "off", "none"}:
+            raise LLMUnavailableError("LLM is disabled (set LLM_PROVIDER=openai_compat)")
+
+        model_to_use = str(model or self.model or "").strip()
+        if provider == "openai_compat":
+            if not self.base_url or not model_to_use:
+                raise LLMUnavailableError(
+                    "LLM provider is not configured (set LLM_BASE_URL and LLM_MODEL or pass model=...)"
+                )
+        elif provider == "mock":
+            if not model_to_use:
+                model_to_use = "mock"
+        else:
+            raise LLMUnavailableError(f"Unsupported LLM_PROVIDER: {provider}")
 
         temperature = self.temperature if temperature is None else float(temperature)
         max_tokens = self.max_tokens if max_tokens is None else int(max_tokens)
@@ -162,11 +174,11 @@ class LLMGateway:
         system_prompt = mask_pii_text(system_prompt, max_chars=self.max_prompt_chars)
         user_prompt = mask_pii_text(user_prompt, max_chars=self.max_prompt_chars)
 
-        prompt_obj = {"system": system_prompt, "user": user_prompt, "task": task, "model": self.model}
+        prompt_obj = {"system": system_prompt, "user": user_prompt, "task": task, "model": model_to_use}
         prompt_hash = sha256_hex(stable_json_dumps(prompt_obj))
         input_digest = digest_for_audit(prompt_obj)
 
-        cache_key = f"llm:{self.provider}:{self.model}:{task}:{prompt_hash}"
+        cache_key = f"llm:{provider}:{model_to_use}:{task}:{prompt_hash}"
 
         if self.enable_cache and redis_service:
             try:
@@ -174,7 +186,7 @@ class LLMGateway:
                 if cached and isinstance(cached, dict) and "data" in cached:
                     parsed = response_model.model_validate(cached["data"])
                     return parsed, LLMCallMeta(
-                        provider=self.provider, model=self.model, cache_hit=True, latency_ms=0
+                        provider=provider, model=model_to_use, cache_hit=True, latency_ms=0
                     )
             except Exception as e:
                 logger.debug(f"LLM cache read failed (non-fatal): {e}")
@@ -185,7 +197,7 @@ class LLMGateway:
         output_digest: Optional[str] = None
 
         try:
-            if self.provider == "mock":
+            if provider == "mock":
                 safe_task = re.sub(r"[^A-Z0-9]+", "_", (task or "").strip().upper()).strip("_")
                 task_key = f"LLM_MOCK_JSON_{safe_task}" if safe_task else ""
                 raw = (os.getenv(task_key) or os.getenv("LLM_MOCK_JSON") or "").strip()
@@ -195,14 +207,14 @@ class LLMGateway:
                 obj = _extract_json_object(raw)
                 out_model = response_model.model_validate(obj)
                 output_digest = digest_for_audit(obj)
-            elif self.provider == "openai_compat":
+            elif provider == "openai_compat":
                 url = f"{self.base_url}/chat/completions"
                 headers: Dict[str, str] = {"Content-Type": "application/json"}
                 if self.api_key:
                     headers["Authorization"] = f"Bearer {self.api_key}"
 
                 body: Dict[str, Any] = {
-                    "model": self.model,
+                    "model": model_to_use,
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
@@ -227,7 +239,7 @@ class LLMGateway:
                     out_model = response_model.model_validate(obj)
                     output_digest = digest_for_audit(obj)
             else:
-                raise LLMUnavailableError(f"Unsupported LLM_PROVIDER: {self.provider}")
+                raise LLMUnavailableError(f"Unsupported LLM_PROVIDER: {provider}")
 
             # Cache (best-effort)
             if self.enable_cache and redis_service and out_model is not None:
@@ -261,8 +273,8 @@ class LLMGateway:
                         resource_id=audit_resource_id or f"llm:{task}:{prompt_hash[:12]}",
                         metadata={
                             **(audit_metadata or {}),
-                            "provider": self.provider,
-                            "model": self.model,
+                            "provider": provider,
+                            "model": model_to_use,
                             "temperature": temperature,
                             "max_tokens": max_tokens,
                             "prompt_hash": prompt_hash,
@@ -280,8 +292,8 @@ class LLMGateway:
             raise LLMRequestError("LLM call failed without a parsed result")
 
         return out_model, LLMCallMeta(
-            provider=self.provider,
-            model=self.model,
+            provider=provider,
+            model=model_to_use,
             cache_hit=False,
             latency_ms=int((time.time() - started) * 1000),
         )

@@ -9,6 +9,8 @@ from fastapi import FastAPI, Request, WebSocket, status
 from fastapi.responses import JSONResponse
 
 from shared.config.settings import get_settings
+from shared.errors.error_envelope import build_error_envelope
+from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.security.auth_utils import extract_presented_token, is_exempt_path
 from shared.security.user_context import UserPrincipal, UserTokenError, extract_bearer_token, verify_user_token
 from shared.services.agent_tool_registry import AgentToolPolicyRecord
@@ -36,6 +38,36 @@ _AGENT_TOOL_AUTHZ_EXEMPT_PREFIXES = (
 _AGENT_TOOL_PATH_RE_CACHE: dict[str, re.Pattern[str]] = {}
 
 
+def _error_response(
+    *,
+    request: Request,
+    status_code: int,
+    message: str,
+    code: Optional[ErrorCode] = None,
+    category: Optional[ErrorCategory] = None,
+    detail: Optional[str] = None,
+    headers: Optional[dict[str, str]] = None,
+) -> JSONResponse:
+    request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Request-ID")
+    correlation_id = request.headers.get("X-Correlation-Id") or request.headers.get("X-Correlation-ID")
+    payload = build_error_envelope(
+        service_name="bff",
+        message=message,
+        detail=detail,
+        code=code,
+        category=category,
+        status_code=int(status_code),
+        origin={
+            "service": "bff",
+            "method": request.method,
+            "path": request.url.path,
+        },
+        request_id=request_id,
+        correlation_id=correlation_id,
+    )
+    return JSONResponse(status_code=int(status_code), content=payload, headers=headers)
+
+
 def _set_scope_header(request: Request, name: str, value: str) -> None:
     """
     Attach a trusted header into the ASGI scope so downstream code that still
@@ -54,12 +86,19 @@ def _set_scope_header(request: Request, name: str, value: str) -> None:
 def _attach_verified_principal(request: Request, principal: UserPrincipal) -> None:
     request.state.user = principal
     request.state.principal = f"{principal.type}:{principal.id}"
+    tenant_id = str(principal.tenant_id or principal.org_id or "default").strip() or "default"
+    request.state.tenant_id = tenant_id
     _set_scope_header(request, "X-User-ID", principal.id)
     _set_scope_header(request, "X-User-Type", principal.type or "user")
     _set_scope_header(request, "X-Principal-Id", principal.id)
     _set_scope_header(request, "X-Principal-Type", principal.type or "user")
     _set_scope_header(request, "X-Actor", principal.id)
     _set_scope_header(request, "X-Actor-Type", principal.type or "user")
+    _set_scope_header(request, "X-Tenant-ID", tenant_id)
+    if principal.org_id:
+        _set_scope_header(request, "X-Org-ID", str(principal.org_id))
+    if principal.roles:
+        _set_scope_header(request, "X-User-Roles", ",".join([str(r) for r in principal.roles if str(r).strip()]))
 
 
 def _compile_agent_tool_path(pattern: str) -> re.Pattern[str]:
@@ -103,9 +142,12 @@ async def _enforce_internal_agent_tool_policy(request: Request) -> Optional[JSON
 
     tool_id = _resolve_agent_tool_id(request)
     if not tool_id:
-        return JSONResponse(
+        return _error_response(
+            request=request,
             status_code=status.HTTP_400_BAD_REQUEST,
-            content={"detail": f"{_AGENT_TOOL_ID_HEADER} required for agent tool calls"},
+            message=f"{_AGENT_TOOL_ID_HEADER} required for agent tool calls",
+            code=ErrorCode.REQUEST_VALIDATION_FAILED,
+            category=ErrorCategory.INPUT,
         )
 
     registry = _resolve_agent_tool_registry(request)
@@ -116,24 +158,36 @@ async def _enforce_internal_agent_tool_policy(request: Request) -> Optional[JSON
 
     policy = await registry.get_tool_policy(tool_id=tool_id)
     if not policy:
-        return JSONResponse(
+        return _error_response(
+            request=request,
             status_code=status.HTTP_403_FORBIDDEN,
-            content={"detail": f"tool_id={tool_id} not in allowlist"},
+            message=f"tool_id={tool_id} not in allowlist",
+            code=ErrorCode.PERMISSION_DENIED,
+            category=ErrorCategory.PERMISSION,
         )
     if str(policy.status or "").strip().upper() != "ACTIVE":
-        return JSONResponse(
+        return _error_response(
+            request=request,
             status_code=status.HTTP_403_FORBIDDEN,
-            content={"detail": f"tool_id={tool_id} is not ACTIVE"},
+            message=f"tool_id={tool_id} is not ACTIVE",
+            code=ErrorCode.PERMISSION_DENIED,
+            category=ErrorCategory.PERMISSION,
         )
     if str(policy.method or "").strip().upper() != str(request.method or "").strip().upper():
-        return JSONResponse(
+        return _error_response(
+            request=request,
             status_code=status.HTTP_403_FORBIDDEN,
-            content={"detail": f"tool_id={tool_id} method mismatch"},
+            message=f"tool_id={tool_id} method mismatch",
+            code=ErrorCode.PERMISSION_DENIED,
+            category=ErrorCategory.PERMISSION,
         )
     if not _path_matches_tool_policy(policy, path):
-        return JSONResponse(
+        return _error_response(
+            request=request,
             status_code=status.HTTP_403_FORBIDDEN,
-            content={"detail": f"tool_id={tool_id} path mismatch"},
+            message=f"tool_id={tool_id} path mismatch",
+            code=ErrorCode.PERMISSION_DENIED,
+            category=ErrorCategory.PERMISSION,
         )
 
     required_roles = {str(role).strip() for role in (policy.roles or []) if str(role).strip()}
@@ -141,9 +195,12 @@ async def _enforce_internal_agent_tool_policy(request: Request) -> Optional[JSON
         principal = getattr(request.state, "user", None)
         user_roles = set(getattr(principal, "roles", ()) or ())
         if not user_roles or not (user_roles & required_roles):
-            return JSONResponse(
+            return _error_response(
+                request=request,
                 status_code=status.HTTP_403_FORBIDDEN,
-                content={"detail": "Permission denied"},
+                message="Permission denied",
+                code=ErrorCode.PERMISSION_DENIED,
+                category=ErrorCategory.PERMISSION,
             )
 
     return None
@@ -185,10 +242,13 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
 
         presented = extract_presented_token(request.headers)
         if not presented:
-            return JSONResponse(
+            return _error_response(
+                request=request,
                 status_code=status.HTTP_401_UNAUTHORIZED,
+                message="Authentication required",
+                code=ErrorCode.AUTH_REQUIRED,
+                category=ErrorCategory.AUTH,
                 headers={"WWW-Authenticate": "Bearer"},
-                content={"detail": "Authentication required"},
             )
 
         agent_token = (auth.bff_agent_token or "").strip()
@@ -197,10 +257,13 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
             delegated_raw = extract_bearer_token(request.headers.get(_DELEGATED_AUTH_HEADER))
             if auth.user_jwt_enabled:
                 if not delegated_raw:
-                    return JSONResponse(
+                    return _error_response(
+                        request=request,
                         status_code=status.HTTP_401_UNAUTHORIZED,
+                        message=f"{_DELEGATED_AUTH_HEADER} required for agent calls",
+                        code=ErrorCode.AUTH_REQUIRED,
+                        category=ErrorCategory.AUTH,
                         headers={"WWW-Authenticate": "Bearer"},
-                        content={"detail": f"{_DELEGATED_AUTH_HEADER} required for agent calls"},
                     )
                 try:
                     principal = await verify_user_token(
@@ -215,9 +278,13 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
                     )
                     _attach_verified_principal(request, principal)
                 except UserTokenError as exc:
-                    return JSONResponse(
+                    return _error_response(
+                        request=request,
                         status_code=status.HTTP_403_FORBIDDEN,
-                        content={"detail": f"Delegated user token invalid: {exc}"},
+                        message="Delegated user token invalid",
+                        detail=str(exc),
+                        code=ErrorCode.AUTH_INVALID,
+                        category=ErrorCategory.AUTH,
                     )
                 denied = await _enforce_internal_agent_tool_policy(request)
                 if denied is not None:
@@ -231,10 +298,13 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
                     request.headers.get("Authorization")
                 )
                 if not delegated_raw:
-                    return JSONResponse(
+                    return _error_response(
+                        request=request,
                         status_code=status.HTTP_401_UNAUTHORIZED,
+                        message="User JWT required for agent endpoints",
+                        code=ErrorCode.AUTH_REQUIRED,
+                        category=ErrorCategory.AUTH,
                         headers={"WWW-Authenticate": "Bearer"},
-                        content={"detail": "User JWT required for agent endpoints"},
                     )
                 try:
                     principal = await verify_user_token(
@@ -249,9 +319,13 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
                     )
                     _attach_verified_principal(request, principal)
                 except UserTokenError as exc:
-                    return JSONResponse(
+                    return _error_response(
+                        request=request,
                         status_code=status.HTTP_403_FORBIDDEN,
-                        content={"detail": f"User JWT invalid: {exc}"},
+                        message="User JWT invalid",
+                        detail=str(exc),
+                        code=ErrorCode.AUTH_INVALID,
+                        category=ErrorCategory.AUTH,
                     )
             return await call_next(request)
 
@@ -273,14 +347,20 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
                 pass
 
         if not expected and not auth.user_jwt_enabled:
-            return JSONResponse(
+            return _error_response(
+                request=request,
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                content={"detail": "BFF auth required but no token configured"},
+                message="BFF auth required but no token configured",
+                code=ErrorCode.INTERNAL_ERROR,
+                category=ErrorCategory.INTERNAL,
             )
 
-        return JSONResponse(
+        return _error_response(
+            request=request,
             status_code=status.HTTP_403_FORBIDDEN,
-            content={"detail": "Invalid authentication credentials"},
+            message="Invalid authentication credentials",
+            code=ErrorCode.AUTH_INVALID,
+            category=ErrorCategory.AUTH,
         )
 
 

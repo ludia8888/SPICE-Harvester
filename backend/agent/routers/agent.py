@@ -39,6 +39,13 @@ def _resolve_principal(request: Optional[Request]) -> tuple[str, str]:
     return principal_type.lower(), principal_id
 
 
+def _resolve_tenant_id(request: Optional[Request]) -> str:
+    if not request:
+        return "default"
+    candidate = request.headers.get("X-Tenant-ID") or request.headers.get("X-Org-ID") or "default"
+    return str(candidate).strip() or "default"
+
+
 def _actor_label(principal_type: str, principal_id: str) -> str:
     principal_type = principal_type or "user"
     principal_id = principal_id or "unknown"
@@ -99,6 +106,7 @@ async def _record_run_start(
     *,
     agent_registry: Optional[AgentRegistry],
     run_id: str,
+    tenant_id: str,
     actor: str,
     requester: str,
     delegated_actor: str,
@@ -113,6 +121,7 @@ async def _record_run_start(
         plan_snapshot = mask_pii(plan_snapshot, max_string_chars=200)
     await agent_registry.create_run(
         run_id=run_id,
+        tenant_id=tenant_id,
         plan_id=_extract_plan_id(body.context or {}),
         status="RUNNING",
         risk_level=_extract_risk_level(body.context or {}),
@@ -127,6 +136,7 @@ async def _record_run_start(
         await agent_registry.create_step(
             run_id=run_id,
             step_id=_step_id(idx),
+            tenant_id=tenant_id,
             tool_id=tool_id,
             status="PENDING",
             input_digest=input_digest,
@@ -146,6 +156,7 @@ async def _execute_agent_run(
     state: AgentState,
     request_id: Optional[str],
     agent_registry: Optional[AgentRegistry],
+    tenant_id: str,
 ) -> None:
     run_id = state["run_id"]
     actor = state["actor"]
@@ -193,6 +204,7 @@ async def _execute_agent_run(
                 await agent_registry.update_step_status(
                     run_id=run_id,
                     step_id=_step_id(idx),
+                    tenant_id=tenant_id,
                     status=status,
                     output_digest=output_digest,
                     error=error,
@@ -200,6 +212,7 @@ async def _execute_agent_run(
                 )
             await agent_registry.update_run_status(
                 run_id=run_id,
+                tenant_id=tenant_id,
                 status="FAILED" if failed else "COMPLETED",
                 finished_at=datetime.now(timezone.utc),
             )
@@ -219,6 +232,7 @@ async def _execute_agent_run(
         if agent_registry:
             await agent_registry.update_run_status(
                 run_id=run_id,
+                tenant_id=tenant_id,
                 status="FAILED",
                 finished_at=datetime.now(timezone.utc),
             )
@@ -228,6 +242,7 @@ async def _execute_agent_run(
                 await agent_registry.update_step_status(
                     run_id=run_id,
                     step_id=_step_id(idx),
+                    tenant_id=tenant_id,
                     status=status,
                     finished_at=datetime.now(timezone.utc),
                 )
@@ -243,6 +258,7 @@ async def create_agent_run(request: Request, body: AgentRunRequest) -> Dict[str,
 
     principal_type, principal_id = _resolve_principal(request)
     actor = _actor_label(principal_type, principal_id)
+    tenant_id = _resolve_tenant_id(request)
     runtime = AgentRuntime.from_env(
         event_store=request.app.state.event_store,  # type: ignore[attr-defined]
         audit_store=request.app.state.audit_store,  # type: ignore[attr-defined]
@@ -271,6 +287,7 @@ async def create_agent_run(request: Request, body: AgentRunRequest) -> Dict[str,
     await _record_run_start(
         agent_registry=agent_registry,
         run_id=run_id,
+        tenant_id=tenant_id,
         actor=actor,
         requester=principal_id,
         delegated_actor=request.headers.get("X-Actor") or "agent",
@@ -302,6 +319,7 @@ async def create_agent_run(request: Request, body: AgentRunRequest) -> Dict[str,
             state=state,
             request_id=request_meta.get("request_id"),
             agent_registry=agent_registry,
+            tenant_id=tenant_id,
         )
     )
     request.app.state.agent_tasks[run_id] = task  # type: ignore[attr-defined]

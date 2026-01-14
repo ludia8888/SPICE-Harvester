@@ -297,6 +297,7 @@ async def validate_agent_plan(
     *,
     plan: AgentPlan,
     tool_registry: AgentToolRegistry,
+    allowed_tool_ids: Optional[List[str]] = None,
 ) -> AgentPlanValidationResult:
     errors: List[str] = []
     warnings: List[str] = []
@@ -402,6 +403,11 @@ async def validate_agent_plan(
     active_policies = [p for p in all_policies if str(p.status or "").strip().upper() == "ACTIVE"]
     allowlist_hash = _tool_policy_hash(active_policies)
     snapshot = _policy_snapshot(tool_allowlist_hash=allowlist_hash)
+    allowed_tool_set = (
+        {str(tool_id).strip() for tool_id in (allowed_tool_ids or []) if str(tool_id).strip()}
+        if allowed_tool_ids is not None
+        else None
+    )
 
     normalized_steps: List[AgentPlanStep] = []
     risk_levels: List[AgentPlanRiskLevel] = []
@@ -416,6 +422,17 @@ async def validate_agent_plan(
     step_id_to_index = {step.step_id: idx for idx, step in enumerate(plan.steps)}
 
     for idx, step in enumerate(plan.steps):
+        if allowed_tool_set is not None and step.tool_id not in allowed_tool_set:
+            msg = f"tool_id={step.tool_id} not enabled for this session"
+            _add_error(
+                code="tool_not_enabled",
+                message=msg,
+                step=step,
+                fix_hint="Enable the tool_id for this session or re-plan using an enabled tool.",
+            )
+            risk_levels.append(AgentPlanRiskLevel.admin)
+            normalized_steps.append(step.model_copy(update={"requires_approval": True}))
+            continue
         policy = policy_by_tool_id.get(step.tool_id)
         if not policy:
             msg = f"tool_id={step.tool_id} not in allowlist"

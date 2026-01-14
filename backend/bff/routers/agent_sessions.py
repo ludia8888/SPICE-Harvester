@@ -28,6 +28,7 @@ from shared.models.agent_plan import AgentPlan, AgentPlanDataScope
 from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import sanitize_input
 from shared.services.agent_plan_registry import AgentPlanRegistry
+from shared.services.agent_policy_registry import AgentPolicyRegistry
 from shared.services.agent_registry import AgentRegistry
 from shared.services.agent_session_registry import AgentSessionRegistry
 from shared.services.agent_tool_registry import AgentToolRegistry
@@ -90,6 +91,8 @@ def _forward_headers_to_agent(request: Request) -> Dict[str, str]:
         "x-admin-token",
         "x-delegated-authorization",
         "x-request-id",
+        "x-org-id",
+        "x-tenant-id",
         "x-user",
         "x-user-id",
         "x-user-type",
@@ -138,6 +141,12 @@ async def get_agent_tool_registry() -> AgentToolRegistry:
     return await _get_agent_tool_registry()
 
 
+async def get_agent_policy_registry() -> AgentPolicyRegistry:
+    from bff.main import get_agent_policy_registry as _get_agent_policy_registry
+
+    return await _get_agent_policy_registry()
+
+
 async def get_agent_plan_registry() -> AgentPlanRegistry:
     from bff.main import get_agent_plan_registry as _get_agent_plan_registry
 
@@ -155,17 +164,65 @@ async def create_session(
     body: AgentSessionCreateRequest,
     request: Request,
     sessions: AgentSessionRegistry = Depends(get_agent_session_registry),
+    policy_registry: AgentPolicyRegistry = Depends(get_agent_policy_registry),
+    tool_registry: AgentToolRegistry = Depends(get_agent_tool_registry),
 ) -> ApiResponse:
     tenant_id, user_id, _actor = _resolve_verified_principal(request)
     payload = sanitize_input(body.model_dump(exclude_none=True))
+    policy = await policy_registry.get_tenant_policy(tenant_id=tenant_id)
+
+    allowed_models: set[str] = set()
+    if policy:
+        allowed_models = {str(m).strip() for m in (policy.allowed_models or []) if str(m).strip()}
+        if not allowed_models and policy.default_model:
+            allowed_models = {str(policy.default_model).strip()}
+    allowed_tools: Optional[set[str]] = None
+    if policy:
+        allowed_tools_set = {str(t).strip() for t in (policy.allowed_tools or []) if str(t).strip()}
+        allowed_tools = allowed_tools_set or None
+
+    requested_selected_model = payload.get("selected_model") if "selected_model" in payload else None
+    selected_model = (
+        str(requested_selected_model).strip()
+        if requested_selected_model is not None
+        else (policy.default_model if policy else None)
+    )
+    if selected_model == "":
+        selected_model = None
+    if selected_model is None and policy and policy.allowed_models:
+        selected_model = policy.allowed_models[0]
+
+    model_restricted = bool(policy and (policy.default_model or policy.allowed_models))
+    if model_restricted and selected_model and allowed_models and selected_model not in allowed_models:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Model not allowed for tenant")
+
+    enabled_tools = payload.get("enabled_tools") if "enabled_tools" in payload else None
+    if enabled_tools is None and policy is not None and allowed_tools is not None:
+        enabled_tools = list(allowed_tools)
+    tools_restricted = bool(enabled_tools is not None)
+
+    if enabled_tools is not None:
+        enabled_tools = [str(tool_id).strip() for tool_id in enabled_tools if str(tool_id).strip()]
+        if allowed_tools is not None and any(tool_id not in allowed_tools for tool_id in enabled_tools):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tool not allowed for tenant")
+        for tool_id in enabled_tools:
+            tool_policy = await tool_registry.get_tool_policy(tool_id=tool_id)
+            if not tool_policy or str(tool_policy.status or "").strip().upper() != "ACTIVE":
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"tool_id not ACTIVE: {tool_id}")
+
+    metadata = dict(payload.get("metadata") or {})
+    metadata.setdefault("policy_source", "tenant" if policy else "none")
+    metadata["tools_restricted"] = tools_restricted
+    metadata["model_restricted"] = model_restricted
+
     record = await sessions.create_session(
         session_id=str(uuid4()),
         tenant_id=tenant_id,
         created_by=user_id,
         status="ACTIVE",
-        selected_model=(payload.get("selected_model") or None),
-        enabled_tools=payload.get("enabled_tools") or None,
-        metadata=payload.get("metadata") or {},
+        selected_model=selected_model,
+        enabled_tools=enabled_tools,
+        metadata=metadata,
         started_at=datetime.now(timezone.utc),
     )
     return ApiResponse.created(
@@ -538,6 +595,16 @@ async def post_message(
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id must be a UUID") from exc
 
+    session_record = await sessions.get_session(session_id=session_id, tenant_id=tenant_id)
+    if not session_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+    if str(session_record.status or "").strip().upper() == "TERMINATED":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Agent session terminated")
+
+    tools_restricted = bool((session_record.metadata or {}).get("tools_restricted"))
+    allowed_tool_ids = list(session_record.enabled_tools or []) if tools_restricted else None
+    selected_model = session_record.selected_model
+
     payload = sanitize_input(body.model_dump(exclude_none=True))
     content = str(payload.get("content") or "").strip()
     if not content:
@@ -564,6 +631,8 @@ async def post_message(
         answers=payload.get("answers"),
         context_pack=None,
         actor=actor,
+        allowed_tool_ids=allowed_tool_ids,
+        selected_model=selected_model,
         tool_registry=tool_registry,
         llm_gateway=llm,
         redis_service=redis_service,
@@ -588,10 +657,11 @@ async def post_message(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to compile agent plan")
 
     plan = compile_result.plan
-    validation = await validate_agent_plan(plan=plan, tool_registry=tool_registry)
+    validation = await validate_agent_plan(plan=plan, tool_registry=tool_registry, allowed_tool_ids=allowed_tool_ids)
     status_name = "COMPILED" if not validation.errors else "DRAFT"
     await plan_registry.upsert_plan(
         plan_id=plan.plan_id,
+        tenant_id=tenant_id,
         status=status_name,
         goal=str(plan.goal or ""),
         risk_level=str(plan.risk_level.value if hasattr(plan.risk_level, "value") else plan.risk_level),
@@ -627,6 +697,8 @@ async def post_message(
     # Auto-execute when approval is not required.
     steps_payload: list[dict[str, Any]] = []
     for step in plan.steps:
+        if allowed_tool_ids is not None and step.tool_id not in set(allowed_tool_ids):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"tool_id not enabled: {step.tool_id}")
         policy = await tool_registry.get_tool_policy(tool_id=step.tool_id)
         if not policy:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"tool_id not in allowlist: {step.tool_id}")
@@ -703,23 +775,32 @@ async def create_job_from_plan(
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id must be a UUID") from exc
 
+    session_record = await sessions.get_session(session_id=session_id, tenant_id=tenant_id)
+    if not session_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+    if str(session_record.status or "").strip().upper() == "TERMINATED":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Agent session terminated")
+
+    tools_restricted = bool((session_record.metadata or {}).get("tools_restricted"))
+    allowed_tool_ids = list(session_record.enabled_tools or []) if tools_restricted else None
+
     payload = sanitize_input(body.model_dump(exclude_none=True))
     try:
         plan_id = str(UUID(str(payload.get("plan_id"))))
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="plan_id must be a UUID") from exc
 
-    record = await plan_registry.get_plan(plan_id=plan_id)
+    record = await plan_registry.get_plan(plan_id=plan_id, tenant_id=tenant_id)
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent plan not found")
 
     plan = AgentPlan.model_validate(record.plan)
-    validation = await validate_agent_plan(plan=plan, tool_registry=tool_registry)
+    validation = await validate_agent_plan(plan=plan, tool_registry=tool_registry, allowed_tool_ids=allowed_tool_ids)
     if validation.errors:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"errors": validation.errors, "warnings": validation.warnings})
 
     if validation.plan.requires_approval:
-        approvals = await agent_registry.list_approvals(plan_id=plan_id)
+        approvals = await agent_registry.list_approvals(plan_id=plan_id, tenant_id=tenant_id)
         if not approvals:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Plan approval required")
         latest = max(approvals, key=lambda a: a.approved_at)
@@ -729,6 +810,8 @@ async def create_job_from_plan(
 
     steps_payload: list[dict[str, Any]] = []
     for step in validation.plan.steps:
+        if allowed_tool_ids is not None and step.tool_id not in set(allowed_tool_ids):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"tool_id not enabled: {step.tool_id}")
         policy = await tool_registry.get_tool_policy(tool_id=step.tool_id)
         if not policy:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"tool_id not in allowlist: {step.tool_id}")

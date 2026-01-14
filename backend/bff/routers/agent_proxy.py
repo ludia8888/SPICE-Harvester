@@ -26,13 +26,17 @@ _FORWARD_HEADER_ALLOWLIST = {
     "content-type",
     "user-agent",
     "x-admin-token",
+    "x-delegated-authorization",
     "x-actor",
     "x-actor-type",
+    "x-org-id",
     "x-principal-id",
     "x-principal-type",
     "x-request-id",
+    "x-tenant-id",
     "x-user",
     "x-user-id",
+    "x-user-roles",
     "x-user-type",
 }
 _CALLER_HEADER = "x-spice-caller"

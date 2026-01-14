@@ -79,12 +79,28 @@ def _principal(*, user_id: str = "user-1", tenant_id: str = "tenant-1") -> UserP
     return UserPrincipal(id=user_id, tenant_id=tenant_id, verified=True)
 
 
+class _FakePolicyRegistry:
+    async def get_tenant_policy(self, *, tenant_id: str):  # noqa: ANN001
+        return None
+
+
+class _FakeToolRegistry:
+    async def get_tool_policy(self, *, tool_id: str):  # noqa: ANN001
+        return None
+
+
 @pytest.mark.asyncio
 async def test_agent_sessions_crud_round_trip() -> None:
     sessions = _FakeSessions()
     req = _Request(principal=_principal())
 
-    created = await create_session(AgentSessionCreateRequest(), request=req, sessions=sessions)
+    created = await create_session(
+        AgentSessionCreateRequest(),
+        request=req,
+        sessions=sessions,
+        policy_registry=_FakePolicyRegistry(),
+        tool_registry=_FakeToolRegistry(),
+    )
     assert created.status == "created"
     session_id = created.data["session"]["session_id"]
     assert created.data["session"]["enabled_tools"] == []
@@ -111,7 +127,13 @@ async def test_agent_sessions_enforces_tenant_boundary() -> None:
     req_tenant_a = _Request(principal=_principal(tenant_id="tenant-a"))
     req_tenant_b = _Request(principal=_principal(tenant_id="tenant-b"))
 
-    created = await create_session(AgentSessionCreateRequest(), request=req_tenant_a, sessions=sessions)
+    created = await create_session(
+        AgentSessionCreateRequest(),
+        request=req_tenant_a,
+        sessions=sessions,
+        policy_registry=_FakePolicyRegistry(),
+        tool_registry=_FakeToolRegistry(),
+    )
     session_id = created.data["session"]["session_id"]
 
     with pytest.raises(HTTPException) as exc_info:

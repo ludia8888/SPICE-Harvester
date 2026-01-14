@@ -25,6 +25,7 @@ from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
 @dataclass(frozen=True)
 class AgentPlanRecord:
     plan_id: str
+    tenant_id: str
     status: str
     goal: str
     risk_level: str
@@ -83,6 +84,7 @@ class AgentPlanRegistry:
                 f"""
                 CREATE TABLE IF NOT EXISTS {self._schema}.agent_plans (
                     plan_id UUID PRIMARY KEY,
+                    tenant_id TEXT NOT NULL DEFAULT 'default',
                     status TEXT NOT NULL DEFAULT 'COMPILED',
                     goal TEXT NOT NULL DEFAULT '',
                     risk_level TEXT NOT NULL DEFAULT 'read',
@@ -96,15 +98,22 @@ class AgentPlanRegistry:
                 """
             )
             await conn.execute(
+                f"ALTER TABLE {self._schema}.agent_plans ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'"
+            )
+            await conn.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_agent_plans_status ON {self._schema}.agent_plans(status)"
             )
             await conn.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_agent_plans_created_at ON {self._schema}.agent_plans(created_at)"
             )
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_agent_plans_tenant ON {self._schema}.agent_plans(tenant_id)"
+            )
 
     def _row_to_plan(self, row: asyncpg.Record) -> AgentPlanRecord:
         return AgentPlanRecord(
             plan_id=str(row["plan_id"]),
+            tenant_id=str(row.get("tenant_id") or "default"),
             status=str(row["status"]),
             goal=str(row["goal"] or ""),
             risk_level=str(row["risk_level"] or "read"),
@@ -120,6 +129,7 @@ class AgentPlanRegistry:
         self,
         *,
         plan_id: str,
+        tenant_id: str,
         status: str,
         goal: str,
         risk_level: str,
@@ -132,15 +142,17 @@ class AgentPlanRegistry:
 
         plan_payload = normalize_json_payload(plan or {})
         digest = sha256_canonical_json_prefixed(plan_payload)
+        tenant_value = str(tenant_id or "").strip() or "default"
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""
                 INSERT INTO {self._schema}.agent_plans (
-                    plan_id, status, goal, risk_level, requires_approval,
+                    plan_id, tenant_id, status, goal, risk_level, requires_approval,
                     plan, plan_digest, created_by
                 )
-                VALUES ($1::uuid, $2, $3, $4, $5, $6::jsonb, $7, $8)
+                VALUES ($1::uuid, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
                 ON CONFLICT (plan_id) DO UPDATE SET
+                    tenant_id = EXCLUDED.tenant_id,
                     status = EXCLUDED.status,
                     goal = EXCLUDED.goal,
                     risk_level = EXCLUDED.risk_level,
@@ -148,10 +160,12 @@ class AgentPlanRegistry:
                     plan = EXCLUDED.plan,
                     plan_digest = EXCLUDED.plan_digest,
                     updated_at = NOW()
+                WHERE {self._schema}.agent_plans.tenant_id = EXCLUDED.tenant_id
                 RETURNING plan_id, status, goal, risk_level, requires_approval,
-                          plan, plan_digest, created_by, created_at, updated_at
+                          plan, plan_digest, created_by, created_at, updated_at, tenant_id
                 """,
                 plan_id,
+                tenant_value,
                 status,
                 goal,
                 risk_level,
@@ -160,44 +174,49 @@ class AgentPlanRegistry:
                 digest,
                 created_by,
             )
+        if not row:
+            raise ValueError("plan upsert failed (tenant mismatch)")
         return self._row_to_plan(row)
 
-    async def get_plan(self, *, plan_id: str) -> Optional[AgentPlanRecord]:
+    async def get_plan(self, *, plan_id: str, tenant_id: str) -> Optional[AgentPlanRecord]:
         if not self._pool:
             raise RuntimeError("AgentPlanRegistry not connected")
+        tenant_value = str(tenant_id or "").strip() or "default"
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""
                 SELECT plan_id, status, goal, risk_level, requires_approval,
-                       plan, plan_digest, created_by, created_at, updated_at
+                       plan, plan_digest, created_by, created_at, updated_at, tenant_id
                 FROM {self._schema}.agent_plans
-                WHERE plan_id = $1::uuid
+                WHERE plan_id = $1::uuid AND tenant_id = $2
                 """,
                 plan_id,
+                tenant_value,
             )
         return self._row_to_plan(row) if row else None
 
     async def list_plans(
         self,
         *,
+        tenant_id: str,
         status: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> List[AgentPlanRecord]:
         if not self._pool:
             raise RuntimeError("AgentPlanRegistry not connected")
-        clauses: list[str] = []
-        values: list[Any] = []
+        clauses: list[str] = ["tenant_id = $1"]
+        values: list[Any] = [str(tenant_id or "").strip() or "default"]
         if status:
             values.append(str(status).strip().upper())
             clauses.append(f"status = ${len(values)}")
-        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        where = f"WHERE {' AND '.join(clauses)}"
         values.extend([int(limit), int(offset)])
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
                 SELECT plan_id, status, goal, risk_level, requires_approval,
-                       plan, plan_digest, created_by, created_at, updated_at
+                       plan, plan_digest, created_by, created_at, updated_at, tenant_id
                 FROM {self._schema}.agent_plans
                 {where}
                 ORDER BY created_at DESC
@@ -207,4 +226,3 @@ class AgentPlanRegistry:
                 *values,
             )
         return [self._row_to_plan(row) for row in rows]
-

@@ -47,15 +47,61 @@ _AGENT_FORWARD_HEADER_ALLOWLIST = {
     "x-admin-token",
     "x-actor",
     "x-actor-type",
+    "x-org-id",
     "x-principal-id",
     "x-principal-type",
     "x-request-id",
+    "x-tenant-id",
     "x-user",
     "x-user-id",
     "x-user-type",
 }
 _APPROVED_DECISIONS = {"APPROVED", "APPROVE", "ALLOW", "YES"}
 _REJECTED_DECISIONS = {"REJECTED", "REJECT", "DENY", "NO"}
+
+
+def _resolve_tenant_id(request: Request) -> str:
+    user = getattr(request.state, "user", None)
+    candidate = (
+        getattr(user, "tenant_id", None)
+        or getattr(user, "org_id", None)
+        or request.headers.get("X-Tenant-ID")
+        or request.headers.get("X-Org-ID")
+        or "default"
+    )
+    return str(candidate).strip() or "default"
+
+
+async def _resolve_tenant_policy_constraints(request: Request) -> tuple[Optional[list[str]], Optional[str]]:
+    """
+    Best-effort tenant policy lookup (AUTH-005).
+
+    Keeps unit-tests + degraded startup paths working by returning (None, None)
+    when the policy registry is unavailable.
+    """
+
+    tenant_id = _resolve_tenant_id(request)
+    try:
+        from bff.main import get_agent_policy_registry as _get_agent_policy_registry
+
+        policy_registry = await _get_agent_policy_registry()
+        policy = await policy_registry.get_tenant_policy(tenant_id=tenant_id)
+    except Exception:
+        return None, None
+
+    if not policy:
+        return None, None
+
+    allowed_tools = [str(t).strip() for t in (policy.allowed_tools or []) if str(t).strip()]
+    allowed_tool_ids = allowed_tools or None
+
+    selected_model: Optional[str] = None
+    if policy.default_model:
+        selected_model = str(policy.default_model).strip() or None
+    if selected_model is None and policy.allowed_models:
+        selected_model = str(policy.allowed_models[0]).strip() or None
+
+    return allowed_tool_ids, selected_model
 
 
 def _forward_headers_to_agent(request: Request) -> Dict[str, str]:
@@ -194,6 +240,7 @@ async def build_context_pack(
 async def apply_plan_patch(
     plan_id: str,
     body: AgentPlanApplyPatchRequest,
+    request: Request,
     plan_registry: AgentPlanRegistry = Depends(get_agent_plan_registry),
     tool_registry: AgentToolRegistry = Depends(get_agent_tool_registry),
 ) -> ApiResponse:
@@ -202,7 +249,8 @@ async def apply_plan_patch(
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="plan_id must be a UUID") from exc
 
-    record = await plan_registry.get_plan(plan_id=plan_id)
+    tenant_id = _resolve_tenant_id(request)
+    record = await plan_registry.get_plan(plan_id=plan_id, tenant_id=tenant_id)
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent plan not found")
 
@@ -220,10 +268,12 @@ async def apply_plan_patch(
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Patched plan invalid: {exc}") from exc
 
-    validation = await validate_agent_plan(plan=patched_plan, tool_registry=tool_registry)
+    allowed_tool_ids, _selected_model = await _resolve_tenant_policy_constraints(request)
+    validation = await validate_agent_plan(plan=patched_plan, tool_registry=tool_registry, allowed_tool_ids=allowed_tool_ids)
     new_status = "COMPILED" if not validation.errors else "DRAFT"
     await plan_registry.upsert_plan(
         plan_id=plan_id,
+        tenant_id=tenant_id,
         status=new_status,
         goal=str(validation.plan.goal or ""),
         risk_level=str(validation.plan.risk_level.value if hasattr(validation.plan.risk_level, "value") else validation.plan.risk_level),
@@ -256,12 +306,13 @@ async def compile_plan(
     tool_registry: AgentToolRegistry = Depends(get_agent_tool_registry),
     plan_registry: AgentPlanRegistry = Depends(get_agent_plan_registry),
     action_logs: ActionLogRegistry = Depends(get_action_log_registry),
-    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
 ) -> ApiResponse:
     payload = sanitize_input(body.model_dump(exclude_none=True))
     goal = str(payload.get("goal") or "").strip()
     data_scope = body.data_scope
     answers = payload.get("answers")
+    tenant_id = _resolve_tenant_id(request)
+    allowed_tool_ids, selected_model = await _resolve_tenant_policy_constraints(request)
     actor = (
         request.headers.get("X-User-ID")
         or request.headers.get("X-User")
@@ -291,6 +342,14 @@ async def compile_plan(
 
     try:
         if data_scope and data_scope.db_name:
+            try:
+                dataset_registry = await get_dataset_registry()
+            except HTTPException as exc:
+                logger.warning("Dataset registry unavailable (%s): %s", exc.status_code, exc.detail)
+                dataset_registry = None
+
+            if dataset_registry is None:
+                raise RuntimeError("Dataset registry unavailable")
             dataset_ids: list[Any] = []
             if data_scope.dataset_id:
                 dataset_ids.append(data_scope.dataset_id)
@@ -322,6 +381,8 @@ async def compile_plan(
         answers=answers if isinstance(answers, dict) else None,
         context_pack=context_pack,
         actor=str(actor),
+        allowed_tool_ids=allowed_tool_ids,
+        selected_model=selected_model,
         tool_registry=tool_registry,
         llm_gateway=llm,
         redis_service=redis_service,
@@ -356,6 +417,7 @@ async def compile_plan(
         if result.plan:
             await plan_registry.upsert_plan(
                 plan_id=result.plan_id,
+                tenant_id=tenant_id,
                 status="COMPILED",
                 goal=str(result.plan.goal or ""),
                 risk_level=str(result.plan.risk_level.value if hasattr(result.plan.risk_level, "value") else result.plan.risk_level),
@@ -368,6 +430,7 @@ async def compile_plan(
         if result.plan:
             await plan_registry.upsert_plan(
                 plan_id=result.plan_id,
+                tenant_id=tenant_id,
                 status="DRAFT",
                 goal=str(result.plan.goal or ""),
                 risk_level=str(result.plan.risk_level.value if hasattr(result.plan.risk_level, "value") else result.plan.risk_level),
@@ -386,6 +449,7 @@ async def compile_plan(
 @router.get("/{plan_id}", response_model=ApiResponse)
 async def get_plan(
     plan_id: str,
+    request: Request,
     plan_registry: AgentPlanRegistry = Depends(get_agent_plan_registry),
 ) -> ApiResponse:
     try:
@@ -393,7 +457,8 @@ async def get_plan(
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="plan_id must be a UUID") from exc
 
-    record = await plan_registry.get_plan(plan_id=plan_id)
+    tenant_id = _resolve_tenant_id(request)
+    record = await plan_registry.get_plan(plan_id=plan_id, tenant_id=tenant_id)
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent plan not found")
 
@@ -423,12 +488,14 @@ async def preview_plan(
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="plan_id must be a UUID") from exc
 
-    record = await plan_registry.get_plan(plan_id=plan_id)
+    tenant_id = _resolve_tenant_id(request)
+    record = await plan_registry.get_plan(plan_id=plan_id, tenant_id=tenant_id)
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent plan not found")
 
     plan = AgentPlan.model_validate(record.plan)
-    validation = await validate_agent_plan(plan=plan, tool_registry=tool_registry)
+    allowed_tool_ids, _selected_model = await _resolve_tenant_policy_constraints(request)
+    validation = await validate_agent_plan(plan=plan, tool_registry=tool_registry, allowed_tool_ids=allowed_tool_ids)
     if validation.errors:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"errors": validation.errors, "warnings": validation.warnings})
 
@@ -491,17 +558,19 @@ async def execute_plan(
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="plan_id must be a UUID") from exc
 
-    record = await plan_registry.get_plan(plan_id=plan_id)
+    tenant_id = _resolve_tenant_id(request)
+    record = await plan_registry.get_plan(plan_id=plan_id, tenant_id=tenant_id)
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent plan not found")
 
     plan = AgentPlan.model_validate(record.plan)
-    validation = await validate_agent_plan(plan=plan, tool_registry=tool_registry)
+    allowed_tool_ids, _selected_model = await _resolve_tenant_policy_constraints(request)
+    validation = await validate_agent_plan(plan=plan, tool_registry=tool_registry, allowed_tool_ids=allowed_tool_ids)
     if validation.errors:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"errors": validation.errors, "warnings": validation.warnings})
 
     if validation.plan.requires_approval:
-        approvals = await agent_registry.list_approvals(plan_id=plan_id)
+        approvals = await agent_registry.list_approvals(plan_id=plan_id, tenant_id=tenant_id)
         if not approvals:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Plan approval required")
         latest = max(approvals, key=lambda a: a.approved_at)
@@ -605,9 +674,11 @@ async def approve_plan(
             or request.headers.get("X-Actor")
             or "system"
         )
+        tenant_id = _resolve_tenant_id(request)
         record = await agent_registry.create_approval(
             approval_id=str(uuid4()),
             plan_id=plan_id,
+            tenant_id=tenant_id,
             step_id=payload.get("step_id"),
             decision=decision,
             approved_by=str(approved_by),

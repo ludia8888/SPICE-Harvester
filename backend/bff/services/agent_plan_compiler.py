@@ -225,6 +225,8 @@ async def compile_agent_plan(
     answers: Optional[Dict[str, Any]],
     context_pack: Optional[Dict[str, Any]] = None,
     actor: str,
+    allowed_tool_ids: Optional[List[str]] = None,
+    selected_model: Optional[str] = None,
     tool_registry: AgentToolRegistry,
     llm_gateway: LLMGateway,
     redis_service: Optional[RedisService],
@@ -242,12 +244,21 @@ async def compile_agent_plan(
         )
 
     policies = await tool_registry.list_tool_policies(status="ACTIVE", limit=200)
+    allowed_set = (
+        {str(tool_id).strip() for tool_id in (allowed_tool_ids or []) if str(tool_id).strip()}
+        if allowed_tool_ids is not None
+        else None
+    )
+    if allowed_set is not None:
+        policies = [p for p in policies if p.tool_id in allowed_set]
     if not policies:
         return AgentPlanCompileResult(
             status="error",
             plan_id=str(uuid4()),
             plan=None,
-            validation_errors=["No ACTIVE agent tool policies found (configure allowlist first)."],
+            validation_errors=[
+                "No enabled agent tool policies found for this session (configure allowlist or enable tools)."
+            ],
             validation_warnings=[],
             questions=[],
         )
@@ -271,6 +282,7 @@ async def compile_agent_plan(
                 tool_catalog_json=tool_catalog_json,
             ),
             response_model=AgentPlanDraftEnvelope,
+            model=selected_model,
             redis_service=redis_service,
             audit_store=audit_store,
             audit_partition_key=f"agent_plan:{plan_id}",
@@ -315,7 +327,7 @@ async def compile_agent_plan(
         }
     )
 
-    validation = await validate_agent_plan(plan=plan, tool_registry=tool_registry)
+    validation = await validate_agent_plan(plan=plan, tool_registry=tool_registry, allowed_tool_ids=allowed_tool_ids)
     auto_applied_patches: list[str] = []
 
     if validation.errors:
@@ -337,7 +349,11 @@ async def compile_agent_plan(
             except (JsonPatchError, ValidationError):
                 break
             auto_applied_patches.append(str(patch.patch_id))
-            validation = await validate_agent_plan(plan=candidate_plan, tool_registry=tool_registry)
+            validation = await validate_agent_plan(
+                plan=candidate_plan,
+                tool_registry=tool_registry,
+                allowed_tool_ids=allowed_tool_ids,
+            )
             if not validation.errors:
                 break
 

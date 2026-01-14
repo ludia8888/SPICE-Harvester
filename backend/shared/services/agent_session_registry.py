@@ -133,6 +133,19 @@ class AgentSessionJobRecord:
     finished_at: Optional[datetime]
 
 
+@dataclass(frozen=True)
+class AgentSessionContextItemRecord:
+    item_id: str
+    session_id: str
+    item_type: str
+    include_mode: str
+    ref: Dict[str, Any]
+    token_count: Optional[int]
+    metadata: Dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
 class AgentSessionRegistry:
     def __init__(
         self,
@@ -272,6 +285,33 @@ class AgentSessionRegistry:
                 f"CREATE INDEX IF NOT EXISTS idx_agent_session_jobs_status ON {self._schema}.agent_session_jobs(status)"
             )
 
+            await conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self._schema}.agent_session_context_items (
+                    item_id UUID PRIMARY KEY,
+                    session_id UUID NOT NULL
+                        REFERENCES {self._schema}.agent_sessions(session_id)
+                        ON DELETE CASCADE,
+                    item_type TEXT NOT NULL,
+                    include_mode TEXT NOT NULL DEFAULT 'summary',
+                    ref JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    token_count INTEGER,
+                    metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_agent_session_context_items_session ON {self._schema}.agent_session_context_items(session_id)"
+            )
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_agent_session_context_items_type ON {self._schema}.agent_session_context_items(item_type)"
+            )
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_agent_session_context_items_updated ON {self._schema}.agent_session_context_items(updated_at)"
+            )
+
     def _row_to_session(self, row: asyncpg.Record) -> AgentSessionRecord:
         return AgentSessionRecord(
             session_id=str(row["session_id"]),
@@ -318,6 +358,19 @@ class AgentSessionRegistry:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             finished_at=row["finished_at"],
+        )
+
+    def _row_to_context_item(self, row: asyncpg.Record) -> AgentSessionContextItemRecord:
+        return AgentSessionContextItemRecord(
+            item_id=str(row["item_id"]),
+            session_id=str(row["session_id"]),
+            item_type=str(row["item_type"]),
+            include_mode=str(row["include_mode"] or "summary"),
+            ref=coerce_json_dataset(row["ref"]),
+            token_count=row["token_count"],
+            metadata=coerce_json_dataset(row["metadata"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
         )
 
     async def create_session(
@@ -773,3 +826,110 @@ class AgentSessionRegistry:
                 int(offset),
             )
         return [self._row_to_job(row) for row in rows]
+
+    async def add_context_item(
+        self,
+        *,
+        item_id: str,
+        session_id: str,
+        tenant_id: str,
+        item_type: str,
+        include_mode: str = "summary",
+        ref: Optional[Dict[str, Any]] = None,
+        token_count: Optional[int] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        created_at: Optional[datetime] = None,
+    ) -> AgentSessionContextItemRecord:
+        if not self._pool:
+            raise RuntimeError("AgentSessionRegistry not connected")
+        existing = await self.get_session(session_id=session_id, tenant_id=tenant_id)
+        if not existing:
+            raise ValueError("session not found")
+
+        ref_payload = normalize_json_payload(ref or {})
+        metadata_payload = normalize_json_payload(metadata or {})
+        include_mode_value = str(include_mode or "summary").strip().lower() or "summary"
+        item_type_value = str(item_type or "").strip()
+        if not item_type_value:
+            raise ValueError("item_type is required")
+
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                INSERT INTO {self._schema}.agent_session_context_items (
+                    item_id, session_id, item_type, include_mode, ref, token_count, metadata, created_at
+                )
+                VALUES ($1::uuid, $2::uuid, $3, $4, $5::jsonb, $6, $7::jsonb, COALESCE($8, NOW()))
+                RETURNING item_id, session_id, item_type, include_mode, ref, token_count, metadata, created_at, updated_at
+                """,
+                item_id,
+                session_id,
+                item_type_value,
+                include_mode_value,
+                ref_payload,
+                token_count,
+                metadata_payload,
+                created_at,
+            )
+        return self._row_to_context_item(row)
+
+    async def list_context_items(
+        self,
+        *,
+        session_id: str,
+        tenant_id: str,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> List[AgentSessionContextItemRecord]:
+        if not self._pool:
+            raise RuntimeError("AgentSessionRegistry not connected")
+        existing = await self.get_session(session_id=session_id, tenant_id=tenant_id)
+        if not existing:
+            raise ValueError("session not found")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT item_id, session_id, item_type, include_mode, ref, token_count, metadata, created_at, updated_at
+                FROM {self._schema}.agent_session_context_items
+                WHERE session_id = $1::uuid
+                ORDER BY created_at ASC
+                LIMIT $2
+                OFFSET $3
+                """,
+                session_id,
+                int(limit),
+                int(offset),
+            )
+        return [self._row_to_context_item(row) for row in rows]
+
+    async def remove_context_item(
+        self,
+        *,
+        session_id: str,
+        tenant_id: str,
+        item_id: str,
+    ) -> int:
+        if not self._pool:
+            raise RuntimeError("AgentSessionRegistry not connected")
+        existing = await self.get_session(session_id=session_id, tenant_id=tenant_id)
+        if not existing:
+            raise ValueError("session not found")
+
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                f"""
+                DELETE FROM {self._schema}.agent_session_context_items c
+                USING {self._schema}.agent_sessions s
+                WHERE c.session_id = s.session_id
+                  AND c.session_id = $1::uuid
+                  AND c.item_id = $2::uuid
+                  AND s.tenant_id = $3
+                """,
+                session_id,
+                item_id,
+                tenant_id,
+            )
+        try:
+            return int(str(result).split()[-1])
+        except Exception:  # pragma: no cover
+            return 0

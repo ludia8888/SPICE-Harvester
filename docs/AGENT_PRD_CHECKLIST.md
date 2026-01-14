@@ -18,8 +18,8 @@
 | AUTH-001 | DONE | `backend/bff/middleware/auth.py`, `backend/shared/security/user_context.py`, `backend/agent/services/agent_runtime.py`, `backend/tests/unit/middleware/test_middleware_fixes.py`, `backend/tests/unit/services/test_agent_runtime_delegated_auth.py` |  |
 | AUTH-002 | PARTIAL | `backend/bff/middleware/auth.py`, `backend/shared/services/agent_tool_registry.py`, `backend/agent/services/agent_runtime.py`, `backend/tests/unit/middleware/test_middleware_fixes.py` | tool_id 기반 런타임 allowlist+role gating은 추가됨. DB Access(RBAC)·ABAC(리소스 스코프)·표준 오류 코드(envelope)로 확장 필요. |
 | AUTH-003 | PARTIAL | `backend/bff/middleware/auth.py`, `backend/agent/services/agent_runtime.py` | 전 서비스/워커 경로에서 “service token only” 실행이 없도록 정리 + RBAC/ABAC로 최종 보장 필요. |
-| AUTH-004 | TODO | (header key 일부만 존재) | 테넌트 격리(세션/로그/아티팩트/레이트리밋) 미구현. |
-| AUTH-005 | PARTIAL | `backend/shared/services/agent_tool_registry.py`(툴 allowlist 전역) | org/user 단위 모델/툴 allowlist + 자동 승인 규칙 + 데이터 정책 미구현. |
+| AUTH-004 | PARTIAL | `backend/bff/middleware/auth.py`, `backend/bff/routers/agent_proxy.py`, `backend/shared/services/agent_session_registry.py`, `backend/shared/services/agent_plan_registry.py`, `backend/shared/services/agent_registry.py` | 로그/아티팩트/레이트리밋까지 tenant 격리 확대 + cross-service(워커 포함) tenant propagation 완결 필요. |
+| AUTH-005 | PARTIAL | `backend/shared/services/agent_policy_registry.py`, `backend/bff/routers/agent_policies.py`, `backend/bff/routers/agent_sessions.py`, `backend/bff/routers/agent_plans.py` | 자동 승인 규칙/데이터·문서 접근 정책(ABAC) + 세션 정책의 런타임 강제(툴/LLM) 완결 필요. |
 
 ---
 
@@ -28,7 +28,7 @@
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
 | SESS-001 | DONE | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_session_registry.py`, `backend/bff/main.py`, `backend/bff/tests/test_agent_sessions_router.py` |  |
-| SESS-002 | PARTIAL | `backend/shared/services/agent_registry.py`(runs/steps/approvals), `backend/agent/services/agent_runtime.py`(events) | “세션” 단위 저장(메시지/컨텍스트 첨부/모델/툴 활성화/비용) 미구현. |
+| SESS-002 | PARTIAL | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_session_registry.py`, `backend/shared/services/agent_registry.py` | tool 호출 req/resp·승인 이벤트·토큰/비용/지연시간 계측을 세션 단위로 완결(조회/집계 API 포함) 필요. |
 | SESS-003 | DONE | `backend/bff/routers/agent_sessions.py`, `backend/bff/tests/test_agent_sessions_router.py` |  |
 | SESS-004 | DONE | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_session_registry.py`, `backend/bff/tests/test_agent_sessions_summarize_remove.py` |  |
 | SESS-005 | DONE | `backend/shared/services/agent_session_registry.py`, `backend/tests/unit/services/test_agent_session_state_machine.py` |  |
@@ -41,8 +41,8 @@
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
 | LLM-001 | PARTIAL | `backend/shared/services/llm_gateway.py` | provider 확장(Anthropic/Google/자체) 필요. |
-| LLM-002 | TODO | (없음) | org allowlist 모델 선택/검증 미구현. |
-| LLM-003 | TODO | (없음) | 세션 단위 모델 지정/변경 + 정책 고정 미구현. |
+| LLM-002 | PARTIAL | `backend/shared/services/agent_policy_registry.py`, `backend/bff/routers/agent_sessions.py`, `backend/bff/routers/agent_policies.py` | 세션 생성/변경 전 과정에서 allowlist 강제(게이트웨이 레벨 포함) + 모델 메타/관리 UI/API 확장 필요. |
+| LLM-003 | PARTIAL | `backend/shared/services/agent_session_registry.py`, `backend/bff/routers/agent_sessions.py` | 세션 단위 모델 변경 API + 모든 호출에 세션 정책(마스킹/툴 허용/데이터 정책) 고정 적용 필요. |
 | LLM-004 | PARTIAL | `backend/shared/services/llm_gateway.py`(JSON-only), `backend/bff/services/agent_plan_compiler.py`(planner) | native function/tool 호출(복수 호출/병렬 계획) 미구현. |
 | LLM-005 | TODO | (없음) | 모델 capability 메타/자동 폴백 미구현. |
 | LLM-006 | PARTIAL | `backend/shared/services/llm_gateway.py`(timeout/cache) | circuit breaker/재시도 정책(멱등성 조건부) 미구현. |
@@ -67,7 +67,7 @@
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
 | TOOL-001 | PARTIAL | `backend/shared/services/agent_tool_registry.py`, `backend/shared/policies/agent_tool_allowlist.json` | tool version / input-output schema / 권한 선언 / retry 정책 메타 확장 필요. |
-| TOOL-002 | TODO | (없음) | 세션 단위 활성 툴 목록 저장 + 런타임 차단 미구현. |
+| TOOL-002 | PARTIAL | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_session_registry.py`, `backend/bff/services/agent_plan_validation.py` | 세션 enabled_tools를 모든 실행 경로에 강제(직접 실행/재개 포함) + “툴 목록 조회/설정” API 완결 필요. |
 | TOOL-003 | PARTIAL | `backend/bff/routers/agent_plans.py`(Idempotency-Key), `backend/agent/services/agent_runtime.py`(tool_run_id) | tool_run_id는 추가됨(관측용). “중복 실행 방지”는 API/스토리지 멱등성 계약까지 확장 필요. |
 | TOOL-004 | PARTIAL | `backend/agent/services/agent_runtime.py`(payload_preview/side_effect_summary) | 표준 응답 스키마(에러 코드 체계/side effect taxonomy) 고도화 필요. |
 | TOOL-005 | PARTIAL | `docs/API_REFERENCE.md`(Actions/Graph/Pipeline/Objectify/Commands), `backend/shared/policies/agent_tool_allowlist.json` | Function/SessionVariableUpdate/Clarification 툴은 미구현(또는 allowlist 확장 필요). |

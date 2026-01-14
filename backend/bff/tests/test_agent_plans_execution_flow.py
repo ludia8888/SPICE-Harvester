@@ -33,9 +33,11 @@ class _FakePlanRegistry:
     async def upsert_plan(self, **kwargs):  # noqa: ANN003
         self.upserts.append(dict(kwargs))
         plan_id = str(kwargs["plan_id"])
+        tenant_id = str(kwargs.get("tenant_id") or "default")
         now = datetime.now(timezone.utc)
         record = AgentPlanRecord(
             plan_id=plan_id,
+            tenant_id=tenant_id,
             status=str(kwargs.get("status") or "COMPILED"),
             goal=str(kwargs.get("goal") or ""),
             risk_level=str(kwargs.get("risk_level") or "read"),
@@ -49,7 +51,7 @@ class _FakePlanRegistry:
         self.plans[plan_id] = record
         return record
 
-    async def get_plan(self, *, plan_id: str) -> Optional[AgentPlanRecord]:
+    async def get_plan(self, *, plan_id: str, tenant_id: str = "default") -> Optional[AgentPlanRecord]:
         return self.plans.get(str(plan_id))
 
 
@@ -57,7 +59,7 @@ class _FakeAgentRegistry:
     def __init__(self) -> None:
         self.approvals: Dict[str, list[AgentApprovalRecord]] = {}
 
-    async def list_approvals(self, *, plan_id: str):
+    async def list_approvals(self, *, plan_id: str, tenant_id: str = "default"):
         return list(self.approvals.get(str(plan_id), []))
 
 
@@ -198,6 +200,7 @@ def test_preview_stops_before_submit(client):
     now = datetime.now(timezone.utc)
     plan_registry.plans[plan_id] = AgentPlanRecord(
         plan_id=plan_id,
+        tenant_id="default",
         status="COMPILED",
         goal=plan.goal,
         risk_level="write",
@@ -272,6 +275,7 @@ def test_execute_requires_approval(client):
     now = datetime.now(timezone.utc)
     plan_registry.plans[plan_id] = AgentPlanRecord(
         plan_id=plan_id,
+        tenant_id="default",
         status="COMPILED",
         goal=plan.goal,
         risk_level="write",
@@ -337,6 +341,7 @@ def test_execute_calls_agent_when_approved(client):
     now = datetime.now(timezone.utc)
     plan_registry.plans[plan_id] = AgentPlanRecord(
         plan_id=plan_id,
+        tenant_id="default",
         status="COMPILED",
         goal=plan.goal,
         risk_level="write",
@@ -351,6 +356,7 @@ def test_execute_calls_agent_when_approved(client):
         AgentApprovalRecord(
             approval_id=str(uuid4()),
             plan_id=plan_id,
+            tenant_id="default",
             step_id=None,
             decision="APPROVED",
             approved_by="user:test",
