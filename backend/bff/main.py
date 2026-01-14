@@ -22,7 +22,6 @@ load_dotenv()
 
 # Standard library imports
 import asyncio
-import os
 import logging
 from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
@@ -66,7 +65,6 @@ from shared.services.agent_tool_allowlist import bootstrap_agent_tool_allowlist
 from shared.services.pipeline_registry import PipelineRegistry
 from shared.services.pipeline_executor import PipelineExecutor
 from shared.services.objectify_registry import ObjectifyRegistry
-from shared.utils.env_utils import parse_int_env
 
 # Shared models and utilities
 from shared.models.ontology import (
@@ -714,7 +712,7 @@ async def lifespan(app: FastAPI):
         if 'rate_limiter' in _bff_container._bff_services:
             app.state.rate_limiter = _bff_container._bff_services['rate_limiter']
 
-        enable_outbox = (os.getenv("ENABLE_DATASET_INGEST_OUTBOX_WORKER", "true") or "true").lower() != "false"
+        enable_outbox = bool(settings.workers.dataset_ingest_outbox.enabled)
         if enable_outbox:
             dataset_outbox_stop = asyncio.Event()
             dataset_registry = _bff_container.get_dataset_registry()
@@ -723,64 +721,57 @@ async def lifespan(app: FastAPI):
                 run_dataset_ingest_outbox_worker(
                     dataset_registry=dataset_registry,
                     lineage_store=lineage_store,
-                    poll_interval_seconds=int(os.getenv("DATASET_INGEST_OUTBOX_POLL_SECONDS", "5")),
+                    poll_interval_seconds=int(settings.workers.dataset_ingest_outbox.poll_seconds),
                     stop_event=dataset_outbox_stop,
                 )
             )
             app.state.dataset_ingest_outbox_task = dataset_outbox_task
             app.state.dataset_ingest_outbox_stop = dataset_outbox_stop
 
-        enable_reconciler = (os.getenv("ENABLE_DATASET_INGEST_RECONCILER", "true") or "true").lower() != "false"
+        enable_reconciler = bool(settings.workers.ingest_reconciler.enabled)
         if enable_reconciler:
             dataset_reconcile_stop = asyncio.Event()
             dataset_registry = _bff_container.get_dataset_registry()
             dataset_reconcile_task = asyncio.create_task(
                 run_dataset_ingest_reconciler(
                     dataset_registry=dataset_registry,
-                    poll_interval_seconds=int(os.getenv("DATASET_INGEST_RECONCILER_POLL_SECONDS", "60")),
-                    stale_after_seconds=int(os.getenv("DATASET_INGEST_RECONCILER_STALE_SECONDS", "3600")),
+                    poll_interval_seconds=int(settings.workers.ingest_reconciler.poll_seconds),
+                    stale_after_seconds=int(settings.workers.ingest_reconciler.stale_seconds),
                     stop_event=dataset_reconcile_stop,
                 )
             )
             app.state.dataset_ingest_reconciler_task = dataset_reconcile_task
             app.state.dataset_ingest_reconciler_stop = dataset_reconcile_stop
 
-        enable_objectify_outbox = (os.getenv("ENABLE_OBJECTIFY_OUTBOX_WORKER", "true") or "true").lower() != "false"
+        enable_objectify_outbox = bool(settings.workers.objectify_outbox.enabled)
         if enable_objectify_outbox:
             objectify_outbox_stop = asyncio.Event()
             objectify_registry = _bff_container.get_objectify_registry()
             objectify_outbox_task = asyncio.create_task(
                 run_objectify_outbox_worker(
                     objectify_registry=objectify_registry,
-                    poll_interval_seconds=int(os.getenv("OBJECTIFY_OUTBOX_POLL_SECONDS", "5")),
-                    batch_size=int(os.getenv("OBJECTIFY_OUTBOX_BATCH", "50")),
+                    poll_interval_seconds=int(settings.workers.objectify_outbox.poll_seconds),
+                    batch_size=int(settings.workers.objectify_outbox.batch_size),
                     stop_event=objectify_outbox_stop,
                 )
             )
             app.state.objectify_outbox_task = objectify_outbox_task
             app.state.objectify_outbox_stop = objectify_outbox_stop
 
-        enable_objectify_reconciler = (os.getenv("ENABLE_OBJECTIFY_RECONCILER", "true") or "true").lower() != "false"
+        enable_objectify_reconciler = bool(settings.workers.objectify_reconciler.enabled)
         if enable_objectify_reconciler:
             objectify_reconcile_stop = asyncio.Event()
             objectify_registry = _bff_container.get_objectify_registry()
             dataset_registry = _bff_container.get_dataset_registry()
             pipeline_registry = _bff_container.get_pipeline_registry()
-            enqueued_stale_seconds = parse_int_env(
-                "OBJECTIFY_RECONCILER_ENQUEUED_STALE_SECONDS",
-                900,
-                min_value=0,
-                max_value=86_400,
-            )
-            if enqueued_stale_seconds <= 0:
-                enqueued_stale_seconds = None
+            enqueued_stale_seconds = settings.workers.objectify_reconciler.enqueued_stale_seconds_effective
             objectify_reconcile_task = asyncio.create_task(
                 run_objectify_reconciler(
                     objectify_registry=objectify_registry,
                     dataset_registry=dataset_registry,
                     pipeline_registry=pipeline_registry,
-                    poll_interval_seconds=int(os.getenv("OBJECTIFY_RECONCILER_POLL_SECONDS", "60")),
-                    stale_after_seconds=int(os.getenv("OBJECTIFY_RECONCILER_STALE_SECONDS", "600")),
+                    poll_interval_seconds=int(settings.workers.objectify_reconciler.poll_seconds),
+                    stale_after_seconds=int(settings.workers.objectify_reconciler.stale_after_seconds),
                     enqueued_stale_seconds=enqueued_stale_seconds,
                     stop_event=objectify_reconcile_stop,
                 )

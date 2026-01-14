@@ -16,7 +16,6 @@ Key improvements:
 6. ✅ Easy testing and mocking
 """
 
-import os
 from typing import Annotated, Optional
 from fastapi import HTTPException, status, Path, Depends
 
@@ -27,7 +26,7 @@ from shared.dependencies.providers import (
     ElasticsearchServiceDep,
     SettingsDep
 )
-from shared.config.settings import ApplicationSettings
+from shared.config.settings import ApplicationSettings, get_settings
 from shared.utils.label_mapper import LabelMapper
 from shared.utils.jsonld import JSONToJSONLDConverter
 from shared.services.elasticsearch_service import ElasticsearchService
@@ -175,7 +174,7 @@ class OMSDependencyProvider:
                     redis_service = RedisServiceClass(
                         host=ServiceConfig.get_redis_host(),
                         port=ServiceConfig.get_redis_port(),
-                        password=os.getenv("REDIS_PASSWORD", "spicepass123"),
+                        password=get_settings().database.redis_password,
                     )
                     await redis_service.connect()
                 except Exception as e:

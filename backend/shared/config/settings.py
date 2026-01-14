@@ -326,6 +326,14 @@ class ServiceSettings(BaseSettings):
         default=False,
         description="Enable opt-in debug endpoints (ENABLE_DEBUG_ENDPOINTS)"
     )
+    agent_proxy_timeout_seconds: float = Field(
+        default=30.0,
+        description="Agent proxy timeout seconds (AGENT_PROXY_TIMEOUT_SECONDS)",
+    )
+    funnel_excel_timeout_seconds: float = Field(
+        default=120.0,
+        description="Funnel excel timeout seconds (FUNNEL_EXCEL_TIMEOUT_SECONDS; fallback FUNNEL_CLIENT_TIMEOUT_SECONDS)",
+    )
 
     @field_validator("oms_base_url_override", mode="before")
     @classmethod
@@ -346,7 +354,33 @@ class ServiceSettings(BaseSettings):
     @classmethod
     def get_agent_base_url_override(cls, v):
         return os.getenv("AGENT_BASE_URL", v)
-    
+
+    @field_validator("agent_proxy_timeout_seconds", mode="before")
+    @classmethod
+    def clamp_agent_proxy_timeout(cls, v):  # noqa: ANN001
+        try:
+            value = float(v)
+        except Exception:
+            return 30.0
+        return max(1.0, min(value, 300.0))
+
+    @field_validator("funnel_excel_timeout_seconds", mode="before")
+    @classmethod
+    def resolve_funnel_excel_timeout(cls, v):  # noqa: ANN001
+        if os.getenv("FUNNEL_EXCEL_TIMEOUT_SECONDS") not in (None, ""):
+            return v
+        fallback = (os.getenv("FUNNEL_CLIENT_TIMEOUT_SECONDS") or "").strip()
+        return fallback or v
+
+    @field_validator("funnel_excel_timeout_seconds", mode="before")
+    @classmethod
+    def clamp_funnel_excel_timeout(cls, v):  # noqa: ANN001
+        try:
+            value = float(v)
+        except Exception:
+            return 120.0
+        return max(5.0, min(value, 3600.0))
+
     @property
     def oms_base_url(self) -> str:
         """Construct OMS base URL"""
@@ -387,6 +421,107 @@ class ServiceSettings(BaseSettings):
             return json.loads(self.cors_origins)
         except (json.JSONDecodeError, TypeError):
             return ["*"]  # Fallback to allow all origins
+
+
+class LLMSettings(BaseSettings):
+    """LLM gateway settings (shared across services)."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="LLM_",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    provider: str = Field(default="disabled", description="LLM provider (LLM_PROVIDER)")
+    base_url: Optional[str] = Field(default=None, description="OpenAI-compatible base URL (LLM_BASE_URL)")
+    api_key: Optional[str] = Field(default=None, description="OpenAI-compatible API key (LLM_API_KEY)")
+    model: Optional[str] = Field(default=None, description="Default model id (LLM_MODEL)")
+
+    anthropic_base_url: str = Field(
+        default="https://api.anthropic.com",
+        description="Anthropic base URL (LLM_ANTHROPIC_BASE_URL)",
+    )
+    anthropic_api_key: Optional[str] = Field(
+        default=None,
+        description="Anthropic API key (LLM_ANTHROPIC_API_KEY; fallback ANTHROPIC_API_KEY/LLM_API_KEY)",
+    )
+    anthropic_version: str = Field(
+        default="2023-06-01",
+        description="Anthropic API version header (LLM_ANTHROPIC_VERSION)",
+    )
+
+    google_base_url: str = Field(
+        default="https://generativelanguage.googleapis.com",
+        description="Google Generative Language base URL (LLM_GOOGLE_BASE_URL)",
+    )
+    google_api_key: Optional[str] = Field(
+        default=None,
+        description="Google API key (LLM_GOOGLE_API_KEY; fallback GOOGLE_API_KEY/LLM_API_KEY)",
+    )
+
+    timeout_seconds: float = Field(default=20.0, description="LLM timeout seconds (LLM_TIMEOUT_SECONDS)")
+    temperature: float = Field(default=0.0, description="LLM temperature (LLM_TEMPERATURE)")
+    max_tokens: int = Field(default=800, description="LLM max tokens (LLM_MAX_TOKENS)")
+    enable_json_mode: bool = Field(default=True, description="Enable JSON mode (LLM_ENABLE_JSON_MODE)")
+    native_tool_calling: bool = Field(default=False, description="Enable native tool calling (LLM_NATIVE_TOOL_CALLING)")
+
+    cache_enabled: bool = Field(default=True, description="Enable Redis cache (LLM_CACHE_ENABLED)")
+    cache_ttl_seconds: int = Field(default=3600, description="Cache TTL seconds (LLM_CACHE_TTL_SECONDS)")
+    max_prompt_chars: int = Field(default=20000, description="Prompt size cap chars (LLM_MAX_PROMPT_CHARS)")
+
+    retry_max_attempts: int = Field(default=2, description="Max retry attempts (LLM_RETRY_MAX_ATTEMPTS)")
+    retry_base_delay_seconds: float = Field(default=0.5, description="Retry base delay seconds (LLM_RETRY_BASE_DELAY_SECONDS)")
+    retry_max_delay_seconds: float = Field(default=4.0, description="Retry max delay seconds (LLM_RETRY_MAX_DELAY_SECONDS)")
+    circuit_failure_threshold: int = Field(default=5, description="Circuit breaker threshold (LLM_CIRCUIT_FAILURE_THRESHOLD)")
+    circuit_open_seconds: float = Field(default=30.0, description="Circuit breaker open seconds (LLM_CIRCUIT_OPEN_SECONDS)")
+
+    pricing_json: Optional[str] = Field(default=None, description="Pricing table JSON (LLM_PRICING_JSON)")
+
+    @field_validator(
+        "provider",
+        "base_url",
+        "api_key",
+        "model",
+        "anthropic_base_url",
+        "anthropic_api_key",
+        "anthropic_version",
+        "google_base_url",
+        "google_api_key",
+        "pricing_json",
+        mode="before",
+    )
+    @classmethod
+    def strip_strings(cls, v):  # noqa: ANN001
+        if v is None:
+            return None
+        value = str(v).strip()
+        return value or None
+
+    @field_validator("anthropic_api_key", mode="before")
+    @classmethod
+    def fallback_anthropic_api_key(cls, v):  # noqa: ANN001
+        if v not in (None, ""):
+            return v
+        fallback = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
+        return fallback or None
+
+    @field_validator("google_api_key", mode="before")
+    @classmethod
+    def fallback_google_api_key(cls, v):  # noqa: ANN001
+        if v not in (None, ""):
+            return v
+        fallback = (os.getenv("GOOGLE_API_KEY") or "").strip()
+        return fallback or None
+
+    @property
+    def anthropic_api_key_effective(self) -> Optional[str]:
+        return self.anthropic_api_key or self.api_key
+
+    @property
+    def google_api_key_effective(self) -> Optional[str]:
+        return self.google_api_key or self.api_key
 
 
 class ObservabilitySettings(BaseSettings):
@@ -532,6 +667,10 @@ class PipelineSettings(BaseSettings):
         default="pipeline-worker-group",
         description="Kafka consumer group id (PIPELINE_JOBS_GROUP)",
     )
+    job_queue_flush_timeout_seconds: float = Field(
+        default=5.0,
+        description="Kafka producer flush timeout seconds (PIPELINE_JOB_QUEUE_FLUSH_TIMEOUT_SECONDS)",
+    )
     worker_handler: str = Field(
         default="pipeline_worker",
         description="Worker handler label (PIPELINE_WORKER_HANDLER)",
@@ -586,6 +725,15 @@ class PipelineSettings(BaseSettings):
     @classmethod
     def clamp_jobs_max_retries(cls, v):  # noqa: ANN001
         return _clamp_int(v, default=5, min_value=1, max_value=100)
+
+    @field_validator("job_queue_flush_timeout_seconds", mode="before")
+    @classmethod
+    def clamp_job_queue_flush_timeout_seconds(cls, v):  # noqa: ANN001
+        try:
+            value = float(v)
+        except Exception:
+            return 5.0
+        return max(0.1, min(value, 60.0))
 
     @field_validator("jobs_backoff_base_seconds", mode="before")
     @classmethod
@@ -2100,6 +2248,122 @@ class IngestReconcilerSettings(BaseSettings):
         return _clamp_int(v, default=300, min_value=0, max_value=86_400)
 
 
+class DatasetIngestOutboxSettings(BaseSettings):
+    """Dataset ingest outbox worker settings (BFF embedded worker)."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable dataset ingest outbox worker (ENABLE_DATASET_INGEST_OUTBOX_WORKER)",
+        validation_alias="ENABLE_DATASET_INGEST_OUTBOX_WORKER",
+    )
+    poll_seconds: int = Field(
+        default=5,
+        description="Poll interval seconds (DATASET_INGEST_OUTBOX_POLL_SECONDS)",
+        validation_alias="DATASET_INGEST_OUTBOX_POLL_SECONDS",
+    )
+
+    @field_validator("poll_seconds", mode="before")
+    @classmethod
+    def clamp_poll_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=5, min_value=1, max_value=3600)
+
+
+class ObjectifyOutboxWorkerSettings(BaseSettings):
+    """Objectify outbox worker settings (BFF embedded worker)."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable objectify outbox worker (ENABLE_OBJECTIFY_OUTBOX_WORKER)",
+        validation_alias="ENABLE_OBJECTIFY_OUTBOX_WORKER",
+    )
+    poll_seconds: int = Field(
+        default=5,
+        description="Poll interval seconds (OBJECTIFY_OUTBOX_POLL_SECONDS)",
+        validation_alias="OBJECTIFY_OUTBOX_POLL_SECONDS",
+    )
+    batch_size: int = Field(
+        default=50,
+        description="Batch size per scan (OBJECTIFY_OUTBOX_BATCH)",
+        validation_alias="OBJECTIFY_OUTBOX_BATCH",
+    )
+
+    @field_validator("poll_seconds", mode="before")
+    @classmethod
+    def clamp_poll_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=5, min_value=1, max_value=3600)
+
+    @field_validator("batch_size", mode="before")
+    @classmethod
+    def clamp_batch_size(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=50, min_value=1, max_value=5000)
+
+
+class ObjectifyReconcilerSettings(BaseSettings):
+    """Objectify reconciler worker settings (BFF embedded worker)."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable objectify reconciler (ENABLE_OBJECTIFY_RECONCILER)",
+        validation_alias="ENABLE_OBJECTIFY_RECONCILER",
+    )
+    poll_seconds: int = Field(
+        default=60,
+        description="Poll interval seconds (OBJECTIFY_RECONCILER_POLL_SECONDS)",
+        validation_alias="OBJECTIFY_RECONCILER_POLL_SECONDS",
+    )
+    stale_after_seconds: int = Field(
+        default=600,
+        description="Stale cutoff seconds (OBJECTIFY_RECONCILER_STALE_SECONDS)",
+        validation_alias="OBJECTIFY_RECONCILER_STALE_SECONDS",
+    )
+    enqueued_stale_seconds: int = Field(
+        default=900,
+        description="Stale cutoff seconds for QUEUED runs (OBJECTIFY_RECONCILER_ENQUEUED_STALE_SECONDS; 0=disabled)",
+        validation_alias="OBJECTIFY_RECONCILER_ENQUEUED_STALE_SECONDS",
+    )
+
+    @field_validator("poll_seconds", mode="before")
+    @classmethod
+    def clamp_poll_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=60, min_value=1, max_value=3600)
+
+    @field_validator("stale_after_seconds", mode="before")
+    @classmethod
+    def clamp_stale_after_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=600, min_value=0, max_value=86_400)
+
+    @field_validator("enqueued_stale_seconds", mode="before")
+    @classmethod
+    def clamp_enqueued_stale_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=900, min_value=0, max_value=86_400)
+
+    @property
+    def enqueued_stale_seconds_effective(self) -> Optional[int]:
+        value = int(self.enqueued_stale_seconds or 0)
+        return value if value > 0 else None
+
+
 class WritebackMaterializerSettings(BaseSettings):
     """Writeback materializer worker settings."""
 
@@ -2300,7 +2564,10 @@ class WorkersSettings(BaseSettings):
     connector_trigger: ConnectorTriggerSettings = Field(default_factory=ConnectorTriggerSettings)
     search_projection: SearchProjectionSettings = Field(default_factory=SearchProjectionSettings)
     objectify: ObjectifySettings = Field(default_factory=ObjectifySettings)
+    dataset_ingest_outbox: DatasetIngestOutboxSettings = Field(default_factory=DatasetIngestOutboxSettings)
     ingest_reconciler: IngestReconcilerSettings = Field(default_factory=IngestReconcilerSettings)
+    objectify_outbox: ObjectifyOutboxWorkerSettings = Field(default_factory=ObjectifyOutboxWorkerSettings)
+    objectify_reconciler: ObjectifyReconcilerSettings = Field(default_factory=ObjectifyReconcilerSettings)
     writeback_materializer: WritebackMaterializerSettings = Field(default_factory=WritebackMaterializerSettings)
     event_publisher: EventPublisherSettings = Field(default_factory=EventPublisherSettings)
 
@@ -2448,6 +2715,7 @@ class ApplicationSettings(BaseSettings):
     # Nested settings
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     services: ServiceSettings = Field(default_factory=ServiceSettings)
+    llm: LLMSettings = Field(default_factory=LLMSettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     pipeline: PipelineSettings = Field(default_factory=PipelineSettings)
     agent: AgentRuntimeSettings = Field(default_factory=AgentRuntimeSettings)

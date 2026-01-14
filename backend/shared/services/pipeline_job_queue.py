@@ -7,7 +7,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import threading
 import time
 from typing import Optional
@@ -16,6 +15,7 @@ from confluent_kafka import Producer
 
 from shared.config.app_config import AppConfig
 from shared.config.service_config import ServiceConfig
+from shared.config.settings import get_settings
 from shared.models.pipeline_job import PipelineJob
 from shared.observability.context_propagation import kafka_headers_from_current_context
 
@@ -26,14 +26,15 @@ class PipelineJobQueue:
     def __init__(self) -> None:
         self._producer: Optional[Producer] = None
         self.topic = AppConfig.PIPELINE_JOBS_TOPIC
-        self.flush_timeout_seconds = float(os.getenv("PIPELINE_JOB_QUEUE_FLUSH_TIMEOUT_SECONDS", "5") or "5")
+        self.flush_timeout_seconds = float(get_settings().pipeline.job_queue_flush_timeout_seconds)
 
     def _producer_instance(self) -> Producer:
         if self._producer is None:
+            service_name = get_settings().observability.service_name or "pipeline-job-queue"
             self._producer = Producer(
                 {
                     "bootstrap.servers": ServiceConfig.get_kafka_bootstrap_servers(),
-                    "client.id": os.getenv("SERVICE_NAME") or "pipeline-job-queue",
+                    "client.id": service_name,
                     "acks": "all",
                     "retries": 3,
                     "retry.backoff.ms": 100,

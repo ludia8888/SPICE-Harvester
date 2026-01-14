@@ -7,12 +7,12 @@ Ensures the Agent service is only reachable through the BFF.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Dict
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request, Response, status
 
+from shared.config.settings import get_settings
 from shared.config.service_config import ServiceConfig
 
 logger = logging.getLogger(__name__)
@@ -88,7 +88,7 @@ async def _proxy_agent_request(request: Request, path: str) -> Response:
         target_path = f"{target_path}/{suffix}"
     url = f"{agent_url}{target_path}"
 
-    timeout_seconds = float(os.getenv("AGENT_PROXY_TIMEOUT_SECONDS", "30") or "30")
+    timeout_seconds = float(get_settings().services.agent_proxy_timeout_seconds)
     ssl_config = ServiceConfig.get_client_ssl_config()
     headers = _forward_headers(request)
     body = await request.body()

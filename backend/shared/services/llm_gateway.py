@@ -23,6 +23,7 @@ from typing import Any, Dict, Optional, Type, TypeVar
 import httpx
 from pydantic import BaseModel, ValidationError
 
+from shared.config.settings import ApplicationSettings, get_settings
 from shared.services.audit_log_store import AuditLogStore
 from shared.services.redis_service import RedisService
 from shared.utils.llm_safety import digest_for_audit, mask_pii_text, sha256_hex, stable_json_dumps
@@ -63,49 +64,25 @@ class LLMCallMeta:
     cost_estimate: Optional[float] = None
 
 
-def _env_bool(name: str, default: bool = False) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+_PRICING_CACHE: Optional[tuple[str, dict[str, dict[str, float]]]] = None
 
 
-def _env_int(name: str, default: int) -> int:
-    raw = os.getenv(name)
-    if raw is None:
-        return int(default)
-    try:
-        return int(str(raw).strip())
-    except Exception:
-        return int(default)
-
-
-def _env_float(name: str, default: float) -> float:
-    raw = os.getenv(name)
-    if raw is None:
-        return float(default)
-    try:
-        return float(str(raw).strip())
-    except Exception:
-        return float(default)
-
-
-_PRICING_CACHE: Optional[dict[str, dict[str, float]]] = None
-
-
-def _load_pricing_table() -> dict[str, dict[str, float]]:
+def _load_pricing_table(raw: Optional[str]) -> dict[str, dict[str, float]]:
     global _PRICING_CACHE
-    if _PRICING_CACHE is not None:
-        return _PRICING_CACHE
-    raw = (os.getenv("LLM_PRICING_JSON") or "").strip()
+    raw_value = str(raw or "").strip()
+    if _PRICING_CACHE is not None and _PRICING_CACHE[0] == raw_value:
+        return _PRICING_CACHE[1]
+    if not raw_value:
+        _PRICING_CACHE = (raw_value, {})
+        return _PRICING_CACHE[1]
     if not raw:
-        _PRICING_CACHE = {}
-        return _PRICING_CACHE
+        _PRICING_CACHE = (raw_value, {})
+        return _PRICING_CACHE[1]
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(raw_value)
     except Exception:
-        _PRICING_CACHE = {}
-        return _PRICING_CACHE
+        _PRICING_CACHE = (raw_value, {})
+        return _PRICING_CACHE[1]
     table: dict[str, dict[str, float]] = {}
     if isinstance(parsed, dict):
         for model_id, pricing in parsed.items():
@@ -119,12 +96,14 @@ def _load_pricing_table() -> dict[str, dict[str, float]]:
             except (TypeError, ValueError):
                 continue
             table[str(model_id)] = {"prompt_per_1k": prompt_rate_f, "completion_per_1k": completion_rate_f}
-    _PRICING_CACHE = table
-    return _PRICING_CACHE
+    _PRICING_CACHE = (raw_value, table)
+    return _PRICING_CACHE[1]
 
 
-def _estimate_cost(*, model: str, prompt_tokens: int, completion_tokens: int) -> Optional[float]:
-    pricing = _load_pricing_table()
+def _estimate_cost(
+    *, model: str, prompt_tokens: int, completion_tokens: int, pricing_json: Optional[str]
+) -> Optional[float]:
+    pricing = _load_pricing_table(pricing_json)
     rates = pricing.get(model)
     if not rates:
         return None
@@ -184,36 +163,40 @@ class LLMGateway:
     - use a local model that exposes the same contract
     """
 
-    def __init__(self) -> None:
-        self.provider = os.getenv("LLM_PROVIDER", "disabled").strip().lower()
-        self.base_url = (os.getenv("LLM_BASE_URL") or "").strip().rstrip("/")
-        self.api_key = (os.getenv("LLM_API_KEY") or "").strip()
-        self.model = (os.getenv("LLM_MODEL") or "").strip()
+    def __init__(self, settings: Optional[ApplicationSettings] = None) -> None:
+        settings = settings or get_settings()
+        llm = getattr(settings, "llm", None)
 
-        # Optional provider-specific overrides
-        self.anthropic_base_url = (os.getenv("LLM_ANTHROPIC_BASE_URL") or "https://api.anthropic.com").strip().rstrip("/")
-        self.anthropic_api_key = (os.getenv("LLM_ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_API_KEY") or self.api_key).strip()
-        self.google_base_url = (os.getenv("LLM_GOOGLE_BASE_URL") or "https://generativelanguage.googleapis.com").strip().rstrip("/")
-        self.google_api_key = (os.getenv("LLM_GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY") or self.api_key).strip()
+        provider_raw = str(getattr(llm, "provider", "") or "disabled").strip().lower()
+        self.provider = provider_raw
+        self.base_url = str(getattr(llm, "base_url", "") or "").strip().rstrip("/")
+        self.api_key = str(getattr(llm, "api_key", "") or "").strip()
+        self.model = str(getattr(llm, "model", "") or "").strip()
 
-        self.timeout_s = float(os.getenv("LLM_TIMEOUT_SECONDS", "20"))
-        self.temperature = float(os.getenv("LLM_TEMPERATURE", "0"))
-        self.max_tokens = int(os.getenv("LLM_MAX_TOKENS", "800"))
-        self.enable_json_mode = _env_bool("LLM_ENABLE_JSON_MODE", True)
-        self.enable_native_tool_calling = _env_bool("LLM_NATIVE_TOOL_CALLING", False)
+        self.anthropic_base_url = str(getattr(llm, "anthropic_base_url", "") or "https://api.anthropic.com").strip().rstrip("/")
+        self.anthropic_api_key = str(getattr(llm, "anthropic_api_key_effective", "") or self.api_key).strip()
+        self.anthropic_version = str(getattr(llm, "anthropic_version", "") or "2023-06-01").strip() or "2023-06-01"
 
-        self.enable_cache = _env_bool("LLM_CACHE_ENABLED", True)
-        self.cache_ttl_s = int(os.getenv("LLM_CACHE_TTL_SECONDS", "3600"))
+        self.google_base_url = str(getattr(llm, "google_base_url", "") or "https://generativelanguage.googleapis.com").strip().rstrip("/")
+        self.google_api_key = str(getattr(llm, "google_api_key_effective", "") or self.api_key).strip()
 
-        # Safety: cap prompt sizes even before provider caps kick in.
-        self.max_prompt_chars = int(os.getenv("LLM_MAX_PROMPT_CHARS", "20000"))
+        self.timeout_s = float(getattr(llm, "timeout_seconds", 20.0) or 20.0)
+        self.temperature = float(getattr(llm, "temperature", 0.0) or 0.0)
+        self.max_tokens = int(getattr(llm, "max_tokens", 800) or 800)
+        self.enable_json_mode = bool(getattr(llm, "enable_json_mode", True))
+        self.enable_native_tool_calling = bool(getattr(llm, "native_tool_calling", False))
 
-        # Reliability: bounded retries + simple in-process circuit breaker.
-        self.retry_max_attempts = _env_int("LLM_RETRY_MAX_ATTEMPTS", 2)
-        self.retry_base_delay_s = _env_float("LLM_RETRY_BASE_DELAY_SECONDS", 0.5)
-        self.retry_max_delay_s = _env_float("LLM_RETRY_MAX_DELAY_SECONDS", 4.0)
-        self.circuit_failure_threshold = _env_int("LLM_CIRCUIT_FAILURE_THRESHOLD", 5)
-        self.circuit_open_seconds = _env_float("LLM_CIRCUIT_OPEN_SECONDS", 30.0)
+        self.enable_cache = bool(getattr(llm, "cache_enabled", True))
+        self.cache_ttl_s = int(getattr(llm, "cache_ttl_seconds", 3600) or 3600)
+        self.max_prompt_chars = int(getattr(llm, "max_prompt_chars", 20000) or 20000)
+
+        self.retry_max_attempts = int(getattr(llm, "retry_max_attempts", 2) or 2)
+        self.retry_base_delay_s = float(getattr(llm, "retry_base_delay_seconds", 0.5) or 0.5)
+        self.retry_max_delay_s = float(getattr(llm, "retry_max_delay_seconds", 4.0) or 4.0)
+        self.circuit_failure_threshold = int(getattr(llm, "circuit_failure_threshold", 5) or 5)
+        self.circuit_open_seconds = float(getattr(llm, "circuit_open_seconds", 30.0) or 30.0)
+
+        self.pricing_json = str(getattr(llm, "pricing_json", "") or "").strip() or None
         self._circuit: dict[str, dict[str, float]] = {}
         self._tool_calls_supported: dict[str, bool] = {}
 
@@ -339,7 +322,7 @@ class LLMGateway:
         headers: Dict[str, str] = {
             "Content-Type": "application/json",
             "x-api-key": self.anthropic_api_key,
-            "anthropic-version": os.getenv("LLM_ANTHROPIC_VERSION", "2023-06-01"),
+            "anthropic-version": self.anthropic_version,
             "Idempotency-Key": sha256_hex(f"llm:{task}:{model}:{prompt_hash}"),
         }
         body: Dict[str, Any] = {
@@ -602,6 +585,7 @@ class LLMGateway:
                         model=model_to_use,
                         prompt_tokens=prompt_tokens,
                         completion_tokens=completion_tokens,
+                        pricing_json=self.pricing_json,
                     )
                     out_model = response_model.model_validate(obj)
                     output_digest = digest_for_audit(obj)
@@ -700,6 +684,5 @@ class LLMGateway:
         )
 
 
-def create_llm_gateway(_settings: Any = None) -> LLMGateway:
-    # The gateway is configured via env vars (LLM_*). Settings object is unused for now.
-    return LLMGateway()
+def create_llm_gateway(settings: ApplicationSettings) -> LLMGateway:
+    return LLMGateway(settings)
