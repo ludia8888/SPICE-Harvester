@@ -115,7 +115,7 @@ graph TD
 ```
 
 **Note**: BFF 내부에서 `dataset_ingest_outbox_worker`와 `objectify_outbox_worker`가 함께 실행된다.
-**Note**: `action-worker` / `action-outbox-worker` / `writeback-materializer-worker`는 코드로 구현되어 있으며, 실행을 위해 별도 서비스로 구동(또는 compose에 추가)해야 한다.
+**Note**: `action-worker` / `action-outbox-worker` / `writeback-materializer-worker`는 `docker-compose.full.yml`(및 `backend/docker-compose.yml`)에 포함되어 있다(운영에서는 각 워커를 별도 서비스/디플로이로 상시 구동 권장, `writeback-materializer-worker`는 CronJob/주기 실행도 가능).
 
 ---
 
@@ -497,6 +497,7 @@ Source: `docker-compose.full.yml` (with extends resolved).
 
 | Service | Ports | Depends On |
 | --- | --- | --- |
+| `action-outbox-worker` | - | kafka<br/>postgres<br/>minio<br/>lakefs<br/>otel-collector |
 | `action-worker` | - | terminusdb<br/>kafka<br/>postgres<br/>minio<br/>lakefs<br/>message-relay<br/>otel-collector |
 | `agent` | - | bff<br/>postgres<br/>minio<br/>otel-collector |
 | `bff` | 8002:8002 | oms<br/>funnel<br/>postgres<br/>lakefs<br/>otel-collector |
@@ -527,6 +528,7 @@ Source: `docker-compose.full.yml` (with extends resolved).
 | `redis` | ${REDIS_PORT_HOST:-6379}:6379 | - |
 | `search-projection-worker` | - | kafka<br/>elasticsearch<br/>otel-collector |
 | `terminusdb` | 6363:6363 | - |
+| `writeback-materializer-worker` | - | minio<br/>lakefs<br/>otel-collector |
 | `zookeeper` | ${ZOOKEEPER_PORT_HOST:-2181}:2181 | - |
 <!-- END AUTO-GENERATED ARCH: COMPOSE_INVENTORY -->
 
@@ -535,6 +537,7 @@ Source: `docker-compose.full.yml` (with extends resolved).
 <!-- BEGIN AUTO-GENERATED ARCH: COMPOSE_GRAPH -->
 ```mermaid
 graph TD
+  svc_action_outbox_worker[action-outbox-worker]
   svc_action_worker[action-worker]
   svc_agent[agent]
   svc_bff[bff]
@@ -565,7 +568,13 @@ graph TD
   svc_redis[redis]
   svc_search_projection_worker[search-projection-worker]
   svc_terminusdb[terminusdb]
+  svc_writeback_materializer_worker[writeback-materializer-worker]
   svc_zookeeper[zookeeper]
+  svc_action_outbox_worker --> svc_kafka
+  svc_action_outbox_worker --> svc_postgres
+  svc_action_outbox_worker --> svc_minio
+  svc_action_outbox_worker --> svc_lakefs
+  svc_action_outbox_worker --> svc_otel_collector
   svc_action_worker --> svc_terminusdb
   svc_action_worker --> svc_kafka
   svc_action_worker --> svc_postgres
@@ -649,6 +658,9 @@ graph TD
   svc_search_projection_worker --> svc_kafka
   svc_search_projection_worker --> svc_elasticsearch
   svc_search_projection_worker --> svc_otel_collector
+  svc_writeback_materializer_worker --> svc_minio
+  svc_writeback_materializer_worker --> svc_lakefs
+  svc_writeback_materializer_worker --> svc_otel_collector
 ```
 <!-- END AUTO-GENERATED ARCH: COMPOSE_GRAPH -->
 
@@ -682,16 +694,23 @@ graph TD
 | --- | --- | --- |
 | `actions.router` | `/api/v1` | - |
 | `admin.router` | `/api/v1` | - |
+| `agent_functions.router` | `/api/v1` | - |
+| `agent_models.router` | `/api/v1` | - |
 | `agent_plans.router` | `/api/v1` | - |
+| `agent_policies.router` | `/api/v1` | - |
 | `agent_proxy.router` | `/api/v1` | - |
+| `agent_sessions.router` | `/api/v1` | - |
 | `agent_tools.router` | `/api/v1` | - |
 | `ai.router` | `/api/v1` | - |
 | `audit.router` | `/api/v1` | - |
+| `ci_webhooks.router` | `/api/v1` | - |
 | `command_status.router` | `/api/v1` | - |
 | `config_monitoring.router` | `/api/v1/config` | - |
 | `context7.router` | `/api/v1` | - |
+| `context_tools.router` | `/api/v1` | - |
 | `data_connector.router` | `/api/v1` | - |
 | `database.router` | `/api/v1` | - |
+| `document_bundles.router` | `/api/v1` | - |
 | `governance.router` | `/api/v1` | - |
 | `graph.router` | `router-defined` | - |
 | `health.router` | `/api/v1` | - |

@@ -11,6 +11,10 @@ Recommended dev stack:
 docker compose -f docker-compose.full.yml up -d
 ```
 
+Included background workers (no public ports):
+- `message-relay`, `ontology-worker`, `instance-worker`, `projection-worker`
+- Action writeback: `action-worker`, `action-outbox-worker`, `writeback-materializer-worker` (default no-op unless `WRITEBACK_MATERIALIZER_DB_NAMES` is set)
+
 Key services/ports (defaults, override via `.env`). OMS/Funnel/Agent are internal by default; use the debug ports override when you need direct access.
 
 | Component | Port |

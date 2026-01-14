@@ -78,6 +78,9 @@ python -m message_relay.main
 python ontology_worker/main.py
 python projection_worker/main.py
 python instance_worker/main.py
+python -m action_worker.main
+python -m action_outbox_worker.main
+python -m writeback_materializer_worker.main
 ```
 
 #### Docker 환경

@@ -170,6 +170,36 @@ services:
       - lakefs
       - otel-collector
 
+  action-outbox-worker:
+    extends:
+      file: backend/docker-compose.yml
+      service: action-outbox-worker
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORT_OTLP=true
+      - OTEL_ENABLE_TRACING=true
+      - OTEL_ENABLE_METRICS=true
+    depends_on:
+      - kafka
+      - postgres
+      - minio
+      - lakefs
+      - otel-collector
+
+  writeback-materializer-worker:
+    extends:
+      file: backend/docker-compose.yml
+      service: writeback-materializer-worker
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORT_OTLP=true
+      - OTEL_ENABLE_TRACING=true
+      - OTEL_ENABLE_METRICS=true
+    depends_on:
+      - minio
+      - lakefs
+      - otel-collector
+
   search-projection-worker:
     extends:
       file: backend/docker-compose.yml
