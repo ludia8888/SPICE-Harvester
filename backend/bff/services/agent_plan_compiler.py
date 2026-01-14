@@ -38,6 +38,7 @@ from shared.services.llm_gateway import (
     LLMRequestError,
     LLMUnavailableError,
 )
+from shared.services.llm_quota import LLMQuotaExceededError, enforce_llm_quota
 from shared.services.redis_service import RedisService
 from shared.utils.json_patch import JsonPatchError, apply_json_patch
 
@@ -79,8 +80,8 @@ class AgentPlanCompileResult:
 
 
 def _policy_summary(policy: AgentToolPolicyRecord) -> Dict[str, Any]:
-    body_schema = get_request_body_schema(method=policy.method, path=policy.path)
-    response_schema = get_response_schema(method=policy.method, path=policy.path)
+    body_schema = policy.input_schema or get_request_body_schema(method=policy.method, path=policy.path)
+    response_schema = policy.output_schema or get_response_schema(method=policy.method, path=policy.path)
     query_params = get_query_params(method=policy.method, path=policy.path)
     return {
         "tool_id": policy.tool_id,
@@ -93,7 +94,7 @@ def _policy_summary(policy: AgentToolPolicyRecord) -> Dict[str, Any]:
         "max_payload_bytes": policy.max_payload_bytes,
         "status": policy.status,
         "schema": {
-            "request_body_required": bool(get_request_body_required(method=policy.method, path=policy.path)),
+            "request_body_required": bool(get_request_body_required(method=policy.method, path=policy.path)) or bool(policy.input_schema),
             "request_body": schema_hint(body_schema),
             "query_params": [
                 {
@@ -248,8 +249,13 @@ async def compile_agent_plan(
     answers: Optional[Dict[str, Any]],
     context_pack: Optional[Dict[str, Any]] = None,
     actor: str,
+    tenant_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    data_policies: Optional[Dict[str, Any]] = None,
     allowed_tool_ids: Optional[List[str]] = None,
     selected_model: Optional[str] = None,
+    allowed_models: Optional[List[str]] = None,
+    use_native_tool_calling: bool = False,
     tool_registry: AgentToolRegistry,
     llm_gateway: LLMGateway,
     redis_service: Optional[RedisService],
@@ -293,25 +299,42 @@ async def compile_agent_plan(
     draft: Optional[AgentPlanDraftEnvelope] = None
     draft_plan_obj: Dict[str, Any] = {}
 
+    system_prompt = _build_plan_system_prompt()
+    user_prompt = _build_plan_user_prompt(
+        goal=goal,
+        data_scope=data_scope,
+        answers=answers,
+        context_pack=context_pack,
+        tool_catalog_json=tool_catalog_json,
+    )
+    if data_policies and redis_service:
+        model_for_quota = str(selected_model or getattr(llm_gateway, "model", "") or "").strip()
+        if model_for_quota:
+            await enforce_llm_quota(
+                redis_service=redis_service,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                model_id=model_for_quota,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                data_policies=data_policies,
+            )
+
     try:
         draft, llm_meta = await llm_gateway.complete_json(
             task="AGENT_PLAN_COMPILE_V1",
-            system_prompt=_build_plan_system_prompt(),
-            user_prompt=_build_plan_user_prompt(
-                goal=goal,
-                data_scope=data_scope,
-                answers=answers,
-                context_pack=context_pack,
-                tool_catalog_json=tool_catalog_json,
-            ),
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
             response_model=AgentPlanDraftEnvelope,
             model=selected_model,
+            allowed_models=allowed_models,
+            use_native_tool_calling=bool(use_native_tool_calling),
             redis_service=redis_service,
             audit_store=audit_store,
             audit_partition_key=f"agent_plan:{plan_id}",
             audit_actor=actor,
             audit_resource_id=plan_id,
-            audit_metadata={"kind": "agent_plan_compile", "schema": "AgentPlan"},
+            audit_metadata={"kind": "agent_plan_compile", "schema": "AgentPlan", "tenant_id": tenant_id, "user_id": user_id},
         )
         draft_plan_obj = dict(draft.plan or {})
     except (LLMUnavailableError, LLMRequestError, LLMOutputValidationError) as exc:
@@ -384,27 +407,45 @@ async def compile_agent_plan(
         questions: List[AgentClarificationQuestion] = []
         clarification_meta: Optional[LLMCallMeta] = None
         try:
+            clarifier_system_prompt = _build_clarifier_system_prompt()
+            clarifier_user_prompt = _build_clarifier_user_prompt(
+                goal=goal,
+                draft_plan=validation.plan.model_dump(mode="json"),
+                validation_errors=validation.errors,
+                validation_warnings=validation.warnings,
+                data_scope=data_scope,
+                context_pack=context_pack,
+            )
+            if data_policies and redis_service:
+                model_for_quota = str(selected_model or getattr(llm_gateway, "model", "") or "").strip()
+                if model_for_quota:
+                    await enforce_llm_quota(
+                        redis_service=redis_service,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        model_id=model_for_quota,
+                        system_prompt=clarifier_system_prompt,
+                        user_prompt=clarifier_user_prompt,
+                        data_policies=data_policies,
+                    )
             clarification, clarification_meta = await llm_gateway.complete_json(
                 task="AGENT_PLAN_CLARIFY_V1",
-                system_prompt=_build_clarifier_system_prompt(),
-                user_prompt=_build_clarifier_user_prompt(
-                    goal=goal,
-                    draft_plan=validation.plan.model_dump(mode="json"),
-                    validation_errors=validation.errors,
-                    validation_warnings=validation.warnings,
-                    data_scope=data_scope,
-                    context_pack=context_pack,
-                ),
+                system_prompt=clarifier_system_prompt,
+                user_prompt=clarifier_user_prompt,
                 response_model=AgentClarificationPayload,
+                model=selected_model,
+                allowed_models=allowed_models,
                 redis_service=redis_service,
                 audit_store=audit_store,
                 audit_partition_key=f"agent_plan:{plan_id}",
                 audit_actor=actor,
                 audit_resource_id=plan_id,
-                audit_metadata={"kind": "agent_plan_clarify"},
+                audit_metadata={"kind": "agent_plan_clarify", "tenant_id": tenant_id, "user_id": user_id},
             )
             questions = list(clarification.questions or [])
             llm_meta = clarification_meta or llm_meta
+        except LLMQuotaExceededError:
+            raise
         except Exception:
             questions = _fallback_questions_from_errors(validation.errors)
 

@@ -53,7 +53,7 @@ async def test_agent_graph_retries_transient_read_failure() -> None:
     runtime = _StubRuntime(
         results=[
             {
-                "status": "failure",
+                "status": "failed",
                 "error": "HTTP 504",
                 "http_status": 504,
                 "error_key": "UPSTREAM_TIMEOUT",
@@ -115,7 +115,7 @@ async def test_agent_graph_does_not_retry_writes_by_default() -> None:
     runtime = _StubRuntime(
         results=[
             {
-                "status": "failure",
+                "status": "failed",
                 "error": "HTTP 503",
                 "http_status": 503,
                 "error_key": "UPSTREAM_UNAVAILABLE",
@@ -149,7 +149,7 @@ async def test_agent_graph_does_not_retry_writes_by_default() -> None:
 
     assert final_state["failed"] is True
     assert len(runtime.calls) == 1
-    assert final_state["results"][0]["status"] == "failure"
+    assert final_state["results"][0]["status"] == "failed"
 
 
 @pytest.mark.unit
@@ -159,7 +159,7 @@ async def test_agent_graph_respects_enterprise_max_attempts() -> None:
     runtime = _StubRuntime(
         results=[
             {
-                "status": "failure",
+                "status": "failed",
                 "error": "HTTP 504",
                 "http_status": 504,
                 "error_key": "UPSTREAM_TIMEOUT",
@@ -211,7 +211,7 @@ async def test_agent_graph_respects_enterprise_max_attempts() -> None:
 
     assert final_state["failed"] is True
     assert len(runtime.calls) == 1
-    assert final_state["results"][0]["status"] == "failure"
+    assert final_state["results"][0]["status"] == "failed"
 
 
 @pytest.mark.unit
@@ -221,7 +221,7 @@ async def test_agent_graph_uses_retry_after_when_allowed() -> None:
     runtime = _StubRuntime(
         results=[
             {
-                "status": "failure",
+                "status": "failed",
                 "error": "HTTP 429",
                 "http_status": 429,
                 "retry_after_ms": 1,

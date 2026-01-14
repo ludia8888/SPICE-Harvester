@@ -12,29 +12,34 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from uuid import UUID, uuid4
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel, Field
 
 from bff.services.agent_plan_compiler import compile_agent_plan
 from bff.services.agent_plan_validation import validate_agent_plan
+from bff.services.pipeline_context_pack import build_pipeline_context_pack
 from shared.config.service_config import ServiceConfig
 from shared.config.settings import get_settings
-from shared.dependencies.providers import AuditLogStoreDep, LLMGatewayDep, RedisServiceDep
+from shared.dependencies.providers import AuditLogStoreDep, LLMGatewayDep, RedisServiceDep, StorageServiceDep
 from shared.models.agent_plan import AgentPlan, AgentPlanDataScope
 from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import sanitize_input
+from shared.security.data_encryption import encryptor_from_keys, is_encrypted_text
 from shared.services.agent_model_registry import AgentModelRegistry
 from shared.services.agent_plan_registry import AgentPlanRegistry
 from shared.services.agent_policy_registry import AgentPolicyRegistry
 from shared.services.agent_registry import AgentRegistry
 from shared.services.agent_session_registry import AgentSessionRegistry
 from shared.services.agent_tool_registry import AgentToolRegistry
+from shared.services.dataset_registry import DatasetRegistry
 from shared.services.llm_gateway import LLMUnavailableError
+from shared.services.llm_quota import LLMQuotaExceededError, enforce_llm_quota
 from shared.utils.llm_safety import digest_for_audit
 
 logger = logging.getLogger(__name__)
@@ -86,6 +91,18 @@ class AgentSessionContextItemCreateRequest(BaseModel):
     metadata: dict | None = Field(default=None)
 
 
+class AgentSessionCIResultCreateRequest(BaseModel):
+    status: str = Field(..., min_length=1, max_length=60, description="queued|in_progress|success|failure|cancelled|skipped|unknown")
+    provider: str | None = Field(default=None, max_length=200)
+    details_url: str | None = Field(default=None, max_length=2000)
+    summary: str | None = Field(default=None, max_length=5000)
+    checks: list[dict] | None = Field(default=None, description="Standardized list of check runs")
+    raw: dict | None = Field(default=None, description="Raw provider payload (optional)")
+    job_id: str | None = Field(default=None, description="Optional agent job id (UUID)")
+    plan_id: str | None = Field(default=None, description="Optional agent plan id (UUID)")
+    run_id: str | None = Field(default=None, description="Optional agent run id (UUID)")
+
+
 class AgentSessionApprovalDecisionRequest(BaseModel):
     decision: str = Field(..., min_length=1, max_length=40)
     comment: str | None = Field(default=None, max_length=2000)
@@ -100,6 +117,26 @@ class AgentSessionUpdateToolsRequest(BaseModel):
     enabled_tools: list[str] = Field(default_factory=list, description="Tool ids to enable for this session")
 
 
+class AgentSessionVariablesUpdateRequest(BaseModel):
+    variables: dict = Field(default_factory=dict, description="Session variables to set/merge")
+    unset_keys: list[str] | None = Field(default=None, description="Variable keys to remove")
+    replace: bool = Field(default=False, description="If true, replace the entire variables object")
+
+
+class AgentSessionClarificationQuestion(BaseModel):
+    id: str = Field(..., min_length=1, max_length=100)
+    question: str = Field(..., min_length=1, max_length=2000)
+    required: bool = Field(default=True)
+    type: str = Field(default="string", description="string|enum|boolean|number|object")
+    options: list[str] | None = None
+    default: Any = None
+
+
+class AgentSessionClarificationCreateRequest(BaseModel):
+    questions: list[AgentSessionClarificationQuestion] = Field(default_factory=list)
+    reason: str | None = Field(default=None, max_length=500)
+
+
 def _approx_token_count(payload: Any) -> int:
     try:
         text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
@@ -107,6 +144,165 @@ def _approx_token_count(payload: Any) -> int:
         text = str(payload)
     # Very rough heuristic: ~4 chars/token for English-ish payloads.
     return max(1, int((len(text) + 3) / 4))
+
+
+_EICAR_SIGNATURE = b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+_SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _safe_filename(name: str) -> str:
+    raw = str(name or "").strip() or "upload"
+    # Keep extensions; sanitize the rest.
+    parts = raw.rsplit(".", 1)
+    if len(parts) == 2 and parts[0]:
+        stem, ext = parts
+        stem = _SAFE_FILENAME_RE.sub("_", stem).strip("_") or "upload"
+        ext = _SAFE_FILENAME_RE.sub("", parts[1]).strip("_") or "bin"
+        return f"{stem}.{ext}"[:200]
+    stem = _SAFE_FILENAME_RE.sub("_", raw).strip("_") or "upload"
+    return stem[:200]
+
+
+def _scan_upload_bytes(blob: bytes) -> None:
+    if _EICAR_SIGNATURE in blob:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Malware signature detected (EICAR)")
+
+
+def _extract_text_from_upload(blob: bytes, *, max_chars: int) -> str:
+    if not blob:
+        return ""
+    try:
+        text = blob.decode("utf-8", errors="replace")
+    except Exception:
+        text = blob.decode("latin-1", errors="replace")
+    text = text.replace("\x00", "").strip()
+    if len(text) > max_chars:
+        return text[:max_chars] + "…"
+    return text
+
+
+def _normalize_classification(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    return text or None
+
+
+def _context_item_classification(metadata: Any) -> Optional[str]:
+    if not isinstance(metadata, dict):
+        return None
+    for key in (
+        "classification",
+        "data_classification",
+        "security_classification",
+        "confidentiality",
+        "sensitivity",
+    ):
+        if key in metadata:
+            return _normalize_classification(metadata.get(key))
+    return None
+
+
+def _filter_context_items_for_llm(*, items: list[Any], data_policies: Any) -> tuple[list[Any], list[dict[str, Any]]]:
+    llm_policy = None
+    if isinstance(data_policies, dict):
+        llm_policy = data_policies.get("llm")
+    llm_policy = llm_policy if isinstance(llm_policy, dict) else {}
+
+    deny_classes = llm_policy.get("deny_classifications") or llm_policy.get("blocked_classifications") or []
+    deny_set = {_normalize_classification(c) for c in deny_classes if _normalize_classification(c)}
+
+    allow_classes = llm_policy.get("allow_classifications") or llm_policy.get("allowed_classifications") or []
+    allow_set = {_normalize_classification(c) for c in allow_classes if _normalize_classification(c)}
+
+    filtered: list[Any] = []
+    blocked: list[dict[str, Any]] = []
+    for item in items:
+        metadata = getattr(item, "metadata", None)
+        classification = _context_item_classification(metadata)
+        if classification and classification in deny_set:
+            blocked.append({"item_id": str(getattr(item, "item_id", "")), "classification": classification, "reason": "denied_by_policy"})
+            continue
+        if allow_set and (classification is None or classification not in allow_set):
+            blocked.append({"item_id": str(getattr(item, "item_id", "")), "classification": classification, "reason": "not_in_allowlist"})
+            continue
+        filtered.append(item)
+    return filtered, blocked
+
+
+def _token_budget_candidates(
+    *,
+    messages: list[Any],
+    context_items: list[Any],
+    target_tokens: int,
+    message_tokens_total: int,
+    context_tokens_total: int,
+) -> list[dict[str, Any]]:
+    over_by = max(0, (int(message_tokens_total) + int(context_tokens_total)) - int(target_tokens))
+    if over_by <= 0:
+        return []
+
+    candidates: list[dict[str, Any]] = []
+    for item in context_items:
+        tokens = int(getattr(item, "token_count", 0) or 0)
+        include_mode = str(getattr(item, "include_mode", "summary") or "summary").strip().lower() or "summary"
+        if tokens <= 0:
+            continue
+        if include_mode == "full":
+            candidates.append(
+                {
+                    "kind": "context_item",
+                    "id": str(getattr(item, "item_id", "")),
+                    "item_type": str(getattr(item, "item_type", "")),
+                    "include_mode": include_mode,
+                    "token_count": tokens,
+                    "suggested_action": "switch_to_summary",
+                    "estimated_token_savings": int(tokens * 0.6),
+                    "reason": "Full context is expensive; prefer summary unless strictly required.",
+                }
+            )
+        elif include_mode == "summary":
+            candidates.append(
+                {
+                    "kind": "context_item",
+                    "id": str(getattr(item, "item_id", "")),
+                    "item_type": str(getattr(item, "item_type", "")),
+                    "include_mode": include_mode,
+                    "token_count": tokens,
+                    "suggested_action": "switch_to_search",
+                    "estimated_token_savings": int(tokens * 0.3),
+                    "reason": "Consider search-based inclusion (RAG) to reduce prompt size.",
+                }
+            )
+
+    for msg in messages[:-10]:
+        tokens = int(getattr(msg, "token_count", 0) or 0)
+        if tokens <= 0:
+            continue
+        candidates.append(
+            {
+                "kind": "message",
+                "id": str(getattr(msg, "message_id", "")),
+                "role": str(getattr(msg, "role", "")),
+                "token_count": tokens,
+                "suggested_action": "summarize_or_remove",
+                "estimated_token_savings": tokens,
+                "reason": "Older messages can be summarized/removed once captured in a session summary.",
+            }
+        )
+
+    candidates.sort(key=lambda c: int(c.get("token_count") or 0), reverse=True)
+    picked: list[dict[str, Any]] = []
+    remaining = over_by
+    for candidate in candidates:
+        if remaining <= 0:
+            break
+        savings = int(candidate.get("estimated_token_savings") or 0)
+        if savings <= 0:
+            continue
+        picked.append(candidate)
+        remaining -= savings
+    return picked
 
 
 def _plan_risk_level(plan: AgentPlan) -> str:
@@ -322,7 +518,10 @@ async def _start_agent_job_run(
         if not policy:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"tool_id not in allowlist: {step.tool_id}")
         rendered_path = str(policy.path or "")
-        for key, value in (step.path_params or {}).items():
+        path_params = dict(step.path_params or {})
+        path_params.setdefault("session_id", session_id)
+        path_params.setdefault("job_id", job_id)
+        for key, value in path_params.items():
             token = "{" + str(key) + "}"
             if token in rendered_path and value not in (None, ""):
                 rendered_path = rendered_path.replace(token, str(value))
@@ -440,6 +639,12 @@ async def get_agent_registry() -> AgentRegistry:
     return await _get_agent_registry()
 
 
+async def get_dataset_registry() -> DatasetRegistry:
+    from bff.main import get_dataset_registry as _get_dataset_registry
+
+    return await _get_dataset_registry()
+
+
 @router.post("/{session_id}/context/items", response_model=ApiResponse, status_code=status.HTTP_201_CREATED)
 async def attach_context_item(
     session_id: str,
@@ -498,6 +703,252 @@ async def attach_context_item(
     )
 
 
+@router.post("/{session_id}/context/file-upload", response_model=ApiResponse, status_code=status.HTTP_201_CREATED)
+async def upload_context_file(
+    session_id: str,
+    request: Request,
+    storage: StorageServiceDep,
+    file: UploadFile = File(...),
+    include_mode: str = Query("summary", description="full|summary|search"),
+    sessions: AgentSessionRegistry = Depends(get_agent_session_registry),
+) -> ApiResponse:
+    tenant_id, user_id, _actor = _resolve_verified_principal(request)
+    try:
+        session_id = str(UUID(session_id))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id must be a UUID") from exc
+
+    session_record = await sessions.get_session(session_id=session_id, tenant_id=tenant_id)
+    if not session_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+    _ensure_session_owner(record=session_record, user_id=user_id)
+    if str(session_record.status or "").strip().upper() == "TERMINATED":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Agent session terminated")
+
+    include_mode_value = str(include_mode or "summary").strip().lower() or "summary"
+    if include_mode_value not in {"full", "summary", "search"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="include_mode must be full|summary|search")
+
+    filename = _safe_filename(file.filename or "upload")
+    content_type = (file.content_type or "application/octet-stream").strip() or "application/octet-stream"
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+
+    agent_settings = get_settings().agent
+    max_upload_bytes = int(getattr(agent_settings, "context_upload_max_bytes", 10 * 1024 * 1024) or 10 * 1024 * 1024)
+    if len(raw) > max_upload_bytes:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large")
+
+    _scan_upload_bytes(raw)
+
+    max_text_chars = int(getattr(agent_settings, "context_upload_max_text_chars", 20000) or 20000)
+    extracted_text = _extract_text_from_upload(raw, max_chars=max_text_chars)
+    preview = extracted_text[:2000] + ("…" if len(extracted_text) > 2000 else "")
+
+    token_count = 0
+    if extracted_text:
+        token_count = _approx_token_count(extracted_text)
+
+    encryptor = encryptor_from_keys(get_settings().security.data_encryption_keys)
+    aad = f"session:{session_id}".encode("utf-8")
+    blob_to_store = encryptor.encrypt_bytes(raw, aad=aad) if encryptor is not None else raw
+
+    bucket = get_settings().storage.instance_bucket
+    key = f"agent_uploads/{tenant_id}/{session_id}/{uuid4().hex}/{filename}"
+    checksum = await storage.save_bytes(
+        bucket=bucket,
+        key=key,
+        data=blob_to_store,
+        content_type=content_type,
+        metadata={
+            "tenant_id": tenant_id,
+            "session_id": session_id,
+            "filename": filename,
+            "content_type": content_type,
+            "encrypted": "true" if encryptor is not None else "false",
+        },
+    )
+
+    extracted_value: Any = extracted_text
+    if encryptor is not None and extracted_text:
+        extracted_value = encryptor.encrypt_text(extracted_text, aad=aad)
+
+    record = await sessions.add_context_item(
+        item_id=str(uuid4()),
+        session_id=session_id,
+        tenant_id=tenant_id,
+        item_type="file_upload",
+        include_mode=include_mode_value,
+        ref={
+            "bucket": bucket,
+            "key": key,
+            "filename": filename,
+            "content_type": content_type,
+            "checksum": checksum,
+            "encrypted": bool(encryptor is not None),
+        },
+        token_count=token_count,
+        metadata={
+            "size_bytes": len(raw),
+            "extracted_text": extracted_value,
+            "extracted_text_preview": preview,
+        },
+        created_at=datetime.now(timezone.utc),
+    )
+
+    return ApiResponse.created(
+        message="Context file uploaded",
+        data={
+            "context_item": {
+                "item_id": record.item_id,
+                "session_id": record.session_id,
+                "item_type": record.item_type,
+                "include_mode": record.include_mode,
+                "ref": record.ref,
+                "token_count": record.token_count,
+                "metadata": {k: v for k, v in (record.metadata or {}).items() if k != "extracted_text"},
+                "created_at": record.created_at.isoformat(),
+                "updated_at": record.updated_at.isoformat(),
+            }
+        },
+    )
+
+
+@router.post("/{session_id}/ci-results", response_model=ApiResponse, status_code=status.HTTP_201_CREATED)
+async def create_ci_result(
+    session_id: str,
+    body: AgentSessionCIResultCreateRequest,
+    request: Request,
+    sessions: AgentSessionRegistry = Depends(get_agent_session_registry),
+) -> ApiResponse:
+    tenant_id, user_id, _actor = _resolve_verified_principal(request)
+    try:
+        session_id = str(UUID(session_id))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id must be a UUID") from exc
+
+    record = await sessions.get_session(session_id=session_id, tenant_id=tenant_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+    _ensure_session_owner(record=record, user_id=user_id)
+
+    payload = sanitize_input(body.model_dump(exclude_none=True))
+    status_value = str(payload.get("status") or "").strip().lower() or "unknown"
+    if status_value not in {"queued", "in_progress", "success", "failure", "cancelled", "skipped", "unknown"}:
+        status_value = "unknown"
+
+    def _safe_uuid(value: Any) -> Optional[str]:
+        if value in (None, ""):
+            return None
+        try:
+            return str(UUID(str(value)))
+        except Exception:
+            return None
+
+    ci_record = await sessions.record_ci_result(
+        ci_result_id=str(uuid4()),
+        session_id=session_id,
+        tenant_id=tenant_id,
+        job_id=_safe_uuid(payload.get("job_id")),
+        plan_id=_safe_uuid(payload.get("plan_id")),
+        run_id=_safe_uuid(payload.get("run_id")),
+        provider=str(payload.get("provider") or "").strip() or None,
+        status=status_value,
+        details_url=str(payload.get("details_url") or "").strip() or None,
+        summary=str(payload.get("summary") or "").strip() or None,
+        checks=payload.get("checks") if isinstance(payload.get("checks"), list) else None,
+        raw=payload.get("raw") if isinstance(payload.get("raw"), dict) else None,
+        created_at=datetime.now(timezone.utc),
+    )
+    with contextlib.suppress(Exception):
+        await sessions.append_event(
+            event_id=str(uuid4()),
+            session_id=session_id,
+            tenant_id=tenant_id,
+            event_type="CI_RESULT",
+            occurred_at=datetime.now(timezone.utc),
+            data={
+                "ci_result_id": ci_record.ci_result_id,
+                "status": ci_record.status,
+                "provider": ci_record.provider,
+                "details_url": ci_record.details_url,
+                "summary": ci_record.summary,
+                "job_id": ci_record.job_id,
+                "plan_id": ci_record.plan_id,
+                "run_id": ci_record.run_id,
+            },
+        )
+
+    return ApiResponse.created(
+        message="CI result recorded",
+        data={
+            "ci_result": {
+                "ci_result_id": ci_record.ci_result_id,
+                "session_id": ci_record.session_id,
+                "tenant_id": ci_record.tenant_id,
+                "job_id": ci_record.job_id,
+                "plan_id": ci_record.plan_id,
+                "run_id": ci_record.run_id,
+                "provider": ci_record.provider,
+                "status": ci_record.status,
+                "details_url": ci_record.details_url,
+                "summary": ci_record.summary,
+                "checks": ci_record.checks,
+                "raw": ci_record.raw,
+                "created_at": ci_record.created_at.isoformat(),
+            }
+        },
+    )
+
+
+@router.get("/{session_id}/ci-results", response_model=ApiResponse)
+async def list_ci_results(
+    session_id: str,
+    request: Request,
+    sessions: AgentSessionRegistry = Depends(get_agent_session_registry),
+    limit: int = Query(200, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> ApiResponse:
+    tenant_id, user_id, _actor = _resolve_verified_principal(request)
+    try:
+        session_id = str(UUID(session_id))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id must be a UUID") from exc
+
+    record = await sessions.get_session(session_id=session_id, tenant_id=tenant_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+    _ensure_session_owner(record=record, user_id=user_id)
+
+    results = await sessions.list_ci_results(session_id=session_id, tenant_id=tenant_id, limit=limit, offset=offset)
+    return ApiResponse.success(
+        message="CI results fetched",
+        data={
+            "session_id": session_id,
+            "count": len(results),
+            "ci_results": [
+                {
+                    "ci_result_id": r.ci_result_id,
+                    "session_id": r.session_id,
+                    "tenant_id": r.tenant_id,
+                    "job_id": r.job_id,
+                    "plan_id": r.plan_id,
+                    "run_id": r.run_id,
+                    "provider": r.provider,
+                    "status": r.status,
+                    "details_url": r.details_url,
+                    "summary": r.summary,
+                    "checks": r.checks,
+                    "raw": r.raw,
+                    "created_at": r.created_at.isoformat(),
+                }
+                for r in results
+            ],
+        },
+    )
+
+
 @router.get("/{session_id}/context/items", response_model=ApiResponse)
 async def list_context_items(
     session_id: str,
@@ -541,6 +992,80 @@ async def list_context_items(
     )
 
 
+@router.get("/{session_id}/token-budget", response_model=ApiResponse)
+async def get_session_token_budget(
+    session_id: str,
+    request: Request,
+    sessions: AgentSessionRegistry = Depends(get_agent_session_registry),
+    model_registry: AgentModelRegistry = Depends(get_agent_model_registry),
+    soft_limit_ratio: float = Query(0.8, ge=0.1, le=1.0),
+    hard_limit_ratio: float = Query(1.0, ge=0.1, le=2.0),
+) -> ApiResponse:
+    tenant_id, user_id, _actor = _resolve_verified_principal(request)
+    try:
+        session_id = str(UUID(session_id))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id must be a UUID") from exc
+
+    session_record = await sessions.get_session(session_id=session_id, tenant_id=tenant_id)
+    if not session_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+    _ensure_session_owner(record=session_record, user_id=user_id)
+
+    messages = await sessions.list_messages(session_id=session_id, tenant_id=tenant_id, limit=2000, offset=0, include_removed=False)
+    context_items = await sessions.list_context_items(session_id=session_id, tenant_id=tenant_id, limit=500, offset=0)
+
+    message_tokens_total = sum(int(getattr(m, "token_count", 0) or 0) for m in messages)
+    context_tokens_total = sum(int(getattr(i, "token_count", 0) or 0) for i in context_items)
+
+    selected_model = session_record.selected_model
+    model_max_context_tokens = None
+    if selected_model:
+        with contextlib.suppress(Exception):
+            model = await model_registry.get_model(model_id=selected_model)
+            if model and getattr(model, "max_context_tokens", None):
+                model_max_context_tokens = int(getattr(model, "max_context_tokens") or 0) or None
+    if model_max_context_tokens is None:
+        model_max_context_tokens = 8192
+
+    soft_limit_tokens = int(model_max_context_tokens * float(soft_limit_ratio))
+    hard_limit_tokens = int(model_max_context_tokens * float(hard_limit_ratio))
+    estimated_prompt_tokens = int(message_tokens_total + context_tokens_total)
+
+    candidates = _token_budget_candidates(
+        messages=messages,
+        context_items=context_items,
+        target_tokens=soft_limit_tokens,
+        message_tokens_total=message_tokens_total,
+        context_tokens_total=context_tokens_total,
+    )
+
+    return ApiResponse.success(
+        message="Token budget fetched",
+        data={
+            "session_id": session_id,
+            "selected_model": selected_model,
+            "model_max_context_tokens": model_max_context_tokens,
+            "soft_limit_ratio": float(soft_limit_ratio),
+            "hard_limit_ratio": float(hard_limit_ratio),
+            "totals": {
+                "message_tokens_total": message_tokens_total,
+                "context_tokens_total": context_tokens_total,
+                "estimated_prompt_tokens": estimated_prompt_tokens,
+            },
+            "limits": {
+                "soft_limit_tokens": soft_limit_tokens,
+                "hard_limit_tokens": hard_limit_tokens,
+            },
+            "flags": {
+                "over_soft_limit": estimated_prompt_tokens > soft_limit_tokens,
+                "over_hard_limit": estimated_prompt_tokens > hard_limit_tokens,
+            },
+            "candidates": candidates,
+        },
+    )
+
+
 @router.delete("/{session_id}/context/items/{item_id}", response_model=ApiResponse)
 async def remove_context_item(
     session_id: str,
@@ -548,7 +1073,7 @@ async def remove_context_item(
     request: Request,
     sessions: AgentSessionRegistry = Depends(get_agent_session_registry),
 ) -> ApiResponse:
-    tenant_id, _user_id, _actor = _resolve_verified_principal(request)
+    tenant_id, user_id, _actor = _resolve_verified_principal(request)
     try:
         session_id = str(UUID(session_id))
         item_uuid = str(UUID(item_id))
@@ -558,6 +1083,7 @@ async def remove_context_item(
     record = await sessions.get_session(session_id=session_id, tenant_id=tenant_id)
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+    _ensure_session_owner(record=record, user_id=user_id)
 
     removed = await sessions.remove_context_item(session_id=session_id, tenant_id=tenant_id, item_id=item_uuid)
     if removed <= 0:
@@ -603,9 +1129,13 @@ async def create_session(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Model not allowed for tenant")
 
     enabled_tools = payload.get("enabled_tools") if "enabled_tools" in payload else None
-    if enabled_tools is None and policy is not None and allowed_tools is not None:
-        enabled_tools = list(allowed_tools)
-    tools_restricted = bool(enabled_tools is not None)
+    if enabled_tools is None:
+        if policy is not None and allowed_tools is not None:
+            enabled_tools = list(allowed_tools)
+        else:
+            policies = await tool_registry.list_tool_policies(status="ACTIVE", limit=500)
+            enabled_tools = [p.tool_id for p in policies if str(p.tool_id).strip()]
+    tools_restricted = True
 
     if enabled_tools is not None:
         enabled_tools = [str(tool_id).strip() for tool_id in enabled_tools if str(tool_id).strip()]
@@ -676,6 +1206,73 @@ async def list_sessions(
                     "updated_at": r.updated_at.isoformat(),
                 }
                 for r in records
+            ],
+        },
+    )
+
+
+@router.get("/metrics/llm-usage", response_model=ApiResponse)
+async def get_llm_usage_metrics(
+    request: Request,
+    sessions: AgentSessionRegistry = Depends(get_agent_session_registry),
+    scope: str = Query("tenant", description="tenant|user"),
+    group_by: str = Query("model", description="tenant|model|user|model_user"),
+    start_time: datetime | None = Query(None),
+    end_time: datetime | None = Query(None),
+    limit: int = Query(200, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> ApiResponse:
+    tenant_id, user_id, _actor = _resolve_verified_principal(request)
+    scope_value = str(scope or "").strip().lower() or "tenant"
+    if scope_value not in {"tenant", "user"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="scope must be tenant|user")
+    created_by = user_id if scope_value == "user" else None
+
+    try:
+        rows = await sessions.aggregate_llm_usage(
+            tenant_id=tenant_id,
+            group_by=group_by,
+            created_by=created_by,
+            start_time=start_time,
+            end_time=end_time,
+            limit=limit,
+            offset=offset,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    totals = {
+        "calls": sum(int(r.calls) for r in rows),
+        "prompt_tokens": sum(int(r.prompt_tokens) for r in rows),
+        "completion_tokens": sum(int(r.completion_tokens) for r in rows),
+        "total_tokens": sum(int(r.total_tokens) for r in rows),
+        "cost_estimate": float(sum(float(r.cost_estimate) for r in rows)),
+    }
+
+    return ApiResponse.success(
+        message="LLM usage metrics fetched",
+        data={
+            "tenant_id": tenant_id,
+            "scope": scope_value,
+            "group_by": str(group_by or "").strip() or "model",
+            "start_time": start_time.isoformat() if start_time else None,
+            "end_time": end_time.isoformat() if end_time else None,
+            "count": len(rows),
+            "totals": totals,
+            "rows": [
+                {
+                    "tenant_id": r.tenant_id,
+                    "user_id": r.user_id,
+                    "model_id": r.model_id,
+                    "calls": r.calls,
+                    "prompt_tokens": r.prompt_tokens,
+                    "completion_tokens": r.completion_tokens,
+                    "total_tokens": r.total_tokens,
+                    "cost_estimate": r.cost_estimate,
+                    "first_at": r.first_at.isoformat(),
+                    "last_at": r.last_at.isoformat(),
+                }
+                for r in rows
             ],
         },
     )
@@ -802,8 +1399,9 @@ async def list_session_models(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id must be a UUID") from exc
 
     session_record = await sessions.get_session(session_id=session_id, tenant_id=tenant_id)
-    if not session_record or session_record.created_by != user_id:
+    if not session_record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+    _ensure_session_owner(record=session_record, user_id=user_id)
 
     policy = await policy_registry.get_tenant_policy(tenant_id=tenant_id)
     allowed_models = [str(m).strip() for m in (policy.allowed_models if policy else []) if str(m).strip()]
@@ -852,8 +1450,9 @@ async def update_session_model(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id must be a UUID") from exc
 
     session_record = await sessions.get_session(session_id=session_id, tenant_id=tenant_id)
-    if not session_record or session_record.created_by != user_id:
+    if not session_record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+    _ensure_session_owner(record=session_record, user_id=user_id)
     if str(session_record.status or "").strip().upper() == "TERMINATED":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Agent session terminated")
 
@@ -917,8 +1516,9 @@ async def list_session_tools(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id must be a UUID") from exc
 
     session_record = await sessions.get_session(session_id=session_id, tenant_id=tenant_id)
-    if not session_record or session_record.created_by != user_id:
+    if not session_record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+    _ensure_session_owner(record=session_record, user_id=user_id)
 
     policy = await policy_registry.get_tenant_policy(tenant_id=tenant_id)
     allowed_tools = {str(t).strip() for t in (policy.allowed_tools if policy else []) if str(t).strip()}
@@ -966,8 +1566,9 @@ async def update_session_tools(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id must be a UUID") from exc
 
     session_record = await sessions.get_session(session_id=session_id, tenant_id=tenant_id)
-    if not session_record or session_record.created_by != user_id:
+    if not session_record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+    _ensure_session_owner(record=session_record, user_id=user_id)
     if str(session_record.status or "").strip().upper() == "TERMINATED":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Agent session terminated")
 
@@ -1016,14 +1617,133 @@ async def update_session_tools(
     )
 
 
+@router.put("/{session_id}/variables", response_model=ApiResponse)
+async def update_session_variables(
+    session_id: str,
+    body: AgentSessionVariablesUpdateRequest,
+    request: Request,
+    sessions: AgentSessionRegistry = Depends(get_agent_session_registry),
+) -> ApiResponse:
+    tenant_id, user_id, _actor = _resolve_verified_principal(request)
+    try:
+        session_id = str(UUID(session_id))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id must be a UUID") from exc
+
+    session_record = await sessions.get_session(session_id=session_id, tenant_id=tenant_id)
+    if not session_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+    _ensure_session_owner(record=session_record, user_id=user_id)
+    if str(session_record.status or "").strip().upper() == "TERMINATED":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Agent session terminated")
+
+    payload = sanitize_input(body.model_dump(exclude_none=True))
+    variables = payload.get("variables") if isinstance(payload.get("variables"), dict) else {}
+    unset_keys = payload.get("unset_keys") if isinstance(payload.get("unset_keys"), list) else []
+    unset_keys = [str(k).strip() for k in unset_keys if str(k).strip()]
+    replace = bool(payload.get("replace") or False)
+
+    meta = dict(session_record.metadata or {})
+    existing = meta.get("variables")
+    existing_vars = existing if isinstance(existing, dict) else {}
+    next_vars: dict[str, Any] = dict(variables) if replace else {**existing_vars, **variables}
+    for key in unset_keys:
+        next_vars.pop(key, None)
+    meta["variables"] = next_vars
+
+    updated = await sessions.update_session(session_id=session_id, tenant_id=tenant_id, metadata=meta)
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+
+    with contextlib.suppress(Exception):
+        await sessions.append_event(
+            event_id=str(uuid4()),
+            session_id=session_id,
+            tenant_id=tenant_id,
+            event_type="SESSION_VARIABLES_UPDATED",
+            occurred_at=datetime.now(timezone.utc),
+            data={
+                "keys_set": sorted(list(variables.keys())),
+                "keys_unset": unset_keys,
+                "replace": replace,
+            },
+        )
+    return ApiResponse.success(message="Session variables updated", data={"session_id": session_id, "variables": next_vars})
+
+
+@router.post("/{session_id}/clarifications", response_model=ApiResponse, status_code=status.HTTP_202_ACCEPTED)
+async def create_clarification_request(
+    session_id: str,
+    body: AgentSessionClarificationCreateRequest,
+    request: Request,
+    sessions: AgentSessionRegistry = Depends(get_agent_session_registry),
+) -> ApiResponse:
+    tenant_id, user_id, _actor = _resolve_verified_principal(request)
+    try:
+        session_id = str(UUID(session_id))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id must be a UUID") from exc
+
+    session_record = await sessions.get_session(session_id=session_id, tenant_id=tenant_id)
+    if not session_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+    _ensure_session_owner(record=session_record, user_id=user_id)
+    if str(session_record.status or "").strip().upper() == "TERMINATED":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Agent session terminated")
+
+    payload = sanitize_input(body.model_dump(exclude_none=True))
+    questions = payload.get("questions") if isinstance(payload.get("questions"), list) else []
+    if not questions:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="questions are required")
+
+    clarification_id = str(uuid4())
+    reason = str(payload.get("reason") or "").strip() or None
+    await sessions.add_message(
+        message_id=str(uuid4()),
+        session_id=session_id,
+        tenant_id=tenant_id,
+        role="system",
+        content="Clarification required",
+        token_count=_approx_token_count(questions),
+        metadata={
+            "kind": "clarification_request",
+            "clarification_id": clarification_id,
+            "reason": reason,
+            "questions": questions,
+        },
+        created_at=datetime.now(timezone.utc),
+    )
+    with contextlib.suppress(Exception):
+        await sessions.append_event(
+            event_id=str(uuid4()),
+            session_id=session_id,
+            tenant_id=tenant_id,
+            event_type="CLARIFICATION_REQUESTED",
+            occurred_at=datetime.now(timezone.utc),
+            data={
+                "clarification_id": clarification_id,
+                "reason": reason,
+                "questions": questions,
+            },
+        )
+
+    await sessions.update_session(session_id=session_id, tenant_id=tenant_id, status="WAITING_APPROVAL")
+    return ApiResponse.accepted(
+        message="Clarification requested",
+        data={"session_id": session_id, "clarification_id": clarification_id, "questions": questions},
+    )
+
+
 @router.post("/{session_id}/summarize", response_model=ApiResponse)
 async def summarize_session(
     session_id: str,
     body: AgentSessionSummarizeRequest,
     request: Request,
     llm: LLMGatewayDep,
+    redis_service: RedisServiceDep,
     audit_store: AuditLogStoreDep,
     sessions: AgentSessionRegistry = Depends(get_agent_session_registry),
+    policy_registry: AgentPolicyRegistry = Depends(get_agent_policy_registry),
 ) -> ApiResponse:
     tenant_id, user_id, actor = _resolve_verified_principal(request)
     try:
@@ -1034,6 +1754,15 @@ async def summarize_session(
     record = await sessions.get_session(session_id=session_id, tenant_id=tenant_id)
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+    _ensure_session_owner(record=record, user_id=user_id)
+    policy = await policy_registry.get_tenant_policy(tenant_id=tenant_id)
+    allowed_models = [str(m).strip() for m in (policy.allowed_models if policy else []) if str(m).strip()]
+    if policy and policy.default_model:
+        allowed_models.append(str(policy.default_model).strip())
+    allowed_models = [m for m in allowed_models if m]
+    selected_model = record.selected_model
+    if allowed_models and selected_model and selected_model not in set(allowed_models):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Model not allowed for tenant")
 
     payload = sanitize_input(body.model_dump(exclude_none=True))
     max_messages = int(payload.get("max_messages") or 200)
@@ -1062,6 +1791,19 @@ async def summarize_session(
     )
     user_prompt = f"Session transcript:\n{transcript}\n"
 
+    try:
+        await enforce_llm_quota(
+            redis_service=redis_service,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            model_id=str(selected_model or getattr(llm, "model", "") or "").strip(),
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            data_policies=(policy.data_policies if policy else None),
+        )
+    except LLMQuotaExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)) from exc
+
     started = datetime.now(timezone.utc)
     try:
         summary_obj, meta = await llm.complete_json(
@@ -1069,6 +1811,9 @@ async def summarize_session(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=_SummaryEnvelope,
+            model=selected_model,
+            allowed_models=allowed_models or None,
+            redis_service=redis_service,
             audit_store=audit_store,
             audit_partition_key=f"agent_session:{session_id}",
             audit_actor=actor,
@@ -1076,6 +1821,43 @@ async def summarize_session(
             audit_metadata={"tenant_id": tenant_id, "session_id": session_id},
         )
         latency_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+        with contextlib.suppress(Exception):
+            await sessions.record_llm_call(
+                llm_call_id=str(uuid4()),
+                session_id=session_id,
+                tenant_id=tenant_id,
+                job_id=None,
+                plan_id=None,
+                call_type="session_summary",
+                provider=meta.provider,
+                model_id=meta.model,
+                cache_hit=bool(meta.cache_hit),
+                latency_ms=int(getattr(meta, "latency_ms", latency_ms) or latency_ms),
+                prompt_tokens=int(getattr(meta, "prompt_tokens", 0) or 0),
+                completion_tokens=int(getattr(meta, "completion_tokens", 0) or 0),
+                total_tokens=int(getattr(meta, "total_tokens", 0) or 0),
+                cost_estimate=float(getattr(meta, "cost_estimate", 0.0) or 0.0) if getattr(meta, "cost_estimate", None) is not None else None,
+                input_digest=digest_for_audit({"task": "SESSION_SUMMARY", "session_id": session_id}),
+                output_digest=digest_for_audit({"summary": str(summary_obj.summary or "").strip()}),
+            )
+            await sessions.append_event(
+                event_id=str(uuid4()),
+                session_id=session_id,
+                tenant_id=tenant_id,
+                event_type="LLM_CALL",
+                occurred_at=datetime.now(timezone.utc),
+                data={
+                    "call_type": "session_summary",
+                    "provider": meta.provider,
+                    "model": meta.model,
+                    "cache_hit": bool(meta.cache_hit),
+                    "latency_ms": int(getattr(meta, "latency_ms", latency_ms) or latency_ms),
+                    "prompt_tokens": int(getattr(meta, "prompt_tokens", 0) or 0),
+                    "completion_tokens": int(getattr(meta, "completion_tokens", 0) or 0),
+                    "total_tokens": int(getattr(meta, "total_tokens", 0) or 0),
+                    "cost_estimate": float(getattr(meta, "cost_estimate", 0.0) or 0.0),
+                },
+            )
         summary_text = str(summary_obj.summary or "").strip()
         await sessions.update_session(session_id=session_id, tenant_id=tenant_id, summary=summary_text)
         await sessions.add_message(
@@ -1085,12 +1867,17 @@ async def summarize_session(
             role="system",
             content=summary_text,
             content_digest=digest_for_audit({"summary": summary_text}),
+            token_count=_approx_token_count(summary_text),
+            cost_estimate=float(getattr(meta, "cost_estimate", 0.0) or 0.0) if getattr(meta, "cost_estimate", None) is not None else None,
             latency_ms=latency_ms,
             metadata={
                 "kind": "session_summary",
                 "provider": meta.provider,
                 "model": meta.model,
                 "cache_hit": meta.cache_hit,
+                "prompt_tokens": int(getattr(meta, "prompt_tokens", 0) or 0),
+                "completion_tokens": int(getattr(meta, "completion_tokens", 0) or 0),
+                "total_tokens": int(getattr(meta, "total_tokens", 0) or 0),
             },
             created_at=datetime.now(timezone.utc),
         )
@@ -1156,6 +1943,7 @@ async def remove_messages(
     record = await sessions.get_session(session_id=session_id, tenant_id=tenant_id)
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+    _ensure_session_owner(record=record, user_id=user_id)
 
     payload = sanitize_input(body.model_dump(exclude_none=True))
     message_ids = payload.get("message_ids")
@@ -1246,9 +2034,11 @@ async def post_message(
     audit_store: AuditLogStoreDep,
     sessions: AgentSessionRegistry = Depends(get_agent_session_registry),
     policy_registry: AgentPolicyRegistry = Depends(get_agent_policy_registry),
+    model_registry: AgentModelRegistry = Depends(get_agent_model_registry),
     tool_registry: AgentToolRegistry = Depends(get_agent_tool_registry),
     plan_registry: AgentPlanRegistry = Depends(get_agent_plan_registry),
     agent_registry: AgentRegistry = Depends(get_agent_registry),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
 ) -> ApiResponse:
     tenant_id, user_id, actor = _resolve_verified_principal(request)
     try:
@@ -1266,6 +2056,20 @@ async def post_message(
     tools_restricted = bool((session_record.metadata or {}).get("tools_restricted"))
     allowed_tool_ids = list(session_record.enabled_tools or []) if tools_restricted else None
     selected_model = session_record.selected_model
+    policy = await policy_registry.get_tenant_policy(tenant_id=tenant_id)
+    allowed_models = [str(m).strip() for m in (policy.allowed_models if policy else []) if str(m).strip()]
+    if policy and policy.default_model:
+        allowed_models.append(str(policy.default_model).strip())
+    allowed_models = [m for m in allowed_models if m]
+    if allowed_models and selected_model and selected_model not in set(allowed_models):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Model not allowed for tenant")
+
+    use_native_tool_calling = False
+    if bool(get_settings().llm.native_tool_calling) and selected_model:
+        with contextlib.suppress(Exception):
+            model_record = await model_registry.get_model(model_id=str(selected_model))
+            if model_record and bool(getattr(model_record, "supports_native_tool_calling", False)):
+                use_native_tool_calling = True
 
     payload = sanitize_input(body.model_dump(exclude_none=True))
     content = str(payload.get("content") or "").strip()
@@ -1303,12 +2107,200 @@ async def post_message(
         return ApiResponse.accepted(message="Message recorded", data={"session_id": session_id})
 
     attached_items = await sessions.list_context_items(session_id=session_id, tenant_id=tenant_id, limit=200, offset=0)
+    filtered_items, blocked_items = _filter_context_items_for_llm(
+        items=attached_items,
+        data_policies=(policy.data_policies if policy else {}),
+    )
+    if blocked_items:
+        with contextlib.suppress(Exception):
+            await sessions.append_event(
+                event_id=str(uuid4()),
+                session_id=session_id,
+                tenant_id=tenant_id,
+                event_type="SESSION_CONTEXT_BLOCKED",
+                occurred_at=datetime.now(timezone.utc),
+                data={"blocked": blocked_items},
+            )
+
+    session_vars = {}
+    if isinstance(session_record.metadata, dict):
+        vars_candidate = session_record.metadata.get("variables")
+        if isinstance(vars_candidate, dict):
+            session_vars = dict(vars_candidate)
+
+    recent_tool_calls: list[dict[str, Any]] = []
+    with contextlib.suppress(Exception):
+        calls = await sessions.list_tool_calls(session_id=session_id, tenant_id=tenant_id, limit=200, offset=0)
+        for call in (calls or [])[-50:]:
+            recent_tool_calls.append(
+                {
+                    "tool_run_id": call.tool_run_id,
+                    "job_id": call.job_id,
+                    "plan_id": call.plan_id,
+                    "run_id": call.run_id,
+                    "step_id": call.step_id,
+                    "tool_id": call.tool_id,
+                    "method": call.method,
+                    "path": call.path,
+                    "status": call.status,
+                    "error_code": call.error_code,
+                    "error_message": call.error_message,
+                    "side_effect_summary": call.side_effect_summary,
+                    "started_at": call.started_at.isoformat() if call.started_at else None,
+                    "finished_at": call.finished_at.isoformat() if call.finished_at else None,
+                    "latency_ms": call.latency_ms,
+                    "request_digest": call.request_digest,
+                    "response_digest": call.response_digest,
+                }
+            )
+
+    recent_ci_results: list[dict[str, Any]] = []
+    with contextlib.suppress(Exception):
+        ci_results = await sessions.list_ci_results(session_id=session_id, tenant_id=tenant_id, limit=200, offset=0)
+        for ci in (ci_results or [])[-20:]:
+            recent_ci_results.append(
+                {
+                    "ci_result_id": ci.ci_result_id,
+                    "job_id": ci.job_id,
+                    "plan_id": ci.plan_id,
+                    "run_id": ci.run_id,
+                    "provider": ci.provider,
+                    "status": ci.status,
+                    "details_url": ci.details_url,
+                    "summary": ci.summary,
+                    "created_at": ci.created_at.isoformat(),
+                }
+            )
+
+    encryptor = encryptor_from_keys(get_settings().security.data_encryption_keys)
+    aad = f"session:{session_id}".encode("utf-8")
+
+    dataset_ids: list[str] = []
+    dataset_db_name = None
+    dataset_branch = None
+    dataset_mode = "summary"
+    for item in filtered_items:
+        if str(getattr(item, "item_type", "") or "").strip().lower() != "dataset":
+            continue
+        mode = str(getattr(item, "include_mode", "summary") or "summary").strip().lower() or "summary"
+        if mode == "full":
+            dataset_mode = "full"
+        elif mode == "search" and dataset_mode != "full":
+            dataset_mode = "search"
+        ref_obj = getattr(item, "ref", None)
+        if isinstance(ref_obj, dict):
+            dataset_db_name = dataset_db_name or str(ref_obj.get("db_name") or "").strip() or None
+            dataset_branch = dataset_branch or str(ref_obj.get("branch") or ref_obj.get("dataset_branch") or "").strip() or None
+            for key in ("dataset_id", "datasetId"):
+                value = str(ref_obj.get(key) or "").strip()
+                if value:
+                    dataset_ids.append(value)
+            ids_value = ref_obj.get("dataset_ids") or ref_obj.get("datasetIds")
+            if isinstance(ids_value, list):
+                dataset_ids.extend([str(v).strip() for v in ids_value if str(v).strip()])
+
+    data_scope_obj = payload.get("data_scope")
+    if isinstance(data_scope_obj, dict):
+        dataset_db_name = dataset_db_name or str(data_scope_obj.get("db_name") or "").strip() or None
+        dataset_branch = dataset_branch or str(data_scope_obj.get("branch") or "").strip() or None
+        ds = str(data_scope_obj.get("dataset_id") or data_scope_obj.get("datasetId") or "").strip()
+        if ds:
+            dataset_ids.append(ds)
+
+    dataset_db_name = dataset_db_name or str(session_vars.get("db_name") or "").strip() or None
+    dataset_branch = dataset_branch or str(session_vars.get("branch") or "").strip() or None
+
+    dataset_ids = [d for d in (str(v).strip() for v in dataset_ids) if d]
+    dataset_ids = sorted({d for d in dataset_ids})
+
+    pipeline_context = None
+    if dataset_db_name:
+        max_sample_rows = 20 if dataset_mode == "full" else (10 if dataset_mode == "summary" else 5)
+        with contextlib.suppress(Exception):
+            pipeline_context = await build_pipeline_context_pack(
+                db_name=dataset_db_name,
+                branch=dataset_branch,
+                dataset_ids=dataset_ids or None,
+                dataset_registry=dataset_registry,
+                max_sample_rows=max_sample_rows,
+            )
+
+    document_search: list[dict[str, Any]] = []
+    for item in filtered_items:
+        if str(getattr(item, "item_type", "") or "").strip().lower() != "document_bundle":
+            continue
+        if str(getattr(item, "include_mode", "summary") or "summary").strip().lower() != "search":
+            continue
+        ref_obj = getattr(item, "ref", None)
+        if not isinstance(ref_obj, dict):
+            continue
+        bundle_id = str(ref_obj.get("bundle_id") or ref_obj.get("document_bundle_id") or "").strip()
+        if not bundle_id:
+            continue
+        filters = ref_obj.get("filters") if isinstance(ref_obj.get("filters"), dict) else {}
+        try:
+            from bff.routers.context7 import get_context7_client
+
+            client = await get_context7_client()
+            results = await client.search(query=content, limit=5, filters={**filters, "bundle_id": bundle_id})
+        except Exception as exc:
+            document_search.append({"bundle_id": bundle_id, "error": str(exc)})
+            continue
+
+        citations: list[dict[str, Any]] = []
+        chunks: list[dict[str, Any]] = []
+        for idx, res in enumerate(results or []):
+            obj = dict(res) if isinstance(res, dict) else {"value": res}
+            doc_id = str(obj.get("id") or obj.get("entity_id") or obj.get("doc_id") or f"result_{idx}").strip()
+            snippet = obj.get("snippet") or obj.get("content") or obj.get("text") or ""
+            if not isinstance(snippet, str):
+                snippet = str(snippet)
+            snippet = snippet.strip()
+            if len(snippet) > 1200:
+                snippet = snippet[:1200] + "…"
+            citation_id = f"context7:{bundle_id}:{doc_id}"
+            citations.append({"citation_id": citation_id, "doc_id": doc_id, "title": obj.get("title") or obj.get("name")})
+            chunks.append({"citation_id": citation_id, "snippet": snippet, "score": obj.get("score")})
+
+        document_search.append(
+            {
+                "bundle_id": bundle_id,
+                "query": content,
+                "results": chunks,
+                "citations": citations,
+            }
+        )
+
+    rendered_uploads: list[dict[str, Any]] = []
+    for item in filtered_items:
+        if str(getattr(item, "item_type", "") or "").strip().lower() != "file_upload":
+            continue
+        ref_obj = getattr(item, "ref", None)
+        meta_obj = getattr(item, "metadata", None)
+        meta_obj = meta_obj if isinstance(meta_obj, dict) else {}
+        extracted = meta_obj.get("extracted_text")
+        if encryptor is not None and is_encrypted_text(extracted):
+            with contextlib.suppress(Exception):
+                extracted = encryptor.decrypt_text(str(extracted), aad=aad)
+        preview = meta_obj.get("extracted_text_preview")
+        mode = str(getattr(item, "include_mode", "summary") or "summary").strip().lower() or "summary"
+        rendered_uploads.append(
+            {
+                "item_id": item.item_id,
+                "filename": (ref_obj.get("filename") if isinstance(ref_obj, dict) else None) or None,
+                "include_mode": mode,
+                "text": extracted if mode == "full" else (preview or ""),
+                "size_bytes": meta_obj.get("size_bytes"),
+            }
+        )
+
     context_pack = {
         "session": {
             "session_id": session_id,
             "summary": session_record.summary,
             "selected_model": session_record.selected_model,
             "enabled_tools": list(session_record.enabled_tools or []),
+            "variables": session_vars,
         },
         "attached_context": [
             {
@@ -1319,24 +2311,37 @@ async def post_message(
                 "token_count": item.token_count,
                 "metadata": item.metadata,
             }
-            for item in attached_items
+            for item in filtered_items
         ],
+        "recent_tool_calls": recent_tool_calls,
+        "ci_results": recent_ci_results,
+        "pipeline_context": pipeline_context,
+        "document_search": document_search,
+        "uploads": rendered_uploads,
     }
 
     compile_started = datetime.now(timezone.utc)
-    compile_result = await compile_agent_plan(
-        goal=content,
-        data_scope=payload.get("data_scope"),
-        answers=payload.get("answers"),
-        context_pack=context_pack,
-        actor=actor,
-        allowed_tool_ids=allowed_tool_ids,
-        selected_model=selected_model,
-        tool_registry=tool_registry,
-        llm_gateway=llm,
-        redis_service=redis_service,
-        audit_store=audit_store,
-    )
+    try:
+        compile_result = await compile_agent_plan(
+            goal=content,
+            data_scope=payload.get("data_scope"),
+            answers=payload.get("answers"),
+            context_pack=context_pack,
+            actor=actor,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            data_policies=(policy.data_policies if policy else None),
+            allowed_tool_ids=allowed_tool_ids,
+            selected_model=selected_model,
+            allowed_models=allowed_models or None,
+            use_native_tool_calling=use_native_tool_calling,
+            tool_registry=tool_registry,
+            llm_gateway=llm,
+            redis_service=redis_service,
+            audit_store=audit_store,
+        )
+    except LLMQuotaExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)) from exc
     compile_latency_ms = int((datetime.now(timezone.utc) - compile_started).total_seconds() * 1000)
     if compile_result.llm_meta is not None:
         with contextlib.suppress(Exception):
@@ -1420,14 +2425,19 @@ async def post_message(
         job_metadata["approval_request_id"] = approval_request_id
 
     job_id = str(uuid4())
-    await sessions.create_job(
-        job_id=job_id,
-        session_id=session_id,
-        tenant_id=tenant_id,
-        plan_id=plan.plan_id,
-        status="WAITING_APPROVAL" if plan.requires_approval else "PENDING",
-        metadata=job_metadata,
-    )
+    try:
+        await sessions.create_job(
+            job_id=job_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            plan_id=plan.plan_id,
+            status="WAITING_APPROVAL" if plan.requires_approval else "PENDING",
+            metadata=job_metadata,
+        )
+    except ValueError as exc:
+        if "active job" in str(exc).lower():
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Session already has an active job") from exc
+        raise
     with contextlib.suppress(Exception):
         await sessions.append_event(
             event_id=str(uuid4()),
@@ -1565,7 +2575,7 @@ async def create_job_from_plan(
     plan_registry: AgentPlanRegistry = Depends(get_agent_plan_registry),
     agent_registry: AgentRegistry = Depends(get_agent_registry),
 ) -> ApiResponse:
-    tenant_id, _user_id, _actor = _resolve_verified_principal(request)
+    tenant_id, user_id, _actor = _resolve_verified_principal(request)
     try:
         session_id = str(UUID(session_id))
     except Exception as exc:
@@ -1574,6 +2584,7 @@ async def create_job_from_plan(
     session_record = await sessions.get_session(session_id=session_id, tenant_id=tenant_id)
     if not session_record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+    _ensure_session_owner(record=session_record, user_id=user_id)
     if str(session_record.status or "").strip().upper() == "TERMINATED":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Agent session terminated")
 
@@ -1605,14 +2616,19 @@ async def create_job_from_plan(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Plan approval required")
 
     job_id = str(uuid4())
-    await sessions.create_job(
-        job_id=job_id,
-        session_id=session_id,
-        tenant_id=tenant_id,
-        plan_id=plan_id,
-        status="PENDING",
-        metadata={"kind": "agent_plan_job"},
-    )
+    try:
+        await sessions.create_job(
+            job_id=job_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            plan_id=plan_id,
+            status="PENDING",
+            metadata={"kind": "agent_plan_job"},
+        )
+    except ValueError as exc:
+        if "active job" in str(exc).lower():
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Session already has an active job") from exc
+        raise
     started = await _start_agent_job_run(
         request=request,
         sessions=sessions,
@@ -1644,11 +2660,15 @@ async def list_jobs(
     limit: int = Query(100, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> ApiResponse:
-    tenant_id, _user_id, _actor = _resolve_verified_principal(request)
+    tenant_id, user_id, _actor = _resolve_verified_principal(request)
     try:
         session_id = str(UUID(session_id))
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id must be a UUID") from exc
+    session_record = await sessions.get_session(session_id=session_id, tenant_id=tenant_id)
+    if not session_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+    _ensure_session_owner(record=session_record, user_id=user_id)
     jobs = await sessions.list_jobs(session_id=session_id, tenant_id=tenant_id, limit=limit, offset=offset)
     reconciled = []
     for job in jobs:
@@ -1687,12 +2707,16 @@ async def get_job(
     sessions: AgentSessionRegistry = Depends(get_agent_session_registry),
     agent_registry: AgentRegistry = Depends(get_agent_registry),
 ) -> ApiResponse:
-    tenant_id, _user_id, _actor = _resolve_verified_principal(request)
+    tenant_id, user_id, _actor = _resolve_verified_principal(request)
     try:
         session_id = str(UUID(session_id))
         job_uuid = str(UUID(job_id))
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id/job_id must be UUID") from exc
+    session_record = await sessions.get_session(session_id=session_id, tenant_id=tenant_id)
+    if not session_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent session not found")
+    _ensure_session_owner(record=session_record, user_id=user_id)
 
     job = await sessions.get_job(job_id=job_uuid, tenant_id=tenant_id)
     if not job or job.session_id != session_id:
@@ -1743,6 +2767,7 @@ async def list_events(
     include_agent_steps: bool = Query(True),
     include_tool_calls: bool = Query(True),
     include_llm_calls: bool = Query(True),
+    include_ci_results: bool = Query(True),
     limit: int = Query(500, ge=1, le=2000),
 ) -> ApiResponse:
     tenant_id, user_id, _actor = _resolve_verified_principal(request)
@@ -1757,7 +2782,10 @@ async def list_events(
     _ensure_session_owner(record=session_record, user_id=user_id)
 
     events: list[dict[str, Any]] = []
-    token_total = 0
+    message_tokens_total = 0
+    llm_tokens_total = 0
+    tool_request_tokens_total = 0
+    tool_response_tokens_total = 0
     cost_total = 0.0
 
     jobs = []
@@ -1774,7 +2802,7 @@ async def list_events(
         messages = await sessions.list_messages(session_id=session_id, tenant_id=tenant_id, limit=500, offset=0, include_removed=True)
         for msg in messages:
             if msg.token_count:
-                token_total += int(msg.token_count)
+                message_tokens_total += int(msg.token_count)
             if msg.cost_estimate:
                 cost_total += float(msg.cost_estimate)
             events.append(
@@ -1799,7 +2827,7 @@ async def list_events(
         with contextlib.suppress(Exception):
             llm_calls = await sessions.list_llm_calls(session_id=session_id, tenant_id=tenant_id, limit=500, offset=0)
             for call in llm_calls:
-                token_total += int(call.total_tokens or 0)
+                llm_tokens_total += int(call.total_tokens or 0)
                 if call.cost_estimate:
                     cost_total += float(call.cost_estimate)
                 events.append(
@@ -1823,11 +2851,34 @@ async def list_events(
                     }
                 )
 
+    if include_ci_results and hasattr(sessions, "list_ci_results"):
+        with contextlib.suppress(Exception):
+            ci_results = await sessions.list_ci_results(session_id=session_id, tenant_id=tenant_id, limit=500, offset=0)
+            for ci in ci_results:
+                events.append(
+                    {
+                        "event_id": ci.ci_result_id,
+                        "event_type": "CI_RESULT",
+                        "occurred_at": ci.created_at.isoformat(),
+                        "data": {
+                            "provider": ci.provider,
+                            "status": ci.status,
+                            "details_url": ci.details_url,
+                            "summary": ci.summary,
+                            "job_id": ci.job_id,
+                            "plan_id": ci.plan_id,
+                            "run_id": ci.run_id,
+                        },
+                    }
+                )
+
     if include_tool_calls and hasattr(sessions, "list_tool_calls"):
         with contextlib.suppress(Exception):
             tool_calls = await sessions.list_tool_calls(session_id=session_id, tenant_id=tenant_id, limit=500, offset=0)
             for call in tool_calls:
                 started_at = call.started_at
+                if call.request_token_count:
+                    tool_request_tokens_total += int(call.request_token_count)
                 events.append(
                     {
                         "event_id": f"{call.tool_run_id}:start",
@@ -1839,6 +2890,7 @@ async def list_events(
                             "method": call.method,
                             "path": call.path,
                             "request_digest": call.request_digest,
+                            "request_token_count": call.request_token_count,
                             "job_id": call.job_id,
                             "plan_id": call.plan_id,
                             "idempotency_key": call.idempotency_key,
@@ -1846,6 +2898,8 @@ async def list_events(
                     }
                 )
                 if call.finished_at:
+                    if call.response_token_count:
+                        tool_response_tokens_total += int(call.response_token_count)
                     events.append(
                         {
                             "event_id": f"{call.tool_run_id}:finish",
@@ -1857,6 +2911,7 @@ async def list_events(
                                 "status": call.status,
                                 "http_status": call.response_status,
                                 "response_digest": call.response_digest,
+                                "response_token_count": call.response_token_count,
                                 "latency_ms": call.latency_ms,
                                 "error_code": call.error_code,
                                 "error_message": call.error_message,
@@ -1999,7 +3054,11 @@ async def list_events(
             "count": len(events_sorted),
             "events": events_sorted,
             "metrics": {
-                "message_tokens_total": token_total,
+                "message_tokens_total": message_tokens_total,
+                "llm_tokens_total": llm_tokens_total,
+                "tool_request_tokens_total": tool_request_tokens_total,
+                "tool_response_tokens_total": tool_response_tokens_total,
+                "token_total_estimate": message_tokens_total + llm_tokens_total + tool_request_tokens_total + tool_response_tokens_total,
                 "message_cost_total": cost_total,
                 "jobs_total": len(jobs),
             },
@@ -2045,11 +3104,13 @@ async def list_tool_calls(
                     "query": c.query,
                     "request_body": c.request_body,
                     "request_digest": c.request_digest,
+                    "request_token_count": c.request_token_count,
                     "idempotency_key": c.idempotency_key,
                     "status": c.status,
                     "response_status": c.response_status,
                     "response_body": c.response_body,
                     "response_digest": c.response_digest,
+                    "response_token_count": c.response_token_count,
                     "error_code": c.error_code,
                     "error_message": c.error_message,
                     "side_effect_summary": c.side_effect_summary,

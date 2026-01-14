@@ -20,10 +20,22 @@ from uuid import UUID, uuid4
 
 import httpx
 from confluent_kafka import Consumer, KafkaError, Producer, TopicPartition
-from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql import functions as F
-from pyspark.sql.window import Window
-from pyspark.sql.types import StructType
+
+try:
+    from pyspark.sql import DataFrame, SparkSession  # type: ignore
+    from pyspark.sql import functions as F  # type: ignore
+    from pyspark.sql.types import StructType  # type: ignore
+    from pyspark.sql.window import Window  # type: ignore
+
+    _PYSPARK_AVAILABLE = True
+except ModuleNotFoundError:  # pragma: no cover
+    # Keep helper functions importable in lightweight/unit-test environments.
+    _PYSPARK_AVAILABLE = False
+    SparkSession = Any  # type: ignore[assignment,misc]
+    DataFrame = Any  # type: ignore[assignment,misc]
+    F = None  # type: ignore[assignment]
+    Window = None  # type: ignore[assignment]
+    StructType = Any  # type: ignore[assignment,misc]
 
 from data_connector.google_sheets.service import GoogleSheetsService
 from shared.config.app_config import AppConfig

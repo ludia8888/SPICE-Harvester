@@ -45,6 +45,10 @@ class LLMOutputValidationError(RuntimeError):
     pass
 
 
+class LLMPolicyError(LLMRequestError):
+    """Raised when a model/tool/policy guard blocks an LLM call."""
+
+
 class LLMHTTPStatusError(LLMRequestError):
     def __init__(self, *, status_code: int, body_preview: str) -> None:
         super().__init__(f"LLM HTTP {int(status_code)}: {body_preview}")
@@ -112,6 +116,27 @@ def _estimate_cost(
     return (float(prompt_tokens) / 1000.0) * prompt_rate + (float(completion_tokens) / 1000.0) * completion_rate
 
 
+def _parse_provider_policies(raw: Optional[str]) -> dict[str, dict[str, Any]]:
+    if raw is None:
+        return {}
+    text = str(raw).strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    policies: dict[str, dict[str, Any]] = {}
+    for key, value in parsed.items():
+        provider = str(key or "").strip().lower()
+        if not provider:
+            continue
+        policies[provider] = dict(value) if isinstance(value, dict) else {}
+    return policies
+
+
 def _extract_json_object(text: str) -> Dict[str, Any]:
     """
     Best-effort JSON object extraction.
@@ -154,6 +179,34 @@ def _extract_json_object(text: str) -> Dict[str, Any]:
     return obj
 
 
+def _tool_parameters_from_model(model: Type[BaseModel]) -> Dict[str, Any]:
+    """
+    Build an OpenAI tool/function `parameters` schema from a Pydantic model.
+
+    We keep this intentionally permissive and rely on Pydantic validation on the
+    returned arguments, because many OpenAI-compatible gateways implement only a
+    subset of JSON Schema.
+    """
+    try:
+        schema = model.model_json_schema()
+    except Exception:
+        schema = {}
+    if not isinstance(schema, dict):
+        schema = {}
+    properties = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+    required = schema.get("required") if isinstance(schema.get("required"), list) else []
+    parameters: Dict[str, Any] = {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": True,
+    }
+    defs = schema.get("$defs")
+    if isinstance(defs, dict) and defs:
+        parameters["$defs"] = defs
+    return parameters
+
+
 class LLMGateway:
     """
     A thin, safe wrapper around an LLM provider.
@@ -185,6 +238,8 @@ class LLMGateway:
         self.max_tokens = int(getattr(llm, "max_tokens", 800) or 800)
         self.enable_json_mode = bool(getattr(llm, "enable_json_mode", True))
         self.enable_native_tool_calling = bool(getattr(llm, "native_tool_calling", False))
+
+        self.provider_policies = _parse_provider_policies(getattr(llm, "provider_policies_json", None))
 
         self.enable_cache = bool(getattr(llm, "cache_enabled", True))
         self.cache_ttl_s = int(getattr(llm, "cache_ttl_seconds", 3600) or 3600)
@@ -304,6 +359,78 @@ class LLMGateway:
         usage = data.get("usage") if isinstance(data, dict) else {}
         return obj, usage if isinstance(usage, dict) else {}
 
+    async def _call_openai_compat_tool_call(
+        self,
+        *,
+        task: str,
+        system_prompt: str,
+        user_prompt: str,
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        prompt_hash: str,
+        tool_name: str,
+        tool_parameters: Dict[str, Any],
+    ) -> tuple[Dict[str, Any], dict[str, Any]]:
+        url = f"{self.base_url}/chat/completions"
+        headers: Dict[str, str] = {
+            "Content-Type": "application/json",
+            "Idempotency-Key": sha256_hex(f"llm:{task}:{model}:{prompt_hash}:tools"),
+        }
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        safe_tool_name = str(tool_name or "return_json").strip() or "return_json"
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": safe_tool_name,
+                    "description": "Return the required JSON object as tool arguments.",
+                    "parameters": tool_parameters or {"type": "object", "additionalProperties": True},
+                },
+            }
+        ]
+
+        body: Dict[str, Any] = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "tools": tools,
+            "tool_choice": {"type": "function", "function": {"name": safe_tool_name}},
+        }
+
+        async with httpx.AsyncClient(timeout=self.timeout_s) as client:
+            resp = await client.post(url, headers=headers, json=body)
+        if resp.status_code >= 400:
+            raise LLMHTTPStatusError(status_code=resp.status_code, body_preview=resp.text[:500])
+
+        data = resp.json()
+        choice = (data.get("choices") or [{}])[0] if isinstance(data, dict) else {}
+        message = (choice.get("message") or {}) if isinstance(choice, dict) else {}
+
+        content = (message.get("content") or "") if isinstance(message, dict) else ""
+        arguments = None
+        if isinstance(message, dict):
+            tool_calls = message.get("tool_calls")
+            if isinstance(tool_calls, list) and tool_calls:
+                first = tool_calls[0]
+                if isinstance(first, dict):
+                    func = first.get("function")
+                    if isinstance(func, dict):
+                        arguments = func.get("arguments")
+
+        if arguments is None:
+            arguments = content
+
+        obj = _extract_json_object(str(arguments or ""))
+        usage = data.get("usage") if isinstance(data, dict) else {}
+        return obj, usage if isinstance(usage, dict) else {}
+
     async def _call_anthropic_json(
         self,
         *,
@@ -410,6 +537,8 @@ class LLMGateway:
         user_prompt: str,
         response_model: Type[T],
         model: Optional[str] = None,
+        allowed_models: Optional[list[str]] = None,
+        use_native_tool_calling: Optional[bool] = None,
         redis_service: Optional[RedisService] = None,
         audit_store: Optional[AuditLogStore] = None,
         audit_partition_key: Optional[str] = None,
@@ -424,6 +553,9 @@ class LLMGateway:
             raise LLMUnavailableError("LLM is disabled (set LLM_PROVIDER=openai_compat)")
 
         model_to_use = str(model or self.model or "").strip()
+        allowed_set = {str(m).strip() for m in (allowed_models or []) if str(m).strip()} if allowed_models else None
+        if allowed_set is not None and model_to_use and model_to_use not in allowed_set:
+            raise LLMPolicyError(f"Model not allowed by policy: {model_to_use}")
         if provider == "openai_compat":
             if not self.base_url or not model_to_use:
                 raise LLMUnavailableError(
@@ -445,7 +577,15 @@ class LLMGateway:
         system_prompt = mask_pii_text(system_prompt, max_chars=self.max_prompt_chars)
         user_prompt = mask_pii_text(user_prompt, max_chars=self.max_prompt_chars)
 
-        prompt_obj = {"system": system_prompt, "user": user_prompt, "task": task, "model": model_to_use}
+        native_flag = self.enable_native_tool_calling if use_native_tool_calling is None else bool(use_native_tool_calling)
+        prompt_obj = {
+            "system": system_prompt,
+            "user": user_prompt,
+            "task": task,
+            "model": model_to_use,
+            "schema": getattr(response_model, "__name__", "schema"),
+            "native_tool_calling": bool(native_flag),
+        }
         prompt_hash = sha256_hex(stable_json_dumps(prompt_obj))
         input_digest = digest_for_audit(prompt_obj)
 
@@ -453,7 +593,14 @@ class LLMGateway:
         cache_partition_hash = sha256_hex(cache_partition)
         cache_key = f"llm:{provider}:{model_to_use}:{task}:{cache_partition_hash}:{prompt_hash}"
 
-        if self.enable_cache and redis_service:
+        provider_policy = (
+            self.provider_policies.get(str(provider or "").strip().lower(), {})
+            if isinstance(getattr(self, "provider_policies", None), dict)
+            else {}
+        )
+        cache_enabled = bool(self.enable_cache and redis_service) and not bool(provider_policy.get("disable_cache"))
+
+        if cache_enabled:
             try:
                 cached = await redis_service.get_json(cache_key)
                 if cached and isinstance(cached, dict) and "data" in cached:
@@ -536,15 +683,49 @@ class LLMGateway:
                         obj = _extract_json_object(raw)
                         usage: dict[str, Any] = {}
                     elif provider == "openai_compat":
-                        obj, usage = await self._call_openai_compat_json(
-                            task=task,
-                            system_prompt=system_prompt,
-                            user_prompt=user_prompt,
-                            model=model_to_use,
-                            temperature=temperature,
-                            max_tokens=max_tokens,
-                            prompt_hash=prompt_hash,
-                        )
+                        tool_calls_supported = self._tool_calls_supported.get(model_to_use)
+                        want_native = bool(native_flag) and tool_calls_supported is not False
+                        if want_native:
+                            safe_task = re.sub(r"[^a-zA-Z0-9_]+", "_", (task or "task").strip().lower()).strip("_")
+                            tool_name = f"return_{safe_task}"[:64] if safe_task else "return_json"
+                            try:
+                                obj, usage = await self._call_openai_compat_tool_call(
+                                    task=task,
+                                    system_prompt=system_prompt,
+                                    user_prompt=user_prompt,
+                                    model=model_to_use,
+                                    temperature=temperature,
+                                    max_tokens=max_tokens,
+                                    prompt_hash=prompt_hash,
+                                    tool_name=tool_name,
+                                    tool_parameters=_tool_parameters_from_model(response_model),
+                                )
+                                self._tool_calls_supported[model_to_use] = True
+                            except LLMHTTPStatusError as exc:
+                                # If the upstream does not support tools/tool_choice, fall back to prompt-based JSON.
+                                if exc.status_code in {400, 404}:
+                                    self._tool_calls_supported[model_to_use] = False
+                                    obj, usage = await self._call_openai_compat_json(
+                                        task=task,
+                                        system_prompt=system_prompt,
+                                        user_prompt=user_prompt,
+                                        model=model_to_use,
+                                        temperature=temperature,
+                                        max_tokens=max_tokens,
+                                        prompt_hash=prompt_hash,
+                                    )
+                                else:
+                                    raise
+                        else:
+                            obj, usage = await self._call_openai_compat_json(
+                                task=task,
+                                system_prompt=system_prompt,
+                                user_prompt=user_prompt,
+                                model=model_to_use,
+                                temperature=temperature,
+                                max_tokens=max_tokens,
+                                prompt_hash=prompt_hash,
+                            )
                     elif provider == "anthropic":
                         obj, usage = await self._call_anthropic_json(
                             task=task,
@@ -609,7 +790,7 @@ class LLMGateway:
                 raise last_exc
 
             # Cache (best-effort)
-            if self.enable_cache and redis_service and out_model is not None:
+            if cache_enabled and out_model is not None:
                 try:
                     await redis_service.set_json(
                         cache_key,

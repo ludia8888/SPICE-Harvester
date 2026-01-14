@@ -2,9 +2,20 @@ from __future__ import annotations
 
 import os
 import sys
+import importlib.util
 
 import pytest
-from pyspark.sql import SparkSession
+
+try:  # pragma: no cover
+    _pyspark_spec = importlib.util.find_spec("pyspark")
+except ValueError:
+    # A prior test may have injected a lightweight stub module (no __spec__).
+    _pyspark_spec = None
+
+if _pyspark_spec is None:  # pragma: no cover
+    pytest.skip("pyspark is not installed", allow_module_level=True)
+
+from pyspark.sql import SparkSession  # noqa: E402
 
 from pipeline_worker.main import (
     PipelineWorker,

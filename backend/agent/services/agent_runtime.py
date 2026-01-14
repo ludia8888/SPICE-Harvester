@@ -67,6 +67,53 @@ def _safe_json(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=True, separators=(",", ":"), default=str)
 
 
+_ERROR_CODE_ALLOWED = re.compile(r"^[A-Z0-9_]{1,120}$")
+
+
+def _normalize_error_code(value: Optional[str]) -> Optional[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    normalized = re.sub(r"[^A-Za-z0-9]+", "_", raw).strip("_").upper()
+    if not normalized:
+        return None
+    if _ERROR_CODE_ALLOWED.match(normalized):
+        return normalized
+    return normalized[:120]
+
+
+def _extract_error_message(payload: Any) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    candidates: list[Any] = [payload]
+    detail = payload.get("detail")
+    if isinstance(detail, dict):
+        candidates.append(detail)
+    context = payload.get("context")
+    if isinstance(context, dict):
+        candidates.append(context)
+        context_detail = context.get("detail")
+        if isinstance(context_detail, dict):
+            candidates.append(context_detail)
+    data = payload.get("data")
+    if isinstance(data, dict):
+        candidates.append(data)
+    result = payload.get("result")
+    if isinstance(result, dict):
+        candidates.append(result)
+
+    for item in candidates:
+        if isinstance(item, str) and item.strip():
+            return item.strip()
+        if not isinstance(item, dict):
+            continue
+        for key in ("message", "detail", "error"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
 def _compute_tool_run_id(*, run_id: str, step_id: Optional[str], step_index: int, attempt: int) -> str:
     """
     Deterministic-ish tool run id for observability.
@@ -723,6 +770,9 @@ class AgentRuntimeConfig:
     auto_retry_base_delay_s: float
     auto_retry_max_delay_s: float
     auto_retry_allow_writes: bool
+    parallel_execution_enabled: bool = False
+    max_concurrent_tool_calls: int = 1
+    fail_fast: bool = False
 
 
 class AgentRuntime:
@@ -772,6 +822,9 @@ class AgentRuntime:
             auto_retry_base_delay_s=agent_settings.auto_retry_base_delay_seconds,
             auto_retry_max_delay_s=agent_settings.auto_retry_max_delay_seconds,
             auto_retry_allow_writes=agent_settings.auto_retry_allow_writes,
+            parallel_execution_enabled=agent_settings.parallel_execution_enabled,
+            max_concurrent_tool_calls=agent_settings.max_concurrent_tool_calls,
+            fail_fast=agent_settings.fail_fast,
         )
         return cls(event_store=event_store, audit_store=audit_store, config=config)
 
@@ -1353,7 +1406,11 @@ class AgentRuntime:
                 error=error,
             )
             return {
-                "status": "failure",
+                "status": "failed",
+                "error_code": "REQUEST_VALIDATION_FAILED",
+                "error_message": error,
+                "payload": None,
+                "side_effect_summary": {},
                 "http_status": 400,
                 "tool_run_id": tool_run_id,
                 "output_digest": None,
@@ -1361,6 +1418,7 @@ class AgentRuntime:
                 "data_scope": mask_pii(tool_call.data_scope, max_string_chars=200),
                 "error": error,
                 "error_key": "template_unresolved",
+                "api_code": "REQUEST_VALIDATION_FAILED",
             }
 
         missing_artifacts: list[str] = []
@@ -1404,7 +1462,11 @@ class AgentRuntime:
                 error=error,
             )
             return {
-                "status": "failure",
+                "status": "failed",
+                "error_code": "REQUEST_VALIDATION_FAILED",
+                "error_message": error,
+                "payload": None,
+                "side_effect_summary": {},
                 "http_status": 400,
                 "tool_run_id": tool_run_id,
                 "output_digest": None,
@@ -1413,6 +1475,7 @@ class AgentRuntime:
                 "error": error,
                 "error_key": "artifact_missing",
                 "missing_artifacts": missing_artifacts,
+                "api_code": "REQUEST_VALIDATION_FAILED",
             }
 
         base_url = self._resolve_base_url(tool_call)
@@ -1485,7 +1548,11 @@ class AgentRuntime:
                 error=error,
             )
             return {
-                "status": "failure",
+                "status": "failed",
+                "error_code": "REQUEST_VALIDATION_FAILED",
+                "error_message": error,
+                "payload": None,
+                "side_effect_summary": {},
                 "http_status": 400,
                 "tool_run_id": tool_run_id,
                 "output_digest": None,
@@ -1493,11 +1560,16 @@ class AgentRuntime:
                 "data_scope": data_scope,
                 "error": error,
                 "error_key": "agent_proxy_loop",
+                "api_code": "REQUEST_VALIDATION_FAILED",
             }
 
         if dry_run:
             return {
-                "status": "skipped",
+                "status": "success",
+                "error_code": None,
+                "error_message": None,
+                "payload": {"skipped": True, "dry_run": True},
+                "side_effect_summary": {"dry_run": True},
                 "http_status": None,
                 "tool_run_id": tool_run_id,
                 "output_digest": None,
@@ -1538,7 +1610,11 @@ class AgentRuntime:
                     error=error,
                 )
                 return {
-                    "status": "failure",
+                    "status": "failed",
+                    "error_code": "CONFLICT",
+                    "error_message": error,
+                    "payload": None,
+                    "side_effect_summary": {},
                     "http_status": 409,
                     "tool_run_id": tool_run_id,
                     "output_digest": None,
@@ -1546,6 +1622,7 @@ class AgentRuntime:
                     "data_scope": data_scope,
                     "error": error,
                     "error_key": "overlay_degraded",
+                    "api_code": "CONFLICT",
                 }
 
         start_time = time.monotonic()
@@ -1687,12 +1764,18 @@ class AgentRuntime:
         if isinstance(signals, dict) and signals:
             side_effect_summary["signals"] = dict(signals)
 
-        status = "failure" if error else "success"
+        tool_status = "failed" if error else "success"
+        event_status = "failure" if error else "success"
+        error_message = _extract_error_message(response_payload) or error
+        error_code = _normalize_error_code(api_code or error_key or (f"HTTP_{http_status}" if http_status else None))
+        payload_value: Any = response_payload
+        if output_size is not None and output_size > self.config.max_payload_bytes:
+            payload_value = {"_omitted": True, "digest": output_digest, "size_bytes": output_size}
         await self.record_event(
             event_type="AGENT_TOOL_RESULT",
             run_id=run_id,
             actor=actor,
-            status=status,
+            status=event_status,
             data={
                 "step_index": step_index,
                 "step_id": tool_call.step_id,
@@ -1760,7 +1843,11 @@ class AgentRuntime:
                         context["latest_artifact"] = {"key": produces[0], "digest": digest_for_audit(candidate)}
 
         return {
-            "status": status,
+            "status": tool_status,
+            "error_code": error_code,
+            "error_message": error_message if error else None,
+            "payload": payload_value,
+            "side_effect_summary": side_effect_summary,
             "http_status": http_status,
             "tool_run_id": tool_run_id,
             "output_digest": output_digest,
@@ -1779,5 +1866,4 @@ class AgentRuntime:
             "retryable": retryable,
             "retry_after_ms": retry_after_ms,
             "signals": signals,
-            "side_effect_summary": side_effect_summary,
         }

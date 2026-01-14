@@ -43,6 +43,8 @@ from shared.services.dataset_ingest_outbox import run_dataset_ingest_outbox_work
 from shared.services.dataset_ingest_reconciler import run_dataset_ingest_reconciler
 from shared.services.objectify_outbox import run_objectify_outbox_worker
 from shared.services.objectify_reconciler import run_objectify_reconciler
+from shared.services.agent_retention_worker import run_agent_session_retention_worker
+from shared.services.storage_service import StorageService, create_storage_service
 from shared.services.lineage_store import LineageStore
 from shared.dependencies.providers import (
     StorageServiceDep,
@@ -57,6 +59,7 @@ from shared.services.connector_registry import ConnectorRegistry
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.agent_registry import AgentRegistry
 from shared.services.agent_model_registry import AgentModelRegistry
+from shared.services.agent_function_registry import AgentFunctionRegistry
 from shared.services.agent_session_registry import AgentSessionRegistry
 from shared.services.agent_plan_registry import AgentPlanRegistry
 from shared.services.agent_policy_registry import AgentPolicyRegistry
@@ -108,6 +111,7 @@ from data_connector.google_sheets.service import GoogleSheetsService
 from bff.routers import (
     admin,
     ai,
+    agent_functions,
     agent_plans,
     agent_policies,
     agent_models,
@@ -117,6 +121,8 @@ from bff.routers import (
     actions,
     command_status,
     context7,
+    context_tools,
+    document_bundles,
     agent_proxy,
     data_connector,
     database,
@@ -210,6 +216,9 @@ class BFFServiceContainer:
 
         # 10d. Initialize Agent Model Registry (LLM model metadata/capabilities)
         await self._initialize_agent_model_registry()
+
+        # 10e. Initialize Agent Function Registry (registered function execution)
+        await self._initialize_agent_function_registry()
 
         # 11. Initialize Agent Tool Registry (allowlist/policy)
         await self._initialize_agent_tool_registry()
@@ -395,6 +404,17 @@ class BFFServiceContainer:
             logger.info("AgentModelRegistry initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize AgentModelRegistry: {e}")
+
+    async def _initialize_agent_function_registry(self) -> None:
+        """Initialize Postgres-backed agent function registry."""
+        try:
+            logger.info("Initializing AgentFunctionRegistry (Postgres)...")
+            registry = AgentFunctionRegistry()
+            await registry.initialize()
+            self._bff_services["agent_function_registry"] = registry
+            logger.info("AgentFunctionRegistry initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize AgentFunctionRegistry: {e}")
 
     async def _initialize_agent_tool_registry(self) -> None:
         """Initialize Postgres-backed agent tool registry."""
@@ -647,6 +667,12 @@ class BFFServiceContainer:
             raise RuntimeError("AgentModelRegistry not initialized")
         return self._bff_services["agent_model_registry"]
 
+    def get_agent_function_registry(self) -> AgentFunctionRegistry:
+        """Get agent function registry instance"""
+        if "agent_function_registry" not in self._bff_services:
+            raise RuntimeError("AgentFunctionRegistry not initialized")
+        return self._bff_services["agent_function_registry"]
+
     def get_agent_tool_registry(self) -> AgentToolRegistry:
         """Get agent tool registry instance"""
         if "agent_tool_registry" not in self._bff_services:
@@ -690,6 +716,8 @@ async def lifespan(app: FastAPI):
     objectify_outbox_stop: Optional[asyncio.Event] = None
     objectify_reconcile_task: Optional[asyncio.Task] = None
     objectify_reconcile_stop: Optional[asyncio.Event] = None
+    agent_retention_task: Optional[asyncio.Task] = None
+    agent_retention_stop: Optional[asyncio.Event] = None
 
     try:
         ensure_bff_auth_configured()
@@ -779,6 +807,30 @@ async def lifespan(app: FastAPI):
             app.state.objectify_reconciler_task = objectify_reconcile_task
             app.state.objectify_reconciler_stop = objectify_reconcile_stop
 
+        enable_agent_retention = bool(getattr(settings.workers, "agent_retention", None) and settings.workers.agent_retention.enabled)
+        if enable_agent_retention:
+            agent_retention_stop = asyncio.Event()
+            session_registry = _bff_container.get_agent_session_registry()
+            storage_service = None
+            try:
+                if not _bff_container.container.has(StorageService):
+                    _bff_container.container.register_singleton(StorageService, create_storage_service)
+                storage_service = await _bff_container.container.get(StorageService)
+            except Exception as exc:
+                logger.warning("Storage service unavailable for agent retention worker: %s", exc)
+            agent_retention_task = asyncio.create_task(
+                run_agent_session_retention_worker(
+                    session_registry=session_registry,
+                    poll_interval_seconds=int(settings.workers.agent_retention.poll_seconds),
+                    retention_days=int(settings.workers.agent_retention.retention_days),
+                    stop_event=agent_retention_stop,
+                    action=str(settings.workers.agent_retention.action),
+                    storage_service=storage_service,
+                )
+            )
+            app.state.agent_retention_task = agent_retention_task
+            app.state.agent_retention_stop = agent_retention_stop
+
         # 6. Middleware setup is handled during app creation (service_factory)
         logger.info("BFF Service startup completed successfully")
         
@@ -791,6 +843,14 @@ async def lifespan(app: FastAPI):
     finally:
         # Shutdown in reverse order
         logger.info("BFF Service shutdown beginning...")
+
+        if agent_retention_stop is not None:
+            agent_retention_stop.set()
+        if agent_retention_task is not None:
+            try:
+                await agent_retention_task
+            except Exception as exc:
+                logger.warning("Agent retention worker shutdown failed: %s", exc)
 
         if dataset_reconcile_stop is not None:
             dataset_reconcile_stop.set()
@@ -938,6 +998,11 @@ async def get_agent_model_registry() -> AgentModelRegistry:
         raise RuntimeError("BFF container not initialized")
     return _bff_container.get_agent_model_registry()
 
+async def get_agent_function_registry() -> AgentFunctionRegistry:
+    if _bff_container is None:
+        raise RuntimeError("BFF container not initialized")
+    return _bff_container.get_agent_function_registry()
+
 
 async def get_agent_tool_registry() -> AgentToolRegistry:
     if _bff_container is None:
@@ -986,10 +1051,13 @@ app.include_router(lineage.router, prefix="/api/v1")
 app.include_router(audit.router, prefix="/api/v1")
 app.include_router(ai.router, prefix="/api/v1")
 app.include_router(context7.router, prefix="/api/v1")
+app.include_router(context_tools.router, prefix="/api/v1")
+app.include_router(document_bundles.router, prefix="/api/v1")
 app.include_router(agent_proxy.router, prefix="/api/v1")
 app.include_router(agent_plans.router, prefix="/api/v1")
 app.include_router(agent_policies.router, prefix="/api/v1")
 app.include_router(agent_models.router, prefix="/api/v1")
+app.include_router(agent_functions.router, prefix="/api/v1")
 app.include_router(agent_sessions.router, prefix="/api/v1")
 app.include_router(agent_tools.router, prefix="/api/v1")
 app.include_router(summary.router, prefix="/api/v1")

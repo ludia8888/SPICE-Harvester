@@ -466,6 +466,10 @@ class LLMSettings(BaseSettings):
     max_tokens: int = Field(default=800, description="LLM max tokens (LLM_MAX_TOKENS)")
     enable_json_mode: bool = Field(default=True, description="Enable JSON mode (LLM_ENABLE_JSON_MODE)")
     native_tool_calling: bool = Field(default=False, description="Enable native tool calling (LLM_NATIVE_TOOL_CALLING)")
+    provider_policies_json: Optional[str] = Field(
+        default=None,
+        description="Provider send policies JSON (LLM_PROVIDER_POLICIES_JSON)",
+    )
 
     cache_enabled: bool = Field(default=True, description="Enable Redis cache (LLM_CACHE_ENABLED)")
     cache_ttl_seconds: int = Field(default=3600, description="Cache TTL seconds (LLM_CACHE_TTL_SECONDS)")
@@ -490,6 +494,7 @@ class LLMSettings(BaseSettings):
         "google_base_url",
         "google_api_key",
         "pricing_json",
+        "provider_policies_json",
         mode="before",
     )
     @classmethod
@@ -822,6 +827,18 @@ class AgentRuntimeSettings(BaseSettings):
         default=True,
         description="Require event store availability (AGENT_REQUIRE_EVENT_STORE)",
     )
+    parallel_execution_enabled: bool = Field(
+        default=False,
+        description="Enable parallel tool execution (AGENT_PARALLEL_EXECUTION_ENABLED)",
+    )
+    max_concurrent_tool_calls: int = Field(
+        default=1,
+        description="Max concurrent tool calls when parallel enabled (AGENT_MAX_CONCURRENT_TOOL_CALLS)",
+    )
+    fail_fast: bool = Field(
+        default=False,
+        description="Stop scheduling independent steps after a failure (AGENT_FAIL_FAST)",
+    )
 
     tool_timeout_seconds: float = Field(
         default=30.0,
@@ -889,6 +906,11 @@ class AgentRuntimeSettings(BaseSettings):
         default=False,
         description="Allow auto retries on write methods (AGENT_AUTO_RETRY_ALLOW_WRITES)",
     )
+
+    @field_validator("max_concurrent_tool_calls", mode="before")
+    @classmethod
+    def clamp_max_concurrent_tool_calls(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=1, min_value=1, max_value=256)
 
     @field_validator("bff_token", mode="before")
     @classmethod
@@ -1046,11 +1068,6 @@ class AuthSettings(BaseSettings):
     user_jwt_algorithms: Optional[str] = Field(
         default=None,
         description="Comma-separated accepted JWT algorithms (USER_JWT_ALGORITHMS)",
-    )
-
-    allow_insecure_agent_no_user_jwt: bool = Field(
-        default=False,
-        description="Allow internal agent calls without USER_JWT_ENABLED (ALLOW_INSECURE_AGENT_NO_USER_JWT)",
     )
 
     # Require flags (Optional so 'unset' can use heuristics)
@@ -1506,6 +1523,12 @@ class SecuritySettings(BaseSettings):
     access_token_expire_minutes: int = Field(
         default=30,
         description="JWT access token expiry in minutes"
+    )
+
+    # Data protection (SEC-004/SEC-005)
+    data_encryption_keys: str = Field(
+        default="",
+        description="Comma-separated base64/hex keys for encrypting stored data at rest (DATA_ENCRYPTION_KEYS)",
     )
 
     # Input validation limits
@@ -2550,6 +2573,43 @@ class EventPublisherSettings(BaseSettings):
         return int(self.kafka_flush_batch_size or self.batch_size)
 
 
+class AgentRetentionWorkerSettings(BaseSettings):
+    """Agent session retention worker settings (SEC-005)."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="AGENT_RETENTION_",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    enabled: bool = Field(default=False, description="Enable agent retention worker (AGENT_RETENTION_ENABLED)")
+    poll_seconds: int = Field(default=3600, description="Retention worker poll seconds (AGENT_RETENTION_POLL_SECONDS)")
+    retention_days: int = Field(default=30, description="Retention days for agent session data (AGENT_RETENTION_DAYS)")
+    action: str = Field(default="redact", description="Retention action redact|delete (AGENT_RETENTION_ACTION)")
+
+    @field_validator("poll_seconds", mode="before")
+    @classmethod
+    def clamp_poll_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=3600, min_value=10, max_value=86_400)
+
+    @field_validator("retention_days", mode="before")
+    @classmethod
+    def clamp_retention_days(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=30, min_value=0, max_value=3650)
+
+    @field_validator("action", mode="before")
+    @classmethod
+    def normalize_action(cls, v):  # noqa: ANN001
+        if v is None:
+            return "redact"
+        value = str(v).strip().lower() or "redact"
+        if value not in {"redact", "delete"}:
+            return "redact"
+        return value
+
+
 class WorkersSettings(BaseSettings):
     """Workers/services runtime settings."""
 
@@ -2575,6 +2635,7 @@ class WorkersSettings(BaseSettings):
     objectify_reconciler: ObjectifyReconcilerSettings = Field(default_factory=ObjectifyReconcilerSettings)
     writeback_materializer: WritebackMaterializerSettings = Field(default_factory=WritebackMaterializerSettings)
     event_publisher: EventPublisherSettings = Field(default_factory=EventPublisherSettings)
+    agent_retention: AgentRetentionWorkerSettings = Field(default_factory=AgentRetentionWorkerSettings)
 
 
 

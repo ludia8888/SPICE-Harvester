@@ -4,6 +4,7 @@ Agent plan validation API (BFF).
 Validates planner output against allowlist + risk policy.
 """
 
+import contextlib
 import logging
 
 from datetime import datetime, timezone
@@ -27,9 +28,11 @@ from shared.models.requests import ApiResponse
 from shared.security.input_sanitizer import sanitize_input
 from shared.services.action_log_registry import ActionLogRegistry
 from shared.services.agent_registry import AgentRegistry
+from shared.services.agent_model_registry import AgentModelRegistry
 from shared.services.agent_plan_registry import AgentPlanRegistry
 from shared.services.agent_tool_registry import AgentToolRegistry
 from shared.services.dataset_registry import DatasetRegistry
+from shared.services.llm_quota import LLMQuotaExceededError
 from shared.config.service_config import ServiceConfig
 from shared.config.settings import get_settings
 from shared.utils.json_patch import JsonPatchError, apply_json_patch
@@ -60,6 +63,11 @@ _APPROVED_DECISIONS = {"APPROVED", "APPROVE", "ALLOW", "YES"}
 _REJECTED_DECISIONS = {"REJECTED", "REJECT", "DENY", "NO"}
 
 
+class _NullAgentModelRegistry:
+    async def get_model(self, *, model_id: str):  # noqa: ANN001
+        return None
+
+
 def _resolve_tenant_id(request: Request) -> str:
     user = getattr(request.state, "user", None)
     candidate = (
@@ -72,7 +80,9 @@ def _resolve_tenant_id(request: Request) -> str:
     return str(candidate).strip() or "default"
 
 
-async def _resolve_tenant_policy_constraints(request: Request) -> tuple[Optional[list[str]], Optional[str]]:
+async def _resolve_tenant_policy_constraints(
+    request: Request,
+) -> tuple[Optional[list[str]], Optional[str], Optional[list[str]]]:
     """
     Best-effort tenant policy lookup (AUTH-005).
 
@@ -87,21 +97,28 @@ async def _resolve_tenant_policy_constraints(request: Request) -> tuple[Optional
         policy_registry = await _get_agent_policy_registry()
         policy = await policy_registry.get_tenant_policy(tenant_id=tenant_id)
     except Exception:
-        return None, None
+        return None, None, None
 
     if not policy:
-        return None, None
+        return None, None, None
 
     allowed_tools = [str(t).strip() for t in (policy.allowed_tools or []) if str(t).strip()]
     allowed_tool_ids = allowed_tools or None
 
+    allowed_models = [str(m).strip() for m in (policy.allowed_models or []) if str(m).strip()]
+    if policy.default_model:
+        allowed_models.append(str(policy.default_model).strip())
+    allowed_models = [m for m in allowed_models if m]
+    allowed_models = list(dict.fromkeys(allowed_models))
+    allowed_models_final = allowed_models or None
+
     selected_model: Optional[str] = None
     if policy.default_model:
         selected_model = str(policy.default_model).strip() or None
-    if selected_model is None and policy.allowed_models:
-        selected_model = str(policy.allowed_models[0]).strip() or None
+    if selected_model is None and allowed_models_final:
+        selected_model = str(allowed_models_final[0]).strip() or None
 
-    return allowed_tool_ids, selected_model
+    return allowed_tool_ids, selected_model, allowed_models_final
 
 
 def _forward_headers_to_agent(request: Request) -> Dict[str, str]:
@@ -177,6 +194,15 @@ async def get_dataset_registry() -> DatasetRegistry:
     from bff.main import get_dataset_registry as _get_dataset_registry
 
     return await _get_dataset_registry()
+
+
+async def get_agent_model_registry() -> AgentModelRegistry:
+    from bff.main import get_agent_model_registry as _get_agent_model_registry
+
+    try:
+        return await _get_agent_model_registry()
+    except Exception:
+        return _NullAgentModelRegistry()  # type: ignore[return-value]
 
 
 class AgentPlanApprovalRequest(BaseModel):
@@ -268,7 +294,7 @@ async def apply_plan_patch(
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Patched plan invalid: {exc}") from exc
 
-    allowed_tool_ids, _selected_model = await _resolve_tenant_policy_constraints(request)
+    allowed_tool_ids, _selected_model, _allowed_models = await _resolve_tenant_policy_constraints(request)
     validation = await validate_agent_plan(plan=patched_plan, tool_registry=tool_registry, allowed_tool_ids=allowed_tool_ids)
     new_status = "COMPILED" if not validation.errors else "DRAFT"
     await plan_registry.upsert_plan(
@@ -306,19 +332,37 @@ async def compile_plan(
     tool_registry: AgentToolRegistry = Depends(get_agent_tool_registry),
     plan_registry: AgentPlanRegistry = Depends(get_agent_plan_registry),
     action_logs: ActionLogRegistry = Depends(get_action_log_registry),
+    model_registry: AgentModelRegistry = Depends(get_agent_model_registry),
 ) -> ApiResponse:
     payload = sanitize_input(body.model_dump(exclude_none=True))
     goal = str(payload.get("goal") or "").strip()
     data_scope = body.data_scope
     answers = payload.get("answers")
     tenant_id = _resolve_tenant_id(request)
-    allowed_tool_ids, selected_model = await _resolve_tenant_policy_constraints(request)
+    allowed_tool_ids, selected_model, allowed_models = await _resolve_tenant_policy_constraints(request)
+    user = getattr(request.state, "user", None)
+    user_id = str(getattr(user, "id", "") or "").strip() or None
+    data_policies: Optional[Dict[str, Any]] = None
+    with contextlib.suppress(Exception):
+        from bff.main import get_agent_policy_registry as _get_agent_policy_registry
+
+        policy_registry = await _get_agent_policy_registry()
+        policy = await policy_registry.get_tenant_policy(tenant_id=tenant_id)
+        if policy:
+            data_policies = dict(getattr(policy, "data_policies", None) or {})
     actor = (
         request.headers.get("X-User-ID")
         or request.headers.get("X-User")
         or request.headers.get("X-Actor")
         or "system"
     )
+
+    use_native_tool_calling = False
+    if bool(get_settings().llm.native_tool_calling) and selected_model:
+        with contextlib.suppress(Exception):
+            model_record = await model_registry.get_model(model_id=str(selected_model))
+            if model_record and bool(getattr(model_record, "supports_native_tool_calling", False)):
+                use_native_tool_calling = True
 
     context_pack: Optional[Dict[str, Any]] = None
     try:
@@ -375,19 +419,27 @@ async def compile_plan(
     except Exception as exc:
         logger.warning("Failed to build pipeline context pack: %s", exc)
 
-    result = await compile_agent_plan(
-        goal=goal,
-        data_scope=data_scope,
-        answers=answers if isinstance(answers, dict) else None,
-        context_pack=context_pack,
-        actor=str(actor),
-        allowed_tool_ids=allowed_tool_ids,
-        selected_model=selected_model,
-        tool_registry=tool_registry,
-        llm_gateway=llm,
-        redis_service=redis_service,
-        audit_store=audit_store,
-    )
+    try:
+        result = await compile_agent_plan(
+            goal=goal,
+            data_scope=data_scope,
+            answers=answers if isinstance(answers, dict) else None,
+            context_pack=context_pack,
+            actor=str(actor),
+            tenant_id=tenant_id,
+            user_id=user_id,
+            data_policies=data_policies,
+            allowed_tool_ids=allowed_tool_ids,
+            selected_model=selected_model,
+            allowed_models=allowed_models,
+            use_native_tool_calling=use_native_tool_calling,
+            tool_registry=tool_registry,
+            llm_gateway=llm,
+            redis_service=redis_service,
+            audit_store=audit_store,
+        )
+    except LLMQuotaExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)) from exc
 
     response_data = {
         "status": result.status,
@@ -494,7 +546,7 @@ async def preview_plan(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent plan not found")
 
     plan = AgentPlan.model_validate(record.plan)
-    allowed_tool_ids, _selected_model = await _resolve_tenant_policy_constraints(request)
+    allowed_tool_ids, _selected_model, _allowed_models = await _resolve_tenant_policy_constraints(request)
     validation = await validate_agent_plan(plan=plan, tool_registry=tool_registry, allowed_tool_ids=allowed_tool_ids)
     if validation.errors:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"errors": validation.errors, "warnings": validation.warnings})
@@ -564,7 +616,7 @@ async def execute_plan(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent plan not found")
 
     plan = AgentPlan.model_validate(record.plan)
-    allowed_tool_ids, _selected_model = await _resolve_tenant_policy_constraints(request)
+    allowed_tool_ids, _selected_model, _allowed_models = await _resolve_tenant_policy_constraints(request)
     validation = await validate_agent_plan(plan=plan, tool_registry=tool_registry, allowed_tool_ids=allowed_tool_ids)
     if validation.errors:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"errors": validation.errors, "warnings": validation.warnings})

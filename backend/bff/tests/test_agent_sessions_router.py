@@ -357,9 +357,11 @@ async def test_agent_sessions_post_message_includes_only_attached_context(monkey
         audit_store=None,  # type: ignore[arg-type]
         sessions=sessions,
         policy_registry=_FakePolicyRegistry(),  # type: ignore[arg-type]
+        model_registry=SimpleNamespace(),
         tool_registry=_FakeToolRegistry(),  # type: ignore[arg-type]
         plan_registry=SimpleNamespace(),
         agent_registry=SimpleNamespace(),
+        dataset_registry=SimpleNamespace(),
     )
     assert response.status == "warning"
 
@@ -369,6 +371,81 @@ async def test_agent_sessions_post_message_includes_only_attached_context(monkey
     assert context_pack["attached_context"][0]["item_type"] == "dataset"
     assert context_pack["attached_context"][0]["include_mode"] == "full"
     assert context_pack["attached_context"][0]["ref"]["dataset_id"] == "ds-ctx"
+
+
+@pytest.mark.asyncio
+async def test_agent_sessions_post_message_blocks_denied_classification(monkeypatch: pytest.MonkeyPatch) -> None:
+    sessions = _FakeSessions()
+    req = _Request(principal=_principal())
+
+    class _PolicyRegistry:
+        async def get_tenant_policy(self, *, tenant_id: str):  # noqa: ANN001
+            return SimpleNamespace(
+                tenant_id=tenant_id,
+                allowed_models=[],
+                allowed_tools=[],
+                default_model=None,
+                auto_approve_rules={},
+                data_policies={"llm": {"deny_classifications": ["secret"]}},
+            )
+
+    created = await create_session(
+        AgentSessionCreateRequest(),
+        request=req,
+        sessions=sessions,
+        policy_registry=_PolicyRegistry(),  # type: ignore[arg-type]
+        tool_registry=_FakeToolRegistry(),
+    )
+    session_id = created.data["session"]["session_id"]
+
+    await attach_context_item(
+        session_id=session_id,
+        body=AgentSessionContextItemCreateRequest(
+            item_type="dataset",
+            include_mode="full",
+            ref={"dataset_id": "ds-secret"},
+            metadata={"classification": "secret"},
+        ),
+        request=req,
+        sessions=sessions,
+    )
+
+    captured: dict = {}
+
+    async def _fake_compile_agent_plan(**kwargs):  # type: ignore[no-untyped-def]
+        captured["context_pack"] = kwargs.get("context_pack")
+        from bff.services.agent_plan_compiler import AgentPlanCompileResult
+
+        return AgentPlanCompileResult(
+            status="clarification_required",
+            plan_id="00000000-0000-0000-0000-000000000000",
+            plan=None,
+            validation_errors=["needs clarification"],
+            validation_warnings=[],
+            questions=[],
+        )
+
+    monkeypatch.setattr("bff.routers.agent_sessions.compile_agent_plan", _fake_compile_agent_plan)
+
+    response = await post_message(
+        session_id=session_id,
+        body=AgentSessionMessageRequest(content="do something", execute=True),
+        request=req,
+        llm=None,  # type: ignore[arg-type]
+        redis_service=None,  # type: ignore[arg-type]
+        audit_store=None,  # type: ignore[arg-type]
+        sessions=sessions,
+        policy_registry=_PolicyRegistry(),  # type: ignore[arg-type]
+        model_registry=SimpleNamespace(),
+        tool_registry=_FakeToolRegistry(),  # type: ignore[arg-type]
+        plan_registry=SimpleNamespace(),
+        agent_registry=SimpleNamespace(),
+        dataset_registry=SimpleNamespace(),
+    )
+    assert response.status == "warning"
+
+    context_pack = captured.get("context_pack") or {}
+    assert context_pack.get("attached_context") == []
 
 
 @pytest.mark.asyncio

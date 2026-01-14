@@ -61,6 +61,6 @@ async def test_agent_blocks_write_when_overlay_degraded() -> None:
         request_id=None,
     )
 
-    assert result["status"] == "failure"
+    assert result["status"] == "failed"
     assert result["http_status"] == 409
     assert result["error"] == "blocked: overlay_degraded"

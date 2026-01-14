@@ -139,7 +139,86 @@ async def test_llm_gateway_cache_key_is_partition_scoped(monkeypatch: pytest.Mon
     assert len(redis.keys) == 2
     assert redis.keys[0] != redis.keys[1]
 
-    prompt_obj = {"system": "system", "user": "user", "task": "TEST", "model": "mock"}
+    prompt_obj = {
+        "system": "system",
+        "user": "user",
+        "task": "TEST",
+        "model": "mock",
+        "schema": "_Out",
+        "native_tool_calling": False,
+    }
     prompt_hash = sha256_hex(stable_json_dumps(prompt_obj))
     assert prompt_hash in redis.keys[0]
 
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_llm_gateway_native_tool_calling_falls_back_on_unsupported(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "openai_compat")
+    monkeypatch.setenv("LLM_BASE_URL", "http://example.invalid")
+    monkeypatch.setenv("LLM_MODEL", "gpt-test")
+    monkeypatch.setenv("LLM_NATIVE_TOOL_CALLING", "true")
+
+    gateway = LLMGateway()
+    calls: dict[str, int] = {"tools": 0, "json": 0}
+
+    async def _stub_tools(**_kwargs):  # noqa: ANN001
+        calls["tools"] += 1
+        raise LLMHTTPStatusError(status_code=400, body_preview="unsupported")
+
+    async def _stub_json(**_kwargs):  # noqa: ANN001
+        calls["json"] += 1
+        return {"ok": True}, {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3}
+
+    monkeypatch.setattr(gateway, "_call_openai_compat_tool_call", _stub_tools)
+    monkeypatch.setattr(gateway, "_call_openai_compat_json", _stub_json)
+
+    out, _meta = await gateway.complete_json(
+        task="TEST",
+        system_prompt="system",
+        user_prompt="user",
+        response_model=_Out,
+        audit_partition_key=None,
+    )
+    assert out.ok is True
+    assert calls["tools"] == 1
+    assert calls["json"] == 1
+    assert gateway._tool_calls_supported.get("gpt-test") is False  # type: ignore[attr-defined]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_llm_gateway_provider_policy_can_disable_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "mock")
+    monkeypatch.setenv("LLM_MODEL", "mock")
+    monkeypatch.setenv("LLM_MOCK_JSON_TEST", json.dumps({"ok": True}))
+    monkeypatch.setenv("LLM_PROVIDER_POLICIES_JSON", json.dumps({"mock": {"disable_cache": True}}))
+
+    class _StubRedis:
+        def __init__(self) -> None:
+            self.get_calls = 0
+            self.set_calls = 0
+
+        async def get_json(self, _key: str):  # noqa: ANN001
+            self.get_calls += 1
+            raise AssertionError("cache read should be disabled")
+
+        async def set_json(self, _key: str, _value, ttl: int):  # noqa: ANN001
+            self.set_calls += 1
+            raise AssertionError("cache write should be disabled")
+
+    redis = _StubRedis()
+    gateway = LLMGateway()
+
+    out, meta = await gateway.complete_json(
+        task="TEST",
+        system_prompt="system",
+        user_prompt="user",
+        response_model=_Out,
+        redis_service=redis,  # type: ignore[arg-type]
+        audit_partition_key="agent_session:test",
+    )
+    assert out.ok is True
+    assert meta.cache_hit is False
+    assert redis.get_calls == 0
+    assert redis.set_calls == 0

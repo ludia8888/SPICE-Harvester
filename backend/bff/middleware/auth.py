@@ -52,6 +52,19 @@ _TENANT_POLICY_CACHE: dict[str, tuple[float, object]] = {}
 _TENANT_POLICY_CACHE_TTL_S = 30.0
 
 
+def _approx_token_count(payload: Any) -> int:
+    if payload is None or payload == "" or payload == {} or payload == []:
+        return 0
+    try:
+        text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
+    except Exception:
+        text = str(payload)
+    text = text.strip()
+    if not text:
+        return 0
+    return max(1, int((len(text) + 3) / 4))
+
+
 def _safe_uuid(value: Optional[str]) -> Optional[str]:
     raw = str(value or "").strip()
     if not raw:
@@ -264,6 +277,7 @@ async def _maybe_start_session_tool_call(request: Request) -> None:
     )
 
     request.state.agent_tool_started_monotonic = time.monotonic()
+    request_token_count = _approx_token_count({"query": request_payload.get("query"), "body": request_payload.get("body")})
     request.state.agent_tool_session_ids = {
         "tenant_id": tenant_id,
         "session_id": session_id,
@@ -273,6 +287,7 @@ async def _maybe_start_session_tool_call(request: Request) -> None:
         "tool_id": tool_id,
         "request_digest": request_digest,
         "idempotency_key": idempotency_key,
+        "request_token_count": request_token_count,
     }
 
     try:
@@ -288,6 +303,7 @@ async def _maybe_start_session_tool_call(request: Request) -> None:
             query={"items": request_payload.get("query") or []},
             request_body=request_payload.get("body"),
             request_digest=request_digest,
+            request_token_count=request_token_count,
             idempotency_key=idempotency_key,
             started_at=datetime.now(timezone.utc),
         )
@@ -303,6 +319,7 @@ async def _maybe_start_session_tool_call(request: Request) -> None:
                 "method": str(request_payload.get("method") or request.method or "GET"),
                 "path": str(request_payload.get("path") or request.url.path),
                 "request_digest": request_digest,
+                "request_token_count": request_token_count,
                 "job_id": job_id,
                 "plan_id": plan_id,
                 "idempotency_key": idempotency_key,
@@ -341,6 +358,7 @@ async def _finalize_session_tool_call(request: Request, response: Response, *, t
             body_obj = {}
 
     response_digest = digest_for_audit(body_obj)
+    response_token_count = _approx_token_count(body_obj)
     error_code = None
     error_message = None
     side_effect_summary: dict[str, Any] = {}
@@ -360,6 +378,7 @@ async def _finalize_session_tool_call(request: Request, response: Response, *, t
             response_status=int(getattr(response, "status_code", 200)),
             response_body=body_obj,
             response_digest=response_digest,
+            response_token_count=response_token_count,
             error_code=error_code,
             error_message=error_message,
             side_effect_summary=side_effect_summary,
@@ -378,6 +397,7 @@ async def _finalize_session_tool_call(request: Request, response: Response, *, t
                 "status": terminal_status,
                 "http_status": int(getattr(response, "status_code", 200)),
                 "response_digest": response_digest,
+                "response_token_count": response_token_count,
                 "latency_ms": latency_ms,
                 "error_code": error_code,
                 "error_message": error_message,
@@ -524,40 +544,46 @@ async def _enforce_internal_agent_tool_policy(request: Request) -> Optional[JSON
     principal = getattr(request.state, "user", None)
     tenant_id = str(getattr(principal, "tenant_id", None) or getattr(principal, "org_id", None) or "default").strip() or "default"
 
-    session_header = (request.headers.get(_AGENT_SESSION_ID_HEADER) or "").strip()
-    if session_header:
-        session_registry = _resolve_agent_session_registry(request)
-        if session_registry is not None:
-            try:
-                session = await session_registry.get_session(session_id=session_header, tenant_id=tenant_id)
-            except Exception:
-                session = None
-            user_id = str(getattr(principal, "id", "") or "").strip()
-            if not session or (user_id and session.created_by != user_id):
-                return _error_response(
-                    request=request,
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    message="Session tool execution denied",
-                    code=ErrorCode.PERMISSION_DENIED,
-                    category=ErrorCategory.PERMISSION,
-                )
-            if str(session.status or "").strip().upper() == "TERMINATED":
-                return _error_response(
-                    request=request,
-                    status_code=status.HTTP_409_CONFLICT,
-                    message="Session terminated",
-                    code=ErrorCode.CONFLICT,
-                    category=ErrorCategory.CONFLICT,
-                )
-            tools_restricted = bool((session.metadata or {}).get("tools_restricted"))
-            if tools_restricted and tool_id not in set(session.enabled_tools or []):
-                return _error_response(
-                    request=request,
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    message=f"tool_id={tool_id} not enabled for session",
-                    code=ErrorCode.PERMISSION_DENIED,
-                    category=ErrorCategory.PERMISSION,
-                )
+    session_registry = _resolve_agent_session_registry(request)
+    if session_registry is not None:
+        session_header = _safe_uuid(request.headers.get(_AGENT_SESSION_ID_HEADER))
+        if not session_header:
+            return _error_response(
+                request=request,
+                status_code=status.HTTP_400_BAD_REQUEST,
+                message=f"{_AGENT_SESSION_ID_HEADER} required for agent tool calls",
+                code=ErrorCode.REQUEST_VALIDATION_FAILED,
+                category=ErrorCategory.INPUT,
+            )
+        try:
+            session = await session_registry.get_session(session_id=session_header, tenant_id=tenant_id)
+        except Exception:
+            session = None
+        user_id = str(getattr(principal, "id", "") or "").strip()
+        if not session or (user_id and session.created_by != user_id):
+            return _error_response(
+                request=request,
+                status_code=status.HTTP_403_FORBIDDEN,
+                message="Session tool execution denied",
+                code=ErrorCode.PERMISSION_DENIED,
+                category=ErrorCategory.PERMISSION,
+            )
+        if str(session.status or "").strip().upper() == "TERMINATED":
+            return _error_response(
+                request=request,
+                status_code=status.HTTP_409_CONFLICT,
+                message="Session terminated",
+                code=ErrorCode.CONFLICT,
+                category=ErrorCategory.CONFLICT,
+            )
+        if tool_id not in set(session.enabled_tools or []):
+            return _error_response(
+                request=request,
+                status_code=status.HTTP_403_FORBIDDEN,
+                message=f"tool_id={tool_id} not enabled for session",
+                code=ErrorCode.PERMISSION_DENIED,
+                category=ErrorCategory.PERMISSION,
+            )
 
     policy_rec = await _get_cached_tenant_policy(request, tenant_id)
     allowed_tools = {str(t).strip() for t in (getattr(policy_rec, "allowed_tools", None) or []) if str(t).strip()}
@@ -756,7 +782,7 @@ async def _maybe_replay_or_start_tool_idempotency(request: Request) -> Optional[
                 message="Idempotency store unavailable",
                 code=ErrorCode.UPSTREAM_UNAVAILABLE,
                 category=ErrorCategory.UPSTREAM,
-                context={"error": "idempotency_store_unavailable"},
+                context={"error": "idempotency/store-unavailable"},
             )
         return None
 
@@ -781,7 +807,7 @@ async def _maybe_replay_or_start_tool_idempotency(request: Request) -> Optional[
                 message="Idempotency store unavailable",
                 code=ErrorCode.UPSTREAM_UNAVAILABLE,
                 category=ErrorCategory.UPSTREAM,
-                context={"error": "idempotency_store_unavailable"},
+                context={"error": "idempotency/store-unavailable"},
             )
         return None
 
@@ -795,7 +821,7 @@ async def _maybe_replay_or_start_tool_idempotency(request: Request) -> Optional[
                 message="Idempotency-Key conflict",
                 code=ErrorCode.CONFLICT,
                 category=ErrorCategory.CONFLICT,
-                context={"error": "idempotency_conflict"},
+                context={"error": "idempotency/conflict"},
             )
 
         status_value = str(getattr(record, "status", "") or "").strip().upper()
@@ -836,7 +862,7 @@ async def _maybe_replay_or_start_tool_idempotency(request: Request) -> Optional[
                 message="Idempotency key in progress",
                 code=ErrorCode.UPSTREAM_UNAVAILABLE,
                 category=ErrorCategory.UPSTREAM,
-                context={"error": "idempotency_in_progress"},
+                context={"error": "idempotency/in-progress"},
                 headers={"Retry-After": "1"},
             )
 
@@ -1027,52 +1053,14 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
                         category=ErrorCategory.AUTH,
                     )
             else:
-                if not bool(auth.allow_insecure_agent_no_user_jwt):
-                    return _error_response(
-                        request=request,
-                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        message="USER_JWT_ENABLED required for agent calls",
-                        code=ErrorCode.INTERNAL_ERROR,
-                        category=ErrorCategory.INTERNAL,
-                        context={"error": "user_jwt_required_for_agent"},
-                    )
-                # Insecure/development mode: treat delegated token as an unverified JWT and extract identity.
-                try:
-                    from jose import jwt as jose_jwt  # local import for optional dev-only path
-
-                    claims = jose_jwt.get_unverified_claims(delegated_raw)
-                except Exception:
-                    claims = {}
-                if not isinstance(claims, dict):
-                    claims = {}
-                user_id = (
-                    str(
-                        claims.get("sub")
-                        or claims.get("user_id")
-                        or claims.get("uid")
-                        or claims.get("id")
-                        or "unknown"
-                    )
-                    .strip()
-                    or "unknown"
+                return _error_response(
+                    request=request,
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    message="USER_JWT_ENABLED required for agent calls",
+                    code=ErrorCode.INTERNAL_ERROR,
+                    category=ErrorCategory.INTERNAL,
+                    context={"error": "user-jwt-required-for-agent"},
                 )
-                tenant_id = str(claims.get("tenant_id") or claims.get("tenant") or claims.get("org_id") or "default").strip() or "default"
-                roles_raw = claims.get("roles") or claims.get("role") or claims.get("groups") or ()
-                if isinstance(roles_raw, str):
-                    roles = tuple([r.strip() for r in roles_raw.split(",") if r.strip()])
-                elif isinstance(roles_raw, (list, tuple, set)):
-                    roles = tuple([str(r).strip() for r in roles_raw if str(r).strip()])
-                else:
-                    roles = ()
-                principal = UserPrincipal(
-                    id=user_id,
-                    tenant_id=tenant_id,
-                    org_id=str(claims.get("org_id") or "").strip() or None,
-                    roles=roles,
-                    verified=True,
-                    claims=dict(claims),
-                )
-                _attach_verified_principal(request, principal)
 
             await _maybe_start_session_tool_call(request)
             denied = await _enforce_internal_agent_tool_policy(request)
@@ -1240,9 +1228,8 @@ async def enforce_bff_websocket_auth(websocket: WebSocket, token: Optional[str])
                 await websocket.close(code=4403, reason="Delegated user token invalid")
                 return False
         else:
-            if not bool(auth.allow_insecure_agent_no_user_jwt):
-                await websocket.close(code=1011, reason="USER_JWT_ENABLED required for agent calls")
-                return False
+            await websocket.close(code=1011, reason="USER_JWT_ENABLED required for agent calls")
+            return False
         return True
 
     expected = auth.bff_expected_token

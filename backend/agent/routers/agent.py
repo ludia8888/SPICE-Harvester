@@ -193,7 +193,7 @@ async def _execute_agent_run(
                     status = status_raw or "UNKNOWN"
                     if status == "SUCCESS":
                         status = "SUCCESS"
-                    elif status == "FAILURE":
+                    elif status in {"FAILED", "FAILURE"}:
                         status = "FAILED"
                     elif status == "SKIPPED":
                         status = "SKIPPED"

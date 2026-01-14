@@ -53,7 +53,7 @@ async def test_simulation_rejection_stops_before_submit() -> None:
     runtime = _StubRuntime(
         results=[
             {
-                "status": "failure",
+                "status": "failed",
                 "error": "simulation rejected",
                 "http_status": 200,
                 "error_key": "submission_criteria_failed",
@@ -96,4 +96,3 @@ async def test_simulation_rejection_stops_before_submit() -> None:
     assert final_state["failed"] is True
     assert len(runtime.calls) == 1
     assert final_state["results"][0]["error_key"] == "submission_criteria_failed"
-

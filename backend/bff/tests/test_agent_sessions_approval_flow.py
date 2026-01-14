@@ -367,9 +367,11 @@ async def test_session_approval_request_and_resume(monkeypatch: pytest.MonkeyPat
         audit_store=None,  # type: ignore[arg-type]
         sessions=sessions,
         policy_registry=policy_registry,
+        model_registry=SimpleNamespace(),
         tool_registry=tools,
         plan_registry=plans,
         agent_registry=agent_registry,
+        dataset_registry=SimpleNamespace(),
     )
     assert response.status == "accepted"
     assert response.data["status"] == "WAITING_APPROVAL"
@@ -468,9 +470,11 @@ async def test_session_auto_approve_policy_starts_job(monkeypatch: pytest.Monkey
         audit_store=None,  # type: ignore[arg-type]
         sessions=sessions,
         policy_registry=policy_registry,
+        model_registry=SimpleNamespace(),
         tool_registry=tools,
         plan_registry=plans,
         agent_registry=agent_registry,
+        dataset_registry=SimpleNamespace(),
     )
     assert response.status == "accepted"
     assert response.data["auto_approved"] is True
@@ -519,9 +523,11 @@ async def test_session_approval_reject_marks_job(monkeypatch: pytest.MonkeyPatch
         audit_store=None,  # type: ignore[arg-type]
         sessions=sessions,
         policy_registry=policy_registry,
+        model_registry=SimpleNamespace(),
         tool_registry=tools,
         plan_registry=plans,
         agent_registry=agent_registry,
+        dataset_registry=SimpleNamespace(),
     )
     approval_request_id = response.data["approval_request_id"]
     job_id = response.data["job_id"]

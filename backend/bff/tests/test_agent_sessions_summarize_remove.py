@@ -153,14 +153,20 @@ async def test_summarize_session_adds_summary_message() -> None:
 
     req = _Request(principal=UserPrincipal(id="user-1", tenant_id=tenant_id, verified=True))
     audit_store = SimpleNamespace(log=lambda **_kwargs: None)
+    async def _get_policy(**_kwargs):  # noqa: ANN001
+        return None
+
+    policy_registry = SimpleNamespace(get_tenant_policy=_get_policy)
 
     result = await summarize_session(
         session_id=session_id,
         body=AgentSessionSummarizeRequest(max_messages=50),
         request=req,
         llm=_FakeLLM(),
+        redis_service=SimpleNamespace(),
         audit_store=audit_store,
         sessions=sessions,
+        policy_registry=policy_registry,  # type: ignore[arg-type]
     )
 
     assert result.status in {"success", "warning"}
@@ -223,4 +229,3 @@ async def test_remove_messages_marks_removed_and_audits() -> None:
     assert result.data["removed_count"] == 1
     assert sessions.messages[session_id][0].is_removed is True
     assert audit_store.calls
-

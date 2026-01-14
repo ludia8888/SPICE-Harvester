@@ -77,7 +77,7 @@ async def test_agent_runtime_blocks_missing_required_artifacts(monkeypatch: pyte
         request_id="req-1",
     )
 
-    assert result["status"] == "failure"
+    assert result["status"] == "failed"
     assert result["http_status"] == 400
     assert result["error_key"] == "artifact_missing"
     assert result["missing_artifacts"] == ["artifact.required"]

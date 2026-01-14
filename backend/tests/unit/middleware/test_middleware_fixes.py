@@ -215,7 +215,7 @@ def test_bff_agent_auth_requires_user_jwt_enabled_for_agent_calls():
         )
         assert resp.status_code == 503
         payload = resp.json()
-        assert payload.get("context", {}).get("error") == "user_jwt_required_for_agent"
+        assert payload.get("context", {}).get("error") == "user-jwt-required-for-agent"
 
 
 @pytest.mark.unit
