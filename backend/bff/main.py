@@ -119,6 +119,7 @@ from bff.routers import (
     agent_tools,
     audit,
     actions,
+    ci_webhooks,
     command_status,
     context7,
     context_tools,
@@ -825,6 +826,7 @@ async def lifespan(app: FastAPI):
                     retention_days=int(settings.workers.agent_retention.retention_days),
                     stop_event=agent_retention_stop,
                     action=str(settings.workers.agent_retention.action),
+                    retention_policy_json=settings.workers.agent_retention.policy_json,
                     storage_service=storage_service,
                 )
             )
@@ -1046,6 +1048,7 @@ app.include_router(command_status.router, prefix="/api/v1")
 app.include_router(websocket.router, prefix="/api/v1")
 app.include_router(tasks.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
+app.include_router(ci_webhooks.router, prefix="/api/v1")
 app.include_router(data_connector.router, prefix="/api/v1")
 app.include_router(lineage.router, prefix="/api/v1")
 app.include_router(audit.router, prefix="/api/v1")

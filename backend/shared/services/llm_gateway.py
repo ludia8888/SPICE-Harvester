@@ -32,6 +32,17 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 
+_ALLOWED_PROVIDER_EXTRA_BODY_KEYS: dict[str, set[str]] = {
+    # OpenAI-compatible chat/completions endpoints commonly accept `user`.
+    # Some gateways accept `store` as a vendor extension; we allow it when configured.
+    "openai_compat": {"store", "user"},
+    # Anthropic Messages API supports `metadata`.
+    "anthropic": {"metadata"},
+    # Google generateContent does not have a stable, portable set of extra body keys to support here.
+    "google": set(),
+    "mock": set(),
+}
+
 
 class LLMUnavailableError(RuntimeError):
     pass
@@ -135,6 +146,96 @@ def _parse_provider_policies(raw: Optional[str]) -> dict[str, dict[str, Any]]:
             continue
         policies[provider] = dict(value) if isinstance(value, dict) else {}
     return policies
+
+
+def _coerce_provider_extra_headers(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    headers: dict[str, str] = {}
+    for raw_key, raw_value in value.items():
+        key = str(raw_key or "").strip()
+        val = str(raw_value or "").strip()
+        if not key or not val:
+            continue
+        if "\n" in key or "\r" in key or "\n" in val or "\r" in val:
+            continue
+        headers[key] = val
+    return headers
+
+
+def _coerce_provider_extra_body(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    body: dict[str, Any] = {}
+    for raw_key, raw_value in value.items():
+        key = str(raw_key or "").strip()
+        if not key:
+            continue
+        body[key] = raw_value
+    return body
+
+
+def _filter_provider_extra_body(*, provider: str, extra_body: dict[str, Any]) -> dict[str, Any]:
+    allowed = _ALLOWED_PROVIDER_EXTRA_BODY_KEYS.get(str(provider or "").strip().lower(), set())
+    if not allowed:
+        return {}
+    filtered: dict[str, Any] = {}
+    for key, value in extra_body.items():
+        if key in allowed:
+            filtered[str(key)] = value
+    return filtered
+
+
+def _build_provider_send_overrides(
+    *,
+    provider: str,
+    provider_policy: Any,
+    audit_partition_key: Optional[str],
+    audit_actor: Optional[str],
+) -> tuple[dict[str, str], dict[str, Any], dict[str, Any]]:
+    """
+    Build provider send overrides (SEC-002).
+
+    Returns (extra_headers, extra_body, policy_summary_for_audit).
+    """
+    policy_dict = provider_policy if isinstance(provider_policy, dict) else {}
+    extra_headers = _coerce_provider_extra_headers(policy_dict.get("extra_headers"))
+
+    extra_body_raw = _coerce_provider_extra_body(policy_dict.get("extra_body"))
+    extra_body = _filter_provider_extra_body(provider=provider, extra_body=extra_body_raw)
+
+    provider_value = str(provider or "").strip().lower()
+
+    no_store = bool(policy_dict.get("no_store")) or policy_dict.get("store") is False
+    if no_store and provider_value == "openai_compat":
+        extra_body["store"] = False
+
+    isolation_mode = str(policy_dict.get("session_isolation") or "").strip().lower()
+    isolation_seed: Optional[str] = None
+    if isolation_mode in {"partition", "partition_hash"} and audit_partition_key:
+        isolation_seed = f"partition:{audit_partition_key}"
+    elif isolation_mode in {"actor", "actor_hash"} and audit_actor:
+        isolation_seed = f"actor:{audit_actor}"
+
+    if isolation_seed:
+        isolation_id = sha256_hex(isolation_seed)[:64]
+        if provider_value == "openai_compat":
+            extra_body.setdefault("user", isolation_id)
+        elif provider_value == "anthropic":
+            metadata = extra_body.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+            metadata.setdefault("user_id", isolation_id)
+            extra_body["metadata"] = metadata
+
+    summary: dict[str, Any] = {
+        "disable_cache": bool(policy_dict.get("disable_cache")),
+        "no_store": bool(no_store),
+        "session_isolation": isolation_mode or None,
+        "extra_headers": sorted(extra_headers.keys()),
+        "extra_body": sorted(extra_body.keys()),
+    }
+    return extra_headers, extra_body, summary
 
 
 def _extract_json_object(text: str) -> Dict[str, Any]:
@@ -315,6 +416,8 @@ class LLMGateway:
         temperature: float,
         max_tokens: int,
         prompt_hash: str,
+        extra_headers: Optional[Dict[str, str]] = None,
+        extra_body: Optional[Dict[str, Any]] = None,
     ) -> tuple[Dict[str, Any], dict[str, Any]]:
         url = f"{self.base_url}/chat/completions"
         headers: Dict[str, str] = {
@@ -323,6 +426,8 @@ class LLMGateway:
         }
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+        if extra_headers:
+            headers.update({str(k): str(v) for k, v in extra_headers.items() if str(k).strip() and str(v).strip()})
 
         body: Dict[str, Any] = {
             "model": model,
@@ -335,6 +440,10 @@ class LLMGateway:
         }
         if self.enable_json_mode:
             body["response_format"] = {"type": "json_object"}
+        if extra_body:
+            for key, value in extra_body.items():
+                if str(key).strip():
+                    body[str(key)] = value
 
         async with httpx.AsyncClient(timeout=self.timeout_s) as client:
             resp = await client.post(url, headers=headers, json=body)
@@ -371,6 +480,8 @@ class LLMGateway:
         prompt_hash: str,
         tool_name: str,
         tool_parameters: Dict[str, Any],
+        extra_headers: Optional[Dict[str, str]] = None,
+        extra_body: Optional[Dict[str, Any]] = None,
     ) -> tuple[Dict[str, Any], dict[str, Any]]:
         url = f"{self.base_url}/chat/completions"
         headers: Dict[str, str] = {
@@ -379,6 +490,8 @@ class LLMGateway:
         }
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+        if extra_headers:
+            headers.update({str(k): str(v) for k, v in extra_headers.items() if str(k).strip() and str(v).strip()})
 
         safe_tool_name = str(tool_name or "return_json").strip() or "return_json"
         tools = [
@@ -403,6 +516,10 @@ class LLMGateway:
             "tools": tools,
             "tool_choice": {"type": "function", "function": {"name": safe_tool_name}},
         }
+        if extra_body:
+            for key, value in extra_body.items():
+                if str(key).strip():
+                    body[str(key)] = value
 
         async with httpx.AsyncClient(timeout=self.timeout_s) as client:
             resp = await client.post(url, headers=headers, json=body)
@@ -441,6 +558,8 @@ class LLMGateway:
         temperature: float,
         max_tokens: int,
         prompt_hash: str,
+        extra_headers: Optional[Dict[str, str]] = None,
+        extra_body: Optional[Dict[str, Any]] = None,
     ) -> tuple[Dict[str, Any], dict[str, Any]]:
         if not self.anthropic_api_key:
             raise LLMUnavailableError("Anthropic API key is not configured (set LLM_ANTHROPIC_API_KEY)")
@@ -452,6 +571,8 @@ class LLMGateway:
             "anthropic-version": self.anthropic_version,
             "Idempotency-Key": sha256_hex(f"llm:{task}:{model}:{prompt_hash}"),
         }
+        if extra_headers:
+            headers.update({str(k): str(v) for k, v in extra_headers.items() if str(k).strip() and str(v).strip()})
         body: Dict[str, Any] = {
             "model": model,
             "max_tokens": max_tokens,
@@ -459,6 +580,10 @@ class LLMGateway:
             "system": system_prompt,
             "messages": [{"role": "user", "content": user_prompt}],
         }
+        if extra_body:
+            for key, value in extra_body.items():
+                if str(key).strip():
+                    body[str(key)] = value
         async with httpx.AsyncClient(timeout=self.timeout_s) as client:
             resp = await client.post(url, headers=headers, json=body)
         if resp.status_code >= 400:
@@ -488,6 +613,8 @@ class LLMGateway:
         temperature: float,
         max_tokens: int,
         prompt_hash: str,
+        extra_headers: Optional[Dict[str, str]] = None,
+        extra_body: Optional[Dict[str, Any]] = None,
     ) -> tuple[Dict[str, Any], dict[str, Any]]:
         if not self.google_api_key:
             raise LLMUnavailableError("Google API key is not configured (set LLM_GOOGLE_API_KEY)")
@@ -497,6 +624,8 @@ class LLMGateway:
             "Content-Type": "application/json",
             "Idempotency-Key": sha256_hex(f"llm:{task}:{model}:{prompt_hash}"),
         }
+        if extra_headers:
+            headers.update({str(k): str(v) for k, v in extra_headers.items() if str(k).strip() and str(v).strip()})
         body: Dict[str, Any] = {
             "contents": [
                 {
@@ -506,6 +635,10 @@ class LLMGateway:
             ],
             "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens},
         }
+        if extra_body:
+            for key, value in extra_body.items():
+                if str(key).strip():
+                    body[str(key)] = value
         async with httpx.AsyncClient(timeout=self.timeout_s) as client:
             resp = await client.post(url, headers=headers, params={"key": self.google_api_key}, json=body)
         if resp.status_code >= 400:
@@ -598,7 +731,18 @@ class LLMGateway:
             if isinstance(getattr(self, "provider_policies", None), dict)
             else {}
         )
-        cache_enabled = bool(self.enable_cache and redis_service) and not bool(provider_policy.get("disable_cache"))
+        provider_extra_headers, provider_extra_body, provider_policy_summary = _build_provider_send_overrides(
+            provider=provider,
+            provider_policy=provider_policy,
+            audit_partition_key=audit_partition_key,
+            audit_actor=audit_actor,
+        )
+
+        cache_enabled = (
+            bool(self.enable_cache and redis_service and audit_partition_key)
+            and not bool(provider_policy.get("disable_cache"))
+        )
+        audit_metadata_effective = {**(audit_metadata or {}), "provider_policy": provider_policy_summary}
 
         if cache_enabled:
             try:
@@ -620,7 +764,7 @@ class LLMGateway:
                                 resource_type="llm_request",
                                 resource_id=audit_resource_id or f"llm:{task}:{prompt_hash[:12]}",
                                 metadata={
-                                    **(audit_metadata or {}),
+                                    **audit_metadata_effective,
                                     "provider": provider,
                                     "model": model_to_use,
                                     "temperature": temperature,
@@ -681,7 +825,7 @@ class LLMGateway:
                             hint = task_key or "LLM_MOCK_JSON"
                             raise LLMRequestError(f"LLM_PROVIDER=mock requires {hint} (or LLM_MOCK_JSON) to be set")
                         obj = _extract_json_object(raw)
-                        usage: dict[str, Any] = {}
+                        usage = {}
                     elif provider == "openai_compat":
                         tool_calls_supported = self._tool_calls_supported.get(model_to_use)
                         want_native = bool(native_flag) and tool_calls_supported is not False
@@ -699,6 +843,8 @@ class LLMGateway:
                                     prompt_hash=prompt_hash,
                                     tool_name=tool_name,
                                     tool_parameters=_tool_parameters_from_model(response_model),
+                                    extra_headers=provider_extra_headers,
+                                    extra_body=provider_extra_body,
                                 )
                                 self._tool_calls_supported[model_to_use] = True
                             except LLMHTTPStatusError as exc:
@@ -713,6 +859,8 @@ class LLMGateway:
                                         temperature=temperature,
                                         max_tokens=max_tokens,
                                         prompt_hash=prompt_hash,
+                                        extra_headers=provider_extra_headers,
+                                        extra_body=provider_extra_body,
                                     )
                                 else:
                                     raise
@@ -725,6 +873,8 @@ class LLMGateway:
                                 temperature=temperature,
                                 max_tokens=max_tokens,
                                 prompt_hash=prompt_hash,
+                                extra_headers=provider_extra_headers,
+                                extra_body=provider_extra_body,
                             )
                     elif provider == "anthropic":
                         obj, usage = await self._call_anthropic_json(
@@ -735,6 +885,8 @@ class LLMGateway:
                             temperature=temperature,
                             max_tokens=max_tokens,
                             prompt_hash=prompt_hash,
+                            extra_headers=provider_extra_headers,
+                            extra_body=provider_extra_body,
                         )
                     elif provider == "google":
                         obj, usage = await self._call_google_json(
@@ -745,6 +897,8 @@ class LLMGateway:
                             temperature=temperature,
                             max_tokens=max_tokens,
                             prompt_hash=prompt_hash,
+                            extra_headers=provider_extra_headers,
+                            extra_body=provider_extra_body,
                         )
                     else:
                         raise LLMUnavailableError(f"Unsupported LLM_PROVIDER: {provider}")
@@ -829,7 +983,7 @@ class LLMGateway:
                         resource_type="llm_request",
                         resource_id=audit_resource_id or f"llm:{task}:{prompt_hash[:12]}",
                         metadata={
-                            **(audit_metadata or {}),
+                            **audit_metadata_effective,
                             "provider": provider,
                             "model": model_to_use,
                             "temperature": temperature,

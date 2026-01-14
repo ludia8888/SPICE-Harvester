@@ -2003,6 +2003,14 @@ class AgentSessionRegistry:
         message_placeholder: str = "<expired>",
         removed_by: str = "retention",
         removed_reason: str = "retention",
+        include_messages: bool = True,
+        include_tool_calls: bool = True,
+        include_context_items: bool = True,
+        include_ci_results: bool = True,
+        include_events: bool = True,
+        include_llm_calls: bool = True,
+        context_item_type: Optional[str] = None,
+        exclude_context_item_types: Optional[List[str]] = None,
     ) -> Dict[str, int]:
         """
         Apply retention to agent session data (SEC-005).
@@ -2025,6 +2033,18 @@ class AgentSessionRegistry:
         if tenant_value == "":
             tenant_value = None
 
+        context_item_type_value = str(context_item_type).strip() if context_item_type is not None else None
+        if context_item_type_value == "":
+            context_item_type_value = None
+
+        exclude_types: list[str] = []
+        if context_item_type_value is None and exclude_context_item_types:
+            for item in exclude_context_item_types:
+                value = str(item or "").strip()
+                if value:
+                    exclude_types.append(value)
+        exclude_types = sorted(set(exclude_types))
+
         def _count(result: Any) -> int:
             try:
                 return int(str(result).split()[-1])
@@ -2041,48 +2061,210 @@ class AgentSessionRegistry:
         }
 
         async with self._pool.acquire() as conn:
-            if action_value == "delete":
-                values: list[Any] = [cutoff]
-                tenant_clause = ""
-                if tenant_value is not None:
-                    values.append(tenant_value)
-                    tenant_clause = f" AND s.tenant_id = ${len(values)}"
-                res = await conn.execute(
-                    f"""
-                    DELETE FROM {self._schema}.agent_session_messages m
-                    USING {self._schema}.agent_sessions s
-                    WHERE m.session_id = s.session_id
-                      AND m.created_at < $1
-                      {tenant_clause}
-                    """,
-                    *values,
-                )
-                stats["messages"] = _count(res)
-            else:
-                values = [str(message_placeholder or "<expired>"), str(removed_by or "retention"), str(removed_reason or "retention"), cutoff]
-                tenant_clause = ""
-                if tenant_value is not None:
-                    values.append(tenant_value)
-                    tenant_clause = f" AND s.tenant_id = ${len(values)}"
-                res = await conn.execute(
-                    f"""
-                    UPDATE {self._schema}.agent_session_messages m
-                    SET content = $1,
-                        is_removed = true,
-                        removed_at = NOW(),
-                        removed_by = $2,
-                        removed_reason = $3
-                    FROM {self._schema}.agent_sessions s
-                    WHERE m.session_id = s.session_id
-                      AND m.is_removed = false
-                      AND m.created_at < $4
-                      {tenant_clause}
-                    """,
-                    *values,
-                )
-                stats["messages"] = _count(res)
+            if include_messages:
+                if action_value == "delete":
+                    values: list[Any] = [cutoff]
+                    tenant_clause = ""
+                    if tenant_value is not None:
+                        values.append(tenant_value)
+                        tenant_clause = f" AND s.tenant_id = ${len(values)}"
+                    res = await conn.execute(
+                        f"""
+                        DELETE FROM {self._schema}.agent_session_messages m
+                        USING {self._schema}.agent_sessions s
+                        WHERE m.session_id = s.session_id
+                          AND m.created_at < $1
+                          {tenant_clause}
+                        """,
+                        *values,
+                    )
+                    stats["messages"] = _count(res)
+                else:
+                    values = [
+                        str(message_placeholder or "<expired>"),
+                        str(removed_by or "retention"),
+                        str(removed_reason or "retention"),
+                        cutoff,
+                    ]
+                    tenant_clause = ""
+                    if tenant_value is not None:
+                        values.append(tenant_value)
+                        tenant_clause = f" AND s.tenant_id = ${len(values)}"
+                    res = await conn.execute(
+                        f"""
+                        UPDATE {self._schema}.agent_session_messages m
+                        SET content = $1,
+                            is_removed = true,
+                            removed_at = NOW(),
+                            removed_by = $2,
+                            removed_reason = $3
+                        FROM {self._schema}.agent_sessions s
+                        WHERE m.session_id = s.session_id
+                          AND m.is_removed = false
+                          AND m.created_at < $4
+                          {tenant_clause}
+                        """,
+                        *values,
+                    )
+                    stats["messages"] = _count(res)
 
-            if action_value == "delete":
+            if include_tool_calls:
+                if action_value == "delete":
+                    values = [cutoff]
+                    tenant_clause = ""
+                    if tenant_value is not None:
+                        values.append(tenant_value)
+                        tenant_clause = f" AND tenant_id = ${len(values)}"
+                    res = await conn.execute(
+                        f"""
+                        DELETE FROM {self._schema}.agent_session_tool_calls
+                        WHERE started_at < $1
+                        {tenant_clause}
+                        """,
+                        *values,
+                    )
+                    stats["tool_calls"] = _count(res)
+                else:
+                    values = [cutoff]
+                    tenant_clause = ""
+                    if tenant_value is not None:
+                        values.append(tenant_value)
+                        tenant_clause = f" AND tenant_id = ${len(values)}"
+                    res = await conn.execute(
+                        f"""
+                        UPDATE {self._schema}.agent_session_tool_calls
+                        SET request_body = NULL,
+                            response_body = NULL,
+                            updated_at = NOW()
+                        WHERE started_at < $1
+                        {tenant_clause}
+                        """,
+                        *values,
+                    )
+                    stats["tool_calls"] = _count(res)
+
+            if include_context_items:
+                if action_value == "delete":
+                    values: list[Any] = [cutoff]
+                    type_clause = ""
+                    if context_item_type_value is not None:
+                        values.append(context_item_type_value)
+                        type_clause = f" AND c.item_type = ${len(values)}"
+                    elif exclude_types:
+                        values.append(exclude_types)
+                        type_clause = f" AND NOT (c.item_type = ANY(${len(values)}::text[]))"
+
+                    tenant_clause = ""
+                    if tenant_value is not None:
+                        values.append(tenant_value)
+                        tenant_clause = f" AND s.tenant_id = ${len(values)}"
+
+                    res = await conn.execute(
+                        f"""
+                        DELETE FROM {self._schema}.agent_session_context_items c
+                        USING {self._schema}.agent_sessions s
+                        WHERE c.session_id = s.session_id
+                          AND c.created_at < $1
+                          {type_clause}
+                          {tenant_clause}
+                        """,
+                        *values,
+                    )
+                    stats["context_items"] = _count(res)
+                else:
+                    if context_item_type_value is not None:
+                        if context_item_type_value == "file_upload":
+                            values = [cutoff]
+                            tenant_clause = ""
+                            if tenant_value is not None:
+                                values.append(tenant_value)
+                                tenant_clause = f" AND s.tenant_id = ${len(values)}"
+                            res = await conn.execute(
+                                f"""
+                                UPDATE {self._schema}.agent_session_context_items c
+                                SET ref = (c.ref - 'bucket' - 'key' - 'checksum'),
+                                    token_count = 0,
+                                    metadata = (c.metadata - 'extracted_text' - 'extracted_text_preview')
+                                              || jsonb_build_object('retention_redacted', true, 'retention_redacted_at', NOW()),
+                                    updated_at = NOW()
+                                FROM {self._schema}.agent_sessions s
+                                WHERE c.session_id = s.session_id
+                                  AND c.item_type = 'file_upload'
+                                  AND c.created_at < $1
+                                  {tenant_clause}
+                                """,
+                                *values,
+                            )
+                            stats["context_items"] = _count(res)
+                        else:
+                            values = [cutoff, context_item_type_value]
+                            tenant_clause = ""
+                            if tenant_value is not None:
+                                values.append(tenant_value)
+                                tenant_clause = f" AND s.tenant_id = ${len(values)}"
+                            res = await conn.execute(
+                                f"""
+                                UPDATE {self._schema}.agent_session_context_items c
+                                SET token_count = 0,
+                                    metadata = (c.metadata - 'extracted_text' - 'extracted_text_preview')
+                                              || jsonb_build_object('retention_redacted', true, 'retention_redacted_at', NOW()),
+                                    updated_at = NOW()
+                                FROM {self._schema}.agent_sessions s
+                                WHERE c.session_id = s.session_id
+                                  AND c.item_type = $2
+                                  AND c.created_at < $1
+                                  {tenant_clause}
+                                """,
+                                *values,
+                            )
+                            stats["context_items"] = _count(res)
+                    else:
+                        values = [cutoff]
+                        tenant_clause = ""
+                        if tenant_value is not None:
+                            values.append(tenant_value)
+                            tenant_clause = f" AND s.tenant_id = ${len(values)}"
+                        exclude_clause = ""
+                        if exclude_types:
+                            values.append(exclude_types)
+                            exclude_clause = f" AND NOT (c.item_type = ANY(${len(values)}::text[]))"
+
+                        res_upload = await conn.execute(
+                            f"""
+                            UPDATE {self._schema}.agent_session_context_items c
+                            SET ref = (c.ref - 'bucket' - 'key' - 'checksum'),
+                                token_count = 0,
+                                metadata = (c.metadata - 'extracted_text' - 'extracted_text_preview')
+                                          || jsonb_build_object('retention_redacted', true, 'retention_redacted_at', NOW()),
+                                updated_at = NOW()
+                            FROM {self._schema}.agent_sessions s
+                            WHERE c.session_id = s.session_id
+                              AND c.item_type = 'file_upload'
+                              AND c.created_at < $1
+                              {tenant_clause}
+                              {exclude_clause}
+                            """,
+                            *values,
+                        )
+                        res_other = await conn.execute(
+                            f"""
+                            UPDATE {self._schema}.agent_session_context_items c
+                            SET token_count = 0,
+                                metadata = (c.metadata - 'extracted_text' - 'extracted_text_preview')
+                                          || jsonb_build_object('retention_redacted', true, 'retention_redacted_at', NOW()),
+                                updated_at = NOW()
+                            FROM {self._schema}.agent_sessions s
+                            WHERE c.session_id = s.session_id
+                              AND c.item_type <> 'file_upload'
+                              AND c.created_at < $1
+                              {tenant_clause}
+                              {exclude_clause}
+                            """,
+                            *values,
+                        )
+                        stats["context_items"] = _count(res_upload) + _count(res_other)
+
+            if include_ci_results:
                 values = [cutoff]
                 tenant_clause = ""
                 if tenant_value is not None:
@@ -2090,14 +2272,15 @@ class AgentSessionRegistry:
                     tenant_clause = f" AND tenant_id = ${len(values)}"
                 res = await conn.execute(
                     f"""
-                    DELETE FROM {self._schema}.agent_session_tool_calls
-                    WHERE started_at < $1
+                    DELETE FROM {self._schema}.agent_session_ci_results
+                    WHERE created_at < $1
                     {tenant_clause}
                     """,
                     *values,
                 )
-                stats["tool_calls"] = _count(res)
-            else:
+                stats["ci_results"] = _count(res)
+
+            if include_events:
                 values = [cutoff]
                 tenant_clause = ""
                 if tenant_value is not None:
@@ -2105,116 +2288,28 @@ class AgentSessionRegistry:
                     tenant_clause = f" AND tenant_id = ${len(values)}"
                 res = await conn.execute(
                     f"""
-                    UPDATE {self._schema}.agent_session_tool_calls
-                    SET request_body = NULL,
-                        response_body = NULL,
-                        updated_at = NOW()
-                    WHERE started_at < $1
+                    DELETE FROM {self._schema}.agent_session_events
+                    WHERE occurred_at < $1
                     {tenant_clause}
                     """,
                     *values,
                 )
-                stats["tool_calls"] = _count(res)
+                stats["events"] = _count(res)
 
-            if action_value == "delete":
+            if include_llm_calls:
                 values = [cutoff]
                 tenant_clause = ""
                 if tenant_value is not None:
                     values.append(tenant_value)
-                    tenant_clause = f" AND s.tenant_id = ${len(values)}"
+                    tenant_clause = f" AND tenant_id = ${len(values)}"
                 res = await conn.execute(
                     f"""
-                    DELETE FROM {self._schema}.agent_session_context_items c
-                    USING {self._schema}.agent_sessions s
-                    WHERE c.session_id = s.session_id
-                      AND c.created_at < $1
-                      {tenant_clause}
+                    DELETE FROM {self._schema}.agent_session_llm_calls
+                    WHERE created_at < $1
+                    {tenant_clause}
                     """,
                     *values,
                 )
-                stats["context_items"] = _count(res)
-            else:
-                values = [cutoff]
-                tenant_clause = ""
-                if tenant_value is not None:
-                    values.append(tenant_value)
-                    tenant_clause = f" AND s.tenant_id = ${len(values)}"
-                res_upload = await conn.execute(
-                    f"""
-                    UPDATE {self._schema}.agent_session_context_items c
-                    SET ref = (c.ref - 'bucket' - 'key' - 'checksum'),
-                        token_count = 0,
-                        metadata = (c.metadata - 'extracted_text' - 'extracted_text_preview')
-                                  || jsonb_build_object('retention_redacted', true, 'retention_redacted_at', NOW()),
-                        updated_at = NOW()
-                    FROM {self._schema}.agent_sessions s
-                    WHERE c.session_id = s.session_id
-                      AND c.item_type = 'file_upload'
-                      AND c.created_at < $1
-                      {tenant_clause}
-                    """,
-                    *values,
-                )
-                res_other = await conn.execute(
-                    f"""
-                    UPDATE {self._schema}.agent_session_context_items c
-                    SET token_count = 0,
-                        metadata = (c.metadata - 'extracted_text' - 'extracted_text_preview')
-                                  || jsonb_build_object('retention_redacted', true, 'retention_redacted_at', NOW()),
-                        updated_at = NOW()
-                    FROM {self._schema}.agent_sessions s
-                    WHERE c.session_id = s.session_id
-                      AND c.item_type <> 'file_upload'
-                      AND c.created_at < $1
-                      {tenant_clause}
-                    """,
-                    *values,
-                )
-                stats["context_items"] = _count(res_upload) + _count(res_other)
-
-            values = [cutoff]
-            tenant_clause = ""
-            if tenant_value is not None:
-                values.append(tenant_value)
-                tenant_clause = f" AND tenant_id = ${len(values)}"
-            res = await conn.execute(
-                f"""
-                DELETE FROM {self._schema}.agent_session_ci_results
-                WHERE created_at < $1
-                {tenant_clause}
-                """,
-                *values,
-            )
-            stats["ci_results"] = _count(res)
-
-            values = [cutoff]
-            tenant_clause = ""
-            if tenant_value is not None:
-                values.append(tenant_value)
-                tenant_clause = f" AND tenant_id = ${len(values)}"
-            res = await conn.execute(
-                f"""
-                DELETE FROM {self._schema}.agent_session_events
-                WHERE occurred_at < $1
-                {tenant_clause}
-                """,
-                *values,
-            )
-            stats["events"] = _count(res)
-
-            values = [cutoff]
-            tenant_clause = ""
-            if tenant_value is not None:
-                values.append(tenant_value)
-                tenant_clause = f" AND tenant_id = ${len(values)}"
-            res = await conn.execute(
-                f"""
-                DELETE FROM {self._schema}.agent_session_llm_calls
-                WHERE created_at < $1
-                {tenant_clause}
-                """,
-                *values,
-            )
-            stats["llm_calls"] = _count(res)
+                stats["llm_calls"] = _count(res)
 
         return stats

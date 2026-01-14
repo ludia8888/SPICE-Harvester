@@ -9,10 +9,12 @@ These endpoints provide the enterprise-grade session boundary required by AGENT_
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
 import re
+import struct
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from uuid import UUID, uuid4
@@ -148,6 +150,7 @@ def _approx_token_count(payload: Any) -> int:
 
 _EICAR_SIGNATURE = b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+_CLAMAV_CHUNK_BYTES = 8192
 
 
 def _safe_filename(name: str) -> str:
@@ -163,9 +166,86 @@ def _safe_filename(name: str) -> str:
     return stem[:200]
 
 
-def _scan_upload_bytes(blob: bytes) -> None:
+async def _clamav_instream_scan(
+    *,
+    blob: bytes,
+    host: str,
+    port: int,
+    timeout_seconds: float,
+) -> Optional[str]:
+    """
+    Best-effort ClamAV `clamd` INSTREAM scan.
+
+    Returns:
+      - None if clean
+      - malware signature name if FOUND
+    """
+    host_value = str(host or "").strip()
+    if not host_value:
+        return None
+
+    async def _open():
+        return await asyncio.open_connection(host_value, int(port))
+
+    reader, writer = await asyncio.wait_for(_open(), timeout=float(timeout_seconds))
+    try:
+        writer.write(b"zINSTREAM\x00")
+        for idx in range(0, len(blob), _CLAMAV_CHUNK_BYTES):
+            chunk = blob[idx : idx + _CLAMAV_CHUNK_BYTES]
+            writer.write(struct.pack("!I", len(chunk)))
+            writer.write(chunk)
+        writer.write(struct.pack("!I", 0))
+        await asyncio.wait_for(writer.drain(), timeout=float(timeout_seconds))
+
+        line = await asyncio.wait_for(reader.readline(), timeout=float(timeout_seconds))
+    finally:
+        writer.close()
+        with contextlib.suppress(Exception):
+            await writer.wait_closed()
+
+    text = (line or b"").decode("utf-8", errors="replace").replace("\x00", "").strip()
+    # Typical responses:
+    #  - "stream: OK"
+    #  - "stream: Eicar-Test-Signature FOUND"
+    if not text:
+        raise RuntimeError("ClamAV scan returned empty response")
+    upper = text.upper()
+    if "FOUND" not in upper:
+        return None
+    signature = text
+    if ":" in signature:
+        signature = signature.split(":", 1)[1].strip()
+    signature = signature.replace("FOUND", "").strip()
+    return signature or "FOUND"
+
+
+async def _scan_upload_bytes(*, blob: bytes, agent_settings: Any) -> None:
     if _EICAR_SIGNATURE in blob:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Malware signature detected (EICAR)")
+    host = str(getattr(agent_settings, "context_upload_clamav_host", "") or "").strip()
+    if not host:
+        return
+    port = int(getattr(agent_settings, "context_upload_clamav_port", 3310) or 3310)
+    timeout_s = float(getattr(agent_settings, "context_upload_clamav_timeout_seconds", 2.0) or 2.0)
+    required = bool(getattr(agent_settings, "context_upload_clamav_required", False))
+
+    try:
+        signature = await _clamav_instream_scan(blob=blob, host=host, port=port, timeout_seconds=timeout_s)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if required:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Virus scanner unavailable"
+            ) from exc
+        logger.warning("ClamAV scan failed (best-effort): %s", exc)
+        return
+
+    if signature:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Malware detected ({signature})",
+        )
 
 
 def _extract_text_from_upload(blob: bytes, *, max_chars: int) -> str:
@@ -740,7 +820,7 @@ async def upload_context_file(
     if len(raw) > max_upload_bytes:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large")
 
-    _scan_upload_bytes(raw)
+    await _scan_upload_bytes(blob=raw, agent_settings=agent_settings)
 
     max_text_chars = int(getattr(agent_settings, "context_upload_max_text_chars", 20000) or 20000)
     extracted_text = _extract_text_from_upload(raw, max_chars=max_text_chars)

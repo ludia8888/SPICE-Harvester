@@ -222,3 +222,75 @@ async def test_llm_gateway_provider_policy_can_disable_cache(monkeypatch: pytest
     assert meta.cache_hit is False
     assert redis.get_calls == 0
     assert redis.set_calls == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_llm_gateway_provider_policy_can_set_no_store_and_partition_isolation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "openai_compat")
+    monkeypatch.setenv("LLM_BASE_URL", "http://example.invalid")
+    monkeypatch.setenv("LLM_MODEL", "gpt-test")
+    monkeypatch.setenv(
+        "LLM_PROVIDER_POLICIES_JSON",
+        json.dumps({"openai_compat": {"no_store": True, "session_isolation": "partition_hash"}}),
+    )
+
+    gateway = LLMGateway()
+    captured: dict[str, object] = {}
+
+    async def _stub_call(**kwargs):  # noqa: ANN001
+        captured.update(kwargs)
+        return {"ok": True}, {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3}
+
+    monkeypatch.setattr(gateway, "_call_openai_compat_json", _stub_call)
+
+    out, _meta = await gateway.complete_json(
+        task="TEST",
+        system_prompt="system",
+        user_prompt="user",
+        response_model=_Out,
+        audit_partition_key="agent_session:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    )
+    assert out.ok is True
+
+    extra_body = captured.get("extra_body")
+    assert isinstance(extra_body, dict)
+    assert extra_body.get("store") is False
+    assert extra_body.get("user") == sha256_hex("partition:agent_session:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")[:64]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_llm_gateway_provider_policy_can_set_actor_isolation_for_anthropic(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("LLM_ANTHROPIC_API_KEY", "test")
+    monkeypatch.setenv("LLM_MODEL", "claude-test")
+    monkeypatch.setenv(
+        "LLM_PROVIDER_POLICIES_JSON",
+        json.dumps({"anthropic": {"session_isolation": "actor_hash"}}),
+    )
+
+    gateway = LLMGateway()
+    captured: dict[str, object] = {}
+
+    async def _stub_call(**kwargs):  # noqa: ANN001
+        captured.update(kwargs)
+        return {"ok": True}, {"input_tokens": 1, "output_tokens": 2}
+
+    monkeypatch.setattr(gateway, "_call_anthropic_json", _stub_call)
+
+    out, _meta = await gateway.complete_json(
+        task="TEST",
+        system_prompt="system",
+        user_prompt="user",
+        response_model=_Out,
+        audit_partition_key=None,
+        audit_actor="user-123",
+    )
+    assert out.ok is True
+
+    extra_body = captured.get("extra_body")
+    assert isinstance(extra_body, dict)
+    metadata = extra_body.get("metadata")
+    assert isinstance(metadata, dict)
+    assert metadata.get("user_id") == sha256_hex("actor:user-123")[:64]

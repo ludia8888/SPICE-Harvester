@@ -853,6 +853,32 @@ class AgentRuntimeSettings(BaseSettings):
         description="Max chars stored in audit previews (AGENT_AUDIT_MAX_PREVIEW_CHARS)",
     )
 
+    # Context uploads (CTX-006)
+    context_upload_max_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        description="Max bytes for agent session context uploads (AGENT_CONTEXT_UPLOAD_MAX_BYTES)",
+    )
+    context_upload_max_text_chars: int = Field(
+        default=20000,
+        description="Max chars extracted from uploaded context files (AGENT_CONTEXT_UPLOAD_MAX_TEXT_CHARS)",
+    )
+    context_upload_clamav_host: Optional[str] = Field(
+        default=None,
+        description="ClamAV daemon host for context upload scanning (AGENT_CONTEXT_UPLOAD_CLAMAV_HOST)",
+    )
+    context_upload_clamav_port: int = Field(
+        default=3310,
+        description="ClamAV daemon port for context upload scanning (AGENT_CONTEXT_UPLOAD_CLAMAV_PORT)",
+    )
+    context_upload_clamav_timeout_seconds: float = Field(
+        default=2.0,
+        description="ClamAV scan timeout seconds (AGENT_CONTEXT_UPLOAD_CLAMAV_TIMEOUT_SECONDS)",
+    )
+    context_upload_clamav_required: bool = Field(
+        default=False,
+        description="Reject uploads when ClamAV unavailable (AGENT_CONTEXT_UPLOAD_CLAMAV_REQUIRED)",
+    )
+
     command_timeout_seconds: float = Field(
         default=600.0,
         description=(
@@ -911,6 +937,29 @@ class AgentRuntimeSettings(BaseSettings):
     @classmethod
     def clamp_max_concurrent_tool_calls(cls, v):  # noqa: ANN001
         return _clamp_int(v, default=1, min_value=1, max_value=256)
+
+    @field_validator("context_upload_max_bytes", mode="before")
+    @classmethod
+    def clamp_context_upload_max_bytes(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=10 * 1024 * 1024, min_value=0, max_value=100 * 1024 * 1024)
+
+    @field_validator("context_upload_max_text_chars", mode="before")
+    @classmethod
+    def clamp_context_upload_max_text_chars(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=20000, min_value=0, max_value=2_000_000)
+
+    @field_validator("context_upload_clamav_host", mode="before")
+    @classmethod
+    def strip_context_upload_clamav_host(cls, v):  # noqa: ANN001
+        if v is None:
+            return None
+        value = str(v).strip()
+        return value or None
+
+    @field_validator("context_upload_clamav_port", mode="before")
+    @classmethod
+    def clamp_context_upload_clamav_port(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=3310, min_value=1, max_value=65535)
 
     @field_validator("bff_token", mode="before")
     @classmethod
@@ -2588,6 +2637,10 @@ class AgentRetentionWorkerSettings(BaseSettings):
     poll_seconds: int = Field(default=3600, description="Retention worker poll seconds (AGENT_RETENTION_POLL_SECONDS)")
     retention_days: int = Field(default=30, description="Retention days for agent session data (AGENT_RETENTION_DAYS)")
     action: str = Field(default="redact", description="Retention action redact|delete (AGENT_RETENTION_ACTION)")
+    policy_json: Optional[str] = Field(
+        default=None,
+        description="Retention policy JSON per object type (AGENT_RETENTION_POLICY_JSON)",
+    )
 
     @field_validator("poll_seconds", mode="before")
     @classmethod
@@ -2608,6 +2661,14 @@ class AgentRetentionWorkerSettings(BaseSettings):
         if value not in {"redact", "delete"}:
             return "redact"
         return value
+
+    @field_validator("policy_json", mode="before")
+    @classmethod
+    def strip_policy_json(cls, v):  # noqa: ANN001
+        if v is None:
+            return None
+        value = str(v).strip()
+        return value or None
 
 
 class WorkersSettings(BaseSettings):

@@ -96,7 +96,7 @@
 | CHG-001 | DONE | `backend/bff/routers/pipeline.py`, `backend/bff/routers/ontology_extensions.py`, `backend/shared/config/settings.py`, `backend/bff/tests/test_pipeline_proposal_governance.py` | |
 | CHG-002 | DONE | `backend/bff/routers/pipeline.py`, `backend/bff/routers/ontology_extensions.py`, `docs/API_REFERENCE.md`, `backend/tests/test_openapi_contract_smoke.py` | |
 | CHG-003 | DONE | `backend/shared/services/agent_session_registry.py`, `backend/bff/middleware/auth.py`, `backend/bff/routers/agent_sessions.py`, `backend/bff/tests/test_agent_sessions_events.py` | |
-| CHG-004 | DONE | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_session_registry.py`, `backend/bff/tests/test_agent_sessions_ci_results.py` | |
+| CHG-004 | DONE | `backend/bff/routers/agent_sessions.py`, `backend/bff/routers/ci_webhooks.py`, `backend/shared/services/agent_session_registry.py`, `backend/bff/tests/test_agent_sessions_ci_results.py`, `backend/bff/tests/test_ci_webhooks_router.py` | |
 | CHG-005 | DONE | `backend/bff/routers/pipeline.py`, `backend/shared/services/action_simulation_registry.py`, `backend/bff/routers/agent_sessions.py`, `backend/bff/tests/test_pipeline_router_uploads.py` | |
 | CHG-006 | DONE | `backend/shared/policies/agent_tool_allowlist.json`, `backend/bff/routers/agent_sessions.py`, `docs/API_REFERENCE.md`, `backend/tests/test_openapi_contract_smoke.py` | |
 
@@ -111,7 +111,7 @@
 | CTX-003 | DONE | `backend/bff/routers/agent_sessions.py`, `backend/bff/routers/document_bundles.py`, `backend/bff/tests/test_document_bundles_router.py` | |
 | CTX-004 | DONE | `backend/bff/routers/document_bundles.py`, `backend/bff/routers/agent_sessions.py`, `backend/bff/tests/test_document_bundles_router.py` | |
 | CTX-005 | DONE | `backend/bff/routers/context_tools.py`, `backend/bff/routers/agent_sessions.py`, `backend/bff/tests/test_context_tools_router.py` | |
-| CTX-006 | DONE | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/storage_service.py`, `backend/shared/services/agent_retention_worker.py`, `backend/tests/unit/services/test_agent_retention_worker.py` | |
+| CTX-006 | DONE | `backend/bff/routers/agent_sessions.py`, `backend/shared/config/settings.py`, `backend/shared/services/storage_service.py`, `backend/shared/services/agent_retention_worker.py`, `backend/bff/tests/test_agent_sessions_upload_scanning.py`, `backend/tests/unit/services/test_agent_retention_worker.py` | |
 | CTX-007 | DONE | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_session_registry.py`, `backend/bff/tests/test_agent_sessions_token_budget.py` | |
 
 ---
@@ -160,7 +160,7 @@
 | INT-001 | DONE | `docs/API_REFERENCE.md`, `backend/bff/routers/agent_sessions.py`, `backend/agent/routers/agent.py`, `backend/tests/test_openapi_contract_smoke.py` | |
 | INT-002 | DONE | `backend/bff/services/oms_client.py`, `backend/shared/services/dataset_registry.py`, `backend/shared/services/pipeline_registry.py`, `docs/API_REFERENCE.md` | |
 | INT-003 | DONE | `backend/bff/routers/document_bundles.py`, `backend/bff/routers/context7.py`, `backend/bff/tests/test_document_bundles_router.py` | |
-| INT-004 | DONE | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_session_registry.py`, `backend/bff/tests/test_agent_sessions_ci_results.py` | |
+| INT-004 | DONE | `backend/bff/routers/agent_sessions.py`, `backend/bff/routers/ci_webhooks.py`, `backend/shared/services/agent_session_registry.py`, `backend/bff/tests/test_agent_sessions_ci_results.py`, `backend/bff/tests/test_ci_webhooks_router.py` | |
 
 ---
 
