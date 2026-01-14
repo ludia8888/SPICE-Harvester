@@ -32,7 +32,7 @@
 | SESS-003 | DONE | `backend/bff/routers/agent_sessions.py`, `backend/bff/tests/test_agent_sessions_router.py` |  |
 | SESS-004 | DONE | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_session_registry.py`, `backend/bff/tests/test_agent_sessions_summarize_remove.py` |  |
 | SESS-005 | DONE | `backend/shared/services/agent_session_registry.py`, `backend/tests/unit/services/test_agent_session_state_machine.py` |  |
-| SESS-006 | PARTIAL | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_session_registry.py` | Job 상태(run_id 연동, 완료 반영), 이벤트/진행률 스트리밍까지 확장 필요. |
+| SESS-006 | DONE | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_session_registry.py`, `backend/shared/services/agent_registry.py` |  |
 
 ---
 
@@ -82,10 +82,10 @@
 |---|---|---|---|
 | APR-001 | PARTIAL | `backend/bff/services/agent_plan_validation.py` | 정책 엔진이 risk/allowlist 기반으로만 동작(조직 정책/컨텍스트 기반 확장 필요). |
 | APR-002 | PARTIAL | `backend/bff/services/agent_plan_validation.py`, `backend/bff/routers/pipeline.py`(protected branch) | “대규모/비가역” 분류/강제 고도화 필요. |
-| APR-003 | TODO | (없음) | 승인 요청 객체(툴/파라미터 요약, 변경 범위, 롤백 제안) 미구현. |
+| APR-003 | DONE | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_registry.py`, `backend/bff/tests/test_agent_sessions_approval_flow.py` |  |
 | APR-004 | DONE | `backend/bff/routers/agent_plans.py`(execute 시 approval 체크), `backend/shared/services/agent_registry.py`(approvals) |  |
-| APR-005 | TODO | (없음) | 자동 승인 allowlist 규칙 미구현. |
-| APR-006 | TODO | (없음) | WAITING_APPROVAL 상태 + 승인 수신 후 흐름 재개(세션 기반) 미구현. |
+| APR-005 | DONE | `backend/shared/services/agent_policy_registry.py`, `backend/bff/routers/agent_sessions.py`, `backend/bff/tests/test_agent_sessions_approval_flow.py` |  |
+| APR-006 | DONE | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_registry.py`, `backend/bff/tests/test_agent_sessions_approval_flow.py` |  |
 
 ---
 
@@ -106,9 +106,9 @@
 
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
-| CTX-001 | TODO | (없음) | 세션 컨텍스트 첨부/제거/목록 API 미구현. |
-| CTX-002 | TODO | (없음) | “명시적 첨부만 프롬프트 포함” 강제 미구현. |
-| CTX-003 | TODO | (없음) | 항목별 포함 방식(전량/요약/검색) 미구현. |
+| CTX-001 | PARTIAL | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_session_registry.py`, `backend/bff/tests/test_agent_sessions_router.py` | 타입별(ref payload) 정규화/커넥터 기반 resolve(데이터셋/온톨로지/문서/파일)까지 확장 필요. |
+| CTX-002 | PARTIAL | `backend/bff/routers/agent_sessions.py`, `backend/bff/tests/test_agent_sessions_router.py` | 세션 외 “직접 compile” 경로 포함 전체 프롬프트 컴파일에서 implicit fetch 금지까지 완결 필요. |
+| CTX-003 | PARTIAL | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_session_registry.py` | include_mode(full/summary/search)에 따른 실제 컨텐츠 구성(요약/RAG) + token_budget 기반 제어 완결 필요. |
 | CTX-004 | PARTIAL | `backend/bff/routers/context7.py` | citation 포함/문서 번들 모델 명확화 필요. |
 | CTX-005 | PARTIAL | `backend/bff/routers/context7.py`(suggestions/search) | 온톨로지/데이터 기반 컨텍스트 추출 툴로 정식화 필요. |
 | CTX-006 | PARTIAL | `backend/bff/routers/pipeline.py`(file upload) | 바이러스 검사/보존기간/텍스트 추출 정책 미구현. |
@@ -133,7 +133,7 @@
 |---|---|---|---|
 | OBS-001 | PARTIAL | `backend/agent/services/agent_runtime.py`(events), `backend/shared/services/audit_log_store.py` | “세션 단위” 감사/추적 + 사용자 검증 컨텍스트 필요. |
 | OBS-002 | PARTIAL | `backend/shared/services/agent_registry.py`(approvals), `backend/agent/services/agent_policy.py`(policy) | 변경 아티팩트(PR/프로포절) 링크를 audit에 연결 미구현. |
-| OBS-003 | PARTIAL | `docs/API_REFERENCE.md`(Agent events), `backend/bff/routers/agent_proxy.py` | 메시지/승인 대기 이벤트 스트림까지 확장 필요. |
+| OBS-003 | DONE | `backend/bff/routers/agent_sessions.py`, `backend/bff/tests/test_agent_sessions_events.py`, `backend/agent/services/agent_runtime.py` |  |
 | OBS-004 | TODO | (없음) | 토큰 사용량 저장/조회 미구현. |
 | OBS-005 | TODO | (없음) | 모델/사용자/조직 비용 집계 미구현. |
 | OBS-006 | PARTIAL | `backend/shared/observability/request_context.py`, `backend/shared/services/service_factory.py` | 분산 트레이싱/상관관계 id를 agent tool 실행까지 end-to-end 연결 고도화 필요. |

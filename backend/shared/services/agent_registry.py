@@ -67,6 +67,27 @@ class AgentApprovalRecord:
     created_at: datetime
 
 
+@dataclass(frozen=True)
+class AgentApprovalRequestRecord:
+    approval_request_id: str
+    plan_id: str
+    tenant_id: str
+    session_id: Optional[str]
+    job_id: Optional[str]
+    status: str
+    risk_level: str
+    requested_by: str
+    requested_at: datetime
+    decision: Optional[str]
+    decided_by: Optional[str]
+    decided_at: Optional[datetime]
+    comment: Optional[str]
+    request_payload: Dict[str, Any]
+    metadata: Dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
 class AgentRegistry:
     def __init__(
         self,
@@ -206,6 +227,48 @@ class AgentRegistry:
                 f"CREATE INDEX IF NOT EXISTS idx_agent_approvals_tenant ON {self._schema}.agent_approvals(tenant_id)"
             )
 
+            await conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self._schema}.agent_approval_requests (
+                    approval_request_id UUID PRIMARY KEY,
+                    plan_id UUID NOT NULL,
+                    tenant_id TEXT NOT NULL DEFAULT 'default',
+                    session_id UUID,
+                    job_id UUID,
+                    status TEXT NOT NULL DEFAULT 'PENDING',
+                    risk_level TEXT NOT NULL DEFAULT 'write',
+                    requested_by TEXT NOT NULL,
+                    requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    decision TEXT,
+                    decided_by TEXT,
+                    decided_at TIMESTAMPTZ,
+                    comment TEXT,
+                    request_payload JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            await conn.execute(
+                f"ALTER TABLE {self._schema}.agent_approval_requests ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'"
+            )
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_agent_approval_requests_plan_id ON {self._schema}.agent_approval_requests(plan_id)"
+            )
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_agent_approval_requests_session_id ON {self._schema}.agent_approval_requests(session_id)"
+            )
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_agent_approval_requests_job_id ON {self._schema}.agent_approval_requests(job_id)"
+            )
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_agent_approval_requests_status ON {self._schema}.agent_approval_requests(status)"
+            )
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_agent_approval_requests_tenant ON {self._schema}.agent_approval_requests(tenant_id)"
+            )
+
     def _row_to_run(self, row: asyncpg.Record) -> AgentRunRecord:
         return AgentRunRecord(
             run_id=str(row["run_id"]),
@@ -254,6 +317,27 @@ class AgentRegistry:
             comment=row["comment"],
             metadata=coerce_json_dataset(row["metadata"]),
             created_at=row["created_at"],
+        )
+
+    def _row_to_approval_request(self, row: asyncpg.Record) -> AgentApprovalRequestRecord:
+        return AgentApprovalRequestRecord(
+            approval_request_id=str(row["approval_request_id"]),
+            plan_id=str(row["plan_id"]),
+            tenant_id=str(row.get("tenant_id") or "default"),
+            session_id=str(row["session_id"]) if row.get("session_id") else None,
+            job_id=str(row["job_id"]) if row.get("job_id") else None,
+            status=str(row["status"]),
+            risk_level=str(row["risk_level"]),
+            requested_by=str(row["requested_by"]),
+            requested_at=row["requested_at"],
+            decision=row.get("decision"),
+            decided_by=row.get("decided_by"),
+            decided_at=row.get("decided_at"),
+            comment=row.get("comment"),
+            request_payload=coerce_json_dataset(row["request_payload"]),
+            metadata=coerce_json_dataset(row["metadata"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
         )
 
     async def create_run(
@@ -537,3 +621,173 @@ class AgentRegistry:
                 tenant_value,
             )
         return [self._row_to_approval(row) for row in rows]
+
+    async def create_approval_request(
+        self,
+        *,
+        approval_request_id: str,
+        plan_id: str,
+        tenant_id: str,
+        session_id: Optional[str],
+        job_id: Optional[str],
+        status: str = "PENDING",
+        risk_level: str = "write",
+        requested_by: str,
+        requested_at: Optional[datetime] = None,
+        request_payload: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> AgentApprovalRequestRecord:
+        if not self._pool:
+            raise RuntimeError("AgentRegistry not connected")
+        tenant_value = str(tenant_id or "").strip() or "default"
+        payload = normalize_json_payload(request_payload or {})
+        meta_payload = normalize_json_payload(metadata or {})
+        status_value = str(status or "PENDING").strip().upper() or "PENDING"
+        risk_value = str(risk_level or "write").strip().lower() or "write"
+        requested_by_value = str(requested_by or "").strip() or "unknown"
+
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                INSERT INTO {self._schema}.agent_approval_requests (
+                    approval_request_id, plan_id, tenant_id, session_id, job_id,
+                    status, risk_level, requested_by, requested_at,
+                    request_payload, metadata
+                )
+                VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5::uuid,
+                        $6, $7, $8, COALESCE($9, NOW()), $10::jsonb, $11::jsonb)
+                RETURNING approval_request_id, plan_id, tenant_id, session_id, job_id,
+                          status, risk_level, requested_by, requested_at,
+                          decision, decided_by, decided_at, comment,
+                          request_payload, metadata, created_at, updated_at
+                """,
+                approval_request_id,
+                plan_id,
+                tenant_value,
+                session_id,
+                job_id,
+                status_value,
+                risk_value,
+                requested_by_value,
+                requested_at,
+                payload,
+                meta_payload,
+            )
+        return self._row_to_approval_request(row)
+
+    async def get_approval_request(
+        self, *, approval_request_id: str, tenant_id: str
+    ) -> Optional[AgentApprovalRequestRecord]:
+        if not self._pool:
+            raise RuntimeError("AgentRegistry not connected")
+        tenant_value = str(tenant_id or "").strip() or "default"
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT approval_request_id, plan_id, tenant_id, session_id, job_id,
+                       status, risk_level, requested_by, requested_at,
+                       decision, decided_by, decided_at, comment,
+                       request_payload, metadata, created_at, updated_at
+                FROM {self._schema}.agent_approval_requests
+                WHERE approval_request_id = $1::uuid AND tenant_id = $2
+                """,
+                approval_request_id,
+                tenant_value,
+            )
+        return self._row_to_approval_request(row) if row else None
+
+    async def list_approval_requests(
+        self,
+        *,
+        tenant_id: str,
+        session_id: Optional[str] = None,
+        job_id: Optional[str] = None,
+        plan_id: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[AgentApprovalRequestRecord]:
+        if not self._pool:
+            raise RuntimeError("AgentRegistry not connected")
+        tenant_value = str(tenant_id or "").strip() or "default"
+        clauses: list[str] = ["tenant_id = $1"]
+        values: list[Any] = [tenant_value]
+        if session_id:
+            values.append(session_id)
+            clauses.append(f"session_id = ${len(values)}::uuid")
+        if job_id:
+            values.append(job_id)
+            clauses.append(f"job_id = ${len(values)}::uuid")
+        if plan_id:
+            values.append(plan_id)
+            clauses.append(f"plan_id = ${len(values)}::uuid")
+        if status:
+            values.append(str(status).strip().upper())
+            clauses.append(f"status = ${len(values)}")
+        where = " AND ".join(clauses)
+        values.extend([int(limit), int(offset)])
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT approval_request_id, plan_id, tenant_id, session_id, job_id,
+                       status, risk_level, requested_by, requested_at,
+                       decision, decided_by, decided_at, comment,
+                       request_payload, metadata, created_at, updated_at
+                FROM {self._schema}.agent_approval_requests
+                WHERE {where}
+                ORDER BY requested_at DESC
+                LIMIT ${len(values) - 1}
+                OFFSET ${len(values)}
+                """,
+                *values,
+            )
+        return [self._row_to_approval_request(row) for row in rows]
+
+    async def decide_approval_request(
+        self,
+        *,
+        approval_request_id: str,
+        tenant_id: str,
+        decision: str,
+        decided_by: str,
+        decided_at: Optional[datetime] = None,
+        comment: Optional[str] = None,
+        status: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[AgentApprovalRequestRecord]:
+        if not self._pool:
+            raise RuntimeError("AgentRegistry not connected")
+        tenant_value = str(tenant_id or "").strip() or "default"
+        decision_value = str(decision or "").strip().upper()
+        decided_by_value = str(decided_by or "").strip() or "unknown"
+        comment_value = str(comment).strip() if comment is not None else None
+        status_value = str(status).strip().upper() if status is not None else None
+        meta_payload = normalize_json_payload(metadata or {}) if metadata is not None else None
+
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                UPDATE {self._schema}.agent_approval_requests
+                SET decision = COALESCE($3, decision),
+                    decided_by = COALESCE($4, decided_by),
+                    decided_at = COALESCE($5, decided_at),
+                    comment = COALESCE($6, comment),
+                    status = COALESCE($7, status),
+                    metadata = COALESCE($8::jsonb, metadata),
+                    updated_at = NOW()
+                WHERE approval_request_id = $1::uuid AND tenant_id = $2
+                RETURNING approval_request_id, plan_id, tenant_id, session_id, job_id,
+                          status, risk_level, requested_by, requested_at,
+                          decision, decided_by, decided_at, comment,
+                          request_payload, metadata, created_at, updated_at
+                """,
+                approval_request_id,
+                tenant_value,
+                decision_value,
+                decided_by_value,
+                decided_at,
+                comment_value,
+                status_value,
+                meta_payload,
+            )
+        return self._row_to_approval_request(row) if row else None

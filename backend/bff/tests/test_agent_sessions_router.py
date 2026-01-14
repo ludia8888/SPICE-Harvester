@@ -8,19 +8,27 @@ import pytest
 from fastapi import HTTPException, status
 
 from bff.routers.agent_sessions import (
+    AgentSessionContextItemCreateRequest,
     AgentSessionCreateRequest,
+    AgentSessionMessageRequest,
+    attach_context_item,
     create_session,
     get_session,
     list_sessions,
+    list_context_items,
+    post_message,
+    remove_context_item,
     terminate_session,
 )
 from shared.security.user_context import UserPrincipal
-from shared.services.agent_session_registry import AgentSessionRecord
+from shared.services.agent_session_registry import AgentSessionContextItemRecord, AgentSessionMessageRecord, AgentSessionRecord
 
 
 class _FakeSessions:
     def __init__(self) -> None:
         self.sessions: dict[str, AgentSessionRecord] = {}
+        self.context_items: dict[str, list[AgentSessionContextItemRecord]] = {}
+        self.messages: dict[str, list[AgentSessionMessageRecord]] = {}
 
     async def create_session(self, **kwargs) -> AgentSessionRecord:  # type: ignore[no-untyped-def]
         now = datetime.now(timezone.utc)
@@ -67,6 +75,65 @@ class _FakeSessions:
         )
         self.sessions[session_id] = updated
         return updated
+
+    async def add_context_item(self, **kwargs) -> AgentSessionContextItemRecord:  # type: ignore[no-untyped-def]
+        session = await self.get_session(session_id=str(kwargs["session_id"]), tenant_id=str(kwargs["tenant_id"]))
+        if not session:
+            raise ValueError("session not found")
+        now = datetime.now(timezone.utc)
+        record = AgentSessionContextItemRecord(
+            item_id=str(kwargs["item_id"]),
+            session_id=str(kwargs["session_id"]),
+            item_type=str(kwargs["item_type"]),
+            include_mode=str(kwargs.get("include_mode") or "summary"),
+            ref=dict(kwargs.get("ref") or {}),
+            token_count=kwargs.get("token_count"),
+            metadata=dict(kwargs.get("metadata") or {}),
+            created_at=kwargs.get("created_at") or now,
+            updated_at=now,
+        )
+        self.context_items.setdefault(record.session_id, []).append(record)
+        return record
+
+    async def list_context_items(self, *, session_id: str, tenant_id: str, limit: int, offset: int):  # type: ignore[no-untyped-def]
+        session = await self.get_session(session_id=session_id, tenant_id=tenant_id)
+        if not session:
+            raise ValueError("session not found")
+        items = list(self.context_items.get(session_id) or [])
+        return items[offset : offset + limit]
+
+    async def remove_context_item(self, *, session_id: str, tenant_id: str, item_id: str) -> int:  # type: ignore[no-untyped-def]
+        session = await self.get_session(session_id=session_id, tenant_id=tenant_id)
+        if not session:
+            raise ValueError("session not found")
+        before = list(self.context_items.get(session_id) or [])
+        after = [item for item in before if item.item_id != item_id]
+        self.context_items[session_id] = after
+        return 1 if len(after) != len(before) else 0
+
+    async def add_message(self, **kwargs) -> AgentSessionMessageRecord:  # type: ignore[no-untyped-def]
+        session = await self.get_session(session_id=str(kwargs["session_id"]), tenant_id=str(kwargs["tenant_id"]))
+        if not session:
+            raise ValueError("session not found")
+        now = datetime.now(timezone.utc)
+        record = AgentSessionMessageRecord(
+            message_id=str(kwargs["message_id"]),
+            session_id=str(kwargs["session_id"]),
+            role=str(kwargs["role"]),
+            content=str(kwargs["content"]),
+            content_digest=kwargs.get("content_digest"),
+            is_removed=False,
+            removed_at=None,
+            removed_by=None,
+            removed_reason=None,
+            token_count=kwargs.get("token_count"),
+            cost_estimate=kwargs.get("cost_estimate"),
+            latency_ms=kwargs.get("latency_ms"),
+            metadata=dict(kwargs.get("metadata") or {}),
+            created_at=kwargs.get("created_at") or now,
+        )
+        self.messages.setdefault(record.session_id, []).append(record)
+        return record
 
 
 class _Request:
@@ -149,3 +216,99 @@ async def test_agent_sessions_rejects_invalid_session_id() -> None:
     with pytest.raises(HTTPException) as exc_info:
         await get_session(session_id="not-a-uuid", request=req, sessions=sessions, include_messages=False, messages_limit=200)
     assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_agent_sessions_context_items_round_trip() -> None:
+    sessions = _FakeSessions()
+    req = _Request(principal=_principal())
+
+    created = await create_session(
+        AgentSessionCreateRequest(),
+        request=req,
+        sessions=sessions,
+        policy_registry=_FakePolicyRegistry(),
+        tool_registry=_FakeToolRegistry(),
+    )
+    session_id = created.data["session"]["session_id"]
+
+    attached = await attach_context_item(
+        session_id=session_id,
+        body=AgentSessionContextItemCreateRequest(item_type="dataset", include_mode="summary", ref={"dataset_id": "ds-1"}),
+        request=req,
+        sessions=sessions,
+    )
+    assert attached.status == "created"
+    item_id = attached.data["context_item"]["item_id"]
+
+    listed = await list_context_items(session_id=session_id, request=req, sessions=sessions, limit=200, offset=0)
+    assert listed.status == "success"
+    assert listed.data["count"] == 1
+    assert listed.data["context_items"][0]["item_id"] == item_id
+
+    removed = await remove_context_item(session_id=session_id, item_id=item_id, request=req, sessions=sessions)
+    assert removed.status == "success"
+
+    listed_again = await list_context_items(session_id=session_id, request=req, sessions=sessions, limit=200, offset=0)
+    assert listed_again.data["count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_agent_sessions_post_message_includes_only_attached_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    sessions = _FakeSessions()
+    req = _Request(principal=_principal())
+
+    created = await create_session(
+        AgentSessionCreateRequest(),
+        request=req,
+        sessions=sessions,
+        policy_registry=_FakePolicyRegistry(),
+        tool_registry=_FakeToolRegistry(),
+    )
+    session_id = created.data["session"]["session_id"]
+
+    await attach_context_item(
+        session_id=session_id,
+        body=AgentSessionContextItemCreateRequest(item_type="dataset", include_mode="full", ref={"dataset_id": "ds-ctx"}),
+        request=req,
+        sessions=sessions,
+    )
+
+    captured: dict = {}
+
+    async def _fake_compile_agent_plan(**kwargs):  # type: ignore[no-untyped-def]
+        captured["context_pack"] = kwargs.get("context_pack")
+        from bff.services.agent_plan_compiler import AgentPlanCompileResult
+
+        return AgentPlanCompileResult(
+            status="clarification_required",
+            plan_id="00000000-0000-0000-0000-000000000000",
+            plan=None,
+            validation_errors=["needs clarification"],
+            validation_warnings=[],
+            questions=[],
+        )
+
+    monkeypatch.setattr("bff.routers.agent_sessions.compile_agent_plan", _fake_compile_agent_plan)
+
+    response = await post_message(
+        session_id=session_id,
+        body=AgentSessionMessageRequest(content="do something", execute=True),
+        request=req,
+        llm=None,  # type: ignore[arg-type]
+        redis_service=None,  # type: ignore[arg-type]
+        audit_store=None,  # type: ignore[arg-type]
+        sessions=sessions,
+        policy_registry=_FakePolicyRegistry(),  # type: ignore[arg-type]
+        tool_registry=_FakeToolRegistry(),  # type: ignore[arg-type]
+        plan_registry=SimpleNamespace(),
+        agent_registry=SimpleNamespace(),
+    )
+    assert response.status == "warning"
+
+    context_pack = captured.get("context_pack") or {}
+    assert context_pack.get("attached_context")
+    assert len(context_pack["attached_context"]) == 1
+    assert context_pack["attached_context"][0]["item_type"] == "dataset"
+    assert context_pack["attached_context"][0]["include_mode"] == "full"
+    assert context_pack["attached_context"][0]["ref"]["dataset_id"] == "ds-ctx"
