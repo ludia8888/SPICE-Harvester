@@ -1648,6 +1648,19 @@ class AgentRuntime:
                 request_headers_payload = {**self._forward_headers(request_headers, actor), **tool_call.headers}
                 request_headers_payload["X-Agent-Tool-ID"] = str(tool_call.tool_id or "").strip()
                 request_headers_payload["X-Agent-Tool-Run-ID"] = tool_run_id
+                db_name_candidate = None
+                if isinstance(tool_call.data_scope, dict):
+                    db_name_candidate = (
+                        tool_call.data_scope.get("db_name")
+                        or tool_call.data_scope.get("project")
+                        or tool_call.data_scope.get("db")
+                    )
+                db_name_value = str(db_name_candidate).strip() if db_name_candidate not in (None, "") else ""
+                if db_name_value:
+                    if not any(key.lower() == "x-db-name" for key in request_headers_payload):
+                        request_headers_payload["X-DB-Name"] = db_name_value
+                    if not any(key.lower() == "x-project" for key in request_headers_payload):
+                        request_headers_payload["X-Project"] = db_name_value
                 response = await client.request(
                     tool_call.method,
                     url,

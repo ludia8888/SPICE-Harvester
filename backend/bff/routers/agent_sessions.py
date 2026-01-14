@@ -2400,11 +2400,17 @@ async def post_message(
         "uploads": rendered_uploads,
     }
 
+    sanitized_data_scope = body.data_scope
+    data_scope_obj = payload.get("data_scope")
+    if isinstance(data_scope_obj, dict):
+        with contextlib.suppress(Exception):
+            sanitized_data_scope = AgentPlanDataScope.model_validate(data_scope_obj)
+
     compile_started = datetime.now(timezone.utc)
     try:
         compile_result = await compile_agent_plan(
             goal=content,
-            data_scope=payload.get("data_scope"),
+            data_scope=sanitized_data_scope,
             answers=payload.get("answers"),
             context_pack=context_pack,
             actor=actor,

@@ -19,7 +19,7 @@ import asyncpg
 from shared.config.service_config import ServiceConfig
 from shared.config.settings import get_settings
 from shared.security.data_encryption import encryptor_from_keys, is_encrypted_json, is_encrypted_text
-from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
+from shared.utils.json_utils import coerce_json_dataset, coerce_json_pipeline, normalize_json_payload
 
 
 def _wrap_json_object(value: Any) -> Dict[str, Any]:
@@ -79,11 +79,16 @@ _SESSION_STATUS_TRANSITIONS = {
     SESSION_STATUS_ERROR: {
         SESSION_STATUS_ERROR,
         SESSION_STATUS_ACTIVE,
+        SESSION_STATUS_WAITING_APPROVAL,
+        SESSION_STATUS_RUNNING_TOOL,
         SESSION_STATUS_TERMINATED,
     },
     SESSION_STATUS_COMPLETED: {
         SESSION_STATUS_COMPLETED,
         SESSION_STATUS_ACTIVE,
+        SESSION_STATUS_WAITING_APPROVAL,
+        SESSION_STATUS_RUNNING_TOOL,
+        SESSION_STATUS_ERROR,
         SESSION_STATUS_TERMINATED,
     },
     SESSION_STATUS_TERMINATED: {SESSION_STATUS_TERMINATED},
@@ -587,13 +592,16 @@ class AgentSessionRegistry:
             )
 
     def _row_to_session(self, row: asyncpg.Record) -> AgentSessionRecord:
+        enabled_tools_raw = coerce_json_pipeline(row["enabled_tools"])
+        enabled_tools_list = enabled_tools_raw if isinstance(enabled_tools_raw, list) else []
+        enabled_tools = [str(t).strip() for t in enabled_tools_list if str(t).strip()]
         return AgentSessionRecord(
             session_id=str(row["session_id"]),
             tenant_id=str(row["tenant_id"]),
             created_by=str(row["created_by"]),
             status=str(row["status"]),
             selected_model=row["selected_model"],
-            enabled_tools=[str(t) for t in (coerce_json_dataset(row["enabled_tools"]) or []) if t],
+            enabled_tools=enabled_tools,
             summary=row["summary"],
             metadata=coerce_json_dataset(row["metadata"]),
             started_at=row["started_at"],
@@ -671,6 +679,8 @@ class AgentSessionRegistry:
         )
 
     def _row_to_ci_result(self, row: asyncpg.Record) -> AgentSessionCIResultRecord:
+        checks_raw = coerce_json_pipeline(row.get("checks"))
+        checks_list = checks_raw if isinstance(checks_raw, list) else []
         return AgentSessionCIResultRecord(
             ci_result_id=str(row["ci_result_id"]),
             session_id=str(row["session_id"]),
@@ -682,7 +692,7 @@ class AgentSessionRegistry:
             status=str(row["status"] or ""),
             details_url=str(row["details_url"]) if row.get("details_url") else None,
             summary=str(row["summary"]) if row.get("summary") else None,
-            checks=[dict(item) for item in (coerce_json_dataset(row.get("checks")) or []) if isinstance(item, dict)],
+            checks=[dict(item) for item in checks_list if isinstance(item, dict)],
             raw=coerce_json_dataset(row.get("raw")),
             created_at=row["created_at"],
         )

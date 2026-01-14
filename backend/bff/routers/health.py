@@ -41,35 +41,30 @@ async def health_check(oms_client: OMSClient = Depends(get_oms_client)):
     """
     from shared.models.requests import ApiResponse
 
+    oms_connected = False
+    oms_error: str | None = None
     try:
-        oms_connected = await oms_client.check_health()
-
-        # 표준화된 헬스체크 응답 생성
-        health_response = ApiResponse.health_check(
-            service_name="BFF", version="2.0.0", description="백엔드 포 프론트엔드 서비스"
-        )
-
-        # OMS 연결 상태 추가
-        health_response.data["oms_connected"] = bool(oms_connected)
-
-        return health_response.to_dict()
-
+        oms_connected = bool(await oms_client.check_health())
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
+        # OMS is optional in minimal/dev stacks; treat as degraded, not unhealthy.
+        logger.warning("Health check: OMS unavailable (continuing): %s", e)
+        oms_connected = False
+        oms_error = str(e)
 
-        error_payload = build_error_envelope(
-            service_name="bff",
-            message="서비스 연결에 문제가 있습니다",
-            detail=str(e),
-            code=ErrorCode.UPSTREAM_UNAVAILABLE,
-            category=ErrorCategory.UPSTREAM,
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            errors=[str(e)],
-            context={
-                "service": "BFF",
-                "version": "2.0.0",
-                "oms_connected": False,
-                "status": "unhealthy",
-            },
-        )
-        return JSONResponse(status_code=error_payload["http_status"], content=error_payload)
+    # 표준화된 헬스체크 응답 생성
+    health_response = ApiResponse.health_check(
+        service_name="BFF", version="2.0.0", description="백엔드 포 프론트엔드 서비스"
+    )
+
+    if health_response.data is None:
+        health_response.data = {}
+
+    # OMS 연결 상태 추가 (degraded but still healthy for core paths)
+    health_response.data["oms_connected"] = bool(oms_connected)
+    if not oms_connected:
+        health_response.data["status"] = "degraded"
+        if oms_error:
+            health_response.data["oms_error"] = oms_error
+        health_response.message = "Service is running (OMS unavailable)"
+
+    return health_response.to_dict()

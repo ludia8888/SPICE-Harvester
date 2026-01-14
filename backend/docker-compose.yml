@@ -41,6 +41,7 @@ services:
 
   # Elasticsearch - 표준화된 인증 정보
   elasticsearch:
+    profiles: ["full"]
     image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
     container_name: spice_elasticsearch
     environment:
@@ -70,6 +71,7 @@ services:
 
   # Kafka
   kafka:
+    profiles: ["full"]
     image: confluentinc/cp-kafka:7.4.0
     container_name: spice_kafka
     environment:
@@ -98,6 +100,7 @@ services:
 
   # Zookeeper
   zookeeper:
+    profiles: ["full"]
     image: confluentinc/cp-zookeeper:7.4.0
     container_name: spice_zookeeper
     environment:
@@ -138,8 +141,123 @@ services:
       timeout: 10s
       retries: 5
 
+  # lakeFS (data versioning + S3 gateway)
+  lakefs:
+    image: treeverse/lakefs:latest
+    container_name: spice_lakefs
+    depends_on:
+      - postgres
+      - minio
+    restart: unless-stopped
+    environment:
+      # Server
+      - LAKEFS_LISTEN_ADDRESS=0.0.0.0:8000
+      # Auth bootstrap (deterministic for local/dev)
+      - LAKEFS_AUTH_ENCRYPT_SECRET_KEY=${LAKEFS_AUTH_ENCRYPT_SECRET_KEY:-notsecretnotsecretnotsecretnotse}
+      - LAKEFS_INSTALLATION_USER_NAME=${LAKEFS_INSTALLATION_USER_NAME:-spice-admin}
+      - LAKEFS_INSTALLATION_ACCESS_KEY_ID=${LAKEFS_ACCESS_KEY_ID:-spice-lakefs-admin}
+      - LAKEFS_INSTALLATION_SECRET_ACCESS_KEY=${LAKEFS_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
+      # Metadata DB
+      - LAKEFS_DATABASE_TYPE=postgres
+      - LAKEFS_DATABASE_POSTGRES_CONNECTION_STRING=postgres://${POSTGRES_USER:-spiceadmin}:${POSTGRES_PASSWORD:-spicepass123}@postgres:5432/${POSTGRES_DB:-spicedb}?sslmode=disable
+      # Blockstore (MinIO S3)
+      - LAKEFS_BLOCKSTORE_TYPE=s3
+      - LAKEFS_BLOCKSTORE_S3_ENDPOINT=http://minio:9000
+      - LAKEFS_BLOCKSTORE_S3_FORCE_PATH_STYLE=true
+      - LAKEFS_BLOCKSTORE_S3_REGION=us-east-1
+      - LAKEFS_BLOCKSTORE_S3_CREDENTIALS_ACCESS_KEY_ID=${MINIO_ACCESS_KEY:-minioadmin}
+      - LAKEFS_BLOCKSTORE_S3_CREDENTIALS_SECRET_ACCESS_KEY=${MINIO_SECRET_KEY:-minioadmin123}
+    ports:
+      - "${LAKEFS_PORT_HOST:-48080}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8000/api/v1/healthcheck >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - spice_network
+
+  # MinIO init (create buckets required by lakeFS and app services)
+  minio-init:
+    image: minio/mc:latest
+    container_name: spice_minio_init
+    depends_on:
+      - minio
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        until /usr/bin/mc alias set local http://minio:9000 "${MINIO_ACCESS_KEY:-minioadmin}" "${MINIO_SECRET_KEY:-minioadmin123}" 2>/dev/null; do sleep 1; done
+        /usr/bin/mc mb -p local/lakefs || true
+        /usr/bin/mc mb -p local/${EVENT_STORE_BUCKET:-spice-event-store} || true
+        /usr/bin/mc mb -p local/${INSTANCE_BUCKET:-instance-events} || true
+        /usr/bin/mc mb -p local/${DATASET_ARTIFACTS_BUCKET:-dataset-artifacts} || true
+        exit 0
+    restart: "no"
+    networks:
+      - spice_network
+
+  # lakeFS init (create required repositories)
+  lakefs-init:
+    image: curlimages/curl:8.5.0
+    container_name: spice_lakefs_init
+    depends_on:
+      - lakefs
+      - minio-init
+    environment:
+      - LAKEFS_INSTALLATION_USER_NAME=${LAKEFS_INSTALLATION_USER_NAME:-spice-admin}
+      - LAKEFS_INSTALLATION_ACCESS_KEY_ID=${LAKEFS_ACCESS_KEY_ID:-spice-lakefs-admin}
+      - LAKEFS_INSTALLATION_SECRET_ACCESS_KEY=${LAKEFS_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
+      - LAKEFS_ARTIFACTS_REPOSITORY=${LAKEFS_ARTIFACTS_REPOSITORY:-pipeline-artifacts}
+      - LAKEFS_RAW_REPOSITORY=${LAKEFS_RAW_REPOSITORY:-raw-datasets}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        echo "Waiting for lakeFS..."
+        until curl -fsS http://lakefs:8000/api/v1/healthcheck >/dev/null 2>&1; do sleep 1; done
+        echo "Checking lakeFS setup state..."
+        state="$(curl -fsS http://lakefs:8000/api/v1/setup_lakefs || true)"
+        if echo "$$state" | grep -q "not_initialized"; then
+          echo "Bootstrapping lakeFS admin user..."
+          username="$${LAKEFS_INSTALLATION_USER_NAME:-spice-admin}"
+          auth_user="$${LAKEFS_INSTALLATION_ACCESS_KEY_ID:-spice-lakefs-admin}"
+          auth_pass="$${LAKEFS_INSTALLATION_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}"
+          curl -fsS -X POST http://lakefs:8000/api/v1/setup_lakefs \
+            -H 'Content-Type: application/json' \
+            -d "{\"username\":\"$$username\",\"key\":{\"access_key_id\":\"$$auth_user\",\"secret_access_key\":\"$$auth_pass\"}}" >/dev/null
+          # Optional comm prefs (ignore if state doesn't require it)
+          curl -fsS -X POST http://lakefs:8000/api/v1/setup_comm_prefs \
+            -H 'Content-Type: application/json' \
+            -d '{"featureUpdates":false,"securityUpdates":false}' >/dev/null 2>&1 || true
+        fi
+        echo "Ensuring repositories..."
+        auth_user="$${LAKEFS_INSTALLATION_ACCESS_KEY_ID:-spice-lakefs-admin}"
+        auth_pass="$${LAKEFS_INSTALLATION_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}"
+        create_repo() {
+          name="$1"
+          ns="$2"
+          code="$$(curl -sS -o /dev/null -w '%{http_code}' -u "$$auth_user:$$auth_pass" -X POST http://lakefs:8000/api/v1/repositories \
+            -H 'Content-Type: application/json' \
+            -d "{\"name\":\"$$name\",\"storage_namespace\":\"$$ns\",\"default_branch\":\"main\"}")"
+          if [ "$$code" != "201" ] && [ "$$code" != "409" ]; then
+            echo "Failed to create repo $$name (http=$$code)"
+            exit 1
+          fi
+        }
+        create_repo "$${LAKEFS_ARTIFACTS_REPOSITORY:-pipeline-artifacts}" "s3://lakefs/$${LAKEFS_ARTIFACTS_REPOSITORY:-pipeline-artifacts}"
+        create_repo "$${LAKEFS_RAW_REPOSITORY:-raw-datasets}" "s3://lakefs/$${LAKEFS_RAW_REPOSITORY:-raw-datasets}"
+        create_repo "ontology-writeback" "s3://lakefs/ontology-writeback"
+        echo "lakeFS repositories ready."
+        exit 0
+    restart: "no"
+    networks:
+      - spice_network
+
   # TerminusDB - 표준화된 인증 정보
   terminusdb:
+    profiles: ["full"]
     image: terminusdb/terminusdb-server:latest
     container_name: spice_terminusdb
     environment:
@@ -161,6 +279,7 @@ services:
 
   # OMS (Ontology Management Service) - 표준화된 인증 정보
   oms:
+    profiles: ["full"]
     build:
       context: .
       dockerfile: ./oms/Dockerfile
@@ -224,10 +343,28 @@ services:
       - FUNNEL_BASE_URL=http://funnel:8003
       - AGENT_BASE_URL=http://agent:8004
       - AGENT_PROXY_TIMEOUT_SECONDS=${AGENT_PROXY_TIMEOUT_SECONDS:-30}
-      - BFF_AGENT_TOKEN=${BFF_AGENT_TOKEN:-}
+      - BFF_AGENT_TOKEN=${BFF_AGENT_TOKEN:-spice-dev-agent-token}
       - MCP_CONFIG_PATH=/app/mcp-config.json
       - CONTEXT7_API_KEY=${CONTEXT7_API_KEY:-}
       - CONTEXT7_WORKSPACE=${CONTEXT7_WORKSPACE:-}
+      # End-user JWT (Agent Sessions)
+      - USER_JWT_ENABLED=${USER_JWT_ENABLED:-true}
+      - USER_JWT_HS256_SECRET=${USER_JWT_HS256_SECRET:-spice-dev-user-jwt-secret}
+      - USER_JWT_ISSUER=${USER_JWT_ISSUER:-}
+      - USER_JWT_AUDIENCE=${USER_JWT_AUDIENCE:-}
+      - USER_JWT_ALGORITHMS=${USER_JWT_ALGORITHMS:-}
+      # Agent tool allowlist bootstrap (safe: only_if_empty by default)
+      - AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ENABLED=${AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ENABLED:-true}
+      - AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ONLY_IF_EMPTY=${AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ONLY_IF_EMPTY:-true}
+      - AGENT_PLAN_ALLOWLIST_BUNDLE_PATH=${AGENT_PLAN_ALLOWLIST_BUNDLE_PATH:-}
+      # LLM gateway (planner). Keep disabled by default; enable via env for dev.
+      - LLM_PROVIDER=${LLM_PROVIDER:-disabled}
+      - LLM_MODEL=${LLM_MODEL:-}
+      - LLM_BASE_URL=${LLM_BASE_URL:-}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MOCK_JSON=${LLM_MOCK_JSON:-}
+      - LLM_MOCK_JSON_AGENT_PLAN_COMPILE_V1=${LLM_MOCK_JSON_AGENT_PLAN_COMPILE_V1:-}
+      - LLM_MOCK_JSON_AGENT_PLAN_CLARIFY_V1=${LLM_MOCK_JSON_AGENT_PLAN_CLARIFY_V1:-}
       # Infra (needed for WebSocket notifications / search / rate limiting)
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
@@ -287,9 +424,6 @@ services:
       - LAKEFS_SERVICE_PRINCIPAL=bff
     ports:
       - "8002:8002"
-    depends_on:
-      - oms
-      - funnel
     networks:
       - spice_network
     volumes:
@@ -337,6 +471,7 @@ services:
 
   # Connector Trigger Service (polls + emits connector-updates)
   connector-trigger-service:
+    profiles: ["full"]
     build:
       context: .
       dockerfile: ./connector_trigger_service/Dockerfile
@@ -366,6 +501,7 @@ services:
 
   # Connector Sync Worker (consumes connector-updates and submits writes)
   connector-sync-worker:
+    profiles: ["full"]
     build:
       context: .
       dockerfile: ./connector_sync_worker/Dockerfile
@@ -397,6 +533,7 @@ services:
 
   # Pipeline Worker (Spark-based execution)
   pipeline-worker:
+    profiles: ["full"]
     build:
       context: .
       dockerfile: ./pipeline_worker/Dockerfile
@@ -437,6 +574,7 @@ services:
 
   # Pipeline Scheduler (cron-style)
   pipeline-scheduler:
+    profiles: ["full"]
     build:
       context: .
       dockerfile: ./pipeline_scheduler/Dockerfile
@@ -470,6 +608,7 @@ services:
 
   # Objectify Worker (Dataset -> Ontology instances)
   objectify-worker:
+    profiles: ["full"]
     build:
       context: .
       dockerfile: ./objectify_worker/Dockerfile
@@ -507,6 +646,7 @@ services:
 
   # Dataset ingest reconciler worker (runs atomicity repair loop)
   ingest-reconciler-worker:
+    profiles: ["full"]
     build:
       context: .
       dockerfile: ./ingest_reconciler_worker/Dockerfile
@@ -540,6 +680,7 @@ services:
 
   # Funnel
   funnel:
+    profiles: ["full"]
     build:
       context: .
       dockerfile: ./funnel/Dockerfile
@@ -561,6 +702,7 @@ services:
 
   # Message Relay - 표준화된 인증 정보
   message-relay:
+    profiles: ["full"]
     build:
       context: .
       dockerfile: ./message_relay/Dockerfile
@@ -586,6 +728,7 @@ services:
 
   # Ontology Worker - 표준화된 인증 정보
   ontology-worker:
+    profiles: ["full"]
     build:
       context: .
       dockerfile: ./ontology_worker/Dockerfile
@@ -619,6 +762,7 @@ services:
 
   # Instance Worker - 표준화된 인증 정보
   instance-worker:
+    profiles: ["full"]
     build:
       context: .
       dockerfile: ./instance_worker/Dockerfile
@@ -669,6 +813,7 @@ services:
 
   # Projection Worker - 표준화된 인증 정보
   projection-worker:
+    profiles: ["full"]
     build:
       context: .
       dockerfile: ./projection_worker/Dockerfile
@@ -712,6 +857,7 @@ services:
 
   # Action Worker (Action-only writeback execution)
   action-worker:
+    profiles: ["full"]
     build:
       context: .
       dockerfile: ./action_worker/Dockerfile
@@ -755,6 +901,7 @@ services:
 
   # Search Projection Worker (optional instance indexing)
   search-projection-worker:
+    profiles: ["full"]
     build:
       context: .
       dockerfile: ./search_projection_worker/Dockerfile

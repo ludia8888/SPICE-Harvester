@@ -564,6 +564,33 @@ async def validate_agent_plan(
             }
         )
 
+        if normalized_step.tool_id == _PIPELINE_CREATE_TOOL_ID:
+            body_obj = normalized_step.body if isinstance(normalized_step.body, dict) else {}
+            location_raw = str(body_obj.get("location") or "").strip()
+            if not location_raw:
+                db_name_for_location = str(body_obj.get("db_name") or getattr(plan.data_scope, "db_name", "") or "").strip()
+                if not db_name_for_location:
+                    db_name_for_location = "default"
+                default_location = f"/projects/{db_name_for_location}/pipelines"
+                patch_id = f"add_location.{normalized_step.step_id}"
+                _add_error(
+                    code="pipeline_location_required",
+                    message=f"tool_id={normalized_step.tool_id} missing required field: body.location",
+                    step=normalized_step,
+                    field="body.location",
+                    fix_hint="Provide a pipeline location (e.g. /projects/<db_name>/pipelines).",
+                    patch_id=patch_id,
+                )
+                _maybe_add_patch(
+                    patch_id=patch_id,
+                    title=f"Add location for step {normalized_step.step_id}",
+                    description="Adds a default pipeline location derived from db_name.",
+                    auto_applicable=True,
+                    operations=[
+                        PlanPatchOp(op="add", path=f"/steps/{idx}/body/location", value=default_location),
+                    ],
+                )
+
         schema_errors = validate_against_request_schema(
             method=str(method or policy.method or "").strip().upper(),
             path=str(policy.path or "").strip(),

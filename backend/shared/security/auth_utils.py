@@ -10,8 +10,6 @@ _DB_SCOPE_HEADER_KEYS = (
     "X-DB-Name",
     "X-Project",
     "X-Project-Id",
-    "X-Tenant",
-    "X-Tenant-Id",
 )
 
 
