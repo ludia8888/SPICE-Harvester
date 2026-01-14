@@ -11,11 +11,16 @@ from bff.routers.agent_sessions import (
     AgentSessionContextItemCreateRequest,
     AgentSessionCreateRequest,
     AgentSessionMessageRequest,
+    AgentSessionUpdateModelRequest,
+    AgentSessionUpdateToolsRequest,
     attach_context_item,
     create_session,
     get_session,
     list_sessions,
     list_context_items,
+    list_session_tools,
+    update_session_model,
+    update_session_tools,
     post_message,
     remove_context_item,
     terminate_session,
@@ -70,6 +75,9 @@ class _FakeSessions:
         updated = replace(
             record,
             status=str(kwargs.get("status") or record.status),
+            selected_model=kwargs.get("selected_model", record.selected_model),
+            enabled_tools=kwargs.get("enabled_tools", record.enabled_tools),
+            metadata=dict(kwargs.get("metadata") or record.metadata),
             terminated_at=kwargs.get("terminated_at") or record.terminated_at,
             updated_at=datetime.now(timezone.utc),
         )
@@ -154,6 +162,55 @@ class _FakePolicyRegistry:
 class _FakeToolRegistry:
     async def get_tool_policy(self, *, tool_id: str):  # noqa: ANN001
         return None
+
+    async def list_tool_policies(self, *, status: str, limit: int = 200):  # noqa: ANN001
+        return []
+
+
+class _ToolRegistryWithActive:
+    def __init__(self, tool_ids: list[str]):  # noqa: ANN001
+        self._tool_ids = tool_ids
+
+    async def get_tool_policy(self, *, tool_id: str):  # noqa: ANN001
+        if tool_id not in self._tool_ids:
+            return None
+        return SimpleNamespace(tool_id=tool_id, status="ACTIVE")
+
+    async def list_tool_policies(self, *, status: str, limit: int = 200):  # noqa: ANN001
+        return [
+            SimpleNamespace(
+                tool_id=tool_id,
+                method="GET",
+                path="/api/v1/health",
+                risk_level="read",
+                requires_approval=False,
+                requires_idempotency_key=False,
+                roles=[],
+                max_payload_bytes=200000,
+                status="ACTIVE",
+            )
+            for tool_id in self._tool_ids
+        ]
+
+
+class _ModelRegistryActive:
+    def __init__(self, active_models: set[str]):  # noqa: ANN001
+        self._active = set(active_models)
+
+    async def get_model(self, *, model_id: str):  # noqa: ANN001
+        if model_id not in self._active:
+            return None
+        return SimpleNamespace(
+            model_id=model_id,
+            provider="openai_compat",
+            display_name=None,
+            status="ACTIVE",
+            supports_json_mode=True,
+            supports_native_tool_calling=False,
+            max_context_tokens=128000,
+            max_output_tokens=4096,
+            metadata={},
+        )
 
 
 @pytest.mark.asyncio
@@ -312,3 +369,78 @@ async def test_agent_sessions_post_message_includes_only_attached_context(monkey
     assert context_pack["attached_context"][0]["item_type"] == "dataset"
     assert context_pack["attached_context"][0]["include_mode"] == "full"
     assert context_pack["attached_context"][0]["ref"]["dataset_id"] == "ds-ctx"
+
+
+@pytest.mark.asyncio
+async def test_agent_sessions_can_update_enabled_tools() -> None:
+    sessions = _FakeSessions()
+    req = _Request(principal=_principal())
+
+    created = await create_session(
+        AgentSessionCreateRequest(),
+        request=req,
+        sessions=sessions,
+        policy_registry=_FakePolicyRegistry(),
+        tool_registry=_FakeToolRegistry(),
+    )
+    session_id = created.data["session"]["session_id"]
+
+    tool_registry = _ToolRegistryWithActive(["tool.a", "tool.b"])
+    updated = await update_session_tools(
+        session_id=session_id,
+        body=AgentSessionUpdateToolsRequest(enabled_tools=["tool.a", "tool.b"]),
+        request=req,
+        sessions=sessions,
+        policy_registry=_FakePolicyRegistry(),  # type: ignore[arg-type]
+        tool_registry=tool_registry,  # type: ignore[arg-type]
+    )
+    assert updated.status == "success"
+    assert set(updated.data["enabled_tools"]) == {"tool.a", "tool.b"}
+    assert updated.data["metadata"]["tools_restricted"] is True
+
+    listed = await list_session_tools(
+        session_id=session_id,
+        request=req,
+        sessions=sessions,
+        policy_registry=_FakePolicyRegistry(),  # type: ignore[arg-type]
+        tool_registry=tool_registry,  # type: ignore[arg-type]
+    )
+    assert listed.status == "success"
+    assert listed.data["count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_agent_sessions_can_update_selected_model() -> None:
+    sessions = _FakeSessions()
+    req = _Request(principal=_principal())
+
+    class _PolicyRegistry:
+        async def get_tenant_policy(self, *, tenant_id: str):  # noqa: ANN001
+            return SimpleNamespace(
+                tenant_id=tenant_id,
+                allowed_models=["gpt-4.1-mini"],
+                allowed_tools=[],
+                default_model=None,
+                auto_approve_rules={},
+                data_policies={},
+            )
+
+    created = await create_session(
+        AgentSessionCreateRequest(),
+        request=req,
+        sessions=sessions,
+        policy_registry=_PolicyRegistry(),  # type: ignore[arg-type]
+        tool_registry=_FakeToolRegistry(),
+    )
+    session_id = created.data["session"]["session_id"]
+
+    updated = await update_session_model(
+        session_id=session_id,
+        body=AgentSessionUpdateModelRequest(selected_model="gpt-4.1-mini"),
+        request=req,
+        sessions=sessions,
+        policy_registry=_PolicyRegistry(),  # type: ignore[arg-type]
+        model_registry=_ModelRegistryActive({"gpt-4.1-mini"}),  # type: ignore[arg-type]
+    )
+    assert updated.status == "success"
+    assert updated.data["selected_model"] == "gpt-4.1-mini"

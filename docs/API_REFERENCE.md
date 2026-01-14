@@ -163,7 +163,11 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/agent-sessions/{session_id}/jobs/{job_id}`
 - `POST /api/v1/agent-sessions/{session_id}/messages`
 - `POST /api/v1/agent-sessions/{session_id}/messages/remove`
+- `PUT /api/v1/agent-sessions/{session_id}/model`
+- `GET /api/v1/agent-sessions/{session_id}/models`
 - `POST /api/v1/agent-sessions/{session_id}/summarize`
+- `GET /api/v1/agent-sessions/{session_id}/tools`
+- `PUT /api/v1/agent-sessions/{session_id}/tools`
 
 ### Agent Tool Admin
 - `GET /api/v1/admin/agent-tools`

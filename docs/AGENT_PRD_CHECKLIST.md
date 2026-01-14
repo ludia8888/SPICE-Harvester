@@ -16,10 +16,10 @@
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
 | AUTH-001 | DONE | `backend/bff/middleware/auth.py`, `backend/shared/security/user_context.py`, `backend/agent/services/agent_runtime.py`, `backend/tests/unit/middleware/test_middleware_fixes.py`, `backend/tests/unit/services/test_agent_runtime_delegated_auth.py` |  |
-| AUTH-002 | PARTIAL | `backend/bff/middleware/auth.py`, `backend/shared/services/agent_tool_registry.py`, `backend/agent/services/agent_runtime.py`, `backend/tests/unit/middleware/test_middleware_fixes.py` | tool_id 기반 런타임 allowlist+role gating은 추가됨. DB Access(RBAC)·ABAC(리소스 스코프)·표준 오류 코드(envelope)로 확장 필요. |
+| AUTH-002 | PARTIAL | `backend/bff/middleware/auth.py`, `backend/shared/services/agent_tool_registry.py`, `backend/shared/services/agent_policy_registry.py`, `backend/shared/services/agent_session_registry.py`, `backend/tests/unit/middleware/test_middleware_fixes.py` | tool_id allowlist+role gating + session enabled_tools 강제 + ABAC(db_name/branch) 일부 추가됨. 표준 오류 코드(envelope) 정리 + 리소스 스코프 확장(문서/데이터셋 등) 필요. |
 | AUTH-003 | PARTIAL | `backend/bff/middleware/auth.py`, `backend/agent/services/agent_runtime.py` | 전 서비스/워커 경로에서 “service token only” 실행이 없도록 정리 + RBAC/ABAC로 최종 보장 필요. |
 | AUTH-004 | PARTIAL | `backend/bff/middleware/auth.py`, `backend/bff/routers/agent_proxy.py`, `backend/shared/services/agent_session_registry.py`, `backend/shared/services/agent_plan_registry.py`, `backend/shared/services/agent_registry.py` | 로그/아티팩트/레이트리밋까지 tenant 격리 확대 + cross-service(워커 포함) tenant propagation 완결 필요. |
-| AUTH-005 | PARTIAL | `backend/shared/services/agent_policy_registry.py`, `backend/bff/routers/agent_policies.py`, `backend/bff/routers/agent_sessions.py`, `backend/bff/routers/agent_plans.py` | 자동 승인 규칙/데이터·문서 접근 정책(ABAC) + 세션 정책의 런타임 강제(툴/LLM) 완결 필요. |
+| AUTH-005 | PARTIAL | `backend/shared/services/agent_policy_registry.py`, `backend/bff/routers/agent_policies.py`, `backend/bff/routers/agent_sessions.py`, `backend/bff/middleware/auth.py`, `backend/bff/tests/test_agent_sessions_router.py`, `backend/tests/unit/middleware/test_middleware_fixes.py` | 세션 model/tools allowlist + ABAC(db_name/branch) 일부 강제됨. 자동 승인 규칙/데이터·문서 접근 정책(ABAC) 확장 + 세션 정책의 런타임 강제(툴/LLM) 완결 필요. |
 
 ---
 
@@ -42,7 +42,7 @@
 |---|---|---|---|
 | LLM-001 | DONE | `backend/shared/services/llm_gateway.py`, `backend/shared/config/settings.py`, `backend/tests/unit/services/test_llm_gateway_resilience.py` |  |
 | LLM-002 | PARTIAL | `backend/shared/services/agent_policy_registry.py`, `backend/bff/routers/agent_sessions.py`, `backend/bff/routers/agent_policies.py`, `backend/shared/services/agent_model_registry.py`, `backend/bff/routers/agent_models.py` | 세션 생성/변경 전 과정에서 allowlist 강제(게이트웨이 레벨 포함) + 모델 메타/조직 정책(권한/송신 정책) 런타임 강제 완결 필요. |
-| LLM-003 | PARTIAL | `backend/shared/services/agent_session_registry.py`, `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_model_registry.py` | 세션 단위 모델 변경 API + 모든 호출에 세션 정책(마스킹/툴 허용/데이터 정책) 고정 적용 필요. |
+| LLM-003 | PARTIAL | `backend/shared/services/agent_session_registry.py`, `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_model_registry.py`, `backend/bff/tests/test_agent_sessions_router.py` | 세션 단위 모델 변경 API는 제공됨. LLM 호출 시 세션 정책(마스킹/툴 허용/데이터 정책) 런타임 강제(게이트웨이 포함) 완결 필요. |
 | LLM-004 | PARTIAL | `backend/shared/services/llm_gateway.py`(JSON-only), `backend/bff/services/agent_plan_compiler.py`(planner) | native function/tool 호출(복수 호출/병렬 계획) 미구현. |
 | LLM-005 | PARTIAL | `backend/shared/services/agent_model_registry.py`, `backend/bff/routers/agent_models.py` | capability 메타 기반 런타임 자동 폴백(네이티브→프롬프트 등) 연결 미구현. |
 | LLM-006 | DONE | `backend/shared/services/llm_gateway.py`, `backend/tests/unit/services/test_llm_gateway_resilience.py` |  |
@@ -67,8 +67,8 @@
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
 | TOOL-001 | PARTIAL | `backend/shared/services/agent_tool_registry.py`, `backend/shared/policies/agent_tool_allowlist.json` | tool version / input-output schema / 권한 선언 / retry 정책 메타 확장 필요. |
-| TOOL-002 | PARTIAL | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_session_registry.py`, `backend/bff/services/agent_plan_validation.py` | 세션 enabled_tools를 모든 실행 경로에 강제(직접 실행/재개 포함) + “툴 목록 조회/설정” API 완결 필요. |
-| TOOL-003 | PARTIAL | `backend/bff/routers/agent_plans.py`(Idempotency-Key), `backend/agent/services/agent_runtime.py`(tool_run_id) | tool_run_id는 추가됨(관측용). “중복 실행 방지”는 API/스토리지 멱등성 계약까지 확장 필요. |
+| TOOL-002 | PARTIAL | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_session_registry.py`, `backend/bff/middleware/auth.py`, `backend/bff/tests/test_agent_sessions_router.py`, `backend/tests/unit/middleware/test_middleware_fixes.py` | 세션 enabled_tools 저장/조회/설정 + 런타임 차단은 추가됨. 모든 툴 실행 경로에서 `X-Agent-Session-ID` 전파를 보장(워커/프록시 포함)하고, 세션 정책 기반 강제를 완결 필요. |
+| TOOL-003 | PARTIAL | `backend/bff/middleware/auth.py`(Idempotency-Key 요구), `backend/agent/services/agent_runtime.py`(tool_run_id), `backend/tests/unit/middleware/test_middleware_fixes.py` | tool_run_id/Idempotency-Key 계약은 존재. “중복 실행 방지”는 tool_run_id/멱등성 키 기반 결과 저장 + 재실행 시 재사용(replay)로 확장 필요. |
 | TOOL-004 | PARTIAL | `backend/agent/services/agent_runtime.py`(payload_preview/side_effect_summary) | 표준 응답 스키마(에러 코드 체계/side effect taxonomy) 고도화 필요. |
 | TOOL-005 | PARTIAL | `docs/API_REFERENCE.md`(Actions/Graph/Pipeline/Objectify/Commands), `backend/shared/policies/agent_tool_allowlist.json` | Function/SessionVariableUpdate/Clarification 툴은 미구현(또는 allowlist 확장 필요). |
 | TOOL-006 | PARTIAL | `backend/agent/services/agent_runtime.py`(mask/audit/events), `backend/shared/utils/llm_safety.py` | hooks는 런타임에 존재하나 tool plugin 레이어/세션 정책 연결 필요. |
@@ -157,7 +157,7 @@
 
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
-| INT-001 | PARTIAL | `docs/API_REFERENCE.md` | session/message/context API가 빠져있음(신규 필요). |
+| INT-001 | PARTIAL | `docs/API_REFERENCE.md`, `backend/bff/routers/agent_sessions.py` | 메시지 스트리밍(또는 long-poll) + context API coverage 정리 + artifact link API 등 남은 군을 완결 필요. |
 | INT-002 | PARTIAL | `docs/API_REFERENCE.md`(datasets/ontology/branches 등) | 통합 connector 계층(메타데이터 표준화) 고도화 필요. |
 | INT-003 | PARTIAL | `backend/bff/routers/context7.py` | citation contract/문서 번들 모델 확정 필요. |
 | INT-004 | TODO | (없음) | CI 결과 수집/표준화(웹훅/폴링) 미구현. |

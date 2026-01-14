@@ -1,6 +1,7 @@
 import os
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 from jose import jwt
@@ -277,6 +278,7 @@ def test_bff_agent_tool_policy_enforced_via_tool_registry():
                 "X-Delegated-Authorization": f"Bearer {user_token}",
                 "X-Agent-Tool-ID": "pipelines.build",
                 "X-Agent-Tool-Run-ID": "11111111-1111-1111-1111-111111111111",
+                "Idempotency-Key": "unit-test-idem-1",
             },
         )
         assert resp.status_code == 200
@@ -300,6 +302,153 @@ def test_bff_agent_tool_policy_enforced_via_tool_registry():
                 "X-Admin-Token": "agent-secret",
                 "X-Delegated-Authorization": f"Bearer {user_no_role}",
                 "X-Agent-Tool-ID": "pipelines.build",
+                "Idempotency-Key": "unit-test-idem-2",
+            },
+        )
+        assert resp.status_code == 403
+
+
+@pytest.mark.unit
+def test_bff_agent_tool_policy_enforces_session_enabled_tools_and_abac():
+    user_token = jwt.encode({"sub": "user-1", "roles": ["Owner"], "tenant_id": "tenant-1"}, "jwt-secret", algorithm="HS256")
+
+    class StubToolRegistry:
+        def __init__(self, policy):  # noqa: ANN001
+            self._policy = policy
+
+        async def get_tool_policy(self, *, tool_id: str):  # noqa: ANN001
+            return self._policy.get(tool_id)
+
+    class StubSessionRegistry:
+        def __init__(self, session):  # noqa: ANN001
+            self._session = session
+
+        async def get_session(self, *, session_id: str, tenant_id: str):  # noqa: ANN001
+            if session_id != self._session["session_id"] or tenant_id != self._session["tenant_id"]:
+                return None
+            return SimpleNamespace(**self._session)
+
+    class StubPolicyRegistry:
+        def __init__(self, policy):  # noqa: ANN001
+            self._policy = policy
+
+        async def get_tenant_policy(self, *, tenant_id: str):  # noqa: ANN001
+            if tenant_id != self._policy["tenant_id"]:
+                return None
+            return SimpleNamespace(**self._policy)
+
+    class StubContainer:
+        def __init__(self, *, tool_registry, session_registry, policy_registry):  # noqa: ANN001
+            self._tool_registry = tool_registry
+            self._session_registry = session_registry
+            self._policy_registry = policy_registry
+
+        def get_agent_tool_registry(self):  # noqa: ANN001
+            return self._tool_registry
+
+        def get_agent_session_registry(self):  # noqa: ANN001
+            return self._session_registry
+
+        def get_agent_policy_registry(self):  # noqa: ANN001
+            return self._policy_registry
+
+    now = datetime.now(timezone.utc)
+    tool_policy = AgentToolPolicyRecord(
+        tool_id="actions.list_logs",
+        method="GET",
+        path="/api/v1/databases/{db_name}/actions/logs",
+        risk_level="read",
+        requires_approval=False,
+        requires_idempotency_key=False,
+        status="ACTIVE",
+        roles=["Owner"],
+        max_payload_bytes=200000,
+        created_at=now,
+        updated_at=now,
+    )
+
+    session_id = "11111111-1111-1111-1111-111111111111"
+    session = {
+        "session_id": session_id,
+        "tenant_id": "tenant-1",
+        "created_by": "user-1",
+        "status": "ACTIVE",
+        "selected_model": None,
+        "enabled_tools": [],
+        "summary": None,
+        "metadata": {"tools_restricted": True},
+        "started_at": now,
+        "terminated_at": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    tenant_policy = {
+        "tenant_id": "tenant-1",
+        "allowed_tools": ["actions.list_logs"],
+        "allowed_models": [],
+        "default_model": None,
+        "auto_approve_rules": {},
+        "data_policies": {"allowed_db_names": ["allowed-db"]},
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    with _set_env(
+        BFF_REQUIRE_AUTH="true",
+        BFF_AGENT_TOKEN="agent-secret",
+        USER_JWT_ENABLED="true",
+        USER_JWT_HS256_SECRET="jwt-secret",
+    ):
+        app = FastAPI()
+        app.state.bff_container = StubContainer(
+            tool_registry=StubToolRegistry({"actions.list_logs": tool_policy}),
+            session_registry=StubSessionRegistry(session),
+            policy_registry=StubPolicyRegistry(tenant_policy),
+        )
+        install_bff_auth_middleware(app)
+
+        @app.get("/api/v1/databases/{db_name}/actions/logs")
+        async def list_logs(db_name: str):  # noqa: ANN001
+            return {"db_name": db_name}
+
+        client = TestClient(app)
+
+        # Session tool restriction: tool not enabled for session => denied.
+        resp = client.get(
+            "/api/v1/databases/allowed-db/actions/logs",
+            headers={
+                "X-Admin-Token": "agent-secret",
+                "X-Delegated-Authorization": f"Bearer {user_token}",
+                "X-Agent-Tool-ID": "actions.list_logs",
+                "X-Agent-Tool-Run-ID": "22222222-2222-2222-2222-222222222222",
+                "X-Agent-Session-ID": session_id,
+            },
+        )
+        assert resp.status_code == 403
+
+        # Enable tool for the session and retry => allowed.
+        session["enabled_tools"] = ["actions.list_logs"]
+        resp = client.get(
+            "/api/v1/databases/allowed-db/actions/logs",
+            headers={
+                "X-Admin-Token": "agent-secret",
+                "X-Delegated-Authorization": f"Bearer {user_token}",
+                "X-Agent-Tool-ID": "actions.list_logs",
+                "X-Agent-Tool-Run-ID": "33333333-3333-3333-3333-333333333333",
+                "X-Agent-Session-ID": session_id,
+            },
+        )
+        assert resp.status_code == 200
+
+        # ABAC: db_name not in allowed list => denied.
+        resp = client.get(
+            "/api/v1/databases/forbidden-db/actions/logs",
+            headers={
+                "X-Admin-Token": "agent-secret",
+                "X-Delegated-Authorization": f"Bearer {user_token}",
+                "X-Agent-Tool-ID": "actions.list_logs",
+                "X-Agent-Tool-Run-ID": "44444444-4444-4444-4444-444444444444",
+                "X-Agent-Session-ID": session_id,
             },
         )
         assert resp.status_code == 403
