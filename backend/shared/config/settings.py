@@ -1048,6 +1048,11 @@ class AuthSettings(BaseSettings):
         description="Comma-separated accepted JWT algorithms (USER_JWT_ALGORITHMS)",
     )
 
+    allow_insecure_agent_no_user_jwt: bool = Field(
+        default=False,
+        description="Allow internal agent calls without USER_JWT_ENABLED (ALLOW_INSECURE_AGENT_NO_USER_JWT)",
+    )
+
     # Require flags (Optional so 'unset' can use heuristics)
     bff_require_auth: Optional[bool] = Field(
         default=None,

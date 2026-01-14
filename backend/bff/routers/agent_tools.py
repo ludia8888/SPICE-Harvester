@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hmac
 import logging
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
@@ -46,6 +46,14 @@ class AgentToolPolicyRequest(BaseModel):
     status: str = Field(default="ACTIVE")
     roles: List[str] = Field(default_factory=list)
     max_payload_bytes: Optional[int] = Field(default=None, ge=0)
+    version: str = Field(default="v1", max_length=50)
+    tool_type: str = Field(default="unknown", max_length=100)
+    input_schema: Dict[str, Any] = Field(default_factory=dict)
+    output_schema: Dict[str, Any] = Field(default_factory=dict)
+    timeout_seconds: Optional[float] = Field(default=None, ge=0)
+    retry_policy: Dict[str, Any] = Field(default_factory=dict)
+    resource_scopes: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 async def get_agent_tool_registry() -> AgentToolRegistry:
@@ -65,6 +73,14 @@ def _serialize_policy(record: AgentToolPolicyRecord) -> dict:
         "status": record.status,
         "roles": record.roles,
         "max_payload_bytes": record.max_payload_bytes,
+        "version": record.version,
+        "tool_type": record.tool_type,
+        "input_schema": record.input_schema,
+        "output_schema": record.output_schema,
+        "timeout_seconds": record.timeout_seconds,
+        "retry_policy": record.retry_policy,
+        "resource_scopes": record.resource_scopes,
+        "metadata": record.metadata,
         "created_at": record.created_at.isoformat(),
         "updated_at": record.updated_at.isoformat(),
     }
@@ -86,6 +102,14 @@ async def upsert_tool_policy(
             status=body.status.strip().upper(),
             roles=body.roles,
             max_payload_bytes=body.max_payload_bytes,
+            version=body.version.strip() or "v1",
+            tool_type=body.tool_type.strip() or "unknown",
+            input_schema=body.input_schema,
+            output_schema=body.output_schema,
+            timeout_seconds=body.timeout_seconds,
+            retry_policy=body.retry_policy,
+            resource_scopes=body.resource_scopes,
+            metadata=body.metadata,
         )
         return ApiResponse.created(
             message="Agent tool policy upserted",

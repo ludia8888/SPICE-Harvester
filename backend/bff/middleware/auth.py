@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hmac
 import json
 import logging
 import re
 import time
 from typing import Any, Optional
+from uuid import UUID, uuid4
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request, WebSocket, status
 from fastapi.responses import JSONResponse, Response
@@ -47,6 +50,25 @@ _AGENT_TOOL_PATH_RE_CACHE: dict[str, re.Pattern[str]] = {}
 _AGENT_TOOL_PATH_PARAMS_RE_CACHE: dict[str, re.Pattern[str]] = {}
 _TENANT_POLICY_CACHE: dict[str, tuple[float, object]] = {}
 _TENANT_POLICY_CACHE_TTL_S = 30.0
+
+
+def _safe_uuid(value: Optional[str]) -> Optional[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return str(UUID(raw))
+    except Exception:
+        return None
+
+
+def _resolve_agent_tool_run_id(request: Request) -> str:
+    existing = _safe_uuid(request.headers.get(_AGENT_TOOL_RUN_ID_HEADER))
+    if existing:
+        return existing
+    tool_run_id = str(uuid4())
+    _set_scope_header(request, _AGENT_TOOL_RUN_ID_HEADER, tool_run_id)
+    return tool_run_id
 
 
 def _error_response(
@@ -177,6 +199,193 @@ def _extract_agent_tool_path_params(policy: AgentToolPolicyRecord, request_path:
 def _resolve_agent_tool_id(request: Request) -> Optional[str]:
     value = (request.headers.get(_AGENT_TOOL_ID_HEADER) or "").strip()
     return value or None
+
+
+async def _capture_agent_tool_request(request: Request) -> dict[str, Any]:
+    body_obj: Any = None
+    raw_body = b""
+    try:
+        raw_body = await request.body()
+    except Exception:
+        raw_body = b""
+    if raw_body:
+        try:
+            body_obj = await request.json()
+        except Exception:
+            body_obj = raw_body.decode("utf-8", errors="replace")
+
+    query_items = []
+    try:
+        query_items = sorted([(k, v) for (k, v) in request.query_params.multi_items()])
+    except Exception:
+        query_items = []
+
+    payload = {
+        "method": str(request.method or "").strip().upper(),
+        "path": request.url.path,
+        "query": query_items,
+        "body": body_obj,
+    }
+    request.state.agent_tool_request = payload
+    return payload
+
+
+async def _maybe_start_session_tool_call(request: Request) -> None:
+    if not bool(getattr(request.state, "is_internal_agent", False)):
+        return
+    tool_id = _resolve_agent_tool_id(request)
+    if not tool_id:
+        return
+    session_id = _safe_uuid(request.headers.get(_AGENT_SESSION_ID_HEADER))
+    if not session_id:
+        return
+    session_registry = _resolve_agent_session_registry(request)
+    if session_registry is None:
+        return
+
+    tenant_id = str(getattr(request.state, "tenant_id", None) or "default").strip() or "default"
+    job_id = _safe_uuid(request.headers.get(_AGENT_JOB_ID_HEADER))
+    plan_id = _safe_uuid(request.headers.get(_AGENT_PLAN_ID_HEADER))
+    idempotency_key = (request.headers.get(_IDEMPOTENCY_KEY_HEADER) or "").strip() or None
+
+    tool_run_id = _resolve_agent_tool_run_id(request)
+    request_payload = getattr(request.state, "agent_tool_request", None)
+    if not isinstance(request_payload, dict):
+        request_payload = await _capture_agent_tool_request(request)
+
+    request_digest = digest_for_audit(
+        {
+            "tool_id": tool_id,
+            "method": request_payload.get("method"),
+            "path": request_payload.get("path"),
+            "query": request_payload.get("query"),
+            "body": request_payload.get("body"),
+        }
+    )
+
+    request.state.agent_tool_started_monotonic = time.monotonic()
+    request.state.agent_tool_session_ids = {
+        "tenant_id": tenant_id,
+        "session_id": session_id,
+        "job_id": job_id,
+        "plan_id": plan_id,
+        "tool_run_id": tool_run_id,
+        "tool_id": tool_id,
+        "request_digest": request_digest,
+        "idempotency_key": idempotency_key,
+    }
+
+    try:
+        await session_registry.start_tool_call(
+            tool_run_id=tool_run_id,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            job_id=job_id,
+            plan_id=plan_id,
+            tool_id=tool_id,
+            method=str(request_payload.get("method") or request.method or "GET"),
+            path=str(request_payload.get("path") or request.url.path),
+            query={"items": request_payload.get("query") or []},
+            request_body=request_payload.get("body"),
+            request_digest=request_digest,
+            idempotency_key=idempotency_key,
+            started_at=datetime.now(timezone.utc),
+        )
+        await session_registry.append_event(
+            event_id=str(uuid4()),
+            session_id=session_id,
+            tenant_id=tenant_id,
+            event_type="TOOL_CALL_STARTED",
+            occurred_at=datetime.now(timezone.utc),
+            data={
+                "tool_run_id": tool_run_id,
+                "tool_id": tool_id,
+                "method": str(request_payload.get("method") or request.method or "GET"),
+                "path": str(request_payload.get("path") or request.url.path),
+                "request_digest": request_digest,
+                "job_id": job_id,
+                "plan_id": plan_id,
+                "idempotency_key": idempotency_key,
+            },
+        )
+    except Exception:
+        return
+
+
+async def _finalize_session_tool_call(request: Request, response: Response, *, terminal_status: str) -> None:
+    session_registry = _resolve_agent_session_registry(request)
+    state = getattr(request.state, "agent_tool_session_ids", None)
+    if session_registry is None or not isinstance(state, dict):
+        return
+    tenant_id = str(state.get("tenant_id") or "default")
+    session_id = str(state.get("session_id") or "")
+    tool_run_id = str(state.get("tool_run_id") or "")
+    tool_id = str(state.get("tool_id") or "")
+    if not (session_id and tool_run_id and tool_id):
+        return
+
+    latency_ms = None
+    started_mono = getattr(request.state, "agent_tool_started_monotonic", None)
+    if isinstance(started_mono, (int, float)):
+        latency_ms = int(max(0.0, (time.monotonic() - float(started_mono))) * 1000.0)
+
+    body_obj = getattr(request.state, "agent_tool_response_body", None)
+    if body_obj is None:
+        raw = getattr(response, "body", b"")
+        if isinstance(raw, (bytes, bytearray)) and raw:
+            try:
+                body_obj = json.loads(bytes(raw).decode("utf-8", errors="replace"))
+            except Exception:
+                body_obj = {"raw": bytes(raw).decode("utf-8", errors="replace")}
+        else:
+            body_obj = {}
+
+    response_digest = digest_for_audit(body_obj)
+    error_code = None
+    error_message = None
+    side_effect_summary: dict[str, Any] = {}
+
+    if isinstance(body_obj, dict):
+        error_code = body_obj.get("code") if isinstance(body_obj.get("code"), str) else None
+        error_message = body_obj.get("message") if isinstance(body_obj.get("message"), str) else None
+        side_effect = body_obj.get("side_effect_summary")
+        if isinstance(side_effect, dict):
+            side_effect_summary = side_effect
+
+    try:
+        await session_registry.finish_tool_call(
+            tool_run_id=tool_run_id,
+            tenant_id=tenant_id,
+            status=terminal_status,
+            response_status=int(getattr(response, "status_code", 200)),
+            response_body=body_obj,
+            response_digest=response_digest,
+            error_code=error_code,
+            error_message=error_message,
+            side_effect_summary=side_effect_summary,
+            latency_ms=latency_ms,
+            finished_at=datetime.now(timezone.utc),
+        )
+        await session_registry.append_event(
+            event_id=str(uuid4()),
+            session_id=session_id,
+            tenant_id=tenant_id,
+            event_type="TOOL_CALL_FINISHED",
+            occurred_at=datetime.now(timezone.utc),
+            data={
+                "tool_run_id": tool_run_id,
+                "tool_id": tool_id,
+                "status": terminal_status,
+                "http_status": int(getattr(response, "status_code", 200)),
+                "response_digest": response_digest,
+                "latency_ms": latency_ms,
+                "error_code": error_code,
+                "error_message": error_message,
+                "side_effect_summary": side_effect_summary,
+            },
+        )
+    except Exception:
+        return
 
 
 def _resolve_agent_tool_registry(request: Request):
@@ -364,6 +573,31 @@ async def _enforce_internal_agent_tool_policy(request: Request) -> Optional[JSON
     data_policies = getattr(policy_rec, "data_policies", None) or {}
     if isinstance(data_policies, dict) and data_policies:
         path_params = _extract_agent_tool_path_params(policy, path)
+        body_obj: Any = None
+        if any(
+            data_policies.get(key)
+            for key in (
+                "allowed_dataset_ids",
+                "allowed_pipeline_ids",
+                "allowed_document_bundle_ids",
+                "allowed_action_type_ids",
+                "allowed_ontology_ids",
+            )
+        ):
+            req_payload = getattr(request.state, "agent_tool_request", None)
+            if not isinstance(req_payload, dict):
+                req_payload = await _capture_agent_tool_request(request)
+            if isinstance(req_payload, dict):
+                body_obj = req_payload.get("body")
+
+        def _body_lookup(keys: tuple[str, ...]) -> str:
+            if not isinstance(body_obj, dict):
+                return ""
+            for key in keys:
+                value = body_obj.get(key)
+                if value not in (None, ""):
+                    return str(value).strip()
+            return ""
         allowed_db_names = {str(v).strip() for v in (data_policies.get("allowed_db_names") or []) if str(v).strip()}
         if allowed_db_names:
             db_name = (path_params.get("db_name") or request.query_params.get("db_name") or "").strip()
@@ -386,6 +620,61 @@ async def _enforce_internal_agent_tool_policy(request: Request) -> Optional[JSON
                 or ""
             ).strip()
             if branch and branch not in allowed_branches:
+                return _error_response(
+                    request=request,
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    message="Permission denied",
+                    code=ErrorCode.PERMISSION_DENIED,
+                    category=ErrorCategory.PERMISSION,
+                )
+
+        allowed_dataset_ids = {str(v).strip() for v in (data_policies.get("allowed_dataset_ids") or []) if str(v).strip()}
+        if allowed_dataset_ids:
+            dataset_id = (
+                path_params.get("dataset_id")
+                or request.query_params.get("dataset_id")
+                or request.query_params.get("datasetId")
+                or _body_lookup(("dataset_id", "datasetId"))
+                or ""
+            ).strip()
+            if dataset_id and dataset_id not in allowed_dataset_ids:
+                return _error_response(
+                    request=request,
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    message="Permission denied",
+                    code=ErrorCode.PERMISSION_DENIED,
+                    category=ErrorCategory.PERMISSION,
+                )
+
+        allowed_pipeline_ids = {str(v).strip() for v in (data_policies.get("allowed_pipeline_ids") or []) if str(v).strip()}
+        if allowed_pipeline_ids:
+            pipeline_id = (
+                path_params.get("pipeline_id")
+                or request.query_params.get("pipeline_id")
+                or request.query_params.get("pipelineId")
+                or _body_lookup(("pipeline_id", "pipelineId"))
+                or ""
+            ).strip()
+            if pipeline_id and pipeline_id not in allowed_pipeline_ids:
+                return _error_response(
+                    request=request,
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    message="Permission denied",
+                    code=ErrorCode.PERMISSION_DENIED,
+                    category=ErrorCategory.PERMISSION,
+                )
+
+        allowed_document_bundle_ids = {str(v).strip() for v in (data_policies.get("allowed_document_bundle_ids") or []) if str(v).strip()}
+        if allowed_document_bundle_ids:
+            bundle_id = (
+                path_params.get("document_bundle_id")
+                or path_params.get("bundle_id")
+                or request.query_params.get("document_bundle_id")
+                or request.query_params.get("bundle_id")
+                or _body_lookup(("document_bundle_id", "bundle_id", "documentBundleId"))
+                or ""
+            ).strip()
+            if bundle_id and bundle_id not in allowed_document_bundle_ids:
                 return _error_response(
                     request=request,
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -515,7 +804,10 @@ async def _maybe_replay_or_start_tool_idempotency(request: Request) -> Optional[
             stored_body = getattr(record, "response_body", None)
             if stored_body is None:
                 stored_body = {}
-            return JSONResponse(status_code=stored_status, content=stored_body)
+            response = JSONResponse(status_code=stored_status, content=stored_body)
+            request.state.agent_tool_response_body = stored_body
+            await _finalize_session_tool_call(request, response, terminal_status="REPLAYED")
+            return response
 
         if status_value == "IN_PROGRESS":
             waited = await _wait_for_tool_idempotency(
@@ -533,7 +825,10 @@ async def _maybe_replay_or_start_tool_idempotency(request: Request) -> Optional[
                     stored_body = getattr(waited, "response_body", None)
                     if stored_body is None:
                         stored_body = {}
-                    return JSONResponse(status_code=stored_status, content=stored_body)
+                    response = JSONResponse(status_code=stored_status, content=stored_body)
+                    request.state.agent_tool_response_body = stored_body
+                    await _finalize_session_tool_call(request, response, terminal_status="REPLAYED")
+                    return response
 
             return _error_response(
                 request=request,
@@ -597,6 +892,7 @@ async def _finalize_tool_idempotency(request: Request, response: Response) -> Re
             body_obj = {}
     except Exception:
         body_obj = {}
+    request.state.agent_tool_response_body = body_obj
 
     error_value = None
     if response.status_code >= 400:
@@ -694,17 +990,21 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
         agent_token = (auth.bff_agent_token or "").strip()
         if agent_token and hmac.compare_digest(presented, agent_token):
             request.state.is_internal_agent = True
-            delegated_raw = extract_bearer_token(request.headers.get(_DELEGATED_AUTH_HEADER))
+            delegated_raw = (
+                extract_bearer_token(request.headers.get(_DELEGATED_AUTH_HEADER))
+                or extract_bearer_token(request.headers.get("Authorization"))
+            )
+            if not delegated_raw:
+                return _error_response(
+                    request=request,
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    message=f"{_DELEGATED_AUTH_HEADER} required for agent calls",
+                    code=ErrorCode.AUTH_REQUIRED,
+                    category=ErrorCategory.AUTH,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+
             if auth.user_jwt_enabled:
-                if not delegated_raw:
-                    return _error_response(
-                        request=request,
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        message=f"{_DELEGATED_AUTH_HEADER} required for agent calls",
-                        code=ErrorCode.AUTH_REQUIRED,
-                        category=ErrorCategory.AUTH,
-                        headers={"WWW-Authenticate": "Bearer"},
-                    )
                 try:
                     principal = await verify_user_token(
                         delegated_raw,
@@ -726,18 +1026,92 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
                         code=ErrorCode.AUTH_INVALID,
                         category=ErrorCategory.AUTH,
                     )
-                denied = await _enforce_internal_agent_tool_policy(request)
-                if denied is not None:
-                    return denied
-                replay = await _maybe_replay_or_start_tool_idempotency(request)
-                if replay is not None:
-                    return replay
+            else:
+                if not bool(auth.allow_insecure_agent_no_user_jwt):
+                    return _error_response(
+                        request=request,
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        message="USER_JWT_ENABLED required for agent calls",
+                        code=ErrorCode.INTERNAL_ERROR,
+                        category=ErrorCategory.INTERNAL,
+                        context={"error": "user_jwt_required_for_agent"},
+                    )
+                # Insecure/development mode: treat delegated token as an unverified JWT and extract identity.
+                try:
+                    from jose import jwt as jose_jwt  # local import for optional dev-only path
+
+                    claims = jose_jwt.get_unverified_claims(delegated_raw)
+                except Exception:
+                    claims = {}
+                if not isinstance(claims, dict):
+                    claims = {}
+                user_id = (
+                    str(
+                        claims.get("sub")
+                        or claims.get("user_id")
+                        or claims.get("uid")
+                        or claims.get("id")
+                        or "unknown"
+                    )
+                    .strip()
+                    or "unknown"
+                )
+                tenant_id = str(claims.get("tenant_id") or claims.get("tenant") or claims.get("org_id") or "default").strip() or "default"
+                roles_raw = claims.get("roles") or claims.get("role") or claims.get("groups") or ()
+                if isinstance(roles_raw, str):
+                    roles = tuple([r.strip() for r in roles_raw.split(",") if r.strip()])
+                elif isinstance(roles_raw, (list, tuple, set)):
+                    roles = tuple([str(r).strip() for r in roles_raw if str(r).strip()])
+                else:
+                    roles = ()
+                principal = UserPrincipal(
+                    id=user_id,
+                    tenant_id=tenant_id,
+                    org_id=str(claims.get("org_id") or "").strip() or None,
+                    roles=roles,
+                    verified=True,
+                    claims=dict(claims),
+                )
+                _attach_verified_principal(request, principal)
+
+            await _maybe_start_session_tool_call(request)
+            denied = await _enforce_internal_agent_tool_policy(request)
+            if denied is not None:
+                denied_obj: Any = {}
+                with contextlib.suppress(Exception):
+                    raw = denied.body if hasattr(denied, "body") else b""
+                    if isinstance(raw, (bytes, bytearray)) and raw:
+                        denied_obj = json.loads(bytes(raw).decode("utf-8", errors="replace"))
+                if denied_obj in (None, ""):
+                    denied_obj = {}
+                request.state.agent_tool_response_body = denied_obj
+                await _finalize_session_tool_call(request, denied, terminal_status="DENIED")
+                return denied
+            replay = await _maybe_replay_or_start_tool_idempotency(request)
+            if replay is not None:
+                return replay
             try:
                 response = await call_next(request)
             except Exception as exc:
                 await _finalize_tool_idempotency_error(request, exc)
+                # Best-effort tool call telemetry for crashes.
+                with contextlib.suppress(Exception):
+                    response = _error_response(
+                        request=request,
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        message="Internal error",
+                        code=ErrorCode.INTERNAL_ERROR,
+                        category=ErrorCategory.INTERNAL,
+                    )
+                    request.state.agent_tool_response_body = {"status": "error", "message": "Internal error"}
+                    await _finalize_session_tool_call(request, response, terminal_status="FAILED")
                 raise
             response = await _finalize_tool_idempotency(request, response)
+            await _finalize_session_tool_call(
+                request,
+                response,
+                terminal_status="COMPLETED" if int(getattr(response, "status_code", 200)) < 400 else "FAILED",
+            )
             return response
 
         expected = auth.bff_expected_token
@@ -842,11 +1216,15 @@ async def enforce_bff_websocket_auth(websocket: WebSocket, token: Optional[str])
 
     agent_token = (auth.bff_agent_token or "").strip()
     if agent_token and hmac.compare_digest(presented, agent_token):
-        delegated_raw = extract_bearer_token(websocket.headers.get(_DELEGATED_AUTH_HEADER))
+        delegated_raw = (
+            extract_bearer_token(websocket.headers.get(_DELEGATED_AUTH_HEADER))
+            or extract_bearer_token(websocket.headers.get("Authorization"))
+        )
+        if not delegated_raw:
+            await websocket.close(code=4401, reason=f"{_DELEGATED_AUTH_HEADER} required for agent calls")
+            return False
+
         if auth.user_jwt_enabled:
-            if not delegated_raw:
-                await websocket.close(code=4401, reason=f"{_DELEGATED_AUTH_HEADER} required for agent calls")
-                return False
             try:
                 await verify_user_token(
                     delegated_raw,
@@ -860,6 +1238,10 @@ async def enforce_bff_websocket_auth(websocket: WebSocket, token: Optional[str])
                 )
             except UserTokenError:
                 await websocket.close(code=4403, reason="Delegated user token invalid")
+                return False
+        else:
+            if not bool(auth.allow_insecure_agent_no_user_jwt):
+                await websocket.close(code=1011, reason="USER_JWT_ENABLED required for agent calls")
                 return False
         return True
 

@@ -194,6 +194,31 @@ def test_bff_agent_auth_requires_delegated_user_jwt_when_enabled():
 
 
 @pytest.mark.unit
+def test_bff_agent_auth_requires_user_jwt_enabled_for_agent_calls():
+    token = jwt.encode({"sub": "user-1"}, "secret", algorithm="HS256")
+    with _set_env(BFF_REQUIRE_AUTH="true", BFF_AGENT_TOKEN="agent-secret", USER_JWT_ENABLED=None):
+        app = FastAPI()
+        install_bff_auth_middleware(app)
+
+        @app.get("/hello")
+        async def hello():  # noqa: ANN001
+            return {"ok": True}
+
+        client = TestClient(app)
+        resp = client.get(
+            "/hello",
+            headers={
+                "X-Admin-Token": "agent-secret",
+                "X-Delegated-Authorization": f"Bearer {token}",
+                "X-Agent-Tool-ID": "unit.test",
+            },
+        )
+        assert resp.status_code == 503
+        payload = resp.json()
+        assert payload.get("context", {}).get("error") == "user_jwt_required_for_agent"
+
+
+@pytest.mark.unit
 def test_bff_admin_token_requires_user_jwt_for_agent_endpoints_when_enabled():
     user_token = jwt.encode({"sub": "user-1"}, "jwt-secret", algorithm="HS256")
     with _set_env(
