@@ -20,6 +20,7 @@ from pydantic import BaseModel
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from oms.services.async_terminus import AsyncTerminusService
+from shared.config.settings import get_settings
 from shared.models.config import ConnectionConfig
 from shared.models.ontology import OntologyBase
 
@@ -278,12 +279,7 @@ class TerminusDBMCPServer:
     
     async def _connect_terminus(self):
         """Connect to TerminusDB"""
-        connection_info = ConnectionConfig(
-            server_url=os.getenv("TERMINUS_SERVER_URL", "http://localhost:6363"),
-            user=os.getenv("TERMINUS_USER", "admin"),
-            account=os.getenv("TERMINUS_ACCOUNT", "admin"),
-            key=os.getenv("TERMINUS_KEY", "admin123")
-        )
+        connection_info = ConnectionConfig.from_settings(get_settings())
         
         self.terminus_service = AsyncTerminusService(connection_info)
         await self.terminus_service.connect()

@@ -11,6 +11,7 @@ from confluent_kafka import Producer
 
 from shared.config.app_config import AppConfig
 from shared.config.service_config import ServiceConfig
+from shared.config.settings import get_settings
 from shared.observability.context_propagation import (
     attach_context_from_carrier,
     carrier_from_envelope_metadata,
@@ -18,7 +19,6 @@ from shared.observability.context_propagation import (
 )
 from shared.observability.tracing import get_tracing_service
 from shared.services.objectify_registry import ObjectifyOutboxItem, ObjectifyRegistry
-from shared.utils.env_utils import parse_int_env
 
 logger = logging.getLogger(__name__)
 
@@ -31,57 +31,39 @@ class ObjectifyOutboxPublisher:
         topic: Optional[str] = None,
         batch_size: int = 50,
     ) -> None:
+        settings = get_settings()
+        cfg = settings.workers.objectify_outbox
         self.registry = objectify_registry
         self.topic = (topic or AppConfig.OBJECTIFY_JOBS_TOPIC or "objectify-jobs").strip() or "objectify-jobs"
         self.batch_size = batch_size
-        self.flush_timeout_seconds = float(os.getenv("OBJECTIFY_OUTBOX_FLUSH_TIMEOUT_SECONDS", "10") or "10")
-        self.backoff_base = parse_int_env("OBJECTIFY_OUTBOX_BACKOFF_BASE_SECONDS", 2, min_value=1, max_value=300)
-        self.backoff_max = parse_int_env("OBJECTIFY_OUTBOX_BACKOFF_MAX_SECONDS", 60, min_value=1, max_value=3600)
-        self.claim_timeout_seconds = parse_int_env(
-            "OBJECTIFY_OUTBOX_CLAIM_TIMEOUT_SECONDS",
-            300,
-            min_value=0,
-            max_value=86_400,
-        )
-        self.worker_id = (
-            os.getenv("OBJECTIFY_OUTBOX_WORKER_ID")
-            or f"{os.getenv('SERVICE_NAME') or 'objectify-outbox'}:{os.getenv('HOSTNAME') or 'local'}:{os.getpid()}"
-        )
-        self.purge_interval_seconds = parse_int_env(
-            "OBJECTIFY_OUTBOX_PURGE_INTERVAL_SECONDS",
-            3600,
-            min_value=300,
-            max_value=86_400,
-        )
-        self.retention_days = parse_int_env("OBJECTIFY_OUTBOX_RETENTION_DAYS", 7, min_value=0, max_value=365)
-        self.purge_limit = parse_int_env("OBJECTIFY_OUTBOX_PURGE_LIMIT", 10_000, min_value=1, max_value=100_000)
+        self.flush_timeout_seconds = float(cfg.flush_timeout_seconds)
+        self.backoff_base = int(cfg.backoff_base_seconds)
+        self.backoff_max = int(cfg.backoff_max_seconds)
+        self.claim_timeout_seconds = int(cfg.claim_timeout_seconds)
+        self.purge_interval_seconds = int(cfg.purge_interval_seconds)
+        self.retention_days = int(cfg.retention_days)
+        self.purge_limit = int(cfg.purge_limit)
+
+        configured_worker_id = str(cfg.worker_id or "").strip()
+        if configured_worker_id:
+            self.worker_id = configured_worker_id
+        else:
+            service_name = (settings.observability.service_name or "objectify-outbox").strip() or "objectify-outbox"
+            hostname = (settings.observability.hostname or "local").strip() or "local"
+            self.worker_id = f"{service_name}:{hostname}:{os.getpid()}"
         self._last_purge = datetime.now(timezone.utc)
-        max_in_flight = parse_int_env(
-            "OBJECTIFY_OUTBOX_MAX_IN_FLIGHT",
-            5,
-            min_value=1,
-            max_value=5,
-        )
-        delivery_timeout_ms = parse_int_env(
-            "OBJECTIFY_OUTBOX_DELIVERY_TIMEOUT_MS",
-            120_000,
-            min_value=10_000,
-            max_value=1_800_000,
-        )
-        request_timeout_ms = parse_int_env(
-            "OBJECTIFY_OUTBOX_REQUEST_TIMEOUT_MS",
-            30_000,
-            min_value=5_000,
-            max_value=600_000,
-        )
+        max_in_flight = int(cfg.producer_max_in_flight)
+        delivery_timeout_ms = int(cfg.producer_delivery_timeout_ms)
+        request_timeout_ms = int(cfg.producer_request_timeout_ms)
         if delivery_timeout_ms <= request_timeout_ms:
             delivery_timeout_ms = request_timeout_ms + 1_000
-        retries = parse_int_env("OBJECTIFY_OUTBOX_RETRIES", 5, min_value=0, max_value=100)
+        retries = int(cfg.producer_retries)
+        client_id = (settings.observability.service_name or "objectify-outbox").strip() or "objectify-outbox"
 
         self.producer = Producer(
             {
                 "bootstrap.servers": ServiceConfig.get_kafka_bootstrap_servers(),
-                "client.id": os.getenv("SERVICE_NAME") or "objectify-outbox",
+                "client.id": client_id,
                 "acks": "all",
                 "retries": retries,
                 "retry.backoff.ms": 250,

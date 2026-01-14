@@ -126,20 +126,20 @@ class AsyncTerminusService:
         Args:
             connection_info: 연결 정보 객체
         """
-        # Use environment variables if no connection info provided
-        self.connection_info = connection_info or ConnectionConfig.from_env()
+        # Use centralized settings if no connection info provided
+        self.connection_info = connection_info or ConnectionConfig.from_settings()
 
         self._client = None
         self._auth_token = None
         self._db_cache = set()
 
         # Initialize modular TerminusDB services
-        self.database_service = DatabaseService(connection_info)
-        self.query_service = QueryService(connection_info)
-        self.instance_service = InstanceService(connection_info)
-        self.ontology_service = OntologyService(connection_info)
-        self.version_control_service = VersionControlService(connection_info)
-        self.document_service = DocumentService(connection_info)
+        self.database_service = DatabaseService(self.connection_info)
+        self.query_service = QueryService(self.connection_info)
+        self.instance_service = InstanceService(self.connection_info)
+        self.ontology_service = OntologyService(self.connection_info)
+        self.version_control_service = VersionControlService(self.connection_info)
+        self.document_service = DocumentService(self.connection_info)
 
         # Initialize relationship management components
         self.relationship_manager = RelationshipManager()

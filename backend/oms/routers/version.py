@@ -4,7 +4,6 @@
 """
 
 import logging
-import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -23,6 +22,7 @@ from shared.security.input_sanitizer import (
 from shared.utils.commit_utils import coerce_commit_id
 from shared.utils.diff_utils import normalize_diff_response
 from shared.utils.branch_utils import protected_branch_write_message
+from shared.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ def _rollback_enabled() -> bool:
     따라서 롤백은 기본적으로 비활성화하고(운영 차단),
     필요 시 명시적으로 ENABLE_OMS_ROLLBACK=true로 켤 수 있게만 둡니다.
     """
-    return os.getenv("ENABLE_OMS_ROLLBACK", "false").strip().lower() in {"1", "true", "yes", "on"}
+    return bool(get_settings().features.enable_oms_rollback)
 
 
 @router.get("/head")

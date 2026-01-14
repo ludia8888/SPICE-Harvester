@@ -63,10 +63,9 @@ class ProcessedEventRegistry:
         self._lease_timeout = timedelta(seconds=lease_timeout)
 
         owner_override = (app_settings.event_sourcing.processed_event_owner or "").strip()
-        self._owner = owner_override or (
-            f"{os.getenv('SERVICE_NAME') or os.getenv('HOSTNAME') or 'worker'}:"
-            f"{os.getpid()}:{uuid4().hex[:8]}"
-        )
+        obs = app_settings.observability
+        owner_token = str(obs.service_name or obs.hostname or "worker").strip() or "worker"
+        self._owner = owner_override or f"{owner_token}:{os.getpid()}:{uuid4().hex[:8]}"
 
     async def connect(self) -> None:
         if self._pool:

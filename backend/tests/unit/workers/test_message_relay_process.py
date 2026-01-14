@@ -14,6 +14,9 @@ from shared.config.app_config import AppConfig
 from shared.config.service_config import ServiceConfig
 
 
+pytestmark = pytest.mark.requires_infra
+
+
 def _s3_client():
     return boto3.client(
         "s3",

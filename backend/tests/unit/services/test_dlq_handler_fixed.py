@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from datetime import datetime, timezone
+from typing import Any, Dict, Optional
 
 import pytest
-import redis.asyncio as aioredis
-from confluent_kafka import Producer
-from confluent_kafka.admin import AdminClient, NewTopic
 
 from shared.config.service_config import ServiceConfig
 from shared.services.dlq_handler_fixed import DLQHandlerFixed, FailedMessage, RetryPolicy
@@ -18,27 +15,79 @@ def _bootstrap_servers() -> str:
     return ServiceConfig.get_kafka_bootstrap_servers()
 
 
-def _ensure_topic(topic: str) -> None:
-    admin = AdminClient({"bootstrap.servers": _bootstrap_servers()})
-    existing = admin.list_topics(timeout=10)
-    if topic in existing.topics:
-        return
-    fs = admin.create_topics([NewTopic(topic=topic, num_partitions=1, replication_factor=1)])
-    for _, f in fs.items():
-        try:
-            f.result(timeout=10)
-        except Exception:
-            pass
+class _FakeProducer:
+    def __init__(self) -> None:
+        self.messages: list[Dict[str, Any]] = []
+
+    def produce(self, *, topic: str, key: Optional[bytes] = None, value: str) -> None:
+        self.messages.append({"topic": topic, "key": key, "value": value})
+
+    def flush(self, *_args, **_kwargs) -> int:
+        return 0
+
+
+class _FakeRedis:
+    def __init__(self) -> None:
+        self._hashes: dict[str, dict[str, str]] = {}
+        self._lists: dict[str, list[str]] = {}
+
+    async def hset(self, key: str, *, mapping: dict[str, Any]) -> int:
+        payload: dict[str, str] = {}
+        for k, v in (mapping or {}).items():
+            payload[str(k)] = "" if v is None else str(v)
+        self._hashes[str(key)] = payload
+        return len(payload)
+
+    async def expire(self, _key: str, _ttl: int) -> bool:
+        return True
+
+    async def hgetall(self, key: str) -> dict[bytes, bytes]:
+        data = self._hashes.get(str(key), {})
+        return {k.encode(): v.encode() for k, v in data.items()}
+
+    async def lpush(self, key: str, value: str) -> int:
+        items = self._lists.setdefault(str(key), [])
+        items.insert(0, str(value))
+        return len(items)
+
+    async def ltrim(self, key: str, start: int, end: int) -> bool:
+        items = self._lists.get(str(key), [])
+        if end < 0:
+            trimmed = items[start:]
+        else:
+            trimmed = items[start : end + 1]
+        self._lists[str(key)] = trimmed
+        return True
+
+    async def lrange(self, key: str, start: int, end: int) -> list[bytes]:
+        items = self._lists.get(str(key), [])
+        if end < 0:
+            sliced = items[start:]
+        else:
+            sliced = items[start : end + 1]
+        return [item.encode() for item in sliced]
+
+    async def delete(self, *keys: str) -> int:
+        removed = 0
+        for key in keys:
+            if str(key) in self._hashes:
+                del self._hashes[str(key)]
+                removed += 1
+            if str(key) in self._lists:
+                del self._lists[str(key)]
+                removed += 1
+        return removed
+
+    async def aclose(self) -> None:
+        return None
 
 
 @pytest.mark.asyncio
 async def test_dlq_handler_retry_and_poison_flow() -> None:
-    redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
-    redis_client = aioredis.from_url(redis_url)
+    redis_client = _FakeRedis()
 
     dlq_topic = f"dlq-test-{uuid.uuid4().hex[:6]}"
     poison_topic = f"{dlq_topic}.poison"
-    _ensure_topic(poison_topic)
 
     handler = DLQHandlerFixed(
         dlq_topic=dlq_topic,
@@ -47,7 +96,7 @@ async def test_dlq_handler_retry_and_poison_flow() -> None:
         retry_policy=RetryPolicy(max_retries=1),
         poison_topic=poison_topic,
     )
-    handler.producer = Producer({"bootstrap.servers": _bootstrap_servers()})
+    handler.producer = _FakeProducer()
 
     failed_msg = FailedMessage(
         message_id="msg-1",
@@ -68,6 +117,8 @@ async def test_dlq_handler_retry_and_poison_flow() -> None:
         assert stored
 
         await handler._move_to_poison_queue(failed_msg)
+        assert handler.producer.messages
+        assert handler.producer.messages[-1]["topic"] == poison_topic
         poison_list = await redis_client.lrange("dlq:poison:messages", 0, 0)
         assert poison_list
     finally:
@@ -78,8 +129,7 @@ async def test_dlq_handler_retry_and_poison_flow() -> None:
 
 @pytest.mark.asyncio
 async def test_dlq_handler_retry_success_records_recovery() -> None:
-    redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
-    redis_client = aioredis.from_url(redis_url)
+    redis_client = _FakeRedis()
 
     dlq_topic = f"dlq-test-{uuid.uuid4().hex[:6]}"
     handler = DLQHandlerFixed(

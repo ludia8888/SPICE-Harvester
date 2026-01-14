@@ -9,11 +9,11 @@ Design goals:
 
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from shared.config.settings import get_settings
 from shared.models.ontology import Property, Relationship
 from shared.models.ontology_lint import LintIssue, LintReport, LintSeverity
 from shared.utils.branch_utils import get_protected_branches
@@ -35,47 +35,23 @@ class OntologyLinterConfig:
 
     @classmethod
     def from_env(cls, *, branch: Optional[str] = None) -> "OntologyLinterConfig":
-        def _truthy(name: str, default: str) -> bool:
-            return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
-
-        def _is_production_env() -> bool:
-            raw = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or os.getenv("APP_ENVIRONMENT") or "")
-            return raw.strip().lower() in {"prod", "production"}
-
-        def _requires_proposals() -> bool:
-            return _truthy("ONTOLOGY_REQUIRE_PROPOSALS", "true")
-
-        def _allow_implicit_primary_key_default() -> bool:
-            if _is_production_env():
-                return False
-            if _requires_proposals() and branch:
-                protected = get_protected_branches()
-                if branch in protected:
-                    return False
-            return True
-
-        def _allow_implicit_title_key_default() -> bool:
-            if _is_production_env():
-                return False
-            if _requires_proposals() and branch:
-                protected = get_protected_branches()
-                if branch in protected:
-                    return False
-            return True
+        settings = get_settings()
+        cfg = settings.ontology
+        is_production = bool(settings.is_production)
+        allow_primary = cfg.allow_implicit_primary_key_effective(is_production=is_production, branch=branch)
+        allow_title = cfg.allow_implicit_title_key_effective(is_production=is_production, branch=branch)
+        if cfg.require_proposals and branch and branch in get_protected_branches():
+            # Ensure proposal workflow stays strict even if defaults change.
+            allow_primary = bool(cfg.allow_implicit_primary_key) if cfg.allow_implicit_primary_key is not None else False
+            allow_title = bool(cfg.allow_implicit_title_key) if cfg.allow_implicit_title_key is not None else False
 
         return cls(
-            require_primary_key=_truthy("ONTOLOGY_REQUIRE_PRIMARY_KEY", "true"),
-            allow_implicit_primary_key=_truthy(
-                "ONTOLOGY_ALLOW_IMPLICIT_PRIMARY_KEY",
-                "true" if _allow_implicit_primary_key_default() else "false",
-            ),
-            require_title_key=_truthy("ONTOLOGY_REQUIRE_TITLE_KEY", "true"),
-            allow_implicit_title_key=_truthy(
-                "ONTOLOGY_ALLOW_IMPLICIT_TITLE_KEY",
-                "true" if _allow_implicit_title_key_default() else "false",
-            ),
-            block_event_like_class_names=_truthy("ONTOLOGY_BLOCK_EVENT_LIKE_CLASS", "false"),
-            enforce_snake_case_fields=_truthy("ONTOLOGY_ENFORCE_SNAKE_CASE_FIELDS", "false"),
+            require_primary_key=bool(cfg.require_primary_key),
+            allow_implicit_primary_key=bool(allow_primary),
+            require_title_key=bool(cfg.require_title_key),
+            allow_implicit_title_key=bool(allow_title),
+            block_event_like_class_names=bool(cfg.block_event_like_class_names),
+            enforce_snake_case_fields=bool(cfg.enforce_snake_case_fields),
         )
 
 

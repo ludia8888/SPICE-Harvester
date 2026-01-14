@@ -5,7 +5,6 @@ Based on Context7 recommendations for observability
 This module provides metrics collection for monitoring system performance.
 """
 
-import os
 import time
 from typing import Dict, Optional, Any
 from functools import wraps
@@ -17,6 +16,7 @@ from prometheus_client import Counter as PrometheusCounter, Histogram as Prometh
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from shared.utils.app_logger import get_logger
+from shared.config.settings import settings
 
 logger = get_logger(__name__)
 
@@ -38,20 +38,16 @@ except Exception:  # pragma: no cover - env dependent
 
 
 class OpenTelemetryMetricsConfig:
-    SERVICE_VERSION = os.getenv("OTEL_SERVICE_VERSION", "1.0.0")
-    ENVIRONMENT = os.getenv("OTEL_ENVIRONMENT", os.getenv("ENVIRONMENT", "development"))
+    SERVICE_VERSION = str(settings.observability.otel_service_version or "1.0.0").strip() or "1.0.0"
+    ENVIRONMENT = (settings.observability.otel_environment or settings.environment.value).strip()
 
-    OTLP_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
+    OTLP_ENDPOINT = (settings.observability.otel_exporter_otlp_endpoint or "").strip()
 
-    ENABLE_METRICS = os.getenv("OTEL_ENABLE_METRICS", "false").strip().lower() in {"1", "true", "yes", "on"}
+    ENABLE_METRICS = bool(settings.observability.otel_enable_metrics)
 
-    _raw_export_otlp = os.getenv("OTEL_EXPORT_OTLP")
-    if _raw_export_otlp is None:
-        EXPORT_OTLP = bool(OTLP_ENDPOINT)
-    else:
-        EXPORT_OTLP = _raw_export_otlp.strip().lower() in {"1", "true", "yes", "on"}
+    EXPORT_OTLP = bool(settings.observability.otel_export_otlp_effective)
 
-    EXPORT_INTERVAL_SECONDS = float(os.getenv("OTEL_METRIC_EXPORT_INTERVAL_SECONDS", "10") or "10")
+    EXPORT_INTERVAL_SECONDS = float(settings.observability.otel_metric_export_interval_seconds)
 
 
 _metrics_provider_initialized = False

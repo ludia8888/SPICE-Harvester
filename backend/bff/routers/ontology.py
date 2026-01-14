@@ -2895,20 +2895,20 @@ async def save_mapping_metadata(
         
         async def _get_expected_seq() -> int:
             import asyncpg
-            import os
             import re
 
-            from shared.config.service_config import ServiceConfig
+            from shared.config.settings import get_settings
 
-            schema = os.getenv("EVENT_STORE_SEQUENCE_SCHEMA", "spice_event_registry")
+            settings = get_settings()
+            schema = settings.event_sourcing.event_store_sequence_schema
             if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", schema):
                 raise ValueError(f"Invalid EVENT_STORE_SEQUENCE_SCHEMA: {schema!r}")
 
-            prefix = (os.getenv("EVENT_STORE_SEQUENCE_HANDLER_PREFIX", "write_side") or "write_side").strip()
+            prefix = (settings.event_sourcing.event_store_sequence_handler_prefix or "write_side").strip()
             handler = f"{prefix}:OntologyClass"
             aggregate_id = f"{db_name}:main:{class_id}"
 
-            conn = await asyncpg.connect(ServiceConfig.get_postgres_url())
+            conn = await asyncpg.connect(settings.database.postgres_url)
             try:
                 value = await conn.fetchval(
                     f"""

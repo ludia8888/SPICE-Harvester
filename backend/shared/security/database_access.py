@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import os
 from typing import Iterable, Mapping, Optional, Tuple
 
 import asyncpg
 
+from shared.config.settings import get_settings
 from shared.config.service_config import ServiceConfig
-from shared.utils.env_utils import parse_bool
 
 DATABASE_ACCESS_ROLES = (
     "Owner",
@@ -153,7 +152,9 @@ async def enforce_database_role(
     if not required_set:
         return
 
-    enforce_flag = parse_bool(os.getenv(require_env_key, ""))
+    enforce_flag: Optional[bool] = None
+    if require_env_key == "BFF_REQUIRE_DB_ACCESS":
+        enforce_flag = get_settings().auth.bff_require_db_access
     principal_type, principal_id = resolve_database_actor(headers)
     if not principal_id:
         raise ValueError("Permission denied")

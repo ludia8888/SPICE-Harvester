@@ -22,7 +22,10 @@ from shared.services.agent_session_registry import (
         (SESSION_STATUS_RUNNING_TOOL, SESSION_STATUS_COMPLETED),
         (SESSION_STATUS_RUNNING_TOOL, SESSION_STATUS_ERROR),
         (SESSION_STATUS_ERROR, SESSION_STATUS_ACTIVE),
+        (SESSION_STATUS_ERROR, SESSION_STATUS_RUNNING_TOOL),
         (SESSION_STATUS_COMPLETED, SESSION_STATUS_ACTIVE),
+        (SESSION_STATUS_COMPLETED, SESSION_STATUS_WAITING_APPROVAL),
+        (SESSION_STATUS_COMPLETED, SESSION_STATUS_RUNNING_TOOL),
         (SESSION_STATUS_ACTIVE, SESSION_STATUS_TERMINATED),
     ],
 )
@@ -35,8 +38,6 @@ def test_validate_session_status_transition_allows_valid_transitions(current_sta
     [
         (SESSION_STATUS_TERMINATED, SESSION_STATUS_ACTIVE),
         (SESSION_STATUS_TERMINATED, SESSION_STATUS_RUNNING_TOOL),
-        (SESSION_STATUS_ERROR, SESSION_STATUS_RUNNING_TOOL),
-        (SESSION_STATUS_COMPLETED, SESSION_STATUS_WAITING_APPROVAL),
     ],
 )
 def test_validate_session_status_transition_rejects_invalid_transitions(current_status: str, next_status: str) -> None:
@@ -49,4 +50,3 @@ def test_validate_session_status_transition_rejects_unknown_states() -> None:
         validate_session_status_transition(current_status="WUT", next_status=SESSION_STATUS_ACTIVE)
     with pytest.raises(ValueError):
         validate_session_status_transition(current_status=SESSION_STATUS_ACTIVE, next_status="WUT")
-

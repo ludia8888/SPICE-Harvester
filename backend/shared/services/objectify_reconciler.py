@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
+from shared.config.settings import get_settings
 from shared.models.objectify_job import ObjectifyJob
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.objectify_registry import ObjectifyJobRecord, ObjectifyRegistry
 from shared.services.pipeline_registry import PipelineRegistry
-from shared.utils.env_utils import parse_int_env
 
 logger = logging.getLogger(__name__)
 
@@ -122,12 +121,7 @@ async def reconcile_objectify_jobs(
     if enqueued_stale_seconds is not None:
         enqueued_cutoff = now - timedelta(seconds=max(60, int(enqueued_stale_seconds)))
 
-    resolved_lock_key = lock_key
-    if resolved_lock_key is None:
-        try:
-            resolved_lock_key = int(os.getenv("OBJECTIFY_RECONCILER_LOCK_KEY", "910215"))
-        except ValueError:
-            resolved_lock_key = 910215
+    resolved_lock_key = int(lock_key) if lock_key is not None else int(get_settings().workers.objectify_reconciler.lock_key)
 
     lock_conn = None
     try:

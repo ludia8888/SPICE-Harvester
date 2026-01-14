@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from shared.config.settings import get_settings
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.pipeline_registry import PipelineRegistry
 from shared.services.pipeline_profiler import compute_column_stats
@@ -69,7 +70,7 @@ class PipelineRunResult:
 
 class PipelineArtifactStore:
     def __init__(self, base_path: Optional[str] = None) -> None:
-        root = base_path or os.getenv("PIPELINE_ARTIFACT_PATH") or "data/pipeline_artifacts"
+        root = base_path or get_settings().pipeline.artifact_path
         self.base_path = Path(root)
         self.base_path.mkdir(parents=True, exist_ok=True)
 

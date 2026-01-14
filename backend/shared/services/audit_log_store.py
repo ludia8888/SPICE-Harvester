@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
@@ -17,6 +16,7 @@ from uuid import UUID, uuid4
 import asyncpg
 
 from shared.config.service_config import ServiceConfig
+from shared.config.settings import get_settings
 from shared.models.audit_log import AuditLogEntry, AuditStatus
 
 
@@ -32,8 +32,10 @@ class AuditLogStore:
         self._dsn = dsn or ServiceConfig.get_postgres_url()
         self._schema = schema
         self._pool: Optional[asyncpg.Pool] = None
-        self._pool_min = int(os.getenv("AUDIT_PG_POOL_MIN", str(pool_min or 1)))
-        self._pool_max = int(os.getenv("AUDIT_PG_POOL_MAX", str(pool_max or 5)))
+        perf = get_settings().performance
+        self._pool_min = int(pool_min) if pool_min is not None else int(perf.audit_pg_pool_min)
+        self._pool_max = int(pool_max) if pool_max is not None else int(perf.audit_pg_pool_max)
+        self._command_timeout = int(perf.audit_pg_command_timeout_seconds)
 
     async def initialize(self) -> None:
         await self.connect()
@@ -45,7 +47,7 @@ class AuditLogStore:
             self._dsn,
             min_size=self._pool_min,
             max_size=self._pool_max,
-            command_timeout=int(os.getenv("AUDIT_PG_COMMAND_TIMEOUT", "30")),
+            command_timeout=self._command_timeout,
         )
         await self.ensure_schema()
 

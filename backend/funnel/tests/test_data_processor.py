@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+import httpx
 
 from funnel.services.data_processor import FunnelDataProcessor
 from shared.models.type_inference import ColumnAnalysisResult, DatasetAnalysisRequest, TypeInferenceResult
@@ -14,6 +15,12 @@ class _FakeResponse:
 
     def json(self):
         return self._payload
+
+    def raise_for_status(self) -> None:
+        if int(self.status_code) >= 400:
+            request = httpx.Request("POST", "http://test")
+            response = httpx.Response(status_code=int(self.status_code), request=request)
+            raise httpx.HTTPStatusError("error", request=request, response=response)
 
 
 class _FakeClient:

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -17,6 +16,7 @@ from uuid import uuid4
 import asyncpg
 
 from shared.config.service_config import ServiceConfig
+from shared.config.settings import get_settings
 from shared.observability.context_propagation import enrich_metadata_with_current_trace
 from shared.utils.s3_uri import is_s3_uri, parse_s3_uri
 from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
@@ -347,8 +347,10 @@ class DatasetRegistry:
         self._dsn = dsn or ServiceConfig.get_postgres_url()
         self._schema = schema
         self._pool: Optional[asyncpg.Pool] = None
-        self._pool_min = int(os.getenv("DATASET_REGISTRY_PG_POOL_MIN", str(pool_min or 1)))
-        self._pool_max = int(os.getenv("DATASET_REGISTRY_PG_POOL_MAX", str(pool_max or 5)))
+        perf = get_settings().performance
+        self._pool_min = int(pool_min) if pool_min is not None else int(perf.dataset_registry_pg_pool_min)
+        self._pool_max = int(pool_max) if pool_max is not None else int(perf.dataset_registry_pg_pool_max)
+        self._command_timeout = int(perf.dataset_registry_pg_command_timeout_seconds)
 
     @staticmethod
     def _row_to_backing(row: asyncpg.Record) -> BackingDatasourceRecord:
@@ -540,7 +542,7 @@ class DatasetRegistry:
             self._dsn,
             min_size=self._pool_min,
             max_size=self._pool_max,
-            command_timeout=int(os.getenv("DATASET_REGISTRY_PG_COMMAND_TIMEOUT", "30")),
+            command_timeout=self._command_timeout,
         )
         await self.ensure_schema()
 
@@ -4161,12 +4163,7 @@ class DatasetRegistry:
         cutoff = datetime.utcnow() - timedelta(seconds=max(60, int(stale_after_seconds)))
 
         lock_conn: Optional[asyncpg.Connection] = None
-        resolved_lock_key = lock_key
-        if resolved_lock_key is None:
-            try:
-                resolved_lock_key = int(os.getenv("DATASET_INGEST_RECONCILER_LOCK_KEY", "910214"))
-            except ValueError:
-                resolved_lock_key = 910214
+        resolved_lock_key = int(lock_key) if lock_key is not None else int(get_settings().workers.ingest_reconciler.lock_key)
 
         try:
             if use_lock and resolved_lock_key is not None:

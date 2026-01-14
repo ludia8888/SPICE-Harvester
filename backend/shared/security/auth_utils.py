@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import os
 from typing import Iterable, Mapping, Optional
 
 from shared.config.settings import get_settings
-from shared.utils.env_utils import parse_bool
 
 _DB_SCOPE_HEADER_KEYS = (
     "X-DB-Name",
@@ -76,10 +74,7 @@ def auth_required(
     if require_env_key == "OMS_REQUIRE_AUTH":
         return auth.is_oms_auth_required(default_required=default_required)
 
-    parsed = parse_bool(os.environ.get(require_env_key, ""))
-    if parsed is not None:
-        return parsed
-    if allow_pytest and os.environ.get(pytest_env_key):
+    if allow_pytest and settings.is_pytest:
         return False
     if get_expected_token(token_env_keys):
         return True
@@ -93,7 +88,7 @@ def get_exempt_paths(env_key: str, *, defaults: Iterable[str]) -> set[str]:
     elif env_key == "OMS_AUTH_EXEMPT_PATHS":
         raw = auth.oms_auth_exempt_paths
     else:
-        raw = os.environ.get(env_key)
+        raw = None
 
     value = str(raw or "").strip()
     if not value:
@@ -119,11 +114,7 @@ def enforce_db_scope(
     db_name: str,
     require_env_key: str = "BFF_REQUIRE_DB_SCOPE",
 ) -> None:
-    required = False
-    if require_env_key == "BFF_REQUIRE_DB_SCOPE":
-        required = bool(get_settings().auth.bff_require_db_scope)
-    else:
-        required = parse_bool(os.environ.get(require_env_key, "")) is True
+    required = bool(get_settings().auth.bff_require_db_scope) if require_env_key == "BFF_REQUIRE_DB_SCOPE" else False
     scope = get_db_scope(headers)
     if not scope:
         if required:

@@ -8,13 +8,12 @@ codebase can replace custom versioning/merge logic with lakeFS primitives.
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import httpx
 
-from shared.config.settings import settings
+from shared.config.settings import get_settings
 
 
 class LakeFSError(RuntimeError):
@@ -41,6 +40,7 @@ class LakeFSConfig:
 
     @staticmethod
     def from_env() -> "LakeFSConfig":
+        settings = get_settings()
         api_url = settings.storage.lakefs_api_url_effective
         access_key_id = str(settings.storage.lakefs_access_key_id or "").strip()
         secret_access_key = str(settings.storage.lakefs_secret_access_key or "").strip()
@@ -102,8 +102,7 @@ class LakeFSClient:
     def __init__(self, *, config: Optional[LakeFSConfig] = None, timeout_seconds: Optional[float] = None) -> None:
         self._config = config or LakeFSConfig.from_env()
         if timeout_seconds is None:
-            timeout_env = os.getenv("LAKEFS_CLIENT_TIMEOUT_SECONDS") or os.getenv("LAKEFS_TIMEOUT_SECONDS")
-            timeout_seconds = float(timeout_env) if timeout_env else 120.0
+            timeout_seconds = float(get_settings().storage.lakefs_client_timeout_seconds)
         self._timeout = float(timeout_seconds)
 
     def _client(self) -> httpx.AsyncClient:

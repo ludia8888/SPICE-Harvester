@@ -3,7 +3,6 @@ OMS 온톨로지 라우터 - 내부 ID 기반 온톨로지 관리
 """
 
 import logging
-import os
 import hmac
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -82,6 +81,7 @@ from shared.security.input_sanitizer import (
 # Rate limiting import
 from shared.middleware.rate_limiter import rate_limit, RateLimitPresets
 from shared.config.rate_limit_config import RateLimitConfig, EndpointCategory
+from shared.config.settings import get_settings
 from shared.security.auth_utils import extract_presented_token, get_expected_token
 from shared.utils.branch_utils import get_protected_branches, protected_branch_write_message
 
@@ -96,7 +96,7 @@ def _is_protected_branch(branch: str) -> bool:
 def _require_proposal_for_branch(branch: str) -> bool:
     if not _is_protected_branch(branch):
         return False
-    return os.getenv("ONTOLOGY_REQUIRE_PROPOSALS", "true").strip().lower() in {"1", "true", "yes", "on"}
+    return bool(get_settings().ontology.require_proposals)
 
 
 def _reject_direct_write_if_required(branch: str) -> None:
@@ -425,12 +425,7 @@ def _merge_lint_reports(*reports: LintReport) -> LintReport:
 
 
 def _relationship_validation_enabled(flag: Optional[bool] = None) -> bool:
-    env_enabled = os.getenv("ONTOLOGY_VALIDATE_RELATIONSHIPS", "true").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    env_enabled = bool(get_settings().ontology.validate_relationships)
     if flag is None:
         return env_enabled
     return env_enabled and bool(flag)
@@ -501,7 +496,7 @@ async def create_ontology(
 ) -> ApiResponse:
     """내부 ID 기반 온톨로지 생성"""
     try:
-        enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
+        enable_event_sourcing = bool(get_settings().event_sourcing.enable_event_sourcing)
         branch = validate_branch_name(branch)
         _reject_direct_write_if_required(branch)
         lang = get_accept_language(request)
@@ -1266,7 +1261,7 @@ async def update_ontology(
 ) -> ApiResponse:
     """내부 ID 기반 온톨로지 업데이트"""
     try:
-        enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
+        enable_event_sourcing = bool(get_settings().event_sourcing.enable_event_sourcing)
         branch = validate_branch_name(branch)
         _reject_direct_write_if_required(branch)
         lang = get_accept_language(request)
@@ -1617,7 +1612,7 @@ async def delete_ontology(
 ):
     """내부 ID 기반 온톨로지 삭제"""
     try:
-        enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
+        enable_event_sourcing = bool(get_settings().event_sourcing.enable_event_sourcing)
         branch = validate_branch_name(branch)
         _reject_direct_write_if_required(branch)
 
@@ -1868,7 +1863,7 @@ async def create_ontology_with_advanced_relationships(
                     "per-property custom metadata, so inverse metadata needs a dedicated projection store."
                 ),
             )
-        enable_event_sourcing = os.getenv("ENABLE_EVENT_SOURCING", "true").lower() == "true"
+        enable_event_sourcing = bool(get_settings().event_sourcing.enable_event_sourcing)
         branch = validate_branch_name(branch)
         _reject_direct_write_if_required(branch)
         lang = get_accept_language(request)

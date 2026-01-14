@@ -6,9 +6,9 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from shared.config.settings import get_settings
 from shared.services.event_store import event_store
 from shared.models.event_envelope import EventEnvelope
-from shared.utils.env_utils import parse_int_env
 
 from oms.services.ontology_deployment_registry import OntologyDeploymentRegistry
 
@@ -22,48 +22,24 @@ class OntologyDeployOutboxPublisher:
         registry: OntologyDeploymentRegistry,
         batch_size: int = 50,
     ) -> None:
+        settings = get_settings()
+        cfg = settings.workers.ontology_deploy_outbox
         self.registry = registry
         self.batch_size = batch_size
-        self.claim_timeout_seconds = parse_int_env(
-            "ONTOLOGY_DEPLOY_OUTBOX_CLAIM_TIMEOUT_SECONDS",
-            300,
-            min_value=0,
-            max_value=86_400,
-        )
-        self.backoff_base = parse_int_env(
-            "ONTOLOGY_DEPLOY_OUTBOX_BACKOFF_BASE_SECONDS",
-            2,
-            min_value=1,
-            max_value=300,
-        )
-        self.backoff_max = parse_int_env(
-            "ONTOLOGY_DEPLOY_OUTBOX_BACKOFF_MAX_SECONDS",
-            60,
-            min_value=1,
-            max_value=3600,
-        )
-        self.retention_days = parse_int_env(
-            "ONTOLOGY_DEPLOY_OUTBOX_RETENTION_DAYS",
-            7,
-            min_value=0,
-            max_value=365,
-        )
-        self.purge_interval_seconds = parse_int_env(
-            "ONTOLOGY_DEPLOY_OUTBOX_PURGE_INTERVAL_SECONDS",
-            3600,
-            min_value=300,
-            max_value=86_400,
-        )
-        self.purge_limit = parse_int_env(
-            "ONTOLOGY_DEPLOY_OUTBOX_PURGE_LIMIT",
-            10_000,
-            min_value=1,
-            max_value=100_000,
-        )
-        self.worker_id = (
-            os.getenv("ONTOLOGY_DEPLOY_OUTBOX_WORKER_ID")
-            or f"{os.getenv('SERVICE_NAME') or 'ontology-deploy-outbox'}:{os.getenv('HOSTNAME') or 'local'}:{os.getpid()}"
-        )
+        self.claim_timeout_seconds = int(cfg.claim_timeout_seconds)
+        self.backoff_base = int(cfg.backoff_base_seconds)
+        self.backoff_max = int(cfg.backoff_max_seconds)
+        self.retention_days = int(cfg.retention_days)
+        self.purge_interval_seconds = int(cfg.purge_interval_seconds)
+        self.purge_limit = int(cfg.purge_limit)
+
+        configured_worker_id = str(cfg.worker_id or "").strip()
+        if configured_worker_id:
+            self.worker_id = configured_worker_id
+        else:
+            service_name = (settings.observability.service_name or "ontology-deploy-outbox").strip() or "ontology-deploy-outbox"
+            hostname = (settings.observability.hostname or "local").strip() or "local"
+            self.worker_id = f"{service_name}:{hostname}:{os.getpid()}"
         self._last_purge = datetime.now(timezone.utc)
 
     def _next_attempt_at(self, attempts: int) -> datetime:

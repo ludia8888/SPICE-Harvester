@@ -23,7 +23,6 @@ load_dotenv()
 # Standard library imports
 import asyncio
 import logging
-import os
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -384,16 +383,15 @@ async def lifespan(app: FastAPI):
         # 6. Middleware setup is handled during app creation (service_factory)
         logger.info("OMS Service startup completed successfully")
 
-        enable_ontology_outbox = (os.getenv("ENABLE_ONTOLOGY_DEPLOY_OUTBOX_WORKER", "true") or "true").lower() != "false"
-        use_deployments_v2 = (os.getenv("ONTOLOGY_DEPLOYMENTS_V2", "true") or "true").lower() != "false"
-        if enable_ontology_outbox:
+        outbox_settings = settings.workers.ontology_deploy_outbox
+        if outbox_settings.enabled:
             ontology_outbox_stop = asyncio.Event()
-            registry = OntologyDeploymentRegistryV2() if use_deployments_v2 else OntologyDeploymentRegistry()
+            registry = OntologyDeploymentRegistryV2() if outbox_settings.use_deployments_v2 else OntologyDeploymentRegistry()
             ontology_outbox_task = asyncio.create_task(
                 run_ontology_deploy_outbox_worker(
                     registry=registry,
-                    poll_interval_seconds=int(os.getenv("ONTOLOGY_DEPLOY_OUTBOX_POLL_SECONDS", "5")),
-                    batch_size=int(os.getenv("ONTOLOGY_DEPLOY_OUTBOX_BATCH", "50")),
+                    poll_interval_seconds=int(outbox_settings.poll_seconds),
+                    batch_size=int(outbox_settings.batch_size),
                     stop_event=ontology_outbox_stop,
                 )
             )
@@ -650,7 +648,7 @@ app.include_router(version.router, prefix="/api/v1", tags=["version"])
 app.include_router(command_status.router, prefix="/api/v1", tags=["command-status"])
 
 # Pull Request endpoints depend on Postgres MVCC; keep them opt-in only.
-if os.getenv("ENABLE_PULL_REQUESTS", "false").lower() == "true":
+if settings.features.enable_pull_requests:
     from oms.routers import pull_request
 
     app.include_router(pull_request.router, prefix="/api/v1", tags=["pull-requests"])

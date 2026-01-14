@@ -3,7 +3,6 @@ Ontology extensions router (resources, governance, health).
 """
 
 import logging
-import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -49,6 +48,7 @@ from shared.security.input_sanitizer import (
     validate_instance_id,
 )
 from shared.utils.branch_utils import get_protected_branches, protected_branch_write_message
+from shared.config.settings import get_settings
 from shared.utils.ontology_type_normalization import normalize_ontology_base_type
 from shared.services.ontology_linter import (
     OntologyLinterConfig,
@@ -150,13 +150,13 @@ def _validate_value_type_immutability(existing: Dict[str, Any], incoming: Dict[s
 
 
 def _resource_validation_strict() -> bool:
-    return os.getenv("ONTOLOGY_RESOURCE_STRICT", "true").strip().lower() in {"1", "true", "yes", "on"}
+    return bool(get_settings().ontology.resource_strict)
 
 
 def _require_health_gate(branch: str) -> bool:
     if branch not in get_protected_branches():
         return False
-    return os.getenv("ONTOLOGY_REQUIRE_HEALTH_GATE", "true").strip().lower() in {"1", "true", "yes", "on"}
+    return bool(get_settings().ontology.require_health_gate)
 
 
 def _ensure_branch_writable(branch: str) -> None:

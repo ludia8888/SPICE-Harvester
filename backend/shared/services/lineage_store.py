@@ -9,7 +9,6 @@ This service persists a lineage graph (nodes + edges) in Postgres so that:
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
@@ -17,6 +16,7 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 import asyncpg
 
 from shared.config.service_config import ServiceConfig
+from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
 from shared.models.lineage import LineageDirection, LineageEdge, LineageGraph, LineageNode
 from shared.utils.ontology_version import extract_ontology_version
@@ -43,8 +43,10 @@ class LineageStore:
         self._dsn = dsn or ServiceConfig.get_postgres_url()
         self._schema = schema
         self._pool: Optional[asyncpg.Pool] = None
-        self._pool_min = int(os.getenv("LINEAGE_PG_POOL_MIN", str(pool_min or 1)))
-        self._pool_max = int(os.getenv("LINEAGE_PG_POOL_MAX", str(pool_max or 5)))
+        perf = get_settings().performance
+        self._pool_min = int(pool_min) if pool_min is not None else int(perf.lineage_pg_pool_min)
+        self._pool_max = int(pool_max) if pool_max is not None else int(perf.lineage_pg_pool_max)
+        self._command_timeout = int(perf.lineage_pg_command_timeout_seconds)
 
     async def initialize(self) -> None:
         await self.connect()
@@ -56,7 +58,7 @@ class LineageStore:
             self._dsn,
             min_size=self._pool_min,
             max_size=self._pool_max,
-            command_timeout=int(os.getenv("LINEAGE_PG_COMMAND_TIMEOUT", "30")),
+            command_timeout=self._command_timeout,
         )
         await self.ensure_schema()
 
@@ -371,20 +373,10 @@ class LineageStore:
             "artifact_key": None,
         }
 
-    @staticmethod
-    def _env_first(*keys: str) -> Optional[str]:
-        for k in keys:
-            v = os.getenv(k)
-            if isinstance(v, str) and v.strip():
-                return v.strip()
-        return None
-
     @classmethod
     def _run_context(cls) -> Dict[str, Optional[str]]:
-        return {
-            "run_id": cls._env_first("PIPELINE_RUN_ID", "RUN_ID", "EXECUTION_ID"),
-            "code_sha": cls._env_first("CODE_SHA", "GIT_SHA", "COMMIT_SHA"),
-        }
+        obs = get_settings().observability
+        return {"run_id": obs.run_id, "code_sha": obs.code_sha}
 
     @staticmethod
     def _deterministic_edge_id(*parts: str) -> UUID:
@@ -783,7 +775,7 @@ class LineageStore:
         if not ids:
             return {}
 
-        max_ids = int(os.getenv("LINEAGE_LATEST_EDGES_MAX_IDS", "5000"))
+        max_ids = int(get_settings().performance.lineage_latest_edges_max_ids)
         if len(ids) > max_ids:
             raise ValueError(f"too many node ids (max={max_ids})")
 

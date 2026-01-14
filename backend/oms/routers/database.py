@@ -5,7 +5,6 @@ Event Sourcing: S3/MinIO Event Store(SSoT)에 Command 이벤트를 저장
 """
 
 import logging
-import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, status, Query
@@ -17,6 +16,7 @@ from shared.models.requests import ApiResponse
 from shared.models.commands import DatabaseCommand, CommandType, CommandStatus
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input, validate_db_name
 from shared.config.app_config import AppConfig
+from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
 from shared.services.aggregate_sequence_allocator import OptimisticConcurrencyError
 
@@ -123,12 +123,7 @@ async def create_database(
                 logger.warning(f"Failed to persist command status (continuing without Redis): {e}")
 
         # Best-effort synchronous fallback to keep E2E flows unblocked even if workers lag.
-        sync_fallback_enabled = os.getenv("ENABLE_SYNC_DATABASE_CREATE_FALLBACK", "true").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
+        sync_fallback_enabled = bool(get_settings().features.enable_sync_database_create_fallback)
         if sync_fallback_enabled:
             try:
                 created = await terminus_service.create_database(db_name, description or "")

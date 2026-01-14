@@ -4,7 +4,6 @@ Handles database creation, deletion, and listing
 """
 
 import logging
-import os
 import re
 from typing import Any, Dict, List, Optional, DefaultDict
 from collections import defaultdict
@@ -25,6 +24,7 @@ from shared.security.input_sanitizer import (
     validate_db_name,
 )
 from shared.utils.branch_utils import protected_branch_write_message
+from shared.config.settings import get_settings
 
 # Add shared path for common utilities
 from shared.utils.language import get_accept_language
@@ -40,11 +40,12 @@ def _is_dev_mode() -> bool:
 
 
 async def _get_expected_seq_for_database(db_name: str) -> int:
-    schema = os.getenv("EVENT_STORE_SEQUENCE_SCHEMA", "spice_event_registry")
+    seq_settings = get_settings().event_sourcing
+    schema = seq_settings.event_store_sequence_schema
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", schema):
         raise ValueError(f"Invalid EVENT_STORE_SEQUENCE_SCHEMA: {schema!r}")
 
-    prefix = (os.getenv("EVENT_STORE_SEQUENCE_HANDLER_PREFIX", "write_side") or "write_side").strip()
+    prefix = str(seq_settings.event_store_sequence_handler_prefix or "write_side").strip() or "write_side"
     handler = f"{prefix}:Database"
 
     conn = await asyncpg.connect(ServiceConfig.get_postgres_url())

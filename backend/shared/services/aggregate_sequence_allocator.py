@@ -12,12 +12,12 @@ Contract:
 
 from __future__ import annotations
 
-import os
 from typing import Optional
 
 import asyncpg
 
 from shared.config.service_config import ServiceConfig
+from shared.config.settings import get_settings
 
 
 class OptimisticConcurrencyError(RuntimeError):
@@ -61,20 +61,26 @@ class AggregateSequenceAllocator:
         schema: str = "spice_event_registry",
         handler_prefix: str = "write_side",
     ):
+        seq_settings = get_settings().event_sourcing
         self._dsn = dsn or ServiceConfig.get_postgres_url()
-        self._schema = schema
-        self._handler_prefix = handler_prefix
+        self._schema = schema or str(seq_settings.event_store_sequence_schema or "spice_event_registry").strip() or "spice_event_registry"
+        self._handler_prefix = (
+            handler_prefix
+            or str(seq_settings.event_store_sequence_handler_prefix or "write_side").strip()
+            or "write_side"
+        )
         self._pool: Optional[asyncpg.Pool] = None
 
     async def connect(self) -> None:
         if self._pool:
             return
 
+        perf = get_settings().performance
         self._pool = await asyncpg.create_pool(
             self._dsn,
-            min_size=int(os.getenv("AGG_SEQ_PG_POOL_MIN", "1")),
-            max_size=int(os.getenv("AGG_SEQ_PG_POOL_MAX", "5")),
-            command_timeout=int(os.getenv("AGG_SEQ_PG_COMMAND_TIMEOUT", "30")),
+            min_size=int(perf.agg_seq_pg_pool_min),
+            max_size=int(perf.agg_seq_pg_pool_max),
+            command_timeout=int(perf.agg_seq_pg_command_timeout_seconds),
         )
         await self.ensure_schema()
 

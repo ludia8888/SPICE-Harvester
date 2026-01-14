@@ -885,18 +885,21 @@ def create_storage_service_legacy(
     Returns:
         StorageService 인스턴스
     """
-    # 환경변수에서 값 가져오기 (인자보다 우선)
-    endpoint = os.getenv('MINIO_ENDPOINT_URL', endpoint_url or 'http://localhost:9000')
-    access = os.getenv('MINIO_ACCESS_KEY', access_key or 'minioadmin')
-    secret = os.getenv('MINIO_SECRET_KEY', secret_key or 'minioadmin123')
-    
-    use_ssl = endpoint.startswith("https")
+    from shared.config.settings import get_settings
+
+    settings = get_settings()
+
+    endpoint = endpoint_url or settings.storage.minio_endpoint_url
+    access = access_key or settings.storage.minio_access_key
+    secret = secret_key or settings.storage.minio_secret_key
+
+    use_ssl = str(endpoint).startswith("https")
     verify: Optional[Union[bool, str]] = None
-    ca_bundle = (os.getenv("MINIO_SSL_CA_BUNDLE") or "").strip()
+    ca_bundle = (getattr(settings.storage, "minio_ssl_ca_bundle", None) or "").strip()
     if ca_bundle:
         verify = ca_bundle
-    elif use_ssl and (raw := os.getenv("MINIO_SSL_VERIFY")) is not None:
-        verify = raw.strip().lower() in {"1", "true", "yes", "on"}
+    elif getattr(settings.storage, "minio_ssl_verify", None) is not None:
+        verify = settings.storage.minio_ssl_verify
 
     return StorageService(
         endpoint_url=endpoint,

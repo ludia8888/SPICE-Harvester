@@ -16,6 +16,8 @@ import httpx
 from mcp.client.session import ClientSession
 from mcp.client.stdio import stdio_client
 
+from shared.config.settings import get_settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -48,9 +50,9 @@ class MCPClientManager:
         if config_path:
             candidates.append(Path(config_path))
 
-        env_path = (os.getenv("MCP_CONFIG_PATH") or "").strip()
-        if env_path:
-            candidates.append(Path(env_path))
+        settings_path = (get_settings().mcp.config_path or "").strip()
+        if settings_path:
+            candidates.append(Path(settings_path))
 
         candidates.append(Path.cwd() / "mcp-config.json")
         candidates.append(Path(__file__).resolve().parents[2] / "mcp-config.json")

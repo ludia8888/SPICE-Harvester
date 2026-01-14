@@ -127,29 +127,25 @@ except Exception:  # pragma: no cover - depends on environment
 
 class OpenTelemetryConfig:
     # Service identification
-    SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "spice-harvester")
-    SERVICE_VERSION = os.getenv("OTEL_SERVICE_VERSION", "1.0.0")
-    ENVIRONMENT = os.getenv("OTEL_ENVIRONMENT", settings.environment.value)
+    SERVICE_NAME = (settings.observability.otel_service_name or "spice-harvester").strip() or "spice-harvester"
+    SERVICE_VERSION = str(settings.observability.otel_service_version or "1.0.0").strip() or "1.0.0"
+    ENVIRONMENT = (settings.observability.otel_environment or settings.environment.value).strip()
 
     # Exporter endpoints
-    OTLP_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
-    JAEGER_ENDPOINT = os.getenv("JAEGER_ENDPOINT", "localhost:14250")
+    OTLP_ENDPOINT = (settings.observability.otel_exporter_otlp_endpoint or "").strip()
+    JAEGER_ENDPOINT = str(settings.observability.jaeger_endpoint or "localhost:14250").strip() or "localhost:14250"
 
     # Sampling
-    TRACE_SAMPLE_RATE = float(os.getenv("OTEL_TRACE_SAMPLE_RATE", "1.0"))
+    TRACE_SAMPLE_RATE = float(settings.observability.otel_trace_sample_rate)
 
     # Export configuration
-    EXPORT_CONSOLE = os.getenv("OTEL_EXPORT_CONSOLE", "false").lower() == "true"
-    _raw_export_otlp = os.getenv("OTEL_EXPORT_OTLP")
-    if _raw_export_otlp is None:
-        EXPORT_OTLP = bool(OTLP_ENDPOINT)
-    else:
-        EXPORT_OTLP = _raw_export_otlp.lower() == "true"
-    EXPORT_JAEGER = os.getenv("OTEL_EXPORT_JAEGER", "false").lower() == "true"
+    EXPORT_CONSOLE = bool(settings.observability.otel_export_console)
+    EXPORT_OTLP = bool(settings.observability.otel_export_otlp_effective)
+    EXPORT_JAEGER = bool(settings.observability.otel_export_jaeger)
 
     # Feature flags
-    ENABLE_TRACING = os.getenv("OTEL_ENABLE_TRACING", "true").lower() == "true"
-    ENABLE_ASYNCIO_INSTRUMENTATION = os.getenv("OTEL_INSTRUMENT_ASYNCIO", "false").lower() == "true"
+    ENABLE_TRACING = bool(settings.observability.otel_enable_tracing)
+    ENABLE_ASYNCIO_INSTRUMENTATION = bool(settings.observability.otel_instrument_asyncio)
 
 
 class TracingService:

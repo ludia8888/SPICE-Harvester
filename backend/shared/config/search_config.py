@@ -4,9 +4,10 @@ Elasticsearch 인덱스 이름 규칙 중앙 관리
 """
 
 import hashlib
-import os
 import re
 from typing import Optional
+
+from shared.config.settings import get_settings
 
 
 def sanitize_index_name(name: str) -> str:
@@ -165,35 +166,15 @@ DEFAULT_NUMBER_OF_REPLICAS_DEV = 0
 DEFAULT_REFRESH_INTERVAL = "1s"
 
 
-def _coerce_int_env(name: str, *, default: int, min_value: int) -> int:
-    raw = os.getenv(name)
-    if raw is None or raw == "":
-        return default
-    try:
-        value = int(raw)
-    except ValueError as exc:
-        raise ValueError(f"{name} must be an integer (got {raw!r})") from exc
-    if value < min_value:
-        raise ValueError(f"{name} must be >= {min_value} (got {value})")
-    return value
-
-
 def get_default_index_settings() -> dict:
     """Return default ES index settings with dev-safe replica defaults."""
-    env = os.getenv("ENVIRONMENT", "development").lower()
-    is_prod = env in ("production", "prod")
-    default_replicas = DEFAULT_NUMBER_OF_REPLICAS_PROD if is_prod else DEFAULT_NUMBER_OF_REPLICAS_DEV
+    settings = get_settings()
+    default_replicas = DEFAULT_NUMBER_OF_REPLICAS_PROD if settings.is_production else DEFAULT_NUMBER_OF_REPLICAS_DEV
 
-    shards = _coerce_int_env(
-        "ELASTICSEARCH_DEFAULT_SHARDS",
-        default=DEFAULT_NUMBER_OF_SHARDS,
-        min_value=1,
-    )
-    replicas = _coerce_int_env(
-        "ELASTICSEARCH_DEFAULT_REPLICAS",
-        default=default_replicas,
-        min_value=0,
-    )
+    shards = settings.database.elasticsearch_default_shards
+    replicas = settings.database.elasticsearch_default_replicas
+    if replicas is None:
+        replicas = default_replicas
 
     return {
         "number_of_shards": shards,

@@ -1,21 +1,14 @@
 from __future__ import annotations
-
-import os
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, Optional, Tuple
 
 from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.utils.canonical_json import sha256_canonical_json_prefixed
+from shared.config.settings import get_settings
 
 ENTERPRISE_SCHEMA_VERSION = "1.1"
-ENTERPRISE_CATALOG_REF = (
-    os.getenv("ENTERPRISE_CATALOG_REF")
-    or os.getenv("GIT_SHA")
-    or os.getenv("SOURCE_VERSION")
-    or os.getenv("OTEL_SERVICE_VERSION")
-    or ""
-).strip()
+ENTERPRISE_CATALOG_REF = get_settings().observability.enterprise_catalog_ref_effective
 
 
 class EnterpriseSeverity(str, Enum):

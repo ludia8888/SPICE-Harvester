@@ -820,7 +820,7 @@ class LLMGateway:
                     if provider == "mock":
                         safe_task = re.sub(r"[^A-Z0-9]+", "_", (task or "").strip().upper()).strip("_")
                         task_key = f"LLM_MOCK_JSON_{safe_task}" if safe_task else ""
-                        raw = (os.getenv(task_key) or os.getenv("LLM_MOCK_JSON") or "").strip()
+                        raw = (get_settings().llm.mock_json_for_task(task) or "").strip()
                         if not raw:
                             hint = task_key or "LLM_MOCK_JSON"
                             raise LLMRequestError(f"LLM_PROVIDER=mock requires {hint} (or LLM_MOCK_JSON) to be set")

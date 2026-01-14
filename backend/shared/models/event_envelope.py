@@ -7,13 +7,13 @@ single canonical shape for storage (S3/MinIO) and transport (Kafka).
 """
 
 from __future__ import annotations
-
-import os
 from datetime import datetime, timezone
 from typing import Any, ClassVar, Dict, Optional
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from pydantic import BaseModel, Field
+
+from shared.config.settings import get_settings
 
 from .commands import BaseCommand
 from .events import BaseEvent
@@ -62,6 +62,7 @@ class EventEnvelope(BaseModel):
         kafka_topic: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> "EventEnvelope":
+        obs = get_settings().observability
         # Use JSON mode so Any-typed payloads don't retain UUID/Enum objects.
         command_dict = command.model_dump(mode="json")
         base_metadata: Dict[str, Any] = {
@@ -69,8 +70,8 @@ class EventEnvelope(BaseModel):
             "command_type": command.command_type.value,
             "command_version": command.version,
             "command_id": str(command.command_id),
-            "run_id": os.getenv("PIPELINE_RUN_ID") or os.getenv("RUN_ID") or os.getenv("EXECUTION_ID"),
-            "code_sha": os.getenv("CODE_SHA") or os.getenv("GIT_SHA") or os.getenv("COMMIT_SHA"),
+            "run_id": obs.run_id,
+            "code_sha": obs.code_sha,
         }
         try:
             correlation_id = getattr(command, "correlation_id", None) or (command.metadata or {}).get("correlation_id")
@@ -114,10 +115,11 @@ class EventEnvelope(BaseModel):
         kafka_topic: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> "EventEnvelope":
+        obs = get_settings().observability
         base_metadata: Dict[str, Any] = {
             "kind": "domain",
-            "run_id": os.getenv("PIPELINE_RUN_ID") or os.getenv("RUN_ID") or os.getenv("EXECUTION_ID"),
-            "code_sha": os.getenv("CODE_SHA") or os.getenv("GIT_SHA") or os.getenv("COMMIT_SHA"),
+            "run_id": obs.run_id,
+            "code_sha": obs.code_sha,
         }
         if kafka_topic:
             base_metadata["kafka_topic"] = kafka_topic
@@ -188,13 +190,14 @@ class EventEnvelope(BaseModel):
         if data:
             base_data.update(data)
 
+        obs = get_settings().observability
         base_metadata: Dict[str, Any] = {
             "kind": "connector_update",
             "source_type": st,
             "source_id": sid,
-            "run_id": os.getenv("PIPELINE_RUN_ID") or os.getenv("RUN_ID") or os.getenv("EXECUTION_ID"),
-            "code_sha": os.getenv("CODE_SHA") or os.getenv("GIT_SHA") or os.getenv("COMMIT_SHA"),
-            "service": os.getenv("SERVICE_NAME") or os.getenv("HOSTNAME"),
+            "run_id": obs.run_id,
+            "code_sha": obs.code_sha,
+            "service": str(obs.service_name or obs.hostname or "").strip() or None,
         }
         if kafka_topic:
             base_metadata["kafka_topic"] = kafka_topic

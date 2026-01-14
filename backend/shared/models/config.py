@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+from shared.config.settings import get_settings
+
 
 @dataclass
 class ConnectionConfig:
@@ -41,32 +43,26 @@ class ConnectionConfig:
             raise ValueError("retry_delay must be non-negative")
 
     @classmethod
-    def from_env(cls) -> "ConnectionConfig":
-        """Create ConnectionConfig from environment variables"""
-        import os
-
-        # Get environment variables with defaults
-        server_url = os.getenv("TERMINUS_SERVER_URL", "http://localhost:6363")
-        user = os.getenv("TERMINUS_USER", "anonymous")
-        key = os.getenv("TERMINUS_KEY", os.getenv("TERMINUSDB_ADMIN_PASS", ""))
-        account = os.getenv("TERMINUS_ACCOUNT", "admin")
-        timeout = int(os.getenv("TERMINUS_TIMEOUT", "30"))
-        database = os.getenv("TERMINUS_DATABASE")
-        retries = int(os.getenv("TERMINUS_RETRY_ATTEMPTS", "3"))
-        retry_delay = float(os.getenv("TERMINUS_RETRY_DELAY", "1.0"))
-        ssl_verify = os.getenv("TERMINUS_SSL_VERIFY", "true").lower() == "true"
-
+    def from_settings(cls) -> "ConnectionConfig":
+        """Create ConnectionConfig from centralized ApplicationSettings."""
+        settings = get_settings()
+        db = settings.database
         return cls(
-            server_url=server_url,
-            user=user,
-            key=key,
-            account=account,
-            timeout=timeout,
-            database=database,
-            retries=retries,
-            retry_delay=retry_delay,
-            ssl_verify=ssl_verify,
+            server_url=db.terminus_url,
+            user=db.terminus_user,
+            key=db.terminus_password,
+            account=db.terminus_account,
+            timeout=int(db.terminus_timeout),
+            database=None,
+            retries=int(db.terminus_retry_attempts),
+            retry_delay=float(db.terminus_retry_delay),
+            ssl_verify=bool(db.terminus_ssl_verify),
         )
+
+    @classmethod
+    def from_env(cls) -> "ConnectionConfig":
+        """Backward-compatible alias for from_settings()."""
+        return cls.from_settings()
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""

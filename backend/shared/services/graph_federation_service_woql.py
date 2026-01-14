@@ -9,13 +9,13 @@ This service uses the CORRECT WOQL format that actually works:
 """
 
 import logging
-import os
 from datetime import datetime, timezone
 import httpx
 import aiohttp
 from typing import Any, Dict, List, Optional, Tuple
 
 from shared.config.app_config import AppConfig
+from shared.config.settings import get_settings
 from shared.config.search_config import get_instances_index_name
 from shared.security.input_sanitizer import validate_branch_name
 from shared.utils.terminus_branch import encode_branch_name
@@ -182,26 +182,21 @@ class GraphFederationServiceWOQL:
         base_branch = validate_branch_name(base_branch or "main")
         logger.info(f"🔥 REAL WOQL Multi-hop query: {start_class} -> {hops} (base_branch={base_branch}, overlay_branch={overlay_branch})")
 
-        max_hops = int(os.getenv("GRAPH_QUERY_MAX_HOPS", "10"))
+        graph_settings = get_settings().graph_query
+        max_hops = int(graph_settings.max_hops)
         if len(hops) > max_hops:
             raise ValueError(f"Too many hops (max={max_hops})")
 
-        limit = max(1, min(int(limit), int(os.getenv("GRAPH_QUERY_MAX_LIMIT", "1000"))))
+        limit = max(1, min(int(limit), int(graph_settings.max_limit)))
         offset = max(0, int(offset))
         max_nodes = max(1, int(max_nodes))
         max_edges = max(1, int(max_edges))
         include_paths = bool(include_paths)
         no_cycles = bool(no_cycles)
         max_paths = max(0, int(max_paths))
-        max_paths_cap = int(os.getenv("GRAPH_QUERY_MAX_PATHS", "2000"))
-        max_paths = min(max_paths, max_paths_cap)
+        max_paths = min(max_paths, int(graph_settings.max_paths))
 
-        enforce_semantics = os.getenv("GRAPH_QUERY_ENFORCE_SEMANTICS", "true").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
+        enforce_semantics = bool(graph_settings.enforce_semantics)
         if enforce_semantics and hops:
             await self._validate_hop_semantics(
                 db_name=db_name, branch=base_branch, start_class=start_class, hops=hops

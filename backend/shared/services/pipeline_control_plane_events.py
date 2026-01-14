@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, Optional
 
 from shared.config.app_config import AppConfig
+from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
 from shared.services.event_store import event_store
 from shared.utils.time_utils import utcnow
@@ -13,8 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def pipeline_control_plane_events_enabled() -> bool:
-    raw = str(os.getenv("ENABLE_PIPELINE_CONTROL_PLANE_EVENTS", "")).strip().lower()
-    if raw in {"0", "false", "no", "off"}:
+    if not get_settings().features.enable_pipeline_control_plane_events:
         logger.warning(
             "ENABLE_PIPELINE_CONTROL_PLANE_EVENTS is disabled but ignored; control-plane events are always on."
         )

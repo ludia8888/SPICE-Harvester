@@ -6,10 +6,11 @@ Comprehensive Input Sanitization Module
 import html
 import json
 import logging
-import os
 import re
 import urllib.parse
 from typing import Any, Dict, List, Optional, Union
+
+from shared.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -126,21 +127,10 @@ class InputSanitizer:
         r"\*\)|\(\*",  # 와일드카드와 괄호 조합
     ]
 
-    @staticmethod
-    def _read_int_env(name: str, default: int) -> int:
-        raw = os.getenv(name)
-        if not raw:
-            return default
-        try:
-            value = int(raw)
-        except ValueError:
-            logger.warning("Invalid %s=%r; using default %s", name, raw, default)
-            return default
-        return max(1, value)
-
     def __init__(self):
-        self.max_dict_keys = self._read_int_env("INPUT_SANITIZER_MAX_DICT_KEYS", 100)
-        self.max_list_items = self._read_int_env("INPUT_SANITIZER_MAX_LIST_ITEMS", 1000)
+        security = get_settings().security
+        self.max_dict_keys = int(security.input_sanitizer_max_dict_keys)
+        self.max_list_items = int(security.input_sanitizer_max_list_items)
         # 컴파일된 정규식 패턴들
         self.sql_regex = [
             re.compile(pattern, re.IGNORECASE) for pattern in self.SQL_INJECTION_PATTERNS

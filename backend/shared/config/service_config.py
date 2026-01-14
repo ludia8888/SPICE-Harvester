@@ -12,7 +12,9 @@ import logging
 import os
 from typing import List, Optional, Tuple
 
-from shared.config.settings import get_settings
+from pydantic import ValidationError
+
+from shared.config.settings import _is_docker_environment, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -181,11 +183,7 @@ class ServiceConfig:
 
         In Docker, services communicate using service names instead of localhost.
         """
-        # FIXED: Check environment variable more carefully
-        docker_env = os.getenv("DOCKER_CONTAINER", "").lower()
-        if docker_env in ("false", "0", "no", "off"):
-            return False
-        return os.path.exists("/.dockerenv") or docker_env == "true"
+        return _is_docker_environment()
     
     @staticmethod
     def get_minio_endpoint() -> str:
@@ -273,17 +271,11 @@ class ServiceConfig:
         Returns:
             True if configuration is valid, False otherwise
         """
-        required_vars = []
-
-        # In production, you might want to require certain environment variables
-        # For now, we accept defaults
-
-        missing = [var for var in required_vars if not os.getenv(var)]
-
-        if missing:
-            print(f"Missing required environment variables: {', '.join(missing)}")
+        try:
+            get_settings()
+        except ValidationError as exc:
+            logger.error("Invalid configuration: %s", exc)
             return False
-
         return True
 
     # HTTPS/SSL Configuration Methods
@@ -428,7 +420,7 @@ class ServiceConfig:
         Returns:
             List of allowed origins
         """
-        cors_origins_env = os.getenv("CORS_ORIGINS")
+        cors_origins_env = str(app_settings.services.cors_origins or "").strip()
 
         if cors_origins_env:
             try:
@@ -574,10 +566,11 @@ class ServiceConfig:
         Returns:
             Dictionary with debug information
         """
+        env_value = getattr(app_settings.environment, "value", str(app_settings.environment))
         return {
             "enabled": ServiceConfig.is_cors_enabled(),
             "origins": ServiceConfig.get_cors_origins(),
-            "environment": os.getenv("ENVIRONMENT", "development"),
+            "environment": env_value,
             "is_production": ServiceConfig.is_production(),
             "config": ServiceConfig.get_cors_config(),
         }
@@ -608,7 +601,7 @@ if __name__ == "__main__":
     # Print current configuration when run directly
     print("🔥 SPICE HARVESTER Service Configuration")
     print("=" * 50)
-    print(f"Environment: {os.getenv('ENVIRONMENT', 'development')}")
+    print(f"Environment: {getattr(app_settings.environment, 'value', app_settings.environment)}")
     print(f"Protocol: {ServiceConfig.get_protocol()}")
     print(f"HTTPS Enabled: {ServiceConfig.use_https()}")
     print(f"SSL Verification: {ServiceConfig.verify_ssl()}")

@@ -6,7 +6,6 @@ Version Control Service for TerminusDB
 import asyncio
 import logging
 import uuid
-import os
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 from shared.utils.terminus_branch import decode_branch_name, encode_branch_name
@@ -14,6 +13,7 @@ from shared.utils.terminus_branch import decode_branch_name, encode_branch_name
 from .base import BaseTerminusService
 from .database import DatabaseService
 from oms.exceptions import DatabaseError
+from shared.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -365,8 +365,9 @@ class VersionControlService(BaseTerminusService):
             "offset": offset
         }
 
-        max_attempts = int(os.getenv("TERMINUS_COMMITS_RETRY_ATTEMPTS", "5") or "5")
-        base_delay = float(os.getenv("TERMINUS_COMMITS_RETRY_DELAY_SECONDS", "0.4") or "0.4")
+        db_settings = get_settings().database
+        max_attempts = int(db_settings.terminus_commits_retry_attempts)
+        base_delay = float(db_settings.terminus_commits_retry_delay_seconds)
 
         last_error: Optional[Exception] = None
         for attempt in range(1, max_attempts + 1):

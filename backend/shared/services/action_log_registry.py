@@ -10,7 +10,6 @@ FAILED is terminal when commit creation fails.
 
 from __future__ import annotations
 
-import os
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -21,6 +20,7 @@ from uuid import UUID
 import asyncpg
 
 from shared.config.service_config import ServiceConfig
+from shared.config.settings import get_settings
 
 
 class ActionLogStatus(str, Enum):
@@ -142,8 +142,10 @@ class ActionLogRegistry:
         self._dsn = dsn or ServiceConfig.get_postgres_url()
         self._schema = schema
         self._pool: Optional[asyncpg.Pool] = None
-        self._pool_min = int(os.getenv("ACTION_LOG_PG_POOL_MIN", str(pool_min or 1)))
-        self._pool_max = int(os.getenv("ACTION_LOG_PG_POOL_MAX", str(pool_max or 5)))
+        perf = get_settings().performance
+        self._pool_min = int(pool_min) if pool_min is not None else int(perf.action_log_pg_pool_min)
+        self._pool_max = int(pool_max) if pool_max is not None else int(perf.action_log_pg_pool_max)
+        self._command_timeout = int(perf.action_log_pg_command_timeout_seconds)
 
     @staticmethod
     def _jsonb_param(value: Any) -> Optional[str]:
@@ -169,7 +171,7 @@ class ActionLogRegistry:
             self._dsn,
             min_size=self._pool_min,
             max_size=self._pool_max,
-            command_timeout=int(os.getenv("ACTION_LOG_PG_COMMAND_TIMEOUT", "30")),
+            command_timeout=self._command_timeout,
         )
         await self.ensure_schema()
 

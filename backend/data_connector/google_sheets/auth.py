@@ -3,12 +3,13 @@ Google Sheets Connector - Authentication Module (for future OAuth2 support)
 """
 
 import logging
-import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 from urllib.parse import urlencode
 
 import httpx
+
+from shared.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +47,10 @@ class GoogleOAuth2Client:
             client_secret: Google OAuth2 Client Secret
             redirect_uri: OAuth2 redirect URI
         """
-        self.client_id = client_id or os.getenv("GOOGLE_CLIENT_ID")
-        self.client_secret = client_secret or os.getenv("GOOGLE_CLIENT_SECRET")
-        self.redirect_uri = redirect_uri or os.getenv(
-            "GOOGLE_REDIRECT_URI", "http://localhost:8002/api/v1/data-connectors/google-sheets/oauth/callback"
-        )
+        google_settings = get_settings().google_sheets
+        self.client_id = client_id or google_settings.oauth_client_id
+        self.client_secret = client_secret or google_settings.oauth_client_secret
+        self.redirect_uri = redirect_uri or google_settings.oauth_redirect_uri
 
         # Token storage (실제로는 DB나 Redis 사용)
         self._tokens: Dict[str, Dict[str, Any]] = {}
@@ -248,7 +248,7 @@ class APIKeyAuth:
         Args:
             api_key: Google API Key
         """
-        self.api_key = api_key or os.getenv("GOOGLE_API_KEY", "")
+        self.api_key = api_key if api_key is not None else (get_settings().google_sheets.google_sheets_api_key or "")
 
     def get_auth_params(self) -> Dict[str, str]:
         """

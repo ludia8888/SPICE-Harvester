@@ -11,10 +11,11 @@ Connector policy:
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, Dict, List, Optional
 
 import httpx
+
+from shared.config.settings import get_settings
 
 from .models import GoogleSheetPreviewResponse, SheetMetadata
 from .utils import (
@@ -33,7 +34,8 @@ class GoogleSheetsService:
     """Google Sheets API client (read-only)."""
 
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = (api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_SHEETS_API_KEY") or "").strip()
+        settings_api_key = get_settings().google_sheets.google_sheets_api_key
+        self.api_key = (api_key if api_key is not None else settings_api_key or "").strip()
         if not self.api_key:
             logger.warning("Google API key not configured. Only public sheets will be accessible.")
         self._client: Optional[httpx.AsyncClient] = None

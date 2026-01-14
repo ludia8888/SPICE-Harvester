@@ -5,11 +5,11 @@ Base TerminusDB Service
 
 import logging
 import json
-import os
 from typing import Any, Dict, Optional, Union
 import httpx
 
 from shared.models.config import ConnectionConfig
+from shared.config.settings import get_settings
 from shared.utils.terminus_branch import encode_branch_name
 from oms.exceptions import ConnectionError as TerminusConnectionError
 from oms.utils.terminus_retry import build_async_retry
@@ -43,16 +43,8 @@ class BaseTerminusService:
         if connection_info:
             self.connection_info = connection_info
         else:
-            # 환경변수에서 연결 정보 로드
-            import os
-            self.connection_info = ConnectionConfig(
-                # Default to 6363 (TerminusDB default in this project); override via TERMINUS_SERVER_URL as needed.
-                server_url=os.getenv("TERMINUS_SERVER_URL", "http://localhost:6363"),
-                account=os.getenv("TERMINUS_ACCOUNT", "admin"),
-                user=os.getenv("TERMINUS_USER", "admin"),
-                key=os.getenv("TERMINUS_KEY", "admin"),
-                ssl_verify=os.getenv("TERMINUS_SSL_VERIFY", "true").lower() == "true",
-            )
+            # 중앙 설정에서 연결 정보 로드
+            self.connection_info = ConnectionConfig.from_settings()
         
         # HTTP 클라이언트 설정
         self._client: Optional[httpx.AsyncClient] = None
@@ -68,23 +60,12 @@ class BaseTerminusService:
     async def _get_client(self) -> httpx.AsyncClient:
         """HTTP 클라이언트 가져오기 (lazy initialization)"""
         if not self._client:
-            def _timeout_from_env(key: str, default: float) -> float:
-                raw = (os.getenv(key) or "").strip()
-                if not raw:
-                    return float(default)
-                try:
-                    return float(raw)
-                except ValueError:
-                    logger.warning("Invalid %s=%r; using default %.1fs", key, raw, default)
-                    return float(default)
-
-            # Timeout defaults are tuned for TerminusDB operations that can take longer than typical HTTP calls
-            # (e.g., database creation, schema migrations, large document writes).
+            db_settings = get_settings().database
             timeout = httpx.Timeout(
-                connect=_timeout_from_env("TERMINUS_CONNECT_TIMEOUT_SECONDS", 10.0),
-                read=_timeout_from_env("TERMINUS_READ_TIMEOUT_SECONDS", 120.0),
-                write=_timeout_from_env("TERMINUS_WRITE_TIMEOUT_SECONDS", 120.0),
-                pool=_timeout_from_env("TERMINUS_POOL_TIMEOUT_SECONDS", 5.0),
+                connect=float(db_settings.terminus_connect_timeout_seconds),
+                read=float(db_settings.terminus_read_timeout_seconds),
+                write=float(db_settings.terminus_write_timeout_seconds),
+                pool=float(db_settings.terminus_pool_timeout_seconds),
             )
             
             # 재시도 설정

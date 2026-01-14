@@ -4,8 +4,9 @@ WOQL 및 SPARQL 쿼리 실행 서비스
 """
 
 import logging
-import os
 from typing import Any, Dict, List, Optional
+
+from shared.config.settings import get_settings
 
 from .base import BaseTerminusService
 from oms.exceptions import DatabaseError
@@ -225,7 +226,7 @@ class QueryService(BaseTerminusService):
         )
 
         batch_size = min(max(limit + offset, 200), 1000)
-        max_scan = int(os.getenv("QUERY_MAX_SCAN_DOCS", "5000"))
+        max_scan = int(get_settings().database.query_max_scan_docs)
 
         all_matches: List[Dict[str, Any]] = []
         scanned = 0

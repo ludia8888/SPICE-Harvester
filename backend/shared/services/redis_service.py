@@ -8,7 +8,6 @@ error handling, and common operations for command status tracking.
 import asyncio
 import json
 import logging
-import os
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta, timezone
 import redis.asyncio as redis
@@ -470,10 +469,12 @@ def create_redis_service_legacy(
     Returns:
         RedisService instance
     """
-    from shared.config.service_config import ServiceConfig
+    from shared.config.settings import get_settings
+
+    settings = get_settings()
     
     return RedisService(
-        host=host or ServiceConfig.get_redis_host(),
-        port=port or ServiceConfig.get_redis_port(),
-        password=password or os.getenv("REDIS_PASSWORD", "spicepass123")
+        host=host or settings.database.redis_host,
+        port=port or settings.database.redis_port,
+        password=password or settings.database.redis_password,
     )

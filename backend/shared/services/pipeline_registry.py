@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -18,7 +17,7 @@ import asyncpg
 from cryptography.fernet import Fernet, InvalidToken
 
 from shared.config.service_config import ServiceConfig
-from shared.config.settings import settings as global_settings
+from shared.config.settings import get_settings
 from shared.services.lakefs_client import (
     LakeFSClient,
     LakeFSConfig,
@@ -63,25 +62,33 @@ def _normalize_output_list(value: Optional[List[Dict[str, Any]]], *, field_name:
 
 
 def _is_production_env() -> bool:
-    raw = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or os.getenv("APP_ENVIRONMENT") or "").strip().lower()
-    return raw in {"prod", "production"}
+    return bool(get_settings().is_production)
 
 
 def _lakefs_credentials_source() -> str:
-    raw = (os.getenv("LAKEFS_CREDENTIALS_SOURCE") or "").strip().lower()
-    if raw in {"db", "database"}:
-        return "db"
-    if raw in {"env", "environment"}:
-        return "env"
-    return "db" if _is_production_env() else "env"
+    settings = get_settings()
+    source = settings.storage.lakefs_credentials_source
+    if source in {"db", "env"}:
+        return source
+    return "db" if settings.is_production else "env"
 
 
 def _lakefs_service_principal() -> str:
-    return (os.getenv("LAKEFS_SERVICE_PRINCIPAL") or os.getenv("SERVICE_NAME") or "bff").strip() or "bff"
+    settings = get_settings()
+    for candidate in (
+        settings.storage.lakefs_service_principal,
+        settings.observability.service_name,
+        settings.observability.otel_service_name,
+        "bff",
+    ):
+        value = str(candidate or "").strip()
+        if value:
+            return value
+    return "bff"
 
 
 def _lakefs_fernet() -> Fernet:
-    key = (os.getenv("LAKEFS_CREDENTIALS_ENCRYPTION_KEY") or "").strip()
+    key = str(get_settings().storage.lakefs_credentials_encryption_key or "").strip()
     if not key:
         raise RuntimeError(
             "LAKEFS_CREDENTIALS_ENCRYPTION_KEY is required to store lakeFS credentials in Postgres. "
@@ -346,8 +353,10 @@ class PipelineRegistry:
         self._dsn = dsn or ServiceConfig.get_postgres_url()
         self._schema = schema
         self._pool: Optional[asyncpg.Pool] = None
-        self._pool_min = int(os.getenv("PIPELINE_REGISTRY_PG_POOL_MIN", str(pool_min or 1)))
-        self._pool_max = int(os.getenv("PIPELINE_REGISTRY_PG_POOL_MAX", str(pool_max or 5)))
+        perf = get_settings().performance
+        self._pool_min = int(pool_min) if pool_min is not None else int(perf.pipeline_registry_pg_pool_min)
+        self._pool_max = int(pool_max) if pool_max is not None else int(perf.pipeline_registry_pg_pool_max)
+        self._command_timeout = int(perf.pipeline_registry_pg_command_timeout_seconds)
 
     async def _get_lakefs_credentials(
         self,
@@ -476,8 +485,9 @@ class PipelineRegistry:
         )
 
         # env fallback (dev/test)
-        access_key_id = str(global_settings.storage.lakefs_access_key_id or "").strip()
-        secret_access_key = str(global_settings.storage.lakefs_secret_access_key or "").strip()
+        settings = get_settings()
+        access_key_id = str(settings.storage.lakefs_access_key_id or "").strip()
+        secret_access_key = str(settings.storage.lakefs_secret_access_key or "").strip()
         if not access_key_id or not secret_access_key:
             raise RuntimeError("lakeFS credentials are required (LAKEFS_ACCESS_KEY_ID/LAKEFS_SECRET_ACCESS_KEY)")
         now = utcnow()
@@ -516,8 +526,8 @@ class PipelineRegistry:
         repo = (pipeline.lakefs_repository or "").strip()
         if repo:
             return repo
-        repo = str(os.getenv("LAKEFS_ARTIFACTS_REPOSITORY") or "").strip()
-        return repo or "pipeline-artifacts"
+        value = str(get_settings().storage.lakefs_artifacts_repository or "").strip()
+        return value or "pipeline-artifacts"
 
     async def initialize(self) -> None:
         await self.connect()
@@ -529,7 +539,7 @@ class PipelineRegistry:
             self._dsn,
             min_size=self._pool_min,
             max_size=self._pool_max,
-            command_timeout=int(os.getenv("PIPELINE_REGISTRY_PG_COMMAND_TIMEOUT", "30")),
+            command_timeout=self._command_timeout,
         )
         await self.ensure_schema()
 
@@ -1298,7 +1308,7 @@ class PipelineRegistry:
 
         pipeline_id = pipeline_id or str(uuid4())
         lakefs_repository = (lakefs_repository or "").strip() or (
-            str(os.getenv("LAKEFS_ARTIFACTS_REPOSITORY") or "").strip() or "pipeline-artifacts"
+            str(get_settings().storage.lakefs_artifacts_repository or "").strip() or "pipeline-artifacts"
         )
 
         async with self._pool.acquire() as conn:

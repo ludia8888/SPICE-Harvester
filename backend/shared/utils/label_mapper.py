@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import aiosqlite
 
 # shared 모델 import
+from shared.config.settings import get_settings
 from shared.models.ontology import QueryFilter, QueryInput
 from shared.utils.language import coerce_localized_text, fallback_languages, normalize_language
 
@@ -42,17 +43,16 @@ class LabelMapper:
         if db_path:
             return db_path
 
-        # 환경 변수에서 경로 읽기
-        env_path = os.getenv("LABEL_MAPPINGS_DB_PATH")
-        if env_path:
+        configured_path = str(get_settings().storage.label_mappings_db_path or "").strip()
+        if configured_path:
             # 환경 변수가 상대 경로인 경우 프로젝트 루트 기준으로 변환
-            if not os.path.isabs(env_path):
+            if not os.path.isabs(configured_path):
                 # 프로젝트 루트를 찾기 위해 현재 파일에서 상위 디렉토리로 이동
                 current_file = Path(__file__).resolve()
                 # backend/ 디렉토리를 찾기 위해 상위로 이동
                 backend_dir = current_file.parent.parent.parent.parent
-                env_path = str(backend_dir / env_path)
-            return env_path
+                configured_path = str(backend_dir / configured_path)
+            return configured_path
 
         # 폴백: 프로젝트 루트 기준 기본 경로
         current_file = Path(__file__).resolve()

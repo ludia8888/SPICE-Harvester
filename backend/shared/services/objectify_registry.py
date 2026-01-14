@@ -7,7 +7,6 @@ Tracks dataset→ontology mapping specs and objectify job lifecycle.
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -17,6 +16,7 @@ import asyncpg
 from asyncpg.exceptions import UniqueViolationError
 
 from shared.config.service_config import ServiceConfig
+from shared.config.settings import get_settings
 from shared.observability.context_propagation import enrich_metadata_with_current_trace
 
 from shared.models.objectify_job import ObjectifyJob
@@ -117,8 +117,10 @@ class ObjectifyRegistry:
         self._dsn = dsn or ServiceConfig.get_postgres_url()
         self._schema = schema
         self._pool: Optional[asyncpg.Pool] = None
-        self._pool_min = int(os.getenv("OBJECTIFY_PG_POOL_MIN", str(pool_min or 1)))
-        self._pool_max = int(os.getenv("OBJECTIFY_PG_POOL_MAX", str(pool_max or 5)))
+        perf = get_settings().performance
+        self._pool_min = int(pool_min) if pool_min is not None else int(perf.objectify_pg_pool_min)
+        self._pool_max = int(pool_max) if pool_max is not None else int(perf.objectify_pg_pool_max)
+        self._command_timeout = int(perf.objectify_pg_command_timeout_seconds)
 
     async def initialize(self) -> None:
         await self.connect()
@@ -130,7 +132,7 @@ class ObjectifyRegistry:
             self._dsn,
             min_size=self._pool_min,
             max_size=self._pool_max,
-            command_timeout=int(os.getenv("OBJECTIFY_PG_COMMAND_TIMEOUT", "30")),
+            command_timeout=self._command_timeout,
         )
         await self.ensure_schema()
 

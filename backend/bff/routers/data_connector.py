@@ -38,6 +38,7 @@ from shared.services.pipeline_registry import PipelineRegistry
 from shared.dependencies.providers import LineageStoreDep
 from shared.utils.s3_uri import build_s3_uri
 from shared.config.app_config import AppConfig
+from shared.config.settings import get_settings
 from shared.services.event_store import event_store
 from shared.models.event_envelope import EventEnvelope
 from shared.utils.event_utils import build_command_event
@@ -1007,7 +1008,7 @@ async def start_pipelining_google_sheet(
             except Exception as e:
                 logger.warning(f"Failed to append gsheet dataset create event: {e}")
 
-        repo = (os.getenv("LAKEFS_RAW_REPOSITORY") or "").strip() or "raw-datasets"
+        repo = str(get_settings().storage.lakefs_raw_repository or "raw-datasets").strip() or "raw-datasets"
         safe_name = dataset.name.replace(" ", "_")
         object_prefix = f"datasets/{db_name}/{dataset.dataset_id}/{safe_name}"
         object_key = f"{object_prefix}/source.csv"

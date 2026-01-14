@@ -19,8 +19,7 @@ from shared.security.input_sanitizer import validate_branch_name, validate_db_na
 from shared.utils.language import get_accept_language
 from shared.services.graph_federation_service_woql import GraphFederationServiceWOQL
 from shared.config.app_config import AppConfig
-from shared.config.settings import ApplicationSettings
-from shared.config.service_config import ServiceConfig
+from shared.config.settings import get_settings
 from shared.dependencies.providers import LineageStoreDep
 from shared.services.lineage_store import LineageStore
 from shared.models.graph_query import (
@@ -31,7 +30,6 @@ from shared.models.graph_query import (
     GraphQueryResponse,
     SimpleGraphQueryRequest,
 )
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -131,24 +129,19 @@ async def get_graph_federation_service() -> GraphFederationServiceWOQL:
     global _graph_service
     
     if _graph_service is None:
+        settings = get_settings()
+
         # Initialize TerminusDB service
-        terminus_url = ServiceConfig.get_terminus_url()
-        
-        connection_info = ConnectionConfig(
-            server_url=terminus_url,
-            user=os.getenv("TERMINUS_USER", "admin"),
-            account=os.getenv("TERMINUS_ACCOUNT", "admin"),
-            key=os.getenv("TERMINUS_KEY", "admin"),
-        )
+        connection_info = ConnectionConfig.from_settings(settings)
         
         terminus_service = AsyncTerminusService(connection_info)
         await terminus_service.connect()
         
         # Initialize REAL WOQL GraphFederationService
-        es_host = ServiceConfig.get_elasticsearch_host()
-        es_port = ServiceConfig.get_elasticsearch_port()
-        es_username = (os.getenv("ELASTICSEARCH_USERNAME") or "").strip()
-        es_password = os.getenv("ELASTICSEARCH_PASSWORD") or ""
+        es_host = settings.database.elasticsearch_host
+        es_port = settings.database.elasticsearch_port
+        es_username = (settings.database.elasticsearch_username or "").strip()
+        es_password = settings.database.elasticsearch_password or ""
         
         _graph_service = GraphFederationServiceWOQL(
             terminus_service=terminus_service,
@@ -731,18 +724,12 @@ async def find_relationship_paths(
         from shared.services.async_terminus import AsyncTerminusService
         from shared.models.config import ConnectionConfig
         
-        # Get TerminusDB connection details from environment
-        terminus_url = ServiceConfig.get_terminus_url()
-        es_host = ServiceConfig.get_elasticsearch_host()
-        es_port = ServiceConfig.get_elasticsearch_port()
+        settings = get_settings()
+        es_host = settings.database.elasticsearch_host
+        es_port = settings.database.elasticsearch_port
         
         # Initialize services for schema query
-        connection_info = ConnectionConfig(
-            server_url=terminus_url,
-            user="admin",
-            account="admin",
-            key="admin"
-        )
+        connection_info = ConnectionConfig.from_settings(settings)
         
         terminus_service = AsyncTerminusService(connection_info)
         await terminus_service.connect()

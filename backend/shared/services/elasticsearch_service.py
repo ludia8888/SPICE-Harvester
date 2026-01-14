@@ -7,7 +7,6 @@ error handling, and common operations for search and indexing.
 
 import json
 import logging
-import os
 from typing import Optional, Dict, Any, List, Union
 from datetime import datetime
 from elasticsearch import AsyncElasticsearch
@@ -640,12 +639,14 @@ def create_elasticsearch_service_legacy(
     Returns:
         ElasticsearchService instance
     """
-    from shared.config.service_config import ServiceConfig
+    from shared.config.settings import get_settings
+
+    settings = get_settings()
     
     return ElasticsearchService(
-        host=host or os.getenv("ELASTICSEARCH_HOST", "localhost"),
-        port=port or int(os.getenv("ELASTICSEARCH_PORT", "9200")),
-        username=username or os.getenv("ELASTICSEARCH_USERNAME"),
-        password=password or os.getenv("ELASTICSEARCH_PASSWORD"),
-        request_timeout=int(os.getenv("ELASTICSEARCH_REQUEST_TIMEOUT", "60")),
+        host=host or settings.database.elasticsearch_host,
+        port=port or settings.database.elasticsearch_port,
+        username=username or settings.database.elasticsearch_username,
+        password=password or settings.database.elasticsearch_password,
+        request_timeout=settings.database.elasticsearch_request_timeout,
     )

@@ -125,6 +125,40 @@ class DatabaseSettings(BaseSettings):
         default=False,
         description="Use SSL for TerminusDB connections"
     )
+
+    # TerminusDB client timeout tuning (httpx)
+    terminus_connect_timeout_seconds: float = Field(
+        default=10.0,
+        description="TerminusDB connect timeout seconds (TERMINUS_CONNECT_TIMEOUT_SECONDS)",
+    )
+    terminus_read_timeout_seconds: float = Field(
+        default=120.0,
+        description="TerminusDB read timeout seconds (TERMINUS_READ_TIMEOUT_SECONDS)",
+    )
+    terminus_write_timeout_seconds: float = Field(
+        default=120.0,
+        description="TerminusDB write timeout seconds (TERMINUS_WRITE_TIMEOUT_SECONDS)",
+    )
+    terminus_pool_timeout_seconds: float = Field(
+        default=5.0,
+        description="TerminusDB connection pool timeout seconds (TERMINUS_POOL_TIMEOUT_SECONDS)",
+    )
+
+    # TerminusDB retry tuning (version control / commits)
+    terminus_commits_retry_attempts: int = Field(
+        default=5,
+        description="Retry attempts for commit-related operations (TERMINUS_COMMITS_RETRY_ATTEMPTS)",
+    )
+    terminus_commits_retry_delay_seconds: float = Field(
+        default=0.4,
+        description="Base delay seconds for commit retries (TERMINUS_COMMITS_RETRY_DELAY_SECONDS)",
+    )
+
+    # Query guardrails
+    query_max_scan_docs: int = Field(
+        default=5000,
+        description="Max scan docs for unsafe queries (QUERY_MAX_SCAN_DOCS)",
+    )
     
     # PostgreSQL Configuration
     postgres_host: str = Field(
@@ -183,6 +217,14 @@ class DatabaseSettings(BaseSettings):
         default=None,
         description="Elasticsearch password"
     )
+    elasticsearch_default_shards: int = Field(
+        default=1,
+        description="Default number of shards for new indices (ELASTICSEARCH_DEFAULT_SHARDS)",
+    )
+    elasticsearch_default_replicas: Optional[int] = Field(
+        default=None,
+        description="Default number of replicas for new indices (ELASTICSEARCH_DEFAULT_REPLICAS)",
+    )
     
     # Kafka Configuration
     kafka_host: str = Field(
@@ -197,6 +239,21 @@ class DatabaseSettings(BaseSettings):
         default=None,
         description="Kafka bootstrap servers (overrides host:port)"
     )
+
+    @field_validator("elasticsearch_default_shards", mode="before")
+    @classmethod
+    def clamp_elasticsearch_default_shards(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=1, min_value=1, max_value=1000)
+
+    @field_validator("elasticsearch_default_replicas", mode="before")
+    @classmethod
+    def clamp_elasticsearch_default_replicas(cls, v):  # noqa: ANN001
+        if v is None:
+            return None
+        raw = str(v).strip()
+        if not raw:
+            return None
+        return _clamp_int(raw, default=0, min_value=0, max_value=1000)
     
     @property
     def postgres_url(self) -> str:
@@ -319,8 +376,8 @@ class ServiceSettings(BaseSettings):
         description="Enable CORS"
     )
     cors_origins: str = Field(
-        default='["http://localhost:3000", "http://localhost:3001", "http://localhost:8080"]',
-        description="CORS allowed origins (JSON array string)"
+        default="",
+        description="CORS allowed origins (JSON array string; CORS_ORIGINS). When unset, defaults apply."
     )
     enable_debug_endpoints: bool = Field(
         default=False,
@@ -416,9 +473,12 @@ class ServiceSettings(BaseSettings):
     @property
     def cors_origins_list(self) -> List[str]:
         """Parse CORS origins from JSON string"""
+        value = str(self.cors_origins or "").strip()
+        if not value:
+            return []
         try:
             import json
-            return json.loads(self.cors_origins)
+            return json.loads(value)
         except (json.JSONDecodeError, TypeError):
             return ["*"]  # Fallback to allow all origins
 
@@ -482,6 +542,10 @@ class LLMSettings(BaseSettings):
     circuit_open_seconds: float = Field(default=30.0, description="Circuit breaker open seconds (LLM_CIRCUIT_OPEN_SECONDS)")
 
     pricing_json: Optional[str] = Field(default=None, description="Pricing table JSON (LLM_PRICING_JSON)")
+    mock_json: Optional[str] = Field(
+        default=None,
+        description="Mock provider JSON payload (LLM_MOCK_JSON)",
+    )
 
     @field_validator(
         "provider",
@@ -494,6 +558,7 @@ class LLMSettings(BaseSettings):
         "google_base_url",
         "google_api_key",
         "pricing_json",
+        "mock_json",
         "provider_policies_json",
         mode="before",
     )
@@ -528,6 +593,26 @@ class LLMSettings(BaseSettings):
     def google_api_key_effective(self) -> Optional[str]:
         return self.google_api_key or self.api_key
 
+    def mock_json_for_task(self, task: Optional[str]) -> Optional[str]:
+        """
+        Resolve the mock provider JSON payload for a task.
+
+        Priority:
+        1) `LLM_MOCK_JSON_<TASK>` where TASK is uppercased and normalized
+        2) `LLM_MOCK_JSON`
+        """
+        safe_task = str(task or "").strip()
+        if safe_task:
+            import re
+
+            token = re.sub(r"[^A-Z0-9]+", "_", safe_task.upper()).strip("_")
+            if token:
+                value = (os.getenv(f"LLM_MOCK_JSON_{token}") or "").strip()
+                if value:
+                    return value
+        fallback = str(self.mock_json or "").strip()
+        return fallback or None
+
 
 class ObservabilitySettings(BaseSettings):
     """Logging/observability settings (shared across services/workers)."""
@@ -547,6 +632,10 @@ class ObservabilitySettings(BaseSettings):
         default=None,
         description="Service name override (SERVICE_NAME)",
     )
+    hostname: Optional[str] = Field(
+        default=None,
+        description="Hostname override (HOSTNAME)",
+    )
     enable_lineage: bool = Field(
         default=True,
         description="Enable lineage store integration (ENABLE_LINEAGE)",
@@ -563,6 +652,71 @@ class ObservabilitySettings(BaseSettings):
         default=None,
         description="Code SHA for audit/tracing (CODE_SHA; fallback GIT_SHA/COMMIT_SHA)",
     )
+    source_version: Optional[str] = Field(
+        default=None,
+        description="Build/source version identifier (SOURCE_VERSION)",
+    )
+    enterprise_catalog_ref: Optional[str] = Field(
+        default=None,
+        description="Enterprise error catalog ref (ENTERPRISE_CATALOG_REF)",
+    )
+
+    # OpenTelemetry configuration (used by tracing/metrics helpers)
+    otel_service_name: Optional[str] = Field(
+        default=None,
+        description="OpenTelemetry service name (OTEL_SERVICE_NAME)",
+    )
+    otel_service_version: str = Field(
+        default="1.0.0",
+        description="OpenTelemetry service version (OTEL_SERVICE_VERSION)",
+    )
+    otel_environment: Optional[str] = Field(
+        default=None,
+        description="OpenTelemetry environment override (OTEL_ENVIRONMENT)",
+    )
+    otel_exporter_otlp_endpoint: Optional[str] = Field(
+        default=None,
+        description="OTLP exporter endpoint (OTEL_EXPORTER_OTLP_ENDPOINT)",
+    )
+    jaeger_endpoint: str = Field(
+        default="localhost:14250",
+        description="Jaeger exporter endpoint (JAEGER_ENDPOINT)",
+    )
+    otel_trace_sample_rate: float = Field(
+        default=1.0,
+        description="Trace sample rate 0.0-1.0 (OTEL_TRACE_SAMPLE_RATE)",
+    )
+    otel_export_console: bool = Field(
+        default=False,
+        description="Export spans to console (OTEL_EXPORT_CONSOLE)",
+    )
+    otel_export_otlp: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Export spans via OTLP (OTEL_EXPORT_OTLP). "
+            "If unset, enabled when OTEL_EXPORTER_OTLP_ENDPOINT is set."
+        ),
+    )
+    otel_export_jaeger: bool = Field(
+        default=False,
+        description="Export spans via Jaeger (OTEL_EXPORT_JAEGER)",
+    )
+    otel_enable_tracing: bool = Field(
+        default=True,
+        description="Enable tracing (OTEL_ENABLE_TRACING)",
+    )
+    otel_instrument_asyncio: bool = Field(
+        default=False,
+        description="Enable asyncio instrumentation (OTEL_INSTRUMENT_ASYNCIO)",
+    )
+    otel_enable_metrics: bool = Field(
+        default=False,
+        description="Enable metrics (OTEL_ENABLE_METRICS)",
+    )
+    otel_metric_export_interval_seconds: float = Field(
+        default=10.0,
+        description="Metrics export interval seconds (OTEL_METRIC_EXPORT_INTERVAL_SECONDS)",
+    )
 
     @field_validator("log_level", mode="before")
     @classmethod
@@ -573,6 +727,12 @@ class ObservabilitySettings(BaseSettings):
     @field_validator("service_name", mode="before")
     @classmethod
     def normalize_service_name(cls, v):  # noqa: ANN001
+        value = str(v or "").strip()
+        return value or None
+
+    @field_validator("hostname", mode="before")
+    @classmethod
+    def normalize_hostname(cls, v):  # noqa: ANN001
         value = str(v or "").strip()
         return value or None
 
@@ -597,6 +757,159 @@ class ObservabilitySettings(BaseSettings):
             if value:
                 return value
         return v
+
+    @field_validator("source_version", mode="before")
+    @classmethod
+    def normalize_source_version(cls, v):  # noqa: ANN001
+        value = str(v or "").strip()
+        return value or None
+
+    @field_validator("enterprise_catalog_ref", mode="before")
+    @classmethod
+    def normalize_enterprise_catalog_ref(cls, v):  # noqa: ANN001
+        value = str(v or "").strip()
+        return value or None
+
+    @field_validator("otel_service_name", mode="before")
+    @classmethod
+    def normalize_otel_service_name(cls, v):  # noqa: ANN001
+        value = str(v or "").strip()
+        return value or None
+
+    @field_validator("otel_service_version", mode="before")
+    @classmethod
+    def normalize_otel_service_version(cls, v):  # noqa: ANN001
+        value = str(v or "").strip()
+        return value or "1.0.0"
+
+    @field_validator("otel_environment", mode="before")
+    @classmethod
+    def normalize_otel_environment(cls, v):  # noqa: ANN001
+        value = str(v or "").strip()
+        return value or None
+
+    @field_validator("otel_exporter_otlp_endpoint", mode="before")
+    @classmethod
+    def normalize_otel_exporter_otlp_endpoint(cls, v):  # noqa: ANN001
+        value = str(v or "").strip()
+        return value or None
+
+    @field_validator("jaeger_endpoint", mode="before")
+    @classmethod
+    def normalize_jaeger_endpoint(cls, v):  # noqa: ANN001
+        value = str(v or "").strip()
+        return value or "localhost:14250"
+
+    @field_validator("otel_trace_sample_rate", mode="before")
+    @classmethod
+    def clamp_trace_sample_rate(cls, v):  # noqa: ANN001
+        try:
+            value = float(v)
+        except Exception:
+            return 1.0
+        if value < 0.0:
+            return 0.0
+        if value > 1.0:
+            return 1.0
+        return value
+
+    @field_validator("otel_export_otlp", mode="before")
+    @classmethod
+    def parse_otel_export_otlp(cls, v):  # noqa: ANN001
+        return _parse_boolish(v)
+
+    @field_validator("otel_metric_export_interval_seconds", mode="before")
+    @classmethod
+    def clamp_metric_export_interval_seconds(cls, v):  # noqa: ANN001
+        try:
+            value = float(v)
+        except Exception:
+            return 10.0
+        return max(1.0, min(value, 3600.0))
+
+    @property
+    def service_name_effective(self) -> str:
+        return (
+            (self.service_name or "").strip()
+            or (self.otel_service_name or "").strip()
+            or "spice-harvester"
+        )
+
+    @property
+    def enterprise_catalog_ref_effective(self) -> str:
+        return (
+            (self.enterprise_catalog_ref or "").strip()
+            or (self.code_sha or "").strip()
+            or (self.source_version or "").strip()
+            or (self.otel_service_version or "").strip()
+            or ""
+        )
+
+    @property
+    def otel_export_otlp_effective(self) -> bool:
+        if self.otel_export_otlp is not None:
+            return bool(self.otel_export_otlp)
+        return bool((self.otel_exporter_otlp_endpoint or "").strip())
+
+
+class GraphQuerySettings(BaseSettings):
+    """Graph query guardrails (graph federation)."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="GRAPH_QUERY_",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    max_hops: int = Field(default=10, description="Max hops allowed (GRAPH_QUERY_MAX_HOPS)")
+    max_limit: int = Field(default=1000, description="Max limit allowed (GRAPH_QUERY_MAX_LIMIT)")
+    max_paths: int = Field(default=2000, description="Max paths cap (GRAPH_QUERY_MAX_PATHS)")
+    enforce_semantics: bool = Field(default=True, description="Enforce semantics (GRAPH_QUERY_ENFORCE_SEMANTICS)")
+
+    @field_validator("max_hops", mode="before")
+    @classmethod
+    def clamp_max_hops(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=10, min_value=1, max_value=1000)
+
+    @field_validator("max_limit", mode="before")
+    @classmethod
+    def clamp_max_limit(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=1000, min_value=1, max_value=1_000_000)
+
+    @field_validator("max_paths", mode="before")
+    @classmethod
+    def clamp_max_paths(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=2000, min_value=1, max_value=1_000_000)
+
+
+class FeatureFlagsSettings(BaseSettings):
+    """Feature flags / opt-in endpoints."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    enable_pull_requests: bool = Field(
+        default=False,
+        description="Enable pull request endpoints (ENABLE_PULL_REQUESTS)",
+    )
+    enable_pipeline_control_plane_events: bool = Field(
+        default=True,
+        description="Enable pipeline control-plane events (ENABLE_PIPELINE_CONTROL_PLANE_EVENTS)",
+    )
+    enable_sync_database_create_fallback: bool = Field(
+        default=True,
+        description="Enable synchronous database-create fallback (ENABLE_SYNC_DATABASE_CREATE_FALLBACK)",
+    )
+    enable_oms_rollback: bool = Field(
+        default=False,
+        description="Enable OMS rollback endpoints (ENABLE_OMS_ROLLBACK)",
+    )
 
 
 class PipelineSettings(BaseSettings):
@@ -666,6 +979,10 @@ class PipelineSettings(BaseSettings):
         default=True,
         description="Enable Spark ANSI mode (PIPELINE_SPARK_ANSI_ENABLED)",
     )
+    artifact_path: str = Field(
+        default="data/pipeline_artifacts",
+        description="Local pipeline artifact path root (PIPELINE_ARTIFACT_PATH)",
+    )
 
     # Worker identity / retries
     jobs_group: str = Field(
@@ -707,6 +1024,7 @@ class PipelineSettings(BaseSettings):
         "protected_branches",
         "fallback_branches",
         "jobs_group",
+        "artifact_path",
         "worker_handler",
         "worker_name",
         mode="before",
@@ -794,6 +1112,105 @@ class PipelineSettings(BaseSettings):
         if "main" not in branches:
             branches.append("main")
         return branches
+
+
+class OntologySettings(BaseSettings):
+    """Ontology API + linter governance settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="ONTOLOGY_",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    protected_branches: str = Field(
+        default="main,master,production,prod",
+        description="Protected branches (ONTOLOGY_PROTECTED_BRANCHES)",
+    )
+    require_proposals: bool = Field(
+        default=True,
+        description="Require proposals on protected branches (ONTOLOGY_REQUIRE_PROPOSALS)",
+    )
+    validate_relationships: bool = Field(
+        default=True,
+        description="Validate relationship structure (ONTOLOGY_VALIDATE_RELATIONSHIPS)",
+    )
+    resource_strict: bool = Field(
+        default=True,
+        description="Strict resource checks (ONTOLOGY_RESOURCE_STRICT)",
+    )
+    require_health_gate: bool = Field(
+        default=True,
+        description="Require health gate for destructive ops (ONTOLOGY_REQUIRE_HEALTH_GATE)",
+    )
+
+    # Linter strictness defaults (domain-neutral)
+    require_primary_key: bool = Field(
+        default=True,
+        description="Require primary key (ONTOLOGY_REQUIRE_PRIMARY_KEY)",
+    )
+    allow_implicit_primary_key: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Allow implicit primary key (ONTOLOGY_ALLOW_IMPLICIT_PRIMARY_KEY). "
+            "When unset, defaults to false in production and on protected branches requiring proposals."
+        ),
+    )
+    require_title_key: bool = Field(
+        default=True,
+        description="Require title key (ONTOLOGY_REQUIRE_TITLE_KEY)",
+    )
+    allow_implicit_title_key: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Allow implicit title key (ONTOLOGY_ALLOW_IMPLICIT_TITLE_KEY). "
+            "When unset, defaults to false in production and on protected branches requiring proposals."
+        ),
+    )
+    block_event_like_class_names: bool = Field(
+        default=False,
+        description="Block event-like class names (ONTOLOGY_BLOCK_EVENT_LIKE_CLASS)",
+    )
+    enforce_snake_case_fields: bool = Field(
+        default=False,
+        description="Enforce snake_case field names (ONTOLOGY_ENFORCE_SNAKE_CASE_FIELDS)",
+    )
+
+    @field_validator("protected_branches", mode="before")
+    @classmethod
+    def strip_protected_branches(cls, v):  # noqa: ANN001
+        return str(v or "").strip() or "main,master,production,prod"
+
+    @field_validator("allow_implicit_primary_key", "allow_implicit_title_key", mode="before")
+    @classmethod
+    def parse_optional_bool(cls, v):  # noqa: ANN001
+        return _parse_boolish(v)
+
+    @property
+    def protected_branches_set(self) -> set[str]:
+        raw = str(self.protected_branches or "").strip()
+        branches = {b.strip() for b in raw.split(",") if b.strip()}
+        return branches or {"main", "master", "production", "prod"}
+
+    def allow_implicit_primary_key_effective(self, *, is_production: bool, branch: Optional[str] = None) -> bool:
+        if self.allow_implicit_primary_key is not None:
+            return bool(self.allow_implicit_primary_key)
+        if is_production:
+            return False
+        if self.require_proposals and branch and branch in self.protected_branches_set:
+            return False
+        return True
+
+    def allow_implicit_title_key_effective(self, *, is_production: bool, branch: Optional[str] = None) -> bool:
+        if self.allow_implicit_title_key is not None:
+            return bool(self.allow_implicit_title_key)
+        if is_production:
+            return False
+        if self.require_proposals and branch and branch in self.protected_branches_set:
+            return False
+        return True
 
 
 class AgentRuntimeSettings(BaseSettings):
@@ -1068,6 +1485,31 @@ class ClientSettings(BaseSettings):
         return v
 
 
+class MCPSettings(BaseSettings):
+    """MCP integration settings (BFF/agent)."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="MCP_",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    config_path: Optional[str] = Field(
+        default=None,
+        description="Path to MCP config JSON (MCP_CONFIG_PATH)",
+    )
+
+    @field_validator("config_path", mode="before")
+    @classmethod
+    def strip_config_path(cls, v):  # noqa: ANN001
+        if v is None:
+            return None
+        value = str(v).strip()
+        return value or None
+
+
 class AuthSettings(BaseSettings):
     """Service auth configuration (BFF/OMS)."""
 
@@ -1131,6 +1573,10 @@ class AuthSettings(BaseSettings):
     bff_require_db_scope: bool = Field(
         default=False,
         description="Require db scope headers for BFF writes (BFF_REQUIRE_DB_SCOPE)",
+    )
+    bff_require_db_access: Optional[bool] = Field(
+        default=None,
+        description="Require database access roles for BFF writes (BFF_REQUIRE_DB_ACCESS)",
     )
 
     # Disable-approval flags (fail-closed)
@@ -1476,6 +1922,22 @@ class StorageSettings(BaseSettings):
         default=None,
         description="CA bundle path for lakeFS S3 gateway TLS verification (LAKEFS_S3_SSL_CA_BUNDLE).",
     )
+    lakefs_client_timeout_seconds: float = Field(
+        default=120.0,
+        description="lakeFS REST client timeout seconds (LAKEFS_CLIENT_TIMEOUT_SECONDS; fallback LAKEFS_TIMEOUT_SECONDS)",
+    )
+    lakefs_credentials_source: Optional[str] = Field(
+        default=None,
+        description="Where to load lakeFS credentials from (LAKEFS_CREDENTIALS_SOURCE: env|db)",
+    )
+    lakefs_service_principal: Optional[str] = Field(
+        default=None,
+        description="Service principal identifier for lakeFS credentials (LAKEFS_SERVICE_PRINCIPAL)",
+    )
+    lakefs_credentials_encryption_key: Optional[str] = Field(
+        default=None,
+        description="Fernet key for encrypting lakeFS secrets in Postgres (LAKEFS_CREDENTIALS_ENCRYPTION_KEY)",
+    )
 
     lakefs_raw_repository: str = Field(
         default="raw-datasets",
@@ -1495,6 +1957,32 @@ class StorageSettings(BaseSettings):
         default="instance-events",
         description="S3 bucket for instance events"
     )
+
+    # Local SQLite / filesystem paths
+    label_mappings_db_path: str = Field(
+        default="data/label_mappings.db",
+        description="SQLite path for label mappings (LABEL_MAPPINGS_DB_PATH)",
+    )
+
+    @field_validator("lakefs_client_timeout_seconds", mode="before")
+    @classmethod
+    def clamp_lakefs_client_timeout(cls, v):  # noqa: ANN001
+        if os.getenv("LAKEFS_CLIENT_TIMEOUT_SECONDS") not in (None, ""):
+            return v
+        fallback = (os.getenv("LAKEFS_TIMEOUT_SECONDS") or "").strip()
+        return fallback or v
+
+    @field_validator("lakefs_credentials_source", mode="before")
+    @classmethod
+    def normalize_lakefs_credentials_source(cls, v):  # noqa: ANN001
+        value = str(v or "").strip().lower()
+        if not value:
+            return None
+        if value in {"db", "database"}:
+            return "db"
+        if value in {"env", "environment"}:
+            return "env"
+        return None
     
     @property
     def use_ssl(self) -> bool:
@@ -1536,6 +2024,10 @@ class CacheSettings(BaseSettings):
         default=86400,
         description="Command status cache TTL in seconds"
     )
+    command_status_ttl_seconds: int = Field(
+        default=0,
+        description="TTL seconds for command status entries (COMMAND_STATUS_TTL_SECONDS; 0=never expire)",
+    )
     user_session_cache_ttl: int = Field(
         default=7200,
         description="User session cache TTL in seconds"
@@ -1548,6 +2040,11 @@ class CacheSettings(BaseSettings):
         default=1800,
         description="Mapping cache TTL in seconds"
     )
+
+    @field_validator("command_status_ttl_seconds", mode="before")
+    @classmethod
+    def clamp_command_status_ttl_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=0, min_value=0, max_value=31_536_000)
 
 
 class SecuritySettings(BaseSettings):
@@ -1578,6 +2075,16 @@ class SecuritySettings(BaseSettings):
     data_encryption_keys: str = Field(
         default="",
         description="Comma-separated base64/hex keys for encrypting stored data at rest (DATA_ENCRYPTION_KEYS)",
+    )
+
+    # Input sanitizer limits
+    input_sanitizer_max_dict_keys: int = Field(
+        default=100,
+        description="Max dict keys to sanitize (INPUT_SANITIZER_MAX_DICT_KEYS)",
+    )
+    input_sanitizer_max_list_items: int = Field(
+        default=1000,
+        description="Max list items to sanitize (INPUT_SANITIZER_MAX_LIST_ITEMS)",
     )
 
     # Input validation limits
@@ -1656,6 +2163,122 @@ class PerformanceSettings(BaseSettings):
         default=1048576,
         description="Max instance payload size in bytes (MAX_INSTANCE_SIZE)",
     )
+
+    # Postgres pool tuning (per-registry overrides)
+    action_log_pg_pool_min: int = Field(default=1, description="ACTION_LOG_PG_POOL_MIN")
+    action_log_pg_pool_max: int = Field(default=5, description="ACTION_LOG_PG_POOL_MAX")
+    action_log_pg_command_timeout_seconds: int = Field(
+        default=30,
+        description="ACTION_LOG_PG_COMMAND_TIMEOUT",
+        validation_alias="ACTION_LOG_PG_COMMAND_TIMEOUT",
+    )
+
+    connector_registry_pg_pool_min: int = Field(default=1, description="CONNECTOR_REGISTRY_PG_POOL_MIN")
+    connector_registry_pg_pool_max: int = Field(default=5, description="CONNECTOR_REGISTRY_PG_POOL_MAX")
+    connector_registry_pg_command_timeout_seconds: int = Field(
+        default=30,
+        description="CONNECTOR_REGISTRY_PG_COMMAND_TIMEOUT",
+        validation_alias="CONNECTOR_REGISTRY_PG_COMMAND_TIMEOUT",
+    )
+
+    dataset_registry_pg_pool_min: int = Field(default=1, description="DATASET_REGISTRY_PG_POOL_MIN")
+    dataset_registry_pg_pool_max: int = Field(default=5, description="DATASET_REGISTRY_PG_POOL_MAX")
+    dataset_registry_pg_command_timeout_seconds: int = Field(
+        default=30,
+        description="DATASET_REGISTRY_PG_COMMAND_TIMEOUT",
+        validation_alias="DATASET_REGISTRY_PG_COMMAND_TIMEOUT",
+    )
+
+    pipeline_registry_pg_pool_min: int = Field(default=1, description="PIPELINE_REGISTRY_PG_POOL_MIN")
+    pipeline_registry_pg_pool_max: int = Field(default=5, description="PIPELINE_REGISTRY_PG_POOL_MAX")
+    pipeline_registry_pg_command_timeout_seconds: int = Field(
+        default=30,
+        description="PIPELINE_REGISTRY_PG_COMMAND_TIMEOUT",
+        validation_alias="PIPELINE_REGISTRY_PG_COMMAND_TIMEOUT",
+    )
+
+    objectify_pg_pool_min: int = Field(default=1, description="OBJECTIFY_PG_POOL_MIN")
+    objectify_pg_pool_max: int = Field(default=5, description="OBJECTIFY_PG_POOL_MAX")
+    objectify_pg_command_timeout_seconds: int = Field(
+        default=30,
+        description="OBJECTIFY_PG_COMMAND_TIMEOUT",
+        validation_alias="OBJECTIFY_PG_COMMAND_TIMEOUT",
+    )
+
+    audit_pg_pool_min: int = Field(default=1, description="AUDIT_PG_POOL_MIN")
+    audit_pg_pool_max: int = Field(default=5, description="AUDIT_PG_POOL_MAX")
+    audit_pg_command_timeout_seconds: int = Field(
+        default=30,
+        description="AUDIT_PG_COMMAND_TIMEOUT",
+        validation_alias="AUDIT_PG_COMMAND_TIMEOUT",
+    )
+
+    lineage_pg_pool_min: int = Field(default=1, description="LINEAGE_PG_POOL_MIN")
+    lineage_pg_pool_max: int = Field(default=5, description="LINEAGE_PG_POOL_MAX")
+    lineage_pg_command_timeout_seconds: int = Field(
+        default=30,
+        description="LINEAGE_PG_COMMAND_TIMEOUT",
+        validation_alias="LINEAGE_PG_COMMAND_TIMEOUT",
+    )
+    lineage_latest_edges_max_ids: int = Field(default=5000, description="LINEAGE_LATEST_EDGES_MAX_IDS")
+
+    agg_seq_pg_pool_min: int = Field(default=1, description="AGG_SEQ_PG_POOL_MIN")
+    agg_seq_pg_pool_max: int = Field(default=5, description="AGG_SEQ_PG_POOL_MAX")
+    agg_seq_pg_command_timeout_seconds: int = Field(
+        default=30,
+        description="AGG_SEQ_PG_COMMAND_TIMEOUT",
+        validation_alias="AGG_SEQ_PG_COMMAND_TIMEOUT",
+    )
+
+    @field_validator(
+        "action_log_pg_pool_min",
+        "connector_registry_pg_pool_min",
+        "dataset_registry_pg_pool_min",
+        "pipeline_registry_pg_pool_min",
+        "objectify_pg_pool_min",
+        "audit_pg_pool_min",
+        "lineage_pg_pool_min",
+        "agg_seq_pg_pool_min",
+        mode="before",
+    )
+    @classmethod
+    def clamp_pg_pool_min(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=1, min_value=1, max_value=100)
+
+    @field_validator(
+        "action_log_pg_pool_max",
+        "connector_registry_pg_pool_max",
+        "dataset_registry_pg_pool_max",
+        "pipeline_registry_pg_pool_max",
+        "objectify_pg_pool_max",
+        "audit_pg_pool_max",
+        "lineage_pg_pool_max",
+        "agg_seq_pg_pool_max",
+        mode="before",
+    )
+    @classmethod
+    def clamp_pg_pool_max(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=5, min_value=1, max_value=500)
+
+    @field_validator(
+        "action_log_pg_command_timeout_seconds",
+        "connector_registry_pg_command_timeout_seconds",
+        "dataset_registry_pg_command_timeout_seconds",
+        "pipeline_registry_pg_command_timeout_seconds",
+        "objectify_pg_command_timeout_seconds",
+        "audit_pg_command_timeout_seconds",
+        "lineage_pg_command_timeout_seconds",
+        "agg_seq_pg_command_timeout_seconds",
+        mode="before",
+    )
+    @classmethod
+    def clamp_pg_command_timeout_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=30, min_value=1, max_value=3600)
+
+    @field_validator("lineage_latest_edges_max_ids", mode="before")
+    @classmethod
+    def clamp_lineage_latest_edges_max_ids(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=5000, min_value=1, max_value=5_000_000)
 
 
 class EventSourcingSettings(BaseSettings):
@@ -1945,6 +2568,113 @@ class ActionOutboxSettings(BaseSettings):
     @classmethod
     def clamp_batch_size(cls, v):  # noqa: ANN001
         return _clamp_int(v, default=100, min_value=1, max_value=10_000_000)
+
+
+class OntologyDeployOutboxSettings(BaseSettings):
+    """Ontology deployment outbox worker settings (OMS embedded worker)."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable ontology deploy outbox worker (ENABLE_ONTOLOGY_DEPLOY_OUTBOX_WORKER)",
+        validation_alias="ENABLE_ONTOLOGY_DEPLOY_OUTBOX_WORKER",
+    )
+    use_deployments_v2: bool = Field(
+        default=True,
+        description="Use deployments registry v2 (ONTOLOGY_DEPLOYMENTS_V2)",
+        validation_alias="ONTOLOGY_DEPLOYMENTS_V2",
+    )
+    poll_seconds: int = Field(
+        default=5,
+        description="Poll interval seconds (ONTOLOGY_DEPLOY_OUTBOX_POLL_SECONDS)",
+        validation_alias="ONTOLOGY_DEPLOY_OUTBOX_POLL_SECONDS",
+    )
+    batch_size: int = Field(
+        default=50,
+        description="Batch size (ONTOLOGY_DEPLOY_OUTBOX_BATCH)",
+        validation_alias="ONTOLOGY_DEPLOY_OUTBOX_BATCH",
+    )
+    claim_timeout_seconds: int = Field(
+        default=300,
+        description="Claim timeout seconds (ONTOLOGY_DEPLOY_OUTBOX_CLAIM_TIMEOUT_SECONDS)",
+        validation_alias="ONTOLOGY_DEPLOY_OUTBOX_CLAIM_TIMEOUT_SECONDS",
+    )
+    backoff_base_seconds: int = Field(
+        default=2,
+        description="Backoff base seconds (ONTOLOGY_DEPLOY_OUTBOX_BACKOFF_BASE_SECONDS)",
+        validation_alias="ONTOLOGY_DEPLOY_OUTBOX_BACKOFF_BASE_SECONDS",
+    )
+    backoff_max_seconds: int = Field(
+        default=60,
+        description="Backoff max seconds (ONTOLOGY_DEPLOY_OUTBOX_BACKOFF_MAX_SECONDS)",
+        validation_alias="ONTOLOGY_DEPLOY_OUTBOX_BACKOFF_MAX_SECONDS",
+    )
+    retention_days: int = Field(
+        default=7,
+        description="Retention days (ONTOLOGY_DEPLOY_OUTBOX_RETENTION_DAYS)",
+        validation_alias="ONTOLOGY_DEPLOY_OUTBOX_RETENTION_DAYS",
+    )
+    purge_interval_seconds: int = Field(
+        default=3600,
+        description="Purge interval seconds (ONTOLOGY_DEPLOY_OUTBOX_PURGE_INTERVAL_SECONDS)",
+        validation_alias="ONTOLOGY_DEPLOY_OUTBOX_PURGE_INTERVAL_SECONDS",
+    )
+    purge_limit: int = Field(
+        default=10_000,
+        description="Purge batch limit (ONTOLOGY_DEPLOY_OUTBOX_PURGE_LIMIT)",
+        validation_alias="ONTOLOGY_DEPLOY_OUTBOX_PURGE_LIMIT",
+    )
+    worker_id: Optional[str] = Field(
+        default=None,
+        description="Worker id override (ONTOLOGY_DEPLOY_OUTBOX_WORKER_ID)",
+        validation_alias="ONTOLOGY_DEPLOY_OUTBOX_WORKER_ID",
+    )
+
+    @field_validator("poll_seconds", mode="before")
+    @classmethod
+    def clamp_poll_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=5, min_value=1, max_value=3600)
+
+    @field_validator("batch_size", mode="before")
+    @classmethod
+    def clamp_batch_size(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=50, min_value=1, max_value=5000)
+
+    @field_validator("claim_timeout_seconds", mode="before")
+    @classmethod
+    def clamp_claim_timeout_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=300, min_value=0, max_value=86_400)
+
+    @field_validator("backoff_base_seconds", mode="before")
+    @classmethod
+    def clamp_backoff_base_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=2, min_value=1, max_value=300)
+
+    @field_validator("backoff_max_seconds", mode="before")
+    @classmethod
+    def clamp_backoff_max_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=60, min_value=1, max_value=3600)
+
+    @field_validator("retention_days", mode="before")
+    @classmethod
+    def clamp_retention_days(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=7, min_value=0, max_value=365)
+
+    @field_validator("purge_interval_seconds", mode="before")
+    @classmethod
+    def clamp_purge_interval_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=3600, min_value=300, max_value=86_400)
+
+    @field_validator("purge_limit", mode="before")
+    @classmethod
+    def clamp_purge_limit(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=10_000, min_value=1, max_value=100_000)
 
 
 class ConnectorSyncSettings(BaseSettings):
@@ -2259,6 +2989,11 @@ class IngestReconcilerSettings(BaseSettings):
         description="Max ingest rows per run (DATASET_INGEST_RECONCILER_LIMIT)",
         validation_alias="DATASET_INGEST_RECONCILER_LIMIT",
     )
+    lock_key: int = Field(
+        default=910214,
+        description="Postgres advisory lock key (DATASET_INGEST_RECONCILER_LOCK_KEY)",
+        validation_alias="DATASET_INGEST_RECONCILER_LOCK_KEY",
+    )
     alert_published_threshold: int = Field(
         default=1,
         description="Alert threshold for published count (INGEST_RECONCILER_ALERT_PUBLISHED_THRESHOLD)",
@@ -2309,6 +3044,11 @@ class IngestReconcilerSettings(BaseSettings):
     def clamp_limit(cls, v):  # noqa: ANN001
         return _clamp_int(v, default=200, min_value=1, max_value=5000)
 
+    @field_validator("lock_key", mode="before")
+    @classmethod
+    def clamp_lock_key(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=910214, min_value=1, max_value=2_000_000_000)
+
     @field_validator("alert_published_threshold", mode="before")
     @classmethod
     def clamp_alert_published_threshold(cls, v):  # noqa: ANN001
@@ -2345,11 +3085,145 @@ class DatasetIngestOutboxSettings(BaseSettings):
         description="Poll interval seconds (DATASET_INGEST_OUTBOX_POLL_SECONDS)",
         validation_alias="DATASET_INGEST_OUTBOX_POLL_SECONDS",
     )
+    flush_timeout_seconds: float = Field(
+        default=10.0,
+        description="Kafka flush timeout seconds (DATASET_INGEST_OUTBOX_FLUSH_TIMEOUT_SECONDS)",
+        validation_alias="DATASET_INGEST_OUTBOX_FLUSH_TIMEOUT_SECONDS",
+    )
+    backoff_base_seconds: int = Field(
+        default=2,
+        description="Retry backoff base seconds (DATASET_INGEST_OUTBOX_BACKOFF_BASE_SECONDS)",
+        validation_alias="DATASET_INGEST_OUTBOX_BACKOFF_BASE_SECONDS",
+    )
+    backoff_max_seconds: int = Field(
+        default=60,
+        description="Retry backoff max seconds (DATASET_INGEST_OUTBOX_BACKOFF_MAX_SECONDS)",
+        validation_alias="DATASET_INGEST_OUTBOX_BACKOFF_MAX_SECONDS",
+    )
+    max_retries: int = Field(
+        default=5,
+        description="Max retries before DLQ (DATASET_INGEST_OUTBOX_MAX_RETRIES)",
+        validation_alias="DATASET_INGEST_OUTBOX_MAX_RETRIES",
+    )
+    claim_timeout_seconds: int = Field(
+        default=300,
+        description="Claim timeout seconds (DATASET_INGEST_OUTBOX_CLAIM_TIMEOUT_SECONDS)",
+        validation_alias="DATASET_INGEST_OUTBOX_CLAIM_TIMEOUT_SECONDS",
+    )
+    worker_id: Optional[str] = Field(
+        default=None,
+        description="Worker id override (DATASET_INGEST_OUTBOX_WORKER_ID)",
+        validation_alias="DATASET_INGEST_OUTBOX_WORKER_ID",
+    )
+    purge_interval_seconds: int = Field(
+        default=3600,
+        description="Purge interval seconds (DATASET_INGEST_OUTBOX_PURGE_INTERVAL_SECONDS)",
+        validation_alias="DATASET_INGEST_OUTBOX_PURGE_INTERVAL_SECONDS",
+    )
+    retention_days: int = Field(
+        default=7,
+        description="Retention days (DATASET_INGEST_OUTBOX_RETENTION_DAYS)",
+        validation_alias="DATASET_INGEST_OUTBOX_RETENTION_DAYS",
+    )
+    purge_limit: int = Field(
+        default=10_000,
+        description="Purge batch limit (DATASET_INGEST_OUTBOX_PURGE_LIMIT)",
+        validation_alias="DATASET_INGEST_OUTBOX_PURGE_LIMIT",
+    )
+    enable_dlq: bool = Field(
+        default=True,
+        description="Enable DLQ publishing (ENABLE_DATASET_INGEST_OUTBOX_DLQ)",
+        validation_alias="ENABLE_DATASET_INGEST_OUTBOX_DLQ",
+    )
+    dlq_max_in_flight: int = Field(
+        default=5,
+        description="DLQ producer max in-flight requests (DATASET_INGEST_OUTBOX_MAX_IN_FLIGHT)",
+        validation_alias="DATASET_INGEST_OUTBOX_MAX_IN_FLIGHT",
+    )
+    dlq_delivery_timeout_ms: int = Field(
+        default=120_000,
+        description="DLQ producer delivery.timeout.ms (DATASET_INGEST_OUTBOX_DELIVERY_TIMEOUT_MS)",
+        validation_alias="DATASET_INGEST_OUTBOX_DELIVERY_TIMEOUT_MS",
+    )
+    dlq_request_timeout_ms: int = Field(
+        default=30_000,
+        description="DLQ producer request.timeout.ms (DATASET_INGEST_OUTBOX_REQUEST_TIMEOUT_MS)",
+        validation_alias="DATASET_INGEST_OUTBOX_REQUEST_TIMEOUT_MS",
+    )
+    dlq_retries: int = Field(
+        default=5,
+        description="DLQ producer retries (DATASET_INGEST_OUTBOX_RETRIES)",
+        validation_alias="DATASET_INGEST_OUTBOX_RETRIES",
+    )
 
     @field_validator("poll_seconds", mode="before")
     @classmethod
     def clamp_poll_seconds(cls, v):  # noqa: ANN001
         return _clamp_int(v, default=5, min_value=1, max_value=3600)
+
+    @field_validator("flush_timeout_seconds", mode="before")
+    @classmethod
+    def clamp_flush_timeout_seconds(cls, v):  # noqa: ANN001
+        try:
+            value = float(v)
+        except Exception:
+            return 10.0
+        return max(0.1, min(value, 600.0))
+
+    @field_validator("backoff_base_seconds", mode="before")
+    @classmethod
+    def clamp_backoff_base_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=2, min_value=1, max_value=300)
+
+    @field_validator("backoff_max_seconds", mode="before")
+    @classmethod
+    def clamp_backoff_max_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=60, min_value=1, max_value=3600)
+
+    @field_validator("max_retries", mode="before")
+    @classmethod
+    def clamp_max_retries(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=5, min_value=1, max_value=100)
+
+    @field_validator("claim_timeout_seconds", mode="before")
+    @classmethod
+    def clamp_claim_timeout_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=300, min_value=0, max_value=86_400)
+
+    @field_validator("purge_interval_seconds", mode="before")
+    @classmethod
+    def clamp_purge_interval_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=3600, min_value=300, max_value=86_400)
+
+    @field_validator("retention_days", mode="before")
+    @classmethod
+    def clamp_retention_days(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=7, min_value=0, max_value=365)
+
+    @field_validator("purge_limit", mode="before")
+    @classmethod
+    def clamp_purge_limit(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=10_000, min_value=1, max_value=100_000)
+
+    @field_validator("dlq_max_in_flight", mode="before")
+    @classmethod
+    def clamp_dlq_max_in_flight(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=5, min_value=1, max_value=5)
+
+    @field_validator("dlq_delivery_timeout_ms", mode="before")
+    @classmethod
+    def clamp_dlq_delivery_timeout_ms(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=120_000, min_value=10_000, max_value=1_800_000)
+
+    @field_validator("dlq_request_timeout_ms", mode="before")
+    @classmethod
+    def clamp_dlq_request_timeout_ms(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=30_000, min_value=5_000, max_value=600_000)
+
+    @field_validator("dlq_retries", mode="before")
+    @classmethod
+    def clamp_dlq_retries(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=5, min_value=0, max_value=100)
 
 
 class ObjectifyOutboxWorkerSettings(BaseSettings):
@@ -2377,6 +3251,66 @@ class ObjectifyOutboxWorkerSettings(BaseSettings):
         description="Batch size per scan (OBJECTIFY_OUTBOX_BATCH)",
         validation_alias="OBJECTIFY_OUTBOX_BATCH",
     )
+    flush_timeout_seconds: float = Field(
+        default=10.0,
+        description="Kafka flush timeout seconds (OBJECTIFY_OUTBOX_FLUSH_TIMEOUT_SECONDS)",
+        validation_alias="OBJECTIFY_OUTBOX_FLUSH_TIMEOUT_SECONDS",
+    )
+    backoff_base_seconds: int = Field(
+        default=2,
+        description="Retry backoff base seconds (OBJECTIFY_OUTBOX_BACKOFF_BASE_SECONDS)",
+        validation_alias="OBJECTIFY_OUTBOX_BACKOFF_BASE_SECONDS",
+    )
+    backoff_max_seconds: int = Field(
+        default=60,
+        description="Retry backoff max seconds (OBJECTIFY_OUTBOX_BACKOFF_MAX_SECONDS)",
+        validation_alias="OBJECTIFY_OUTBOX_BACKOFF_MAX_SECONDS",
+    )
+    claim_timeout_seconds: int = Field(
+        default=300,
+        description="Claim timeout seconds (OBJECTIFY_OUTBOX_CLAIM_TIMEOUT_SECONDS)",
+        validation_alias="OBJECTIFY_OUTBOX_CLAIM_TIMEOUT_SECONDS",
+    )
+    worker_id: Optional[str] = Field(
+        default=None,
+        description="Worker id override (OBJECTIFY_OUTBOX_WORKER_ID)",
+        validation_alias="OBJECTIFY_OUTBOX_WORKER_ID",
+    )
+    purge_interval_seconds: int = Field(
+        default=3600,
+        description="Purge interval seconds (OBJECTIFY_OUTBOX_PURGE_INTERVAL_SECONDS)",
+        validation_alias="OBJECTIFY_OUTBOX_PURGE_INTERVAL_SECONDS",
+    )
+    retention_days: int = Field(
+        default=7,
+        description="Retention days (OBJECTIFY_OUTBOX_RETENTION_DAYS)",
+        validation_alias="OBJECTIFY_OUTBOX_RETENTION_DAYS",
+    )
+    purge_limit: int = Field(
+        default=10_000,
+        description="Purge batch limit (OBJECTIFY_OUTBOX_PURGE_LIMIT)",
+        validation_alias="OBJECTIFY_OUTBOX_PURGE_LIMIT",
+    )
+    producer_max_in_flight: int = Field(
+        default=5,
+        description="Kafka producer max in-flight requests (OBJECTIFY_OUTBOX_MAX_IN_FLIGHT)",
+        validation_alias="OBJECTIFY_OUTBOX_MAX_IN_FLIGHT",
+    )
+    producer_delivery_timeout_ms: int = Field(
+        default=120_000,
+        description="Kafka producer delivery.timeout.ms (OBJECTIFY_OUTBOX_DELIVERY_TIMEOUT_MS)",
+        validation_alias="OBJECTIFY_OUTBOX_DELIVERY_TIMEOUT_MS",
+    )
+    producer_request_timeout_ms: int = Field(
+        default=30_000,
+        description="Kafka producer request.timeout.ms (OBJECTIFY_OUTBOX_REQUEST_TIMEOUT_MS)",
+        validation_alias="OBJECTIFY_OUTBOX_REQUEST_TIMEOUT_MS",
+    )
+    producer_retries: int = Field(
+        default=5,
+        description="Kafka producer retries (OBJECTIFY_OUTBOX_RETRIES)",
+        validation_alias="OBJECTIFY_OUTBOX_RETRIES",
+    )
 
     @field_validator("poll_seconds", mode="before")
     @classmethod
@@ -2387,6 +3321,65 @@ class ObjectifyOutboxWorkerSettings(BaseSettings):
     @classmethod
     def clamp_batch_size(cls, v):  # noqa: ANN001
         return _clamp_int(v, default=50, min_value=1, max_value=5000)
+
+    @field_validator("flush_timeout_seconds", mode="before")
+    @classmethod
+    def clamp_flush_timeout_seconds(cls, v):  # noqa: ANN001
+        try:
+            value = float(v)
+        except Exception:
+            return 10.0
+        return max(0.1, min(value, 600.0))
+
+    @field_validator("backoff_base_seconds", mode="before")
+    @classmethod
+    def clamp_backoff_base_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=2, min_value=1, max_value=300)
+
+    @field_validator("backoff_max_seconds", mode="before")
+    @classmethod
+    def clamp_backoff_max_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=60, min_value=1, max_value=3600)
+
+    @field_validator("claim_timeout_seconds", mode="before")
+    @classmethod
+    def clamp_claim_timeout_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=300, min_value=0, max_value=86_400)
+
+    @field_validator("purge_interval_seconds", mode="before")
+    @classmethod
+    def clamp_purge_interval_seconds(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=3600, min_value=300, max_value=86_400)
+
+    @field_validator("retention_days", mode="before")
+    @classmethod
+    def clamp_retention_days(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=7, min_value=0, max_value=365)
+
+    @field_validator("purge_limit", mode="before")
+    @classmethod
+    def clamp_purge_limit(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=10_000, min_value=1, max_value=100_000)
+
+    @field_validator("producer_max_in_flight", mode="before")
+    @classmethod
+    def clamp_producer_max_in_flight(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=5, min_value=1, max_value=5)
+
+    @field_validator("producer_delivery_timeout_ms", mode="before")
+    @classmethod
+    def clamp_producer_delivery_timeout_ms(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=120_000, min_value=10_000, max_value=1_800_000)
+
+    @field_validator("producer_request_timeout_ms", mode="before")
+    @classmethod
+    def clamp_producer_request_timeout_ms(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=30_000, min_value=5_000, max_value=600_000)
+
+    @field_validator("producer_retries", mode="before")
+    @classmethod
+    def clamp_producer_retries(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=5, min_value=0, max_value=100)
 
 
 class ObjectifyReconcilerSettings(BaseSettings):
@@ -2419,6 +3412,11 @@ class ObjectifyReconcilerSettings(BaseSettings):
         description="Stale cutoff seconds for QUEUED runs (OBJECTIFY_RECONCILER_ENQUEUED_STALE_SECONDS; 0=disabled)",
         validation_alias="OBJECTIFY_RECONCILER_ENQUEUED_STALE_SECONDS",
     )
+    lock_key: int = Field(
+        default=910215,
+        description="Postgres advisory lock key (OBJECTIFY_RECONCILER_LOCK_KEY)",
+        validation_alias="OBJECTIFY_RECONCILER_LOCK_KEY",
+    )
 
     @field_validator("poll_seconds", mode="before")
     @classmethod
@@ -2434,6 +3432,11 @@ class ObjectifyReconcilerSettings(BaseSettings):
     @classmethod
     def clamp_enqueued_stale_seconds(cls, v):  # noqa: ANN001
         return _clamp_int(v, default=900, min_value=0, max_value=86_400)
+
+    @field_validator("lock_key", mode="before")
+    @classmethod
+    def clamp_lock_key(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=910215, min_value=1, max_value=2_000_000_000)
 
     @property
     def enqueued_stale_seconds_effective(self) -> Optional[int]:
@@ -2683,6 +3686,7 @@ class WorkersSettings(BaseSettings):
 
     instance: InstanceWorkerSettings = Field(default_factory=InstanceWorkerSettings)
     ontology: OntologyWorkerSettings = Field(default_factory=OntologyWorkerSettings)
+    ontology_deploy_outbox: OntologyDeployOutboxSettings = Field(default_factory=OntologyDeployOutboxSettings)
     projection: ProjectionWorkerSettings = Field(default_factory=ProjectionWorkerSettings)
     action: ActionWorkerSettings = Field(default_factory=ActionWorkerSettings)
     action_outbox: ActionOutboxSettings = Field(default_factory=ActionOutboxSettings)
@@ -2809,6 +3813,21 @@ class GoogleSheetsSettings(BaseSettings):
         default=None,
         description="Google Sheets service account credentials path"
     )
+    oauth_client_id: Optional[str] = Field(
+        default=None,
+        validation_alias="GOOGLE_CLIENT_ID",
+        description="Google OAuth client id (GOOGLE_CLIENT_ID)",
+    )
+    oauth_client_secret: Optional[str] = Field(
+        default=None,
+        validation_alias="GOOGLE_CLIENT_SECRET",
+        description="Google OAuth client secret (GOOGLE_CLIENT_SECRET)",
+    )
+    oauth_redirect_uri: str = Field(
+        default="http://localhost:8002/api/v1/data-connectors/google-sheets/oauth/callback",
+        validation_alias="GOOGLE_REDIRECT_URI",
+        description="Google OAuth redirect URI (GOOGLE_REDIRECT_URI)",
+    )
 
     @field_validator("google_sheets_api_key", mode="before")
     @classmethod
@@ -2844,10 +3863,14 @@ class ApplicationSettings(BaseSettings):
     services: ServiceSettings = Field(default_factory=ServiceSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
+    graph_query: GraphQuerySettings = Field(default_factory=GraphQuerySettings)
+    features: FeatureFlagsSettings = Field(default_factory=FeatureFlagsSettings)
     pipeline: PipelineSettings = Field(default_factory=PipelineSettings)
+    ontology: OntologySettings = Field(default_factory=OntologySettings)
     agent: AgentRuntimeSettings = Field(default_factory=AgentRuntimeSettings)
     agent_plan: AgentPlanSettings = Field(default_factory=AgentPlanSettings)
     clients: ClientSettings = Field(default_factory=ClientSettings)
+    mcp: MCPSettings = Field(default_factory=MCPSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     rate_limit: RateLimitSettings = Field(default_factory=RateLimitSettings)
     messaging: MessagingSettings = Field(default_factory=MessagingSettings)
@@ -2898,6 +3921,11 @@ class ApplicationSettings(BaseSettings):
     def is_test(self) -> bool:
         """Check if running in test mode"""
         return self.environment == Environment.TEST
+
+    @property
+    def is_pytest(self) -> bool:
+        """Check if running under pytest (PYTEST_CURRENT_TEST set)."""
+        return bool(os.environ.get("PYTEST_CURRENT_TEST"))
 
 
 # This replaces all scattered ServiceConfig() and AppConfig() instantiations
