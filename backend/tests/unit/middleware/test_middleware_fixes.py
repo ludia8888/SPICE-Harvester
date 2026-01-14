@@ -233,12 +233,71 @@ def test_bff_agent_tool_policy_enforced_via_tool_registry():
         async def get_tool_policy(self, *, tool_id: str):  # noqa: ANN001
             return self._policy.get(tool_id)
 
+    class StubAgentRegistry:
+        def __init__(self):  # noqa: D107
+            self._store = {}
+
+        async def get_tool_idempotency(self, *, tenant_id: str, idempotency_key: str):  # noqa: ANN001
+            return self._store.get((tenant_id, idempotency_key))
+
+        async def begin_tool_idempotency(  # noqa: ANN001
+            self,
+            *,
+            tenant_id: str,
+            idempotency_key: str,
+            tool_id: str,
+            request_digest: str,
+            started_at=None,
+        ):
+            key = (tenant_id, idempotency_key)
+            existing = self._store.get(key)
+            if existing:
+                return existing, False
+            record = SimpleNamespace(
+                tenant_id=tenant_id,
+                idempotency_key=idempotency_key,
+                tool_id=tool_id,
+                request_digest=request_digest,
+                status="IN_PROGRESS",
+                response_status=None,
+                response_body=None,
+                error=None,
+            )
+            self._store[key] = record
+            return record, True
+
+        async def finalize_tool_idempotency(  # noqa: ANN001
+            self,
+            *,
+            tenant_id: str,
+            idempotency_key: str,
+            tool_id: str,
+            request_digest: str,
+            response_status,
+            response_body,
+            error=None,
+            finished_at=None,
+        ):
+            key = (tenant_id, idempotency_key)
+            record = self._store.get(key)
+            if not record or record.tool_id != tool_id or record.request_digest != request_digest:
+                return None
+            record.status = "COMPLETED"
+            record.response_status = response_status
+            record.response_body = response_body
+            record.error = error
+            return record
+
     class StubContainer:
-        def __init__(self, registry):  # noqa: ANN001
-            self._registry = registry
+        def __init__(self, *, tool_registry, agent_registry):  # noqa: ANN001
+            self._tool_registry = tool_registry
+            self._agent_registry = agent_registry
 
         def get_agent_tool_registry(self):  # noqa: ANN001
-            return self._registry
+            return self._tool_registry
+
+        def get_agent_registry(self):  # noqa: ANN001
+            return self._agent_registry
 
     now = datetime.now(timezone.utc)
     policy = AgentToolPolicyRecord(
@@ -262,7 +321,10 @@ def test_bff_agent_tool_policy_enforced_via_tool_registry():
         USER_JWT_HS256_SECRET="jwt-secret",
     ):
         app = FastAPI()
-        app.state.bff_container = StubContainer(StubToolRegistry({"pipelines.build": policy}))
+        app.state.bff_container = StubContainer(
+            tool_registry=StubToolRegistry({"pipelines.build": policy}),
+            agent_registry=StubAgentRegistry(),
+        )
         install_bff_auth_middleware(app)
 
         @app.post("/api/v1/pipelines/{pipeline_id}/build")
@@ -452,3 +514,147 @@ def test_bff_agent_tool_policy_enforces_session_enabled_tools_and_abac():
             },
         )
         assert resp.status_code == 403
+
+
+@pytest.mark.unit
+def test_bff_agent_tool_idempotency_replays_without_reexecution():
+    user_token = jwt.encode(
+        {"sub": "user-1", "roles": ["Owner"], "tenant_id": "tenant-1"},
+        "jwt-secret",
+        algorithm="HS256",
+    )
+
+    class StubToolRegistry:
+        def __init__(self, policy):  # noqa: ANN001
+            self._policy = policy
+
+        async def get_tool_policy(self, *, tool_id: str):  # noqa: ANN001
+            return self._policy.get(tool_id)
+
+    class StubAgentRegistry:
+        def __init__(self):  # noqa: D107
+            self._store = {}
+
+        async def get_tool_idempotency(self, *, tenant_id: str, idempotency_key: str):  # noqa: ANN001
+            return self._store.get((tenant_id, idempotency_key))
+
+        async def begin_tool_idempotency(  # noqa: ANN001
+            self,
+            *,
+            tenant_id: str,
+            idempotency_key: str,
+            tool_id: str,
+            request_digest: str,
+            started_at=None,
+        ):
+            key = (tenant_id, idempotency_key)
+            existing = self._store.get(key)
+            if existing:
+                return existing, False
+            record = SimpleNamespace(
+                tenant_id=tenant_id,
+                idempotency_key=idempotency_key,
+                tool_id=tool_id,
+                request_digest=request_digest,
+                status="IN_PROGRESS",
+                response_status=None,
+                response_body=None,
+                error=None,
+            )
+            self._store[key] = record
+            return record, True
+
+        async def finalize_tool_idempotency(  # noqa: ANN001
+            self,
+            *,
+            tenant_id: str,
+            idempotency_key: str,
+            tool_id: str,
+            request_digest: str,
+            response_status,
+            response_body,
+            error=None,
+            finished_at=None,
+        ):
+            key = (tenant_id, idempotency_key)
+            record = self._store.get(key)
+            if not record or record.tool_id != tool_id or record.request_digest != request_digest:
+                return None
+            record.status = "COMPLETED"
+            record.response_status = response_status
+            record.response_body = response_body
+            record.error = error
+            return record
+
+    class StubContainer:
+        def __init__(self, *, tool_registry, agent_registry):  # noqa: ANN001
+            self._tool_registry = tool_registry
+            self._agent_registry = agent_registry
+
+        def get_agent_tool_registry(self):  # noqa: ANN001
+            return self._tool_registry
+
+        def get_agent_registry(self):  # noqa: ANN001
+            return self._agent_registry
+
+    now = datetime.now(timezone.utc)
+    policy = AgentToolPolicyRecord(
+        tool_id="pipelines.build",
+        method="POST",
+        path="/api/v1/pipelines/{pipeline_id}/build",
+        risk_level="write",
+        requires_approval=True,
+        requires_idempotency_key=True,
+        status="ACTIVE",
+        roles=["Owner"],
+        max_payload_bytes=200000,
+        created_at=now,
+        updated_at=now,
+    )
+
+    with _set_env(
+        BFF_REQUIRE_AUTH="true",
+        BFF_AGENT_TOKEN="agent-secret",
+        USER_JWT_ENABLED="true",
+        USER_JWT_HS256_SECRET="jwt-secret",
+    ):
+        app = FastAPI()
+        agent_registry = StubAgentRegistry()
+        app.state.bff_container = StubContainer(
+            tool_registry=StubToolRegistry({"pipelines.build": policy}),
+            agent_registry=agent_registry,
+        )
+        install_bff_auth_middleware(app)
+
+        counter = {"calls": 0}
+
+        @app.post("/api/v1/pipelines/{pipeline_id}/build")
+        async def build(pipeline_id: str):  # noqa: ANN001
+            counter["calls"] += 1
+            return {"pipeline_id": pipeline_id, "calls": counter["calls"]}
+
+        client = TestClient(app)
+
+        headers = {
+            "X-Admin-Token": "agent-secret",
+            "X-Delegated-Authorization": f"Bearer {user_token}",
+            "X-Agent-Tool-ID": "pipelines.build",
+            "X-Agent-Tool-Run-ID": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            "Idempotency-Key": "unit-test-idem-1",
+        }
+
+        resp1 = client.post("/api/v1/pipelines/123/build", headers=headers, json={"x": 1})
+        assert resp1.status_code == 200
+        assert resp1.json()["calls"] == 1
+        assert counter["calls"] == 1
+
+        # Same idempotency key => replay (no re-execution).
+        resp2 = client.post("/api/v1/pipelines/123/build", headers=headers, json={"x": 1})
+        assert resp2.status_code == 200
+        assert resp2.json()["calls"] == 1
+        assert counter["calls"] == 1
+
+        # Same idempotency key with different request => conflict.
+        resp3 = client.post("/api/v1/pipelines/123/build", headers=headers, json={"x": 2})
+        assert resp3.status_code == 409
+        assert counter["calls"] == 1

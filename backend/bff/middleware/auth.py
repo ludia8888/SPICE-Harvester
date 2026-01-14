@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import hmac
+import json
 import logging
 import re
 import time
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import FastAPI, Request, WebSocket, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from shared.config.settings import get_settings
 from shared.errors.error_envelope import build_error_envelope
@@ -15,6 +17,7 @@ from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.security.auth_utils import extract_presented_token, is_exempt_path
 from shared.security.user_context import UserPrincipal, UserTokenError, extract_bearer_token, verify_user_token
 from shared.services.agent_tool_registry import AgentToolPolicyRecord
+from shared.utils.llm_safety import digest_for_audit
 
 _EXEMPT_PATHS_DEFAULT = (
     "/api/v1/health",
@@ -54,6 +57,7 @@ def _error_response(
     code: Optional[ErrorCode] = None,
     category: Optional[ErrorCategory] = None,
     detail: Optional[str] = None,
+    context: Optional[dict[str, Any]] = None,
     headers: Optional[dict[str, str]] = None,
 ) -> JSONResponse:
     request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Request-ID")
@@ -65,6 +69,7 @@ def _error_response(
         code=code,
         category=category,
         status_code=int(status_code),
+        context=context,
         origin={
             "service": "bff",
             "method": request.method,
@@ -200,6 +205,16 @@ def _resolve_agent_policy_registry(request: Request):
         return None
     try:
         return container.get_agent_policy_registry()
+    except Exception:
+        return None
+
+
+def _resolve_agent_registry(request: Request):
+    container = getattr(request.app.state, "bff_container", None)
+    if container is None:
+        return None
+    try:
+        return container.get_agent_registry()
     except Exception:
         return None
 
@@ -379,7 +394,256 @@ async def _enforce_internal_agent_tool_policy(request: Request) -> Optional[JSON
                     category=ErrorCategory.PERMISSION,
                 )
 
+    request.state.agent_tool_policy = policy
+    request.state.agent_tool_id = tool_id
     return None
+
+
+async def _compute_agent_tool_idempotency_digest(request: Request, *, tool_id: str) -> str:
+    body_obj: Any = None
+    raw_body = b""
+    try:
+        raw_body = await request.body()
+    except Exception:
+        raw_body = b""
+    if raw_body:
+        try:
+            body_obj = await request.json()
+        except Exception:
+            body_obj = raw_body.decode("utf-8", errors="replace")
+
+    query_items = []
+    try:
+        query_items = sorted([(k, v) for (k, v) in request.query_params.multi_items()])
+    except Exception:
+        query_items = []
+
+    signature = {
+        "tool_id": str(tool_id or "").strip(),
+        "method": str(request.method or "").strip().upper(),
+        "path": request.url.path,
+        "query": query_items,
+        "body": body_obj,
+    }
+    return digest_for_audit(signature)
+
+
+async def _wait_for_tool_idempotency(  # noqa: ANN001
+    registry,
+    *,
+    tenant_id: str,
+    idempotency_key: str,
+    timeout_s: float = 2.0,
+    interval_s: float = 0.1,
+):
+    deadline = time.monotonic() + float(timeout_s)
+    last = None
+    while time.monotonic() < deadline:
+        last = await registry.get_tool_idempotency(tenant_id=tenant_id, idempotency_key=idempotency_key)
+        if last is None:
+            return None
+        status_value = str(getattr(last, "status", "") or "").strip().upper()
+        if status_value and status_value != "IN_PROGRESS":
+            return last
+        await asyncio.sleep(float(interval_s))
+    return last
+
+
+async def _maybe_replay_or_start_tool_idempotency(request: Request) -> Optional[JSONResponse]:
+    idempotency_key = (request.headers.get(_IDEMPOTENCY_KEY_HEADER) or "").strip()
+    if not idempotency_key:
+        return None
+    tool_id = _resolve_agent_tool_id(request)
+    if not tool_id:
+        return None
+
+    policy = getattr(request.state, "agent_tool_policy", None)
+    registry = _resolve_agent_registry(request)
+    if registry is None:
+        if policy is not None and bool(getattr(policy, "requires_idempotency_key", False)):
+            return _error_response(
+                request=request,
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                message="Idempotency store unavailable",
+                code=ErrorCode.UPSTREAM_UNAVAILABLE,
+                category=ErrorCategory.UPSTREAM,
+                context={"error": "idempotency_store_unavailable"},
+            )
+        return None
+
+    tenant_id = str(getattr(request.state, "tenant_id", None) or "default").strip() or "default"
+    request_digest = await _compute_agent_tool_idempotency_digest(request, tool_id=tool_id)
+
+    try:
+        record, created = await registry.begin_tool_idempotency(
+            tenant_id=tenant_id,
+            idempotency_key=idempotency_key,
+            tool_id=tool_id,
+            request_digest=request_digest,
+        )
+    except Exception:
+        record, created = None, False
+
+    if record is None:
+        if policy is not None and bool(getattr(policy, "requires_idempotency_key", False)):
+            return _error_response(
+                request=request,
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                message="Idempotency store unavailable",
+                code=ErrorCode.UPSTREAM_UNAVAILABLE,
+                category=ErrorCategory.UPSTREAM,
+                context={"error": "idempotency_store_unavailable"},
+            )
+        return None
+
+    if not created:
+        if str(getattr(record, "tool_id", "") or "").strip() != tool_id or str(
+            getattr(record, "request_digest", "") or ""
+        ).strip() != request_digest:
+            return _error_response(
+                request=request,
+                status_code=status.HTTP_409_CONFLICT,
+                message="Idempotency-Key conflict",
+                code=ErrorCode.CONFLICT,
+                category=ErrorCategory.CONFLICT,
+                context={"error": "idempotency_conflict"},
+            )
+
+        status_value = str(getattr(record, "status", "") or "").strip().upper()
+        if status_value == "COMPLETED":
+            stored_status = int(getattr(record, "response_status", None) or 200)
+            stored_body = getattr(record, "response_body", None)
+            if stored_body is None:
+                stored_body = {}
+            return JSONResponse(status_code=stored_status, content=stored_body)
+
+        if status_value == "IN_PROGRESS":
+            waited = await _wait_for_tool_idempotency(
+                registry,
+                tenant_id=tenant_id,
+                idempotency_key=idempotency_key,
+                timeout_s=2.0,
+                interval_s=0.15,
+            )
+            if waited is not None and str(getattr(waited, "status", "") or "").strip().upper() == "COMPLETED":
+                if str(getattr(waited, "tool_id", "") or "").strip() == tool_id and str(
+                    getattr(waited, "request_digest", "") or ""
+                ).strip() == request_digest:
+                    stored_status = int(getattr(waited, "response_status", None) or 200)
+                    stored_body = getattr(waited, "response_body", None)
+                    if stored_body is None:
+                        stored_body = {}
+                    return JSONResponse(status_code=stored_status, content=stored_body)
+
+            return _error_response(
+                request=request,
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                message="Idempotency key in progress",
+                code=ErrorCode.UPSTREAM_UNAVAILABLE,
+                category=ErrorCategory.UPSTREAM,
+                context={"error": "idempotency_in_progress"},
+                headers={"Retry-After": "1"},
+            )
+
+    request.state.agent_tool_idempotency = {
+        "tenant_id": tenant_id,
+        "idempotency_key": idempotency_key,
+        "tool_id": tool_id,
+        "request_digest": request_digest,
+    }
+    return None
+
+
+async def _finalize_tool_idempotency(request: Request, response: Response) -> Response:
+    state = getattr(request.state, "agent_tool_idempotency", None)
+    if not isinstance(state, dict):
+        return response
+    registry = _resolve_agent_registry(request)
+    if registry is None:
+        return response
+
+    body_bytes = b""
+    iterator = getattr(response, "body_iterator", None)
+    if iterator is not None:
+        try:
+            chunks: list[bytes] = []
+            async for chunk in iterator:
+                if isinstance(chunk, str):
+                    chunk = chunk.encode("utf-8")
+                chunks.append(chunk)
+            body_bytes = b"".join(chunks)
+        except Exception:
+            body_bytes = b""
+        headers = dict(response.headers)
+        headers.pop("content-length", None)
+        response = Response(
+            content=body_bytes,
+            status_code=int(getattr(response, "status_code", 200)),
+            headers=headers,
+            media_type=getattr(response, "media_type", None),
+            background=getattr(response, "background", None),
+        )
+    else:
+        raw = getattr(response, "body", None)
+        if isinstance(raw, (bytes, bytearray)):
+            body_bytes = bytes(raw)
+
+    body_obj: Any = None
+    try:
+        if body_bytes:
+            decoded = body_bytes.decode("utf-8", errors="replace")
+            body_obj = json.loads(decoded)
+        else:
+            body_obj = {}
+    except Exception:
+        body_obj = {}
+
+    error_value = None
+    if response.status_code >= 400:
+        try:
+            if isinstance(body_obj, dict):
+                error_value = str(body_obj.get("message") or body_obj.get("detail") or "").strip() or None
+        except Exception:
+            error_value = None
+
+    try:
+        await registry.finalize_tool_idempotency(
+            tenant_id=state["tenant_id"],
+            idempotency_key=state["idempotency_key"],
+            tool_id=state["tool_id"],
+            request_digest=state["request_digest"],
+            response_status=int(getattr(response, "status_code", 200)),
+            response_body=body_obj,
+            error=error_value,
+        )
+    except Exception:
+        return response
+
+    return response
+
+
+async def _finalize_tool_idempotency_error(request: Request, exc: Exception) -> None:
+    state = getattr(request.state, "agent_tool_idempotency", None)
+    if not isinstance(state, dict):
+        return
+    registry = _resolve_agent_registry(request)
+    if registry is None:
+        return
+    error_value = str(exc).strip()
+    if error_value and len(error_value) > 500:
+        error_value = error_value[:500] + "…"
+    try:
+        await registry.finalize_tool_idempotency(
+            tenant_id=state["tenant_id"],
+            idempotency_key=state["idempotency_key"],
+            tool_id=state["tool_id"],
+            request_digest=state["request_digest"],
+            response_status=500,
+            response_body={"status": "error", "message": "Internal error"},
+            error=error_value or "Internal error",
+        )
+    except Exception:
+        return
 
 
 def ensure_bff_auth_configured() -> None:
@@ -465,7 +729,16 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
                 denied = await _enforce_internal_agent_tool_policy(request)
                 if denied is not None:
                     return denied
-            return await call_next(request)
+                replay = await _maybe_replay_or_start_tool_idempotency(request)
+                if replay is not None:
+                    return replay
+            try:
+                response = await call_next(request)
+            except Exception as exc:
+                await _finalize_tool_idempotency_error(request, exc)
+                raise
+            response = await _finalize_tool_idempotency(request, response)
+            return response
 
         expected = auth.bff_expected_token
         if expected and hmac.compare_digest(presented, expected):

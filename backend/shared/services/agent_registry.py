@@ -9,12 +9,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import asyncpg
 
 from shared.config.service_config import ServiceConfig
-from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
+from shared.utils.json_utils import coerce_json_dataset, coerce_json_pipeline, normalize_json_payload
 
 
 @dataclass(frozen=True)
@@ -84,6 +84,22 @@ class AgentApprovalRequestRecord:
     comment: Optional[str]
     request_payload: Dict[str, Any]
     metadata: Dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class AgentToolIdempotencyRecord:
+    tenant_id: str
+    idempotency_key: str
+    tool_id: str
+    request_digest: str
+    status: str
+    response_status: Optional[int]
+    response_body: Any
+    error: Optional[str]
+    started_at: datetime
+    finished_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime
 
@@ -269,6 +285,29 @@ class AgentRegistry:
                 f"CREATE INDEX IF NOT EXISTS idx_agent_approval_requests_tenant ON {self._schema}.agent_approval_requests(tenant_id)"
             )
 
+            await conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self._schema}.agent_tool_idempotency (
+                    tenant_id TEXT NOT NULL DEFAULT 'default',
+                    idempotency_key TEXT NOT NULL,
+                    tool_id TEXT NOT NULL,
+                    request_digest TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'IN_PROGRESS',
+                    response_status INTEGER,
+                    response_body JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    error TEXT,
+                    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    finished_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (tenant_id, idempotency_key)
+                )
+                """
+            )
+            await conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_agent_tool_idempotency_tool_id ON {self._schema}.agent_tool_idempotency(tool_id)"
+            )
+
     def _row_to_run(self, row: asyncpg.Record) -> AgentRunRecord:
         return AgentRunRecord(
             run_id=str(row["run_id"]),
@@ -336,6 +375,22 @@ class AgentRegistry:
             comment=row.get("comment"),
             request_payload=coerce_json_dataset(row["request_payload"]),
             metadata=coerce_json_dataset(row["metadata"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def _row_to_tool_idempotency(self, row: asyncpg.Record) -> AgentToolIdempotencyRecord:
+        return AgentToolIdempotencyRecord(
+            tenant_id=str(row.get("tenant_id") or "default"),
+            idempotency_key=str(row["idempotency_key"]),
+            tool_id=str(row["tool_id"]),
+            request_digest=str(row["request_digest"]),
+            status=str(row["status"]),
+            response_status=row.get("response_status"),
+            response_body=coerce_json_pipeline(row.get("response_body")),
+            error=row.get("error"),
+            started_at=row["started_at"],
+            finished_at=row.get("finished_at"),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -791,3 +846,138 @@ class AgentRegistry:
                 meta_payload,
             )
         return self._row_to_approval_request(row) if row else None
+
+    async def get_tool_idempotency(
+        self,
+        *,
+        tenant_id: str,
+        idempotency_key: str,
+    ) -> Optional[AgentToolIdempotencyRecord]:
+        if not self._pool:
+            raise RuntimeError("AgentRegistry not connected")
+        tenant_value = str(tenant_id or "").strip() or "default"
+        key_value = str(idempotency_key or "").strip()
+        if not key_value:
+            return None
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT tenant_id, idempotency_key, tool_id, request_digest, status,
+                       response_status, response_body, error,
+                       started_at, finished_at, created_at, updated_at
+                FROM {self._schema}.agent_tool_idempotency
+                WHERE tenant_id = $1 AND idempotency_key = $2
+                """,
+                tenant_value,
+                key_value,
+            )
+        return self._row_to_tool_idempotency(row) if row else None
+
+    async def begin_tool_idempotency(
+        self,
+        *,
+        tenant_id: str,
+        idempotency_key: str,
+        tool_id: str,
+        request_digest: str,
+        started_at: Optional[datetime] = None,
+    ) -> Tuple[Optional[AgentToolIdempotencyRecord], bool]:
+        """
+        Create or fetch a tool idempotency record.
+
+        Returns (record, created).
+        """
+        if not self._pool:
+            raise RuntimeError("AgentRegistry not connected")
+        tenant_value = str(tenant_id or "").strip() or "default"
+        key_value = str(idempotency_key or "").strip()
+        tool_value = str(tool_id or "").strip()
+        digest_value = str(request_digest or "").strip()
+        if not (key_value and tool_value and digest_value):
+            return None, False
+
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                INSERT INTO {self._schema}.agent_tool_idempotency (
+                    tenant_id, idempotency_key, tool_id, request_digest, status, started_at
+                )
+                VALUES ($1, $2, $3, $4, 'IN_PROGRESS', COALESCE($5, NOW()))
+                ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
+                RETURNING tenant_id, idempotency_key, tool_id, request_digest, status,
+                          response_status, response_body, error,
+                          started_at, finished_at, created_at, updated_at
+                """,
+                tenant_value,
+                key_value,
+                tool_value,
+                digest_value,
+                started_at,
+            )
+            if row:
+                return self._row_to_tool_idempotency(row), True
+            row = await conn.fetchrow(
+                f"""
+                SELECT tenant_id, idempotency_key, tool_id, request_digest, status,
+                       response_status, response_body, error,
+                       started_at, finished_at, created_at, updated_at
+                FROM {self._schema}.agent_tool_idempotency
+                WHERE tenant_id = $1 AND idempotency_key = $2
+                """,
+                tenant_value,
+                key_value,
+            )
+        return (self._row_to_tool_idempotency(row) if row else None), False
+
+    async def finalize_tool_idempotency(
+        self,
+        *,
+        tenant_id: str,
+        idempotency_key: str,
+        tool_id: str,
+        request_digest: str,
+        response_status: Optional[int],
+        response_body: Any,
+        error: Optional[str] = None,
+        finished_at: Optional[datetime] = None,
+    ) -> Optional[AgentToolIdempotencyRecord]:
+        if not self._pool:
+            raise RuntimeError("AgentRegistry not connected")
+        tenant_value = str(tenant_id or "").strip() or "default"
+        key_value = str(idempotency_key or "").strip()
+        tool_value = str(tool_id or "").strip()
+        digest_value = str(request_digest or "").strip()
+        if not (key_value and tool_value and digest_value):
+            return None
+        status_code = int(response_status) if response_status is not None else None
+        body_payload = normalize_json_payload(response_body if response_body is not None else {})
+        error_value = str(error).strip() if error is not None else None
+
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                UPDATE {self._schema}.agent_tool_idempotency
+                SET status = 'COMPLETED',
+                    response_status = COALESCE($5, response_status),
+                    response_body = COALESCE($6::jsonb, response_body),
+                    error = COALESCE($7, error),
+                    finished_at = COALESCE($8, finished_at, NOW()),
+                    updated_at = NOW()
+                WHERE tenant_id = $1
+                  AND idempotency_key = $2
+                  AND tool_id = $3
+                  AND request_digest = $4
+                RETURNING tenant_id, idempotency_key, tool_id, request_digest, status,
+                          response_status, response_body, error,
+                          started_at, finished_at, created_at, updated_at
+                """,
+                tenant_value,
+                key_value,
+                tool_value,
+                digest_value,
+                status_code,
+                body_payload,
+                error_value,
+                finished_at,
+            )
+        return self._row_to_tool_idempotency(row) if row else None

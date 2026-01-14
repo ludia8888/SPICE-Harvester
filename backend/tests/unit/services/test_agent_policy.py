@@ -20,6 +20,24 @@ def test_policy_overlay_degraded_safe_mode() -> None:
 
 
 @pytest.mark.unit
+def test_policy_idempotency_in_progress_is_safe_retry() -> None:
+    tool_call = AgentToolCall(service="bff", method="POST", path="/api/v1/pipelines/123/build")
+    decision = decide_policy(
+        tool_call=tool_call,
+        result={
+            "error_key": "idempotency_in_progress",
+            "api_code": "UPSTREAM_UNAVAILABLE",
+            "enterprise": None,
+            "signals": {},
+        },
+        context={},
+    )
+    assert decision.family == "idempotency_in_progress"
+    assert decision.recommended_action == "retry"
+    assert decision.safe_to_auto_retry is True
+
+
+@pytest.mark.unit
 def test_policy_timeout_retry_for_reads() -> None:
     tool_call = AgentToolCall(service="bff", method="GET", path="/api/v1/health")
     decision = decide_policy(

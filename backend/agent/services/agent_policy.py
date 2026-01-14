@@ -126,6 +126,15 @@ def decide_policy(
             details={"legacy_code": legacy_code, "enterprise_code": enterprise_code, "api_code": api_code},
         )
 
+    if legacy_code == "idempotency_in_progress":
+        return AgentPolicyDecision(
+            family="idempotency_in_progress",
+            recommended_action="retry",
+            safe_to_auto_retry=True,
+            reason="Idempotency key already in progress; safe to retry without duplicating side effects",
+            details={"legacy_code": legacy_code, "enterprise_code": enterprise_code, "api_code": api_code},
+        )
+
     if human_required is True:
         family = enterprise_class or "human_required"
         recommended_action = enterprise_action or "human_required"

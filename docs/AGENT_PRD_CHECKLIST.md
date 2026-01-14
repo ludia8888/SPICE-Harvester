@@ -68,7 +68,7 @@
 |---|---|---|---|
 | TOOL-001 | PARTIAL | `backend/shared/services/agent_tool_registry.py`, `backend/shared/policies/agent_tool_allowlist.json` | tool version / input-output schema / 권한 선언 / retry 정책 메타 확장 필요. |
 | TOOL-002 | PARTIAL | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_session_registry.py`, `backend/bff/middleware/auth.py`, `backend/bff/tests/test_agent_sessions_router.py`, `backend/tests/unit/middleware/test_middleware_fixes.py` | 세션 enabled_tools 저장/조회/설정 + 런타임 차단은 추가됨. 모든 툴 실행 경로에서 `X-Agent-Session-ID` 전파를 보장(워커/프록시 포함)하고, 세션 정책 기반 강제를 완결 필요. |
-| TOOL-003 | PARTIAL | `backend/bff/middleware/auth.py`(Idempotency-Key 요구), `backend/agent/services/agent_runtime.py`(tool_run_id), `backend/tests/unit/middleware/test_middleware_fixes.py` | tool_run_id/Idempotency-Key 계약은 존재. “중복 실행 방지”는 tool_run_id/멱등성 키 기반 결과 저장 + 재실행 시 재사용(replay)로 확장 필요. |
+| TOOL-003 | DONE | `backend/bff/middleware/auth.py`, `backend/shared/services/agent_registry.py`, `backend/tests/unit/middleware/test_middleware_fixes.py`, `backend/agent/services/agent_policy.py`, `backend/tests/unit/services/test_agent_policy.py` |  |
 | TOOL-004 | PARTIAL | `backend/agent/services/agent_runtime.py`(payload_preview/side_effect_summary) | 표준 응답 스키마(에러 코드 체계/side effect taxonomy) 고도화 필요. |
 | TOOL-005 | PARTIAL | `docs/API_REFERENCE.md`(Actions/Graph/Pipeline/Objectify/Commands), `backend/shared/policies/agent_tool_allowlist.json` | Function/SessionVariableUpdate/Clarification 툴은 미구현(또는 allowlist 확장 필요). |
 | TOOL-006 | PARTIAL | `backend/agent/services/agent_runtime.py`(mask/audit/events), `backend/shared/utils/llm_safety.py` | hooks는 런타임에 존재하나 tool plugin 레이어/세션 정책 연결 필요. |
