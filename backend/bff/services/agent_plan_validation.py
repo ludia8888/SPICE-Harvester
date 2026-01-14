@@ -26,6 +26,8 @@ from shared.errors.enterprise_catalog import enterprise_catalog_fingerprint
 from shared.services.agent_tool_registry import AgentToolPolicyRecord, AgentToolRegistry
 from shared.utils.canonical_json import sha256_canonical_json_prefixed
 
+from bff.services.agent_tool_schemas import validate_against_request_schema
+
 
 _RISK_ORDER = {
     AgentPlanRiskLevel.read: 0,
@@ -561,6 +563,21 @@ async def validate_agent_plan(
                 "requires_approval": step_requires_approval,
             }
         )
+
+        schema_errors = validate_against_request_schema(
+            method=str(method or policy.method or "").strip().upper(),
+            path=str(policy.path or "").strip(),
+            body=normalized_step.body,
+            query=normalized_step.query or {},
+        )
+        for schema_error in schema_errors[:20]:
+            _add_error(
+                code="request_schema_mismatch",
+                message=f"tool_id={step.tool_id} schema validation failed: {schema_error}",
+                step=normalized_step,
+                field="body",
+                fix_hint="Fix step.body/query to match the tool input schema.",
+            )
 
         for artifact in normalized_step.produces:
             key = str(artifact or "").strip()

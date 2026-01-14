@@ -57,6 +57,7 @@ from shared.services.service_factory import BFF_SERVICE_INFO, create_fastapi_ser
 from shared.services.connector_registry import ConnectorRegistry
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.agent_registry import AgentRegistry
+from shared.services.agent_model_registry import AgentModelRegistry
 from shared.services.agent_session_registry import AgentSessionRegistry
 from shared.services.agent_plan_registry import AgentPlanRegistry
 from shared.services.agent_policy_registry import AgentPolicyRegistry
@@ -111,6 +112,7 @@ from bff.routers import (
     ai,
     agent_plans,
     agent_policies,
+    agent_models,
     agent_sessions,
     agent_tools,
     audit,
@@ -207,6 +209,9 @@ class BFFServiceContainer:
 
         # 10c. Initialize Agent Policy Registry (tenant allowlists)
         await self._initialize_agent_policy_registry()
+
+        # 10d. Initialize Agent Model Registry (LLM model metadata/capabilities)
+        await self._initialize_agent_model_registry()
 
         # 11. Initialize Agent Tool Registry (allowlist/policy)
         await self._initialize_agent_tool_registry()
@@ -381,6 +386,17 @@ class BFFServiceContainer:
             logger.info("AgentPolicyRegistry initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize AgentPolicyRegistry: {e}")
+
+    async def _initialize_agent_model_registry(self) -> None:
+        """Initialize Postgres-backed agent model registry."""
+        try:
+            logger.info("Initializing AgentModelRegistry (Postgres)...")
+            registry = AgentModelRegistry()
+            await registry.initialize()
+            self._bff_services["agent_model_registry"] = registry
+            logger.info("AgentModelRegistry initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize AgentModelRegistry: {e}")
 
     async def _initialize_agent_tool_registry(self) -> None:
         """Initialize Postgres-backed agent tool registry."""
@@ -626,6 +642,12 @@ class BFFServiceContainer:
         if "agent_policy_registry" not in self._bff_services:
             raise RuntimeError("AgentPolicyRegistry not initialized")
         return self._bff_services["agent_policy_registry"]
+
+    def get_agent_model_registry(self) -> AgentModelRegistry:
+        """Get agent model registry instance"""
+        if "agent_model_registry" not in self._bff_services:
+            raise RuntimeError("AgentModelRegistry not initialized")
+        return self._bff_services["agent_model_registry"]
 
     def get_agent_tool_registry(self) -> AgentToolRegistry:
         """Get agent tool registry instance"""
@@ -920,6 +942,12 @@ async def get_agent_policy_registry() -> AgentPolicyRegistry:
     return _bff_container.get_agent_policy_registry()
 
 
+async def get_agent_model_registry() -> AgentModelRegistry:
+    if _bff_container is None:
+        raise RuntimeError("BFF container not initialized")
+    return _bff_container.get_agent_model_registry()
+
+
 async def get_agent_tool_registry() -> AgentToolRegistry:
     if _bff_container is None:
         raise RuntimeError("BFF container not initialized")
@@ -968,13 +996,14 @@ app.include_router(audit.router, prefix="/api/v1")
 app.include_router(ai.router, prefix="/api/v1")
 app.include_router(context7.router, prefix="/api/v1")
 app.include_router(agent_proxy.router, prefix="/api/v1")
-app.include_router(agent_plans.router, prefix="/api/v1")
-app.include_router(agent_policies.router, prefix="/api/v1")
-app.include_router(agent_sessions.router, prefix="/api/v1")
-app.include_router(agent_tools.router, prefix="/api/v1")
-app.include_router(summary.router, prefix="/api/v1")
-app.include_router(pipeline.router, prefix="/api/v1")
-app.include_router(objectify.router, prefix="/api/v1")
+    app.include_router(agent_plans.router, prefix="/api/v1")
+    app.include_router(agent_policies.router, prefix="/api/v1")
+    app.include_router(agent_models.router, prefix="/api/v1")
+    app.include_router(agent_sessions.router, prefix="/api/v1")
+    app.include_router(agent_tools.router, prefix="/api/v1")
+    app.include_router(summary.router, prefix="/api/v1")
+    app.include_router(pipeline.router, prefix="/api/v1")
+    app.include_router(objectify.router, prefix="/api/v1")
 app.include_router(governance.router, prefix="/api/v1")
 app.include_router(ops.router, prefix="/api/v1")
 app.include_router(graph.router)  # Graph router has its own /api/v1 prefix

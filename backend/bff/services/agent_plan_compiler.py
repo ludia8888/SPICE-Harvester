@@ -20,6 +20,13 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, ValidationError
 
 from bff.services.agent_plan_validation import validate_agent_plan
+from bff.services.agent_tool_schemas import (
+    get_query_params,
+    get_request_body_required,
+    get_request_body_schema,
+    get_response_schema,
+    schema_hint,
+)
 from shared.models.agent_plan import AgentPlan, AgentPlanDataScope
 from shared.models.agent_plan_report import PlanCompilationReport
 from shared.services.agent_tool_registry import AgentToolPolicyRecord, AgentToolRegistry
@@ -72,6 +79,9 @@ class AgentPlanCompileResult:
 
 
 def _policy_summary(policy: AgentToolPolicyRecord) -> Dict[str, Any]:
+    body_schema = get_request_body_schema(method=policy.method, path=policy.path)
+    response_schema = get_response_schema(method=policy.method, path=policy.path)
+    query_params = get_query_params(method=policy.method, path=policy.path)
     return {
         "tool_id": policy.tool_id,
         "method": policy.method,
@@ -82,6 +92,19 @@ def _policy_summary(policy: AgentToolPolicyRecord) -> Dict[str, Any]:
         "roles": policy.roles,
         "max_payload_bytes": policy.max_payload_bytes,
         "status": policy.status,
+        "schema": {
+            "request_body_required": bool(get_request_body_required(method=policy.method, path=policy.path)),
+            "request_body": schema_hint(body_schema),
+            "query_params": [
+                {
+                    "name": p.get("name"),
+                    "required": bool(p.get("required") or False),
+                    "schema": schema_hint(p.get("schema")),
+                }
+                for p in query_params
+            ],
+            "response_body": schema_hint(response_schema),
+        },
     }
 
 
