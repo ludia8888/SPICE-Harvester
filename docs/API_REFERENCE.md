@@ -127,6 +127,11 @@ python scripts/generate_api_reference.py
 - `GET /api/v1/agent/runs/{run_id}`
 - `GET /api/v1/agent/runs/{run_id}/events`
 
+### Agent Model Admin
+- `GET /api/v1/admin/agent-models`
+- `POST /api/v1/admin/agent-models`
+- `GET /api/v1/admin/agent-models/{model_id}`
+
 ### Agent Plans
 - `POST /api/v1/agent-plans/compile`
 - `POST /api/v1/agent-plans/context-pack`
@@ -136,6 +141,29 @@ python scripts/generate_api_reference.py
 - `POST /api/v1/agent-plans/{plan_id}/approvals`
 - `POST /api/v1/agent-plans/{plan_id}/execute`
 - `POST /api/v1/agent-plans/{plan_id}/preview`
+
+### Agent Policy Admin
+- `GET /api/v1/admin/agent-policies`
+- `POST /api/v1/admin/agent-policies`
+- `GET /api/v1/admin/agent-policies/{tenant_id}`
+
+### Agent Sessions
+- `GET /api/v1/agent-sessions`
+- `POST /api/v1/agent-sessions`
+- `GET /api/v1/agent-sessions/{session_id}`
+- `DELETE /api/v1/agent-sessions/{session_id}`
+- `GET /api/v1/agent-sessions/{session_id}/approvals`
+- `POST /api/v1/agent-sessions/{session_id}/approvals/{approval_request_id}`
+- `GET /api/v1/agent-sessions/{session_id}/context/items`
+- `POST /api/v1/agent-sessions/{session_id}/context/items`
+- `DELETE /api/v1/agent-sessions/{session_id}/context/items/{item_id}`
+- `GET /api/v1/agent-sessions/{session_id}/events`
+- `GET /api/v1/agent-sessions/{session_id}/jobs`
+- `POST /api/v1/agent-sessions/{session_id}/jobs`
+- `GET /api/v1/agent-sessions/{session_id}/jobs/{job_id}`
+- `POST /api/v1/agent-sessions/{session_id}/messages`
+- `POST /api/v1/agent-sessions/{session_id}/messages/remove`
+- `POST /api/v1/agent-sessions/{session_id}/summarize`
 
 ### Agent Tool Admin
 - `GET /api/v1/admin/agent-tools`
@@ -383,6 +411,7 @@ python scripts/generate_api_reference.py
 - `POST /api/v1/pipelines/datasets/{dataset_id}/versions`
 - `POST /api/v1/pipelines/datasets/{dataset_id}/versions/{version_id}/funnel-analysis`
 - `GET /api/v1/pipelines/proposals`
+- `POST /api/v1/pipelines/simulate-definition`
 - `GET /api/v1/pipelines/{pipeline_id}`
 - `PUT /api/v1/pipelines/{pipeline_id}`
 - `GET /api/v1/pipelines/{pipeline_id}/artifacts`

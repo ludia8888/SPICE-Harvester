@@ -28,7 +28,7 @@
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
 | SESS-001 | DONE | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_session_registry.py`, `backend/bff/main.py`, `backend/bff/tests/test_agent_sessions_router.py` |  |
-| SESS-002 | PARTIAL | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_session_registry.py`, `backend/shared/services/agent_registry.py` | tool 호출 req/resp·승인 이벤트·토큰/비용/지연시간 계측을 세션 단위로 완결(조회/집계 API 포함) 필요. |
+| SESS-002 | PARTIAL | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_session_registry.py`, `backend/shared/services/agent_registry.py`, `backend/bff/tests/test_agent_sessions_approval_flow.py`, `backend/bff/tests/test_agent_sessions_events.py` | tool 호출 req/resp 저장·조회 및 토큰/비용/지연시간 계측을 세션 단위로 완결(조회/집계 API 포함) 필요. |
 | SESS-003 | DONE | `backend/bff/routers/agent_sessions.py`, `backend/bff/tests/test_agent_sessions_router.py` |  |
 | SESS-004 | DONE | `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_session_registry.py`, `backend/bff/tests/test_agent_sessions_summarize_remove.py` |  |
 | SESS-005 | DONE | `backend/shared/services/agent_session_registry.py`, `backend/tests/unit/services/test_agent_session_state_machine.py` |  |
@@ -40,12 +40,12 @@
 
 | ID | Status | Evidence (code/docs) | Gap / Next |
 |---|---|---|---|
-| LLM-001 | PARTIAL | `backend/shared/services/llm_gateway.py` | provider 확장(Anthropic/Google/자체) 필요. |
-| LLM-002 | PARTIAL | `backend/shared/services/agent_policy_registry.py`, `backend/bff/routers/agent_sessions.py`, `backend/bff/routers/agent_policies.py` | 세션 생성/변경 전 과정에서 allowlist 강제(게이트웨이 레벨 포함) + 모델 메타/관리 UI/API 확장 필요. |
-| LLM-003 | PARTIAL | `backend/shared/services/agent_session_registry.py`, `backend/bff/routers/agent_sessions.py` | 세션 단위 모델 변경 API + 모든 호출에 세션 정책(마스킹/툴 허용/데이터 정책) 고정 적용 필요. |
+| LLM-001 | DONE | `backend/shared/services/llm_gateway.py`, `backend/shared/config/settings.py`, `backend/tests/unit/services/test_llm_gateway_resilience.py` |  |
+| LLM-002 | PARTIAL | `backend/shared/services/agent_policy_registry.py`, `backend/bff/routers/agent_sessions.py`, `backend/bff/routers/agent_policies.py`, `backend/shared/services/agent_model_registry.py`, `backend/bff/routers/agent_models.py` | 세션 생성/변경 전 과정에서 allowlist 강제(게이트웨이 레벨 포함) + 모델 메타/조직 정책(권한/송신 정책) 런타임 강제 완결 필요. |
+| LLM-003 | PARTIAL | `backend/shared/services/agent_session_registry.py`, `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_model_registry.py` | 세션 단위 모델 변경 API + 모든 호출에 세션 정책(마스킹/툴 허용/데이터 정책) 고정 적용 필요. |
 | LLM-004 | PARTIAL | `backend/shared/services/llm_gateway.py`(JSON-only), `backend/bff/services/agent_plan_compiler.py`(planner) | native function/tool 호출(복수 호출/병렬 계획) 미구현. |
-| LLM-005 | TODO | (없음) | 모델 capability 메타/자동 폴백 미구현. |
-| LLM-006 | PARTIAL | `backend/shared/services/llm_gateway.py`(timeout/cache) | circuit breaker/재시도 정책(멱등성 조건부) 미구현. |
+| LLM-005 | PARTIAL | `backend/shared/services/agent_model_registry.py`, `backend/bff/routers/agent_models.py` | capability 메타 기반 런타임 자동 폴백(네이티브→프롬프트 등) 연결 미구현. |
+| LLM-006 | DONE | `backend/shared/services/llm_gateway.py`, `backend/tests/unit/services/test_llm_gateway_resilience.py` |  |
 
 ---
 
