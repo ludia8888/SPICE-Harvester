@@ -192,4 +192,8 @@ def get_default_index_settings() -> dict:
     }
 
 
-DEFAULT_INDEX_SETTINGS = get_default_index_settings()
+def __getattr__(name: str):  # noqa: ANN001
+    # Lazy export to avoid import-time config capture (drift prevention).
+    if name == "DEFAULT_INDEX_SETTINGS":
+        return get_default_index_settings()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

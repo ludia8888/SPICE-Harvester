@@ -4,9 +4,22 @@ Application Configuration
 """
 
 import re
+from operator import attrgetter
+from typing import Any, Callable
 from typing import Optional
 
-from .settings import settings as app_settings
+from .settings import get_settings
+
+
+class _SettingsValue:
+    """Descriptor that resolves values from the current settings instance (SSoT)."""
+
+    def __init__(self, path: str):
+        self._path = path
+        self._getter: Callable[[Any], Any] = attrgetter(path)
+
+    def __get__(self, instance: object, owner: type | None = None):  # noqa: ANN001
+        return self._getter(get_settings())
 
 
 class AppConfig:
@@ -21,45 +34,45 @@ class AppConfig:
     # Kafka Topics
     # ======================
     # Event Topics (used by workers to publish events)
-    INSTANCE_EVENTS_TOPIC = app_settings.messaging.instance_events_topic
-    ONTOLOGY_EVENTS_TOPIC = app_settings.messaging.ontology_events_topic
-    ACTION_EVENTS_TOPIC = app_settings.messaging.action_events_topic
-    PROJECTION_DLQ_TOPIC = app_settings.messaging.projection_dlq_topic
-    SEARCH_PROJECTION_DLQ_TOPIC = app_settings.messaging.search_projection_dlq_topic
-    CONNECTOR_UPDATES_TOPIC = app_settings.messaging.connector_updates_topic
-    CONNECTOR_UPDATES_DLQ_TOPIC = app_settings.messaging.connector_updates_dlq_topic
-    PIPELINE_JOBS_TOPIC = app_settings.messaging.pipeline_jobs_topic
-    PIPELINE_JOBS_DLQ_TOPIC = app_settings.messaging.pipeline_jobs_dlq_topic
-    PIPELINE_EVENTS_TOPIC = app_settings.messaging.pipeline_events_topic
-    DATASET_INGEST_OUTBOX_DLQ_TOPIC = app_settings.messaging.dataset_ingest_outbox_dlq_topic
-    OBJECTIFY_JOBS_TOPIC = app_settings.messaging.objectify_jobs_topic
-    OBJECTIFY_JOBS_DLQ_TOPIC = app_settings.messaging.objectify_jobs_dlq_topic
+    INSTANCE_EVENTS_TOPIC = _SettingsValue("messaging.instance_events_topic")
+    ONTOLOGY_EVENTS_TOPIC = _SettingsValue("messaging.ontology_events_topic")
+    ACTION_EVENTS_TOPIC = _SettingsValue("messaging.action_events_topic")
+    PROJECTION_DLQ_TOPIC = _SettingsValue("messaging.projection_dlq_topic")
+    SEARCH_PROJECTION_DLQ_TOPIC = _SettingsValue("messaging.search_projection_dlq_topic")
+    CONNECTOR_UPDATES_TOPIC = _SettingsValue("messaging.connector_updates_topic")
+    CONNECTOR_UPDATES_DLQ_TOPIC = _SettingsValue("messaging.connector_updates_dlq_topic")
+    PIPELINE_JOBS_TOPIC = _SettingsValue("messaging.pipeline_jobs_topic")
+    PIPELINE_JOBS_DLQ_TOPIC = _SettingsValue("messaging.pipeline_jobs_dlq_topic")
+    PIPELINE_EVENTS_TOPIC = _SettingsValue("messaging.pipeline_events_topic")
+    DATASET_INGEST_OUTBOX_DLQ_TOPIC = _SettingsValue("messaging.dataset_ingest_outbox_dlq_topic")
+    OBJECTIFY_JOBS_TOPIC = _SettingsValue("messaging.objectify_jobs_topic")
+    OBJECTIFY_JOBS_DLQ_TOPIC = _SettingsValue("messaging.objectify_jobs_dlq_topic")
     
     # Command Topics (used by workers to consume commands)
-    INSTANCE_COMMANDS_TOPIC = app_settings.messaging.instance_commands_topic
-    ONTOLOGY_COMMANDS_TOPIC = app_settings.messaging.ontology_commands_topic
-    DATABASE_COMMANDS_TOPIC = app_settings.messaging.database_commands_topic
-    ACTION_COMMANDS_TOPIC = app_settings.messaging.action_commands_topic
+    INSTANCE_COMMANDS_TOPIC = _SettingsValue("messaging.instance_commands_topic")
+    ONTOLOGY_COMMANDS_TOPIC = _SettingsValue("messaging.ontology_commands_topic")
+    DATABASE_COMMANDS_TOPIC = _SettingsValue("messaging.database_commands_topic")
+    ACTION_COMMANDS_TOPIC = _SettingsValue("messaging.action_commands_topic")
 
     # Command DLQ Topics (poison/non-retryable or max-retry exceeded)
-    INSTANCE_COMMANDS_DLQ_TOPIC = app_settings.messaging.instance_commands_dlq_topic
-    ONTOLOGY_COMMANDS_DLQ_TOPIC = app_settings.messaging.ontology_commands_dlq_topic
-    ACTION_COMMANDS_DLQ_TOPIC = app_settings.messaging.action_commands_dlq_topic
+    INSTANCE_COMMANDS_DLQ_TOPIC = _SettingsValue("messaging.instance_commands_dlq_topic")
+    ONTOLOGY_COMMANDS_DLQ_TOPIC = _SettingsValue("messaging.ontology_commands_dlq_topic")
+    ACTION_COMMANDS_DLQ_TOPIC = _SettingsValue("messaging.action_commands_dlq_topic")
     
     # Kafka Consumer Groups
-    PROJECTION_WORKER_GROUP = app_settings.messaging.projection_worker_group
-    MESSAGE_RELAY_GROUP = app_settings.messaging.message_relay_group
-    INSTANCE_WORKER_GROUP = app_settings.messaging.instance_worker_group
-    ONTOLOGY_WORKER_GROUP = app_settings.messaging.ontology_worker_group
-    ACTION_WORKER_GROUP = app_settings.messaging.action_worker_group
-    OBJECTIFY_JOBS_GROUP = app_settings.messaging.objectify_jobs_group
-    SEARCH_PROJECTION_GROUP = app_settings.messaging.search_projection_group
+    PROJECTION_WORKER_GROUP = _SettingsValue("messaging.projection_worker_group")
+    MESSAGE_RELAY_GROUP = _SettingsValue("messaging.message_relay_group")
+    INSTANCE_WORKER_GROUP = _SettingsValue("messaging.instance_worker_group")
+    ONTOLOGY_WORKER_GROUP = _SettingsValue("messaging.ontology_worker_group")
+    ACTION_WORKER_GROUP = _SettingsValue("messaging.action_worker_group")
+    OBJECTIFY_JOBS_GROUP = _SettingsValue("messaging.objectify_jobs_group")
+    SEARCH_PROJECTION_GROUP = _SettingsValue("messaging.search_projection_group")
     
     # ======================
     # S3 Storage
     # ======================
     # S3 버킷 이름 (환경변수로 오버라이드 가능)
-    INSTANCE_BUCKET = app_settings.storage.instance_bucket
+    INSTANCE_BUCKET = _SettingsValue("storage.instance_bucket")
     
     # S3 Key Patterns
     @staticmethod
@@ -148,31 +161,31 @@ class AppConfig:
     # Event Sourcing & CQRS
     # ======================
     # Event Store 설정
-    EVENT_STORE_RETENTION_DAYS = app_settings.event_sourcing.event_store_retention_days
+    EVENT_STORE_RETENTION_DAYS = _SettingsValue("event_sourcing.event_store_retention_days")
     
     # Projection Worker 설정
-    PROJECTION_BATCH_SIZE = app_settings.event_sourcing.projection_batch_size
-    PROJECTION_SCROLL_TIMEOUT = app_settings.event_sourcing.projection_scroll_timeout
+    PROJECTION_BATCH_SIZE = _SettingsValue("event_sourcing.projection_batch_size")
+    PROJECTION_SCROLL_TIMEOUT = _SettingsValue("event_sourcing.projection_scroll_timeout")
     
     # Command 처리 설정
-    COMMAND_TIMEOUT_SECONDS = app_settings.event_sourcing.command_timeout_seconds
-    COMMAND_RETRY_COUNT = app_settings.event_sourcing.command_retry_count
+    COMMAND_TIMEOUT_SECONDS = _SettingsValue("event_sourcing.command_timeout_seconds")
+    COMMAND_RETRY_COUNT = _SettingsValue("event_sourcing.command_retry_count")
 
     # ======================
     # Ontology Writeback Defaults
     # ======================
     # lakeFS repository ids must match `^[a-z0-9][a-z0-9-]{2,62}$` (no underscores).
-    ONTOLOGY_WRITEBACK_REPO = app_settings.writeback.ontology_writeback_repo
-    ONTOLOGY_WRITEBACK_BRANCH_PREFIX = app_settings.writeback.ontology_writeback_branch_prefix
-    ONTOLOGY_WRITEBACK_DATASET_ID = app_settings.writeback.ontology_writeback_dataset_id
+    ONTOLOGY_WRITEBACK_REPO = _SettingsValue("writeback.ontology_writeback_repo")
+    ONTOLOGY_WRITEBACK_BRANCH_PREFIX = _SettingsValue("writeback.ontology_writeback_branch_prefix")
+    ONTOLOGY_WRITEBACK_DATASET_ID = _SettingsValue("writeback.ontology_writeback_dataset_id")
 
     # Writeback feature flags (ACTION_WRITEBACK_DESIGN.md)
     # NOTE: Defaults are intentionally conservative; enable explicitly per environment.
-    WRITEBACK_ENFORCE = app_settings.writeback.writeback_enforce
-    WRITEBACK_ENFORCE_GOVERNANCE = app_settings.writeback.writeback_enforce_governance
-    WRITEBACK_READ_OVERLAY = app_settings.writeback.writeback_read_overlay
-    WRITEBACK_ENABLED_OBJECT_TYPES_RAW = app_settings.writeback.writeback_enabled_object_types
-    WRITEBACK_DATASET_ACL_SCOPE = app_settings.writeback.writeback_dataset_acl_scope
+    WRITEBACK_ENFORCE = _SettingsValue("writeback.writeback_enforce")
+    WRITEBACK_ENFORCE_GOVERNANCE = _SettingsValue("writeback.writeback_enforce_governance")
+    WRITEBACK_READ_OVERLAY = _SettingsValue("writeback.writeback_read_overlay")
+    WRITEBACK_ENABLED_OBJECT_TYPES_RAW = _SettingsValue("writeback.writeback_enabled_object_types")
+    WRITEBACK_DATASET_ACL_SCOPE = _SettingsValue("writeback.writeback_dataset_acl_scope")
 
     @staticmethod
     def _normalize_object_type_id(value: str) -> str:
@@ -244,34 +257,34 @@ class AppConfig:
     # Cache & TTL Settings
     # ======================
     # Redis TTL 설정 (초 단위)
-    CLASS_LABEL_CACHE_TTL = app_settings.cache.class_label_cache_ttl
-    COMMAND_STATUS_CACHE_TTL = app_settings.cache.command_status_cache_ttl
-    USER_SESSION_CACHE_TTL = app_settings.cache.user_session_cache_ttl
-    WEBSOCKET_CONNECTION_TTL = app_settings.cache.websocket_connection_ttl
+    CLASS_LABEL_CACHE_TTL = _SettingsValue("cache.class_label_cache_ttl")
+    COMMAND_STATUS_CACHE_TTL = _SettingsValue("cache.command_status_cache_ttl")
+    USER_SESSION_CACHE_TTL = _SettingsValue("cache.user_session_cache_ttl")
+    WEBSOCKET_CONNECTION_TTL = _SettingsValue("cache.websocket_connection_ttl")
     
     # ======================
     # Security Settings
     # ======================
     # 입력 검증 제한
-    MAX_SEARCH_QUERY_LENGTH = app_settings.security.max_search_query_length
-    MAX_DB_NAME_LENGTH = app_settings.security.max_db_name_length
-    MAX_CLASS_ID_LENGTH = app_settings.security.max_class_id_length
-    MAX_INSTANCE_ID_LENGTH = app_settings.security.max_instance_id_length
+    MAX_SEARCH_QUERY_LENGTH = _SettingsValue("security.max_search_query_length")
+    MAX_DB_NAME_LENGTH = _SettingsValue("security.max_db_name_length")
+    MAX_CLASS_ID_LENGTH = _SettingsValue("security.max_class_id_length")
+    MAX_INSTANCE_ID_LENGTH = _SettingsValue("security.max_instance_id_length")
     
     # WebSocket 보안 설정
-    MAX_CLIENT_ID_LENGTH = app_settings.security.max_client_id_length
-    MAX_USER_ID_LENGTH = app_settings.security.max_user_id_length
+    MAX_CLIENT_ID_LENGTH = _SettingsValue("security.max_client_id_length")
+    MAX_USER_ID_LENGTH = _SettingsValue("security.max_user_id_length")
     
     # ======================
     # Performance Settings
     # ======================
     # 동시 처리 제한
-    MAX_CONCURRENT_COMMANDS = app_settings.performance.max_concurrent_commands
-    MAX_WEBSOCKET_CONNECTIONS = app_settings.performance.max_websocket_connections
+    MAX_CONCURRENT_COMMANDS = _SettingsValue("performance.max_concurrent_commands")
+    MAX_WEBSOCKET_CONNECTIONS = _SettingsValue("performance.max_websocket_connections")
     
     # 데이터 크기 제한
-    MAX_ONTOLOGY_SIZE = app_settings.performance.max_ontology_size
-    MAX_INSTANCE_SIZE = app_settings.performance.max_instance_size
+    MAX_ONTOLOGY_SIZE = _SettingsValue("performance.max_ontology_size")
+    MAX_INSTANCE_SIZE = _SettingsValue("performance.max_instance_size")
     
     # ======================
     # Validation Methods
@@ -358,11 +371,5 @@ class AppConfig:
         }
 
 
-# 편의를 위한 전역 상수들 (하위 호환성)
-KAFKA_TOPICS = AppConfig.get_all_topics()
-DEFAULT_S3_BUCKET = AppConfig.INSTANCE_BUCKET
-
-# 설정 검증 (import 시 자동 실행)
-if not AppConfig.validate_config():
-    import warnings
-    warnings.warn("AppConfig validation failed. Please check your environment variables.", UserWarning)
+# NOTE: Do not compute/capture config at import-time.
+# Use `AppConfig.*` and `AppConfig.get_all_topics()` which resolve via `get_settings()`.

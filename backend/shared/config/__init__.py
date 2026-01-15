@@ -25,7 +25,6 @@ from .search_config import (
     get_instances_index_name,
     get_ontologies_index_name,
     sanitize_index_name,
-    DEFAULT_INDEX_SETTINGS,
     get_default_index_settings,
 )
 
@@ -172,22 +171,20 @@ __all__ = [
     'get_default_index_settings',
 ]
 
-# 하위 호환성을 위한 별칭들
-KAFKA_TOPICS = Config.get_all_topics()
-DEFAULT_S3_BUCKET = Config.INSTANCE_BUCKET
+def __getattr__(name: str):  # noqa: ANN001
+    """
+    Lazy, drift-free compatibility exports.
 
-# 모든 주요 설정값들을 최상위에서 접근 가능하도록 함
-INSTANCE_EVENTS_TOPIC = Config.INSTANCE_EVENTS_TOPIC
-ONTOLOGY_EVENTS_TOPIC = Config.ONTOLOGY_EVENTS_TOPIC
-PROJECTION_DLQ_TOPIC = Config.PROJECTION_DLQ_TOPIC
-INSTANCE_COMMANDS_TOPIC = Config.INSTANCE_COMMANDS_TOPIC
-ONTOLOGY_COMMANDS_TOPIC = Config.ONTOLOGY_COMMANDS_TOPIC
-
-# 설정 검증 (import 시 자동 실행)
-_validation_results = Config.validate_all_config()
-if not all(_validation_results.values()):
-    import warnings
-    warnings.warn(
-        f"Configuration validation failed: {_validation_results}", 
-        UserWarning
-    )
+    Important:
+    - Do not capture settings-derived values at import-time.
+    - Resolve via `Config` / `get_default_index_settings()` on demand.
+    """
+    if name == "DEFAULT_INDEX_SETTINGS":
+        return get_default_index_settings()
+    if name == "KAFKA_TOPICS":
+        return Config.get_all_topics()
+    if name == "DEFAULT_S3_BUCKET":
+        return Config.INSTANCE_BUCKET
+    if hasattr(Config, name):
+        return getattr(Config, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
