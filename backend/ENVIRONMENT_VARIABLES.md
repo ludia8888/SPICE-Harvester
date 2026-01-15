@@ -150,6 +150,17 @@ EVENT_STORE_SEQUENCE_HANDLER_PREFIX=write_side
 EVENT_STORE_IDEMPOTENCY_MISMATCH_MODE=error
 ```
 
+## Chaos Injection (test-only)
+
+Deterministic crash points for validating lease recovery/idempotency (used by `backend/tests/chaos_lite.py`).
+
+```bash
+ENABLE_CHAOS_INJECTION=false
+CHAOS_CRASH_POINT=
+CHAOS_CRASH_ONCE=true
+CHAOS_CRASH_EXIT_CODE=42
+```
+
 ## Publisher (S3 tail -> Kafka)
 
 ```bash

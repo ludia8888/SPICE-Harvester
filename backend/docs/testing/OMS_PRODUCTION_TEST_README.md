@@ -88,6 +88,15 @@ Notes:
 - This test is intentionally “real stack”: it will stop/start containers and recreate `instance-worker`.
 - Run it on an isolated dev stack; do not run against shared environments.
 
+Crash injection env knobs (used by scenario 5; optional if you want to reproduce manually):
+
+```bash
+export ENABLE_CHAOS_INJECTION=true
+export CHAOS_CRASH_POINT=instance_worker:after_claim
+export CHAOS_CRASH_ONCE=true
+export CHAOS_CRASH_EXIT_CODE=42
+```
+
 ## Notes
 
 - `RUN_LIVE_OMS_SMOKE=true` is intentionally opt-in because it creates and deletes real databases.

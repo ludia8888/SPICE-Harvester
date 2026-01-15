@@ -20,7 +20,7 @@ import aiohttp
 import pytest
 import pytest_asyncio
 
-from shared.config.settings import ApplicationSettings
+from shared.config.settings import get_settings
 from shared.config.service_config import ServiceConfig
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.event_store import EventStore
@@ -391,7 +391,7 @@ async def _create_dataset_with_artifact(
         branch=branch,
     )
 
-    storage = create_lakefs_storage_service(ApplicationSettings())
+    storage = create_lakefs_storage_service(get_settings())
     if storage is None:
         raise AssertionError("LakeFS storage service unavailable")
 

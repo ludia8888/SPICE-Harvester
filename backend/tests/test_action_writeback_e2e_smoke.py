@@ -1052,7 +1052,7 @@ async def test_action_writeback_e2e_verification_suite() -> None:
 
             # 8) Conflict policy branches: FAIL / WRITEBACK_WINS (merge) / BASE_WINS (skip)
             from shared.config.app_config import AppConfig
-            from shared.config.settings import ApplicationSettings
+            from shared.config.settings import get_settings
             from shared.services.lakefs_storage_service import create_lakefs_storage_service
             from shared.utils.writeback_paths import (
                 queue_entry_key,
@@ -1063,7 +1063,7 @@ async def test_action_writeback_e2e_verification_suite() -> None:
             )
 
             lakefs_branch = AppConfig.get_ontology_writeback_branch(db_name)
-            settings = ApplicationSettings()
+            settings = get_settings()
             lakefs_storage = create_lakefs_storage_service(settings)
             assert lakefs_storage is not None
 

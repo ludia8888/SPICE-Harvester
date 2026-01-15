@@ -22,9 +22,11 @@ import re
 from pathlib import Path
 from typing import Optional
 
+from shared.config.settings import get_settings
+
 
 def chaos_enabled() -> bool:
-    return (os.getenv("ENABLE_CHAOS_INJECTION") or "").strip().lower() in {"1", "true", "yes", "on"}
+    return bool(get_settings().chaos.enabled)
 
 
 def _sanitize_marker(point: str) -> str:
@@ -40,17 +42,17 @@ def maybe_crash(point: str, *, logger: Optional[object] = None) -> None:
     This uses os._exit to simulate an abrupt crash (no cleanup), which is what
     exercises lease recovery and at-least-once correctness.
     """
-    if not chaos_enabled():
+    chaos = get_settings().chaos
+    if not chaos.enabled:
         return
 
-    selected = (os.getenv("CHAOS_CRASH_POINT") or "").strip()
+    selected = (chaos.crash_point or "").strip()
     if not selected:
         return
     if selected.lower() != (point or "").strip().lower():
         return
 
-    crash_once = (os.getenv("CHAOS_CRASH_ONCE") or "true").strip().lower() in {"1", "true", "yes", "on"}
-    if crash_once:
+    if chaos.crash_once:
         marker = Path("/tmp") / f"spice_chaos_crashed_{_sanitize_marker(point)}"
         try:
             if marker.exists():
@@ -69,10 +71,4 @@ def maybe_crash(point: str, *, logger: Optional[object] = None) -> None:
     except Exception:
         pass
 
-    code_raw = (os.getenv("CHAOS_CRASH_EXIT_CODE") or "42").strip()
-    try:
-        code = int(code_raw)
-    except Exception:
-        code = 42
-    os._exit(code)
-
+    os._exit(int(chaos.crash_exit_code))

@@ -3674,6 +3674,69 @@ class AgentRetentionWorkerSettings(BaseSettings):
         return value or None
 
 
+class ChaosSettings(BaseSettings):
+    """Chaos/fault injection settings (test-only)."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="CHAOS_",
+        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    enabled: bool = Field(
+        default=False,
+        validation_alias="ENABLE_CHAOS_INJECTION",
+        description="Enable chaos injection (ENABLE_CHAOS_INJECTION)",
+    )
+    crash_point: Optional[str] = Field(
+        default=None,
+        description="Crash point selector (CHAOS_CRASH_POINT)",
+    )
+    crash_once: bool = Field(
+        default=True,
+        description="Crash only once per container (CHAOS_CRASH_ONCE)",
+    )
+    crash_exit_code: int = Field(
+        default=42,
+        description="Process exit code when crashing (CHAOS_CRASH_EXIT_CODE)",
+    )
+
+    @field_validator("enabled", mode="before")
+    @classmethod
+    def coerce_enabled(cls, v):  # noqa: ANN001
+        value = str(v).strip() if v is not None else ""
+        if not value:
+            return False
+        parsed = _parse_boolish(value)
+        return parsed if parsed is not None else False
+
+    @field_validator("crash_point", mode="before")
+    @classmethod
+    def blank_to_none(cls, v):  # noqa: ANN001
+        if v is None:
+            return None
+        value = str(v).strip()
+        return value or None
+
+    @field_validator("crash_once", mode="before")
+    @classmethod
+    def coerce_crash_once(cls, v):  # noqa: ANN001
+        if v is None:
+            return True
+        raw = str(v).strip()
+        if not raw:
+            return True
+        parsed = _parse_boolish(raw)
+        return parsed if parsed is not None else False
+
+    @field_validator("crash_exit_code", mode="before")
+    @classmethod
+    def clamp_crash_exit_code(cls, v):  # noqa: ANN001
+        return _clamp_int(v, default=42, min_value=0, max_value=255)
+
+
 class WorkersSettings(BaseSettings):
     """Workers/services runtime settings."""
 
@@ -3878,6 +3941,7 @@ class ApplicationSettings(BaseSettings):
     branch_virtualization: BranchVirtualizationSettings = Field(default_factory=BranchVirtualizationSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
     workers: WorkersSettings = Field(default_factory=WorkersSettings)
+    chaos: ChaosSettings = Field(default_factory=ChaosSettings)
     cache: CacheSettings = Field(default_factory=CacheSettings)
     writeback: WritebackSettings = Field(default_factory=WritebackSettings)
     security: SecuritySettings = Field(default_factory=SecuritySettings)

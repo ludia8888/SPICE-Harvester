@@ -54,10 +54,9 @@ def debug_pydantic():
     # Test full ApplicationSettings
     print("🔧 Testing Full ApplicationSettings:")
     try:
-        from shared.config.settings import ApplicationSettings
+        from shared.config.settings import reload_settings
         
-        # Create ApplicationSettings directly  
-        app_settings = ApplicationSettings()
+        app_settings = reload_settings()
         
         print(f"   database.terminus_url: '{app_settings.database.terminus_url}'")
         print(f"   database.terminus_user: '{app_settings.database.terminus_user}'") 
