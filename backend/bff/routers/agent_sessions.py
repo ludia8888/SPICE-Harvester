@@ -26,8 +26,7 @@ from pydantic import BaseModel, Field
 from bff.services.agent_plan_compiler import compile_agent_plan
 from bff.services.agent_plan_validation import validate_agent_plan
 from bff.services.pipeline_context_pack import build_pipeline_context_pack
-from shared.config.service_config import ServiceConfig
-from shared.config.settings import get_settings
+from shared.config.settings import build_client_ssl_config, get_settings
 from shared.dependencies.providers import AuditLogStoreDep, LLMGatewayDep, RedisServiceDep, StorageServiceDep
 from shared.models.agent_plan import AgentPlan, AgentPlanDataScope
 from shared.models.requests import ApiResponse
@@ -561,10 +560,11 @@ def _forward_headers_to_agent(request: Request) -> Dict[str, str]:
 
 
 async def _call_agent_create_run(*, request: Request, payload: Dict[str, Any]) -> Dict[str, Any]:
-    agent_url = ServiceConfig.get_agent_url().rstrip("/")
+    settings = get_settings()
+    agent_url = settings.services.agent_base_url.rstrip("/")
     url = f"{agent_url}/api/v1/agent/runs"
-    timeout_seconds = get_settings().clients.agent_proxy_timeout_seconds
-    ssl_config = ServiceConfig.get_client_ssl_config()
+    timeout_seconds = settings.clients.agent_proxy_timeout_seconds
+    ssl_config = build_client_ssl_config(settings)
 
     async with httpx.AsyncClient(timeout=timeout_seconds, verify=ssl_config.get("verify", True)) as client:
         resp = await client.post(url, headers=_forward_headers_to_agent(request), json=payload)
@@ -630,6 +630,13 @@ async def _start_agent_job_run(
             }
         )
 
+    session_vars: dict[str, Any] = {}
+    session_record = await sessions.get_session(session_id=session_id, tenant_id=tenant_id)
+    if session_record and isinstance(getattr(session_record, "metadata", None), dict):
+        raw_vars = session_record.metadata.get("variables")
+        if isinstance(raw_vars, dict):
+            session_vars = raw_vars
+
     run_payload = {
         "goal": plan.goal,
         "steps": steps_payload,
@@ -639,6 +646,7 @@ async def _start_agent_job_run(
             "plan_snapshot": plan.model_dump(mode="json"),
             "session_id": session_id,
             "job_id": job_id,
+            **session_vars,
         },
         "dry_run": False,
         "request_id": str(uuid4()),

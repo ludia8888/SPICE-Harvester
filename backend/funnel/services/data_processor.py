@@ -13,7 +13,7 @@ from shared.models.google_sheets import GoogleSheetPreviewRequest, GoogleSheetPr
 from funnel.services.risk_assessor import assess_dataset_risks
 from funnel.services.schema_utils import normalize_property_name
 from funnel.services.type_inference import FunnelTypeInferenceService
-from shared.config.service_config import ServiceConfig
+from shared.config.settings import get_settings
 from shared.models.type_inference import (
     ColumnAnalysisResult,
     DatasetAnalysisRequest,
@@ -69,8 +69,9 @@ class FunnelDataProcessor:
         # 여기서는 직접 HTTP 요청으로 시뮬레이션
         timeout = httpx.Timeout(30.0, connect=5.0)
         async with httpx.AsyncClient(timeout=timeout) as client:
+            bff_url = get_settings().services.bff_base_url
             response = await client.post(
-                f"{ServiceConfig.get_bff_url()}/api/v1/data-connectors/google-sheets/preview",
+                f"{bff_url}/api/v1/data-connectors/google-sheets/preview",
                 json=preview_request.model_dump(),
             )
 

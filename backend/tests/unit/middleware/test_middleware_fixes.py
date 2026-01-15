@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from bff.middleware.auth import install_bff_auth_middleware
+from oms.middleware.auth import install_oms_auth_middleware
 from shared.services.agent_tool_registry import AgentToolPolicyRecord
 from shared.i18n.middleware import install_i18n_middleware
 from shared.middleware.rate_limiter import rate_limit, install_rate_limit_headers_middleware
@@ -110,6 +111,21 @@ def test_bff_auth_middleware_blocks_unsafe_methods():
 
 
 @pytest.mark.unit
+def test_bff_auth_accepts_rotated_admin_tokens():
+    with _set_env(BFF_REQUIRE_AUTH="true", BFF_ADMIN_TOKEN="secret-1, secret-2"):
+        app = FastAPI()
+        install_bff_auth_middleware(app)
+
+        @app.post("/write")
+        async def write():
+            return {"ok": True}
+
+        client = TestClient(app)
+        resp = client.post("/write", headers={"X-Admin-Token": "secret-2"})
+        assert resp.status_code == 200
+
+
+@pytest.mark.unit
 def test_rate_limit_admin_bypass_requires_valid_token():
     def _build_app():
         app = FastAPI()
@@ -162,6 +178,26 @@ def test_bff_auth_allows_user_jwt_when_enabled():
 
 
 @pytest.mark.unit
+def test_bff_user_jwt_accepts_rotated_hs256_secrets():
+    token = jwt.encode({"sub": "user-1"}, "old-secret", algorithm="HS256")
+    with _set_env(
+        BFF_REQUIRE_AUTH="true",
+        USER_JWT_ENABLED="true",
+        USER_JWT_HS256_SECRET="new-secret, old-secret",
+    ):
+        app = FastAPI()
+        install_bff_auth_middleware(app)
+
+        @app.get("/hello")
+        async def hello():  # noqa: ANN001
+            return {"ok": True}
+
+        client = TestClient(app)
+        resp = client.get("/hello", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 200
+
+
+@pytest.mark.unit
 def test_bff_agent_auth_requires_delegated_user_jwt_when_enabled():
     token = jwt.encode({"sub": "user-1"}, "secret", algorithm="HS256")
     with _set_env(
@@ -194,6 +230,34 @@ def test_bff_agent_auth_requires_delegated_user_jwt_when_enabled():
 
 
 @pytest.mark.unit
+def test_bff_agent_auth_accepts_rotated_agent_tokens():
+    token = jwt.encode({"sub": "user-1"}, "secret", algorithm="HS256")
+    with _set_env(
+        BFF_REQUIRE_AUTH="true",
+        BFF_AGENT_TOKEN="agent-secret-1, agent-secret-2",
+        USER_JWT_ENABLED="true",
+        USER_JWT_HS256_SECRET="secret",
+    ):
+        app = FastAPI()
+        install_bff_auth_middleware(app)
+
+        @app.get("/hello")
+        async def hello():  # noqa: ANN001
+            return {"ok": True}
+
+        client = TestClient(app)
+        resp = client.get(
+            "/hello",
+            headers={
+                "X-Admin-Token": "agent-secret-2",
+                "X-Delegated-Authorization": f"Bearer {token}",
+                "X-Agent-Tool-ID": "unit.test",
+            },
+        )
+        assert resp.status_code == 200
+
+
+@pytest.mark.unit
 def test_bff_agent_auth_requires_user_jwt_enabled_for_agent_calls():
     token = jwt.encode({"sub": "user-1"}, "secret", algorithm="HS256")
     with _set_env(BFF_REQUIRE_AUTH="true", BFF_AGENT_TOKEN="agent-secret", USER_JWT_ENABLED=None):
@@ -216,6 +280,22 @@ def test_bff_agent_auth_requires_user_jwt_enabled_for_agent_calls():
         assert resp.status_code == 503
         payload = resp.json()
         assert payload.get("context", {}).get("error") == "user-jwt-required-for-agent"
+
+
+@pytest.mark.unit
+def test_oms_auth_accepts_rotated_tokens():
+    with _set_env(OMS_REQUIRE_AUTH="true", OMS_ADMIN_TOKEN="oms-1, oms-2"):
+        app = FastAPI()
+        install_oms_auth_middleware(app)
+
+        @app.get("/secure")
+        async def secure():  # noqa: ANN001
+            return {"ok": True}
+
+        client = TestClient(app)
+        assert client.get("/secure").status_code == 401
+        assert client.get("/secure", headers={"X-Admin-Token": "oms-1"}).status_code == 200
+        assert client.get("/secure", headers={"X-Admin-Token": "oms-2"}).status_code == 200
 
 
 @pytest.mark.unit

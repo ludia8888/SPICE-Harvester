@@ -20,7 +20,6 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import asyncpg
 
-from shared.config.service_config import ServiceConfig
 from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
 from shared.utils.json_utils import coerce_json_strict
@@ -95,7 +94,7 @@ class ConnectorRegistry:
         pool_min: Optional[int] = None,
         pool_max: Optional[int] = None,
     ):
-        self._dsn = dsn or ServiceConfig.get_postgres_url()
+        self._dsn = dsn or get_settings().database.postgres_url
         self._schema = schema
         self._pool: Optional[asyncpg.Pool] = None
         perf = get_settings().performance

@@ -41,7 +41,7 @@ async def test_process_google_sheets_preview_sets_explicit_timeout(monkeypatch):
             return FakeResponse()
 
     monkeypatch.setattr(module.httpx, "AsyncClient", FakeClient)
-    monkeypatch.setattr(module.ServiceConfig, "get_bff_url", staticmethod(lambda: "http://bff"))
+    monkeypatch.setenv("BFF_BASE_URL", "http://bff")
 
     processor = FunnelDataProcessor()
     result = await processor.process_google_sheets_preview(
@@ -58,4 +58,3 @@ async def test_process_google_sheets_preview_sets_explicit_timeout(monkeypatch):
     assert captured["raise_for_status_called"] is True
     assert captured["url"].startswith("http://bff/")
     assert result.preview_rows == 1
-

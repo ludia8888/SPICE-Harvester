@@ -95,7 +95,7 @@ async def test_trigger_service_initialize_and_close(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(trigger_module, "ConnectorRegistry", _FakeRegistry)
     monkeypatch.setattr(trigger_module, "GoogleSheetsService", _FakeSheets)
     monkeypatch.setattr(trigger_module, "Producer", _FakeProducer)
-    monkeypatch.setattr(trigger_module.ServiceConfig, "get_kafka_bootstrap_servers", lambda: "localhost:1234")
+    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:1234")
 
     service = ConnectorTriggerService()
     await service.initialize()

@@ -5,17 +5,13 @@
 Port: 8003
 """
 
-from dotenv import load_dotenv
-
-load_dotenv()  # Load .env file
-
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
 from fastapi import FastAPI
 
 # Shared service factory import
-from shared.services.service_factory import FUNNEL_SERVICE_INFO, create_fastapi_service, run_service
+from shared.services.service_factory import create_fastapi_service, get_funnel_service_info, run_service
 
 from funnel.routers.type_inference_router import router as type_inference_router
 from shared.utils.app_logger import get_logger
@@ -50,8 +46,9 @@ async def lifespan(app: FastAPI):
 
 
 # FastAPI 앱 생성 - Service Factory 사용
+service_info = get_funnel_service_info()
 app = create_fastapi_service(
-    service_info=FUNNEL_SERVICE_INFO,
+    service_info=service_info,
     custom_lifespan=lifespan,
     include_health_check=False,  # 기존 health check 유지
     include_logging_middleware=True
@@ -95,4 +92,4 @@ async def health_check() -> Dict[str, Any]:
 
 if __name__ == "__main__":
     # Service Factory를 사용한 간소화된 서비스 실행
-    run_service(app, FUNNEL_SERVICE_INFO, "funnel.main:app")
+    run_service(app, service_info, "funnel.main:app")

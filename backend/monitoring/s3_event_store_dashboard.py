@@ -18,9 +18,9 @@ from collections import defaultdict
 import aioboto3
 from prometheus_client import Counter, Histogram, Gauge, generate_latest
 import logging
-import os
 
 from oms.services.event_store import event_store
+from shared.config.settings import get_settings
 from shared.config.service_config import ServiceConfig
 
 logger = logging.getLogger(__name__)
@@ -95,7 +95,7 @@ class S3EventStoreDashboard:
         self.session = aioboto3.Session()
         self.endpoint_url = ServiceConfig.get_minio_endpoint()
         self.bucket_name = ServiceConfig.get_event_store_bucket()
-        self.checkpoint_key = os.getenv("EVENT_PUBLISHER_CHECKPOINT_KEY", "checkpoints/event_publisher.json")
+        self.checkpoint_key = get_settings().workers.event_publisher.checkpoint_key
         self.metrics_cache = defaultdict(dict)
         self.last_update = datetime.now(timezone.utc)
         

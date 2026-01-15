@@ -5,7 +5,6 @@ from typing import Iterable, Mapping, Optional, Tuple
 import asyncpg
 
 from shared.config.settings import get_settings
-from shared.config.service_config import ServiceConfig
 
 DATABASE_ACCESS_ROLES = (
     "Owner",
@@ -100,7 +99,7 @@ async def get_database_access_role(
     principal_type: str,
     principal_id: str,
 ) -> Optional[str]:
-    conn = await asyncpg.connect(ServiceConfig.get_postgres_url())
+    conn = await asyncpg.connect(get_settings().database.postgres_url)
     try:
         try:
             row = await conn.fetchrow(
@@ -125,7 +124,7 @@ async def get_database_access_role(
 
 
 async def has_database_access_config(*, db_name: str) -> bool:
-    conn = await asyncpg.connect(ServiceConfig.get_postgres_url())
+    conn = await asyncpg.connect(get_settings().database.postgres_url)
     try:
         try:
             row = await conn.fetchrow(

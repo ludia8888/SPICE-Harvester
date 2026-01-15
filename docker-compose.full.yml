@@ -1,5 +1,3 @@
-version: '3.8'
-
 # 전체 서비스 통합 구성 - Command/Event Sourcing + Redis + WebSocket 통합
 # 포함 서비스: TerminusDB, PostgreSQL, Redis, Kafka, OMS, BFF, Funnel, Worker, Message Relay
 # WebSocket 실시간 업데이트 완전 지원
@@ -392,10 +390,23 @@ services:
     command: ["--config.file=/etc/prometheus/prometheus.yml"]
     volumes:
       - ./backend/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./backend/monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
     ports:
       - "19090:9090"
     depends_on:
       - otel-collector
+      - alertmanager
+    networks:
+      - spice_network
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: spice_alertmanager
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
+    volumes:
+      - ./backend/monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "19093:9093"
     networks:
       - spice_network
 

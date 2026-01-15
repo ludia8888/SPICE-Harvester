@@ -984,7 +984,7 @@ def ensure_bff_auth_configured() -> None:
             "USER_JWT_ENABLED=true but no verification key configured. "
             "Set USER_JWT_HS256_SECRET, USER_JWT_PUBLIC_KEY, or USER_JWT_JWKS_URL."
         )
-    if not auth.bff_expected_token and not auth.user_jwt_enabled:
+    if not (auth.bff_expected_tokens or auth.bff_agent_tokens) and not auth.user_jwt_enabled:
         raise RuntimeError(
             "BFF auth is required but no token is configured. "
             "Set BFF_ADMIN_TOKEN (or BFF_WRITE_TOKEN/ADMIN_API_KEY/ADMIN_TOKEN)."
@@ -1013,8 +1013,8 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        agent_token = (auth.bff_agent_token or "").strip()
-        if agent_token and hmac.compare_digest(presented, agent_token):
+        agent_tokens = auth.bff_agent_tokens
+        if agent_tokens and any(hmac.compare_digest(presented, token) for token in agent_tokens):
             request.state.is_internal_agent = True
             delegated_raw = (
                 extract_bearer_token(request.headers.get(_DELEGATED_AUTH_HEADER))
@@ -1102,8 +1102,8 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
             )
             return response
 
-        expected = auth.bff_expected_token
-        if expected and hmac.compare_digest(presented, expected):
+        expected_tokens = auth.bff_expected_tokens
+        if expected_tokens and any(hmac.compare_digest(presented, token) for token in expected_tokens):
             if auth.user_jwt_enabled and request.url.path.startswith(_USER_CONTEXT_REQUIRED_PREFIXES):
                 delegated_raw = extract_bearer_token(request.headers.get(_DELEGATED_AUTH_HEADER)) or extract_bearer_token(
                     request.headers.get("Authorization")
@@ -1157,7 +1157,7 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
             except UserTokenError:
                 pass
 
-        if not expected and not auth.user_jwt_enabled:
+        if not expected_tokens and not auth.user_jwt_enabled:
             return _error_response(
                 request=request,
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1202,8 +1202,8 @@ async def enforce_bff_websocket_auth(websocket: WebSocket, token: Optional[str])
         await websocket.close(code=4401, reason="Authentication required")
         return False
 
-    agent_token = (auth.bff_agent_token or "").strip()
-    if agent_token and hmac.compare_digest(presented, agent_token):
+    agent_tokens = auth.bff_agent_tokens
+    if agent_tokens and any(hmac.compare_digest(presented, token) for token in agent_tokens):
         delegated_raw = (
             extract_bearer_token(websocket.headers.get(_DELEGATED_AUTH_HEADER))
             or extract_bearer_token(websocket.headers.get("Authorization"))
@@ -1232,8 +1232,8 @@ async def enforce_bff_websocket_auth(websocket: WebSocket, token: Optional[str])
             return False
         return True
 
-    expected = auth.bff_expected_token
-    if expected and hmac.compare_digest(presented, expected):
+    expected_tokens = auth.bff_expected_tokens
+    if expected_tokens and any(hmac.compare_digest(presented, token) for token in expected_tokens):
         return True
 
     if auth.user_jwt_enabled:
@@ -1252,7 +1252,7 @@ async def enforce_bff_websocket_auth(websocket: WebSocket, token: Optional[str])
         except UserTokenError:
             pass
 
-    if not expected and not auth.user_jwt_enabled:
+    if not expected_tokens and not auth.user_jwt_enabled:
         await websocket.close(code=1011, reason="BFF auth required but no token configured")
         return False
 

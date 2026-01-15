@@ -174,8 +174,11 @@ async def verify_user_token(
         raise UserTokenError("JWT header invalid") from exc
 
     key: Any = None
+    hs256_secrets: Tuple[str, ...] = ()
     if jwt_hs256_secret:
-        key = jwt_hs256_secret
+        parts = [part.strip() for part in str(jwt_hs256_secret).split(",") if part.strip()]
+        if parts:
+            hs256_secrets = tuple(parts)
     elif jwt_public_key:
         key = jwt_public_key
     elif jwt_jwks_url:
@@ -186,13 +189,35 @@ async def verify_user_token(
         raise UserTokenError("No JWT verification key configured")
 
     try:
-        claims = _decode_user_claims(
-            raw,
-            key=key,
-            algorithms=algorithms,
-            issuer=issuer,
-            audience=audience,
-        )
+        if hs256_secrets:
+            last_exc: Optional[Exception] = None
+            claims = None
+            for secret in hs256_secrets:
+                try:
+                    claims = _decode_user_claims(
+                        raw,
+                        key=secret,
+                        algorithms=algorithms,
+                        issuer=issuer,
+                        audience=audience,
+                    )
+                    last_exc = None
+                    break
+                except ExpiredSignatureError as exc:
+                    raise UserTokenError("JWT expired") from exc
+                except JWTError as exc:
+                    last_exc = exc
+                    continue
+            if claims is None:
+                raise UserTokenError("JWT verification failed") from last_exc
+        else:
+            claims = _decode_user_claims(
+                raw,
+                key=key,
+                algorithms=algorithms,
+                issuer=issuer,
+                audience=audience,
+            )
     except ExpiredSignatureError as exc:
         raise UserTokenError("JWT expired") from exc
     except JWTError as exc:

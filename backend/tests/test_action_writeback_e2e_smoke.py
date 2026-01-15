@@ -31,9 +31,10 @@ from tests.utils.auth import bff_auth_headers
 
 
 if os.getenv("RUN_LIVE_ACTION_WRITEBACK_SMOKE", "").strip().lower() not in {"1", "true", "yes", "on"}:
-    raise RuntimeError(
+    pytest.skip(
         "RUN_LIVE_ACTION_WRITEBACK_SMOKE must be enabled for this test run. "
-        "Set RUN_LIVE_ACTION_WRITEBACK_SMOKE=true."
+        "Set RUN_LIVE_ACTION_WRITEBACK_SMOKE=true.",
+        allow_module_level=True,
     )
 
 

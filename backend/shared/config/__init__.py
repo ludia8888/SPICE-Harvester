@@ -21,6 +21,7 @@ SPICE HARVESTER 애플리케이션의 모든 설정을 통합 관리
 
 from .app_config import AppConfig
 from .service_config import ServiceConfig
+from .settings import get_settings
 from .search_config import (
     get_instances_index_name,
     get_ontologies_index_name,
@@ -43,32 +44,32 @@ class Config(AppConfig):
     @staticmethod
     def get_postgres_url() -> str:
         """PostgreSQL 연결 URL"""
-        return ServiceConfig.get_postgres_url()
+        return get_settings().database.postgres_url
     
     @staticmethod
     def get_redis_url() -> str:
         """Redis 연결 URL"""
-        return ServiceConfig.get_redis_url()
+        return get_settings().database.redis_url
     
     @staticmethod
     def get_elasticsearch_url() -> str:
         """Elasticsearch 연결 URL"""
-        return ServiceConfig.get_elasticsearch_url()
+        return get_settings().database.elasticsearch_url
     
     @staticmethod
     def get_kafka_bootstrap_servers() -> str:
         """Kafka Bootstrap Servers"""
-        return ServiceConfig.get_kafka_bootstrap_servers()
+        return get_settings().database.kafka_servers
     
     @staticmethod
     def get_terminus_url() -> str:
         """TerminusDB 연결 URL"""
-        return ServiceConfig.get_terminus_url()
+        return get_settings().database.terminus_url
     
     @staticmethod
     def get_minio_url() -> str:
         """MinIO 연결 URL"""
-        return ServiceConfig.get_minio_url()
+        return get_settings().storage.minio_endpoint_url
     
     # ======================
     # Search Configuration Integration

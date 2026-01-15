@@ -25,7 +25,6 @@ from confluent_kafka import Consumer, KafkaError, Producer, TopicPartition
 from oms.services.async_terminus import AsyncTerminusService
 from oms.services.ontology_resources import OntologyResourceService
 from shared.config.app_config import AppConfig
-from shared.config.service_config import ServiceConfig
 from shared.config.settings import get_settings
 from shared.errors.enterprise_catalog import is_external_code, resolve_enterprise_error
 from shared.errors.error_types import ErrorCode
@@ -157,7 +156,7 @@ class ActionWorker:
         self.running = False
         self.tracing = get_tracing_service("action-worker")
         self.metrics = get_metrics_collector("action-worker")
-        self.kafka_servers = ServiceConfig.get_kafka_bootstrap_servers()
+        self.kafka_servers = settings.database.kafka_servers
         self.consumer: Optional[Consumer] = None
         self.dlq_producer: Optional[Producer] = None
         self.dlq_topic = AppConfig.ACTION_COMMANDS_DLQ_TOPIC
@@ -237,7 +236,7 @@ class ActionWorker:
         from shared.models.config import ConnectionConfig
 
         connection_info = ConnectionConfig(
-            server_url=ServiceConfig.get_terminus_url(),
+            server_url=settings.database.terminus_url.rstrip("/"),
             user=settings.database.terminus_user,
             account=settings.database.terminus_account,
             key=settings.database.terminus_password,

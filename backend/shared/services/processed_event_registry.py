@@ -18,7 +18,6 @@ from uuid import uuid4
 
 import asyncpg
 
-from shared.config.service_config import ServiceConfig
 from shared.config.settings import get_settings
 
 
@@ -54,7 +53,7 @@ class ProcessedEventRegistry:
     ):
         settings = get_settings()
         self._settings = settings
-        self._dsn = dsn or ServiceConfig.get_postgres_url()
+        self._dsn = dsn or settings.database.postgres_url
         self._schema = schema
         self._pool: Optional[asyncpg.Pool] = None
         lease_timeout = (
@@ -523,8 +522,9 @@ class ProcessedEventRegistry:
 
 
 def validate_lease_settings() -> None:
-    heartbeat = int(app_settings.event_sourcing.processed_event_heartbeat_interval_seconds)
-    lease = int(app_settings.event_sourcing.processed_event_lease_timeout_seconds)
+    settings = get_settings()
+    heartbeat = int(settings.event_sourcing.processed_event_heartbeat_interval_seconds)
+    lease = int(settings.event_sourcing.processed_event_lease_timeout_seconds)
 
     if heartbeat <= 0 or lease <= 0:
         raise RuntimeError(
@@ -540,7 +540,8 @@ def validate_lease_settings() -> None:
 
 
 def validate_registry_enabled() -> None:
-    enabled = bool(app_settings.event_sourcing.enable_processed_event_registry)
+    settings = get_settings()
+    enabled = bool(settings.event_sourcing.enable_processed_event_registry)
     if not enabled:
         raise RuntimeError(
             "ENABLE_PROCESSED_EVENT_REGISTRY=false is not supported. "

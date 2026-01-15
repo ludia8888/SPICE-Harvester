@@ -1,0 +1,31 @@
+groups:
+  - name: spice-harvester
+    rules:
+      - alert: SpiceServiceDown
+        expr: up{job="spice-services"} == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "Service down: {{ $labels.instance }}"
+          description: "Prometheus scrape failed for {{ $labels.instance }} (job={{ $labels.job }})."
+
+      - alert: OtelCollectorDown
+        expr: up{job="otel-collector"} == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "OTel collector down"
+          description: "Prometheus scrape failed for otel-collector."
+
+      # FastAPI/Prometheus-client standard metric names (may be provided by instrumentation).
+      - alert: SpiceHighHttp5xxRate
+        expr: sum(rate(http_requests_total{job="spice-services",status=~"5.."}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "HTTP 5xx responses detected"
+          description: "5xx rate is > 0 for 5m across spice-services."
+

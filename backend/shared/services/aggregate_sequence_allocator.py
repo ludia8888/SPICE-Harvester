@@ -16,7 +16,6 @@ from typing import Optional
 
 import asyncpg
 
-from shared.config.service_config import ServiceConfig
 from shared.config.settings import get_settings
 
 
@@ -62,7 +61,7 @@ class AggregateSequenceAllocator:
         handler_prefix: str = "write_side",
     ):
         seq_settings = get_settings().event_sourcing
-        self._dsn = dsn or ServiceConfig.get_postgres_url()
+        self._dsn = dsn or get_settings().database.postgres_url
         self._schema = schema or str(seq_settings.event_store_sequence_schema or "spice_event_registry").strip() or "spice_event_registry"
         self._handler_prefix = (
             handler_prefix

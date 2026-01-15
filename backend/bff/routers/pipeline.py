@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
+import asyncpg
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel, Field
 
@@ -4047,6 +4048,8 @@ async def create_dataset(
             data={"dataset": dataset.__dict__},
         ).to_dict()
     except HTTPException:
+        raise
+    except asyncpg.PostgresError:
         raise
     except Exception as e:
         logger.error(f"Failed to create dataset: {e}")

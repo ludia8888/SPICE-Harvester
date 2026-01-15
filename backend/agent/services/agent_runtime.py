@@ -18,7 +18,6 @@ import httpx
 
 from agent.models import AgentToolCall
 from shared.config.settings import get_settings
-from shared.config.service_config import ServiceConfig
 from shared.models.event_envelope import EventEnvelope
 from shared.services.audit_log_store import AuditLogStore
 from shared.services.event_store import EventStore
@@ -797,7 +796,7 @@ class AgentRuntime:
         settings = get_settings()
         agent_settings = settings.agent
 
-        bff_url_raw = (agent_settings.bff_base_url or "").strip() or ServiceConfig.get_bff_url()
+        bff_url_raw = (agent_settings.bff_base_url or "").strip() or settings.services.bff_base_url
         bff_url = _clean_url(bff_url_raw)
         bff_token = (agent_settings.bff_token or "").strip() or None
         allowed_services = ("bff",)

@@ -25,7 +25,6 @@ from oms.utils.terminus_retry import build_async_retry
 from oms.utils.circular_reference_detector import CircularReferenceDetector
 from oms.utils.relationship_path_tracker import PathQuery, PathType, RelationshipPathTracker
 from oms.validators.relationship_validator import RelationshipValidator, ValidationSeverity
-from shared.config.service_config import ServiceConfig
 from shared.models.common import DataType
 from shared.models.config import ConnectionConfig
 from shared.models.ontology import OntologyBase, OntologyResponse, Relationship, Property

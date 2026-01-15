@@ -23,7 +23,6 @@ from confluent_kafka import Consumer, KafkaError, Producer, TopicPartition
 
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
-from shared.config.service_config import ServiceConfig
 from shared.models.objectify_job import ObjectifyJob
 from shared.observability.context_propagation import attach_context_from_kafka, kafka_headers_from_current_context
 from shared.observability.logging import install_trace_context_filter
@@ -528,11 +527,11 @@ class ObjectifyWorker:
         if token:
             headers["Authorization"] = f"Bearer {token}"
             headers["X-Admin-Token"] = token
-        self.http = httpx.AsyncClient(base_url=ServiceConfig.get_oms_url(), timeout=60.0, headers=headers)
+        self.http = httpx.AsyncClient(base_url=settings.services.oms_base_url, timeout=60.0, headers=headers)
 
         self.consumer = Consumer(
             {
-                "bootstrap.servers": ServiceConfig.get_kafka_bootstrap_servers(),
+                "bootstrap.servers": settings.database.kafka_servers,
                 "group.id": self.group_id,
                 "auto.offset.reset": "earliest",
                 "enable.auto.commit": False,
@@ -544,8 +543,8 @@ class ObjectifyWorker:
 
         self.dlq_producer = Producer(
             {
-                "bootstrap.servers": ServiceConfig.get_kafka_bootstrap_servers(),
-                "client.id": get_settings().observability.service_name or "objectify-worker",
+                "bootstrap.servers": settings.database.kafka_servers,
+                "client.id": settings.observability.service_name or "objectify-worker",
                 "acks": "all",
                 "retries": 3,
                 "retry.backoff.ms": 100,

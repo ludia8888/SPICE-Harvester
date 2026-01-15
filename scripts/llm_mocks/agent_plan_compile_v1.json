@@ -1,0 +1,385 @@
+[
+  {
+    "plan": {
+      "goal": "Analyze uploaded dataset and propose a safe, preview-only cleansing plan.",
+      "requires_approval": false,
+      "risk_level": "read",
+      "data_scope": {
+        "db_name": "${context.db_name}",
+        "branch": "${context.branch}",
+        "dataset_id": "${context.dataset_id}",
+        "dataset_version_id": "${context.dataset_version_id}"
+      },
+      "steps": [
+        {
+          "step_id": "simulate_cleansing_definition",
+          "tool_id": "pipelines.simulate_definition",
+          "body": {
+            "db_name": "${context.db_name}",
+            "branch": "${context.branch}",
+            "definition_json": {
+              "nodes": [
+                {
+                  "id": "input_customers",
+                  "type": "input",
+                  "title": "Customers (raw)",
+                  "metadata": {
+                    "datasetId": "${context.dataset_id}",
+                    "datasetBranch": "${context.branch}"
+                  }
+                },
+                {
+                  "id": "cast_fields",
+                  "type": "transform",
+                  "title": "Cast total_purchases/vip_status",
+                  "metadata": {
+                    "operation": "cast",
+                    "casts": [
+                      {
+                        "column": "total_purchases",
+                        "type": "integer"
+                      },
+                      {
+                        "column": "vip_status",
+                        "type": "boolean"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "dedupe_customers",
+                  "type": "transform",
+                  "title": "Deduplicate by customer_id",
+                  "metadata": {
+                    "operation": "dedupe",
+                    "columns": [
+                      "customer_id"
+                    ]
+                  }
+                },
+                {
+                  "id": "output_customers_clean",
+                  "type": "output",
+                  "title": "Customers (clean)",
+                  "metadata": {
+                    "outputName": "customers_clean"
+                  }
+                }
+              ],
+              "edges": [
+                {
+                  "from": "input_customers",
+                  "to": "cast_fields"
+                },
+                {
+                  "from": "cast_fields",
+                  "to": "dedupe_customers"
+                },
+                {
+                  "from": "dedupe_customers",
+                  "to": "output_customers_clean"
+                }
+              ]
+            },
+            "limit": 20
+          },
+          "description": "Preview-only cleansing simulation (no writes)."
+        }
+      ],
+      "policy_notes": [],
+      "warnings": []
+    },
+    "confidence": 0.92,
+    "notes": [
+      "Cleansing recommendation: cast total_purchases→integer, vip_status→boolean; dedupe by customer_id.",
+      "PK candidate: customer_id. Title candidate: full_name."
+    ],
+    "warnings": []
+  },
+  {
+    "plan": {
+      "goal": "Apply cleansing via Pipeline Builder and prep for Objectify (requires approval).",
+      "requires_approval": false,
+      "risk_level": "read",
+      "data_scope": {
+        "db_name": "${context.db_name}",
+        "branch": "${context.branch}",
+        "dataset_id": "${context.dataset_id}",
+        "dataset_version_id": "${context.dataset_version_id}"
+      },
+      "steps": [
+        {
+          "step_id": "simulate_cleansing_definition",
+          "tool_id": "pipelines.simulate_definition",
+          "body": {
+            "db_name": "${context.db_name}",
+            "branch": "${context.branch}",
+            "definition_json": {
+              "nodes": [
+                {
+                  "id": "input_customers",
+                  "type": "input",
+                  "title": "Customers (raw)",
+                  "metadata": {
+                    "datasetId": "${context.dataset_id}",
+                    "datasetBranch": "${context.branch}"
+                  }
+                },
+                {
+                  "id": "cast_fields",
+                  "type": "transform",
+                  "title": "Cast total_purchases/vip_status",
+                  "metadata": {
+                    "operation": "cast",
+                    "casts": [
+                      {
+                        "column": "total_purchases",
+                        "type": "integer"
+                      },
+                      {
+                        "column": "vip_status",
+                        "type": "boolean"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "dedupe_customers",
+                  "type": "transform",
+                  "title": "Deduplicate by customer_id",
+                  "metadata": {
+                    "operation": "dedupe",
+                    "columns": [
+                      "customer_id"
+                    ]
+                  }
+                },
+                {
+                  "id": "output_customers_clean",
+                  "type": "output",
+                  "title": "Customers (clean)",
+                  "metadata": {
+                    "outputName": "customers_clean"
+                  }
+                }
+              ],
+              "edges": [
+                {
+                  "from": "input_customers",
+                  "to": "cast_fields"
+                },
+                {
+                  "from": "cast_fields",
+                  "to": "dedupe_customers"
+                },
+                {
+                  "from": "dedupe_customers",
+                  "to": "output_customers_clean"
+                }
+              ]
+            },
+            "limit": 20
+          },
+          "description": "Validate the pipeline definition before creating it."
+        },
+        {
+          "step_id": "create_pipeline",
+          "tool_id": "pipelines.create",
+          "body": {
+            "db_name": "${context.db_name}",
+            "branch": "${context.branch}",
+            "name": "agent_demo_customers_clean_${context.run_id}",
+            "description": "Created by e2e_agent_pipeline_demo (mock LLM) to apply cleansing.",
+            "pipeline_type": "batch",
+            "location": "team/agent_demo",
+            "definition_json": {
+              "nodes": [
+                {
+                  "id": "input_customers",
+                  "type": "input",
+                  "title": "Customers (raw)",
+                  "metadata": {
+                    "datasetId": "${context.dataset_id}",
+                    "datasetBranch": "${context.branch}"
+                  }
+                },
+                {
+                  "id": "cast_fields",
+                  "type": "transform",
+                  "title": "Cast total_purchases/vip_status",
+                  "metadata": {
+                    "operation": "cast",
+                    "casts": [
+                      {
+                        "column": "total_purchases",
+                        "type": "integer"
+                      },
+                      {
+                        "column": "vip_status",
+                        "type": "boolean"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "dedupe_customers",
+                  "type": "transform",
+                  "title": "Deduplicate by customer_id",
+                  "metadata": {
+                    "operation": "dedupe",
+                    "columns": [
+                      "customer_id"
+                    ]
+                  }
+                },
+                {
+                  "id": "output_customers_clean",
+                  "type": "output",
+                  "title": "Customers (clean)",
+                  "metadata": {
+                    "outputName": "customers_clean"
+                  }
+                }
+              ],
+              "edges": [
+                {
+                  "from": "input_customers",
+                  "to": "cast_fields"
+                },
+                {
+                  "from": "cast_fields",
+                  "to": "dedupe_customers"
+                },
+                {
+                  "from": "dedupe_customers",
+                  "to": "output_customers_clean"
+                }
+              ]
+            }
+          },
+          "description": "Create a pipeline definition (write, approval-gated)."
+        },
+        {
+          "step_id": "preview_pipeline",
+          "tool_id": "pipelines.preview",
+          "path_params": {
+            "pipeline_id": "${steps.create_pipeline.pipeline_id}"
+          },
+          "body": {
+            "limit": 20
+          },
+          "description": "Preview pipeline output to validate cleansing."
+        },
+        {
+          "step_id": "create_mapping_spec",
+          "tool_id": "objectify.mapping_specs.create",
+          "body": {
+            "dataset_id": "${context.dataset_id}",
+            "dataset_branch": "${context.branch}",
+            "target_class_id": "Customer",
+            "mappings": [
+              {
+                "source_field": "customer_id",
+                "target_field": "customer_id"
+              },
+              {
+                "source_field": "full_name",
+                "target_field": "full_name"
+              },
+              {
+                "source_field": "email_address",
+                "target_field": "email_address"
+              },
+              {
+                "source_field": "phone_number",
+                "target_field": "phone_number"
+              },
+              {
+                "source_field": "birth_date",
+                "target_field": "birth_date"
+              },
+              {
+                "source_field": "registration_date",
+                "target_field": "registration_date"
+              },
+              {
+                "source_field": "city",
+                "target_field": "city"
+              },
+              {
+                "source_field": "country",
+                "target_field": "country"
+              },
+              {
+                "source_field": "total_purchases",
+                "target_field": "total_purchases"
+              },
+              {
+                "source_field": "vip_status",
+                "target_field": "vip_status"
+              }
+            ],
+            "status": "ACTIVE",
+            "auto_sync": true,
+            "options": {
+              "change_reason": "e2e_agent_pipeline_demo apply stage",
+              "ontology_branch": "${context.ontology_branch}"
+            }
+          },
+          "description": "Create mapping spec to make the dataset Objectify-ready."
+        },
+        {
+          "step_id": "run_objectify",
+          "tool_id": "objectify.run",
+          "path_params": {
+            "dataset_id": "${context.dataset_id}"
+          },
+          "body": {
+            "mapping_spec_id": "${steps.create_mapping_spec.mapping_spec_id}",
+            "dataset_version_id": "${context.dataset_version_id}",
+            "max_rows": 50,
+            "allow_partial": true
+          },
+          "description": "Trigger objectify job (write, approval-gated)."
+        }
+      ],
+      "policy_notes": [],
+      "warnings": []
+    },
+    "confidence": 0.88,
+    "notes": [
+      "This plan includes writes (pipeline create + mapping spec + objectify run), so the server will require approval and add idempotency keys.",
+      "If the Customer object type contract is missing, create it first via /databases/{db_name}/ontology/object-types."
+    ],
+    "warnings": []
+  },
+  {
+    "plan": {
+      "goal": "Re-plan based on CI failure context (read-only checks first).",
+      "requires_approval": false,
+      "risk_level": "read",
+      "data_scope": {
+        "db_name": "${context.db_name}",
+        "branch": "${context.branch}"
+      },
+      "steps": [
+        {
+          "step_id": "list_pipelines",
+          "tool_id": "pipelines.list",
+          "query": {
+            "db_name": "${context.db_name}",
+            "branch": "${context.branch}"
+          },
+          "description": "Enumerate pipelines in scope to confirm state before proposing changes."
+        }
+      ],
+      "policy_notes": [],
+      "warnings": []
+    },
+    "confidence": 0.75,
+    "notes": [
+      "CI failure ingested: start with read-only checks, then propose minimal changes behind approval if needed."
+    ],
+    "warnings": []
+  }
+]

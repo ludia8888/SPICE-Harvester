@@ -51,8 +51,6 @@ def pytest_configure() -> None:
     redis_port = _env_or_dotenv(dotenv, "REDIS_PORT_HOST", "6380")
     minio_port = _env_or_dotenv(dotenv, "MINIO_PORT_HOST", "9002")
     lakefs_port = _env_or_dotenv(dotenv, "LAKEFS_PORT_HOST", "48080")
-    lakefs_access = _env_or_dotenv(dotenv, "LAKEFS_ACCESS_KEY_ID", "")
-    lakefs_secret = _env_or_dotenv(dotenv, "LAKEFS_SECRET_ACCESS_KEY", "")
 
     os.environ.setdefault("KAFKA_BOOTSTRAP_SERVERS", f"127.0.0.1:{kafka_port}")
     os.environ.setdefault(
@@ -68,10 +66,12 @@ def pytest_configure() -> None:
     os.environ.setdefault("MINIO_SECRET_KEY", "minioadmin123")
     os.environ.setdefault("LAKEFS_PORT_HOST", lakefs_port)
     os.environ.setdefault("LAKEFS_API_PORT", lakefs_port)
-    if lakefs_access:
-        os.environ.setdefault("LAKEFS_INSTALLATION_ACCESS_KEY_ID", lakefs_access)
-    if lakefs_secret:
-        os.environ.setdefault("LAKEFS_INSTALLATION_SECRET_ACCESS_KEY", lakefs_secret)
+
+    # Never pull LakeFS credentials from the repo `.env` (frequently contains unrelated AWS keys).
+    os.environ.setdefault("LAKEFS_ACCESS_KEY_ID", "spice-lakefs-admin")
+    os.environ.setdefault("LAKEFS_SECRET_ACCESS_KEY", "spice-lakefs-admin-secret")
+    os.environ.setdefault("LAKEFS_INSTALLATION_ACCESS_KEY_ID", os.environ["LAKEFS_ACCESS_KEY_ID"])
+    os.environ.setdefault("LAKEFS_INSTALLATION_SECRET_ACCESS_KEY", os.environ["LAKEFS_SECRET_ACCESS_KEY"])
     if "LAKEFS_API_URL" not in os.environ:
         os.environ["LAKEFS_API_URL"] = f"http://127.0.0.1:{lakefs_port}"
     os.environ.setdefault("PIPELINE_JOB_QUEUE_FLUSH_TIMEOUT_SECONDS", "20")

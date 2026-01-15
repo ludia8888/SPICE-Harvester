@@ -33,6 +33,7 @@ from typing import Any, Dict, Iterable, Optional, Tuple
 
 import aiohttp
 import pytest
+from jose import jwt
 
 from tests.utils.auth import bff_auth_headers
 
@@ -50,6 +51,37 @@ BFF_HEADERS = bff_auth_headers()
 if _ENV_SMOKE_TOKEN and _ENV_SMOKE_TOKEN != BFF_HEADERS.get("X-Admin-Token"):
     raise AssertionError("SMOKE_ADMIN_TOKEN differs from BFF auth token.")
 SMOKE_ADMIN_TOKEN = _ENV_SMOKE_TOKEN or (BFF_HEADERS.get("X-Admin-Token") or "")
+
+def _build_smoke_user_jwt() -> str:
+    """
+    Build a deterministic HS256 user JWT for integration smoke tests.
+
+    The docker-compose default is `USER_JWT_HS256_SECRET=spice-dev-user-jwt-secret`, so we
+    fall back to that when the test runner environment doesn't export a secret.
+    """
+    secret = (os.getenv("USER_JWT_HS256_SECRET") or os.getenv("SMOKE_USER_JWT_SECRET") or "spice-dev-user-jwt-secret").strip()
+    if not secret:
+        secret = "spice-dev-user-jwt-secret"
+
+    issuer = (os.getenv("USER_JWT_ISSUER") or "").strip() or None
+    audience = (os.getenv("USER_JWT_AUDIENCE") or "").strip() or None
+
+    claims: Dict[str, Any] = {
+        "sub": "openapi_smoke_user",
+        "email": "openapi_smoke_user@local.test",
+        "roles": ["admin"],
+        "tenant_id": "openapi_smoke_tenant",
+        "org_id": "openapi_smoke_org",
+    }
+    if issuer:
+        claims["iss"] = issuer
+    if audience:
+        claims["aud"] = audience
+
+    return jwt.encode(claims, secret, algorithm="HS256")
+
+
+SMOKE_USER_JWT = _build_smoke_user_jwt()
 
 
 def _load_repo_dotenv() -> Dict[str, str]:
@@ -312,6 +344,13 @@ class SmokeContext:
     action_log_id: Optional[str] = None
     simulation_id: Optional[str] = None
     simulation_version: Optional[int] = None
+    agent_session_id: Optional[str] = None
+    agent_plan_id: Optional[str] = None
+    agent_run_id: Optional[str] = None
+    agent_job_id: Optional[str] = None
+    agent_approval_request_id: Optional[str] = None
+    agent_context_item_id: Optional[str] = None
+    document_bundle_id: Optional[str] = None
 
     @property
     def ontology_aggregate_id(self) -> str:
@@ -361,6 +400,7 @@ class RequestPlan:
     headers: Optional[Dict[str, str]] = None
     note: Optional[str] = None
     allow_5xx: bool = False
+    auth_mode: str = "admin"  # admin|delegated_user|user
 
 
 async def _request(
@@ -371,6 +411,12 @@ async def _request(
     if plan.params:
         kwargs["params"] = plan.params
     headers: Dict[str, str] = dict(BFF_HEADERS)
+    auth_mode = str(getattr(plan, "auth_mode", "") or "admin").strip().lower()
+    if auth_mode == "user":
+        headers["X-Admin-Token"] = ""
+        headers["Authorization"] = f"Bearer {SMOKE_USER_JWT}"
+    elif auth_mode == "delegated_user":
+        headers["X-Delegated-Authorization"] = f"Bearer {SMOKE_USER_JWT}"
     if plan.headers:
         headers.update(plan.headers)
     kwargs["headers"] = headers
@@ -415,6 +461,17 @@ def _format_path(template: str, ctx: SmokeContext, *, overrides: Optional[Dict[s
         "action_log_id": ctx.action_log_id or "00000000-0000-0000-0000-000000000000",
         "simulation_id": ctx.simulation_id or "00000000-0000-0000-0000-000000000000",
         "version": str(ctx.simulation_version or 1),
+        # Agent control-plane placeholders
+        "session_id": ctx.agent_session_id or "00000000-0000-0000-0000-000000000000",
+        "plan_id": ctx.agent_plan_id or "00000000-0000-0000-0000-000000000000",
+        "job_id": ctx.agent_job_id or "00000000-0000-0000-0000-000000000000",
+        "run_id": ctx.agent_run_id or "00000000-0000-0000-0000-000000000000",
+        "approval_request_id": ctx.agent_approval_request_id or "00000000-0000-0000-0000-000000000000",
+        "item_id": ctx.agent_context_item_id or "00000000-0000-0000-0000-000000000000",
+        "function_id": f"smoke_echo_{ctx.db_name}",
+        # Context / RAG placeholders
+        "bundle_id": ctx.document_bundle_id or "bundle_smoke",
+        "entity_id": "entity_smoke",
     }
     if overrides:
         values.update(overrides)
@@ -519,6 +576,189 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     if key == ("GET", "/api/v1/graph-query/health"):
         return RequestPlan(op.method, op.path, f"{BFF_URL}{op.path}", (200,))
 
+    # ---------- Agent Control Plane ----------
+    if key == ("POST", "/api/v1/agent/runs"):
+        url = f"{BFF_URL}{op.path}"
+        # Intentionally invalid (no steps) -> deterministic 400 without running any tools.
+        body = {"goal": "openapi smoke run", "steps": [], "context": {"source": "openapi_smoke"}, "request_id": str(uuid.uuid4())}
+        return RequestPlan(op.method, op.path, url, (200, 400, 422), json_body=body, auth_mode="delegated_user")
+
+    if key == ("POST", "/api/v1/agent-functions"):
+        url = f"{BFF_URL}{op.path}"
+        body = {
+            "function_id": f"smoke_echo_{ctx.db_name}",
+            "version": "v1",
+            "status": "ACTIVE",
+            "handler": "echo",
+            "tags": ["openapi_smoke"],
+            "roles": [],
+            "input_schema": {},
+            "output_schema": {},
+            "metadata": {"source": "openapi_smoke"},
+        }
+        return RequestPlan(op.method, op.path, url, (201, 400, 401, 403, 422), json_body=body, auth_mode="delegated_user")
+
+    if key == ("POST", "/api/v1/agent-functions/{function_id}/execute"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {"input": {"hello": "world"}}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 422), json_body=body, auth_mode="delegated_user")
+
+    if key == ("POST", "/api/v1/agent-plans/compile"):
+        url = f"{BFF_URL}{op.path}"
+        body = {"goal": "데이터 정제하고 통합해 (openapi smoke)", "data_scope": {"db_name": ctx.db_name, "branch": "main"}}
+        return RequestPlan(op.method, op.path, url, (200, 400, 422, 429), json_body=body, auth_mode="delegated_user")
+
+    if key == ("POST", "/api/v1/agent-plans/context-pack"):
+        url = f"{BFF_URL}{op.path}"
+        body = {"db_name": ctx.db_name, "max_decisions": 1, "max_simulations": 1}
+        return RequestPlan(op.method, op.path, url, (200, 400, 422), json_body=body, auth_mode="delegated_user")
+
+    if key == ("POST", "/api/v1/agent-plans/validate"):
+        url = f"{BFF_URL}{op.path}"
+        # Invalid plan shape -> 422 from request validation.
+        return RequestPlan(op.method, op.path, url, (200, 400, 422), json_body={}, auth_mode="delegated_user")
+
+    if key == ("POST", "/api/v1/agent-plans/{plan_id}/apply-patch"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {"patch": []}
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 422), json_body=body, auth_mode="delegated_user")
+
+    if key == ("POST", "/api/v1/agent-plans/{plan_id}/approvals"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {"decision": "APPROVE", "comment": "openapi smoke approval"}
+        return RequestPlan(op.method, op.path, url, (200, 201, 400, 404, 422), json_body=body, auth_mode="delegated_user")
+
+    if key == ("POST", "/api/v1/agent-plans/{plan_id}/preview"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (202, 400, 404, 422), json_body={}, auth_mode="delegated_user")
+
+    if key == ("POST", "/api/v1/agent-plans/{plan_id}/execute"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (202, 400, 403, 404, 422), json_body={}, auth_mode="delegated_user")
+
+    if key == ("POST", "/api/v1/agent-sessions"):
+        url = f"{BFF_URL}{op.path}"
+        body = {"metadata": {"source": "openapi_smoke"}}
+        return RequestPlan(op.method, op.path, url, (201, 400, 401, 403, 422), json_body=body, auth_mode="delegated_user")
+
+    if key == ("POST", "/api/v1/agent-sessions/{session_id}/messages"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {"content": "Hello from OpenAPI smoke", "execute": False}
+        return RequestPlan(op.method, op.path, url, (202, 400, 403, 404, 409, 422), json_body=body, auth_mode="delegated_user")
+
+    if key == ("POST", "/api/v1/agent-sessions/{session_id}/jobs"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {"plan_id": ctx.agent_plan_id or "00000000-0000-0000-0000-000000000000"}
+        return RequestPlan(op.method, op.path, url, (201, 400, 403, 404, 409, 422), json_body=body, auth_mode="delegated_user")
+
+    if key == ("POST", "/api/v1/agent-sessions/{session_id}/context/items"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {"item_type": "custom", "include_mode": "summary", "ref": {"note": "openapi smoke"}, "metadata": {"source": "openapi_smoke"}}
+        return RequestPlan(op.method, op.path, url, (201, 400, 403, 404, 409, 422), json_body=body, auth_mode="delegated_user")
+
+    if key == ("POST", "/api/v1/agent-sessions/{session_id}/context/file-upload"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        form = aiohttp.FormData()
+        form.add_field("file", b"hello-world", filename="openapi_smoke.txt", content_type="text/plain")
+        form.add_field("include_mode", "summary")
+        return RequestPlan(op.method, op.path, url, (201, 400, 401, 403, 404, 409, 422, 503), form=form, auth_mode="delegated_user", allow_5xx=True)
+
+    if key == ("POST", "/api/v1/agent-sessions/{session_id}/summarize"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 409, 422), json_body={}, auth_mode="delegated_user")
+
+    if key == ("POST", "/api/v1/agent-sessions/{session_id}/messages/remove"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 409, 422), json_body={}, auth_mode="delegated_user")
+
+    if key == ("POST", "/api/v1/agent-sessions/{session_id}/clarifications"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {"questions": [], "reason": "openapi smoke"}
+        return RequestPlan(op.method, op.path, url, (201, 400, 403, 404, 409, 422), json_body=body, auth_mode="delegated_user")
+
+    if key == ("POST", "/api/v1/agent-sessions/{session_id}/approvals/{approval_request_id}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {"decision": "APPROVE", "comment": "openapi smoke"}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 409, 422), json_body=body, auth_mode="delegated_user")
+
+    if key == ("POST", "/api/v1/agent-sessions/{session_id}/ci-results"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {"status": "success", "provider": "openapi_smoke", "summary": "ok"}
+        return RequestPlan(op.method, op.path, url, (201, 400, 403, 404, 409, 422), json_body=body, auth_mode="delegated_user")
+
+    if key == ("PUT", "/api/v1/agent-sessions/{session_id}/model"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {"selected_model": None}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 409, 422), json_body=body, auth_mode="delegated_user")
+
+    if key == ("PUT", "/api/v1/agent-sessions/{session_id}/tools"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {"enabled_tools": []}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 409, 422), json_body=body, auth_mode="delegated_user")
+
+    if key == ("PUT", "/api/v1/agent-sessions/{session_id}/variables"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {"variables": {"foo": "bar"}, "replace": False}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 409, 422), json_body=body, auth_mode="delegated_user")
+
+    if key == ("DELETE", "/api/v1/agent-sessions/{session_id}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (200, 202, 400, 403, 404, 409), auth_mode="delegated_user")
+
+    if key == ("DELETE", "/api/v1/agent-sessions/{session_id}/context/items/{item_id}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 409), auth_mode="delegated_user")
+
+    # ---------- Context Tools (User JWT required) ----------
+    if key == ("POST", "/api/v1/context-tools/datasets/describe"):
+        url = f"{BFF_URL}{op.path}"
+        body = {"db_name": ctx.db_name, "branch": "main"}
+        return RequestPlan(op.method, op.path, url, (200, 400, 401, 403, 422), json_body=body, auth_mode="user")
+
+    if key == ("POST", "/api/v1/context-tools/ontology/snapshot"):
+        url = f"{BFF_URL}{op.path}"
+        body = {"db_name": ctx.db_name, "branch": "main", "ontology_id": ctx.class_id}
+        return RequestPlan(op.method, op.path, url, (200, 400, 401, 403, 404, 422), json_body=body, auth_mode="user")
+
+    # ---------- Document Bundles (User JWT + Context7) ----------
+    if key == ("POST", "/api/v1/document-bundles/{bundle_id}/search"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        body = {"query": "openapi smoke", "limit": 3}
+        return RequestPlan(
+            op.method,
+            op.path,
+            url,
+            (200, 400, 401, 403, 404, 422, 503),
+            json_body=body,
+            auth_mode="user",
+            allow_5xx=True,
+        )
+
+    # ---------- Context7 (MCP) ----------
+    if key == ("POST", "/api/v1/context7/search"):
+        url = f"{BFF_URL}{op.path}"
+        body = {"query": "openapi smoke", "limit": 3, "filters": {"source": "openapi_smoke"}}
+        return RequestPlan(op.method, op.path, url, (200, 400, 422, 503), json_body=body, allow_5xx=True)
+
+    if key == ("GET", "/api/v1/context7/context/{entity_id}"):
+        url = f"{BFF_URL}{_format_path(op.path, ctx)}"
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 503), allow_5xx=True)
+
+    if key == ("POST", "/api/v1/context7/knowledge"):
+        url = f"{BFF_URL}{op.path}"
+        body = {"title": "OpenAPI smoke", "content": "hello", "metadata": {"source": "openapi_smoke"}, "tags": ["openapi_smoke"]}
+        return RequestPlan(op.method, op.path, url, (200, 400, 422, 503), json_body=body, allow_5xx=True)
+
+    if key == ("POST", "/api/v1/context7/link"):
+        url = f"{BFF_URL}{op.path}"
+        body = {"source_id": "entity_a", "target_id": "entity_b", "relationship": "related_to", "properties": {"source": "openapi_smoke"}}
+        return RequestPlan(op.method, op.path, url, (200, 400, 422, 503), json_body=body, allow_5xx=True)
+
+    if key == ("POST", "/api/v1/context7/analyze/ontology"):
+        url = f"{BFF_URL}{op.path}"
+        body = {"ontology_id": ctx.class_id, "db_name": ctx.db_name, "branch": "main", "include_relationships": False, "include_suggestions": True}
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 422, 503), json_body=body, allow_5xx=True)
+
     # ---------- Database ----------
     if key == ("GET", "/api/v1/databases"):
         return RequestPlan(op.method, op.path, f"{BFF_URL}{op.path}", (200,))
@@ -561,6 +801,12 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
             "definition_json": {"nodes": [], "edges": [], "parameters": []},
         }
         return RequestPlan(op.method, op.path, url, (200, 409, 400), json_body=body)
+
+    if key == ("POST", "/api/v1/pipelines/simulate-definition"):
+        url = f"{BFF_URL}{op.path}"
+        headers = {"X-DB-Name": ctx.db_name}
+        body = {"db_name": ctx.db_name, "branch": "main", "definition_json": {"nodes": [], "edges": [], "parameters": []}}
+        return RequestPlan(op.method, op.path, url, (200, 400, 403, 404, 422), json_body=body, headers=headers)
 
     if key == ("GET", "/api/v1/pipelines/{pipeline_id}"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
@@ -984,7 +1230,7 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     if key == ("POST", "/api/v1/databases/{db_name}/ontology/{class_id}/mapping-metadata"):
         url = f"{BFF_URL}{_format_path(op.path, ctx, overrides={'class_id': ctx.class_id})}"
         body = {"source": "openapi_smoke", "note": "mapping metadata smoke"}
-        return RequestPlan(op.method, op.path, url, (200, 400, 404, 422), json_body=body)
+        return RequestPlan(op.method, op.path, url, (200, 400, 404, 409, 422), json_body=body)
 
     if key == ("POST", "/api/v1/databases/{db_name}/ontology/object-types"):
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
@@ -1421,7 +1667,27 @@ async def _build_plan(op: Operation, ctx: SmokeContext) -> RequestPlan:
     # - POST/PUT/DELETE without a recipe is a hard failure (we want full coverage).
     if op.method == "GET":
         url = f"{BFF_URL}{_format_path(op.path, ctx)}"
-        return RequestPlan(op.method, op.path, url, (200, 404))
+        auth_mode = "admin"
+        expected_statuses: Tuple[int, ...] = (200, 404)
+        allow_5xx = False
+
+        if op.path.startswith("/api/v1/agent"):
+            auth_mode = "delegated_user"
+        elif op.path.startswith("/api/v1/context-tools") or op.path.startswith("/api/v1/document-bundles"):
+            auth_mode = "user"
+        elif op.path.startswith("/api/v1/context7"):
+            # Context7 depends on external MCP wiring; treat 503 as acceptable degradation.
+            expected_statuses = (200, 400, 404, 503)
+            allow_5xx = True
+
+        return RequestPlan(
+            op.method,
+            op.path,
+            url,
+            expected_statuses,
+            auth_mode=auth_mode,
+            allow_5xx=allow_5xx,
+        )
 
     raise AssertionError(f"Missing RequestPlan recipe for operation: {op.method} {op.path} (tags={op.tags}, summary={op.summary!r})")
 
@@ -1546,26 +1812,6 @@ async def test_openapi_stable_contract_smoke():
                 ctx.command_ids["create_database"] = str(command_id)
                 await _wait_for_command_completed(session, command_id=str(command_id))
 
-            # Create ontology classes (Product + Order)
-            for op in [
-                Operation("POST", db_ontology_path, ("Ontology Management",), "Create Ontology"),
-                Operation(
-                    "POST",
-                    db_ontology_advanced_path,
-                    ("Ontology Management",),
-                    "Create Ontology Advanced",
-                ),
-            ]:
-                plan = await _build_plan(op, ctx)
-                status, text, payload = await _request(session, plan)
-                executed.add((plan.method, plan.path_template))
-                if status not in plan.expected_statuses:
-                    raise AssertionError(f"{plan.method} {plan.path_template} unexpected status {status}: {text[:500]}")
-                if status == 202 and isinstance(payload, dict):
-                    command_id = ((payload.get("data") or {}).get("command_id")) or ((payload.get("data") or {}).get("commandId"))
-                    if command_id:
-                        await _wait_for_command_completed(session, command_id=str(command_id))
-
             # Create branch (for merge simulate, etc)
             plan = await _build_plan(
                 Operation("POST", db_branches_path, ("Database Management",), "Create Branch"),
@@ -1575,6 +1821,247 @@ async def test_openapi_stable_contract_smoke():
             executed.add((plan.method, plan.path_template))
             if status not in plan.expected_statuses:
                 raise AssertionError(f"{plan.method} {plan.path_template} unexpected status {status}: {text[:500]}")
+
+            # Create ontology classes (Product + Order) on main. If the stack is running with
+            # protected branches (e.g., ONTOLOGY_REQUIRE_PROPOSALS=true), writes to main will 409.
+            # In that case, write to ctx.branch_name and merge/deploy into main via proposals.
+            proposal_id: Optional[str] = None
+            deployment_recorded = False
+            action_type_created = False
+
+            ontology_ops = [
+                (
+                    Operation("POST", db_ontology_path, ("Ontology Management",), "Create Ontology"),
+                    _ontology_payload(class_id=ctx.class_id, label_en="Product", label_ko="제품"),
+                ),
+                (
+                    Operation(
+                        "POST",
+                        db_ontology_advanced_path,
+                        ("Ontology Management",),
+                        "Create Ontology Advanced",
+                    ),
+                    _ontology_payload(class_id=ctx.advanced_class_id, label_en="Order", label_ko="주문"),
+                ),
+            ]
+            needs_proposal: list[Tuple[str, Any]] = []
+            for op, body in ontology_ops:
+                plan = await _build_plan(op, ctx)
+                status, text, payload = await _request(session, plan)
+                executed.add((plan.method, plan.path_template))
+
+                if status == 409:
+                    needs_proposal.append((plan.path_template, body))
+                    continue
+
+                if status not in plan.expected_statuses:
+                    raise AssertionError(f"{plan.method} {plan.path_template} unexpected status {status}: {text[:500]}")
+                if status == 202 and isinstance(payload, dict):
+                    command_id = ((payload.get("data") or {}).get("command_id")) or (
+                        (payload.get("data") or {}).get("commandId")
+                    )
+                    if command_id:
+                        await _wait_for_command_completed(session, command_id=str(command_id))
+
+            if needs_proposal:
+                # Write missing ontology resources to the feature branch.
+                for path_template, body in needs_proposal:
+                    url = f"{BFF_URL}{_format_path(path_template, ctx)}"
+                    branch_plan = RequestPlan(
+                        "POST",
+                        path_template,
+                        url,
+                        (200, 202, 409),
+                        params={"branch": ctx.branch_name},
+                        json_body=body,
+                        note="smoke: proposal fallback write",
+                    )
+                    status, text, payload = await _request(session, branch_plan)
+                    executed.add((branch_plan.method, branch_plan.path_template))
+                    if status == 409:
+                        raise AssertionError(
+                            f"Protected-branch fallback failed for {branch_plan.path_template} (http=409): {text[:800]}"
+                        )
+                    if status == 202 and isinstance(payload, dict):
+                        command_id = ((payload.get("data") or {}).get("command_id")) or (
+                            (payload.get("data") or {}).get("commandId")
+                        )
+                        if command_id:
+                            await _wait_for_command_completed(session, command_id=str(command_id))
+
+                # Create an action type on the branch so it lands in main via the same proposal.
+                branch_head = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch=ctx.branch_name)
+                action_type_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/action-types"
+                action_type_body = {
+                    "id": ctx.action_type_id,
+                    "label": {"en": "Rename Product", "ko": "상품 이름 변경"},
+                    "description": {"en": "Rename an existing Product", "ko": "기존 Product 인스턴스 이름 변경"},
+                    "spec": {
+                        "input_schema": {
+                            "fields": [
+                                {"name": "product", "type": "object_ref", "required": True, "object_type": ctx.class_id},
+                                {"name": "new_name", "type": "string", "required": True, "max_length": 2000},
+                            ],
+                            "allow_extra_fields": False,
+                        },
+                        "permission_policy": {
+                            "effect": "ALLOW",
+                            "principals": ["role:Owner", "role:Editor", "role:DomainModeler"],
+                        },
+                        "writeback_target": {
+                            "repo": "ontology-writeback",
+                            "branch": f"writeback-{ctx.db_name}",
+                        },
+                        "conflict_policy": "FAIL",
+                        "implementation": {
+                            "type": "template_v1",
+                            "targets": [
+                                {
+                                    "target": {"from": "input.product"},
+                                    "changes": {
+                                        "set": {"name": {"$ref": "input.new_name"}},
+                                    },
+                                }
+                            ],
+                        },
+                    },
+                    "metadata": {"source": "openapi_smoke"},
+                }
+                async with session.post(
+                    action_type_url,
+                    params={"branch": ctx.branch_name, "expected_head_commit": branch_head},
+                    json=action_type_body,
+                ) as resp:
+                    executed.add(("POST", "/api/v1/databases/{db_name}/ontology/action-types"))
+                    if resp.status != 201:
+                        raise AssertionError(
+                            f"Failed to create action type on branch (http={resp.status}): {await resp.text()}"
+                        )
+                action_type_created = True
+
+                # Ontology approval gates require object type contracts for any object types
+                # introduced on the feature branch (e.g., Product/Order). Bootstrap a minimal
+                # backing dataset + contracts so the proposal can be approved deterministically.
+                dataset_upload_url = f"{BFF_URL}/api/v1/pipelines/datasets/csv-upload"
+                dataset_form = aiohttp.FormData()
+                dataset_bytes = _csv_bytes(
+                    header=["product_id", "order_id", "name"],
+                    rows=[[ctx.instance_id, f"order_{ctx.instance_id}", "OpenAPI Smoke"]],
+                )
+                dataset_form.add_field(
+                    "file",
+                    dataset_bytes,
+                    filename="openapi_smoke_products_orders.csv",
+                    content_type="text/csv",
+                )
+                dataset_form.add_field("dataset_name", ctx.dataset_name)
+                dataset_form.add_field("description", "openapi smoke bootstrap dataset (for object type contracts)")
+                dataset_form.add_field("has_header", "true")
+                dataset_upload_plan = RequestPlan(
+                    "POST",
+                    "/api/v1/pipelines/datasets/csv-upload",
+                    dataset_upload_url,
+                    (200,),
+                    params={"db_name": ctx.db_name, "branch": "main"},
+                    form=dataset_form,
+                    headers={"Idempotency-Key": f"openapi-smoke-{ctx.db_name}-dataset", "X-DB-Name": ctx.db_name},
+                    note="smoke: bootstrap dataset for ontology approval gates",
+                )
+                status, text, payload = await _request(session, dataset_upload_plan)
+                executed.add((dataset_upload_plan.method, dataset_upload_plan.path_template))
+                if status != 200 or not isinstance(payload, dict):
+                    raise AssertionError(f"Failed to bootstrap dataset (http={status}): {text[:800]}")
+                data = payload.get("data")
+                if isinstance(data, dict):
+                    dataset = data.get("dataset") if isinstance(data.get("dataset"), dict) else None
+                    if isinstance(dataset, dict):
+                        ctx.dataset_id = str(dataset.get("dataset_id") or dataset.get("id") or "").strip() or ctx.dataset_id
+                if not ctx.dataset_id:
+                    raise AssertionError(f"Missing dataset_id in bootstrap dataset response: {payload}")
+
+                object_type_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/object-types"
+                for class_id in (ctx.class_id, ctx.advanced_class_id):
+                    object_type_plan = RequestPlan(
+                        "POST",
+                        "/api/v1/databases/{db_name}/ontology/object-types",
+                        object_type_url,
+                        (201, 409),
+                        params={"branch": ctx.branch_name},
+                        json_body={
+                            "class_id": class_id,
+                            "backing_dataset_id": ctx.dataset_id,
+                            "pk_spec": {"primary_key": [f"{class_id.lower()}_id"], "title_key": ["name"]},
+                            "status": "ACTIVE",
+                            "metadata": {"source": "openapi_smoke"},
+                        },
+                        headers={"X-DB-Name": ctx.db_name},
+                        note="smoke: bootstrap object type contract for ontology approval gates",
+                    )
+                    status, text, _ = await _request(session, object_type_plan)
+                    executed.add((object_type_plan.method, object_type_plan.path_template))
+                    if status not in object_type_plan.expected_statuses:
+                        raise AssertionError(
+                            f"Failed to bootstrap object type contract for {class_id} (http={status}): {text[:800]}"
+                        )
+
+                # Propose + approve (merge) into main.
+                proposal_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/proposals"
+                proposal_body = {
+                    "source_branch": ctx.branch_name,
+                    "target_branch": "main",
+                    "title": f"OpenAPI smoke ontology ({ctx.db_name})",
+                    "description": "openapi contract smoke proposal (auto)",
+                    "author": "openapi_smoke",
+                }
+                proposal_plan = RequestPlan(
+                    "POST",
+                    "/api/v1/databases/{db_name}/ontology/proposals",
+                    proposal_url,
+                    (201,),
+                    json_body=proposal_body,
+                )
+                status, text, payload = await _request(session, proposal_plan)
+                executed.add((proposal_plan.method, proposal_plan.path_template))
+                if status != 201 or not isinstance(payload, dict):
+                    raise AssertionError(f"Failed to create ontology proposal (http={status}): {text[:800]}")
+                data = payload.get("data")
+                if isinstance(data, dict):
+                    proposal_id = str(data.get("id") or "").strip() or None
+                if not proposal_id:
+                    raise AssertionError(f"Missing proposal id in response: {payload}")
+
+                approve_url = f"{proposal_url}/{proposal_id}/approve"
+                approve_plan = RequestPlan(
+                    "POST",
+                    "/api/v1/databases/{db_name}/ontology/proposals/{proposal_id}/approve",
+                    approve_url,
+                    (200,),
+                    json_body={"author": "openapi_smoke"},
+                )
+                status, text, payload = await _request(session, approve_plan)
+                executed.add((approve_plan.method, approve_plan.path_template))
+                if status != 200:
+                    raise AssertionError(f"Failed to approve ontology proposal (http={status}): {text[:800]}")
+
+                # Record deployment via the API (proves the full proposal->deploy path).
+                main_head = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch="main")
+                deploy_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/deploy"
+                deploy_plan = RequestPlan(
+                    "POST",
+                    "/api/v1/databases/{db_name}/ontology/deploy",
+                    deploy_url,
+                    (200,),
+                    json_body={
+                        "proposal_id": proposal_id,
+                        "ontology_commit_id": main_head,
+                        "author": "openapi_smoke",
+                    },
+                )
+                status, text, payload = await _request(session, deploy_plan)
+                executed.add((deploy_plan.method, deploy_plan.path_template))
+                if status != 200:
+                    raise AssertionError(f"Failed to deploy ontology (http={status}): {text[:800]}")
+                deployment_recorded = True
 
             # Create one instance (async) and wait
             plan = await _build_plan(
@@ -1597,57 +2084,157 @@ async def test_openapi_stable_contract_smoke():
                 await _wait_for_command_completed(session, command_id=str(command_id), timeout_seconds=180)
 
             # Create one action type and mark the current ontology commit as deployed so Action simulation can run.
-            head_commit = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch="main")
-            action_type_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/action-types"
-            action_type_body = {
-                "id": ctx.action_type_id,
-                "label": {"en": "Rename Product", "ko": "상품 이름 변경"},
-                "description": {"en": "Rename an existing Product", "ko": "기존 Product 인스턴스 이름 변경"},
-                "spec": {
-                    "input_schema": {
-                        "fields": [
-                            {"name": "product", "type": "object_ref", "required": True, "object_type": ctx.class_id},
-                            {"name": "new_name", "type": "string", "required": True, "max_length": 2000},
-                        ],
-                        "allow_extra_fields": False,
+            if not action_type_created:
+                head_commit = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch="main")
+                action_type_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/action-types"
+                action_type_body = {
+                    "id": ctx.action_type_id,
+                    "label": {"en": "Rename Product", "ko": "상품 이름 변경"},
+                    "description": {"en": "Rename an existing Product", "ko": "기존 Product 인스턴스 이름 변경"},
+                    "spec": {
+                        "input_schema": {
+                            "fields": [
+                                {"name": "product", "type": "object_ref", "required": True, "object_type": ctx.class_id},
+                                {"name": "new_name", "type": "string", "required": True, "max_length": 2000},
+                            ],
+                            "allow_extra_fields": False,
+                        },
+                        "permission_policy": {
+                            "effect": "ALLOW",
+                            "principals": ["role:Owner", "role:Editor", "role:DomainModeler"],
+                        },
+                        "writeback_target": {
+                            "repo": "ontology-writeback",
+                            "branch": f"writeback-{ctx.db_name}",
+                        },
+                        "conflict_policy": "FAIL",
+                        "implementation": {
+                            "type": "template_v1",
+                            "targets": [
+                                {
+                                    "target": {"from": "input.product"},
+                                    "changes": {
+                                        "set": {"name": {"$ref": "input.new_name"}},
+                                    },
+                                }
+                            ],
+                        },
                     },
-                    "permission_policy": {
-                        "effect": "ALLOW",
-                        "principals": ["role:Owner", "role:Editor", "role:DomainModeler"],
-                    },
-                    "writeback_target": {
-                        "repo": "ontology-writeback",
-                        "branch": f"writeback-{ctx.db_name}",
-                    },
-                    "conflict_policy": "FAIL",
-                    "implementation": {
-                        "type": "template_v1",
-                        "targets": [
-                            {
-                                "target": {"from": "input.product"},
-                                "changes": {
-                                    "set": {"name": {"$ref": "input.new_name"}},
-                                },
-                            }
-                        ],
-                    },
-                },
-                "metadata": {"source": "openapi_smoke"},
-            }
+                    "metadata": {"source": "openapi_smoke"},
+                }
 
-            async with session.post(
-                action_type_url,
-                params={"branch": "main", "expected_head_commit": head_commit},
-                json=action_type_body,
-            ) as resp:
-                executed.add(("POST", "/api/v1/databases/{db_name}/ontology/action-types"))
-                if resp.status != 201:
-                    raise AssertionError(
-                        f"Failed to create action type (http={resp.status}): {await resp.text()}"
+                action_type_plan = RequestPlan(
+                    "POST",
+                    "/api/v1/databases/{db_name}/ontology/action-types",
+                    action_type_url,
+                    (201, 409),
+                    params={"branch": "main", "expected_head_commit": head_commit},
+                    json_body=action_type_body,
+                )
+                status, text, _ = await _request(session, action_type_plan)
+                executed.add((action_type_plan.method, action_type_plan.path_template))
+
+                if status == 201:
+                    action_type_created = True
+                elif status == 409:
+                    # Some stacks protect ontology resources (including action-types) on main, even if
+                    # class creation is allowed (or already happened). In that case, create the action
+                    # type on a fresh branch from the current main head and merge+deploy it.
+                    action_branch = f"{ctx.branch_name}-action-type"
+                    create_branch_plan = RequestPlan(
+                        "POST",
+                        db_branches_path,
+                        f"{BFF_URL}{_format_path(db_branches_path, ctx)}",
+                        (200, 201, 404, 409),
+                        json_body={"name": action_branch, "from_branch": "main"},
+                        note="smoke: action-type protected-branch fallback",
                     )
+                    status, text, _ = await _request(session, create_branch_plan)
+                    executed.add((create_branch_plan.method, create_branch_plan.path_template))
+                    if status not in create_branch_plan.expected_statuses:
+                        raise AssertionError(
+                            f"{create_branch_plan.method} {create_branch_plan.path_template} unexpected status {status}: {text[:500]}"
+                        )
 
-            deployed_commit = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch="main")
-            await _record_deployed_commit(db_name=ctx.db_name, target_branch="main", ontology_commit_id=deployed_commit)
+                    branch_head = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch=action_branch)
+                    action_type_branch_plan = RequestPlan(
+                        "POST",
+                        "/api/v1/databases/{db_name}/ontology/action-types",
+                        action_type_url,
+                        (201,),
+                        params={"branch": action_branch, "expected_head_commit": branch_head},
+                        json_body=action_type_body,
+                        note="smoke: action-type proposal fallback write",
+                    )
+                    status, text, _ = await _request(session, action_type_branch_plan)
+                    executed.add((action_type_branch_plan.method, action_type_branch_plan.path_template))
+                    if status != 201:
+                        raise AssertionError(f"Failed to create action type on fallback branch (http={status}): {text[:800]}")
+
+                    proposal_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/proposals"
+                    proposal_body = {
+                        "source_branch": action_branch,
+                        "target_branch": "main",
+                        "title": f"OpenAPI smoke action-type ({ctx.db_name})",
+                        "description": "openapi contract smoke action-type proposal (auto)",
+                        "author": "openapi_smoke",
+                    }
+                    proposal_plan = RequestPlan(
+                        "POST",
+                        "/api/v1/databases/{db_name}/ontology/proposals",
+                        proposal_url,
+                        (201,),
+                        json_body=proposal_body,
+                    )
+                    status, text, payload = await _request(session, proposal_plan)
+                    executed.add((proposal_plan.method, proposal_plan.path_template))
+                    if status != 201 or not isinstance(payload, dict):
+                        raise AssertionError(f"Failed to create ontology proposal (http={status}): {text[:800]}")
+                    data = payload.get("data")
+                    if isinstance(data, dict):
+                        proposal_id = str(data.get("id") or "").strip() or None
+                    if not proposal_id:
+                        raise AssertionError(f"Missing proposal id in response: {payload}")
+
+                    approve_url = f"{proposal_url}/{proposal_id}/approve"
+                    approve_plan = RequestPlan(
+                        "POST",
+                        "/api/v1/databases/{db_name}/ontology/proposals/{proposal_id}/approve",
+                        approve_url,
+                        (200,),
+                        json_body={"author": "openapi_smoke"},
+                    )
+                    status, text, _ = await _request(session, approve_plan)
+                    executed.add((approve_plan.method, approve_plan.path_template))
+                    if status != 200:
+                        raise AssertionError(f"Failed to approve ontology proposal (http={status}): {text[:800]}")
+
+                    main_head = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch="main")
+                    deploy_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/ontology/deploy"
+                    deploy_plan = RequestPlan(
+                        "POST",
+                        "/api/v1/databases/{db_name}/ontology/deploy",
+                        deploy_url,
+                        (200,),
+                        json_body={
+                            "proposal_id": proposal_id,
+                            "ontology_commit_id": main_head,
+                            "author": "openapi_smoke",
+                        },
+                    )
+                    status, text, _ = await _request(session, deploy_plan)
+                    executed.add((deploy_plan.method, deploy_plan.path_template))
+                    if status != 200:
+                        raise AssertionError(f"Failed to deploy ontology (http={status}): {text[:800]}")
+                    deployment_recorded = True
+                    action_type_created = True
+                else:
+                    raise AssertionError(f"Failed to create action type (http={status}): {text[:800]}")
+
+            if not deployment_recorded:
+                deployed_commit = await _get_ontology_head_commit(session, db_name=ctx.db_name, branch="main")
+                await _record_deployed_commit(db_name=ctx.db_name, target_branch="main", ontology_commit_id=deployed_commit)
+                deployment_recorded = True
 
             simulate_url = f"{BFF_URL}/api/v1/databases/{ctx.db_name}/actions/{ctx.action_type_id}/simulate"
             simulate_body = {

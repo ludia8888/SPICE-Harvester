@@ -355,6 +355,9 @@ class LLMGateway:
         self.pricing_json = str(getattr(llm, "pricing_json", "") or "").strip() or None
         self._circuit: dict[str, dict[str, float]] = {}
         self._tool_calls_supported: dict[str, bool] = {}
+        # Mock provider supports deterministic sequences for E2E/CI runs.
+        # Keyed by normalized task name and advanced per call.
+        self._mock_sequence_cursors: dict[str, int] = {}
 
     def is_enabled(self) -> bool:
         if self.provider in {"", "disabled", "off", "none"}:
@@ -820,11 +823,38 @@ class LLMGateway:
                     if provider == "mock":
                         safe_task = re.sub(r"[^A-Z0-9]+", "_", (task or "").strip().upper()).strip("_")
                         task_key = f"LLM_MOCK_JSON_{safe_task}" if safe_task else ""
+                        cursor_key = safe_task or str(task or "").strip() or "DEFAULT"
                         raw = (get_settings().llm.mock_json_for_task(task) or "").strip()
                         if not raw:
                             hint = task_key or "LLM_MOCK_JSON"
-                            raise LLMRequestError(f"LLM_PROVIDER=mock requires {hint} (or LLM_MOCK_JSON) to be set")
-                        obj = _extract_json_object(raw)
+                            raise LLMUnavailableError(
+                                f"LLM_PROVIDER=mock requires {hint} (or LLM_MOCK_JSON or LLM_MOCK_DIR) to be set"
+                            )
+                        parsed: Any
+                        try:
+                            parsed = json.loads(raw)
+                        except Exception:
+                            parsed = None
+
+                        if isinstance(parsed, list):
+                            if not parsed:
+                                hint = task_key or "LLM_MOCK_JSON"
+                                raise LLMUnavailableError(f"LLM_PROVIDER=mock requires {hint} to contain at least 1 item")
+                            idx = int(self._mock_sequence_cursors.get(cursor_key, 0) or 0)
+                            if idx < 0:
+                                idx = 0
+                            if idx >= len(parsed):
+                                idx = len(parsed) - 1
+                            selected = parsed[idx]
+                            if not isinstance(selected, dict):
+                                raise LLMOutputValidationError("LLM mock sequence items must be JSON objects")
+                            obj = selected
+                            # Advance cursor (cap at last element for repeated calls).
+                            self._mock_sequence_cursors[cursor_key] = min(len(parsed) - 1, idx + 1)
+                        elif isinstance(parsed, dict):
+                            obj = parsed
+                        else:
+                            obj = _extract_json_object(raw)
                         usage = {}
                     elif provider == "openai_compat":
                         tool_calls_supported = self._tool_calls_supported.get(model_to_use)

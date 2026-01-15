@@ -161,9 +161,11 @@ def _require_health_gate(branch: str) -> bool:
 
 def _ensure_branch_writable(branch: str) -> None:
     protected = get_protected_branches()
-    if branch in protected:
+    if branch not in protected:
+        return
+    if bool(get_settings().ontology.require_proposals):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=status.HTTP_409_CONFLICT,
             detail=protected_branch_write_message(),
         )
 

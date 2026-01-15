@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Iterable, Dict
+from typing import Any, Dict, Iterable, Optional
+
+from jose import jwt
 
 
 def _load_repo_dotenv() -> Dict[str, str]:
@@ -67,3 +69,43 @@ def oms_auth_headers() -> Dict[str, str]:
         )
     )
     return {"X-Admin-Token": token}
+
+
+def build_smoke_user_jwt(
+    *,
+    subject: str = "smoke_user",
+    roles: Iterable[str] = ("admin",),
+    tenant_id: str = "smoke_tenant",
+    org_id: str = "smoke_org",
+    email: str = "smoke_user@local.test",
+) -> str:
+    """
+    Build a deterministic HS256 user JWT for integration tests.
+
+    docker-compose default: USER_JWT_HS256_SECRET=spice-dev-user-jwt-secret
+    """
+    secret = (os.getenv("USER_JWT_HS256_SECRET") or os.getenv("SMOKE_USER_JWT_SECRET") or "spice-dev-user-jwt-secret").strip()
+    if not secret:
+        secret = "spice-dev-user-jwt-secret"
+
+    issuer: Optional[str] = (os.getenv("USER_JWT_ISSUER") or "").strip() or None
+    audience: Optional[str] = (os.getenv("USER_JWT_AUDIENCE") or "").strip() or None
+
+    claims: Dict[str, Any] = {
+        "sub": subject,
+        "email": email,
+        "roles": list(roles),
+        "tenant_id": tenant_id,
+        "org_id": org_id,
+    }
+    if issuer:
+        claims["iss"] = issuer
+    if audience:
+        claims["aud"] = audience
+
+    return jwt.encode(claims, secret, algorithm="HS256")
+
+
+def with_delegated_user(headers: Dict[str, str]) -> Dict[str, str]:
+    delegated = build_smoke_user_jwt()
+    return {**headers, "X-Delegated-Authorization": f"Bearer {delegated}"}

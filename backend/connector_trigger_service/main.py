@@ -25,7 +25,6 @@ from confluent_kafka import Producer
 from data_connector.google_sheets.service import GoogleSheetsService
 from data_connector.google_sheets.utils import calculate_data_hash
 from shared.config.app_config import AppConfig
-from shared.config.service_config import ServiceConfig
 from shared.config.settings import get_settings
 from shared.observability.context_propagation import (
     attach_context_from_carrier,
@@ -62,18 +61,19 @@ class ConnectorTriggerService:
         self.sheets: Optional[GoogleSheetsService] = None
 
     async def initialize(self) -> None:
+        settings = get_settings()
         # Durable registry (Postgres)
         self.registry = ConnectorRegistry()
         await self.registry.initialize()
 
         # Connector library (no polling inside)
-        api_key = get_settings().google_sheets.google_sheets_api_key
+        api_key = settings.google_sheets.google_sheets_api_key
         self.sheets = GoogleSheetsService(api_key=api_key)
 
         # Kafka producer (blocking)
         kafka_config = {
-            "bootstrap.servers": ServiceConfig.get_kafka_bootstrap_servers(),
-            "client.id": get_settings().observability.service_name or "connector-trigger-service",
+            "bootstrap.servers": settings.database.kafka_servers,
+            "client.id": settings.observability.service_name or "connector-trigger-service",
             "acks": "all",
             "retries": 3,
             "retry.backoff.ms": 100,

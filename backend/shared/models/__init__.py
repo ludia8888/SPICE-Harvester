@@ -16,8 +16,6 @@ __all__ = [
     "Cardinality",
     "QueryOperator",
     "QUERY_OPERATORS",
-    # config models
-    "ServiceConfig",
     # ontology models
     "QueryFilter",
     "QueryInput",

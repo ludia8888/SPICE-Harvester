@@ -15,7 +15,6 @@ from typing import Optional, Dict, Any, List
 
 from confluent_kafka import Consumer, Producer, KafkaError, KafkaException, TopicPartition
 
-from shared.config.service_config import ServiceConfig
 from shared.config.search_config import (
     get_instances_index_name,
     get_ontologies_index_name,
@@ -81,7 +80,7 @@ class ProjectionWorker:
         worker_cfg = settings.workers.projection
 
         self.running = False
-        self.kafka_servers = ServiceConfig.get_kafka_bootstrap_servers()
+        self.kafka_servers = settings.database.kafka_servers
         self.consumer: Optional[Consumer] = None
         self.producer: Optional[Producer] = None
         self.redis_service: Optional[RedisService] = None

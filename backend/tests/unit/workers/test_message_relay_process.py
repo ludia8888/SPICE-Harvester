@@ -11,7 +11,6 @@ from botocore.client import Config
 
 from message_relay.main import EventPublisher
 from shared.config.app_config import AppConfig
-from shared.config.service_config import ServiceConfig
 
 
 pytestmark = pytest.mark.requires_infra
@@ -44,7 +43,7 @@ def _cleanup_bucket(client, bucket: str) -> None:
 @pytest.mark.asyncio
 async def test_event_publisher_processes_index(monkeypatch: pytest.MonkeyPatch) -> None:
     bucket = f"event-store-test-{uuid.uuid4().hex[:8]}"
-    monkeypatch.setattr(ServiceConfig, "get_event_store_bucket", lambda: bucket)
+    monkeypatch.setenv("EVENT_STORE_BUCKET", bucket)
     monkeypatch.setenv("EVENT_PUBLISHER_BATCH_SIZE", "1")
 
     publisher = EventPublisher()

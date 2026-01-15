@@ -169,12 +169,12 @@ class OMSDependencyProvider:
             if redis_service is None:
                 try:
                     from shared.services.redis_service import RedisService as RedisServiceClass
-                    from shared.config.service_config import ServiceConfig
+                    settings = get_settings()
 
                     redis_service = RedisServiceClass(
-                        host=ServiceConfig.get_redis_host(),
-                        port=ServiceConfig.get_redis_port(),
-                        password=get_settings().database.redis_password,
+                        host=settings.database.redis_host,
+                        port=settings.database.redis_port,
+                        password=settings.database.redis_password,
                     )
                     await redis_service.connect()
                 except Exception as e:

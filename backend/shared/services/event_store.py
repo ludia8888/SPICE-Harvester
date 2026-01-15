@@ -25,7 +25,6 @@ import aioboto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
-from shared.config.service_config import ServiceConfig
 from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import enrich_metadata_with_current_trace
@@ -59,11 +58,12 @@ class EventStore:
     """
     
     def __init__(self):
-        self.endpoint_url = ServiceConfig.get_minio_endpoint()
-        self.access_key = ServiceConfig.get_minio_access_key()
-        self.secret_key = ServiceConfig.get_minio_secret_key()
+        storage = get_settings().storage
+        self.endpoint_url = storage.minio_endpoint_url
+        self.access_key = storage.minio_access_key
+        self.secret_key = storage.minio_secret_key
         # Keep consistent with EventPublisher (message_relay)
-        self.bucket_name = ServiceConfig.get_event_store_bucket()  # The SSoT bucket
+        self.bucket_name = storage.event_store_bucket  # The SSoT bucket
         self.session = None
         self.s3_client = None
         self._sequence_allocator: Optional[AggregateSequenceAllocator] = None

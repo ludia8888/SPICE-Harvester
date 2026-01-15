@@ -19,12 +19,13 @@ from typing import Any, Dict, List, Optional, Tuple
 import aiohttp
 import pytest
 
-from tests.utils.auth import bff_auth_headers
+from tests.utils.auth import bff_auth_headers, with_delegated_user
 
 
 BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
 INSTANCE_COUNT = int(os.getenv("AGENT_PROGRESS_INSTANCE_COUNT", "25"))
 PK_FIELDS_RAW = os.getenv("AGENT_PROGRESS_PK_FIELDS", "customer_id,external_id")
+_BULK_CREATE_TOOL_ID = "instances.bulk_create"
 
 
 def _normalize_pk_fields(raw: str) -> List[Tuple[str, str]]:
@@ -85,6 +86,41 @@ def _extract_command_id(payload: Dict[str, Any]) -> Optional[str]:
         if value:
             return str(value)
     return None
+
+
+async def _ensure_bulk_create_tool_policy(session: aiohttp.ClientSession) -> None:
+    payload = {
+        "tool_id": _BULK_CREATE_TOOL_ID,
+        "method": "POST",
+        "path": "/api/v1/databases/{db_name}/instances/{class_label}/bulk-create",
+        "risk_level": "write",
+        "requires_approval": True,
+        "requires_idempotency_key": True,
+        "status": "ACTIVE",
+        "roles": [],
+        "max_payload_bytes": 200000,
+        "version": "v1",
+        "tool_type": "action",
+        "resource_scopes": ["db_name", "class_label"],
+        "metadata": {"source": "integration_test_agent_progress_smoke"},
+    }
+    async with session.post(f"{BFF_URL}/api/v1/admin/agent-tools", json=payload) as resp:
+        body = await resp.json()
+        if resp.status in {200, 201}:
+            return
+        raise AssertionError(f"Failed to upsert tool policy (status={resp.status}, body={body})")
+
+
+async def _create_agent_session(session: aiohttp.ClientSession, *, enabled_tools: List[str]) -> str:
+    payload = {"enabled_tools": enabled_tools}
+    async with session.post(f"{BFF_URL}/api/v1/agent-sessions", json=payload) as resp:
+        body = await resp.json()
+        if resp.status not in {200, 201}:
+            raise AssertionError(f"Agent session create failed (status={resp.status}, body={body})")
+        session_id = (((body.get("data") or {}).get("session") or {}).get("session_id") or "").strip()
+        if not session_id:
+            raise AssertionError(f"Missing session_id in response: {body}")
+        return session_id
 
 
 async def _create_database(session: aiohttp.ClientSession, *, db_name: str) -> None:
@@ -155,19 +191,27 @@ async def _start_agent_bulk_create(
     class_id: str,
     pk_field: str,
     count: int,
+    session_id: str,
 ) -> str:
     instances = [
         {pk_field: f"item_{idx:04d}", "name": f"Item {idx}"}
         for idx in range(1, count + 1)
     ]
+    idempotency_key = f"agent-progress-{uuid.uuid4()}"
     payload = {
         "goal": "agent progress smoke",
         "steps": [
             {
+                "tool_id": _BULK_CREATE_TOOL_ID,
                 "service": "bff",
                 "method": "POST",
                 "path": f"/api/v1/databases/{db_name}/instances/{class_id}/bulk-create",
                 "body": {"instances": instances, "metadata": {"source": "agent_progress_smoke"}},
+                "headers": {
+                    "X-Agent-Session-ID": session_id,
+                    "Idempotency-Key": idempotency_key,
+                },
+                "data_scope": {"db_name": db_name},
             }
         ],
         "context": {"risk_level": "write"},
@@ -222,9 +266,11 @@ async def _wait_for_run_completion(
 async def test_agent_progress_smoke() -> None:
     pk_fields = _normalize_pk_fields(PK_FIELDS_RAW)
     db_name = f"agent_progress_{uuid.uuid4().hex[:8]}"
-    headers = bff_auth_headers()
+    headers = with_delegated_user(bff_auth_headers())
 
     async with aiohttp.ClientSession(headers=headers) as session:
+        await _ensure_bulk_create_tool_policy(session)
+        agent_session_id = await _create_agent_session(session, enabled_tools=[_BULK_CREATE_TOOL_ID])
         await _create_database(session, db_name=db_name)
 
         for pk_field, class_id in pk_fields:
@@ -240,6 +286,7 @@ async def test_agent_progress_smoke() -> None:
                 class_id=class_id,
                 pk_field=pk_field,
                 count=INSTANCE_COUNT,
+                session_id=agent_session_id,
             )
             progress_seen, command_id = await _wait_for_run_completion(session, run_id=run_id)
             assert progress_seen, f"No progress updates observed for run {run_id}"

@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import asyncpg
 
-from shared.config.service_config import ServiceConfig
+from shared.config.settings import get_settings
 from shared.utils.json_utils import coerce_json_dataset, coerce_json_pipeline, normalize_json_payload
 
 
@@ -113,7 +113,7 @@ class AgentRegistry:
         pool_min: Optional[int] = None,
         pool_max: Optional[int] = None,
     ) -> None:
-        self._dsn = dsn or ServiceConfig.get_postgres_url()
+        self._dsn = dsn or get_settings().database.postgres_url
         self._schema = schema
         self._pool: Optional[asyncpg.Pool] = None
         self._pool_min = int(pool_min or 1)

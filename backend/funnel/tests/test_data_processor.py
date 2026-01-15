@@ -106,7 +106,7 @@ async def test_process_google_sheets_preview_success(monkeypatch: pytest.MonkeyP
         return _FakeClient(_FakeResponse(payload))
 
     monkeypatch.setattr("funnel.services.data_processor.httpx.AsyncClient", _fake_client)
-    monkeypatch.setattr("funnel.services.data_processor.ServiceConfig.get_bff_url", lambda: "http://bff")
+    monkeypatch.setenv("BFF_BASE_URL", "http://bff")
 
     response = await processor.process_google_sheets_preview(
         sheet_url="https://docs.google.com/spreadsheets/d/1abc123XYZ456def789GHI012jklMNOP3456789/edit",
@@ -125,7 +125,7 @@ async def test_process_google_sheets_preview_failure(monkeypatch: pytest.MonkeyP
         return _FakeClient(_FakeResponse({}, status_code=500))
 
     monkeypatch.setattr("funnel.services.data_processor.httpx.AsyncClient", _fake_client)
-    monkeypatch.setattr("funnel.services.data_processor.ServiceConfig.get_bff_url", lambda: "http://bff")
+    monkeypatch.setenv("BFF_BASE_URL", "http://bff")
 
     with pytest.raises(Exception):
         await processor.process_google_sheets_preview(

@@ -29,7 +29,6 @@ from confluent_kafka import Consumer, KafkaError, Producer
 from data_connector.google_sheets.service import GoogleSheetsService
 from data_connector.google_sheets.utils import normalize_sheet_data
 from shared.config.app_config import AppConfig
-from shared.config.service_config import ServiceConfig
 from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
 from shared.observability.context_propagation import (
@@ -91,6 +90,7 @@ class ConnectorSyncWorker:
         return await loop.run_in_executor(self._producer_executor, lambda: func(*args, **kwargs))
 
     async def initialize(self) -> None:
+        settings = get_settings()
         self.registry = ConnectorRegistry()
         await self.registry.initialize()
 
@@ -106,7 +106,7 @@ class ConnectorSyncWorker:
             self.lineage = None
 
         # Connector adapter (v1: google sheets)
-        api_key = get_settings().google_sheets.google_sheets_api_key
+        api_key = settings.google_sheets.google_sheets_api_key
         self.sheets = GoogleSheetsService(api_key=api_key)
 
         # HTTP client to call BFF (auth is fail-closed in prod).
@@ -121,7 +121,7 @@ class ConnectorSyncWorker:
         # Kafka consumer
         self.consumer = Consumer(
             {
-                "bootstrap.servers": ServiceConfig.get_kafka_bootstrap_servers(),
+                "bootstrap.servers": settings.database.kafka_servers,
                 "group.id": self.group_id,
                 "auto.offset.reset": "earliest",
                 "enable.auto.commit": False,
@@ -134,8 +134,8 @@ class ConnectorSyncWorker:
         # DLQ producer (best-effort)
         self.dlq_producer = Producer(
             {
-                "bootstrap.servers": ServiceConfig.get_kafka_bootstrap_servers(),
-                "client.id": get_settings().observability.service_name or "connector-sync-worker",
+                "bootstrap.servers": settings.database.kafka_servers,
+                "client.id": settings.observability.service_name or "connector-sync-worker",
                 "acks": "all",
                 "retries": 3,
                 "retry.backoff.ms": 100,
@@ -240,7 +240,7 @@ class ConnectorSyncWorker:
     async def _fetch_ontology_schema(self, *, db_name: str, class_label: str, branch: str) -> Dict[str, Any]:
         if not self.http:
             raise RuntimeError("HTTP client not initialized")
-        bff_url = ServiceConfig.get_bff_url()
+        bff_url = get_settings().services.bff_base_url
         url = f"{bff_url}/api/v1/databases/{db_name}/ontology/{class_label}/schema"
         headers = self._bff_scope_headers(db_name=db_name)
         resp = await self.http.get(url, params={"format": "json", "branch": branch}, headers=headers or None)
@@ -377,7 +377,7 @@ class ConnectorSyncWorker:
         if not instances:
             raise ValueError(f"No valid instances to import (errors={len(errors)})")
 
-        bff_url = ServiceConfig.get_bff_url()
+        bff_url = get_settings().services.bff_base_url
         url = f"{bff_url}/api/v1/databases/{db_name}/instances/{class_label}/bulk-create"
         payload = {
             "instances": instances,

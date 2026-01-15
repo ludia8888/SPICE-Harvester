@@ -16,7 +16,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from starlette.responses import Response
 
-from shared.config.service_config import ServiceConfig
+from shared.config.settings import (
+    build_cors_middleware_config,
+    build_server_ssl_config,
+    get_cors_debug_info,
+    get_settings,
+)
 from shared.errors.error_response import install_error_handlers
 from shared.models.requests import ApiResponse
 from shared.i18n.middleware import install_i18n_middleware
@@ -136,7 +141,8 @@ def create_fastapi_service(
         _add_health_check(app, service_info)
     
     # Add CORS debug endpoint in non-production
-    if ServiceConfig.is_debug_endpoints_enabled() and not ServiceConfig.is_production():
+    settings = get_settings()
+    if bool(settings.services.enable_debug_endpoints) and not settings.is_production:
         _add_debug_endpoints(app)
     
     logger.info(f"✅ {service_info.name} FastAPI 앱 생성 완료")
@@ -196,8 +202,9 @@ def _install_openapi_language_contract(app: FastAPI) -> None:
 
 def _configure_cors(app: FastAPI) -> None:
     """Configure CORS middleware based on environment variables"""
-    if ServiceConfig.is_cors_enabled():
-        cors_config = ServiceConfig.get_cors_config()
+    settings = get_settings()
+    if bool(settings.services.cors_enabled):
+        cors_config = build_cors_middleware_config(settings)
         app.add_middleware(CORSMiddleware, **cors_config)
         logger.info(
             f"🌐 CORS enabled with origins: {cors_config['allow_origins'][:3]}..."
@@ -281,7 +288,7 @@ def _add_debug_endpoints(app: FastAPI) -> None:
     @app.get("/debug/cors")
     async def debug_cors():
         """CORS 설정 디버그 정보"""
-        return ServiceConfig.get_cors_debug_info()
+        return get_cors_debug_info()
 
 
 def _install_observability(app: FastAPI, service_info: ServiceInfo) -> None:
@@ -340,7 +347,7 @@ def create_uvicorn_config(service_info: ServiceInfo, reload: bool = True) -> Dic
     """
     
     # Get SSL configuration
-    ssl_config = ServiceConfig.get_ssl_config()
+    ssl_config = build_server_ssl_config()
     
     # Base uvicorn configuration
     config = {
@@ -424,72 +431,82 @@ def run_service(
     uvicorn.run(app_module_path, **config)
 
 
-# Predefined service configurations
-BFF_SERVICE_INFO = ServiceInfo(
-    name="BFF",
-    title="BFF (Backend for Frontend) Service",
-    description="사용자 친화적인 레이블 기반 온톨로지 관리 서비스",
-    version="2.0.0",
-    port=ServiceConfig.get_bff_port(),
-    host=ServiceConfig.get_bff_host(),
-    tags=[
-        {"name": "Database Management", "description": "Databases/branches/classes/versions (BFF → OMS)"},
-        {"name": "Ontology Management", "description": "Ontology CRUD + import pipeline (BFF → OMS/Funnel)"},
-        {"name": "Query", "description": "Query builder + raw queries"},
-        {"name": "Graph", "description": "Federated graph queries (multi-hop)"},
-        {"name": "Projections (WIP)", "description": "🚧 Materialized view APIs (skeleton/fallback; do not use for FE yet)"},
-        {"name": "Instance Management", "description": "Read-side instance retrieval (ES-first; Terminus fallback)"},
-        {"name": "Async Instance Management", "description": "Write-side instance commands (async; idempotent)"},
-        {"name": "Command Status", "description": "Async command status polling (command_id → status/result)"},
-        {"name": "Label Mappings", "description": "Label mapping import/export/validate"},
-        {"name": "Merge Conflict Resolution", "description": "Merge simulation + conflict resolution helpers"},
-        {"name": "Lineage", "description": "Lineage graph/impact/metrics (read model)"},
-        {"name": "Audit", "description": "Audit log query + chain verification"},
-        {"name": "Data Connectors", "description": "External data connector helpers (Google Sheets, etc.)"},
-        {"name": "AI", "description": "LLM-assisted query helpers"},
-        {"name": "Background Tasks", "description": "Background task status/metrics/retry/cancel"},
-        {"name": "Admin Operations", "description": "Operator-only recovery/maintenance endpoints (token required)"},
-        {"name": "Monitoring", "description": "Service health/metrics/dependencies (operator-only)"},
-        {"name": "Config Monitoring", "description": "Configuration drift/audit/validation (operator-only)"},
-    ]
-)
+def get_bff_service_info() -> ServiceInfo:
+    settings = get_settings()
+    return ServiceInfo(
+        name="BFF",
+        title="BFF (Backend for Frontend) Service",
+        description="사용자 친화적인 레이블 기반 온톨로지 관리 서비스",
+        version="2.0.0",
+        port=int(settings.services.bff_port),
+        host=str(settings.services.bff_host),
+        tags=[
+            {"name": "Database Management", "description": "Databases/branches/classes/versions (BFF → OMS)"},
+            {"name": "Ontology Management", "description": "Ontology CRUD + import pipeline (BFF → OMS/Funnel)"},
+            {"name": "Query", "description": "Query builder + raw queries"},
+            {"name": "Graph", "description": "Federated graph queries (multi-hop)"},
+            {"name": "Projections (WIP)", "description": "🚧 Materialized view APIs (skeleton/fallback; do not use for FE yet)"},
+            {"name": "Instance Management", "description": "Read-side instance retrieval (ES-first; Terminus fallback)"},
+            {"name": "Async Instance Management", "description": "Write-side instance commands (async; idempotent)"},
+            {"name": "Command Status", "description": "Async command status polling (command_id → status/result)"},
+            {"name": "Label Mappings", "description": "Label mapping import/export/validate"},
+            {"name": "Merge Conflict Resolution", "description": "Merge simulation + conflict resolution helpers"},
+            {"name": "Lineage", "description": "Lineage graph/impact/metrics (read model)"},
+            {"name": "Audit", "description": "Audit log query + chain verification"},
+            {"name": "Data Connectors", "description": "External data connector helpers (Google Sheets, etc.)"},
+            {"name": "AI", "description": "LLM-assisted query helpers"},
+            {"name": "Background Tasks", "description": "Background task status/metrics/retry/cancel"},
+            {"name": "Admin Operations", "description": "Operator-only recovery/maintenance endpoints (token required)"},
+            {"name": "Monitoring", "description": "Service health/metrics/dependencies (operator-only)"},
+            {"name": "Config Monitoring", "description": "Configuration drift/audit/validation (operator-only)"},
+        ],
+    )
 
-OMS_SERVICE_INFO = ServiceInfo(
-    name="OMS",
-    title="Ontology Management Service (OMS)",
-    description="내부 ID 기반 핵심 온톨로지 관리 서비스",
-    version="1.0.0",
-    port=ServiceConfig.get_oms_port(),
-    host=ServiceConfig.get_oms_host(),
-    tags=[
-        {"name": "Database", "description": "Database management operations"},
-        {"name": "Ontology Management", "description": "Core ontology operations"},
-        {"name": "Branch Management", "description": "Git-like branch operations"},
-        {"name": "Version Control", "description": "Version control operations"},
-    ]
-)
 
-FUNNEL_SERVICE_INFO = ServiceInfo(
-    name="Funnel",
-    title="Funnel Service",
-    description="타입 추론 및 스키마 제안 전용 마이크로서비스",
-    version="0.1.0",
-    port=ServiceConfig.get_funnel_port(),
-    host=ServiceConfig.get_funnel_host(),
-    tags=[
-        {"name": "Type Inference", "description": "Data type inference operations"},
-        {"name": "Schema Suggestion", "description": "Schema generation operations"},
-    ]
-)
+def get_oms_service_info() -> ServiceInfo:
+    settings = get_settings()
+    return ServiceInfo(
+        name="OMS",
+        title="Ontology Management Service (OMS)",
+        description="내부 ID 기반 핵심 온톨로지 관리 서비스",
+        version="1.0.0",
+        port=int(settings.services.oms_port),
+        host=str(settings.services.oms_host),
+        tags=[
+            {"name": "Database", "description": "Database management operations"},
+            {"name": "Ontology Management", "description": "Core ontology operations"},
+            {"name": "Branch Management", "description": "Git-like branch operations"},
+            {"name": "Version Control", "description": "Version control operations"},
+        ],
+    )
 
-AGENT_SERVICE_INFO = ServiceInfo(
-    name="Agent",
-    title="Agent Service",
-    description="LangGraph 기반 에이전트 실행 및 감사 이벤트 기록",
-    version="0.1.0",
-    port=ServiceConfig.get_agent_port(),
-    host=ServiceConfig.get_agent_host(),
-    tags=[
-        {"name": "Agent", "description": "Agent runs, steps, and audit-traceable actions"},
-    ],
-)
+
+def get_funnel_service_info() -> ServiceInfo:
+    settings = get_settings()
+    return ServiceInfo(
+        name="Funnel",
+        title="Funnel Service",
+        description="타입 추론 및 스키마 제안 전용 마이크로서비스",
+        version="0.1.0",
+        port=int(settings.services.funnel_port),
+        host=str(settings.services.funnel_host),
+        tags=[
+            {"name": "Type Inference", "description": "Data type inference operations"},
+            {"name": "Schema Suggestion", "description": "Schema generation operations"},
+        ],
+    )
+
+
+def get_agent_service_info() -> ServiceInfo:
+    settings = get_settings()
+    return ServiceInfo(
+        name="Agent",
+        title="Agent Service",
+        description="LangGraph 기반 에이전트 실행 및 감사 이벤트 기록",
+        version="0.1.0",
+        port=int(settings.services.agent_port),
+        host=str(settings.services.agent_host),
+        tags=[
+            {"name": "Agent", "description": "Agent runs, steps, and audit-traceable actions"},
+        ],
+    )

@@ -33,8 +33,7 @@ from shared.services.agent_plan_registry import AgentPlanRegistry
 from shared.services.agent_tool_registry import AgentToolRegistry
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.llm_quota import LLMQuotaExceededError
-from shared.config.service_config import ServiceConfig
-from shared.config.settings import get_settings
+from shared.config.settings import build_client_ssl_config, get_settings
 from shared.utils.json_patch import JsonPatchError, apply_json_patch
 
 logger = logging.getLogger(__name__)
@@ -155,10 +154,11 @@ def _is_preview_safe_step(method: str, path: str, policy_risk_level: str) -> boo
 
 
 async def _call_agent_create_run(*, request: Request, payload: Dict[str, Any]) -> Dict[str, Any]:
-    agent_url = ServiceConfig.get_agent_url().rstrip("/")
+    settings = get_settings()
+    agent_url = settings.services.agent_base_url.rstrip("/")
     url = f"{agent_url}/api/v1/agent/runs"
-    timeout_seconds = get_settings().clients.agent_proxy_timeout_seconds
-    ssl_config = ServiceConfig.get_client_ssl_config()
+    timeout_seconds = settings.clients.agent_proxy_timeout_seconds
+    ssl_config = build_client_ssl_config(settings)
 
     async with httpx.AsyncClient(timeout=timeout_seconds, verify=ssl_config.get("verify", True)) as client:
         resp = await client.post(url, headers=_forward_headers_to_agent(request), json=payload)

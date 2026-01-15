@@ -39,7 +39,6 @@ except ModuleNotFoundError:  # pragma: no cover
 
 from data_connector.google_sheets.service import GoogleSheetsService
 from shared.config.app_config import AppConfig
-from shared.config.service_config import ServiceConfig
 from shared.config.settings import get_settings
 from shared.errors.error_envelope import build_error_envelope
 from shared.errors.error_types import ErrorCategory, ErrorCode
@@ -283,6 +282,7 @@ def _resolve_partition_columns(
 class PipelineWorker:
     def __init__(self) -> None:
         settings = get_settings()
+        self.settings = settings
         pipeline_settings = settings.pipeline
 
         self.running = False
@@ -372,6 +372,7 @@ class PipelineWorker:
         )
 
     async def initialize(self) -> None:
+        settings = self.settings
         self.dataset_registry = DatasetRegistry()
         await self.dataset_registry.initialize()
 
@@ -400,7 +401,7 @@ class PipelineWorker:
         self.storage = await self.pipeline_registry.get_lakefs_storage()
         self.lakefs_client = await self.pipeline_registry.get_lakefs_client()
 
-        api_key = (get_settings().google_sheets.google_sheets_api_key or "").strip() or None
+        api_key = (settings.google_sheets.google_sheets_api_key or "").strip() or None
         self.sheets = GoogleSheetsService(api_key=api_key)
 
         token = self.bff_admin_token
@@ -425,7 +426,7 @@ class PipelineWorker:
 
         self.consumer = Consumer(
             {
-                "bootstrap.servers": ServiceConfig.get_kafka_bootstrap_servers(),
+                "bootstrap.servers": settings.database.kafka_servers,
                 "group.id": self.group_id,
                 "auto.offset.reset": "earliest",
                 "enable.auto.commit": False,
@@ -438,7 +439,7 @@ class PipelineWorker:
 
         self.dlq_producer = Producer(
             {
-                "bootstrap.servers": ServiceConfig.get_kafka_bootstrap_servers(),
+                "bootstrap.servers": settings.database.kafka_servers,
                 "client.id": self.service_name or "pipeline-worker-dlq",
                 "acks": "all",
                 "retries": 3,

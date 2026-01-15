@@ -59,12 +59,11 @@ def _load_repo_dotenv() -> Dict[str, str]:
 
 def _ensure_lakefs_credentials() -> None:
     dotenv = _load_repo_dotenv()
-    access = (os.getenv("LAKEFS_ACCESS_KEY_ID") or dotenv.get("LAKEFS_ACCESS_KEY_ID") or "").strip()
-    secret = (os.getenv("LAKEFS_SECRET_ACCESS_KEY") or dotenv.get("LAKEFS_SECRET_ACCESS_KEY") or "").strip()
-    if not access:
-        access = (os.getenv("MINIO_ACCESS_KEY") or "minioadmin").strip()
-    if not secret:
-        secret = (os.getenv("MINIO_SECRET_KEY") or "minioadmin123").strip()
+    # Never implicitly read LakeFS credentials from the repo `.env`.
+    # Local developer machines often keep unrelated AWS keys there, which can break
+    # the docker-compose default LakeFS auth and create confusing drift.
+    access = (os.getenv("LAKEFS_ACCESS_KEY_ID") or "").strip() or "spice-lakefs-admin"
+    secret = (os.getenv("LAKEFS_SECRET_ACCESS_KEY") or "").strip() or "spice-lakefs-admin-secret"
     os.environ.setdefault("LAKEFS_ACCESS_KEY_ID", access)
     os.environ.setdefault("LAKEFS_SECRET_ACCESS_KEY", secret)
 
@@ -73,6 +72,7 @@ def _ensure_lakefs_credentials() -> None:
         port = (
             os.getenv("LAKEFS_API_PORT")
             or dotenv.get("LAKEFS_API_PORT")
+            or os.getenv("LAKEFS_PORT_HOST")
             or dotenv.get("LAKEFS_PORT_HOST")
             or "8000"
         )
@@ -82,19 +82,14 @@ def _ensure_lakefs_credentials() -> None:
 
 
 def _lakefs_admin_credentials() -> Tuple[str, str]:
-    dotenv = _load_repo_dotenv()
     access = (
         os.getenv("LAKEFS_INSTALLATION_ACCESS_KEY_ID")
-        or dotenv.get("LAKEFS_INSTALLATION_ACCESS_KEY_ID")
         or os.getenv("LAKEFS_ACCESS_KEY_ID")
-        or dotenv.get("LAKEFS_ACCESS_KEY_ID")
         or "spice-lakefs-admin"
     ).strip()
     secret = (
         os.getenv("LAKEFS_INSTALLATION_SECRET_ACCESS_KEY")
-        or dotenv.get("LAKEFS_INSTALLATION_SECRET_ACCESS_KEY")
         or os.getenv("LAKEFS_SECRET_ACCESS_KEY")
-        or dotenv.get("LAKEFS_SECRET_ACCESS_KEY")
         or "spice-lakefs-admin-secret"
     ).strip()
     return access, secret
@@ -817,6 +812,7 @@ async def test_link_indexing_updates_relationships_and_status() -> None:
 
             head_commit = await _get_head_commit(oms_session, db_name=db_name, branch=branch)
             link_type_id = f"link_{suffix}"
+            relationship_spec_id = str(uuid.uuid4())
             async with bff_session.post(
                 f"{BFF_URL}/api/v1/databases/{db_name}/ontology/link-types",
                 params={"expected_head_commit": head_commit, "branch": branch},
@@ -828,6 +824,7 @@ async def test_link_indexing_updates_relationships_and_status() -> None:
                     "predicate": predicate,
                     "cardinality": "n:m",
                     "relationship_spec": {
+                        "relationship_spec_id": relationship_spec_id,
                         "type": "join_table",
                         "join_dataset_id": join_dataset.dataset_id,
                         "join_dataset_version_id": join_version.version_id,

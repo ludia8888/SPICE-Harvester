@@ -33,6 +33,9 @@ Key services/ports (defaults, override via `.env`). OMS/Funnel/Agent are interna
 | lakeFS | 48080 |
 | Jaeger | 16686 |
 | OTEL Collector | 4317/4318 |
+| Prometheus | 19090 |
+| Alertmanager | 19093 |
+| Grafana | 13000 |
 
 ## 2) Health / Monitoring
 
@@ -47,10 +50,17 @@ Quick smoke (external ports only):
 - `HOST=127.0.0.1 ./scripts/smoke_external_ports.sh`
 - Detailed monitoring: `/api/v1/monitoring/*` and `/api/v1/config/*`
 
+Local dashboards (when using `docker-compose.full.yml`):
+- Prometheus: `http://localhost:19090`
+- Alertmanager: `http://localhost:19093`
+- Grafana: `http://localhost:13000` (default `admin` / `admin`)
+- Traces (Jaeger): `http://localhost:16686`
+
 ## 3) Authentication & Security
 
 - BFF/OMS require a shared token by default. Set:
   - `BFF_ADMIN_TOKEN` and `OMS_ADMIN_TOKEN` (or `ADMIN_API_KEY`/`ADMIN_TOKEN`).
+- Token rotation: shared-token env vars accept comma-separated lists (e.g. `new,old`).
 - Disable auth only for non-production:
   - `BFF_REQUIRE_AUTH=false` + `ALLOW_INSECURE_BFF_AUTH_DISABLE=true`
   - `OMS_REQUIRE_AUTH=false` + `ALLOW_INSECURE_OMS_AUTH_DISABLE=true`
@@ -106,6 +116,31 @@ Pipeline transform/cleansing E2E (full stack required):
 ```bash
 RUN_PIPELINE_TRANSFORM_E2E=true PYTHON_BIN=python3.12 ./backend/run_production_tests.sh --full
 ```
+
+### Agent Pipeline Demo (JWT + Mock LLM)
+
+Deterministic end-to-end demo script:
+- `./scripts/e2e_agent_pipeline_demo.sh`
+- Artifacts: `test_results/agent_pipeline_demo_<RUN_ID>/`
+
+Bring up the stack with end-user JWT enabled and mock LLM responses:
+
+```bash
+USER_JWT_ENABLED=true \
+USER_JWT_HS256_SECRET=spice-dev-user-jwt-secret \
+LLM_PROVIDER=mock \
+ADMIN_TOKEN=test-token \
+docker compose -f backend/docker-compose.yml up -d --build
+
+ADMIN_TOKEN=test-token \
+USER_JWT_HS256_SECRET=spice-dev-user-jwt-secret \
+AUTO_APPROVE=true \
+./scripts/e2e_agent_pipeline_demo.sh
+```
+
+Notes:
+- `backend/docker-compose.yml` mounts `scripts/llm_mocks/` into the BFF container and sets `LLM_MOCK_DIR=/app/llm_mocks`, so you usually don't need to export `LLM_MOCK_JSON_*` manually.
+- Compose uses `${VAR:-default}` expansion; re-running `docker compose up` without exporting the variables will recreate containers with defaults (e.g. `LLM_PROVIDER=disabled`).
 
 ## 9) Troubleshooting
 

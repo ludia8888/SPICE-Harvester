@@ -377,8 +377,13 @@ async def compile_agent_plan(
     auto_applied_patches: list[str] = []
 
     if validation.errors:
-        candidate_plan = validation.plan
-        for _ in range(5):
+        # Apply server-side "mechanical" patches (idempotency keys, default locations, etc.)
+        #
+        # Important: patch the original (still Pydantic-valid) plan shape, not the normalized
+        # validation.plan, because validation.plan may contain write-method hints that trigger
+        # Pydantic idempotency validators before all patches are applied.
+        candidate_plan_obj = plan.model_dump(mode="json")
+        for _ in range(25):
             report = validation.compilation_report
             auto_patches = [
                 patch
@@ -390,8 +395,8 @@ async def compile_agent_plan(
             patch = auto_patches[0]
             ops = [op.model_dump(mode="json", by_alias=True) for op in (patch.operations or [])]
             try:
-                patched_obj = apply_json_patch(candidate_plan.model_dump(mode="json"), ops)
-                candidate_plan = AgentPlan.model_validate(patched_obj)
+                candidate_plan_obj = apply_json_patch(candidate_plan_obj, ops)
+                candidate_plan = AgentPlan.model_validate(candidate_plan_obj)
             except (JsonPatchError, ValidationError):
                 break
             auto_applied_patches.append(str(patch.patch_id))

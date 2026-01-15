@@ -310,7 +310,7 @@ async def create_object_type_contract(
     body: ObjectTypeContractRequest,
     request: Request,
     branch: str = Query("main", description="Target branch"),
-    expected_head_commit: str = Query(..., description="Optimistic concurrency guard"),
+    expected_head_commit: Optional[str] = Query(default=None, description="Optimistic concurrency guard (defaults to branch head)"),
     oms_client: OMSClient = OMSClientDep,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
@@ -404,12 +404,32 @@ async def create_object_type_contract(
             },
         }
 
+        expected_head = str(expected_head_commit or "").strip() or None
+        if not expected_head:
+            head_payload = await oms_client.get_version_head(db_name, branch=branch)
+            head_data = head_payload.get("data") if isinstance(head_payload, dict) else {}
+            if isinstance(head_data, dict):
+                expected_head = (
+                    str(
+                        head_data.get("head_commit_id")
+                        or head_data.get("commit")
+                        or head_data.get("head_commit")
+                        or ""
+                    ).strip()
+                    or None
+                )
+        if not expected_head:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="expected_head_commit is required (could not resolve branch head)",
+            )
+
         response = await oms_client.create_ontology_resource(
             db_name,
             resource_type="object_type",
             payload=resource_payload,
             branch=branch,
-            expected_head_commit=expected_head_commit,
+            expected_head_commit=expected_head,
         )
         resource = _extract_resource_payload(response)
 
@@ -596,8 +616,8 @@ async def update_object_type_contract(
     class_id: str,
     body: ObjectTypeContractUpdate,
     request: Request,
-    branch: str = Query(..., description="Target branch"),
-    expected_head_commit: str = Query(..., description="Optimistic concurrency guard"),
+    branch: str = Query("main", description="Target branch"),
+    expected_head_commit: Optional[str] = Query(default=None, description="Optimistic concurrency guard (defaults to branch head)"),
     oms_client: OMSClient = OMSClientDep,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
@@ -620,6 +640,10 @@ async def update_object_type_contract(
             existing_spec = {}
 
         payload = sanitize_input(body.model_dump(exclude_unset=True))
+        dataset = None
+        backing = None
+        backing_version = None
+        version = None
         backing_spec = existing_spec.get("backing_source") if isinstance(existing_spec.get("backing_source"), dict) else {}
         if any(
             key in payload
@@ -741,7 +765,7 @@ async def update_object_type_contract(
                 if str(old_id).strip() and str(new_id).strip():
                     id_remap[str(old_id).strip()] = str(new_id).strip()
 
-        reindex_required = migration_approved and (backing_changed or pk_changed)
+        reindex_required = migration_approved and backing_changed
         status_value_upper = str(status_value or "ACTIVE").strip().upper()
         if reindex_required and status_value_upper == "ACTIVE":
             if dataset is None or version is None:
@@ -996,13 +1020,33 @@ async def update_object_type_contract(
             },
         }
 
+        expected_head = str(expected_head_commit or "").strip() or None
+        if not expected_head:
+            head_payload = await oms_client.get_version_head(db_name, branch=branch)
+            head_data = head_payload.get("data") if isinstance(head_payload, dict) else {}
+            if isinstance(head_data, dict):
+                expected_head = (
+                    str(
+                        head_data.get("head_commit_id")
+                        or head_data.get("commit")
+                        or head_data.get("head_commit")
+                        or ""
+                    ).strip()
+                    or None
+                )
+        if not expected_head:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="expected_head_commit is required (could not resolve branch head)",
+            )
+
         response = await oms_client.update_ontology_resource(
             db_name,
             resource_type="object_type",
             resource_id=class_id,
             payload=updated_payload,
             branch=branch,
-            expected_head_commit=expected_head_commit,
+            expected_head_commit=expected_head,
         )
 
         reindex_job_id = None

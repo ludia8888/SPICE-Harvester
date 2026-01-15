@@ -54,20 +54,55 @@ AGENT_PROXY_TIMEOUT_SECONDS=30
 # BFF
 BFF_REQUIRE_AUTH=true
 BFF_REQUIRE_DB_SCOPE=false
-BFF_ADMIN_TOKEN=change_me
+BFF_ADMIN_TOKEN=change_me # comma-separated rotation supported: new_token,old_token
 BFF_WRITE_TOKEN=
-BFF_AGENT_TOKEN=change_me_agent_token
+BFF_AGENT_TOKEN=change_me_agent_token # comma-separated rotation supported: new_token,old_token
 ALLOW_INSECURE_BFF_AUTH_DISABLE=false
 
 # OMS
 OMS_REQUIRE_AUTH=true
-OMS_ADMIN_TOKEN=change_me
+OMS_ADMIN_TOKEN=change_me # comma-separated rotation supported: new_token,old_token
 OMS_WRITE_TOKEN=
 ALLOW_INSECURE_OMS_AUTH_DISABLE=false
 
 # Shared fallback
 ADMIN_API_KEY=
 ADMIN_TOKEN=
+```
+
+## End-user JWT (Agent Sessions)
+
+Agent Sessions (`/api/v1/agent-sessions/*`) run under delegated end-user auth.
+
+```bash
+USER_JWT_ENABLED=true
+
+# Dev-only HS256 signing (the demo script can generate JWTs when this is set)
+USER_JWT_HS256_SECRET=change_me_dev_secret # comma-separated rotation supported: new_secret,old_secret
+
+# Production verification (prefer RS256 + JWKS)
+USER_JWT_PUBLIC_KEY=
+USER_JWT_JWKS_URL=
+USER_JWT_ALGORITHMS=RS256,HS256
+
+# Optional claims constraints
+USER_JWT_ISSUER=
+USER_JWT_AUDIENCE=
+USER_JWT_TTL_SECONDS=3600
+```
+
+## LLM (Planner)
+
+```bash
+# LLM provider selection
+LLM_PROVIDER=mock
+
+# Dev-only: deterministic planner responses (JSON, typically minified)
+LLM_MOCK_JSON_AGENT_PLAN_COMPILE_V1='[{"plan":{...},"confidence":0.9,"notes":[],"warnings":[]}]'
+
+# Dev-only: load mock payloads from a directory of JSON files.
+# Example filenames: agent_plan_compile_v1.json, agent_plan_clarify_v1.json
+LLM_MOCK_DIR=./scripts/llm_mocks
 ```
 
 ## Rate Limiting

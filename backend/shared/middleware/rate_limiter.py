@@ -14,7 +14,6 @@ import redis.asyncio as redis
 
 from shared.config.settings import get_settings
 from shared.config.rate_limit_config import rate_limit_config
-from shared.config.service_config import ServiceConfig
 from shared.security.auth_utils import extract_presented_token
 from shared.utils.app_logger import get_logger
 
@@ -224,7 +223,7 @@ class RateLimiter:
         Args:
             redis_url: Redis connection URL
         """
-        self.redis_url = redis_url or ServiceConfig.get_redis_url()
+        self.redis_url = redis_url or get_settings().database.redis_url
         self.redis_client: Optional[redis.Redis] = None
         self.buckets: Dict[str, TokenBucket] = {}
         self._local_buckets: Dict[str, LocalTokenBucket] = {}

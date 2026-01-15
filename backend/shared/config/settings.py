@@ -12,11 +12,17 @@ Features:
 - Test-friendly configuration isolation
 """
 
+import json
+import contextlib
+import logging
 import os
-from typing import Optional, List, Dict, Any
+from enum import Enum
+from typing import Any, Dict, List, Optional
+
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 
 def _is_docker_environment() -> bool:
@@ -300,8 +306,8 @@ class ServiceSettings(BaseSettings):
     
     # Service Hosts and Ports
     oms_host: str = Field(
-        default="127.0.0.1",
-        description="OMS service host"
+        default_factory=lambda: ("oms" if _is_docker_environment() else "127.0.0.1"),
+        description="OMS service host",
     )
     oms_port: int = Field(
         default=8000,
@@ -312,8 +318,8 @@ class ServiceSettings(BaseSettings):
         description="OMS base URL override (OMS_BASE_URL)"
     )
     bff_host: str = Field(
-        default="127.0.0.1",
-        description="BFF service host"
+        default_factory=lambda: ("bff" if _is_docker_environment() else "127.0.0.1"),
+        description="BFF service host",
     )
     bff_port: int = Field(
         default=8002,
@@ -324,8 +330,8 @@ class ServiceSettings(BaseSettings):
         description="BFF base URL override (BFF_BASE_URL)"
     )
     funnel_host: str = Field(
-        default="127.0.0.1",
-        description="Funnel service host"
+        default_factory=lambda: ("funnel" if _is_docker_environment() else "127.0.0.1"),
+        description="Funnel service host",
     )
     funnel_port: int = Field(
         default=8003,
@@ -336,8 +342,8 @@ class ServiceSettings(BaseSettings):
         description="Funnel base URL override (FUNNEL_BASE_URL)"
     )
     agent_host: str = Field(
-        default="127.0.0.1",
-        description="Agent service host"
+        default_factory=lambda: ("agent" if _is_docker_environment() else "127.0.0.1"),
+        description="Agent service host",
     )
     agent_port: int = Field(
         default=8004,
@@ -383,10 +389,6 @@ class ServiceSettings(BaseSettings):
         default=False,
         description="Enable opt-in debug endpoints (ENABLE_DEBUG_ENDPOINTS)"
     )
-    agent_proxy_timeout_seconds: float = Field(
-        default=30.0,
-        description="Agent proxy timeout seconds (AGENT_PROXY_TIMEOUT_SECONDS)",
-    )
     funnel_excel_timeout_seconds: float = Field(
         default=120.0,
         description="Funnel excel timeout seconds (FUNNEL_EXCEL_TIMEOUT_SECONDS; fallback FUNNEL_CLIENT_TIMEOUT_SECONDS)",
@@ -411,15 +413,6 @@ class ServiceSettings(BaseSettings):
     @classmethod
     def get_agent_base_url_override(cls, v):
         return os.getenv("AGENT_BASE_URL", v)
-
-    @field_validator("agent_proxy_timeout_seconds", mode="before")
-    @classmethod
-    def clamp_agent_proxy_timeout(cls, v):  # noqa: ANN001
-        try:
-            value = float(v)
-        except Exception:
-            return 30.0
-        return max(1.0, min(value, 300.0))
 
     @field_validator("funnel_excel_timeout_seconds", mode="before")
     @classmethod
@@ -546,6 +539,10 @@ class LLMSettings(BaseSettings):
         default=None,
         description="Mock provider JSON payload (LLM_MOCK_JSON)",
     )
+    mock_dir: Optional[str] = Field(
+        default=None,
+        description="Directory containing mock JSON files like agent_plan_compile_v1.json (LLM_MOCK_DIR)",
+    )
 
     @field_validator(
         "provider",
@@ -559,6 +556,7 @@ class LLMSettings(BaseSettings):
         "google_api_key",
         "pricing_json",
         "mock_json",
+        "mock_dir",
         "provider_policies_json",
         mode="before",
     )
@@ -599,8 +597,11 @@ class LLMSettings(BaseSettings):
 
         Priority:
         1) `LLM_MOCK_JSON_<TASK>` where TASK is uppercased and normalized
+        2) `<LLM_MOCK_DIR>/<task>.json` (lowercased) when LLM_MOCK_DIR is set
         2) `LLM_MOCK_JSON`
         """
+        from pathlib import Path
+
         safe_task = str(task or "").strip()
         if safe_task:
             import re
@@ -610,8 +611,23 @@ class LLMSettings(BaseSettings):
                 value = (os.getenv(f"LLM_MOCK_JSON_{token}") or "").strip()
                 if value:
                     return value
+                mock_dir = str(self.mock_dir or "").strip()
+                if mock_dir:
+                    candidate = Path(mock_dir) / f"{token.lower()}.json"
+                    with contextlib.suppress(Exception):
+                        file_value = candidate.read_text(encoding="utf-8").strip()
+                        if file_value:
+                            return file_value
         fallback = str(self.mock_json or "").strip()
-        return fallback or None
+        if fallback:
+            return fallback
+        mock_dir = str(self.mock_dir or "").strip()
+        if mock_dir:
+            with contextlib.suppress(Exception):
+                file_value = (Path(mock_dir) / "default.json").read_text(encoding="utf-8").strip()
+                if file_value:
+                    return file_value
+        return None
 
 
 class ObservabilitySettings(BaseSettings):
@@ -1462,6 +1478,15 @@ class ClientSettings(BaseSettings):
         description="BFF admin token for internal calls (BFF_ADMIN_TOKEN; fallback BFF_WRITE_TOKEN/ADMIN_API_KEY/ADMIN_TOKEN)",
     )
 
+    @field_validator("agent_proxy_timeout_seconds", mode="before")
+    @classmethod
+    def clamp_agent_proxy_timeout(cls, v):  # noqa: ANN001
+        try:
+            value = float(v)
+        except Exception:
+            return 30.0
+        return max(1.0, min(value, 300.0))
+
     @field_validator("oms_client_token", mode="before")
     @classmethod
     def fallback_oms_client_token(cls, v):  # noqa: ANN001
@@ -1521,15 +1546,36 @@ class AuthSettings(BaseSettings):
     )
 
     # Token sources (inbound auth)
-    bff_admin_token: Optional[str] = Field(default=None, description="BFF admin token (BFF_ADMIN_TOKEN)")
-    bff_write_token: Optional[str] = Field(default=None, description="BFF write token (BFF_WRITE_TOKEN)")
-    bff_agent_token: Optional[str] = Field(default=None, description="BFF agent token (BFF_AGENT_TOKEN)")
+    bff_admin_token: Optional[str] = Field(
+        default=None,
+        description="BFF admin token(s), comma-separated for rotation (BFF_ADMIN_TOKEN)",
+    )
+    bff_write_token: Optional[str] = Field(
+        default=None,
+        description="BFF write token(s), comma-separated for rotation (BFF_WRITE_TOKEN)",
+    )
+    bff_agent_token: Optional[str] = Field(
+        default=None,
+        description="BFF internal agent token(s), comma-separated for rotation (BFF_AGENT_TOKEN)",
+    )
 
-    oms_admin_token: Optional[str] = Field(default=None, description="OMS admin token (OMS_ADMIN_TOKEN)")
-    oms_write_token: Optional[str] = Field(default=None, description="OMS write token (OMS_WRITE_TOKEN)")
+    oms_admin_token: Optional[str] = Field(
+        default=None,
+        description="OMS admin token(s), comma-separated for rotation (OMS_ADMIN_TOKEN)",
+    )
+    oms_write_token: Optional[str] = Field(
+        default=None,
+        description="OMS write token(s), comma-separated for rotation (OMS_WRITE_TOKEN)",
+    )
 
-    admin_api_key: Optional[str] = Field(default=None, description="Unified admin API key (ADMIN_API_KEY)")
-    admin_token: Optional[str] = Field(default=None, description="Unified admin token (ADMIN_TOKEN)")
+    admin_api_key: Optional[str] = Field(
+        default=None,
+        description="Unified admin API key(s), comma-separated for rotation (ADMIN_API_KEY)",
+    )
+    admin_token: Optional[str] = Field(
+        default=None,
+        description="Unified admin token(s), comma-separated for rotation (ADMIN_TOKEN)",
+    )
 
     # End-user auth (JWT/OIDC) - enterprise mode
     user_jwt_enabled: bool = Field(
@@ -1554,7 +1600,7 @@ class AuthSettings(BaseSettings):
     )
     user_jwt_hs256_secret: Optional[str] = Field(
         default=None,
-        description="HS256 shared secret for JWT verification (USER_JWT_HS256_SECRET)",
+        description="HS256 shared secret(s), comma-separated for rotation (USER_JWT_HS256_SECRET)",
     )
     user_jwt_algorithms: Optional[str] = Field(
         default=None,
@@ -1636,36 +1682,55 @@ class AuthSettings(BaseSettings):
     def oms_auth_disable_allowed(self) -> bool:
         return bool(self.allow_insecure_oms_auth_disable or self.allow_insecure_auth_disable)
 
+    @staticmethod
+    def _split_tokens(raw: Optional[str]) -> tuple[str, ...]:
+        value = str(raw or "").strip()
+        if not value:
+            return ()
+        return tuple(part.strip() for part in value.split(",") if part.strip())
+
+    @classmethod
+    def _tokens_from_values(cls, *values: Optional[str]) -> tuple[str, ...]:
+        tokens: list[str] = []
+        for value in values:
+            tokens.extend(cls._split_tokens(value))
+        return tuple(tokens)
+
+    @property
+    def bff_expected_tokens(self) -> tuple[str, ...]:
+        return self._tokens_from_values(self.bff_admin_token, self.bff_write_token, self.admin_api_key, self.admin_token)
+
+    @property
+    def bff_agent_tokens(self) -> tuple[str, ...]:
+        return self._split_tokens(self.bff_agent_token)
+
+    @property
+    def oms_expected_tokens(self) -> tuple[str, ...]:
+        return self._tokens_from_values(self.oms_admin_token, self.oms_write_token, self.admin_api_key, self.admin_token)
+
     @property
     def bff_expected_token(self) -> Optional[str]:
-        for value in (
-            self.bff_admin_token,
-            self.bff_write_token,
-            self.admin_api_key,
-            self.admin_token,
-            self.bff_agent_token,
-        ):
-            if value:
-                return value
+        tokens = self.bff_expected_tokens
+        if tokens:
+            return tokens[0]
+        agent_tokens = self.bff_agent_tokens
+        if agent_tokens:
+            return agent_tokens[0]
         return None
 
     @property
     def bff_admin_only_token(self) -> Optional[str]:
-        for value in (self.bff_admin_token, self.admin_api_key, self.admin_token):
-            if value:
-                return value
-        return None
+        tokens = self._tokens_from_values(self.bff_admin_token, self.admin_api_key, self.admin_token)
+        return tokens[0] if tokens else None
 
     @property
     def oms_expected_token(self) -> Optional[str]:
-        for value in (self.oms_admin_token, self.oms_write_token, self.admin_api_key, self.admin_token):
-            if value:
-                return value
-        return None
+        tokens = self.oms_expected_tokens
+        return tokens[0] if tokens else None
 
     @property
     def admin_bypass_tokens(self) -> set[str]:
-        tokens = (
+        tokens = self._tokens_from_values(
             self.bff_admin_token,
             self.bff_write_token,
             self.oms_admin_token,
@@ -1673,21 +1738,21 @@ class AuthSettings(BaseSettings):
             self.admin_api_key,
             self.admin_token,
         )
-        return {token for token in tokens if token}
+        return set(tokens)
 
     def is_bff_auth_required(self, *, allow_pytest: bool, default_required: bool = True) -> bool:
         if self.bff_require_auth is not None:
             return bool(self.bff_require_auth)
         if allow_pytest and os.environ.get("PYTEST_CURRENT_TEST"):
             return False
-        if self.bff_expected_token:
+        if self.bff_expected_tokens or self.bff_agent_tokens:
             return True
         return bool(default_required)
 
     def is_oms_auth_required(self, *, default_required: bool = True) -> bool:
         if self.oms_require_auth is not None:
             return bool(self.oms_require_auth)
-        if self.oms_expected_token:
+        if self.oms_expected_tokens:
             return True
         return bool(default_required)
 
@@ -4019,3 +4084,164 @@ def reload_settings() -> ApplicationSettings:
     global settings
     settings = ApplicationSettings()
     return settings
+
+
+def build_client_ssl_config(settings: Optional[ApplicationSettings] = None) -> Dict[str, Any]:
+    """
+    SSL config for HTTP clients (httpx/requests/etc).
+
+    Mirrors legacy behavior:
+    - In production: always verify.
+    - In non-prod: follow `services.verify_ssl`.
+    - If verifying and CA path exists, use it.
+    """
+    cfg = settings or get_settings()
+    services = cfg.services
+
+    verify_ssl = True if cfg.is_production else bool(services.verify_ssl)
+    client_cfg: Dict[str, Any] = {"verify": verify_ssl}
+
+    ca_path = str(services.ssl_ca_path or "").strip()
+    if verify_ssl and ca_path and os.path.exists(ca_path):
+        client_cfg["verify"] = ca_path
+    return client_cfg
+
+
+def build_server_ssl_config(settings: Optional[ApplicationSettings] = None) -> Dict[str, Any]:
+    """
+    SSL config for uvicorn (server-side TLS).
+
+    Returns uvicorn kwargs like `ssl_certfile`/`ssl_keyfile`, or `{}` when disabled.
+    """
+    cfg = settings or get_settings()
+    services = cfg.services
+    if not bool(services.use_https):
+        return {}
+
+    ssl_cfg: Dict[str, Any] = {}
+    cert_path = str(services.ssl_cert_path or "").strip()
+    key_path = str(services.ssl_key_path or "").strip()
+
+    if cert_path:
+        if os.path.exists(cert_path):
+            ssl_cfg["ssl_certfile"] = cert_path
+        else:
+            logger.warning("SSL certificate not found at %s", cert_path)
+
+    if key_path:
+        if os.path.exists(key_path):
+            ssl_cfg["ssl_keyfile"] = key_path
+        else:
+            logger.warning("SSL key not found at %s", key_path)
+
+    return ssl_cfg
+
+
+def _get_dev_cors_origins() -> List[str]:
+    common_ports = [3000, 3001, 3002, 5173, 5174, 8080, 8081, 8082, 4200, 4201]
+    origins: List[str] = []
+    for port in common_ports:
+        origins.extend(
+            [
+                f"http://localhost:{port}",
+                f"http://127.0.0.1:{port}",
+                f"https://localhost:{port}",
+                f"https://127.0.0.1:{port}",
+            ]
+        )
+    origins.append("*")
+    return origins
+
+
+def _get_environment_default_origins(settings: ApplicationSettings) -> List[str]:
+    if settings.is_production:
+        return [
+            "https://app.spice-harvester.com",
+            "https://www.spice-harvester.com",
+            "https://spice-harvester.com",
+        ]
+    return _get_dev_cors_origins()
+
+
+def resolve_cors_origins(settings: Optional[ApplicationSettings] = None) -> List[str]:
+    """
+    Resolve CORS origins with production safety.
+
+    Rules:
+    - If CORS_ORIGINS is a JSON array:
+      - empty list => fall back to environment defaults
+      - in production: filter wildcard '*' (and fall back if it removes all)
+    - Else: fall back to environment defaults.
+    """
+    cfg = settings or get_settings()
+    raw = str(cfg.services.cors_origins or "").strip()
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except Exception as exc:
+            logger.warning("Invalid CORS_ORIGINS JSON: %s", exc)
+            parsed = None
+
+        if isinstance(parsed, list):
+            if len(parsed) == 0:
+                return _get_environment_default_origins(cfg)
+
+            if cfg.is_production:
+                filtered: List[str] = []
+                for origin in parsed:
+                    if origin == "*":
+                        logger.error(
+                            "SECURITY WARNING: Wildcard (*) CORS origin is not allowed in production"
+                        )
+                        continue
+                    filtered.append(origin)
+                return filtered or _get_environment_default_origins(cfg)
+
+            return parsed
+
+        if parsed is not None:
+            logger.warning("CORS_ORIGINS must be a JSON array, got=%s", type(parsed))
+
+    return _get_environment_default_origins(cfg)
+
+
+def build_cors_middleware_config(settings: Optional[ApplicationSettings] = None) -> Dict[str, Any]:
+    cfg = settings or get_settings()
+    origins = resolve_cors_origins(cfg)
+
+    cors_cfg: Dict[str, Any] = {
+        "allow_origins": origins,
+        "allow_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+        "allow_headers": ["*"],
+        "expose_headers": ["*"],
+        "allow_credentials": True,
+        "max_age": 3600,
+    }
+
+    if cfg.is_production:
+        cors_cfg["allow_headers"] = [
+            "Accept",
+            "Accept-Language",
+            "Authorization",
+            "Content-Type",
+            "DNT",
+            "Origin",
+            "User-Agent",
+            "X-Requested-With",
+        ]
+        cors_cfg["expose_headers"] = ["Content-Length", "Content-Type", "X-Request-ID"]
+        cors_cfg["max_age"] = 86400
+
+    return cors_cfg
+
+
+def get_cors_debug_info(settings: Optional[ApplicationSettings] = None) -> Dict[str, Any]:
+    cfg = settings or get_settings()
+    env_value = getattr(cfg.environment, "value", str(cfg.environment))
+    return {
+        "enabled": bool(cfg.services.cors_enabled),
+        "origins": resolve_cors_origins(cfg),
+        "environment": env_value,
+        "is_production": cfg.is_production,
+        "config": build_cors_middleware_config(cfg),
+    }

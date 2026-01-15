@@ -4,10 +4,6 @@ Agent Service - LangGraph-based orchestration runtime.
 Port: 8004
 """
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -18,7 +14,7 @@ from shared.middleware.rate_limiter import RateLimiter
 from shared.services.audit_log_store import AuditLogStore
 from shared.services.agent_registry import AgentRegistry
 from shared.services.event_store import event_store
-from shared.services.service_factory import AGENT_SERVICE_INFO, create_fastapi_service, run_service
+from shared.services.service_factory import create_fastapi_service, get_agent_service_info, run_service
 from shared.utils.app_logger import get_logger
 
 logger = get_logger(__name__)
@@ -76,8 +72,9 @@ async def lifespan(app: FastAPI):
         await app.state.agent_registry.close()
 
 
+service_info = get_agent_service_info()
 app = create_fastapi_service(
-    service_info=AGENT_SERVICE_INFO,
+    service_info=service_info,
     custom_lifespan=lifespan,
     include_health_check=True,
     include_logging_middleware=True,
@@ -87,4 +84,4 @@ app.include_router(agent_router, prefix="/api/v1")
 
 
 if __name__ == "__main__":
-    run_service(app, AGENT_SERVICE_INFO, "agent.main:app")
+    run_service(app, service_info, "agent.main:app")

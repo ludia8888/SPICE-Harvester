@@ -17,7 +17,6 @@ from uuid import uuid5, NAMESPACE_URL
 from confluent_kafka import Consumer, Producer, KafkaError, KafkaException, TopicPartition
 import asyncpg
 
-from shared.config.service_config import ServiceConfig
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.models.commands import (
@@ -74,7 +73,7 @@ class OntologyWorker:
         worker_cfg = settings.workers.ontology
 
         self.running = False
-        self.kafka_servers = ServiceConfig.get_kafka_bootstrap_servers()
+        self.kafka_servers = settings.database.kafka_servers
         self.enable_event_sourcing = bool(settings.event_sourcing.enable_event_sourcing)
         self.enable_processed_event_registry = bool(settings.event_sourcing.enable_processed_event_registry)
         self.enable_lineage = bool(settings.observability.enable_lineage)
@@ -160,7 +159,7 @@ class OntologyWorker:
         
         # TerminusDB 연결 설정 - 올바른 인증 정보 사용
         connection_info = ConnectionConfig(
-            server_url=ServiceConfig.get_terminus_url(),  # Use ServiceConfig for correct endpoint
+            server_url=settings.database.terminus_url.rstrip("/"),
             user=settings.database.terminus_user,
             account=settings.database.terminus_account,
             key=settings.database.terminus_password,

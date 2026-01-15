@@ -6,10 +6,10 @@ This module provides centralized Kafka configuration for all workers,
 ensuring exactly-once processing semantics and optimal performance.
 """
 
-import os
 import uuid
 from typing import Dict, Any, Optional
-from shared.config.service_config import ServiceConfig
+
+from shared.config.settings import get_settings
 
 
 class KafkaEOSConfig:
@@ -45,7 +45,7 @@ class KafkaEOSConfig:
             instance_id = str(uuid.uuid4())[:8]
         
         config = {
-            'bootstrap.servers': ServiceConfig.get_kafka_bootstrap_servers(),
+            'bootstrap.servers': get_settings().database.kafka_servers,
             'client.id': f'{service_name}-producer',
             
             # Durability settings
@@ -95,7 +95,7 @@ class KafkaEOSConfig:
             Consumer configuration dictionary
         """
         config = {
-            'bootstrap.servers': ServiceConfig.get_kafka_bootstrap_servers(),
+            'bootstrap.servers': get_settings().database.kafka_servers,
             'group.id': group_id,
             'client.id': f'{service_name}-consumer',
             
@@ -133,7 +133,7 @@ class KafkaEOSConfig:
             Admin configuration dictionary
         """
         return {
-            'bootstrap.servers': ServiceConfig.get_kafka_bootstrap_servers(),
+            'bootstrap.servers': get_settings().database.kafka_servers,
             'client.id': 'admin-client',
             'request.timeout.ms': 30000,
         }

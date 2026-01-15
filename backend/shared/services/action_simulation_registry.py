@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 
 import asyncpg
 
-from shared.config.service_config import ServiceConfig
+from shared.config.settings import get_settings
 from shared.utils.json_utils import coerce_json_dataset, normalize_json_payload
 
 
@@ -92,7 +92,7 @@ class ActionSimulationRegistry:
         pool_min: int = 1,
         pool_max: int = 5,
     ) -> None:
-        self._dsn = dsn or ServiceConfig.get_postgres_url()
+        self._dsn = dsn or get_settings().database.postgres_url
         self._schema = schema
         self._pool: Optional[asyncpg.Pool] = None
         self._pool_min = int(pool_min or 1)
@@ -345,7 +345,7 @@ class ActionSimulationRegistry:
         if not self._pool:
             raise RuntimeError("ActionSimulationRegistry not connected")
         payload_input = normalize_json_payload(input_payload)
-        payload_assumptions = normalize_json_payload(assumptions) if assumptions is not None else {}
+        payload_assumptions = normalize_json_payload(assumptions) if assumptions is not None else "{}"
         payload_scenarios = normalize_json_payload(scenarios)
         payload_result = normalize_json_payload(result) if result is not None else None
         payload_error = normalize_json_payload(error) if error is not None else None

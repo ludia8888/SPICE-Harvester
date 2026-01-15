@@ -170,7 +170,7 @@ async def test_analyze_google_sheets_structure(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(router, "SheetGrid", SheetGrid)
     monkeypatch.setattr(router, "get_patch", lambda sig: None)  # noqa: ARG005
     monkeypatch.setattr(router.FunnelStructureAnalyzer, "analyze", lambda *args, **kwargs: analysis)
-    monkeypatch.setattr("shared.config.service_config.ServiceConfig.get_bff_url", lambda: "http://bff")
+    monkeypatch.setenv("BFF_BASE_URL", "http://bff")
 
     request = GoogleSheetStructureAnalysisRequest(
         sheet_url="https://docs.google.com/spreadsheets/d/1abc123XYZ456def789GHI012jklMNOP3456789/edit",

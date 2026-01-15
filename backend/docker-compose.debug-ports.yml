@@ -1,5 +1,3 @@
-version: "3.8"
-
 # Optional debug-only port exposure for internal services.
 # Usage:
 #   docker compose -f docker-compose.full.yml -f backend/docker-compose.debug-ports.yml up -d

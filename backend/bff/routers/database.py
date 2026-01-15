@@ -28,7 +28,6 @@ from shared.config.settings import get_settings
 
 # Add shared path for common utilities
 from shared.utils.language import get_accept_language
-from shared.config.service_config import ServiceConfig
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +35,7 @@ router = APIRouter(prefix="/databases", tags=["Database Management"])
 
 
 def _is_dev_mode() -> bool:
-    return not ServiceConfig.is_production()
+    return not get_settings().is_production
 
 
 async def _get_expected_seq_for_database(db_name: str) -> int:
@@ -48,7 +47,7 @@ async def _get_expected_seq_for_database(db_name: str) -> int:
     prefix = str(seq_settings.event_store_sequence_handler_prefix or "write_side").strip() or "write_side"
     handler = f"{prefix}:Database"
 
-    conn = await asyncpg.connect(ServiceConfig.get_postgres_url())
+    conn = await asyncpg.connect(get_settings().database.postgres_url)
     try:
         value = await conn.fetchval(
             f"""
@@ -81,7 +80,7 @@ def _coerce_db_entry(entry: Any) -> Dict[str, Any]:
 async def _fetch_database_access(db_names: List[str]) -> Dict[str, List[Dict[str, Any]]]:
     if not db_names:
         return {}
-    conn = await asyncpg.connect(ServiceConfig.get_postgres_url())
+    conn = await asyncpg.connect(get_settings().database.postgres_url)
     try:
         try:
             rows = await conn.fetch(
@@ -120,7 +119,7 @@ async def _upsert_database_owner(
 ) -> None:
     if not principal_id:
         return
-    conn = await asyncpg.connect(ServiceConfig.get_postgres_url())
+    conn = await asyncpg.connect(get_settings().database.postgres_url)
     try:
         try:
             await conn.execute(
@@ -409,7 +408,20 @@ async def delete_database(
             expected_seq = await _get_expected_seq_for_database(validated_db_name)
 
         # OMS를 통해 데이터베이스 삭제
-        result = await oms.delete_database(validated_db_name, expected_seq=expected_seq)
+        try:
+            result = await oms.delete_database(validated_db_name, expected_seq=expected_seq)
+        except httpx.HTTPStatusError as e:
+            status_code = e.response.status_code
+            detail: Any
+            try:
+                detail = e.response.json()
+            except Exception:
+                detail = e.response.text or str(e)
+            if isinstance(detail, dict):
+                detail = detail.get("detail") or detail.get("message") or detail.get("error") or detail
+            raise HTTPException(status_code=status_code, detail=detail)
+        except httpx.RequestError as e:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
 
         # Event Sourcing mode: pass through async contract (202 + command_id)
         if isinstance(result, dict) and result.get("status") == "accepted":
@@ -662,6 +674,22 @@ async def create_class(
         result = await oms.create_ontology(db_name, oms_data)
 
         return {"status": "success", "@id": class_data.get("@id"), "data": result}
+    except SecurityViolationError as e:
+        logger.warning(f"Security validation failed for create_class ({db_name}): {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    except httpx.HTTPStatusError as e:
+        # Preserve OMS semantics (e.g., protected-branch proposal workflow = 409).
+        upstream_status = int(getattr(e.response, "status_code", 502) or 502)
+        try:
+            upstream_body: Any = e.response.json()
+        except Exception:  # pragma: no cover (depends on upstream)
+            upstream_body = getattr(e.response, "text", str(e))
+
+        if upstream_status in {400, 401, 403, 404, 409, 422}:
+            raise HTTPException(status_code=upstream_status, detail=upstream_body) from e
+
+        # Unknown upstream failure -> treat as a gateway error (not a BFF 500).
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=upstream_body) from e
     except HTTPException:
         raise
     except Exception as e:

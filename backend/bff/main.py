@@ -16,10 +16,6 @@ Key improvements:
 6. ✅ Test-friendly architecture
 """
 
-# Load environment variables first (before other imports)
-from dotenv import load_dotenv
-load_dotenv()
-
 # Standard library imports
 import asyncio
 import logging
@@ -54,7 +50,7 @@ from shared.dependencies.providers import (
 )
 
 # Service factory import
-from shared.services.service_factory import BFF_SERVICE_INFO, create_fastapi_service, run_service
+from shared.services.service_factory import create_fastapi_service, get_bff_service_info, run_service
 from shared.services.connector_registry import ConnectorRegistry
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.agent_registry import AgentRegistry
@@ -238,9 +234,7 @@ class BFFServiceContainer:
     async def _initialize_oms_client(self) -> None:
         """Initialize OMS client with health check"""
         try:
-            # Use ServiceConfig.get_oms_url() to properly handle OMS_BASE_URL env var
-            from shared.config.service_config import ServiceConfig
-            oms_url = ServiceConfig.get_oms_url()
+            oms_url = self.settings.services.oms_base_url
             logger.info(f"Initializing OMS client with URL: {oms_url}")
             oms_client = OMSClient(oms_url)
             
@@ -256,8 +250,7 @@ class BFFServiceContainer:
         except (httpx.HTTPError, httpx.TimeoutException, ConnectionError) as e:
             logger.error(f"OMS service connection failed: {e}")
             # Create client anyway for fallback scenarios
-            from shared.config.service_config import ServiceConfig
-            self._bff_services['oms_client'] = OMSClient(ServiceConfig.get_oms_url())
+            self._bff_services['oms_client'] = OMSClient(self.settings.services.oms_base_url)
     
     async def _initialize_label_mapper(self) -> None:
         """Initialize label mapper"""
@@ -897,8 +890,9 @@ async def lifespan(app: FastAPI):
 
 
 # FastAPI app creation using service factory
+service_info = get_bff_service_info()
 app = create_fastapi_service(
-    service_info=BFF_SERVICE_INFO,
+    service_info=service_info,
     custom_lifespan=lifespan,
     include_health_check=False,  # Handled by existing router
     include_logging_middleware=True
@@ -1079,4 +1073,4 @@ app.include_router(config_monitoring.router, prefix="/api/v1/config")
 
 if __name__ == "__main__":
     # Use service factory for simplified service execution
-    run_service(app, BFF_SERVICE_INFO, "bff.main:app")
+    run_service(app, service_info, "bff.main:app")

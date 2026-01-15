@@ -20,7 +20,7 @@ import aiohttp
 import asyncpg
 import pytest
 
-from tests.utils.auth import bff_auth_headers
+from tests.utils.auth import bff_auth_headers, with_delegated_user
 
 
 BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
@@ -63,7 +63,7 @@ async def _connect_postgres() -> asyncpg.Connection:
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_agent_registry_smoke() -> None:
-    headers = bff_auth_headers()
+    headers = with_delegated_user(bff_auth_headers())
     tool_id = f"system.health.smoke.{uuid.uuid4().hex[:8]}"
     plan_id = str(uuid.uuid4())
 

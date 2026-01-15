@@ -28,21 +28,25 @@ AGENT_BASE_URL=http://agent:8004  # Docker network default
 # To expose internal ports on localhost, use backend/docker-compose.debug-ports.yml
 ```
 
-### 2. Using ServiceConfig
-All services now use `shared/config/service_config.py`:
+### 2. Using `get_settings()` (SSoT)
+All services should use centralized Pydantic settings (`shared/config/settings.py`):
 ```python
-from shared.config.service_config import ServiceConfig
+from shared.config.settings import get_settings
+
+settings = get_settings()
 
 # Get ports
-oms_port = ServiceConfig.get_oms_port()  # Returns 8000 or $OMS_PORT
-bff_port = ServiceConfig.get_bff_port()  # Returns 8002 or $BFF_PORT
-funnel_port = ServiceConfig.get_funnel_port()  # Returns 8003 or $FUNNEL_PORT
+oms_port = settings.services.oms_port
+bff_port = settings.services.bff_port
+funnel_port = settings.services.funnel_port
 
 # Get URLs
-oms_url = ServiceConfig.get_oms_url()  # http://oms:8000 in Docker, http://localhost:8000 otherwise
-bff_url = ServiceConfig.get_bff_url()  # http://localhost:8002 or $BFF_BASE_URL
-funnel_url = ServiceConfig.get_funnel_url()  # http://funnel:8003 in Docker, http://localhost:8003 otherwise
+oms_url = settings.services.oms_base_url  # http://oms:8000 in Docker
+bff_url = settings.services.bff_base_url  # http://localhost:8002 or $BFF_BASE_URL
+funnel_url = settings.services.funnel_base_url  # http://funnel:8003 in Docker
 ```
+
+> Note: `shared/config/service_config.py` remains as a backward-compatible wrapper, but new code should prefer `get_settings()` to avoid drift.
 
 ## Running Services
 

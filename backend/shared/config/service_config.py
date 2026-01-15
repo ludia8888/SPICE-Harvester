@@ -14,7 +14,15 @@ from typing import List, Optional, Tuple
 
 from pydantic import ValidationError
 
-from shared.config.settings import _is_docker_environment, get_settings
+from shared.config.settings import (
+    _is_docker_environment,
+    build_client_ssl_config,
+    build_cors_middleware_config,
+    build_server_ssl_config,
+    get_cors_debug_info as settings_cors_debug_info,
+    get_settings,
+    resolve_cors_origins,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -369,24 +377,7 @@ class ServiceConfig:
         Returns:
             Dictionary with SSL configuration suitable for uvicorn
         """
-        if not ServiceConfig.use_https():
-            return {}
-
-        config = {}
-
-        if cert_path := ServiceConfig.get_ssl_cert_path():
-            if os.path.exists(cert_path):
-                config["ssl_certfile"] = cert_path
-            else:
-                logger.warning(f"SSL certificate not found at {cert_path}")
-
-        if key_path := ServiceConfig.get_ssl_key_path():
-            if os.path.exists(key_path):
-                config["ssl_keyfile"] = key_path
-            else:
-                logger.warning(f"SSL key not found at {key_path}")
-
-        return config
+        return build_server_ssl_config()
 
     @staticmethod
     def get_client_ssl_config() -> dict:
@@ -396,14 +387,7 @@ class ServiceConfig:
         Returns:
             Dictionary with SSL configuration for clients
         """
-        config = {"verify": ServiceConfig.verify_ssl()}
-
-        # In production with custom CA, specify the CA certificate
-        if ServiceConfig.verify_ssl() and (ca_path := ServiceConfig.get_ssl_ca_path()):
-            if os.path.exists(ca_path):
-                config["verify"] = ca_path
-
-        return config
+        return build_client_ssl_config()
 
     # CORS Configuration Methods
 
@@ -420,47 +404,7 @@ class ServiceConfig:
         Returns:
             List of allowed origins
         """
-        cors_origins_env = str(app_settings.services.cors_origins or "").strip()
-
-        if cors_origins_env:
-            try:
-                origins = json.loads(cors_origins_env)
-                if isinstance(origins, list):
-                    # 🔥 BUG FIX: 빈 리스트가 설정된 경우 처리
-                    if len(origins) == 0:
-                        logger.warning("CORS_ORIGINS is empty. Using environment defaults.")
-                        # 빈 리스트라도 환경별 기본값 사용
-                        return ServiceConfig._get_environment_default_origins()
-
-                    # 🔥 SECURITY FIX: 프로덕션 환경에서 와일드카드 차단
-                    if ServiceConfig.is_production():
-                        filtered_origins = []
-                        for origin in origins:
-                            if origin == "*":
-                                logger.error(
-                                    "SECURITY WARNING: Wildcard (*) CORS origin is not allowed in production!"
-                                )
-                                logger.error("Using production defaults instead.")
-                                continue
-                            filtered_origins.append(origin)
-
-                        # 와일드카드가 필터링된 후 빈 리스트가 되면 기본값 사용
-                        if len(filtered_origins) == 0:
-                            logger.warning(
-                                "All CORS origins were invalid in production. Using defaults."
-                            )
-                            return ServiceConfig._get_environment_default_origins()
-
-                        return filtered_origins
-
-                    return origins
-                else:
-                    logger.warning(f"CORS_ORIGINS must be a JSON array, got: {type(origins)}")
-            except json.JSONDecodeError as e:
-                logger.warning(f"Invalid CORS_ORIGINS JSON format: {e}")
-
-        # Environment-based defaults
-        return ServiceConfig._get_environment_default_origins()
+        return resolve_cors_origins()
 
     @staticmethod
     def _get_environment_default_origins() -> List[str]:
@@ -516,37 +460,7 @@ class ServiceConfig:
         Returns:
             Dictionary with CORS configuration
         """
-        origins = ServiceConfig.get_cors_origins()
-
-        # Base configuration
-        config = {
-            "allow_origins": origins,
-            "allow_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-            "allow_headers": ["*"],
-            "expose_headers": ["*"],
-            "allow_credentials": True,
-            "max_age": 3600,  # 1 hour
-        }
-
-        # Production-specific adjustments
-        if ServiceConfig.is_production():
-            # More restrictive headers in production
-            config["allow_headers"] = [
-                "Accept",
-                "Accept-Language",
-                "Authorization",
-                "Content-Type",
-                "DNT",
-                "Origin",
-                "User-Agent",
-                "X-Requested-With",
-            ]
-            # Specific exposed headers
-            config["expose_headers"] = ["Content-Length", "Content-Type", "X-Request-ID"]
-            # Longer cache for production
-            config["max_age"] = 86400  # 24 hours
-
-        return config
+        return build_cors_middleware_config()
 
     @staticmethod
     def is_cors_enabled() -> bool:
@@ -566,14 +480,7 @@ class ServiceConfig:
         Returns:
             Dictionary with debug information
         """
-        env_value = getattr(app_settings.environment, "value", str(app_settings.environment))
-        return {
-            "enabled": ServiceConfig.is_cors_enabled(),
-            "origins": ServiceConfig.get_cors_origins(),
-            "environment": env_value,
-            "is_production": ServiceConfig.is_production(),
-            "config": ServiceConfig.get_cors_config(),
-        }
+        return settings_cors_debug_info()
 
 
 # Convenience functions for backward compatibility

@@ -15,7 +15,7 @@ from typing import Optional
 import asyncpg
 from asyncpg import Connection, Pool
 
-from shared.config.service_config import ServiceConfig
+from shared.config.settings import get_settings
 from .mvcc import MVCCTransactionManager, IsolationLevel
 from .decorators import with_deadlock_retry
 
@@ -33,7 +33,7 @@ class PostgresDatabase:
     def __init__(self):
         self.pool: Optional[Pool] = None
         self.mvcc_manager: Optional[MVCCTransactionManager] = None
-        self.connection_url = ServiceConfig.get_postgres_url()
+        self.connection_url = get_settings().database.postgres_url
         # Default to REPEATABLE_READ for better consistency
         self.default_isolation = IsolationLevel.REPEATABLE_READ
         

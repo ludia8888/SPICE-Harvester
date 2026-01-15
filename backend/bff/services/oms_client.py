@@ -8,8 +8,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from shared.config.service_config import ServiceConfig
-from shared.config.settings import get_settings
+from shared.config.settings import build_client_ssl_config, get_settings
 
 # shared 모델 import
 from shared.models.ontology import (
@@ -28,11 +27,9 @@ class OMSClient:
         settings = get_settings()
         client_settings = settings.clients
 
-        # ServiceConfig에서 OMS URL 가져오기
-        self.base_url = base_url or ServiceConfig.get_oms_url()
+        self.base_url = base_url or settings.services.oms_base_url
 
-        # SSL 설정 가져오기
-        ssl_config = ServiceConfig.get_client_ssl_config()
+        ssl_config = build_client_ssl_config(settings)
 
         # HTTPX 클라이언트 생성
         headers = {"Content-Type": "application/json", "Accept": "application/json"}

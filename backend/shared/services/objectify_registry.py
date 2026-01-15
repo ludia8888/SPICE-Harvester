@@ -15,7 +15,6 @@ from uuid import uuid4
 import asyncpg
 from asyncpg.exceptions import UniqueViolationError
 
-from shared.config.service_config import ServiceConfig
 from shared.config.settings import get_settings
 from shared.observability.context_propagation import enrich_metadata_with_current_trace
 
@@ -114,7 +113,7 @@ class ObjectifyRegistry:
         pool_min: Optional[int] = None,
         pool_max: Optional[int] = None,
     ) -> None:
-        self._dsn = dsn or ServiceConfig.get_postgres_url()
+        self._dsn = dsn or get_settings().database.postgres_url
         self._schema = schema
         self._pool: Optional[asyncpg.Pool] = None
         perf = get_settings().performance

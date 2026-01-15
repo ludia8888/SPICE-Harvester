@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 from shared.config.kafka_config import KafkaEOSConfig, TransactionalProducer
-from shared.config.service_config import ServiceConfig
 
 
 class _FakeProducer:
@@ -32,7 +31,7 @@ class _FakeProducer:
 
 
 def test_kafka_eos_producer_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ServiceConfig, "get_kafka_bootstrap_servers", lambda: "localhost:9092")
+    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 
     config = KafkaEOSConfig.get_producer_config("service", instance_id="abc123", enable_transactions=True)
 
@@ -43,7 +42,7 @@ def test_kafka_eos_producer_config(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_kafka_eos_consumer_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ServiceConfig, "get_kafka_bootstrap_servers", lambda: "localhost:9092")
+    monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 
     config = KafkaEOSConfig.get_consumer_config("svc", group_id="group", read_committed=False, auto_commit=True)
 

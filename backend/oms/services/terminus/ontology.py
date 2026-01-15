@@ -358,7 +358,7 @@ class OntologyService(BaseTerminusService):
         except Exception:
             return False
     
-    def _create_property_schema(self, prop: Property) -> Dict[str, Any]:
+    def _create_property_schema(self, prop: Property) -> Any:
         """속성 스키마 생성 - TerminusDB 공식 패턴 준수"""
         # TerminusDB 공식 패턴:
         # - 스칼라 타입은 직접 지정 (예: "xsd:string")
@@ -401,13 +401,17 @@ class OntologyService(BaseTerminusService):
         if prop.items:
             documentation["items"] = prop.items
 
-        schema: Dict[str, Any] = {
+        # TerminusDB requires `@type` when using the object form for property definitions.
+        # For required scalar properties, the official pattern is to store a bare type string.
+        # Note: this drops per-property documentation in schema, but required-ness round-trips.
+        if prop.required:
+            return mapped_type
+
+        return {
             "@class": mapped_type,
             "@documentation": documentation,
-            # TerminusDB requires @type on object property definitions; keep required in documentation.
             "@type": "Optional",
         }
-        return schema
     
     def _create_relationship_schema(self, rel: Relationship) -> Dict[str, Any]:
         """관계 스키마 생성 - TerminusDB 공식 패턴 준수"""

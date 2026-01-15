@@ -35,9 +35,10 @@ if os.getenv("RUN_LIVE_BRANCH_VIRTUALIZATION", "").strip().lower() not in {
     "yes",
     "on",
 }:
-    raise RuntimeError(
+    pytest.skip(
         "RUN_LIVE_BRANCH_VIRTUALIZATION must be enabled for this test run. "
-        "Set RUN_LIVE_BRANCH_VIRTUALIZATION=true."
+        "Set RUN_LIVE_BRANCH_VIRTUALIZATION=true.",
+        allow_module_level=True,
     )
 
 

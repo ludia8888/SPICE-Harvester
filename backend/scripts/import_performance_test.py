@@ -84,9 +84,9 @@ def test_bulk_import_simulation():
     from shared.services.elasticsearch_service import ElasticsearchService, create_elasticsearch_service
     from shared.services.background_task_manager import BackgroundTaskManager
     from shared.services.service_factory import (
-        BFF_SERVICE_INFO,
-        OMS_SERVICE_INFO, 
         create_fastapi_service,
+        get_bff_service_info,
+        get_oms_service_info,
         run_service
     )
     

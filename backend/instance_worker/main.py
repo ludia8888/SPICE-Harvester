@@ -31,7 +31,6 @@ import boto3
 import httpx
 from botocore.exceptions import ClientError
 
-from shared.config.service_config import ServiceConfig
 from shared.config.app_config import AppConfig
 from shared.services.redis_service import create_redis_service
 from shared.services.command_status_service import (
@@ -90,7 +89,7 @@ class StrictInstanceWorker:
         worker_cfg = settings.workers.instance
 
         self.running = False
-        self.kafka_servers = ServiceConfig.get_kafka_bootstrap_servers()
+        self.kafka_servers = settings.database.kafka_servers
         self.enable_event_sourcing = bool(settings.event_sourcing.enable_event_sourcing)
         self.consumer = None
         self.producer = None
@@ -201,9 +200,9 @@ class StrictInstanceWorker:
         # S3/MinIO
         self.s3_client = boto3.client(
             's3',
-            endpoint_url=ServiceConfig.get_minio_endpoint(),
-            aws_access_key_id=ServiceConfig.get_minio_access_key(),
-            aws_secret_access_key=ServiceConfig.get_minio_secret_key(),
+            endpoint_url=settings.storage.minio_endpoint_url,
+            aws_access_key_id=settings.storage.minio_access_key,
+            aws_secret_access_key=settings.storage.minio_secret_key,
             region_name='us-east-1'
         )
         
@@ -230,7 +229,7 @@ class StrictInstanceWorker:
         
         # TerminusDB
         connection_info = ConnectionConfig(
-            server_url=ServiceConfig.get_terminus_url(),
+            server_url=settings.database.terminus_url.rstrip("/"),
             user=settings.database.terminus_user,
             account=settings.database.terminus_account,
             key=settings.database.terminus_password,
@@ -259,7 +258,7 @@ class StrictInstanceWorker:
         else:
             logger.warning("No BFF auth token configured; link reindex calls may fail.")
         self.bff_http = httpx.AsyncClient(
-            base_url=ServiceConfig.get_bff_url(),
+            base_url=settings.services.bff_base_url,
             timeout=60.0,
             headers=headers,
         )

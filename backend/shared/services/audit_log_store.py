@@ -15,7 +15,6 @@ from uuid import UUID, uuid4
 
 import asyncpg
 
-from shared.config.service_config import ServiceConfig
 from shared.config.settings import get_settings
 from shared.models.audit_log import AuditLogEntry, AuditStatus
 
@@ -29,7 +28,7 @@ class AuditLogStore:
         pool_min: Optional[int] = None,
         pool_max: Optional[int] = None,
     ):
-        self._dsn = dsn or ServiceConfig.get_postgres_url()
+        self._dsn = dsn or get_settings().database.postgres_url
         self._schema = schema
         self._pool: Optional[asyncpg.Pool] = None
         perf = get_settings().performance
@@ -443,5 +442,5 @@ class AuditLogStore:
 
 
 def create_audit_log_store(settings: Any) -> AuditLogStore:
-    # settings is unused; ServiceConfig reads envs and handles docker/local.
+    # settings is unused; AuditLogStore resolves configuration via `get_settings()` when needed.
     return AuditLogStore()

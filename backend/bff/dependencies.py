@@ -63,9 +63,7 @@ class BFFDependencyProvider:
         # Register OMSClient factory if not already registered
         if not container.has(OMSClient):
             def create_oms_client(settings: ApplicationSettings) -> OMSClient:
-                # Use ServiceConfig.get_oms_url() instead of settings to properly handle OMS_BASE_URL
-                from shared.config.service_config import ServiceConfig
-                return OMSClient(ServiceConfig.get_oms_url())
+                return OMSClient(settings.services.oms_base_url)
             
             container.register_singleton(OMSClient, create_oms_client)
         
@@ -492,7 +490,12 @@ class TerminusService:
                 },
                 headers=headers,
             )
-            response.raise_for_status()
+            if response.status_code >= 400:
+                try:
+                    payload = response.json()
+                except Exception:
+                    payload = {"detail": response.text}
+                raise HTTPException(status_code=response.status_code, detail=payload)
             return response.json()
         except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
             raise RuntimeError(f"고급 온톨로지 생성 실패 ({db_name}): {e}")

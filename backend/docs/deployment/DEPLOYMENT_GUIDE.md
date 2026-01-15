@@ -46,4 +46,4 @@ curl -fsS http://localhost:8003/health
 - BFF/OMS 토큰 인증 강제
 - Postgres + MinIO + lakeFS 메타데이터 정기 백업
 - Kafka retention/DLQ 정책 정의
-- 모니터링: `/metrics`, `/api/v1/monitoring/*`
+- 모니터링: `/metrics`, `/api/v1/monitoring/*`, 로컬 대시보드(Compose): Prometheus `:19090`, Grafana `:13000`, Alertmanager `:19093`

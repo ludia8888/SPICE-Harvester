@@ -142,20 +142,17 @@ class AppConfig:
     @staticmethod
     def get_oms_url() -> str:
         """OMS 서비스 URL"""
-        from .service_config import ServiceConfig
-        return ServiceConfig.get_oms_url()
+        return get_settings().services.oms_base_url
     
     @staticmethod
     def get_bff_url() -> str:
         """BFF 서비스 URL"""
-        from .service_config import ServiceConfig
-        return ServiceConfig.get_bff_url()
+        return get_settings().services.bff_base_url
     
     @staticmethod
     def get_funnel_url() -> str:
         """Funnel 서비스 URL"""
-        from .service_config import ServiceConfig
-        return ServiceConfig.get_funnel_url()
+        return get_settings().services.funnel_base_url
     
     # ======================
     # Event Sourcing & CQRS

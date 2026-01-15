@@ -16,10 +16,6 @@ Key improvements:
 6. ✅ Test-friendly architecture
 """
 
-# Load environment variables first (before other imports)
-from dotenv import load_dotenv
-load_dotenv()
-
 # Standard library imports
 import asyncio
 import logging
@@ -45,7 +41,7 @@ from shared.dependencies.providers import (
 )
 
 # Service factory import
-from shared.services.service_factory import OMS_SERVICE_INFO, create_fastapi_service, run_service
+from shared.services.service_factory import create_fastapi_service, get_oms_service_info, run_service
 from oms.middleware.auth import install_oms_auth_middleware, ensure_oms_auth_configured
 
 # OMS specific imports  
@@ -427,8 +423,9 @@ async def lifespan(app: FastAPI):
 
 
 # FastAPI app creation using service factory
+service_info = get_oms_service_info()
 app = create_fastapi_service(
-    service_info=OMS_SERVICE_INFO,
+    service_info=service_info,
     custom_lifespan=lifespan,
     include_health_check=False,  # Handled by existing health endpoint
     include_logging_middleware=True,
@@ -668,4 +665,4 @@ app.include_router(config_monitoring.router, prefix="/api/v1/config", tags=["con
 
 if __name__ == "__main__":
     # Use service factory for simplified service execution
-    run_service(app, OMS_SERVICE_INFO, "oms.main:app")
+    run_service(app, service_info, "oms.main:app")

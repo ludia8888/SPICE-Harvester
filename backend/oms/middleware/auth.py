@@ -21,7 +21,7 @@ def ensure_oms_auth_configured() -> None:
         )
     if not auth.is_oms_auth_required(default_required=True):
         return
-    if not auth.oms_expected_token:
+    if not auth.oms_expected_tokens:
         raise RuntimeError(
             "OMS auth is required but no token is configured. "
             "Set OMS_ADMIN_TOKEN (or OMS_WRITE_TOKEN/ADMIN_API_KEY/ADMIN_TOKEN)."
@@ -39,8 +39,8 @@ def install_oms_auth_middleware(app: FastAPI) -> None:
         if is_exempt_path(request.url.path, exempt_paths=exempt_paths):
             return await call_next(request)
 
-        expected = auth.oms_expected_token
-        if not expected:
+        expected_tokens = auth.oms_expected_tokens
+        if not expected_tokens:
             return JSONResponse(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 content={"detail": "OMS auth required but no token configured"},
@@ -54,7 +54,7 @@ def install_oms_auth_middleware(app: FastAPI) -> None:
                 content={"detail": "Authentication required"},
             )
 
-        if not hmac.compare_digest(presented, expected):
+        if not any(hmac.compare_digest(presented, expected) for expected in expected_tokens):
             return JSONResponse(
                 status_code=status.HTTP_403_FORBIDDEN,
                 content={"detail": "Invalid authentication credentials"},

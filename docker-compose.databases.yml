@@ -1,5 +1,3 @@
-version: '3.8'
-
 # 데이터베이스 서비스들만 독립 실행
 # 포함: PostgreSQL (processed_events 멱등 레지스트리), Redis (Command Status), Elasticsearch, MinIO (S3)
 # 실행: docker-compose -f docker-compose.databases.yml up -d
@@ -53,7 +51,9 @@ services:
 
   # Elasticsearch
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+    # NOTE: 8.13.x bundles JDK 22 which is unstable on some ARM hosts (SIGILL).
+    # Pin to 8.12.x (JDK 21) for deterministic local/dev runs.
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.2
     container_name: spice-harvester-elasticsearch
     platform: linux/amd64
     environment:
@@ -90,7 +90,7 @@ services:
 
   # Kibana (Optional - Elasticsearch UI)
   kibana:
-    image: docker.elastic.co/kibana/kibana:8.13.0
+    image: docker.elastic.co/kibana/kibana:8.12.2
     container_name: spice-harvester-kibana
     platform: linux/amd64
     environment:

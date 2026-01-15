@@ -7,12 +7,11 @@ from typing import Any, Dict, Optional
 
 import pytest
 
-from shared.config.service_config import ServiceConfig
 from shared.services.dlq_handler_fixed import DLQHandlerFixed, FailedMessage, RetryPolicy
 
 
 def _bootstrap_servers() -> str:
-    return ServiceConfig.get_kafka_bootstrap_servers()
+    return "localhost:9092"
 
 
 class _FakeProducer:

@@ -22,6 +22,7 @@ def _iter_runtime_python_files(repo_backend: Path) -> list[Path]:
         repo_backend / "agent",
         repo_backend / "message_relay",
         repo_backend / "data_connector",
+        repo_backend / "monitoring",
     ]
 
     for child in repo_backend.iterdir():

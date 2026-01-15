@@ -28,7 +28,6 @@ from urllib.parse import urlparse
 from confluent_kafka import Producer, KafkaException
 from confluent_kafka.admin import AdminClient, NewTopic
 
-from shared.config.service_config import ServiceConfig
 from shared.config.app_config import AppConfig
 from shared.config.settings import get_settings
 from shared.models.event_envelope import EventEnvelope
@@ -99,16 +98,17 @@ class EventPublisher:
     """S3/MinIO Event Store -> Kafka publisher."""
     
     def __init__(self):
-        cfg = get_settings().workers.event_publisher
+        settings = get_settings()
+        cfg = settings.workers.event_publisher
 
         self.running = False
-        self.kafka_servers = ServiceConfig.get_kafka_bootstrap_servers()
+        self.kafka_servers = settings.database.kafka_servers
         self.producer: Optional[Producer] = None
-        self.bucket_name = ServiceConfig.get_event_store_bucket()
+        self.bucket_name = settings.storage.event_store_bucket
 
-        self.endpoint_url = ServiceConfig.get_minio_endpoint()
-        self.access_key = ServiceConfig.get_minio_access_key()
-        self.secret_key = ServiceConfig.get_minio_secret_key()
+        self.endpoint_url = settings.storage.minio_endpoint_url
+        self.access_key = settings.storage.minio_access_key
+        self.secret_key = settings.storage.minio_secret_key
         self.session = aioboto3.Session()
 
         self.checkpoint_key = str(cfg.checkpoint_key or "checkpoints/event_publisher.json")

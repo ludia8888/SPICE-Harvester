@@ -12,8 +12,7 @@ from typing import Dict
 import httpx
 from fastapi import APIRouter, HTTPException, Request, Response, status
 
-from shared.config.settings import get_settings
-from shared.config.service_config import ServiceConfig
+from shared.config.settings import build_client_ssl_config, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -81,15 +80,16 @@ async def _proxy_agent_request(request: Request, path: str) -> Response:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Agent proxy loop blocked",
         )
-    agent_url = ServiceConfig.get_agent_url()
+    settings = get_settings()
+    agent_url = settings.services.agent_base_url
     suffix = path.lstrip("/")
     target_path = "/api/v1/agent"
     if suffix:
         target_path = f"{target_path}/{suffix}"
     url = f"{agent_url}{target_path}"
 
-    timeout_seconds = float(get_settings().services.agent_proxy_timeout_seconds)
-    ssl_config = ServiceConfig.get_client_ssl_config()
+    timeout_seconds = float(settings.clients.agent_proxy_timeout_seconds)
+    ssl_config = build_client_ssl_config(settings)
     headers = _forward_headers(request)
     body = await request.body()
 

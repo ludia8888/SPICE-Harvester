@@ -5,7 +5,6 @@ import os
 import pytest
 import redis.asyncio as aioredis
 
-from shared.config.service_config import ServiceConfig
 from shared.services.watermark_monitor import GlobalWatermark, PartitionWatermark, WatermarkMonitor
 
 
@@ -15,7 +14,7 @@ async def test_watermark_monitor_metrics_and_alerts() -> None:
     redis_client = aioredis.from_url(redis_url)
 
     monitor = WatermarkMonitor(
-        kafka_config={"bootstrap.servers": ServiceConfig.get_kafka_bootstrap_servers()},
+        kafka_config={"bootstrap.servers": "localhost:9092"},
         redis_client=redis_client,
         consumer_groups=["group"],
         topics=["topic"],

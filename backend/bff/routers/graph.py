@@ -132,7 +132,7 @@ async def get_graph_federation_service() -> GraphFederationServiceWOQL:
         settings = get_settings()
 
         # Initialize TerminusDB service
-        connection_info = ConnectionConfig.from_settings(settings)
+        connection_info = ConnectionConfig.from_settings()
         
         terminus_service = AsyncTerminusService(connection_info)
         await terminus_service.connect()
@@ -716,30 +716,9 @@ async def find_relationship_paths(
         # Validate database name
         db_name = validate_db_name(db_name)
         branch = validate_branch_name(branch)
-        
+
         logger.info(f"🔍 Finding paths from {source_class} to {target_class} in {db_name}")
-        
-        # Use REAL WOQL to query schema relationships
-        # THINK ULTRA³ - This is now using REAL schema discovery!
-        from shared.services.async_terminus import AsyncTerminusService
-        from shared.models.config import ConnectionConfig
-        
-        settings = get_settings()
-        es_host = settings.database.elasticsearch_host
-        es_port = settings.database.elasticsearch_port
-        
-        # Initialize services for schema query
-        connection_info = ConnectionConfig.from_settings(settings)
-        
-        terminus_service = AsyncTerminusService(connection_info)
-        await terminus_service.connect()
-        
-        graph_service = GraphFederationServiceWOQL(
-            terminus_service=terminus_service,
-            es_host=es_host,
-            es_port=es_port
-        )
-        
+
         # Find paths using REAL WOQL schema queries
         paths = await graph_service.find_relationship_paths(
             db_name=db_name,
@@ -748,7 +727,7 @@ async def find_relationship_paths(
             target_class=target_class,
             max_depth=max_depth,
         )
-        
+
         logger.info(f"✅ Found {len(paths)} paths via REAL WOQL schema discovery")
         
         return {

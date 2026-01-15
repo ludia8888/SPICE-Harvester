@@ -10,7 +10,6 @@ from typing import Any, Optional
 from confluent_kafka import Producer
 
 from shared.config.app_config import AppConfig
-from shared.config.service_config import ServiceConfig
 from shared.config.settings import get_settings
 from shared.observability.context_propagation import (
     attach_context_from_carrier,
@@ -70,7 +69,7 @@ class DatasetIngestOutboxPublisher:
             client_id = (settings.observability.service_name or "dataset-ingest-outbox").strip() or "dataset-ingest-outbox"
             self.dlq_producer = Producer(
                 {
-                    "bootstrap.servers": ServiceConfig.get_kafka_bootstrap_servers(),
+                    "bootstrap.servers": settings.database.kafka_servers,
                     "client.id": client_id,
                     "acks": "all",
                     "retries": retries,

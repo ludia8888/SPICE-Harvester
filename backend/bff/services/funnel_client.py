@@ -10,8 +10,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from shared.config.settings import get_settings
-from shared.config.service_config import ServiceConfig
+from shared.config.settings import build_client_ssl_config, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +19,10 @@ class FunnelClient:
     """Funnel HTTP 클라이언트"""
 
     def __init__(self, base_url: str = None):
-        self.base_url = base_url or ServiceConfig.get_funnel_url()
+        settings = get_settings()
+        self.base_url = base_url or settings.services.funnel_base_url
 
-        # SSL 설정 가져오기
-        ssl_config = ServiceConfig.get_client_ssl_config()
+        ssl_config = build_client_ssl_config(settings)
         self.excel_timeout_seconds = self._resolve_excel_timeout_seconds()
 
         self.client = httpx.AsyncClient(

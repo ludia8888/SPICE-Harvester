@@ -15,7 +15,6 @@ from uuid import uuid4
 
 import asyncpg
 
-from shared.config.service_config import ServiceConfig
 from shared.config.settings import get_settings
 from shared.observability.context_propagation import enrich_metadata_with_current_trace
 from shared.utils.s3_uri import is_s3_uri, parse_s3_uri
@@ -344,7 +343,7 @@ class DatasetRegistry:
         pool_min: Optional[int] = None,
         pool_max: Optional[int] = None,
     ):
-        self._dsn = dsn or ServiceConfig.get_postgres_url()
+        self._dsn = dsn or get_settings().database.postgres_url
         self._schema = schema
         self._pool: Optional[asyncpg.Pool] = None
         perf = get_settings().performance
@@ -2275,9 +2274,10 @@ class DatasetRegistry:
         if not self._pool:
             raise RuntimeError("DatasetRegistry not connected")
         cleaned_fields = [str(field).strip() for field in (fields or []) if str(field).strip()]
-        payload = normalize_json_payload(metadata or {})
+        metadata_obj = coerce_json_dataset(metadata) if metadata is not None else {}
         if cleaned_fields:
-            payload = {**payload, "fields": cleaned_fields}
+            metadata_obj = {**metadata_obj, "fields": cleaned_fields}
+        metadata_payload = normalize_json_payload(metadata_obj)
         status_value = str(status or "ACTIVE").strip().upper() or "ACTIVE"
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -2294,7 +2294,7 @@ class DatasetRegistry:
                 edit_type,
                 status_value,
                 normalize_json_payload(cleaned_fields),
-                payload,
+                metadata_payload,
             )
             if not row:
                 raise RuntimeError("Failed to record instance edit")

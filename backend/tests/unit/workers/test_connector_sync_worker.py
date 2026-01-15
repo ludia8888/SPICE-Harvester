@@ -160,7 +160,7 @@ async def test_sync_worker_bff_scope_headers() -> None:
 
 @pytest.mark.asyncio
 async def test_sync_worker_fetch_schema_and_target_types(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sync_module.ServiceConfig, "get_bff_url", lambda: "http://bff")
+    monkeypatch.setenv("BFF_BASE_URL", "http://bff")
 
     worker = ConnectorSyncWorker()
     worker.http = _FakeHttp()
@@ -176,7 +176,7 @@ async def test_sync_worker_fetch_schema_and_target_types(monkeypatch: pytest.Mon
 
 @pytest.mark.asyncio
 async def test_sync_worker_process_google_sheets_update(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sync_module.ServiceConfig, "get_bff_url", lambda: "http://bff")
+    monkeypatch.setenv("BFF_BASE_URL", "http://bff")
 
     class _FakeOAuth:
         client_id = "client"

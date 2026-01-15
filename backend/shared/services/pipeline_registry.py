@@ -16,7 +16,6 @@ from uuid import uuid4
 import asyncpg
 from cryptography.fernet import Fernet, InvalidToken
 
-from shared.config.service_config import ServiceConfig
 from shared.config.settings import get_settings
 from shared.services.lakefs_client import (
     LakeFSClient,
@@ -350,7 +349,7 @@ class PipelineRegistry:
         pool_min: Optional[int] = None,
         pool_max: Optional[int] = None,
     ):
-        self._dsn = dsn or ServiceConfig.get_postgres_url()
+        self._dsn = dsn or get_settings().database.postgres_url
         self._schema = schema
         self._pool: Optional[asyncpg.Pool] = None
         perf = get_settings().performance
@@ -503,7 +502,7 @@ class PipelineRegistry:
 
     async def get_lakefs_client(self, *, user_id: Optional[str] = None) -> LakeFSClient:
         creds = await self.resolve_lakefs_credentials(user_id=user_id)
-        api_url = ServiceConfig.get_lakefs_api_url()
+        api_url = get_settings().storage.lakefs_api_url_effective
         return LakeFSClient(
             config=LakeFSConfig(
                 api_url=api_url,
@@ -514,7 +513,7 @@ class PipelineRegistry:
 
     async def get_lakefs_storage(self, *, user_id: Optional[str] = None) -> LakeFSStorageService:
         creds = await self.resolve_lakefs_credentials(user_id=user_id)
-        endpoint = ServiceConfig.get_lakefs_s3_endpoint()
+        endpoint = get_settings().storage.lakefs_s3_endpoint_effective
         return LakeFSStorageService(
             endpoint_url=endpoint,
             access_key=creds.access_key_id,

@@ -28,9 +28,10 @@ from tests.utils.auth import oms_auth_headers
 
 
 if os.getenv("RUN_LIVE_OMS_SMOKE", "").strip().lower() not in {"1", "true", "yes", "on"}:
-    raise RuntimeError(
+    pytest.skip(
         "RUN_LIVE_OMS_SMOKE must be enabled for this test run. "
-        "Set RUN_LIVE_OMS_SMOKE=true."
+        "Set RUN_LIVE_OMS_SMOKE=true.",
+        allow_module_level=True,
     )
 
 
@@ -166,13 +167,17 @@ async def _wait_for_ontology_present(
     *,
     db_name: str,
     ontology_id: str,
+    branch: str = "main",
     timeout_seconds: int = 60,
     poll_interval_seconds: float = 1.0,
 ) -> None:
     deadline = time.monotonic() + timeout_seconds
     last = None
     while time.monotonic() < deadline:
-        async with session.get(f"{OMS_URL}/api/v1/database/{db_name}/ontology") as resp:
+        async with session.get(
+            f"{OMS_URL}/api/v1/database/{db_name}/ontology",
+            params={"branch": branch},
+        ) as resp:
             assert resp.status == 200
             last = await resp.json()
             ontologies = (last.get("data") or {}).get("ontologies") or []
@@ -188,16 +193,20 @@ async def _wait_for_instance_count(
     db_name: str,
     class_id: str,
     expected_count: int,
+    branch: str = "main",
     timeout_seconds: int = 90,
     poll_interval_seconds: float = 1.5,
 ) -> None:
     deadline = time.monotonic() + timeout_seconds
     last = None
     while time.monotonic() < deadline:
-        async with session.get(f"{OMS_URL}/api/v1/instance/{db_name}/class/{class_id}/count") as resp:
+        async with session.get(
+            f"{OMS_URL}/api/v1/instance/{db_name}/class/{class_id}/instances",
+            params={"branch": branch, "limit": 1, "offset": 0},
+        ) as resp:
             assert resp.status == 200
             last = await resp.json()
-            if int(last.get("count") or 0) >= expected_count:
+            if int(last.get("total") or 0) >= expected_count:
                 return
         await asyncio.sleep(poll_interval_seconds)
     raise AssertionError(
@@ -213,6 +222,7 @@ async def test_oms_end_to_end_smoke():
         branch_name = "feature/oms_smoke"
         class_id = "Product"
         instance_id = f"prod_{uuid.uuid4().hex[:8]}"
+        write_branch = "main"
 
         try:
             # 1) Database lifecycle (event sourcing)
@@ -268,20 +278,53 @@ async def test_oms_end_to_end_smoke():
             }
             async with session.post(
                 f"{OMS_URL}/api/v1/database/{db_name}/ontology",
+                params={"branch": write_branch},
                 json=ontology,
             ) as resp:
-                assert resp.status == 202
-                payload = await resp.json()
-                ontology_command_id = (payload.get("data") or {}).get("command_id")
-                assert ontology_command_id
-                await _assert_command_event_has_ontology_stamp(event_id=str(ontology_command_id))
-                await _wait_for_command_completed(session, command_id=str(ontology_command_id))
+                if resp.status == 409:
+                    payload = await resp.json()
+                    detail = str(payload.get("detail") or "")
+                    message = str(payload.get("message") or "")
+                    detail_lc = detail.lower()
+                    message_lc = message.lower()
+                    if (
+                        "protected branch" in detail_lc
+                        or "protected branch" in message_lc
+                        or "proposal" in detail_lc
+                        or "proposal" in message_lc
+                        or "보호된 브랜치" in detail
+                        or "보호된 브랜치" in message
+                    ):
+                        write_branch = branch_name
+                    else:
+                        raise AssertionError(f"Unexpected 409 response: {payload}")
+                else:
+                    assert resp.status == 202
+                    payload = await resp.json()
+                    ontology_command_id = (payload.get("data") or {}).get("command_id")
+                    assert ontology_command_id
+                    await _assert_command_event_has_ontology_stamp(event_id=str(ontology_command_id))
+                    await _wait_for_command_completed(session, command_id=str(ontology_command_id))
 
-            await _wait_for_ontology_present(session, db_name=db_name, ontology_id=class_id)
+            if write_branch != "main":
+                async with session.post(
+                    f"{OMS_URL}/api/v1/database/{db_name}/ontology",
+                    params={"branch": write_branch},
+                    json=ontology,
+                ) as resp:
+                    assert resp.status == 202
+                    payload = await resp.json()
+                    ontology_command_id = (payload.get("data") or {}).get("command_id")
+                    assert ontology_command_id
+                    await _assert_command_event_has_ontology_stamp(event_id=str(ontology_command_id))
+                    await _wait_for_command_completed(session, command_id=str(ontology_command_id))
+
+            await _wait_for_ontology_present(session, db_name=db_name, ontology_id=class_id, branch=write_branch)
 
             # 5) Async instance create (event sourcing) + read-side count
             async with session.post(
                 f"{OMS_URL}/api/v1/instances/{db_name}/async/{class_id}/create",
+                params={"branch": write_branch},
                 json={"data": {"product_id": instance_id, "name": "OMS Smoke Product"}},
             ) as resp:
                 assert resp.status == 202
@@ -296,6 +339,7 @@ async def test_oms_end_to_end_smoke():
                 db_name=db_name,
                 class_id=class_id,
                 expected_count=1,
+                branch=write_branch,
             )
         finally:
             # Best-effort cleanup (database delete is async)

@@ -1,10 +1,11 @@
-version: '3.8'
-
 services:
   # PostgreSQL - 표준화된 인증 정보
   postgres:
     image: postgres:16-alpine
     container_name: spice_postgres
+    # Running the full stack (services + workers) can open many connections.
+    # Increase max_connections for local/dev + integration test stability.
+    command: ["postgres", "-c", "max_connections=200"]
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
@@ -21,6 +22,27 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+
+  # Postgres migrations (idempotent, tracked in schema_migrations)
+  db-migrations:
+    image: postgres:16-alpine
+    container_name: spice_db_migrations
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
+      - POSTGRES_DB=${POSTGRES_DB:-spicedb}
+    volumes:
+      - ./database/migrations:/migrations:ro
+      - ./database/migrate/apply_migrations.sh:/apply_migrations.sh:ro
+    entrypoint: ["/bin/sh", "/apply_migrations.sh"]
+    restart: "no"
+    networks:
+      - spice_network
 
   # Redis - 표준화된 인증 정보
   redis:
@@ -41,8 +63,13 @@ services:
 
   # Elasticsearch - 표준화된 인증 정보
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+    # NOTE: 8.13.x bundles JDK 22 which is unstable on some ARM hosts (SIGILL).
+    # Pin to 8.12.x (JDK 21) for deterministic local/dev runs.
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.2
     container_name: spice_elasticsearch
+    # On Apple Silicon / some ARM hypervisors, the bundled JDK can SIGILL at JVM bootstrap.
+    # Force the amd64 image for stable local/dev runs (Docker will emulate if needed).
+    platform: linux/amd64
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
@@ -308,18 +335,34 @@ services:
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
       - EVENT_STORE_BUCKET=${EVENT_STORE_BUCKET:-spice-event-store}
+      # lakeFS (versioned storage + S3 gateway)
+      - LAKEFS_API_URL=http://lakefs:8000
+      - LAKEFS_S3_ENDPOINT_URL=http://lakefs:8000
+      - LAKEFS_ACCESS_KEY_ID=${LAKEFS_ACCESS_KEY_ID:-spice-lakefs-admin}
+      - LAKEFS_SECRET_ACCESS_KEY=${LAKEFS_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
       # Service
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
       - OMS_REQUIRE_AUTH=${OMS_REQUIRE_AUTH:-true}
       - ADMIN_TOKEN=${ADMIN_TOKEN:?ADMIN_TOKEN is required}
+      # Dev-stack default: allow direct writes on protected branches (smoke/E2E tests + README flow).
+      # Set to true in environments that require proposal workflow on protected branches (main/prod).
+      - ONTOLOGY_REQUIRE_PROPOSALS=${ONTOLOGY_REQUIRE_PROPOSALS:-false}
     depends_on:
-      - terminusdb
-      - postgres
-      - redis
-      - elasticsearch
+      db-migrations:
+        condition: service_completed_successfully
+      terminusdb:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
     networks:
       - spice_network
+    ports:
+      - "${OMS_PORT_HOST:-8000}:8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -360,6 +403,7 @@ services:
       - LLM_MOCK_JSON=${LLM_MOCK_JSON:-}
       - LLM_MOCK_JSON_AGENT_PLAN_COMPILE_V1=${LLM_MOCK_JSON_AGENT_PLAN_COMPILE_V1:-}
       - LLM_MOCK_JSON_AGENT_PLAN_CLARIFY_V1=${LLM_MOCK_JSON_AGENT_PLAN_CLARIFY_V1:-}
+      - LLM_MOCK_DIR=${LLM_MOCK_DIR:-/app/llm_mocks}
       # Infra (needed for WebSocket notifications / search / rate limiting)
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
@@ -407,6 +451,7 @@ services:
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
       - EVENT_STORE_IDEMPOTENCY_MISMATCH_MODE=${EVENT_STORE_IDEMPOTENCY_MISMATCH_MODE:-warn}
       - PIPELINE_JOB_QUEUE_FLUSH_TIMEOUT_SECONDS=${PIPELINE_JOB_QUEUE_FLUSH_TIMEOUT_SECONDS:-30}
+      - ONTOLOGY_REQUIRE_PROPOSALS=${ONTOLOGY_REQUIRE_PROPOSALS:-false}
       # lakeFS (versioned storage + S3 gateway)
       - LAKEFS_API_URL=http://lakefs:8000
       - LAKEFS_S3_ENDPOINT_URL=http://lakefs:8000
@@ -417,6 +462,23 @@ services:
       - LAKEFS_CREDENTIALS_SOURCE=${LAKEFS_CREDENTIALS_SOURCE:-env}
       - LAKEFS_CREDENTIALS_ENCRYPTION_KEY=${LAKEFS_CREDENTIALS_ENCRYPTION_KEY:-WCgHDn1AOcBzLOuW2zM8kSTFocoQmT07kkgHCFc8qtM=}
       - LAKEFS_SERVICE_PRINCIPAL=bff
+    depends_on:
+      db-migrations:
+        condition: service_completed_successfully
+      oms:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      lakefs:
+        condition: service_healthy
     ports:
       - "8002:8002"
     networks:
@@ -424,6 +486,7 @@ services:
     volumes:
       - bff_data:/app/data
       - ../mcp-config.json:/app/mcp-config.json:ro
+      - ../scripts/llm_mocks:/app/llm_mocks:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/api/v1/health"]
       interval: 30s
@@ -449,7 +512,7 @@ services:
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
       - EVENT_STORE_BUCKET=${AGENT_EVENT_STORE_BUCKET:-spice-agent-store}
-      - AGENT_BFF_TOKEN=${BFF_AGENT_TOKEN:-}
+      - AGENT_BFF_TOKEN=${BFF_AGENT_TOKEN:-spice-dev-agent-token}
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
     depends_on:
@@ -458,6 +521,8 @@ services:
       - minio
     networks:
       - spice_network
+    ports:
+      - "${AGENT_PORT_HOST:-8004}:8004"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
       interval: 30s
@@ -682,6 +747,8 @@ services:
       - DOCKER_CONTAINER=true
     networks:
       - spice_network
+    ports:
+      - "${FUNNEL_PORT_HOST:-8003}:8003"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
       interval: 30s
@@ -988,7 +1055,8 @@ services:
       - elasticsearch
     networks:
       - spice_network
-    restart: unless-stopped
+    # When disabled (default), the worker exits cleanly; don't restart-loop.
+    restart: on-failure
 
 volumes:
   postgres_data:

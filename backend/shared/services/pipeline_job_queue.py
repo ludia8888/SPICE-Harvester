@@ -14,7 +14,6 @@ from typing import Optional
 from confluent_kafka import Producer
 
 from shared.config.app_config import AppConfig
-from shared.config.service_config import ServiceConfig
 from shared.config.settings import get_settings
 from shared.models.pipeline_job import PipelineJob
 from shared.observability.context_propagation import kafka_headers_from_current_context
@@ -33,7 +32,7 @@ class PipelineJobQueue:
             service_name = get_settings().observability.service_name or "pipeline-job-queue"
             self._producer = Producer(
                 {
-                    "bootstrap.servers": ServiceConfig.get_kafka_bootstrap_servers(),
+                    "bootstrap.servers": get_settings().database.kafka_servers,
                     "client.id": service_name,
                     "acks": "all",
                     "retries": 3,

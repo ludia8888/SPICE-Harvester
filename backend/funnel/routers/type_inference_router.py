@@ -220,12 +220,13 @@ async def analyze_google_sheets_structure(
 
     import httpx
 
-    from shared.config.service_config import ServiceConfig
+    from shared.config.settings import get_settings
 
     try:
+        bff_url = get_settings().services.bff_base_url
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
-                f"{ServiceConfig.get_bff_url()}/api/v1/data-connectors/google-sheets/grid",
+                f"{bff_url}/api/v1/data-connectors/google-sheets/grid",
                 json={
                     "sheet_url": str(request.sheet_url),
                     "worksheet_name": request.worksheet_name,

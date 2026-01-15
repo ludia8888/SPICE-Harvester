@@ -196,13 +196,17 @@ async def _wait_for_ontology_present(
     *,
     db_name: str,
     ontology_id: str,
+    branch: str = "main",
     timeout_seconds: int = 30,
     poll_interval_seconds: float = 1.0,
 ) -> None:
     deadline = time.monotonic() + timeout_seconds
     last = None
     while time.monotonic() < deadline:
-        async with session.get(f"{OMS_URL}/api/v1/database/{db_name}/ontology") as resp:
+        async with session.get(
+            f"{OMS_URL}/api/v1/database/{db_name}/ontology",
+            params={"branch": branch},
+        ) as resp:
             assert resp.status == 200
             last = await resp.json()
             ontologies = (last.get("data") or {}).get("ontologies") or []
@@ -290,6 +294,7 @@ class TestCoreOntologyManagement:
         """Test ontology creation with complex types"""
         async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
             db_name = f"test_ontology_db_{uuid.uuid4().hex[:12]}"
+            ontology_branch = f"ontology/{uuid.uuid4().hex[:8]}"
             
             # Create database first
             async with session.post(
@@ -299,6 +304,12 @@ class TestCoreOntologyManagement:
                 assert resp.status == 202
 
             await _wait_for_db_exists(session, db_name=db_name, expected=True)
+
+            async with session.post(
+                f"{OMS_URL}/api/v1/branch/{db_name}/create",
+                json={"branch_name": ontology_branch, "from_branch": "main"},
+            ) as resp:
+                assert resp.status in {200, 201}
 
             # Relationship targets must exist in schema (create Customer first)
             customer_ontology = {
@@ -313,11 +324,17 @@ class TestCoreOntologyManagement:
             }
             async with session.post(
                 f"{OMS_URL}/api/v1/database/{db_name}/ontology",
+                params={"branch": ontology_branch},
                 json=customer_ontology,
             ) as resp:
                 assert resp.status == 202
 
-            await _wait_for_ontology_present(session, db_name=db_name, ontology_id="Customer")
+            await _wait_for_ontology_present(
+                session,
+                db_name=db_name,
+                ontology_id="Customer",
+                branch=ontology_branch,
+            )
             
             # Create ontology
             ontology_data = {
@@ -342,6 +359,7 @@ class TestCoreOntologyManagement:
             
             async with session.post(
                 f"{OMS_URL}/api/v1/database/{db_name}/ontology",
+                params={"branch": ontology_branch},
                 json=ontology_data
             ) as resp:
                 assert resp.status == 202
@@ -349,13 +367,19 @@ class TestCoreOntologyManagement:
                 assert result.get("status") == "accepted"
                 assert "command_id" in (result.get("data") or {})
 
-            await _wait_for_ontology_present(session, db_name=db_name, ontology_id="TestProduct")
+            await _wait_for_ontology_present(
+                session,
+                db_name=db_name,
+                ontology_id="TestProduct",
+                branch=ontology_branch,
+            )
 
     @pytest.mark.asyncio
     async def test_ontology_i18n_label_projection(self):
         """Ensure i18n labels are normalized for ES and preserved in label_i18n."""
         async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
             db_name = f"test_ontology_i18n_db_{uuid.uuid4().hex[:12]}"
+            ontology_branch = f"ontology/{uuid.uuid4().hex[:8]}"
 
             async with session.post(
                 f"{OMS_URL}/api/v1/database/create",
@@ -364,6 +388,12 @@ class TestCoreOntologyManagement:
                 assert resp.status == 202
 
             await _wait_for_db_exists(session, db_name=db_name, expected=True)
+
+            async with session.post(
+                f"{OMS_URL}/api/v1/branch/{db_name}/create",
+                json={"branch_name": ontology_branch, "from_branch": "main"},
+            ) as resp:
+                assert resp.status in {200, 201}
 
             customer = {
                 "id": "Customer",
@@ -380,10 +410,19 @@ class TestCoreOntologyManagement:
                 ],
                 "relationships": [],
             }
-            async with session.post(f"{OMS_URL}/api/v1/database/{db_name}/ontology", json=customer) as resp:
+            async with session.post(
+                f"{OMS_URL}/api/v1/database/{db_name}/ontology",
+                params={"branch": ontology_branch},
+                json=customer,
+            ) as resp:
                 assert resp.status == 202
 
-            await _wait_for_ontology_present(session, db_name=db_name, ontology_id="Customer")
+            await _wait_for_ontology_present(
+                session,
+                db_name=db_name,
+                ontology_id="Customer",
+                branch=ontology_branch,
+            )
 
             product = {
                 "id": "I18nProduct",
@@ -411,14 +450,23 @@ class TestCoreOntologyManagement:
                 ],
             }
 
-            async with session.post(f"{OMS_URL}/api/v1/database/{db_name}/ontology", json=product) as resp:
+            async with session.post(
+                f"{OMS_URL}/api/v1/database/{db_name}/ontology",
+                params={"branch": ontology_branch},
+                json=product,
+            ) as resp:
                 assert resp.status == 202
                 result = await resp.json()
                 assert result.get("status") == "accepted"
 
-            await _wait_for_ontology_present(session, db_name=db_name, ontology_id="I18nProduct")
+            await _wait_for_ontology_present(
+                session,
+                db_name=db_name,
+                ontology_id="I18nProduct",
+                branch=ontology_branch,
+            )
 
-            index_name = get_ontologies_index_name(db_name)
+            index_name = get_ontologies_index_name(db_name, branch=ontology_branch)
             es_doc = await _wait_for_es_doc(
                 session,
                 index_name=index_name,
@@ -463,6 +511,7 @@ class TestCoreOntologyManagement:
         """Test advanced ontology creation path is truly event-sourced and functional."""
         async with aiohttp.ClientSession(headers=AUTH_HEADERS) as session:
             db_name = f"test_adv_ontology_db_{uuid.uuid4().hex[:12]}"
+            ontology_branch = f"ontology/{uuid.uuid4().hex[:8]}"
 
             async with session.post(
                 f"{OMS_URL}/api/v1/database/create",
@@ -471,6 +520,12 @@ class TestCoreOntologyManagement:
                 assert resp.status == 202
 
             await _wait_for_db_exists(session, db_name=db_name, expected=True)
+
+            async with session.post(
+                f"{OMS_URL}/api/v1/branch/{db_name}/create",
+                json={"branch_name": ontology_branch, "from_branch": "main"},
+            ) as resp:
+                assert resp.status in {200, 201}
 
             # Create target class first so relationship validation can succeed.
             customer = {
@@ -488,12 +543,21 @@ class TestCoreOntologyManagement:
                 ],
                 "relationships": [],
             }
-            async with session.post(f"{OMS_URL}/api/v1/database/{db_name}/ontology", json=customer) as resp:
+            async with session.post(
+                f"{OMS_URL}/api/v1/database/{db_name}/ontology",
+                params={"branch": ontology_branch},
+                json=customer,
+            ) as resp:
                 assert resp.status == 202
                 body = await resp.json()
                 assert body.get("status") == "accepted"
 
-            await _wait_for_ontology_present(session, db_name=db_name, ontology_id="Customer")
+            await _wait_for_ontology_present(
+                session,
+                db_name=db_name,
+                ontology_id="Customer",
+                branch=ontology_branch,
+            )
 
             product_adv = {
                 "id": "AdvProduct",
@@ -524,7 +588,7 @@ class TestCoreOntologyManagement:
                 params={
                     "validate_relationships": "true",
                     "check_circular_references": "true",
-                    "branch": "main",
+                    "branch": ontology_branch,
                 },
             ) as resp:
                 assert resp.status == 202
@@ -533,7 +597,12 @@ class TestCoreOntologyManagement:
                 command_id = (body.get("data") or {}).get("command_id")
                 assert command_id
 
-            await _wait_for_ontology_present(session, db_name=db_name, ontology_id="AdvProduct")
+            await _wait_for_ontology_present(
+                session,
+                db_name=db_name,
+                ontology_id="AdvProduct",
+                branch=ontology_branch,
+            )
             await _wait_for_command_terminal_state(session, command_id=str(command_id))
 
             # Verify the relationship network analyzer works end-to-end (no broken method wiring).
