@@ -32,7 +32,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
 # Centralized configuration and dependency injection
-from shared.config.settings import settings, ApplicationSettings
+from shared.config.settings import get_settings, ApplicationSettings
 from shared.dependencies import (
     initialize_container, 
     get_container, 
@@ -722,6 +722,8 @@ async def lifespan(app: FastAPI):
 
     try:
         ensure_bff_auth_configured()
+
+        settings = get_settings()
 
         # 1. Initialize the main dependency injection container
         container = await initialize_container(settings)

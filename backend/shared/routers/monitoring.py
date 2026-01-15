@@ -23,6 +23,7 @@ from starlette.responses import RedirectResponse
 
 from shared.config.settings import ApplicationSettings
 from shared.dependencies import get_container, ServiceContainer
+from shared.config.settings import get_settings as get_settings_ssot
 
 router = APIRouter(tags=["Monitoring"])
 
@@ -30,8 +31,7 @@ router = APIRouter(tags=["Monitoring"])
 # Dependency injection for monitoring endpoints
 async def get_settings() -> ApplicationSettings:
     """Get application settings for monitoring"""
-    from shared.config.settings import settings
-    return settings
+    return get_settings_ssot()
 
 
 async def _check_service_instance(instance: Any) -> Dict[str, Any]:

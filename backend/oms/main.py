@@ -31,7 +31,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
 # Centralized configuration and dependency injection
-from shared.config.settings import settings, ApplicationSettings
+from shared.config.settings import get_settings, ApplicationSettings
 from shared.dependencies import (
     initialize_container, 
     get_container, 
@@ -362,6 +362,8 @@ async def lifespan(app: FastAPI):
     try:
         ensure_oms_auth_configured()
 
+        settings = get_settings()
+
         # 1. Initialize the main dependency injection container
         container = await initialize_container(settings)
         
@@ -447,6 +449,7 @@ async def get_terminus_service() -> AsyncTerminusService:
 @app.get("/")
 async def root():
     """루트 엔드포인트 - Modernized version"""
+    settings = get_settings()
     return {
         "message": "Ontology Management Service (OMS)",
         "version": "1.0.0",
@@ -467,6 +470,7 @@ async def root():
 async def health_check():
     """헬스 체크 - Modernized version"""
     try:
+        settings = get_settings()
         if _oms_container is None:
             error_payload = build_error_envelope(
                 service_name="oms",
@@ -556,6 +560,7 @@ async def container_health_check():
     This endpoint provides visibility into the new dependency injection system.
     """
     try:
+        settings = get_settings()
         if _oms_container is None:
             return {
                 "status": "unhealthy",
@@ -617,10 +622,11 @@ async def container_health_check():
 
 
 # Debug endpoint for development (using modern config system)
-if settings.is_development:
+if get_settings().is_development:
     @app.get("/debug/config")
     async def debug_config():
         """Debug endpoint to show configuration - Modern version"""
+        settings = get_settings()
         return {
             "environment": settings.environment.value,
             "debug_mode": settings.debug,
@@ -648,7 +654,7 @@ app.include_router(version.router, prefix="/api/v1", tags=["version"])
 app.include_router(command_status.router, prefix="/api/v1", tags=["command-status"])
 
 # Pull Request endpoints depend on Postgres MVCC; keep them opt-in only.
-if settings.features.enable_pull_requests:
+if get_settings().features.enable_pull_requests:
     from oms.routers import pull_request
 
     app.include_router(pull_request.router, prefix="/api/v1", tags=["pull-requests"])

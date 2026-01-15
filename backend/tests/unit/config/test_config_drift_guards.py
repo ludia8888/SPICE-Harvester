@@ -95,3 +95,27 @@ def test_no_application_settings_instantiation_outside_settings_module() -> None
 
     assert not offenders, "Instantiate settings via get_settings()/DI only:\n" + "\n".join(sorted(offenders))
 
+
+def test_no_import_global_settings_symbol_outside_settings_module() -> None:
+    repo_backend = Path(__file__).resolve().parents[3]
+    allowed = {
+        repo_backend / "shared" / "config" / "settings.py",
+    }
+
+    offenders: list[str] = []
+    for path in _iter_runtime_python_files(repo_backend):
+        if path in allowed:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if node.module != "shared.config.settings":
+                continue
+            for alias in node.names:
+                if alias.name == "settings":
+                    offenders.append(f"{path.relative_to(repo_backend)}:{node.lineno}")
+
+    assert not offenders, "Import `get_settings` (not the global `settings`) to avoid drift:\n" + "\n".join(
+        sorted(offenders)
+    )

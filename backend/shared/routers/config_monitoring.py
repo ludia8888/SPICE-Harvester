@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Any
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
 from fastapi.responses import JSONResponse
 
-from shared.config.settings import ApplicationSettings
+from shared.config.settings import ApplicationSettings, get_settings as get_settings_ssot
 from shared.observability.config_monitor import (
     ConfigurationMonitor, ConfigChange, ConfigSeverity, 
     ConfigChangeType, ConfigSecurityAudit
@@ -32,8 +32,7 @@ _config_monitor: Optional[ConfigurationMonitor] = None
 
 async def get_settings() -> ApplicationSettings:
     """Get application settings"""
-    from shared.config.settings import settings
-    return settings
+    return get_settings_ssot()
 
 
 async def get_config_monitor(settings: ApplicationSettings = Depends(get_settings)) -> ConfigurationMonitor:

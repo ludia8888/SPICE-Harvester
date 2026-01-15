@@ -19,7 +19,7 @@ from uuid import uuid4
 import asyncpg
 
 from shared.config.service_config import ServiceConfig
-from shared.config.settings import settings as app_settings
+from shared.config.settings import get_settings
 
 
 class ClaimDecision(str, Enum):
@@ -52,18 +52,20 @@ class ProcessedEventRegistry:
         schema: str = "spice_event_registry",
         lease_timeout_seconds: Optional[int] = None,
     ):
+        settings = get_settings()
+        self._settings = settings
         self._dsn = dsn or ServiceConfig.get_postgres_url()
         self._schema = schema
         self._pool: Optional[asyncpg.Pool] = None
         lease_timeout = (
             int(lease_timeout_seconds)
             if lease_timeout_seconds is not None
-            else int(app_settings.event_sourcing.processed_event_lease_timeout_seconds)
+            else int(settings.event_sourcing.processed_event_lease_timeout_seconds)
         )
         self._lease_timeout = timedelta(seconds=lease_timeout)
 
-        owner_override = (app_settings.event_sourcing.processed_event_owner or "").strip()
-        obs = app_settings.observability
+        owner_override = (settings.event_sourcing.processed_event_owner or "").strip()
+        obs = settings.observability
         owner_token = str(obs.service_name or obs.hostname or "worker").strip() or "worker"
         self._owner = owner_override or f"{owner_token}:{os.getpid()}:{uuid4().hex[:8]}"
 
@@ -71,11 +73,12 @@ class ProcessedEventRegistry:
         if self._pool:
             return
 
+        settings = self._settings
         self._pool = await asyncpg.create_pool(
             self._dsn,
-            min_size=int(app_settings.event_sourcing.processed_event_pg_pool_min),
-            max_size=int(app_settings.event_sourcing.processed_event_pg_pool_max),
-            command_timeout=int(app_settings.event_sourcing.processed_event_pg_command_timeout),
+            min_size=int(settings.event_sourcing.processed_event_pg_pool_min),
+            max_size=int(settings.event_sourcing.processed_event_pg_pool_max),
+            command_timeout=int(settings.event_sourcing.processed_event_pg_command_timeout),
         )
         await self.ensure_schema()
 

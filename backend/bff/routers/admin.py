@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from bff.dependencies import get_oms_client, get_storage_service, get_elasticsearch_service
 from bff.services.oms_client import OMSClient
 from shared.services.event_store import EventStore
-from shared.config.settings import settings
+from shared.config.settings import get_settings
 from shared.config.search_config import (
     get_instances_index_name,
     get_ontologies_index_name,
@@ -568,7 +568,7 @@ async def _replay_instance_state_task(
         
         # Reconstruct from the same S3 bucket used by the instance worker snapshots.
         # (See `INSTANCE_BUCKET` / `settings.storage.instance_bucket`; default: `instance-events`)
-        bucket = settings.storage.instance_bucket
+        bucket = get_settings().storage.instance_bucket
         
         # Get all command files for the instance
         command_files = await storage_service.get_all_commands_for_instance(

@@ -16,7 +16,7 @@ from prometheus_client import Counter as PrometheusCounter, Histogram as Prometh
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from shared.utils.app_logger import get_logger
-from shared.config.settings import settings
+from shared.config.settings import get_settings
 
 logger = get_logger(__name__)
 
@@ -37,17 +37,25 @@ except Exception:  # pragma: no cover - env dependent
     _HAS_OTEL_METRICS_SDK = False
 
 
+class _SettingsValue:
+    def __init__(self, getter):  # noqa: ANN001
+        self._getter = getter
+
+    def __get__(self, instance: object, owner: type | None = None):  # noqa: ANN001
+        return self._getter(get_settings())
+
+
 class OpenTelemetryMetricsConfig:
-    SERVICE_VERSION = str(settings.observability.otel_service_version or "1.0.0").strip() or "1.0.0"
-    ENVIRONMENT = (settings.observability.otel_environment or settings.environment.value).strip()
+    SERVICE_VERSION = _SettingsValue(lambda s: str(s.observability.otel_service_version or "1.0.0").strip() or "1.0.0")
+    ENVIRONMENT = _SettingsValue(lambda s: (s.observability.otel_environment or s.environment.value).strip())
 
-    OTLP_ENDPOINT = (settings.observability.otel_exporter_otlp_endpoint or "").strip()
+    OTLP_ENDPOINT = _SettingsValue(lambda s: (s.observability.otel_exporter_otlp_endpoint or "").strip())
 
-    ENABLE_METRICS = bool(settings.observability.otel_enable_metrics)
+    ENABLE_METRICS = _SettingsValue(lambda s: bool(s.observability.otel_enable_metrics))
 
-    EXPORT_OTLP = bool(settings.observability.otel_export_otlp_effective)
+    EXPORT_OTLP = _SettingsValue(lambda s: bool(s.observability.otel_export_otlp_effective))
 
-    EXPORT_INTERVAL_SECONDS = float(settings.observability.otel_metric_export_interval_seconds)
+    EXPORT_INTERVAL_SECONDS = _SettingsValue(lambda s: float(s.observability.otel_metric_export_interval_seconds))
 
 
 _metrics_provider_initialized = False

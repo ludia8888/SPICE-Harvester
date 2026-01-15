@@ -36,8 +36,7 @@ async def get_settings_dependency() -> ApplicationSettings:
     Returns:
         ApplicationSettings: The global settings instance
     """
-    from shared.config.settings import settings
-    return settings
+    return get_settings()
 
 
 async def get_storage_service(

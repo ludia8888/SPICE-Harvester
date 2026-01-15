@@ -17,7 +17,7 @@ from contextlib import contextmanager, nullcontext
 from functools import wraps
 from typing import Any, Dict, Optional
 
-from shared.config.settings import settings
+from shared.config.settings import get_settings
 from shared.utils.app_logger import get_logger
 
 logger = get_logger(__name__)
@@ -125,27 +125,37 @@ except Exception:  # pragma: no cover - depends on environment
     KafkaInstrumentor = None
 
 
+class _SettingsValue:
+    def __init__(self, getter):  # noqa: ANN001
+        self._getter = getter
+
+    def __get__(self, instance: object, owner: type | None = None):  # noqa: ANN001
+        return self._getter(get_settings())
+
+
 class OpenTelemetryConfig:
     # Service identification
-    SERVICE_NAME = (settings.observability.otel_service_name or "spice-harvester").strip() or "spice-harvester"
-    SERVICE_VERSION = str(settings.observability.otel_service_version or "1.0.0").strip() or "1.0.0"
-    ENVIRONMENT = (settings.observability.otel_environment or settings.environment.value).strip()
+    SERVICE_NAME = _SettingsValue(
+        lambda s: (s.observability.otel_service_name or "spice-harvester").strip() or "spice-harvester"
+    )
+    SERVICE_VERSION = _SettingsValue(lambda s: str(s.observability.otel_service_version or "1.0.0").strip() or "1.0.0")
+    ENVIRONMENT = _SettingsValue(lambda s: (s.observability.otel_environment or s.environment.value).strip())
 
     # Exporter endpoints
-    OTLP_ENDPOINT = (settings.observability.otel_exporter_otlp_endpoint or "").strip()
-    JAEGER_ENDPOINT = str(settings.observability.jaeger_endpoint or "localhost:14250").strip() or "localhost:14250"
+    OTLP_ENDPOINT = _SettingsValue(lambda s: (s.observability.otel_exporter_otlp_endpoint or "").strip())
+    JAEGER_ENDPOINT = _SettingsValue(lambda s: str(s.observability.jaeger_endpoint or "localhost:14250").strip() or "localhost:14250")
 
     # Sampling
-    TRACE_SAMPLE_RATE = float(settings.observability.otel_trace_sample_rate)
+    TRACE_SAMPLE_RATE = _SettingsValue(lambda s: float(s.observability.otel_trace_sample_rate))
 
     # Export configuration
-    EXPORT_CONSOLE = bool(settings.observability.otel_export_console)
-    EXPORT_OTLP = bool(settings.observability.otel_export_otlp_effective)
-    EXPORT_JAEGER = bool(settings.observability.otel_export_jaeger)
+    EXPORT_CONSOLE = _SettingsValue(lambda s: bool(s.observability.otel_export_console))
+    EXPORT_OTLP = _SettingsValue(lambda s: bool(s.observability.otel_export_otlp_effective))
+    EXPORT_JAEGER = _SettingsValue(lambda s: bool(s.observability.otel_export_jaeger))
 
     # Feature flags
-    ENABLE_TRACING = bool(settings.observability.otel_enable_tracing)
-    ENABLE_ASYNCIO_INSTRUMENTATION = bool(settings.observability.otel_instrument_asyncio)
+    ENABLE_TRACING = _SettingsValue(lambda s: bool(s.observability.otel_enable_tracing))
+    ENABLE_ASYNCIO_INSTRUMENTATION = _SettingsValue(lambda s: bool(s.observability.otel_instrument_asyncio))
 
 
 class TracingService:

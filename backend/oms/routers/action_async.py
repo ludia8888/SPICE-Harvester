@@ -20,7 +20,7 @@ from oms.dependencies import EventStoreDep, TerminusServiceDep, ensure_database_
 from oms.services.ontology_deployment_registry_v2 import OntologyDeploymentRegistryV2
 from oms.services.ontology_resources import OntologyResourceService
 from shared.config.app_config import AppConfig
-from shared.config.settings import settings as app_settings
+from shared.config.settings import get_settings
 from shared.errors.error_types import ErrorCode
 from shared.models.commands import ActionCommand
 from shared.models.event_envelope import EventEnvelope
@@ -300,9 +300,10 @@ async def submit_action_async(
             ) from exc
 
         if compiled_shape:
-            storage = create_storage_service(app_settings)
+            settings = get_settings()
+            storage = create_storage_service(settings)
             if storage:
-                max_targets = max(0, int(app_settings.writeback.writeback_submission_snapshot_max_targets))
+                max_targets = max(0, int(settings.writeback.writeback_submission_snapshot_max_targets))
                 for item in compiled_shape[: max(0, max_targets)]:
                     target_class_id = str(item.class_id or "").strip()
                     target_instance_id = str(item.instance_id or "").strip()
@@ -540,10 +541,11 @@ async def simulate_action_async(
             )
         version = await simulation_registry.next_version(simulation_id=simulation_id)
 
-        base_storage = create_storage_service(app_settings)
+        settings = get_settings()
+        base_storage = create_storage_service(settings)
         if not base_storage:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="StorageService unavailable")
-        lakefs_storage = create_lakefs_storage_service(app_settings)
+        lakefs_storage = create_lakefs_storage_service(settings)
         if not lakefs_storage:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="LakeFSStorageService unavailable")
 

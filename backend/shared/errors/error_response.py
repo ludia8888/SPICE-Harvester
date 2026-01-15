@@ -8,7 +8,7 @@ from fastapi import HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from shared.config.settings import settings
+from shared.config.settings import get_settings
 from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.errors.enterprise_catalog import is_external_code
 from shared.errors.error_envelope import build_error_envelope
@@ -383,6 +383,7 @@ def install_error_handlers(
     async def unhandled_exception_handler(request: Request, exc: Exception):
         logger.exception("Unhandled exception")
         detail = None
+        settings = get_settings()
         if settings.is_development or settings.is_test:
             detail = str(exc)
         return _build_response(

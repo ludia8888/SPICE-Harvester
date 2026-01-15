@@ -19,7 +19,7 @@ from oms.dependencies import (
     ValidatedDatabaseName,
 )
 from elasticsearch import AsyncElasticsearch
-from shared.config.settings import settings as app_settings
+from shared.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +39,10 @@ class WOQLQuery(BaseModel):
 
 async def get_elasticsearch() -> AsyncIterator[AsyncElasticsearch]:
     """Get Elasticsearch client"""
-    es_url = f"http://{app_settings.database.elasticsearch_host}:{app_settings.database.elasticsearch_port}"
-    es_username = (app_settings.database.elasticsearch_username or "").strip()
-    es_password = app_settings.database.elasticsearch_password or ""
+    settings = get_settings()
+    es_url = f"http://{settings.database.elasticsearch_host}:{settings.database.elasticsearch_port}"
+    es_username = (settings.database.elasticsearch_username or "").strip()
+    es_password = settings.database.elasticsearch_password or ""
 
     es_kwargs = {
         "hosts": [es_url],
