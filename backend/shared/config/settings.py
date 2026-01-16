@@ -1704,6 +1704,24 @@ class AuthSettings(BaseSettings):
         description="Allow disabling auth globally (ALLOW_INSECURE_AUTH_DISABLE)",
     )
 
+    # Development-only auth bypass (master principal)
+    dev_master_auth_enabled: bool = Field(
+        default=False,
+        description="Development-only: allow bypassing auth failures by attaching a master principal (DEV_MASTER_AUTH_ENABLED)",
+    )
+    dev_master_user_id: str = Field(
+        default="dev-admin",
+        description="Development-only: master principal user id (DEV_MASTER_USER_ID)",
+    )
+    dev_master_user_type: str = Field(
+        default="user",
+        description="Development-only: master principal type (DEV_MASTER_USER_TYPE)",
+    )
+    dev_master_roles: Optional[str] = Field(
+        default="admin,platform_admin",
+        description="Development-only: comma-separated roles for the master principal (DEV_MASTER_ROLES)",
+    )
+
     # Exempt paths
     bff_auth_exempt_paths: Optional[str] = Field(
         default=None,
@@ -1730,6 +1748,9 @@ class AuthSettings(BaseSettings):
         "user_jwt_algorithms",
         "bff_auth_exempt_paths",
         "oms_auth_exempt_paths",
+        "dev_master_user_id",
+        "dev_master_user_type",
+        "dev_master_roles",
         mode="before",
     )
     @classmethod
@@ -1834,6 +1855,10 @@ class AuthSettings(BaseSettings):
 
     def resolve_oms_exempt_paths(self, *, defaults: tuple[str, ...]) -> set[str]:
         return self._parse_exempt_paths(self.oms_auth_exempt_paths, defaults)
+
+    @property
+    def dev_master_role_set(self) -> tuple[str, ...]:
+        return self._split_tokens(self.dev_master_roles)
 
 
 class RateLimitSettings(BaseSettings):

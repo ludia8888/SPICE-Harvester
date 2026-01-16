@@ -52,6 +52,31 @@ _TENANT_POLICY_CACHE: dict[str, tuple[float, object]] = {}
 _TENANT_POLICY_CACHE_TTL_S = 30.0
 
 
+def _dev_master_auth_enabled() -> bool:
+    settings = get_settings()
+    auth = settings.auth
+    if not auth.dev_master_auth_enabled:
+        return False
+    return bool(settings.is_development)
+
+
+def _attach_dev_master_principal(request: Request) -> None:
+    settings = get_settings()
+    auth = settings.auth
+    roles = auth.dev_master_role_set or ("admin", "platform_admin")
+    principal = UserPrincipal(
+        id=str(auth.dev_master_user_id or "dev-admin"),
+        type=str(auth.dev_master_user_type or "user"),
+        roles=tuple(roles),
+        tenant_id="default",
+        org_id="default",
+        verified=True,
+        claims={"dev_master": True},
+    )
+    _attach_verified_principal(request, principal)
+    request.state.dev_master_auth = True
+
+
 def _approx_token_count(payload: Any) -> int:
     if payload is None or payload == "" or payload == {} or payload == []:
         return 0
@@ -994,7 +1019,8 @@ def ensure_bff_auth_configured() -> None:
 def install_bff_auth_middleware(app: FastAPI) -> None:
     @app.middleware("http")
     async def _bff_auth_middleware(request: Request, call_next):
-        auth = get_settings().auth
+        settings = get_settings()
+        auth = settings.auth
         if not auth.is_bff_auth_required(allow_pytest=True, default_required=True):
             return await call_next(request)
 
@@ -1002,8 +1028,12 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
         if is_exempt_path(request.url.path, exempt_paths=exempt_paths):
             return await call_next(request)
 
+        dev_master = _dev_master_auth_enabled()
         presented = extract_presented_token(request.headers)
         if not presented:
+            if dev_master:
+                _attach_dev_master_principal(request)
+                return await call_next(request)
             return _error_response(
                 request=request,
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -1109,6 +1139,9 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
                     request.headers.get("Authorization")
                 )
                 if not delegated_raw:
+                    if dev_master:
+                        _attach_dev_master_principal(request)
+                        return await call_next(request)
                     return _error_response(
                         request=request,
                         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -1130,6 +1163,9 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
                     )
                     _attach_verified_principal(request, principal)
                 except UserTokenError as exc:
+                    if dev_master:
+                        _attach_dev_master_principal(request)
+                        return await call_next(request)
                     return _error_response(
                         request=request,
                         status_code=status.HTTP_403_FORBIDDEN,
@@ -1138,6 +1174,8 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
                         code=ErrorCode.AUTH_INVALID,
                         category=ErrorCategory.AUTH,
                     )
+            elif dev_master and getattr(request.state, "user", None) is None:
+                _attach_dev_master_principal(request)
             return await call_next(request)
 
         if auth.user_jwt_enabled:
@@ -1166,6 +1204,10 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
                 category=ErrorCategory.INTERNAL,
             )
 
+        if dev_master:
+            _attach_dev_master_principal(request)
+            return await call_next(request)
+
         return _error_response(
             request=request,
             status_code=status.HTTP_403_FORBIDDEN,
@@ -1176,8 +1218,12 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
 
 
 async def enforce_bff_websocket_auth(websocket: WebSocket, token: Optional[str]) -> bool:
-    auth = get_settings().auth
+    settings = get_settings()
+    auth = settings.auth
     if not auth.is_bff_auth_required(allow_pytest=True, default_required=True):
+        return True
+
+    if _dev_master_auth_enabled():
         return True
 
     query_token = None

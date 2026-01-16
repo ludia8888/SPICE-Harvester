@@ -345,6 +345,8 @@ services:
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
       - OMS_REQUIRE_AUTH=${OMS_REQUIRE_AUTH:-true}
+      # Dev convenience: allow treating all requests as master when enabled (development only).
+      - DEV_MASTER_AUTH_ENABLED=${DEV_MASTER_AUTH_ENABLED:-true}
       - ADMIN_TOKEN=${ADMIN_TOKEN:?ADMIN_TOKEN is required}
       # Dev-stack default: allow direct writes on protected branches (smoke/E2E tests + README flow).
       # Set to true in environments that require proposal workflow on protected branches (main/prod).
@@ -451,6 +453,8 @@ services:
       - BFF_REQUIRE_AUTH=${BFF_REQUIRE_AUTH:-true}
       - BFF_REQUIRE_DB_SCOPE=${BFF_REQUIRE_DB_SCOPE:-false}
       - ENABLE_DATASET_INGEST_RECONCILER=false
+      # Dev convenience: allow treating all requests as master when enabled (development only).
+      - DEV_MASTER_AUTH_ENABLED=${DEV_MASTER_AUTH_ENABLED:-true}
       - ADMIN_TOKEN=${ADMIN_TOKEN:?ADMIN_TOKEN is required}
       # Event Store / Dataset artifacts (S3/MinIO)
       - MINIO_ENDPOINT_URL=http://spice-minio:9000

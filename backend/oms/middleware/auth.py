@@ -31,7 +31,8 @@ def ensure_oms_auth_configured() -> None:
 def install_oms_auth_middleware(app: FastAPI) -> None:
     @app.middleware("http")
     async def _oms_auth_middleware(request: Request, call_next):
-        auth = get_settings().auth
+        settings = get_settings()
+        auth = settings.auth
         if not auth.is_oms_auth_required(default_required=True):
             return await call_next(request)
 
@@ -39,6 +40,7 @@ def install_oms_auth_middleware(app: FastAPI) -> None:
         if is_exempt_path(request.url.path, exempt_paths=exempt_paths):
             return await call_next(request)
 
+        dev_master = bool(auth.dev_master_auth_enabled and settings.is_development)
         expected_tokens = auth.oms_expected_tokens
         if not expected_tokens:
             return JSONResponse(
@@ -48,6 +50,8 @@ def install_oms_auth_middleware(app: FastAPI) -> None:
 
         presented = extract_presented_token(request.headers)
         if not presented:
+            if dev_master:
+                return await call_next(request)
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 headers={"WWW-Authenticate": "Bearer"},
@@ -55,6 +59,8 @@ def install_oms_auth_middleware(app: FastAPI) -> None:
             )
 
         if not any(hmac.compare_digest(presented, expected) for expected in expected_tokens):
+            if dev_master:
+                return await call_next(request)
             return JSONResponse(
                 status_code=status.HTTP_403_FORBIDDEN,
                 content={"detail": "Invalid authentication credentials"},

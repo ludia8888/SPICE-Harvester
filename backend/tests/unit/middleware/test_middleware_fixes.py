@@ -126,6 +126,47 @@ def test_bff_auth_accepts_rotated_admin_tokens():
 
 
 @pytest.mark.unit
+def test_bff_dev_master_auth_allows_missing_token_in_development():
+    with _set_env(
+        ENVIRONMENT="development",
+        BFF_REQUIRE_AUTH="true",
+        BFF_ADMIN_TOKEN="secret",
+        DEV_MASTER_AUTH_ENABLED="true",
+    ):
+        app = FastAPI()
+        install_bff_auth_middleware(app)
+
+        @app.get("/read")
+        async def read():
+            return {"ok": True}
+
+        client = TestClient(app)
+        resp = client.get("/read")
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+
+
+@pytest.mark.unit
+def test_bff_dev_master_auth_is_disabled_in_production():
+    with _set_env(
+        ENVIRONMENT="production",
+        BFF_REQUIRE_AUTH="true",
+        BFF_ADMIN_TOKEN="secret",
+        DEV_MASTER_AUTH_ENABLED="true",
+    ):
+        app = FastAPI()
+        install_bff_auth_middleware(app)
+
+        @app.get("/read")
+        async def read():
+            return {"ok": True}
+
+        client = TestClient(app)
+        resp = client.get("/read")
+        assert resp.status_code == 401
+
+
+@pytest.mark.unit
 def test_rate_limit_admin_bypass_requires_valid_token():
     def _build_app():
         app = FastAPI()
