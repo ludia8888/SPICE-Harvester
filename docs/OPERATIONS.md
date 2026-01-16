@@ -11,6 +11,26 @@ Recommended dev stack:
 docker compose -f docker-compose.full.yml up -d
 ```
 
+Disk hygiene (recommended):
+
+```bash
+# Bring the stack down + clean docker caches (prevents build cache growth)
+make stack-down
+
+# Only prune docker caches (safe; keeps volumes)
+make stack-gc
+
+# Aggressive cache cleanup (also removes all unused images)
+GC_MODE=aggressive make stack-down
+
+# Optional: also destroy stack volumes (Postgres/MinIO/etc data)
+WITH_VOLUMES=true make stack-down
+```
+
+Notes:
+- `make stack-down` runs `./scripts/ops/compose_down_clean.sh` (which calls `./scripts/ops/docker_gc.sh`).
+- Global unused volume pruning is intentionally guarded (destructive): `CONFIRM=YES ./scripts/ops/docker_gc.sh --with-volumes`.
+
 Included background workers (no public ports):
 - `message-relay`, `ontology-worker`, `instance-worker`, `projection-worker`
 - Action writeback: `action-worker`, `action-outbox-worker`, `writeback-materializer-worker` (default no-op unless `WRITEBACK_MATERIALIZER_DB_NAMES` is set)

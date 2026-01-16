@@ -155,8 +155,8 @@ stop_services() {
 # Function to clean up
 cleanup() {
     echo "🧹 Cleaning up..."
-    compose down -v --remove-orphans
-    docker system prune -f
+    COMPOSE_BIN="${COMPOSE_CMD[*]}" GC_MODE=aggressive \
+        "$REPO_ROOT/scripts/ops/compose_down_clean.sh" -f "$COMPOSE_FILE" --with-volumes || true
 }
 
 # Function to show logs

@@ -16,6 +16,40 @@ mkdir -p "$EVIDENCE_DIR" "$E2E_DIR" "$PERF_DIR"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-platform-checklist}"
 COMPOSE_NETWORK_NAME="${COMPOSE_PROJECT_NAME}_spice_network"
 
+# Cleanup: keep disk usage bounded and avoid leaving stacks running after verification.
+KEEP_STACK="${KEEP_STACK:-false}"
+GC_MODE="${GC_MODE:-safe}" # safe|aggressive
+BUILDER_UNTIL="${BUILDER_UNTIL:-24h}"
+
+truthy() {
+  local v
+  v="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | xargs)"
+  [[ "${v}" == "1" || "${v}" == "true" || "${v}" == "yes" || "${v}" == "y" || "${v}" == "on" ]]
+}
+
+cleanup() {
+  local exit_code=$?
+  trap - EXIT
+
+  cd "$ROOT_DIR" >/dev/null 2>&1 || true
+
+  if [[ -n "${LAKEFS_BOOTSTRAP_CREDS_FILE:-}" ]]; then
+    rm -f "$LAKEFS_BOOTSTRAP_CREDS_FILE" >/dev/null 2>&1 || true
+  fi
+
+  if truthy "${KEEP_STACK}"; then
+    echo "KEEP_STACK=true; skipping docker compose down."
+    ./scripts/ops/docker_gc.sh --builder-until "${BUILDER_UNTIL}" || true
+    exit "$exit_code"
+  fi
+
+  COMPOSE_BIN="docker compose" GC_MODE="${GC_MODE}" BUILDER_UNTIL="${BUILDER_UNTIL}" \
+    ./scripts/ops/compose_down_clean.sh -f "$ROOT_DIR/docker-compose.full.yml" --with-volumes || true
+
+  exit "$exit_code"
+}
+trap cleanup EXIT
+
 # Security posture: don't auto-source repo-root `.env` unless explicitly enabled.
 DOTENV_FLAG="${SPICE_LOAD_DOTENV:-}"
 DOTENV_FLAG="${DOTENV_FLAG,,}"
@@ -466,7 +500,6 @@ PY
 log_section "lakeFS bootstrap (repos + DB credentials)" >"$EVIDENCE_DIR/lakefs_bootstrap.log"
 LAKEFS_BOOTSTRAP_CREDS_FILE="$(mktemp)"
 export LAKEFS_BOOTSTRAP_CREDS_FILE
-trap 'rm -f "$LAKEFS_BOOTSTRAP_CREDS_FILE"' EXIT
 
 "$PYTHON_BIN" - <<'PY' 2>&1 | tee -a "$EVIDENCE_DIR/lakefs_bootstrap.log"
 from __future__ import annotations

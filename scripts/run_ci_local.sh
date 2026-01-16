@@ -65,7 +65,7 @@ cd "$REPO_ROOT"
 echo "🐳 Backend stack tests..."
 "$COMPOSE" -f docker-compose.full.yml up -d --build
 cleanup_stack() {
-  "$COMPOSE" -f docker-compose.full.yml down --remove-orphans
+  COMPOSE_BIN="$COMPOSE" GC_MODE="${GC_MODE:-safe}" ./scripts/ops/compose_down_clean.sh -f docker-compose.full.yml
 }
 trap cleanup_stack EXIT
 

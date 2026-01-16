@@ -36,7 +36,8 @@ help:
 	@echo "  ci                     Run backend-coverage + frontend-check + frontend-coverage"
 	@echo "  stack-up               Start full local docker stack"
 	@echo "  stack-up-build         Start stack (with --build)"
-	@echo "  stack-down             Stop full local docker stack"
+	@echo "  stack-down             Stop stack + clean docker caches"
+	@echo "  stack-gc               Prune docker caches (safe)"
 
 .PHONY: backend-unit
 backend-unit:
@@ -105,4 +106,8 @@ stack-up-build:
 
 .PHONY: stack-down
 stack-down:
-	$(COMPOSE) -f $(COMPOSE_FULL) down
+	COMPOSE_BIN="$(COMPOSE)" ./scripts/ops/compose_down_clean.sh -f $(COMPOSE_FULL)
+
+.PHONY: stack-gc
+stack-gc:
+	./scripts/ops/docker_gc.sh
