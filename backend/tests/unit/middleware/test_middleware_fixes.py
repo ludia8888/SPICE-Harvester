@@ -5,10 +5,11 @@ from types import SimpleNamespace
 
 import pytest
 from jose import jwt
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 
 from bff.middleware.auth import install_bff_auth_middleware
+from bff.routers.admin import require_admin
 from oms.middleware.auth import install_oms_auth_middleware
 from shared.services.agent_tool_registry import AgentToolPolicyRecord
 from shared.i18n.middleware import install_i18n_middleware
@@ -164,6 +165,39 @@ def test_bff_dev_master_auth_is_disabled_in_production():
         client = TestClient(app)
         resp = client.get("/read")
         assert resp.status_code == 401
+
+
+@pytest.mark.unit
+def test_bff_admin_guard_allows_dev_master_without_token_in_development():
+    with _set_env(ENVIRONMENT="development", DEV_MASTER_AUTH_ENABLED="true"):
+        app = FastAPI()
+
+        @app.get("/admin-test", dependencies=[Depends(require_admin)])
+        async def admin_test(request: Request):
+            return {
+                "actor": request.state.admin_actor,
+                "dev_master": bool(getattr(request.state, "dev_master_auth", False)),
+            }
+
+        client = TestClient(app)
+        resp = client.get("/admin-test")
+        assert resp.status_code == 200
+        assert resp.json()["dev_master"] is True
+        assert resp.json()["actor"] == "dev-admin"
+
+
+@pytest.mark.unit
+def test_bff_admin_guard_requires_token_in_production_even_with_dev_master_flag():
+    with _set_env(ENVIRONMENT="production", DEV_MASTER_AUTH_ENABLED="true", BFF_ADMIN_TOKEN="secret"):
+        app = FastAPI()
+
+        @app.get("/admin-test", dependencies=[Depends(require_admin)])
+        async def admin_test():  # noqa: ARG001
+            return {"ok": True}
+
+        client = TestClient(app)
+        resp = client.get("/admin-test")
+        assert resp.status_code == 403
 
 
 @pytest.mark.unit

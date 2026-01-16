@@ -57,6 +57,13 @@ async def require_admin(request: Request) -> None:
     - Requires a shared secret token in `X-Admin-Token` or `Authorization: Bearer ...`.
     - If token is not configured, admin endpoints are effectively disabled.
     """
+    settings = get_settings()
+    if settings.is_development and settings.auth.dev_master_auth_enabled:
+        actor = (request.headers.get("X-Admin-Actor") or str(settings.auth.dev_master_user_id or "dev-admin")).strip()
+        request.state.admin_actor = actor or "dev-admin"
+        request.state.dev_master_auth = True
+        return
+
     expected = get_expected_token(_ADMIN_TOKEN_ENV_KEYS)
     if not expected:
         raise HTTPException(

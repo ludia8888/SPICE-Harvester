@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
+from shared.config.settings import get_settings
 from shared.models.requests import ApiResponse
 from shared.security.auth_utils import extract_presented_token, get_expected_token
 from shared.services.agent_policy_registry import AgentPolicyRegistry, AgentTenantPolicyRecord
@@ -25,6 +26,13 @@ router = APIRouter(prefix="/admin/agent-policies", tags=["Agent Policy Admin"])
 
 
 async def require_admin(request: Request) -> None:
+    settings = get_settings()
+    if settings.is_development and settings.auth.dev_master_auth_enabled:
+        actor = (request.headers.get("X-Admin-Actor") or str(settings.auth.dev_master_user_id or "dev-admin")).strip()
+        request.state.admin_actor = actor or "dev-admin"
+        request.state.dev_master_auth = True
+        return
+
     expected = get_expected_token(_ADMIN_TOKEN_ENV_KEYS)
     if not expected:
         raise HTTPException(
@@ -113,4 +121,3 @@ async def get_tenant_policy(
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant policy not found")
     return ApiResponse.success(message="Agent tenant policy retrieved", data={"policy": _serialize_policy(record)})
-
