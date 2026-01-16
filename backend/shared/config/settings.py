@@ -624,6 +624,30 @@ class LLMSettings(BaseSettings):
         fallback = (os.getenv("GOOGLE_API_KEY") or "").strip()
         return fallback or None
 
+    @field_validator("api_key", mode="before")
+    @classmethod
+    def fallback_openai_api_key(cls, v):  # noqa: ANN001
+        if v not in (None, ""):
+            return v
+        fallback = (os.getenv("OPENAI_API_KEY") or "").strip()
+        return fallback or None
+
+    @field_validator("base_url", mode="before")
+    @classmethod
+    def fallback_openai_base_url(cls, v):  # noqa: ANN001
+        if v not in (None, ""):
+            return v
+        fallback = (os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_API_BASE") or "").strip()
+        return fallback or None
+
+    @field_validator("model", mode="before")
+    @classmethod
+    def fallback_openai_model(cls, v):  # noqa: ANN001
+        if v not in (None, ""):
+            return v
+        fallback = (os.getenv("OPENAI_MODEL") or "").strip()
+        return fallback or None
+
     @property
     def anthropic_api_key_effective(self) -> Optional[str]:
         return self.anthropic_api_key or self.api_key

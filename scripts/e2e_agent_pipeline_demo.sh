@@ -814,7 +814,7 @@ print("1" if "LLM is disabled" in msg else "0")
 PY
 )"
         if [[ "${LLM_DISABLED_LATEST}" == "1" ]]; then
-          echo "   Hint: planner needs an LLM provider (e.g. start compose with LLM_PROVIDER=mock)." >&2
+          echo "   Hint: planner needs an LLM provider (e.g. set LLM_PROVIDER=openai_compat and OPENAI_API_KEY=<key>)." >&2
         fi
       fi
       return 2

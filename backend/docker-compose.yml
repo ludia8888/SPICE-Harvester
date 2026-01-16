@@ -396,11 +396,17 @@ services:
       - AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ENABLED=${AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ENABLED:-true}
       - AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ONLY_IF_EMPTY=${AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ONLY_IF_EMPTY:-true}
       - AGENT_PLAN_ALLOWLIST_BUNDLE_PATH=${AGENT_PLAN_ALLOWLIST_BUNDLE_PATH:-}
-      # LLM gateway (planner). Default to mock for local dev; set LLM_PROVIDER=disabled to turn off.
-      - LLM_PROVIDER=${LLM_PROVIDER:-mock}
-      - LLM_MODEL=${LLM_MODEL:-}
-      - LLM_BASE_URL=${LLM_BASE_URL:-}
+      # LLM gateway (planner). Default: OpenAI-compatible (set OPENAI_API_KEY to enable calls).
+      # To disable LLM features: set LLM_PROVIDER=disabled.
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai_compat}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://api.openai.com/v1}
       - LLM_API_KEY=${LLM_API_KEY:-}
+      # OpenAI env (supported via settings fallbacks)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - OPENAI_API_BASE=${OPENAI_API_BASE:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-}
       - LLM_MOCK_JSON=${LLM_MOCK_JSON:-}
       - LLM_MOCK_JSON_AGENT_PLAN_COMPILE_V1=${LLM_MOCK_JSON_AGENT_PLAN_COMPILE_V1:-}
       - LLM_MOCK_JSON_AGENT_PLAN_CLARIFY_V1=${LLM_MOCK_JSON_AGENT_PLAN_CLARIFY_V1:-}

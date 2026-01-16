@@ -162,18 +162,18 @@ Pipeline transform/cleansing E2E (full stack required):
 RUN_PIPELINE_TRANSFORM_E2E=true PYTHON_BIN=python3.12 ./backend/run_production_tests.sh --full
 ```
 
-### Agent Pipeline Demo (JWT + Mock LLM)
+### Agent Pipeline Demo (JWT + OpenAI LLM)
 
-Deterministic end-to-end demo script:
+End-to-end demo script:
 - `./scripts/e2e_agent_pipeline_demo.sh`
 - Artifacts: `test_results/agent_pipeline_demo_<RUN_ID>/`
 
-Bring up the stack with end-user JWT enabled and mock LLM responses:
+Bring up the stack with end-user JWT enabled and an OpenAI-compatible LLM:
 
 ```bash
 USER_JWT_ENABLED=true \
 USER_JWT_HS256_SECRET=spice-dev-user-jwt-secret \
-LLM_PROVIDER=mock \
+OPENAI_API_KEY=your_openai_api_key_here \
 ADMIN_TOKEN=test-token \
 docker compose -f backend/docker-compose.yml up -d --build
 
@@ -184,8 +184,9 @@ AUTO_APPROVE=true \
 ```
 
 Notes:
-- `backend/docker-compose.yml` mounts `scripts/llm_mocks/` into the BFF container and sets `LLM_MOCK_DIR=/app/llm_mocks`, so you usually don't need to export `LLM_MOCK_JSON_*` manually.
-- Compose uses `${VAR:-default}` expansion; re-running `docker compose up` without exporting the variables will recreate containers with defaults (e.g. `LLM_PROVIDER=mock`).
+- Default LLM config in `backend/docker-compose.yml` is `LLM_PROVIDER=openai_compat` with `LLM_BASE_URL=https://api.openai.com/v1` and `LLM_MODEL=gpt-4o-mini` (override via env).
+- Deterministic mode (CI/offline): set `LLM_PROVIDER=mock` (Compose mounts `scripts/llm_mocks/` into the BFF container and sets `LLM_MOCK_DIR=/app/llm_mocks`).
+- Compose uses `${VAR:-default}` expansion; re-running `docker compose up` without exporting the variables will recreate containers with defaults.
 
 ## 9) Troubleshooting
 

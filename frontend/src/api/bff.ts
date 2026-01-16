@@ -139,6 +139,71 @@ export type PipelineReadiness = {
 
 export type UploadMode = 'structured' | 'media' | 'unstructured' | 'raw'
 
+export type GoogleSheetRegisteredSheet = {
+  sheet_id: string
+  sheet_url: string
+  sheet_title?: string | null
+  worksheet_name: string
+  polling_interval: number
+  database_name?: string | null
+  branch?: string | null
+  class_label?: string | null
+  auto_import?: boolean
+  max_import_rows?: number | null
+  last_polled?: string | null
+  last_hash?: string | null
+  is_active?: boolean
+  registered_at?: string | null
+}
+
+export type GoogleSheetPreview = {
+  sheet_id?: string
+  sheet_title?: string
+  worksheet_title?: string
+  worksheet_name?: string
+  columns?: string[]
+  sample_rows?: Array<Record<string, unknown>>
+  total_rows?: number
+  total_columns?: number
+  [key: string]: unknown
+}
+
+export type AgentClarificationQuestion = {
+  id: string
+  question: string
+  required?: boolean
+  type?: string
+  options?: string[] | null
+  default?: unknown
+}
+
+export type AgentPlanStep = {
+  step_id: string
+  tool_id: string
+  method?: string | null
+  path_params?: Record<string, unknown>
+  query?: Record<string, unknown>
+  body?: Record<string, unknown> | null
+  requires_approval?: boolean
+  idempotency_key?: string | null
+  data_scope?: Record<string, unknown>
+  description?: string | null
+  expected_output?: string | null
+}
+
+export type AgentPlan = {
+  plan_id?: string | null
+  goal?: string
+  created_at?: string | null
+  created_by?: string | null
+  risk_level?: string
+  requires_approval?: boolean
+  data_scope?: Record<string, unknown>
+  steps?: AgentPlanStep[]
+  policy_notes?: string[]
+  warnings?: string[]
+}
+
 type DatabaseListPayload = {
   databases?: Array<DatabaseRecord | string>
   count?: number
@@ -195,6 +260,12 @@ export type DatasetUploadResult = {
 type DatasetSchemaApprovalPayload = {
   dataset?: DatasetRecord
   ingest_request?: DatasetIngestRequestRecord
+}
+
+type GoogleSheetsRegisteredListPayload = {
+  sheets?: GoogleSheetRegisteredSheet[]
+  count?: number
+  database_filter?: string | null
 }
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''
@@ -603,6 +674,200 @@ export const approveDatasetSchema = async (params: {
       body: JSON.stringify(params.schemaJson ? { schema_json: params.schemaJson } : {}),
     },
     'Failed to approve dataset schema',
+  )
+  return data
+}
+
+export const listRegisteredGoogleSheets = async (params?: { databaseName?: string }) => {
+  const query = new URLSearchParams()
+  if (params?.databaseName) {
+    query.set('database_name', params.databaseName)
+  }
+  const suffix = query.toString()
+  const path = suffix
+    ? `/api/v1/data-connectors/google-sheets/registered?${suffix}`
+    : '/api/v1/data-connectors/google-sheets/registered'
+  const data = await requestApi<GoogleSheetsRegisteredListPayload>(path, undefined, 'Failed to load registered sheets')
+  return {
+    sheets: data.sheets ?? [],
+    count: data.count ?? (data.sheets?.length ?? 0),
+    database_filter: data.database_filter ?? null,
+  }
+}
+
+export const registerGoogleSheet = async (payload: Record<string, unknown>) => {
+  const data = await requestApi<Record<string, unknown>>(
+    '/api/v1/data-connectors/google-sheets/register',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+      },
+      body: JSON.stringify(payload),
+    },
+    'Failed to register Google Sheet',
+  )
+  return data
+}
+
+export const previewRegisteredGoogleSheet = async (
+  sheetId: string,
+  params?: { worksheetName?: string; limit?: number },
+) => {
+  const query = new URLSearchParams()
+  if (params?.worksheetName) {
+    query.set('worksheet_name', params.worksheetName)
+  }
+  if (params?.limit) {
+    query.set('limit', String(params.limit))
+  }
+  const suffix = query.toString()
+  const path = suffix
+    ? `/api/v1/data-connectors/google-sheets/${encodeURIComponent(sheetId)}/preview?${suffix}`
+    : `/api/v1/data-connectors/google-sheets/${encodeURIComponent(sheetId)}/preview`
+  const data = await requestApi<GoogleSheetPreview>(path, undefined, 'Failed to preview Google Sheet')
+  return data
+}
+
+export const startPipeliningGoogleSheet = async (sheetId: string, payload: Record<string, unknown>) => {
+  const data = await requestApi<Record<string, unknown>>(
+    `/api/v1/data-connectors/google-sheets/${encodeURIComponent(sheetId)}/start-pipelining`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+      },
+      body: JSON.stringify(payload),
+    },
+    'Failed to start pipelining',
+  )
+  return data
+}
+
+export const unregisterGoogleSheet = async (sheetId: string) => {
+  const data = await requestApi<Record<string, unknown>>(
+    `/api/v1/data-connectors/google-sheets/${encodeURIComponent(sheetId)}`,
+    {
+      method: 'DELETE',
+      headers: { 'Idempotency-Key': createIdempotencyKey() },
+    },
+    'Failed to unregister Google Sheet',
+  )
+  return data
+}
+
+export type AIQueryMode = 'auto' | 'label_query' | 'graph_query'
+
+export type AIQueryRequest = {
+  question: string
+  branch?: string
+  mode?: AIQueryMode
+  limit?: number
+  include_documents?: boolean
+  include_provenance?: boolean
+}
+
+export const aiQuery = async (dbName: string, payload: AIQueryRequest) => {
+  const encoded = encodeURIComponent(dbName)
+  const data = await requestApi<Record<string, unknown>>(
+    `/api/v1/ai/query/${encoded}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+        'X-DB-Name': dbName,
+        'X-Project': dbName,
+      },
+      body: JSON.stringify(payload),
+    },
+    'AI query failed',
+  )
+  return data
+}
+
+export const runGraphQuery = async (dbName: string, payload: Record<string, unknown>, params?: { branch?: string }) => {
+  const encoded = encodeURIComponent(dbName)
+  const branch = (params?.branch ?? 'main').trim() || 'main'
+  const data = await requestApi<Record<string, unknown>>(
+    `/api/v1/graph-query/${encoded}?branch=${encodeURIComponent(branch)}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+        'X-DB-Name': dbName,
+        'X-Project': dbName,
+      },
+      body: JSON.stringify(payload),
+    },
+    'Graph query failed',
+  )
+  return data
+}
+
+export const compileAgentPlan = async (payload: {
+  goal: string
+  data_scope?: Record<string, unknown>
+  answers?: Record<string, unknown>
+}) => {
+  const data = await requestApi<Record<string, unknown>>(
+    '/api/v1/agent-plans/compile',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+      },
+      body: JSON.stringify(payload),
+    },
+    'Failed to compile agent plan',
+  )
+  return data as unknown as {
+    status?: string
+    plan_id?: string
+    plan?: AgentPlan | null
+    questions?: AgentClarificationQuestion[]
+    validation_errors?: string[]
+    validation_warnings?: string[]
+    compilation_report?: Record<string, unknown> | null
+    planner?: Record<string, unknown> | null
+  }
+}
+
+export const approveAgentPlan = async (
+  planId: string,
+  payload: { decision: string; step_id?: string; comment?: string; metadata?: Record<string, unknown> },
+) => {
+  const data = await requestApi<Record<string, unknown>>(
+    `/api/v1/agent-plans/${encodeURIComponent(planId)}/approvals`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+      },
+      body: JSON.stringify(payload),
+    },
+    'Failed to record plan approval',
+  )
+  return data
+}
+
+export const executeAgentPlan = async (planId: string) => {
+  const data = await requestApi<Record<string, unknown>>(
+    `/api/v1/agent-plans/${encodeURIComponent(planId)}/execute`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+      },
+      body: JSON.stringify({}),
+    },
+    'Failed to execute agent plan',
   )
   return data
 }

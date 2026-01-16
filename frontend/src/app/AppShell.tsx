@@ -3,8 +3,11 @@ import { SidebarRail } from '../components/SidebarRail'
 import { useAppStore, type NavKey } from '../state/store'
 import { HomePage } from '../pages/HomePage'
 import { DatasetsPage } from '../pages/DatasetsPage'
+import { ConnectorsPage } from '../pages/ConnectorsPage'
 import { GraphPage } from '../pages/GraphPage'
 import { OntologyPage } from '../pages/OntologyPage'
+import { AIAgentPage } from '../pages/AIAgentPage'
+import { WorkshopPage } from '../pages/WorkshopPage'
 import { PlaceholderPage } from '../pages/PlaceholderPage'
 
 type NavItem = {
@@ -48,6 +51,12 @@ export const AppShell = () => {
         return <GraphPage />
       case 'ontology':
         return <OntologyPage />
+      case 'connectors':
+        return <ConnectorsPage />
+      case 'ai-agent':
+        return <AIAgentPage />
+      case 'workshop':
+        return <WorkshopPage />
       case 'home':
         return <HomePage />
       default:

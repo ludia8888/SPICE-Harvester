@@ -188,7 +188,6 @@ const createOptions: CreateOption[] = [
     description: 'Build no-code interactive assistants with enterprise tools.',
     icon: 'user',
     category: 'Application development',
-    disabled: true,
   },
   {
     id: 'aip-logic',
@@ -196,7 +195,6 @@ const createOptions: CreateOption[] = [
     description: 'Build composable no-code functions for transformations.',
     icon: 'flow-branch',
     category: 'Application development',
-    disabled: true,
   },
 ]
 
@@ -746,6 +744,16 @@ export const DatasetsPage = () => {
       }
       setCreateMenuOpen(false)
       setActiveNav('pipeline')
+      return
+    }
+    if (optionId === 'aip-agent') {
+      setCreateMenuOpen(false)
+      setActiveNav('ai-agent')
+      return
+    }
+    if (optionId === 'aip-logic') {
+      setCreateMenuOpen(false)
+      setActiveNav('workshop')
       return
     }
   }

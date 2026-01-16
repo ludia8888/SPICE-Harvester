@@ -94,15 +94,19 @@ USER_JWT_TTL_SECONDS=3600
 ## LLM (Planner)
 
 ```bash
-# LLM provider selection
-LLM_PROVIDER=mock
+# OpenAI-compatible (recommended)
+LLM_PROVIDER=openai_compat
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=gpt-4o-mini
+OPENAI_API_KEY=change_me
 
-# Dev-only: deterministic planner responses (JSON, typically minified)
-LLM_MOCK_JSON_AGENT_PLAN_COMPILE_V1='[{"plan":{...},"confidence":0.9,"notes":[],"warnings":[]}]'
+# Alternative key name:
+# LLM_API_KEY=change_me
 
-# Dev-only: load mock payloads from a directory of JSON files.
-# Example filenames: agent_plan_compile_v1.json, agent_plan_clarify_v1.json
-LLM_MOCK_DIR=./scripts/llm_mocks
+# Dev-only (deterministic): mock planner responses (JSON, typically minified)
+# LLM_PROVIDER=mock
+# LLM_MOCK_JSON_AGENT_PLAN_COMPILE_V1='[{"plan":{...},"confidence":0.9,"notes":[],"warnings":[]}]'
+# LLM_MOCK_DIR=./scripts/llm_mocks
 ```
 
 ## Rate Limiting
