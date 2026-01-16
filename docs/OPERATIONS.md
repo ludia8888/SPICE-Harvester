@@ -79,6 +79,7 @@ Critical storage systems (backup/restore):
 
 - **Event Store (S3/MinIO)**: bucket `spice-event-store` (command + domain events)
 - **Dataset artifacts (lakeFS + MinIO)**: lakeFS metadata in Postgres, objects in MinIO buckets
+- **Ontology store (TerminusDB)**: docker volume backing `/app/terminusdb/storage` (backup at volume/snapshot level)
 - **Postgres**: registries, processed_events, lineage, audit logs, gate results
 - **Elasticsearch**: read projections (rebuildable by replay)
 - **Redis**: command status + rate limiter (recoverable)
@@ -95,6 +96,50 @@ Recovery strategy:
 - Restore Postgres + MinIO + lakeFS first.
 - Bring up OMS/BFF/workers.
 - Rebuild projections by replay if ES is stale.
+
+### 6.1 Code-backed backup scripts
+
+All backup artifacts are written under `./backups/` (gitignored).
+
+One-shot backups (recommended for drills):
+
+```bash
+./scripts/ops/backup_stack.sh
+```
+
+Component-level backups:
+
+```bash
+# Postgres dump (custom format) + retention pruning
+OUT_DIR=./backups/postgres RETENTION_DAYS=14 ./scripts/ops/backup_postgres.sh
+
+# MinIO buckets mirror + retention pruning
+BACKUP_ROOT=./backups/minio RETENTION_DAYS=14 ./scripts/ops/backup_minio.sh
+
+# TerminusDB data volume archive + retention pruning
+OUT_DIR=./backups/terminusdb RETENTION_DAYS=14 ./scripts/ops/backup_terminusdb_volume.sh
+```
+
+### 6.2 Restore (Disaster Recovery)
+
+Restores are **destructive**. Every restore requires explicit confirmation via `CONFIRM=YES`.
+
+```bash
+# Restore Postgres
+CONFIRM=YES ./scripts/ops/restore_postgres.sh ./backups/postgres/<dump>.dump
+
+# Restore MinIO buckets (safe default: overwrite only; no remote deletes)
+CONFIRM=YES ./scripts/ops/restore_minio.sh ./backups/minio/<timestamp>/
+
+# Restore TerminusDB volume (requires TerminusDB container stopped)
+CONFIRM=YES AUTO_STOP=true ./scripts/ops/restore_terminusdb_volume.sh ./backups/terminusdb/<archive>.tar.gz
+```
+
+### 6.3 Rollback policy (production)
+
+- **Service rollback**: pin image tags, keep a “last known good” tag, and roll back by redeploying the previous tag.
+- **Schema rollback**: prefer forward-only migrations; for emergency rollback restore from the most recent Postgres backup.
+- **Ontology rollback**: disabled by default (`ENABLE_OMS_ROLLBACK=false`); treat as non-prod/admin-only.
 
 ## 7) Operational Checks
 
@@ -140,7 +185,7 @@ AUTO_APPROVE=true \
 
 Notes:
 - `backend/docker-compose.yml` mounts `scripts/llm_mocks/` into the BFF container and sets `LLM_MOCK_DIR=/app/llm_mocks`, so you usually don't need to export `LLM_MOCK_JSON_*` manually.
-- Compose uses `${VAR:-default}` expansion; re-running `docker compose up` without exporting the variables will recreate containers with defaults (e.g. `LLM_PROVIDER=disabled`).
+- Compose uses `${VAR:-default}` expansion; re-running `docker compose up` without exporting the variables will recreate containers with defaults (e.g. `LLM_PROVIDER=mock`).
 
 ## 9) Troubleshooting
 
@@ -153,6 +198,12 @@ Notes:
   - 주요 DLQ 토픽: `pipeline-jobs-dlq`, `objectify-jobs-dlq`, `projection_failures_dlq`, `connector-updates-dlq`, `dataset-ingest-outbox-dlq`, `instance-commands-dlq`, `ontology-commands-dlq`, `action-commands-dlq`
   - 재처리(Replay): `python3 scripts/replay_dlq.py --dlq-topic instance-commands-dlq --max-messages 50`
   - 원인 확인: DLQ payload의 `error`/`stage`/`attempt_count` 및 trace(`traceparent` header 또는 envelope `metadata`)로 상관관계 추적
+
+### 9.1 Incident runbook (alerts)
+
+- `SpiceServiceDown`: `docker compose ps` → `docker compose logs <service>` → `docker compose restart <service>` (and validate `GET /health` + `/metrics`)
+- `SpiceHighHttp5xxRate`: check latest deploy/config changes → roll back to last known good image tag (prod) or rebuild previous commit (dev) → verify error-rate drops
+- `OtelCollectorDown`: restart collector; traces/metrics degrade but core services should remain functional
 
 ## 10) Production Hardening (Checklist)
 

@@ -54,6 +54,24 @@ def test_data_encryptor_round_trip_bytes(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 @pytest.mark.unit
+def test_data_encryptor_supports_key_rotation(monkeypatch: pytest.MonkeyPatch) -> None:
+    old_key = "hex:" + ("00" * 32)
+    new_key = "hex:" + ("01" * 32)
+
+    encryptor_old = encryptor_from_keys(old_key)
+    assert encryptor_old is not None
+
+    aad = b"session:test"
+    ciphertext = encryptor_old.encrypt_text("hello", aad=aad)
+    assert is_encrypted_text(ciphertext)
+
+    monkeypatch.setenv("DATA_ENCRYPTION_KEYS", f"{new_key},{old_key}")
+    encryptor_rotated = encryptor_from_keys(f"{new_key},{old_key}")
+    assert encryptor_rotated is not None
+    assert encryptor_rotated.decrypt_text(ciphertext, aad=aad) == "hello"
+
+
+@pytest.mark.unit
 def test_agent_session_registry_decrypts_message_content(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATA_ENCRYPTION_KEYS", "base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
     encryptor = DataEncryptor(keys=[b"\x00" * 32])

@@ -87,6 +87,20 @@ This prevents “agent/service account” from bypassing end-user policy (AUTH-0
 - Postgres holds idempotency registry, lineage, audit logs, and control-plane data.
 - Stored sensitive fields can be encrypted at rest with `DATA_ENCRYPTION_KEYS` (AESGCM keyring; encrypt with first key, decrypt with any key for rotation): `backend/shared/security/data_encryption.py`
 
+### 8.1 Rotation playbooks (code-backed + tested)
+
+Service/shared tokens (BFF/OMS):
+- Rotation is done by setting comma-separated lists (e.g. `ADMIN_TOKEN=new,old`).
+- After all clients are updated to `new`, remove `old`.
+
+End-user JWT:
+- JWKS (`USER_JWT_JWKS_URL`) is preferred; rotation is handled upstream by your IdP via `kid`.
+- HS256 (`USER_JWT_HS256_SECRET`) is supported for local/dev and supports comma-separated rotation.
+
+Data encryption keyring:
+- Rotate by setting `DATA_ENCRYPTION_KEYS=new,old` (encrypt uses first key; decrypt tries all keys).
+- Do not remove `old` until you have re-encrypted/rewritten old ciphertexts or confirmed they’re no longer needed.
+
 ## 9) Audit & Lineage
 
 - Audit logs: `backend/shared/services/audit_log_store.py` (hash-chain per partition).

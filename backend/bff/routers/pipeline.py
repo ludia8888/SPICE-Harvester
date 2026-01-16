@@ -2708,7 +2708,7 @@ async def preview_pipeline(
             branch=pipeline.branch,
         )
         try:
-            await pipeline_job_queue.publish(job, require_delivery=False)
+            await pipeline_job_queue.publish(job)
         except Exception as exc:
             error = str(exc)
             error_payload = build_error_envelope(

@@ -173,5 +173,5 @@
 | NFR-003 | DONE | `backend/shared/services/agent_session_registry.py` (active job gate), `backend/agent/services/agent_graph.py`, `backend/tests/unit/services/test_agent_graph_parallel.py` | |
 | NFR-004 | DONE | `backend/shared/middleware/rate_limiter.py`, `backend/shared/services/llm_quota.py`, `backend/tests/unit/services/test_llm_quota.py` | |
 | NFR-005 | DONE | `backend/shared/services/llm_gateway.py`, `backend/bff/middleware/auth.py`, `backend/shared/services/service_factory.py`, `docs/OPERATIONS.md` | |
-| NFR-006 | DONE | `docs/OPERATIONS.md`, `docs/DATA_LINEAGE.md`, `backend/shared/services/event_store.py` | |
+| NFR-006 | DONE | `docs/OPERATIONS.md`, `scripts/ops/backup_stack.sh`, `scripts/ops/backup_postgres.sh`, `scripts/ops/backup_minio.sh`, `scripts/ops/backup_terminusdb_volume.sh`, `backend/shared/services/event_store.py`, `backend/tests/unit/monitoring/test_monitoring_configs.py` | |
 | NFR-007 | DONE | `backend/shared/services/agent_tool_registry.py`, `backend/shared/services/agent_model_registry.py`, `backend/shared/services/agent_policy_registry.py`, `backend/bff/routers/agent_tools.py`, `backend/bff/routers/agent_models.py`, `backend/bff/routers/agent_policies.py` | |

@@ -125,6 +125,7 @@ test = [
     "diff-cover==9.7.2",
     "pytest-mock==3.12.0",  # 모킹 라이브러리
     "faker==20.1.0",        # 테스트 데이터 생성
+    "pyyaml==6.0.2",        # YAML config validation tests (monitoring/ops)
 ]
 
 # Documentation dependencies

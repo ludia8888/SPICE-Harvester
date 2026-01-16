@@ -179,8 +179,9 @@ services:
       # Auth bootstrap (deterministic for local/dev)
       - LAKEFS_AUTH_ENCRYPT_SECRET_KEY=${LAKEFS_AUTH_ENCRYPT_SECRET_KEY:-notsecretnotsecretnotsecretnotse}
       - LAKEFS_INSTALLATION_USER_NAME=${LAKEFS_INSTALLATION_USER_NAME:-spice-admin}
-      - LAKEFS_INSTALLATION_ACCESS_KEY_ID=${LAKEFS_ACCESS_KEY_ID:-spice-lakefs-admin}
-      - LAKEFS_INSTALLATION_SECRET_ACCESS_KEY=${LAKEFS_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
+      # Use docker-specific env vars to avoid accidentally reusing real AWS keys from host `.env`.
+      - LAKEFS_INSTALLATION_ACCESS_KEY_ID=${LAKEFS_DOCKER_ACCESS_KEY_ID:-spice-lakefs-admin}
+      - LAKEFS_INSTALLATION_SECRET_ACCESS_KEY=${LAKEFS_DOCKER_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
       # Metadata DB
       - LAKEFS_DATABASE_TYPE=postgres
       - LAKEFS_DATABASE_POSTGRES_CONNECTION_STRING=postgres://${POSTGRES_USER:-spiceadmin}:${POSTGRES_PASSWORD:-spicepass123}@postgres:5432/${POSTGRES_DB:-spicedb}?sslmode=disable
@@ -231,8 +232,8 @@ services:
       - minio-init
     environment:
       - LAKEFS_INSTALLATION_USER_NAME=${LAKEFS_INSTALLATION_USER_NAME:-spice-admin}
-      - LAKEFS_INSTALLATION_ACCESS_KEY_ID=${LAKEFS_ACCESS_KEY_ID:-spice-lakefs-admin}
-      - LAKEFS_INSTALLATION_SECRET_ACCESS_KEY=${LAKEFS_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
+      - LAKEFS_INSTALLATION_ACCESS_KEY_ID=${LAKEFS_DOCKER_ACCESS_KEY_ID:-spice-lakefs-admin}
+      - LAKEFS_INSTALLATION_SECRET_ACCESS_KEY=${LAKEFS_DOCKER_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
       - LAKEFS_ARTIFACTS_REPOSITORY=${LAKEFS_ARTIFACTS_REPOSITORY:-pipeline-artifacts}
       - LAKEFS_RAW_REPOSITORY=${LAKEFS_RAW_REPOSITORY:-raw-datasets}
     entrypoint: ["/bin/sh", "-c"]
@@ -338,8 +339,8 @@ services:
       # lakeFS (versioned storage + S3 gateway)
       - LAKEFS_API_URL=http://lakefs:8000
       - LAKEFS_S3_ENDPOINT_URL=http://lakefs:8000
-      - LAKEFS_ACCESS_KEY_ID=${LAKEFS_ACCESS_KEY_ID:-spice-lakefs-admin}
-      - LAKEFS_SECRET_ACCESS_KEY=${LAKEFS_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
+      - LAKEFS_ACCESS_KEY_ID=${LAKEFS_DOCKER_ACCESS_KEY_ID:-spice-lakefs-admin}
+      - LAKEFS_SECRET_ACCESS_KEY=${LAKEFS_DOCKER_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
       # Service
       - LOG_LEVEL=INFO
       - DOCKER_CONTAINER=true
@@ -395,8 +396,8 @@ services:
       - AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ENABLED=${AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ENABLED:-true}
       - AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ONLY_IF_EMPTY=${AGENT_PLAN_ALLOWLIST_BOOTSTRAP_ONLY_IF_EMPTY:-true}
       - AGENT_PLAN_ALLOWLIST_BUNDLE_PATH=${AGENT_PLAN_ALLOWLIST_BUNDLE_PATH:-}
-      # LLM gateway (planner). Keep disabled by default; enable via env for dev.
-      - LLM_PROVIDER=${LLM_PROVIDER:-disabled}
+      # LLM gateway (planner). Default to mock for local dev; set LLM_PROVIDER=disabled to turn off.
+      - LLM_PROVIDER=${LLM_PROVIDER:-mock}
       - LLM_MODEL=${LLM_MODEL:-}
       - LLM_BASE_URL=${LLM_BASE_URL:-}
       - LLM_API_KEY=${LLM_API_KEY:-}
@@ -455,8 +456,8 @@ services:
       # lakeFS (versioned storage + S3 gateway)
       - LAKEFS_API_URL=http://lakefs:8000
       - LAKEFS_S3_ENDPOINT_URL=http://lakefs:8000
-      - LAKEFS_ACCESS_KEY_ID=${LAKEFS_ACCESS_KEY_ID:-spice-lakefs-admin}
-      - LAKEFS_SECRET_ACCESS_KEY=${LAKEFS_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
+      - LAKEFS_ACCESS_KEY_ID=${LAKEFS_DOCKER_ACCESS_KEY_ID:-spice-lakefs-admin}
+      - LAKEFS_SECRET_ACCESS_KEY=${LAKEFS_DOCKER_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
       - LAKEFS_ARTIFACTS_REPOSITORY=${LAKEFS_ARTIFACTS_REPOSITORY:-pipeline-artifacts}
       - LAKEFS_RAW_REPOSITORY=${LAKEFS_RAW_REPOSITORY:-raw-datasets}
       - LAKEFS_CREDENTIALS_SOURCE=${LAKEFS_CREDENTIALS_SOURCE:-env}
@@ -608,8 +609,8 @@ services:
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin123}
       - LAKEFS_API_URL=http://lakefs:8000
       - LAKEFS_S3_ENDPOINT_URL=http://lakefs:8000
-      - LAKEFS_ACCESS_KEY_ID=${LAKEFS_ACCESS_KEY_ID:-spice-lakefs-admin}
-      - LAKEFS_SECRET_ACCESS_KEY=${LAKEFS_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
+      - LAKEFS_ACCESS_KEY_ID=${LAKEFS_DOCKER_ACCESS_KEY_ID:-spice-lakefs-admin}
+      - LAKEFS_SECRET_ACCESS_KEY=${LAKEFS_DOCKER_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
       - LAKEFS_ARTIFACTS_REPOSITORY=${LAKEFS_ARTIFACTS_REPOSITORY:-pipeline-artifacts}
       - LAKEFS_RAW_REPOSITORY=${LAKEFS_RAW_REPOSITORY:-raw-datasets}
       - LAKEFS_CREDENTIALS_SOURCE=${LAKEFS_CREDENTIALS_SOURCE:-env}
@@ -645,8 +646,8 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:-spicedb}
       - LAKEFS_API_URL=http://lakefs:8000
       - LAKEFS_S3_ENDPOINT_URL=http://lakefs:8000
-      - LAKEFS_ACCESS_KEY_ID=${LAKEFS_ACCESS_KEY_ID:-spice-lakefs-admin}
-      - LAKEFS_SECRET_ACCESS_KEY=${LAKEFS_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
+      - LAKEFS_ACCESS_KEY_ID=${LAKEFS_DOCKER_ACCESS_KEY_ID:-spice-lakefs-admin}
+      - LAKEFS_SECRET_ACCESS_KEY=${LAKEFS_DOCKER_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
       - LAKEFS_ARTIFACTS_REPOSITORY=${LAKEFS_ARTIFACTS_REPOSITORY:-pipeline-artifacts}
       - LAKEFS_RAW_REPOSITORY=${LAKEFS_RAW_REPOSITORY:-raw-datasets}
       - LAKEFS_CREDENTIALS_SOURCE=${LAKEFS_CREDENTIALS_SOURCE:-env}
@@ -678,8 +679,8 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:-spicedb}
       - OMS_BASE_URL=http://oms:8000
       - LAKEFS_S3_ENDPOINT_URL=http://lakefs:8000
-      - LAKEFS_ACCESS_KEY_ID=${LAKEFS_ACCESS_KEY_ID:-spice-lakefs-admin}
-      - LAKEFS_SECRET_ACCESS_KEY=${LAKEFS_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
+      - LAKEFS_ACCESS_KEY_ID=${LAKEFS_DOCKER_ACCESS_KEY_ID:-spice-lakefs-admin}
+      - LAKEFS_SECRET_ACCESS_KEY=${LAKEFS_DOCKER_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
       - OBJECTIFY_JOBS_TOPIC=${OBJECTIFY_JOBS_TOPIC:-objectify-jobs}
       - OBJECTIFY_JOBS_GROUP=${OBJECTIFY_JOBS_GROUP:-objectify-worker-group}
       - OBJECTIFY_JOBS_DLQ_TOPIC=${OBJECTIFY_JOBS_DLQ_TOPIC:-objectify-jobs-dlq}

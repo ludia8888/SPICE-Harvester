@@ -157,8 +157,9 @@ services:
       # Auth bootstrap (deterministic for local/dev)
       - LAKEFS_AUTH_ENCRYPT_SECRET_KEY=${LAKEFS_AUTH_ENCRYPT_SECRET_KEY:-notsecretnotsecretnotsecretnotse}
       - LAKEFS_INSTALLATION_USER_NAME=${LAKEFS_INSTALLATION_USER_NAME:-spice-admin}
-      - LAKEFS_INSTALLATION_ACCESS_KEY_ID=${LAKEFS_INSTALLATION_ACCESS_KEY_ID:-spice-lakefs-admin}
-      - LAKEFS_INSTALLATION_SECRET_ACCESS_KEY=${LAKEFS_INSTALLATION_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
+      # Use docker-specific env vars to avoid accidentally reusing real AWS keys from host `.env`.
+      - LAKEFS_INSTALLATION_ACCESS_KEY_ID=${LAKEFS_DOCKER_ACCESS_KEY_ID:-spice-lakefs-admin}
+      - LAKEFS_INSTALLATION_SECRET_ACCESS_KEY=${LAKEFS_DOCKER_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
       # Metadata DB
       - LAKEFS_DATABASE_TYPE=postgres
       - LAKEFS_DATABASE_POSTGRES_CONNECTION_STRING=postgres://spiceadmin:spicepass123@postgres:5432/spicedb?sslmode=disable
@@ -209,8 +210,8 @@ services:
       - lakefs
       - minio-init
     environment:
-      - LAKEFS_INSTALLATION_ACCESS_KEY_ID=${LAKEFS_INSTALLATION_ACCESS_KEY_ID:-spice-lakefs-admin}
-      - LAKEFS_INSTALLATION_SECRET_ACCESS_KEY=${LAKEFS_INSTALLATION_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
+      - LAKEFS_INSTALLATION_ACCESS_KEY_ID=${LAKEFS_DOCKER_ACCESS_KEY_ID:-spice-lakefs-admin}
+      - LAKEFS_INSTALLATION_SECRET_ACCESS_KEY=${LAKEFS_DOCKER_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |

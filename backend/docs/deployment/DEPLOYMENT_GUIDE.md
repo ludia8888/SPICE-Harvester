@@ -44,6 +44,11 @@ curl -fsS http://localhost:8003/health
 
 - TLS 종료는 리버스 프록시/LB에서 처리
 - BFF/OMS 토큰 인증 강제
-- Postgres + MinIO + lakeFS 메타데이터 정기 백업
+- Postgres + MinIO + lakeFS + TerminusDB 정기 백업 (`docs/OPERATIONS.md` + `scripts/ops/*`)
 - Kafka retention/DLQ 정책 정의
 - 모니터링: `/metrics`, `/api/v1/monitoring/*`, 로컬 대시보드(Compose): Prometheus `:19090`, Grafana `:13000`, Alertmanager `:19093`
+
+### 롤백(운영)
+
+- 서비스 롤백: 이미지 태그 고정 + “last known good” 태그 유지 후 이전 태그로 재배포
+- 스키마 롤백: forward-only 권장; 긴급 시 Postgres 백업에서 복구
