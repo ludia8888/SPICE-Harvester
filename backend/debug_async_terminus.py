@@ -6,10 +6,8 @@ Debug AsyncTerminusService
 
 import asyncio
 import logging
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+from shared.config.settings import get_settings
 
 # Set up logging to see debug messages
 logging.basicConfig(level=logging.DEBUG)
@@ -23,14 +21,14 @@ async def debug_async_terminus_service():
     try:
         from oms.services.async_terminus import AsyncTerminusService
         from shared.models.config import ConnectionConfig
-        import os
+        cfg = get_settings().database
         
         # Create connection config
         connection_info = ConnectionConfig(
-            server_url=os.getenv("TERMINUS_SERVER_URL", "http://localhost:6364"),
-            account=os.getenv("TERMINUS_ACCOUNT", "admin"),
-            user=os.getenv("TERMINUS_USER", "admin"),
-            key=os.getenv("TERMINUS_KEY", "admin"),
+            server_url=cfg.terminus_url,
+            account=cfg.terminus_account,
+            user=cfg.terminus_user,
+            key=cfg.terminus_password,
         )
         
         print(f"   Using connection: {connection_info.server_url}")

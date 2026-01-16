@@ -1,7 +1,7 @@
 # SPICE HARVESTER Environment Variables (Index)
 
 > Updated: 2026-01-08  \
-> Note: This is a human-friendly index. Defaults live in `.env.example` and code in `backend/shared/config/*`.
+> Note: This is a human-friendly index. Defaults live in `.env.example` and code in `backend/shared/config/*`. `.env` loading is opt-in via `SPICE_LOAD_DOTENV=true` (never loaded in Docker).
 
 ## Service URLs (local/dev)
 
@@ -146,6 +146,8 @@ ELASTICSEARCH_DEFAULT_REPLICAS=0
 # Kafka
 KAFKA_BOOTSTRAP_SERVERS=localhost:39092
 ```
+
+Host tooling note: when running scripts outside Docker with docker-compose port overrides, settings also accepts `*_PORT_HOST` fallbacks (e.g. `POSTGRES_PORT_HOST`, `REDIS_PORT_HOST`, `ELASTICSEARCH_PORT_HOST`, `KAFKA_PORT_HOST`, `MINIO_PORT_HOST`, `LAKEFS_PORT_HOST`) when the corresponding `*_PORT`/URL vars are unset.
 
 ## Storage (S3/MinIO + lakeFS)
 

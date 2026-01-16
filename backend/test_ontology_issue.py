@@ -4,14 +4,17 @@
 import asyncio
 import aiohttp
 import json
-import os
 from datetime import datetime
 import pytest
+
+from shared.config.settings import get_settings
 
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_ontology_creation():
-    admin_token = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "").strip()
+    settings = get_settings()
+    oms_url = settings.services.oms_base_url.rstrip("/")
+    admin_token = (settings.clients.oms_client_token or "").strip()
     if not admin_token:
         pytest.fail("ADMIN_TOKEN is required for integration tests")
     headers = {"X-Admin-Token": admin_token}
@@ -24,7 +27,7 @@ async def test_ontology_creation():
         print(f'Creating database: {test_db}')
         try:
             resp = await session.post(
-                'http://localhost:8000/api/v1/database/create',
+                f'{oms_url}/api/v1/database/create',
                 json={'name': test_db, 'description': 'Test'},
                 headers=headers,
             )
@@ -48,7 +51,7 @@ async def test_ontology_creation():
         
         try:
             resp = await session.post(
-                f'http://localhost:8000/api/v1/database/{test_db}/ontology',
+                f'{oms_url}/api/v1/database/{test_db}/ontology',
                 json=simple_ontology,
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=10)
@@ -83,7 +86,7 @@ async def test_ontology_creation():
         
         try:
             resp = await session.post(
-                f'http://localhost:8000/api/v1/database/{test_db}/ontology',
+                f'{oms_url}/api/v1/database/{test_db}/ontology',
                 json=complex_ontology,
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=10)
@@ -101,7 +104,7 @@ async def test_ontology_creation():
         print(f'Cleaning up {test_db}...')
         try:
             resp = await session.delete(
-                f'http://localhost:8000/api/v1/database/{test_db}',
+                f'{oms_url}/api/v1/database/{test_db}',
                 headers=headers,
             )
             print(f'  Cleanup: {resp.status}')

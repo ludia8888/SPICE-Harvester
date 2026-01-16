@@ -19,7 +19,7 @@ import os
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -55,6 +55,31 @@ def _parse_boolish(raw: Any) -> Optional[bool]:
     return None
 
 
+def _env_truthy(name: str) -> bool:
+    parsed = _parse_boolish(os.getenv(name))
+    return parsed is True
+
+
+def _should_load_dotenv() -> bool:
+    """
+    Whether settings should read from a local `.env` file.
+
+    Security posture:
+    - Disabled by default (avoid accidental secret loading/leaks).
+    - Never load `.env` inside Docker.
+    - Enable explicitly via SPICE_LOAD_DOTENV=true for local dev tooling.
+    """
+
+    if not _env_truthy("SPICE_LOAD_DOTENV"):
+        return False
+    if _is_docker_environment():
+        return False
+    return True
+
+
+_ENV_FILE = ".env" if _should_load_dotenv() else None
+
+
 class Environment(str, Enum):
     """Application environment types"""
     DEVELOPMENT = "development"
@@ -66,7 +91,7 @@ class DatabaseSettings(BaseSettings):
     """Database configuration settings"""
     
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -173,6 +198,7 @@ class DatabaseSettings(BaseSettings):
     )
     postgres_port: int = Field(
         default_factory=lambda: (5432 if _is_docker_environment() else 5433),
+        validation_alias=AliasChoices("POSTGRES_PORT", "POSTGRES_PORT_HOST"),
         description="PostgreSQL port"
     )
     postgres_user: str = Field(
@@ -195,6 +221,7 @@ class DatabaseSettings(BaseSettings):
     )
     redis_port: int = Field(
         default=6379,
+        validation_alias=AliasChoices("REDIS_PORT", "REDIS_PORT_HOST"),
         description="Redis port"
     )
     redis_password: Optional[str] = Field(
@@ -209,6 +236,7 @@ class DatabaseSettings(BaseSettings):
     )
     elasticsearch_port: int = Field(
         default=9200,
+        validation_alias=AliasChoices("ELASTICSEARCH_PORT", "ELASTICSEARCH_PORT_HOST"),
         description="Elasticsearch port"
     )
     elasticsearch_request_timeout: int = Field(
@@ -238,7 +266,8 @@ class DatabaseSettings(BaseSettings):
         description="Kafka host"
     )
     kafka_port: int = Field(
-        default_factory=lambda: (29092 if _is_docker_environment() else 9092),
+        default_factory=lambda: (29092 if _is_docker_environment() else 39092),
+        validation_alias=AliasChoices("KAFKA_PORT", "KAFKA_PORT_HOST"),
         description="Kafka port"
     )
     kafka_bootstrap_servers: Optional[str] = Field(
@@ -298,7 +327,7 @@ class ServiceSettings(BaseSettings):
     """Service configuration settings"""
     
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -397,22 +426,34 @@ class ServiceSettings(BaseSettings):
     @field_validator("oms_base_url_override", mode="before")
     @classmethod
     def get_oms_base_url_override(cls, v):
-        return os.getenv("OMS_BASE_URL", v)
+        if os.getenv("OMS_BASE_URL") not in (None, ""):
+            return os.getenv("OMS_BASE_URL")
+        fallback = (os.getenv("OMS_URL") or "").strip()
+        return fallback or v
 
     @field_validator("bff_base_url_override", mode="before")
     @classmethod
     def get_bff_base_url_override(cls, v):
-        return os.getenv("BFF_BASE_URL", v)
+        if os.getenv("BFF_BASE_URL") not in (None, ""):
+            return os.getenv("BFF_BASE_URL")
+        fallback = (os.getenv("BFF_URL") or "").strip()
+        return fallback or v
 
     @field_validator("funnel_base_url_override", mode="before")
     @classmethod
     def get_funnel_base_url_override(cls, v):
-        return os.getenv("FUNNEL_BASE_URL", v)
+        if os.getenv("FUNNEL_BASE_URL") not in (None, ""):
+            return os.getenv("FUNNEL_BASE_URL")
+        fallback = (os.getenv("FUNNEL_URL") or "").strip()
+        return fallback or v
 
     @field_validator("agent_base_url_override", mode="before")
     @classmethod
     def get_agent_base_url_override(cls, v):
-        return os.getenv("AGENT_BASE_URL", v)
+        if os.getenv("AGENT_BASE_URL") not in (None, ""):
+            return os.getenv("AGENT_BASE_URL")
+        fallback = (os.getenv("AGENT_URL") or "").strip()
+        return fallback or v
 
     @field_validator("funnel_excel_timeout_seconds", mode="before")
     @classmethod
@@ -481,7 +522,7 @@ class LLMSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="LLM_",
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -634,7 +675,7 @@ class ObservabilitySettings(BaseSettings):
     """Logging/observability settings (shared across services/workers)."""
 
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -873,7 +914,7 @@ class GraphQuerySettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="GRAPH_QUERY_",
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -904,7 +945,7 @@ class FeatureFlagsSettings(BaseSettings):
     """Feature flags / opt-in endpoints."""
 
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -933,7 +974,7 @@ class PipelineSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="PIPELINE_",
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -1135,7 +1176,7 @@ class OntologySettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="ONTOLOGY_",
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -1234,7 +1275,7 @@ class AgentRuntimeSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="AGENT_",
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -1419,7 +1460,7 @@ class AgentPlanSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="AGENT_PLAN_",
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -1451,7 +1492,7 @@ class ClientSettings(BaseSettings):
     """Internal service-to-service client settings (BFF/OMS/etc)."""
 
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -1515,7 +1556,7 @@ class MCPSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="MCP_",
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -1539,7 +1580,7 @@ class AuthSettings(BaseSettings):
     """Service auth configuration (BFF/OMS)."""
 
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -1776,7 +1817,7 @@ class RateLimitSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="RATE_LIMIT_",
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -1801,7 +1842,7 @@ class MessagingSettings(BaseSettings):
     """Kafka topic/group configuration settings"""
 
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -1925,7 +1966,7 @@ class StorageSettings(BaseSettings):
     """Storage configuration settings"""
     
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -1936,6 +1977,7 @@ class StorageSettings(BaseSettings):
         default_factory=lambda: (
             "http://spice-minio:9000" if _is_docker_environment() else "http://127.0.0.1:9000"
         ),
+        validation_alias=AliasChoices("MINIO_ENDPOINT_URL", "MINIO_PORT_HOST"),
         description="MinIO/S3 endpoint URL"
     )
     minio_access_key: str = Field(
@@ -1969,8 +2011,22 @@ class StorageSettings(BaseSettings):
     )
     lakefs_api_port: int = Field(
         default_factory=lambda: (8000 if _is_docker_environment() else 48080),
+        validation_alias=AliasChoices("LAKEFS_API_PORT", "LAKEFS_PORT_HOST"),
         description="lakeFS API port (used when LAKEFS_API_URL is unset)",
     )
+
+    @field_validator("minio_endpoint_url", mode="before")
+    @classmethod
+    def normalize_minio_endpoint_url(cls, v):  # noqa: ANN001
+        if v is None:
+            return v
+        value = str(v).strip()
+        if not value:
+            return value
+        if value.isdigit() and not _is_docker_environment():
+            port = _clamp_int(value, default=9000, min_value=1, max_value=65535)
+            return f"http://127.0.0.1:{port}"
+        return value
     lakefs_access_key_id: Optional[str] = Field(
         default=None,
         description="lakeFS access key id",
@@ -2074,7 +2130,7 @@ class CacheSettings(BaseSettings):
     """Cache and TTL configuration settings"""
     
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -2116,7 +2172,7 @@ class SecuritySettings(BaseSettings):
     """Security configuration settings"""
     
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -2183,7 +2239,7 @@ class PerformanceSettings(BaseSettings):
     """Performance and optimization settings"""
     
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -2350,7 +2406,7 @@ class EventSourcingSettings(BaseSettings):
     """Event sourcing / CQRS tuning settings"""
 
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -2459,7 +2515,7 @@ class BranchVirtualizationSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="BRANCH_VIRTUALIZATION_",
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -2481,7 +2537,7 @@ class InstanceWorkerSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="INSTANCE_WORKER_",
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -2527,7 +2583,7 @@ class OntologyWorkerSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="ONTOLOGY_WORKER_",
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -2557,7 +2613,7 @@ class ProjectionWorkerSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="PROJECTION_WORKER_",
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -2579,7 +2635,7 @@ class ActionWorkerSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="ACTION_WORKER_",
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -2614,7 +2670,7 @@ class ActionOutboxSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="ACTION_OUTBOX_",
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -2639,7 +2695,7 @@ class OntologyDeployOutboxSettings(BaseSettings):
     """Ontology deployment outbox worker settings (OMS embedded worker)."""
 
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -2747,7 +2803,7 @@ class ConnectorSyncSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="CONNECTOR_SYNC_",
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -2802,7 +2858,7 @@ class ConnectorTriggerSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="CONNECTOR_TRIGGER_",
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -2851,7 +2907,7 @@ class SearchProjectionSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="SEARCH_PROJECTION_",
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -2920,7 +2976,7 @@ class ObjectifySettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="OBJECTIFY_",
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -3028,7 +3084,7 @@ class IngestReconcilerSettings(BaseSettings):
     """Dataset ingest reconciler worker settings."""
 
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -3134,7 +3190,7 @@ class DatasetIngestOutboxSettings(BaseSettings):
     """Dataset ingest outbox worker settings (BFF embedded worker)."""
 
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -3295,7 +3351,7 @@ class ObjectifyOutboxWorkerSettings(BaseSettings):
     """Objectify outbox worker settings (BFF embedded worker)."""
 
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -3451,7 +3507,7 @@ class ObjectifyReconcilerSettings(BaseSettings):
     """Objectify reconciler worker settings (BFF embedded worker)."""
 
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -3514,7 +3570,7 @@ class WritebackMaterializerSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="WRITEBACK_MATERIALIZER_",
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -3561,7 +3617,7 @@ class EventPublisherSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="EVENT_PUBLISHER_",
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -3695,7 +3751,7 @@ class AgentRetentionWorkerSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="AGENT_RETENTION_",
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -3744,7 +3800,7 @@ class ChaosSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="CHAOS_",
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -3806,7 +3862,7 @@ class WorkersSettings(BaseSettings):
     """Workers/services runtime settings."""
 
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -3836,7 +3892,7 @@ class WritebackSettings(BaseSettings):
     """Ontology writeback + read overlay settings"""
 
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -3907,7 +3963,7 @@ class TestSettings(BaseSettings):
     """Test environment configuration"""
     
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -3921,13 +3977,17 @@ class TestSettings(BaseSettings):
         default=30,
         description="Test timeout in seconds"
     )
+    oms_query_wait_seconds: float = Field(
+        default=60.0,
+        description="OMS query wait seconds (OMS_QUERY_WAIT_SECONDS)",
+    )
 
 
 class GoogleSheetsSettings(BaseSettings):
     """Google Sheets integration settings"""
     
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -3970,7 +4030,7 @@ class ApplicationSettings(BaseSettings):
     """Main application settings - aggregates all other settings"""
     
     model_config = SettingsConfigDict(
-        env_file=".env" if not os.getenv("DOCKER_CONTAINER") else None,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore"
@@ -3979,6 +4039,7 @@ class ApplicationSettings(BaseSettings):
     # Environment and basic settings
     environment: Environment = Field(
         default=Environment.DEVELOPMENT,
+        validation_alias=AliasChoices("ENVIRONMENT", "SPICE_ENV"),
         description="Application environment"
     )
     debug: bool = Field(

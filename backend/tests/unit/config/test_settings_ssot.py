@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from shared.config.settings import AgentRuntimeSettings, ClientSettings, PipelineSettings, StorageSettings
+from shared.config.settings import AgentRuntimeSettings, ClientSettings, DatabaseSettings, PipelineSettings, StorageSettings
 
 
 def _disable_env_file(monkeypatch: pytest.MonkeyPatch) -> None:
-    # settings.py loads `.env` unless DOCKER_CONTAINER is set.
+    # settings.py reads `.env` only when SPICE_LOAD_DOTENV=true and not in Docker;
+    # force-disable dotenv reads for deterministic unit tests.
     monkeypatch.setenv("DOCKER_CONTAINER", "1")
 
 
@@ -70,3 +71,24 @@ def test_lakefs_repository_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = StorageSettings()
     assert settings.lakefs_raw_repository == "raw-datasets"
     assert settings.lakefs_artifacts_repository == "pipeline-artifacts"
+
+
+def test_local_port_host_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Simulate local (non-Docker) scripts relying on docker-compose port overrides.
+    monkeypatch.setenv("DOCKER_CONTAINER", "false")
+
+    monkeypatch.delenv("POSTGRES_PORT", raising=False)
+    monkeypatch.setenv("POSTGRES_PORT_HOST", "55433")
+    assert DatabaseSettings().postgres_port == 55433
+
+    monkeypatch.delenv("ELASTICSEARCH_PORT", raising=False)
+    monkeypatch.setenv("ELASTICSEARCH_PORT_HOST", "19200")
+    assert DatabaseSettings().elasticsearch_port == 19200
+
+    monkeypatch.delenv("REDIS_PORT", raising=False)
+    monkeypatch.setenv("REDIS_PORT_HOST", "6380")
+    assert DatabaseSettings().redis_port == 6380
+
+    monkeypatch.delenv("MINIO_ENDPOINT_URL", raising=False)
+    monkeypatch.setenv("MINIO_PORT_HOST", "9002")
+    assert StorageSettings().minio_endpoint_url == "http://127.0.0.1:9002"

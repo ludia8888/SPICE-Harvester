@@ -16,22 +16,24 @@ mkdir -p "$EVIDENCE_DIR" "$E2E_DIR" "$PERF_DIR"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-platform-checklist}"
 COMPOSE_NETWORK_NAME="${COMPOSE_PROJECT_NAME}_spice_network"
 
-# Prefer repo-provided .env for port overrides and tokens. If missing, set safe defaults.
-if [[ -f "$ROOT_DIR/.env" ]]; then
+# Security posture: don't auto-source repo-root `.env` unless explicitly enabled.
+DOTENV_FLAG="${SPICE_LOAD_DOTENV:-}"
+DOTENV_FLAG="${DOTENV_FLAG,,}"
+if [[ -f "$ROOT_DIR/.env" ]] && [[ "$DOTENV_FLAG" == "1" || "$DOTENV_FLAG" == "true" || "$DOTENV_FLAG" == "yes" || "$DOTENV_FLAG" == "on" ]]; then
   set -a
   # shellcheck disable=SC1091
   source "$ROOT_DIR/.env"
   set +a
 else
-  export POSTGRES_PORT_HOST="${POSTGRES_PORT_HOST:-55433}"
-  export REDIS_PORT_HOST="${REDIS_PORT_HOST:-6380}"
-  export ELASTICSEARCH_PORT_HOST="${ELASTICSEARCH_PORT_HOST:-19200}"
-  export ELASTICSEARCH_TRANSPORT_PORT_HOST="${ELASTICSEARCH_TRANSPORT_PORT_HOST:-19300}"
-  export MINIO_PORT_HOST="${MINIO_PORT_HOST:-9002}"
-  export MINIO_CONSOLE_PORT_HOST="${MINIO_CONSOLE_PORT_HOST:-9003}"
+  export POSTGRES_PORT_HOST="${POSTGRES_PORT_HOST:-5433}"
+  export REDIS_PORT_HOST="${REDIS_PORT_HOST:-6379}"
+  export ELASTICSEARCH_PORT_HOST="${ELASTICSEARCH_PORT_HOST:-9200}"
+  export ELASTICSEARCH_TRANSPORT_PORT_HOST="${ELASTICSEARCH_TRANSPORT_PORT_HOST:-9300}"
+  export MINIO_PORT_HOST="${MINIO_PORT_HOST:-9000}"
+  export MINIO_CONSOLE_PORT_HOST="${MINIO_CONSOLE_PORT_HOST:-9001}"
   export KAFKA_PORT_HOST="${KAFKA_PORT_HOST:-39092}"
-  export KAFKA_UI_PORT_HOST="${KAFKA_UI_PORT_HOST:-18082}"
-  export ZOOKEEPER_PORT_HOST="${ZOOKEEPER_PORT_HOST:-2182}"
+  export KAFKA_UI_PORT_HOST="${KAFKA_UI_PORT_HOST:-8080}"
+  export ZOOKEEPER_PORT_HOST="${ZOOKEEPER_PORT_HOST:-2181}"
   export LAKEFS_PORT_HOST="${LAKEFS_PORT_HOST:-48080}"
   export LAKEFS_INSTALLATION_ACCESS_KEY_ID="${LAKEFS_INSTALLATION_ACCESS_KEY_ID:-spice-lakefs-admin}"
   export LAKEFS_INSTALLATION_SECRET_ACCESS_KEY="${LAKEFS_INSTALLATION_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}"
@@ -145,8 +147,8 @@ def _docker_used_host_ports() -> set[int]:
         return used
     for line in out.splitlines():
         # Examples:
-        # 0.0.0.0:6380->6379/tcp, :::6380->6379/tcp
-        # 0.0.0.0:19200-19201->9200-9201/tcp
+        # 0.0.0.0:6379->6379/tcp, :::6379->6379/tcp
+        # 0.0.0.0:9200->9200/tcp
         for match in re.finditer(r":(\d+)(?:-(\d+))?->", line):
             start = int(match.group(1))
             end = int(match.group(2) or start)
@@ -198,15 +200,15 @@ def _pick_port(key: str, desired: int, *, candidates: list[int]) -> int:
 
 ports: dict[str, tuple[int, list[int]]] = {
     # Keep fallbacks deterministic-ish: try {x+10000, x+20000, x+30000} before ephemeral.
-    "POSTGRES_PORT_HOST": (int(os.getenv("POSTGRES_PORT_HOST", "55433")), []),
-    "REDIS_PORT_HOST": (int(os.getenv("REDIS_PORT_HOST", "6380")), []),
-    "ELASTICSEARCH_PORT_HOST": (int(os.getenv("ELASTICSEARCH_PORT_HOST", "19200")), []),
-    "ELASTICSEARCH_TRANSPORT_PORT_HOST": (int(os.getenv("ELASTICSEARCH_TRANSPORT_PORT_HOST", "19300")), []),
-    "MINIO_PORT_HOST": (int(os.getenv("MINIO_PORT_HOST", "9002")), []),
-    "MINIO_CONSOLE_PORT_HOST": (int(os.getenv("MINIO_CONSOLE_PORT_HOST", "9003")), []),
+    "POSTGRES_PORT_HOST": (int(os.getenv("POSTGRES_PORT_HOST", "5433")), []),
+    "REDIS_PORT_HOST": (int(os.getenv("REDIS_PORT_HOST", "6379")), []),
+    "ELASTICSEARCH_PORT_HOST": (int(os.getenv("ELASTICSEARCH_PORT_HOST", "9200")), []),
+    "ELASTICSEARCH_TRANSPORT_PORT_HOST": (int(os.getenv("ELASTICSEARCH_TRANSPORT_PORT_HOST", "9300")), []),
+    "MINIO_PORT_HOST": (int(os.getenv("MINIO_PORT_HOST", "9000")), []),
+    "MINIO_CONSOLE_PORT_HOST": (int(os.getenv("MINIO_CONSOLE_PORT_HOST", "9001")), []),
     "KAFKA_PORT_HOST": (int(os.getenv("KAFKA_PORT_HOST", "39092")), []),
-    "KAFKA_UI_PORT_HOST": (int(os.getenv("KAFKA_UI_PORT_HOST", "18082")), []),
-    "ZOOKEEPER_PORT_HOST": (int(os.getenv("ZOOKEEPER_PORT_HOST", "2182")), []),
+    "KAFKA_UI_PORT_HOST": (int(os.getenv("KAFKA_UI_PORT_HOST", "8080")), []),
+    "ZOOKEEPER_PORT_HOST": (int(os.getenv("ZOOKEEPER_PORT_HOST", "2181")), []),
     "LAKEFS_PORT_HOST": (int(os.getenv("LAKEFS_PORT_HOST", "48080")), []),
 }
 
@@ -362,9 +364,9 @@ print("")
 
 kafka_host_port = int(os.getenv("KAFKA_PORT_HOST", "39092"))
 print("expected_kafka_bootstrap=", f"127.0.0.1:{kafka_host_port}")
-postgres_host_port = int(os.getenv("POSTGRES_PORT_HOST", "55433"))
-redis_host_port = int(os.getenv("REDIS_PORT_HOST", "6380"))
-minio_host_port = int(os.getenv("MINIO_PORT_HOST", "9002"))
+postgres_host_port = int(os.getenv("POSTGRES_PORT_HOST", "5433"))
+redis_host_port = int(os.getenv("REDIS_PORT_HOST", "6379"))
+minio_host_port = int(os.getenv("MINIO_PORT_HOST", "9000"))
 terminus_host_port = int(os.getenv("TERMINUS_PORT_HOST", "6363"))
 lakefs_host_port = int(os.getenv("LAKEFS_PORT_HOST", "48080"))
 print("expected_postgres_tcp=", f"127.0.0.1:{postgres_host_port}")
@@ -805,9 +807,9 @@ export BFF_ADMIN_TOKEN="${BFF_ADMIN_TOKEN:-test-token}"
 export RUN_LIVE_BRANCH_VIRTUALIZATION="${RUN_LIVE_BRANCH_VIRTUALIZATION:-true}"
 export RUN_LIVE_OMS_SMOKE="${RUN_LIVE_OMS_SMOKE:-true}"
 export KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-127.0.0.1:${KAFKA_PORT_HOST:-39092}}"
-export POSTGRES_URL="${POSTGRES_URL:-postgresql://${POSTGRES_USER:-spiceadmin}:${POSTGRES_PASSWORD:-spicepass123}@127.0.0.1:${POSTGRES_PORT_HOST:-55433}/${POSTGRES_DB:-spicedb}}"
-export REDIS_URL="${REDIS_URL:-redis://:${REDIS_PASSWORD:-spicepass123}@127.0.0.1:${REDIS_PORT_HOST:-6380}}"
-export MINIO_ENDPOINT_URL="${MINIO_ENDPOINT_URL:-http://127.0.0.1:${MINIO_PORT_HOST:-9002}}"
+export POSTGRES_URL="${POSTGRES_URL:-postgresql://${POSTGRES_USER:-spiceadmin}:${POSTGRES_PASSWORD:-spicepass123}@127.0.0.1:${POSTGRES_PORT_HOST:-5433}/${POSTGRES_DB:-spicedb}}"
+export REDIS_URL="${REDIS_URL:-redis://:${REDIS_PASSWORD:-spicepass123}@127.0.0.1:${REDIS_PORT_HOST:-6379}}"
+export MINIO_ENDPOINT_URL="${MINIO_ENDPOINT_URL:-http://127.0.0.1:${MINIO_PORT_HOST:-9000}}"
 export MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-minioadmin}"
 export MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-minioadmin123}"
 export ELASTICSEARCH_HOST="${ELASTICSEARCH_HOST:-127.0.0.1}"

@@ -17,15 +17,14 @@ import json
 import time
 
 import aiohttp
-import os
 import pytest
 
-OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhost:8000").rstrip("/")
-BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
-ELASTICSEARCH_URL = (
-    os.getenv("ELASTICSEARCH_URL")
-    or f"http://{os.getenv('ELASTICSEARCH_HOST', 'localhost')}:{os.getenv('ELASTICSEARCH_PORT', '9200')}"
-).rstrip("/")
+from shared.config.settings import get_settings
+
+_SETTINGS = get_settings()
+OMS_URL = _SETTINGS.services.oms_base_url.rstrip("/")
+BFF_URL = _SETTINGS.services.bff_base_url.rstrip("/")
+ELASTICSEARCH_URL = _SETTINGS.database.elasticsearch_url.rstrip("/")
 
 
 async def _wait_for_command_completed(
@@ -137,7 +136,8 @@ async def test_full_api_integration():
     print("🔥 THINK ULTRA: COMPLETE API INTEGRATION TEST")
     print("=" * 80)
     
-    admin_token = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "test-token").strip()
+    settings = get_settings()
+    admin_token = str(settings.clients.oms_client_token or settings.clients.bff_admin_token or "test-token").strip()
     headers = {"X-Admin-Token": admin_token}
     async with aiohttp.ClientSession(headers=headers) as session:
         # Test configuration
@@ -431,7 +431,7 @@ async def test_full_api_integration():
         # 3.1 Query via OMS API (Direct ES query)
         print("\n1️⃣ Simple query via OMS API...")
         query_payload = {'query': 'SELECT * FROM Product WHERE category = "Software"'}
-        query_deadline = time.monotonic() + float(os.getenv("OMS_QUERY_WAIT_SECONDS", "60") or 60)
+        query_deadline = time.monotonic() + float(settings.test.oms_query_wait_seconds or 60.0)
         attempt = 0
         last_error = None
         while time.monotonic() < query_deadline:

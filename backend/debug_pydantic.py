@@ -4,20 +4,11 @@ Debug Pydantic Settings Loading
 Pydantic이 환경변수를 올바르게 로드하는지 테스트
 """
 
-from dotenv import load_dotenv
-import os
-
-# Load environment variables first
-load_dotenv()
+from shared.config.settings import get_settings, reload_settings
 
 def debug_pydantic():
     print("🔍 Pydantic Settings Loading Debug")
     print("=" * 50)
-    
-    # Check raw environment variable
-    terminus_key = os.getenv("TERMINUS_KEY")
-    print(f"📋 Raw TERMINUS_KEY environment variable: '{terminus_key}'")
-    print("")
     
     # Test Pydantic model directly
     print("🔧 Testing DatabaseSettings directly:")
@@ -30,7 +21,7 @@ def debug_pydantic():
         print(f"   terminus_url: '{db_settings.terminus_url}'")
         print(f"   terminus_user: '{db_settings.terminus_user}'")
         print(f"   terminus_account: '{db_settings.terminus_account}'")
-        print(f"   terminus_password: '{db_settings.terminus_password}'")
+        print("   terminus_password: '<redacted>'")
         print("")
         
         # Test the Pydantic field configuration
@@ -54,14 +45,14 @@ def debug_pydantic():
     # Test full ApplicationSettings
     print("🔧 Testing Full ApplicationSettings:")
     try:
-        from shared.config.settings import reload_settings
-        
         app_settings = reload_settings()
         
         print(f"   database.terminus_url: '{app_settings.database.terminus_url}'")
         print(f"   database.terminus_user: '{app_settings.database.terminus_user}'") 
         print(f"   database.terminus_account: '{app_settings.database.terminus_account}'")
-        print(f"   database.terminus_password: '{app_settings.database.terminus_password}'")
+        print("   database.terminus_password: '<redacted>'")
+        print("")
+        print(f"   effective environment: {get_settings().environment.value}")
         
     except Exception as e:
         print(f"   ❌ ApplicationSettings error: {e}")

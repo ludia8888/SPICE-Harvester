@@ -5,9 +5,10 @@
 
 import asyncio
 import aiohttp
-import os
 import sys
 from datetime import datetime
+
+from shared.config.settings import get_settings
 
 async def quick_production_test():
     """Quick test to verify production system works"""
@@ -15,9 +16,11 @@ async def quick_production_test():
     print("🔥 QUICK PRODUCTION TEST - POST DEBUG CLEANUP")
     print("=" * 50)
     
+    settings = get_settings()
+    oms_base_url = settings.services.oms_base_url.rstrip("/")
     test_db = f"prod_test_{datetime.now().strftime('%H%M%S')}"
     test_class = "production_test"
-    admin_token = (os.getenv("ADMIN_TOKEN") or os.getenv("BFF_ADMIN_TOKEN") or "test-token").strip()
+    admin_token = (settings.clients.oms_client_token or settings.clients.bff_admin_token or "test-token").strip()
     if not admin_token:
         raise RuntimeError("ADMIN_TOKEN is required for production test")
     headers = {"X-Admin-Token": admin_token}
@@ -27,7 +30,7 @@ async def quick_production_test():
             # 1. Create database
             print(f"1️⃣ Creating database: {test_db}")
             async with session.post(
-                "http://localhost:8000/api/v1/database/create",
+                f"{oms_base_url}/api/v1/database/create",
                 json={"name": test_db, "description": "Production Test"},
                 headers=headers,
             ) as resp:
@@ -40,13 +43,13 @@ async def quick_production_test():
             for i in range(15):
                 await asyncio.sleep(1)
                 async with session.get(
-                    f"http://localhost:8000/api/v1/database/exists/{test_db}",
+                    f"{oms_base_url}/api/v1/database/exists/{test_db}",
                     headers=headers,
                 ) as check_resp:
                     result = await check_resp.json()
-                    if result.get('data', {}).get('exists'):
-                        print(f"   ✅ Database confirmed after {i+1} seconds")
-                        break
+                if result.get("data", {}).get("exists"):
+                    print(f"   ✅ Database confirmed after {i + 1} seconds")
+                    break
             else:
                 raise Exception("Database not created in time")
                 
@@ -70,7 +73,7 @@ async def quick_production_test():
             }
             
             async with session.post(
-                f"http://localhost:8000/api/v1/database/{test_db}/ontology",
+                f"{oms_base_url}/api/v1/database/{test_db}/ontology",
                 json=ontology_data,
                 headers=headers,
             ) as resp:
@@ -89,7 +92,7 @@ async def quick_production_test():
             cleanup_ok = False
             for _ in range(2):
                 async with session.delete(
-                    f"http://localhost:8000/api/v1/database/{test_db}",
+                    f"{oms_base_url}/api/v1/database/{test_db}",
                     params={"expected_seq": expected_seq},
                     headers=headers,
                 ) as resp:

@@ -14,38 +14,44 @@ from uuid import uuid4
 import subprocess
 import pytest
 
-ELASTICSEARCH_HOST = (os.getenv("ELASTICSEARCH_HOST") or "localhost").strip()
-ELASTICSEARCH_PORT = (
-    os.getenv("ELASTICSEARCH_PORT") or os.getenv("ELASTICSEARCH_PORT_HOST") or "9200"
-).strip()
-ELASTICSEARCH_URL = (
-    os.getenv("ELASTICSEARCH_URL") or f"http://{ELASTICSEARCH_HOST}:{ELASTICSEARCH_PORT}"
-).rstrip("/")
+from shared.config.settings import get_settings
+
+_SETTINGS = get_settings()
+OMS_URL = _SETTINGS.services.oms_base_url.rstrip("/")
+ELASTICSEARCH_URL = _SETTINGS.database.elasticsearch_url.rstrip("/")
+KAFKA_BOOTSTRAP_SERVERS = _SETTINGS.database.kafka_servers
+MINIO_ENDPOINT_URL = _SETTINGS.storage.minio_endpoint_url.rstrip("/")
+POSTGRES_HOST = _SETTINGS.database.postgres_host
+POSTGRES_PORT = _SETTINGS.database.postgres_port
+REDIS_HOST = _SETTINGS.database.redis_host
+REDIS_PORT = _SETTINGS.database.redis_port
+TERMINUS_URL = _SETTINGS.database.terminus_url.rstrip("/")
+EVENT_STORE_BUCKET = _SETTINGS.storage.event_store_bucket
 
 # REAL production configuration
 PRODUCTION_ENV = {
     "DOCKER_CONTAINER": "false",
-    "MINIO_ENDPOINT_URL": "http://localhost:9002",
-    "MINIO_ACCESS_KEY": "minioadmin",
-    "MINIO_SECRET_KEY": "minioadmin123",
-    "POSTGRES_HOST": "localhost",
-    "POSTGRES_PORT": "55433",  # CORRECT PORT
-    "POSTGRES_USER": "spiceadmin",
-    "POSTGRES_PASSWORD": "spicepass123",
-    "POSTGRES_DB": "spicedb",
-    "ELASTICSEARCH_HOST": ELASTICSEARCH_HOST or "localhost",
-    "ELASTICSEARCH_PORT": ELASTICSEARCH_PORT or "9200",
-    "ELASTICSEARCH_USER": "",
-    "ELASTICSEARCH_PASSWORD": "",
-    "KAFKA_BOOTSTRAP_SERVERS": "localhost:39092",
-    "REDIS_HOST": "localhost",
-    "REDIS_PORT": "6380",
-    "REDIS_PASSWORD": "spicepass123",
-    "TERMINUS_SERVER_URL": "http://localhost:6363",
+    "MINIO_ENDPOINT_URL": MINIO_ENDPOINT_URL,
+    "MINIO_ACCESS_KEY": _SETTINGS.storage.minio_access_key,
+    "MINIO_SECRET_KEY": _SETTINGS.storage.minio_secret_key,
+    "POSTGRES_HOST": POSTGRES_HOST,
+    "POSTGRES_PORT": str(POSTGRES_PORT),
+    "POSTGRES_USER": _SETTINGS.database.postgres_user,
+    "POSTGRES_PASSWORD": _SETTINGS.database.postgres_password,
+    "POSTGRES_DB": _SETTINGS.database.postgres_db,
+    "ELASTICSEARCH_HOST": _SETTINGS.database.elasticsearch_host,
+    "ELASTICSEARCH_PORT": str(_SETTINGS.database.elasticsearch_port),
+    "ELASTICSEARCH_USER": _SETTINGS.database.elasticsearch_username or "",
+    "ELASTICSEARCH_PASSWORD": _SETTINGS.database.elasticsearch_password or "",
+    "KAFKA_BOOTSTRAP_SERVERS": KAFKA_BOOTSTRAP_SERVERS,
+    "REDIS_HOST": REDIS_HOST,
+    "REDIS_PORT": str(REDIS_PORT),
+    "REDIS_PASSWORD": _SETTINGS.database.redis_password or "",
+    "TERMINUS_SERVER_URL": TERMINUS_URL,
 }
 
 
-ADMIN_TOKEN = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "test-token").strip()
+ADMIN_TOKEN = str(_SETTINGS.clients.oms_client_token or _SETTINGS.clients.bff_admin_token or "test-token").strip()
 HEADERS = {"X-Admin-Token": ADMIN_TOKEN}
 
 
@@ -69,11 +75,11 @@ class ProductionFlowTest:
         try:
             import asyncpg
             conn = await asyncpg.connect(
-                host="localhost",
-                port=55433,
-                user="spiceadmin",
-                password="spicepass123",
-                database="spicedb"
+                host=POSTGRES_HOST,
+                port=POSTGRES_PORT,
+                user=_SETTINGS.database.postgres_user,
+                password=_SETTINGS.database.postgres_password,
+                database=_SETTINGS.database.postgres_db,
             )
             count = await conn.fetchval("SELECT COUNT(*) FROM spice_event_registry.processed_events")
             await conn.close()
@@ -88,9 +94,9 @@ class ProductionFlowTest:
             session = aioboto3.Session()
             async with session.client(
                 's3',
-                endpoint_url='http://localhost:9002',
-                aws_access_key_id='minioadmin',
-                aws_secret_access_key='minioadmin123'
+                endpoint_url=MINIO_ENDPOINT_URL,
+                aws_access_key_id=_SETTINGS.storage.minio_access_key,
+                aws_secret_access_key=_SETTINGS.storage.minio_secret_key,
             ) as s3:
                 await s3.list_buckets()
                 checks.append(("MinIO/S3", True, "Connected"))
@@ -114,7 +120,7 @@ class ProductionFlowTest:
         # 4. Kafka
         try:
             result = subprocess.run(
-                ["kafka-topics", "--bootstrap-server", "localhost:39092", "--list"],
+                ["kafka-topics", "--bootstrap-server", KAFKA_BOOTSTRAP_SERVERS, "--list"],
                 capture_output=True, text=True, timeout=15
             )
             topics = [line for line in result.stdout.strip().split('\n') if line]
@@ -145,7 +151,12 @@ class ProductionFlowTest:
         # 5. Redis
         try:
             import redis
-            r = redis.Redis(host='localhost', port=6380, password='spicepass123', decode_responses=True)
+            r = redis.Redis(
+                host=REDIS_HOST,
+                port=REDIS_PORT,
+                password=_SETTINGS.database.redis_password or "",
+                decode_responses=True,
+            )
             r.ping()
             checks.append(("Redis", True, "Connected"))
         except Exception as e:
@@ -155,7 +166,7 @@ class ProductionFlowTest:
         # 6. TerminusDB
         try:
             async with aiohttp.ClientSession(headers=HEADERS) as session:
-                async with session.get('http://localhost:6363/api/info') as resp:
+                async with session.get(f"{TERMINUS_URL}/api/info") as resp:
                     if resp.status == 200:
                         checks.append(("TerminusDB", True, "Connected"))
                     else:
@@ -184,7 +195,7 @@ class ProductionFlowTest:
         async with aiohttp.ClientSession(headers=HEADERS) as session:
             # Create database
             async with session.post(
-                'http://localhost:8000/api/v1/database/create',
+                f"{OMS_URL}/api/v1/database/create",
                 json={
                     "name": db_name,
                     "description": f"Production test database {self.test_id}"
@@ -241,7 +252,7 @@ class ProductionFlowTest:
         
         async with aiohttp.ClientSession(headers=HEADERS) as session:
             async with session.post(
-                f'http://localhost:8000/api/v1/database/{db_name}/ontology',
+                f"{OMS_URL}/api/v1/database/{db_name}/ontology",
                 json=ontology_data
             ) as resp:
                 result = await resp.json()
@@ -272,7 +283,7 @@ class ProductionFlowTest:
         
         async with aiohttp.ClientSession(headers=HEADERS) as session:
             async with session.post(
-                f'http://localhost:8000/api/v1/instances/{db_name}/async/{class_id}/create',
+                f"{OMS_URL}/api/v1/instances/{db_name}/async/{class_id}/create",
                 json=instance_data
             ) as resp:
                 result = await resp.json()
@@ -304,13 +315,13 @@ class ProductionFlowTest:
         
         async with session.client(
             's3',
-            endpoint_url='http://localhost:9002',
-            aws_access_key_id='minioadmin',
-            aws_secret_access_key='minioadmin123'
+            endpoint_url=MINIO_ENDPOINT_URL,
+            aws_access_key_id=_SETTINGS.storage.minio_access_key,
+            aws_secret_access_key=_SETTINGS.storage.minio_secret_key,
         ) as s3:
             # List all events
             response = await s3.list_objects_v2(
-                Bucket='spice-event-store',
+                Bucket=EVENT_STORE_BUCKET,
                 Prefix=f"events/{datetime.now(timezone.utc).year:04d}/{datetime.now(timezone.utc).month:02d}/{datetime.now(timezone.utc).day:02d}/"
             )
             
@@ -338,11 +349,11 @@ class ProductionFlowTest:
         
         import asyncpg
         conn = await asyncpg.connect(
-            host="localhost",
-            port=55433,
-            user="spiceadmin",
-            password="spicepass123",
-            database="spicedb"
+            host=POSTGRES_HOST,
+            port=POSTGRES_PORT,
+            user=_SETTINGS.database.postgres_user,
+            password=_SETTINGS.database.postgres_password,
+            database=_SETTINGS.database.postgres_db,
         )
         
         query = """
@@ -377,7 +388,7 @@ class ProductionFlowTest:
         # Check Kafka consumer groups (fallback to in-container if localhost not reachable)
         try:
             result = subprocess.run(
-                ["kafka-consumer-groups", "--bootstrap-server", "localhost:39092", "--list"],
+                ["kafka-consumer-groups", "--bootstrap-server", KAFKA_BOOTSTRAP_SERVERS, "--list"],
                 capture_output=True,
                 text=True,
                 timeout=15,
@@ -410,7 +421,7 @@ class ProductionFlowTest:
                         [
                             "kafka-consumer-groups",
                             "--bootstrap-server",
-                            "localhost:39092",
+                            KAFKA_BOOTSTRAP_SERVERS,
                             "--group",
                             group,
                             "--describe",

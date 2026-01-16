@@ -15,7 +15,7 @@ Included background workers (no public ports):
 - `message-relay`, `ontology-worker`, `instance-worker`, `projection-worker`
 - Action writeback: `action-worker`, `action-outbox-worker`, `writeback-materializer-worker` (default no-op unless `WRITEBACK_MATERIALIZER_DB_NAMES` is set)
 
-Key services/ports (defaults, override via `.env`). OMS/Funnel/Agent are internal by default; use the debug ports override when you need direct access.
+Key services/ports (defaults, override via env vars; docker-compose reads `.env` for substitution, and Python reads `.env` only when `SPICE_LOAD_DOTENV=true`). OMS/Funnel/Agent are internal by default; use the debug ports override when you need direct access.
 
 | Component | Port |
 | --- | ---: |
@@ -71,7 +71,7 @@ Local dashboards (when using `docker-compose.full.yml`):
 Canonical list is maintained in:
 - `backend/ENVIRONMENT_VARIABLES.md`
 
-Core services read from `.env` and docker-compose overrides. Avoid putting secrets in git.
+Core services read from environment variables. Docker Compose uses `.env` for variable substitution; Python settings only read `.env` when `SPICE_LOAD_DOTENV=true`. Avoid putting secrets in git.
 
 ## 5) Data & Persistence
 

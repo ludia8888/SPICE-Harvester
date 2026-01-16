@@ -6,14 +6,17 @@ Quick test to verify Event Sourcing is 100% working after field name fix
 import asyncio
 import aiohttp
 from datetime import datetime
-import os
 import pytest
+
+from shared.config.settings import get_settings
 
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_event_sourcing_complete():
     """Test the complete Event Sourcing flow with the fixed field name"""
-    admin_token = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "").strip()
+    settings = get_settings()
+    oms_base_url = settings.services.oms_base_url.rstrip("/")
+    admin_token = (settings.clients.oms_client_token or "").strip()
     if not admin_token:
         pytest.fail("ADMIN_TOKEN is required for integration tests")
     headers = {"X-Admin-Token": admin_token}
@@ -30,7 +33,7 @@ async def test_event_sourcing_complete():
         # 1. Create database
         print(f"\n1️⃣ Creating database: {test_db}")
         async with session.post(
-            "http://localhost:8000/api/v1/database/create",
+            f"{oms_base_url}/api/v1/database/create",
             json={"name": test_db, "description": "Test Event Sourcing 100%"},
             headers=headers,
         ) as resp:
@@ -45,7 +48,7 @@ async def test_event_sourcing_complete():
             for i in range(10):  # Try for 10 seconds
                 await asyncio.sleep(1)
                 async with session.get(
-                    f"http://localhost:8000/api/v1/database/exists/{test_db}"
+                    f"{oms_base_url}/api/v1/database/exists/{test_db}"
                 ) as check_resp:
                     check_result = await check_resp.json()
                     if check_result.get('data', {}).get('exists'):
@@ -77,7 +80,7 @@ async def test_event_sourcing_complete():
         }
         
         async with session.post(
-            f"http://localhost:8000/api/v1/ontology/{test_db}/create",
+            f"{oms_base_url}/api/v1/ontology/{test_db}/create",
             json=ontology_data,
             headers=headers,
         ) as resp:
@@ -97,7 +100,7 @@ async def test_event_sourcing_complete():
         
         # Check if database exists
         async with session.get(
-            f"http://localhost:8000/api/v1/database/exists/{test_db}"
+            f"{oms_base_url}/api/v1/database/exists/{test_db}"
         ) as resp:
             result = await resp.json()
             if result.get('data', {}).get('exists'):
@@ -107,7 +110,7 @@ async def test_event_sourcing_complete():
                 
         # Check if ontology class exists
         async with session.get(
-            f"http://localhost:8000/api/v1/ontology/{test_db}/class/{test_class}"
+            f"{oms_base_url}/api/v1/ontology/{test_db}/class/{test_class}"
         ) as resp:
             if resp.status == 200:
                 result = await resp.json()

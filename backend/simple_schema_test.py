@@ -6,15 +6,19 @@ Simpler approach: Use WOQL to add schema directly
 import asyncio
 import httpx
 import json
-import os
 import pytest
 import uuid
 
-OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhost:8000").rstrip("/")
+from shared.config.settings import get_settings
+
+
+def _oms_base_url() -> str:
+    return get_settings().services.oms_base_url.rstrip("/")
 
 
 def _admin_headers() -> dict:
-    admin_token = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "test-token").strip()
+    settings = get_settings()
+    admin_token = (settings.clients.oms_client_token or "test-token").strip()
     return {"X-Admin-Token": admin_token}
 
 
@@ -43,12 +47,13 @@ async def _post_with_retry(
 async def create_simple_schema(db_name: str):
     """Create schema using OMS ontology endpoints."""
     headers = _admin_headers()
+    oms_url = _oms_base_url()
     print(f"Creating schema for {db_name} via OMS...")
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         db_response = await _post_with_retry(
             client,
-            f"{OMS_URL}/api/v1/database/create",
+            f"{oms_url}/api/v1/database/create",
             json_payload={"name": db_name, "description": f"Test database for {db_name}"},
             headers=headers,
         )
@@ -61,7 +66,7 @@ async def create_simple_schema(db_name: str):
         # Wait for database availability
         for _ in range(20):
             exists_resp = await client.get(
-                f"{OMS_URL}/api/v1/database/exists/{db_name}",
+                f"{oms_url}/api/v1/database/exists/{db_name}",
                 headers=headers,
             )
             if exists_resp.status_code == 200 and (exists_resp.json().get("data") or {}).get("exists"):
@@ -105,7 +110,7 @@ async def create_simple_schema(db_name: str):
         for ontology in (client_ontology, product_ontology):
             response = await _post_with_retry(
                 client,
-                f"{OMS_URL}/api/v1/database/{db_name}/ontology",
+                f"{oms_url}/api/v1/database/{db_name}/ontology",
                 json_payload=ontology,
                 headers=headers,
             )
@@ -120,8 +125,8 @@ async def create_simple_schema(db_name: str):
 @pytest.mark.asyncio
 async def test_create_instance(db_name: str):
     """Test creating a lightweight instance"""
-    terminus_url = os.getenv("TERMINUS_SERVER_URL", "http://localhost:6363")
     headers = _admin_headers()
+    oms_url = _oms_base_url()
     
     print(f"\nTesting instance creation...")
     
@@ -143,7 +148,7 @@ async def test_create_instance(db_name: str):
     
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(
-            f"{OMS_URL}/api/v1/instances/{db_name}/async/Product/create",
+            f"{oms_url}/api/v1/instances/{db_name}/async/Product/create",
             json={"data": instance_data},
             headers=headers,
         )

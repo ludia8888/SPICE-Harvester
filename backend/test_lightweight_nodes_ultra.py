@@ -10,15 +10,13 @@ import json
 import aiohttp
 import time
 import pytest
-import os
+from shared.config.settings import get_settings
 
 
-OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhost:8000").rstrip("/")
-BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
-ELASTICSEARCH_URL = (
-    os.getenv("ELASTICSEARCH_URL")
-    or f"http://{os.getenv('ELASTICSEARCH_HOST', 'localhost')}:{os.getenv('ELASTICSEARCH_PORT', '9200')}"
-).rstrip("/")
+_SETTINGS = get_settings()
+OMS_URL = _SETTINGS.services.oms_base_url.rstrip("/")
+BFF_URL = _SETTINGS.services.bff_base_url.rstrip("/")
+ELASTICSEARCH_URL = _SETTINGS.database.elasticsearch_url.rstrip("/")
 
 
 async def _post_json_with_retry(
@@ -54,7 +52,8 @@ async def test_lightweight_architecture():
     print("🔥 TESTING LIGHTWEIGHT NODES ARCHITECTURE")
     print("=" * 70)
     
-    admin_token = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "test-token").strip()
+    settings = get_settings()
+    admin_token = str(settings.clients.oms_client_token or settings.clients.bff_admin_token or "test-token").strip()
     headers = {"X-Admin-Token": admin_token}
     async with aiohttp.ClientSession(headers=headers) as session:
         db_name = f"lightweight_test_{int(time.time())}"
@@ -164,11 +163,12 @@ async def test_lightweight_architecture():
                 }
             }
             
-            terminus_user = os.getenv("TERMINUS_USER", "admin")
-            terminus_key = os.getenv("TERMINUS_KEY", "admin")
-            terminus_account = os.getenv("TERMINUS_ACCOUNT", terminus_user)
+            terminus_url = settings.database.terminus_url.rstrip("/")
+            terminus_user = settings.database.terminus_user
+            terminus_key = settings.database.terminus_password
+            terminus_account = settings.database.terminus_account
             response = await client.post(
-                f"http://localhost:6363/api/woql/{terminus_account}/{db_name}",
+                f"{terminus_url}/api/woql/{terminus_account}/{db_name}",
                 json=woql_query,
                 auth=(terminus_user, terminus_key),
             )

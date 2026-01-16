@@ -14,10 +14,12 @@ import sys
 import urllib3
 from pathlib import Path
 
+from shared.config.settings import get_settings
+
 # Disable SSL warnings for development
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-def start_service(name, path, command, port, health_path="/health"):
+def start_service(name, path, command, port, *, protocol: str, verify_ssl: bool, health_path="/health"):
     """Start a service and verify it's running"""
     print(f"\n🚀 Starting {name}...")
     
@@ -36,10 +38,6 @@ def start_service(name, path, command, port, health_path="/health"):
     
     os.chdir(original_dir)
     
-    # Determine protocol
-    use_https = os.getenv("USE_HTTPS", "false").lower() in ("true", "1", "yes", "on")
-    protocol = "https" if use_https else "http"
-    
     # Wait for service to start
     max_attempts = 30
     for i in range(max_attempts):
@@ -47,7 +45,7 @@ def start_service(name, path, command, port, health_path="/health"):
             # Use verify=False for self-signed certificates in development
             response = requests.get(
                 f"{protocol}://localhost:{port}{health_path}",
-                verify=False if use_https else True
+                verify=verify_ssl,
             )
             if response.status_code == 200:
                 print(f"✅ {name} started successfully on port {port} ({protocol.upper()})")
@@ -95,7 +93,7 @@ def main():
     parser.add_argument(
         "--env",
         choices=["development", "production"],
-        default=os.getenv("SPICE_ENV", "development"),
+        default=get_settings().environment.value,
         help="Environment preset (default: development)",
     )
     args = parser.parse_args()
@@ -124,9 +122,12 @@ def main():
             print(f"❌ {name} main.py not found at {path}")
             return 1
     
+    settings = get_settings()
+
     # Determine protocol
-    use_https = os.getenv("USE_HTTPS", "false").lower() in ("true", "1", "yes", "on")
+    use_https = bool(settings.services.use_https)
     protocol = "https" if use_https else "http"
+    verify_ssl = False if use_https else True
     
     if use_https:
         print("\n🔐 Starting services with HTTPS enabled")
@@ -140,7 +141,9 @@ def main():
             "OMS",
             oms_path,
             f"{sys.executable} -m uvicorn main:app --host 0.0.0.0 --port 8000",
-            8000
+            8000,
+            protocol=protocol,
+            verify_ssl=verify_ssl,
         )
         
         if not oms_process:
@@ -153,7 +156,9 @@ def main():
             "Funnel",
             funnel_path,
             f"{sys.executable} -m uvicorn main:app --host 0.0.0.0 --port 8003",
-            8003
+            8003,
+            protocol=protocol,
+            verify_ssl=verify_ssl,
         )
         
         if not funnel_process:
@@ -168,6 +173,8 @@ def main():
             bff_path,
             f"{sys.executable} -m uvicorn main:app --host 0.0.0.0 --port 8002",
             8002,
+            protocol=protocol,
+            verify_ssl=verify_ssl,
             health_path="/api/v1/health",
         )
         
@@ -183,6 +190,8 @@ def main():
             agent_path,
             f"{sys.executable} -m uvicorn main:app --host 0.0.0.0 --port 8004",
             8004,
+            protocol=protocol,
+            verify_ssl=verify_ssl,
             health_path="/health",
         )
 

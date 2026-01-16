@@ -15,75 +15,32 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import os
 import re
 import time
-from pathlib import Path
-from typing import Dict, Iterable, Optional
-from urllib.parse import urlparse
+from typing import Iterable, Optional
 
 import asyncpg
 import httpx
 
-
-def _load_repo_dotenv() -> Dict[str, str]:
-    try:
-        repo_root = Path(__file__).resolve().parents[2]
-    except Exception:
-        return {}
-
-    env_path = repo_root / ".env"
-    if not env_path.exists():
-        return {}
-
-    values: Dict[str, str] = {}
-    for raw in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip("'").strip('"')
-        if key:
-            values[key] = value
-    return values
+from shared.config.settings import get_settings
 
 
 def _postgres_dsn_candidates() -> list[str]:
-    explicit = (os.getenv("POSTGRES_URL") or "").strip()
-    if explicit:
-        return [explicit]
-
-    dotenv = _load_repo_dotenv()
-    port_override = (os.getenv("POSTGRES_PORT_HOST") or "").strip() or (dotenv.get("POSTGRES_PORT_HOST") or "").strip()
-
-    ports: list[int] = []
-    if port_override:
-        try:
-            ports.append(int(port_override))
-        except ValueError:
-            pass
-
-    for p in (15433, 5433, 5432):
-        if p not in ports:
-            ports.append(p)
-
-    return [f"postgresql://spiceadmin:spicepass123@localhost:{p}/spicedb" for p in ports]
+    cfg = get_settings()
+    return [cfg.database.postgres_url]
 
 
 def _bff_base_url() -> str:
-    base = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
+    base = get_settings().services.bff_base_url.rstrip("/")
     if base.endswith("/api/v1"):
         return base
     return f"{base}/api/v1"
 
 
 def _admin_token() -> str:
-    for key in ("SMOKE_ADMIN_TOKEN", "BFF_ADMIN_TOKEN", "ADMIN_TOKEN"):
-        value = (os.getenv(key) or "").strip()
-        if value:
-            return value
-    return "change_me"
+    cfg = get_settings()
+    token = str(cfg.clients.bff_admin_token or cfg.clients.oms_client_token or "").strip()
+    return token or "change_me"
 
 
 def _extract_command_id(payload: object) -> Optional[str]:
@@ -113,11 +70,11 @@ async def _connect_postgres() -> asyncpg.Connection:
 
 
 async def _fetch_db_expected_seq(conn: asyncpg.Connection, *, db_name: str) -> Optional[int]:
-    schema = (os.getenv("EVENT_STORE_SEQUENCE_SCHEMA") or "spice_event_registry").strip()
+    schema = str(get_settings().event_sourcing.event_store_sequence_schema or "spice_event_registry").strip()
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", schema):
         raise ValueError(f"Invalid EVENT_STORE_SEQUENCE_SCHEMA: {schema!r}")
 
-    prefix = (os.getenv("EVENT_STORE_SEQUENCE_HANDLER_PREFIX") or "write_side").strip() or "write_side"
+    prefix = str(get_settings().event_sourcing.event_store_sequence_handler_prefix or "write_side").strip() or "write_side"
     handler = f"{prefix}:Database"
 
     row = await conn.fetchrow(
@@ -253,4 +210,3 @@ async def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(asyncio.run(main()))
-

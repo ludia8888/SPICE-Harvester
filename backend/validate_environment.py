@@ -1,277 +1,256 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
-🔥 THINK ULTRA! Complete Environment Validation Script
+SPICE Harvester Environment Validator (SSoT)
 
-This script validates:
-1. All environment variables are correctly set
-2. All services are accessible on correct ports
-3. Docker configuration matches local configuration
-4. All inter-service connections work
+Validates effective configuration and connectivity using the centralized
+Pydantic settings SSoT (`shared.config.settings.get_settings`).
+
+Security posture:
+- Does NOT auto-load `.env` (set `SPICE_LOAD_DOTENV=true` explicitly for local dev).
+- Does NOT print raw secrets (tokens/passwords are redacted).
 """
 
-import os
+from __future__ import annotations
+
 import asyncio
+import base64
+import os
+from typing import Any, Optional
+from urllib.parse import urlsplit, urlunsplit
+
 import aiohttp
 import asyncpg
-import redis.asyncio as redis
-from elasticsearch import AsyncElasticsearch
 from confluent_kafka.admin import AdminClient
-import json
-from dotenv import load_dotenv
+from elasticsearch import AsyncElasticsearch
+import redis.asyncio as redis
 
-# Load environment variables
-load_dotenv()
+from shared.config.settings import get_settings
+
+
+def _redact_url(url: str) -> str:
+    raw = str(url or "").strip()
+    if not raw:
+        return raw
+    try:
+        parts = urlsplit(raw)
+        if not (parts.username or parts.password):
+            return raw
+        hostname = parts.hostname or ""
+        netloc = hostname
+        if parts.port:
+            netloc = f"{hostname}:{parts.port}"
+        if parts.username:
+            netloc = f"{parts.username}:***@{netloc}"
+        return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    except Exception:
+        return "<redacted-url>"
+
+
+def _redact_secret(value: Optional[str], *, show: int = 2) -> str:
+    if value is None:
+        return ""
+    raw = str(value)
+    if not raw:
+        return ""
+    if len(raw) <= show * 2:
+        return "***"
+    return f"{raw[:show]}***{raw[-show:]}"
+
 
 class EnvironmentValidator:
-    def __init__(self):
-        self.results = {}
-        self.errors = []
-        
-    def print_header(self, title):
+    def __init__(self) -> None:
+        self.results: dict[str, bool] = {}
+        self.errors: list[str] = []
+        self.settings = get_settings()
+
+    def print_header(self, title: str) -> None:
         print("\n" + "=" * 70)
         print(f"🔍 {title}")
         print("=" * 70)
-        
-    def check_result(self, name, success, message=""):
+
+    def check_result(self, name: str, success: bool, message: str = "") -> None:
         if success:
             print(f"  ✅ {name}: {message if message else 'OK'}")
             self.results[name] = True
-        else:
-            print(f"  ❌ {name}: {message if message else 'FAILED'}")
-            self.results[name] = False
-            self.errors.append(f"{name}: {message}")
-    
-    def validate_env_variables(self):
-        """Validate all required environment variables"""
-        self.print_header("ENVIRONMENT VARIABLES VALIDATION")
-        
-        required_vars = {
-            # PostgreSQL
-            "POSTGRES_HOST": "localhost",
-            "POSTGRES_PORT": "5432",
-            "POSTGRES_USER": "spiceadmin",
-            "POSTGRES_PASSWORD": "spice123!",
-            "POSTGRES_DB": "spicedb",
-            
-            # Redis
-            "REDIS_HOST": "localhost",
-            "REDIS_PORT": "6379",
-            "REDIS_PASSWORD": "",  # Empty for local
-            
-            # Elasticsearch
-            "ELASTICSEARCH_HOST": "localhost",
-            "ELASTICSEARCH_PORT": "9200",
-            "ELASTICSEARCH_USERNAME": "elastic",
-            "ELASTICSEARCH_PASSWORD": "spice123!",
-            
-            # Kafka
-            "KAFKA_HOST": "localhost",
-            "KAFKA_PORT": "9092",
-            "KAFKA_BOOTSTRAP_SERVERS": "localhost:9092",
-            
-            # TerminusDB
-            "TERMINUS_SERVER_URL": "http://localhost:6363",
-            "TERMINUS_USER": "admin",
-            "TERMINUS_ACCOUNT": "admin",
-            "TERMINUS_KEY": "spice123!",
-            
-            # Services
-            "OMS_HOST": "localhost",
-            "OMS_PORT": "8000",
-            "BFF_HOST": "localhost",
-            "BFF_PORT": "8002",
-            "FUNNEL_HOST": "localhost",
-            "FUNNEL_PORT": "8003",
-            
-            # Docker
-            "DOCKER_CONTAINER": "false",
-            
-            # Feature Flags
-            "ENABLE_EVENT_SOURCING": "true",
-        }
-        
-        print("\n  📋 Checking required environment variables:")
-        for var, expected in required_vars.items():
-            actual = os.getenv(var)
-            if actual is None:
-                self.check_result(var, False, "NOT SET")
-            elif expected and actual != expected:
-                self.check_result(var, False, f"Expected '{expected}', got '{actual}'")
-            else:
-                self.check_result(var, True, actual or "Empty (OK)")
-    
-    async def check_postgresql(self):
-        """Check PostgreSQL connection and processed-event registry tables"""
+            return
+        print(f"  ❌ {name}: {message if message else 'FAILED'}")
+        self.results[name] = False
+        self.errors.append(f"{name}: {message}")
+
+    def validate_effective_settings(self) -> None:
+        self.print_header("EFFECTIVE SETTINGS (SSoT)")
+
+        cfg = self.settings
+        db = cfg.database
+        services = cfg.services
+        storage = cfg.storage
+
+        print("  📋 Runtime mode:")
+        self.check_result("Environment", True, cfg.environment.value)
+        self.check_result("HTTPS Enabled", True, str(bool(services.use_https)).lower())
+
+        print("\n  📋 Endpoints (redacted):")
+        self.check_result("OMS Base URL", True, services.oms_base_url)
+        self.check_result("BFF Base URL", True, services.bff_base_url)
+        self.check_result("Funnel Base URL", True, services.funnel_base_url)
+        self.check_result("Agent Base URL", True, services.agent_base_url)
+
+        self.check_result("Postgres URL", True, _redact_url(db.postgres_url))
+        self.check_result("Redis URL", True, _redact_url(db.redis_url))
+        self.check_result("Kafka Bootstrap", True, db.kafka_servers)
+        self.check_result("Elasticsearch URL", True, _redact_url(db.elasticsearch_url))
+
+        self.check_result("Terminus URL", True, db.terminus_url.rstrip("/"))
+        self.check_result("Terminus User", True, db.terminus_user)
+        self.check_result("Terminus Account", True, db.terminus_account)
+        self.check_result("Terminus Key", True, _redact_secret(db.terminus_password))
+
+        self.check_result("MinIO Endpoint", True, storage.minio_endpoint_url)
+        self.check_result("Event Store Bucket", True, storage.event_store_bucket)
+
+    async def check_postgresql(self) -> None:
         self.print_header("POSTGRESQL CONNECTION CHECK")
-        
+
+        dsn = self.settings.database.postgres_url
         try:
-            conn = await asyncpg.connect(
-                host=os.getenv("POSTGRES_HOST", "localhost"),
-                port=int(os.getenv("POSTGRES_PORT", "5432")),
-                user=os.getenv("POSTGRES_USER", "spiceadmin"),
-                password=os.getenv("POSTGRES_PASSWORD", "spice123!"),
-                database=os.getenv("POSTGRES_DB", "spicedb")
-            )
-            
-            self.check_result("PostgreSQL Connection", True, f"Connected to {os.getenv('POSTGRES_HOST')}:{os.getenv('POSTGRES_PORT')}")
-            
-            # Check spice_event_registry schema
-            schema_exists = await conn.fetchval("""
+            conn = await asyncpg.connect(dsn=dsn)
+            self.check_result("PostgreSQL Connection", True, f"Connected ({_redact_url(dsn)})")
+
+            schema_exists = await conn.fetchval(
+                """
                 SELECT EXISTS(
-                    SELECT 1 FROM information_schema.schemata 
+                    SELECT 1 FROM information_schema.schemata
                     WHERE schema_name = 'spice_event_registry'
                 )
-            """)
-            self.check_result("spice_event_registry Schema", schema_exists)
-            
-            # Check registry tables
-            if schema_exists:
-                processed_events_exists = await conn.fetchval("""
-                    SELECT EXISTS(
-                        SELECT 1 FROM information_schema.tables 
-                        WHERE table_schema = 'spice_event_registry' 
-                        AND table_name = 'processed_events'
-                    )
-                """)
-                self.check_result("processed_events Table", processed_events_exists)
-                
-                aggregate_versions_exists = await conn.fetchval("""
-                    SELECT EXISTS(
-                        SELECT 1 FROM information_schema.tables 
-                        WHERE table_schema = 'spice_event_registry' 
-                        AND table_name = 'aggregate_versions'
-                    )
-                """)
-                self.check_result("aggregate_versions Table", aggregate_versions_exists)
+                """
+            )
+            self.check_result("spice_event_registry Schema", bool(schema_exists))
 
-                if processed_events_exists:
-                    count = await conn.fetchval("SELECT COUNT(*) FROM spice_event_registry.processed_events")
-                    in_progress = await conn.fetchval("""
-                        SELECT COUNT(*) FROM spice_event_registry.processed_events 
-                        WHERE status = 'processing'
-                    """)
-                    self.check_result(
-                        "Processed Events Records",
-                        True,
-                        f"{count} total, {in_progress} processing",
+            if schema_exists:
+                processed_events_exists = await conn.fetchval(
+                    """
+                    SELECT EXISTS(
+                        SELECT 1 FROM information_schema.tables
+                        WHERE table_schema = 'spice_event_registry'
+                          AND table_name = 'processed_events'
                     )
-            
+                    """
+                )
+                self.check_result("processed_events Table", bool(processed_events_exists))
+
+                aggregate_versions_exists = await conn.fetchval(
+                    """
+                    SELECT EXISTS(
+                        SELECT 1 FROM information_schema.tables
+                        WHERE table_schema = 'spice_event_registry'
+                          AND table_name = 'aggregate_versions'
+                    )
+                    """
+                )
+                self.check_result("aggregate_versions Table", bool(aggregate_versions_exists))
+
             await conn.close()
-            
-        except Exception as e:
-            self.check_result("PostgreSQL Connection", False, str(e))
-    
-    async def check_redis(self):
-        """Check Redis connection"""
+        except Exception as exc:
+            self.check_result("PostgreSQL Connection", False, str(exc))
+
+    async def check_redis(self) -> None:
         self.print_header("REDIS CONNECTION CHECK")
-        
+
+        url = self.settings.database.redis_url
         try:
-            password = os.getenv("REDIS_PASSWORD", "")
-            if password:
-                redis_url = f"redis://:{password}@{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}"
-            else:
-                redis_url = f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}"
-            
-            client = redis.from_url(redis_url)
+            client = redis.from_url(url)
             await client.ping()
-            
-            self.check_result("Redis Connection", True, f"Connected to {os.getenv('REDIS_HOST')}:{os.getenv('REDIS_PORT')}")
-            
-            # Check some keys
+            self.check_result("Redis Connection", True, f"Connected ({_redact_url(url)})")
+
             keys = await client.keys("*")
             self.check_result("Redis Keys", True, f"{len(keys)} keys found")
-            
-            await client.close()
-            
-        except Exception as e:
-            self.check_result("Redis Connection", False, str(e))
-    
-    async def check_elasticsearch(self):
-        """Check Elasticsearch connection"""
+
+            await client.aclose()
+        except Exception as exc:
+            self.check_result("Redis Connection", False, str(exc))
+
+    async def check_elasticsearch(self) -> None:
         self.print_header("ELASTICSEARCH CONNECTION CHECK")
-        
+
+        db = self.settings.database
+        base = f"http://{db.elasticsearch_host}:{db.elasticsearch_port}"
         try:
-            es = AsyncElasticsearch(
-                [f"http://{os.getenv('ELASTICSEARCH_HOST', 'localhost')}:{os.getenv('ELASTICSEARCH_PORT', '9200')}"],
-                basic_auth=(
-                    os.getenv("ELASTICSEARCH_USERNAME", "elastic"),
-                    os.getenv("ELASTICSEARCH_PASSWORD", "spice123!")
-                )
-            )
-            
+            kwargs: dict[str, Any] = {}
+            if db.elasticsearch_username and db.elasticsearch_password:
+                kwargs["basic_auth"] = (db.elasticsearch_username, db.elasticsearch_password)
+
+            es = AsyncElasticsearch([base], request_timeout=db.elasticsearch_request_timeout, **kwargs)
             info = await es.info()
-            self.check_result("Elasticsearch Connection", True, f"Version {info['version']['number']}")
-            
-            # Check indices
+            version = ((info or {}).get("version") or {}).get("number", "unknown")
+            self.check_result("Elasticsearch Connection", True, f"Version {version}")
+
             indices = await es.cat.indices(format="json")
-            spice_indices = [idx for idx in indices if 'spice' in idx.get('index', '')]
+            spice_indices = [idx for idx in (indices or []) if "spice" in str(idx.get("index", "")).lower()]
             self.check_result("Elasticsearch Indices", True, f"{len(spice_indices)} SPICE indices")
-            
+
             await es.close()
-            
-        except Exception as e:
-            self.check_result("Elasticsearch Connection", False, str(e))
-    
-    def check_kafka(self):
-        """Check Kafka connection"""
+        except Exception as exc:
+            self.check_result("Elasticsearch Connection", False, str(exc))
+
+    def check_kafka(self) -> None:
         self.print_header("KAFKA CONNECTION CHECK")
-        
+
+        bootstrap = self.settings.database.kafka_servers
         try:
-            admin_client = AdminClient({
-                'bootstrap.servers': os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
-                'socket.timeout.ms': 5000,
-                'api.version.request.timeout.ms': 5000
-            })
-            
+            admin_client = AdminClient(
+                {
+                    "bootstrap.servers": bootstrap,
+                    "socket.timeout.ms": 5000,
+                    "api.version.request.timeout.ms": 5000,
+                }
+            )
             metadata = admin_client.list_topics(timeout=5)
-            topics = list(metadata.topics.keys())
-            
-            self.check_result("Kafka Connection", True, f"{len(topics)} topics")
-            
-            # Check required topics
+            topics = list((metadata.topics or {}).keys())
+            self.check_result("Kafka Connection", True, f"{len(topics)} topics ({bootstrap})")
+
             required_topics = [
                 "instance_commands",
                 "instance_events",
                 "ontology_commands",
-                "ontology_events"
+                "ontology_events",
+                "pipeline-jobs",
+                "objectify-jobs",
             ]
-            
-            for topic in required_topics:
-                if topic in topics:
-                    self.check_result(f"Topic: {topic}", True)
-                else:
-                    self.check_result(f"Topic: {topic}", False, "NOT FOUND")
-                    
-        except Exception as e:
-            self.check_result("Kafka Connection", False, str(e))
-    
-    async def check_terminus(self):
-        """Check TerminusDB connection"""
+            missing = [t for t in required_topics if t not in topics]
+            if missing:
+                self.check_result("Required Kafka Topics", False, f"Missing: {missing}")
+            else:
+                self.check_result("Required Kafka Topics", True, "All required topics exist")
+        except Exception as exc:
+            self.check_result("Kafka Connection", False, str(exc))
+
+    async def check_terminus(self) -> None:
         self.print_header("TERMINUSDB CONNECTION CHECK")
-        
+
+        db = self.settings.database
+        server_url = db.terminus_url.rstrip("/")
+
         try:
             async with aiohttp.ClientSession() as session:
-                # Get auth header
-                import base64
-                auth_str = f"{os.getenv('TERMINUS_USER', 'admin')}:{os.getenv('TERMINUS_KEY', 'spice123!')}"
+                auth_str = f"{db.terminus_user}:{db.terminus_password}"
                 auth_header = f"Basic {base64.b64encode(auth_str.encode()).decode()}"
-                
-                # Check connection
+
                 async with session.get(
-                    f"{os.getenv('TERMINUS_SERVER_URL', 'http://localhost:6363')}/api/info",
-                    headers={"Authorization": auth_header}
+                    f"{server_url}/api/info",
+                    headers={"Authorization": auth_header},
+                    timeout=aiohttp.ClientTimeout(total=db.terminus_read_timeout_seconds),
                 ) as resp:
                     if resp.status == 200:
                         info = await resp.json()
-                        version = info.get('api:info', {}).get('terminusdb', {}).get('version', 'unknown')
+                        version = info.get("api:info", {}).get("terminusdb", {}).get("version", "unknown")
                         self.check_result("TerminusDB Connection", True, f"Version {version}")
                     else:
                         self.check_result("TerminusDB Connection", False, f"Status {resp.status}")
-                
-                # List databases
+
                 async with session.get(
-                    f"{os.getenv('TERMINUS_SERVER_URL', 'http://localhost:6363')}/api/db/admin",
-                    headers={"Authorization": auth_header}
+                    f"{server_url}/api/db/{db.terminus_account}",
+                    headers={"Authorization": auth_header},
+                    timeout=aiohttp.ClientTimeout(total=db.terminus_read_timeout_seconds),
                 ) as resp:
                     if resp.status == 200:
                         dbs = await resp.json()
@@ -279,135 +258,113 @@ class EnvironmentValidator:
                         self.check_result("TerminusDB Databases", True, f"{db_count} databases")
                     else:
                         self.check_result("TerminusDB Databases", False, f"Status {resp.status}")
-                        
-        except Exception as e:
-            self.check_result("TerminusDB Connection", False, str(e))
-    
-    async def check_services(self):
-        """Check all microservices"""
+        except Exception as exc:
+            self.check_result("TerminusDB Connection", False, str(exc))
+
+    async def check_services(self) -> None:
         self.print_header("MICROSERVICES HEALTH CHECK")
-        
-        services = [
-            ("OMS", f"http://localhost:{os.getenv('OMS_PORT', '8000')}/health"),
-            ("BFF", f"http://localhost:{os.getenv('BFF_PORT', '8002')}/api/v1/health"),
-            ("Funnel", f"http://localhost:{os.getenv('FUNNEL_PORT', '8003')}/health"),
+
+        services = self.settings.services
+        targets = [
+            ("OMS", f"{services.oms_base_url}/health"),
+            ("BFF", f"{services.bff_base_url}/api/v1/health"),
+            ("Funnel", f"{services.funnel_base_url}/health"),
+            ("Agent", f"{services.agent_base_url}/health"),
         ]
-        
+
         async with aiohttp.ClientSession() as session:
-            for name, url in services:
+            for name, url in targets:
                 try:
                     async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                         if resp.status == 200:
-                            data = await resp.json()
-                            status = data.get('data', {}).get('status', 'unknown')
-                            self.check_result(f"{name} Service", True, f"Status: {status}")
+                            self.check_result(f"{name} Service", True, "Healthy")
                         else:
-                            self.check_result(f"{name} Service", False, f"Status {resp.status}")
-                except Exception as e:
-                    self.check_result(f"{name} Service", False, str(e))
-    
-    def check_docker_config(self):
-        """Check Docker configuration"""
-        self.print_header("DOCKER CONFIGURATION CHECK")
+                            self.check_result(f"{name} Service", False, f"HTTP {resp.status}")
+                except Exception as exc:
+                    self.check_result(f"{name} Service", False, str(exc))
+
+    def check_docker_config(self) -> None:
+        self.print_header("DOCKER COMPOSE CHECK")
 
         docker_compose_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docker-compose.yml")
-        
-        if os.path.exists(docker_compose_path):
-            with open(docker_compose_path, 'r') as f:
-                content = f.read()
-                
-            # Check key configurations
-            checks = [
-                ("PostgreSQL Port", "5432:5432" in content or "5433:5432" in content),
-                ("Redis Port", "6379:6379" in content),
-                ("Elasticsearch Port", "9200:9200" in content),
-                ("Kafka Port", "9092:9092" in content),
-                ("TerminusDB Port", "6363:6363" in content),
-            ]
-            
-            for name, exists in checks:
-                self.check_result(name, exists)
-        else:
-            self.check_result("docker-compose.yml", False, "File not found")
-    
-    async def check_workers(self):
-        """Check background workers"""
-        self.print_header("BACKGROUND WORKERS CHECK")
-        
+        if not os.path.exists(docker_compose_path):
+            self.check_result("backend/docker-compose.yml", False, "File not found")
+            return
+
+        content = open(docker_compose_path, "r", encoding="utf-8").read()
+        checks = [
+            ("PostgreSQL Port", (":5432" in content) and (":5433" in content or "POSTGRES_PORT_HOST" in content)),
+            ("Redis Port", "6379:6379" in content or "REDIS_PORT_HOST" in content),
+            ("Elasticsearch Port", "9200:9200" in content),
+            ("Kafka Port", ":9092" in content and ("39092" in content or "KAFKA_PORT_HOST" in content)),
+            ("TerminusDB Port", "6363:6363" in content),
+            ("MinIO Port", ":9000" in content and ("MINIO_PORT_HOST" in content or "9000:9000" in content)),
+        ]
+        for name, ok in checks:
+            self.check_result(name, bool(ok))
+
+    async def check_workers(self) -> None:
+        self.print_header("BACKGROUND WORKERS CHECK (BEST-EFFORT)")
+
         import subprocess
-        
+
         workers = [
             "message_relay",
             "ontology_worker",
             "projection_worker",
-            "instance_worker"
+            "instance_worker",
+            "pipeline_worker",
         ]
-        
+
         for worker in workers:
             try:
-                result = subprocess.run(
-                    ["pgrep", "-f", worker],
-                    capture_output=True,
-                    text=True
-                )
+                result = subprocess.run(["pgrep", "-f", worker], capture_output=True, text=True, check=False)
                 if result.returncode == 0:
-                    pids = result.stdout.strip().split('\n')
-                    self.check_result(f"{worker}", True, f"Running (PID: {pids[0]})")
+                    pids = [pid for pid in result.stdout.strip().split("\n") if pid.strip()]
+                    self.check_result(worker, True, f"Running (PID: {pids[0]})" if pids else "Running")
                 else:
-                    self.check_result(f"{worker}", False, "Not running")
-            except Exception as e:
-                self.check_result(f"{worker}", False, str(e))
-    
-    async def run_all_checks(self):
-        """Run all validation checks"""
+                    self.check_result(worker, False, "Not running")
+            except Exception as exc:
+                self.check_result(worker, False, str(exc))
+
+    async def run_all_checks(self) -> bool:
         print("\n" + "=" * 70)
-        print("🔥 THINK ULTRA! SPICE HARVESTER ENVIRONMENT VALIDATION")
+        print("🔥 SPICE HARVESTER ENVIRONMENT VALIDATION (SSoT)")
         print("=" * 70)
-        
-        # Synchronous checks
-        self.validate_env_variables()
+
+        self.validate_effective_settings()
         self.check_docker_config()
         self.check_kafka()
-        
-        # Asynchronous checks
+
         await self.check_postgresql()
         await self.check_redis()
         await self.check_elasticsearch()
         await self.check_terminus()
         await self.check_services()
         await self.check_workers()
-        
-        # Summary
+
         self.print_header("VALIDATION SUMMARY")
-        
         total = len(self.results)
         passed = sum(1 for v in self.results.values() if v)
         failed = total - passed
-        
+
         print(f"\n  📊 Results: {passed}/{total} checks passed")
-        
-        if failed > 0:
+        if failed:
             print(f"\n  ❌ Failed checks ({failed}):")
             for error in self.errors:
                 print(f"    - {error}")
         else:
-            print("\n  🎉 All checks passed! Environment is properly configured.")
-        
+            print("\n  🎉 All checks passed! Environment looks healthy.")
+
         return failed == 0
 
-async def main():
+
+async def main() -> int:
     validator = EnvironmentValidator()
-    success = await validator.run_all_checks()
-    
-    if success:
-        print("\n✅ Environment validation completed successfully!")
-        print("🚀 Your SPICE HARVESTER environment is ready for production!")
-    else:
-        print("\n⚠️ Environment validation found issues.")
-        print("Please fix the errors above and run validation again.")
-    
-    return 0 if success else 1
+    ok = await validator.run_all_checks()
+    return 0 if ok else 1
+
 
 if __name__ == "__main__":
-    exit_code = asyncio.run(main())
-    exit(exit_code)
+    raise SystemExit(asyncio.run(main()))
+

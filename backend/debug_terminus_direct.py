@@ -7,9 +7,7 @@ ULTRA DEBUG: Direct TerminusDB Investigation
 import asyncio
 import httpx
 import json
-import os
-
-from shared.config.service_config import ServiceConfig
+from shared.config.settings import get_settings
 from shared.models.config import ConnectionConfig
 
 async def debug_terminusdb_directly():
@@ -17,11 +15,12 @@ async def debug_terminusdb_directly():
     print('=' * 60)
     
     # Get connection config
+    cfg = get_settings().database
     connection_info = ConnectionConfig(
-        server_url=ServiceConfig.get_terminus_url(),
-        user=os.getenv('TERMINUS_USER', 'admin'),
-        account=os.getenv('TERMINUS_ACCOUNT', 'admin'), 
-        key=os.getenv('TERMINUS_KEY', 'admin123'),
+        server_url=cfg.terminus_url.rstrip("/"),
+        user=cfg.terminus_user,
+        account=cfg.terminus_account,
+        key=cfg.terminus_password,
     )
     
     print(f'📋 TerminusDB Config:')

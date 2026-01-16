@@ -7,22 +7,24 @@
 import asyncio
 import aiohttp
 import json
-import os
 import time
 from datetime import datetime
 from typing import Dict, Any, List
 import pytest
 
+from shared.config.settings import get_settings
+
 # Configuration
-OMS_URL = "http://localhost:8000"
-BFF_URL = "http://localhost:8002"
+_SETTINGS = get_settings()
+OMS_URL = _SETTINGS.services.oms_base_url.rstrip("/")
+BFF_URL = _SETTINGS.services.bff_base_url.rstrip("/")
 TEST_DB = f"arch_test_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_complete_user_flow():
-    admin_token = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "test-token").strip()
+    admin_token = (_SETTINGS.clients.oms_client_token or "test-token").strip()
     headers = {"X-Admin-Token": admin_token}
 
     """완전한 user flow 테스트"""

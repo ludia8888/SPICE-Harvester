@@ -4,24 +4,30 @@ Debug TerminusDB Authentication
 실제로 OMS가 어떤 인증 정보를 사용하는지 확인
 """
 
-import os
 import asyncio
 import base64
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+from shared.config.settings import get_settings
 
 async def debug_terminus_auth():
     print("🔍 TerminusDB Authentication Debug")
     print("=" * 50)
-    
-    # Show environment variables
-    print("📋 Environment Variables:")
-    print(f"   TERMINUS_SERVER_URL: {os.getenv('TERMINUS_SERVER_URL')}")
-    print(f"   TERMINUS_USER: {os.getenv('TERMINUS_USER')}")
-    print(f"   TERMINUS_ACCOUNT: {os.getenv('TERMINUS_ACCOUNT')}")
-    print(f"   TERMINUS_KEY: {os.getenv('TERMINUS_KEY')}")
+
+    def _mask_secret(value: str, *, show: int = 2) -> str:
+        raw = str(value or "")
+        if not raw:
+            return ""
+        if len(raw) <= show * 2:
+            return "***"
+        return f"{raw[:show]}***{raw[-show:]}"
+
+    cfg = get_settings().database
+    print("📋 Effective Terminus Settings (SSoT):")
+    print(f"   server_url: {cfg.terminus_url}")
+    print(f"   user: {cfg.terminus_user}")
+    print(f"   account: {cfg.terminus_account}")
+    print(f"   key: {_mask_secret(cfg.terminus_password)}")
+    print(f"   ssl_verify: {cfg.terminus_ssl_verify}")
     print("")
     
     # Test OMS connection config
@@ -29,11 +35,11 @@ async def debug_terminus_auth():
     from shared.models.config import ConnectionConfig
     
     connection_info = ConnectionConfig(
-        server_url=os.getenv("TERMINUS_SERVER_URL", "http://localhost:6364"),
-        account=os.getenv("TERMINUS_ACCOUNT", "admin"),
-        user=os.getenv("TERMINUS_USER", "admin"),
-        key=os.getenv("TERMINUS_KEY", "admin"),
-        ssl_verify=os.getenv("TERMINUS_SSL_VERIFY", "true").lower() == "true",
+        server_url=cfg.terminus_url,
+        account=cfg.terminus_account,
+        user=cfg.terminus_user,
+        key=cfg.terminus_password,
+        ssl_verify=bool(cfg.terminus_ssl_verify),
     )
     
     print(f"   server_url: {connection_info.server_url}")
@@ -48,9 +54,9 @@ async def debug_terminus_auth():
     encoded_credentials = base64.b64encode(credentials.encode()).decode()
     auth_header = f"Basic {encoded_credentials}"
     
-    print(f"   Credentials: {credentials}")
-    print(f"   Base64 Encoded: {encoded_credentials}")
-    print(f"   Auth Header: {auth_header}")
+    print("   Credentials: <redacted>")
+    print("   Base64 Encoded: <redacted>")
+    print("   Auth Header: <redacted>")
     print("")
     
     # Test direct TerminusDB connection

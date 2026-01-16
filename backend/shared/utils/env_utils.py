@@ -14,12 +14,12 @@ def parse_bool(raw: str) -> Optional[bool]:
 
 
 def parse_bool_env(name: str, default: Optional[bool] = None) -> Optional[bool]:
-    parsed = parse_bool(os.getenv(name, ""))
+    parsed = parse_bool(str(os.environ.get(name, "")))
     return parsed if parsed is not None else default
 
 
 def parse_int_env(name: str, default: int, *, min_value: int = 0, max_value: int = 1_000_000) -> int:
-    raw = (os.getenv(name) or "").strip()
+    raw = str(os.environ.get(name, "")).strip()
     if not raw:
         return default
     try:

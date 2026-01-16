@@ -15,6 +15,8 @@ import asyncpg
 import boto3
 from botocore.exceptions import ClientError
 
+from shared.config.settings import get_settings
+
 # Set critical environment variable for local running
 os.environ["DOCKER_CONTAINER"] = "false"
 
@@ -27,6 +29,8 @@ async def main():
     all_checks_passed = True
     issues_found = []
     
+    cfg = get_settings()
+
     async with aiohttp.ClientSession() as session:
         
         # 1. Service Health Checks
@@ -166,7 +170,7 @@ async def main():
             )
             
             # Check event-store bucket
-            bucket = os.getenv("EVENT_STORE_BUCKET", "spice-event-store")
+            bucket = cfg.storage.event_store_bucket
             try:
                 s3_client.head_bucket(Bucket=bucket)
                 # Count objects

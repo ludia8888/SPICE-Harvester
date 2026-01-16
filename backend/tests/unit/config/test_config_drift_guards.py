@@ -9,7 +9,8 @@ from shared.config.app_config import AppConfig
 
 
 def _disable_env_file(monkeypatch: pytest.MonkeyPatch) -> None:
-    # settings.py loads `.env` unless DOCKER_CONTAINER is set.
+    # settings.py reads `.env` only when SPICE_LOAD_DOTENV=true and not in Docker;
+    # force-disable dotenv reads for deterministic unit tests.
     monkeypatch.setenv("DOCKER_CONTAINER", "1")
 
 
@@ -23,6 +24,9 @@ def _iter_runtime_python_files(repo_backend: Path) -> list[Path]:
         repo_backend / "message_relay",
         repo_backend / "data_connector",
         repo_backend / "monitoring",
+        repo_backend / "perf",
+        repo_backend / "scripts",
+        repo_backend / "examples",
     ]
 
     for child in repo_backend.iterdir():
@@ -36,7 +40,12 @@ def _iter_runtime_python_files(repo_backend: Path) -> list[Path]:
         if not root.exists():
             continue
         files.extend(sorted(root.rglob("*.py")))
-    return files
+
+    # Include backend root-level scripts (but intentionally exclude backend/tests/**).
+    files.extend(sorted(repo_backend.glob("*.py")))
+
+    # Ensure stable output + no duplicates.
+    return sorted(set(files))
 
 
 def test_app_config_reflects_current_settings(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -53,8 +62,6 @@ def test_no_os_getenv_calls_outside_settings_module() -> None:
     repo_backend = Path(__file__).resolve().parents[3]
     allowed = {
         repo_backend / "shared" / "config" / "settings.py",
-        # Test-only helper (unit-tested) – not used by services/workers directly.
-        repo_backend / "shared" / "utils" / "env_utils.py",
     }
 
     offenders: list[str] = []

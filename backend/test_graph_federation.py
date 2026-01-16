@@ -14,14 +14,13 @@ import time
 
 import aiohttp
 import pytest
-import os
 
-OMS_URL = (os.getenv("OMS_BASE_URL") or os.getenv("OMS_URL") or "http://localhost:8000").rstrip("/")
-BFF_URL = (os.getenv("BFF_BASE_URL") or os.getenv("BFF_URL") or "http://localhost:8002").rstrip("/")
-ELASTICSEARCH_URL = (
-    os.getenv("ELASTICSEARCH_URL")
-    or f"http://{os.getenv('ELASTICSEARCH_HOST', 'localhost')}:{os.getenv('ELASTICSEARCH_PORT', '9200')}"
-).rstrip("/")
+from shared.config.settings import get_settings
+
+_SETTINGS = get_settings()
+OMS_URL = _SETTINGS.services.oms_base_url.rstrip("/")
+BFF_URL = _SETTINGS.services.bff_base_url.rstrip("/")
+ELASTICSEARCH_URL = _SETTINGS.database.elasticsearch_url.rstrip("/")
 
 
 async def _request_json(
@@ -60,7 +59,8 @@ async def test_graph_federation():
     print("🔥 TESTING GRAPH FEDERATION")
     print("=" * 70)
     
-    admin_token = (os.getenv("ADMIN_TOKEN") or os.getenv("OMS_ADMIN_TOKEN") or "").strip()
+    settings = get_settings()
+    admin_token = str(settings.clients.oms_client_token or settings.clients.bff_admin_token or "").strip()
     if not admin_token:
         raise RuntimeError("ADMIN_TOKEN is required for federation test")
     headers = {"X-Admin-Token": admin_token}

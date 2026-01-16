@@ -149,13 +149,14 @@ async def add_system_fields_to_all_ontologies(db_name: str) -> Dict[str, Any]:
     # Initialize TerminusDB connection
     from oms.services.async_terminus import AsyncTerminusService
     from shared.models.config import ConnectionConfig
-    import os
+    from shared.config.settings import get_settings
     
+    cfg = get_settings().database
     connection_info = ConnectionConfig(
-        server_url=os.getenv("TERMINUS_SERVER_URL", "http://localhost:6363"),
-        user="admin",
-        account="admin",
-        key="spice123!"
+        server_url=cfg.terminus_url,
+        user=cfg.terminus_user,
+        account=cfg.terminus_account,
+        key=cfg.terminus_password,
     )
     
     terminus_service = AsyncTerminusService(connection_info)

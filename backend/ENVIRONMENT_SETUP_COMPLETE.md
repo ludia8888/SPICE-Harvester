@@ -31,7 +31,7 @@ ENABLE_EVENT_SOURCING=true   # ✅ Event Sourcing 활성화
 | PostgreSQL | 5433 (host) / 5432 (container) | ✅ Running | `processed_events`/`aggregate_versions` 레지스트리 |
 | Redis | 6379 | ✅ Running | 캐싱 & 세션 |
 | Elasticsearch | 9200 | ✅ Running | 전체 문서 저장 |
-| Kafka | 9092 | ✅ Running | 이벤트 스트리밍 |
+| Kafka | 39092 (host) / 9092 (container) | ✅ Running | 이벤트 스트리밍 |
 | TerminusDB | 6363 | ✅ Running | 그래프 & 온톨로지 |
 | OMS | 8000 | ✅ Running | 온톨로지 관리 |
 | BFF | 8002 | ✅ Running | Graph Federation |
@@ -127,7 +127,7 @@ python validate_environment.py
 2. [ ] `/tmp/*.log` 파일에서 에러 로그 확인
 3. [ ] `ps aux | grep -E "worker|relay"` 로 프로세스 확인
 4. [ ] PostgreSQL 레지스트리 확인: `SELECT * FROM spice_event_registry.processed_events ORDER BY processed_at DESC LIMIT 50`
-5. [ ] Kafka 토픽 확인: `kafka-topics --list --bootstrap-server localhost:9092`
+5. [ ] Kafka 토픽 확인: `kafka-topics --list --bootstrap-server localhost:39092`
 
 ---
 *THINK ULTRA 원칙에 따라 모든 설정이 근본적으로 해결되었습니다.*
