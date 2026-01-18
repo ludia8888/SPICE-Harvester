@@ -810,6 +810,29 @@ export type AIQueryRequest = {
   include_provenance?: boolean
 }
 
+export type AIIntentRoute = 'chat' | 'query' | 'plan'
+export type AIIntentType = 'greeting' | 'small_talk' | 'help' | 'data_query' | 'plan_request' | 'unknown'
+
+export type AIIntentRequest = {
+  question: string
+  db_name?: string | null
+  project_name?: string | null
+  pipeline_name?: string | null
+  language?: string | null
+  context?: Record<string, unknown> | null
+}
+
+export type AIIntentResponse = {
+  intent: AIIntentType
+  route: AIIntentRoute
+  confidence: number
+  requires_clarification: boolean
+  clarifying_question?: string
+  reply?: string
+  missing_fields?: string[]
+  llm?: Record<string, unknown>
+}
+
 export const aiQuery = async (dbName: string, payload: AIQueryRequest) => {
   const encoded = encodeURIComponent(dbName)
   const data = await requestApi<Record<string, unknown>>(
@@ -825,6 +848,22 @@ export const aiQuery = async (dbName: string, payload: AIQueryRequest) => {
       body: JSON.stringify(payload),
     },
     'AI query failed',
+  )
+  return data
+}
+
+export const aiIntent = async (payload: AIIntentRequest) => {
+  const data = await requestApi<AIIntentResponse>(
+    '/api/v1/ai/intent',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+      },
+      body: JSON.stringify(payload),
+    },
+    'AI intent routing failed',
   )
   return data
 }

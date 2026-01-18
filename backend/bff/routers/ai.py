@@ -26,12 +26,23 @@ from bff.dependencies import (
 from bff.services.oms_client import OMSClient
 from shared.dependencies.providers import AuditLogStoreDep, LLMGatewayDep, LineageStoreDep, RedisServiceDep
 from shared.middleware.rate_limiter import RateLimitPresets, rate_limit
-from shared.models.ai import AIAnswer, AIQueryPlan, AIQueryRequest, AIQueryResponse, AIQueryTool
+from shared.models.ai import (
+    AIAnswer,
+    AIIntentDraft,
+    AIIntentRequest,
+    AIIntentResponse,
+    AIIntentRoute,
+    AIIntentType,
+    AIQueryPlan,
+    AIQueryRequest,
+    AIQueryResponse,
+    AIQueryTool,
+)
 from shared.models.graph_query import GraphQueryRequest, GraphQueryResponse
 from shared.security.input_sanitizer import sanitize_input, validate_branch_name, validate_db_name
 from shared.services.redis_service import RedisService
 from shared.services.llm_gateway import LLMOutputValidationError, LLMRequestError, LLMUnavailableError
-from shared.utils.language import get_accept_language
+from shared.utils.language import detect_language_from_text, get_accept_language, normalize_language
 from shared.utils.llm_safety import digest_for_audit, mask_pii, sample_items
 
 # Reuse the existing graph query execution logic (single source of truth)
@@ -42,6 +53,155 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 
+def _default_clarifying_question(lang: str) -> str:
+    if lang.startswith("ko"):
+        return "어떤 프로젝트(데이터베이스)를 기준으로 볼까요?"
+    return "Which project/database should I use?"
+
+
+def _default_help_reply(lang: str) -> str:
+    if lang.startswith("ko"):
+        return "데이터 조회, 파이프라인 계획/실행, 스키마 탐색을 도와줄 수 있어요. 어떤 작업을 할까요?"
+    return "I can help with data queries, pipeline planning/execution, and schema exploration. What should we do?"
+
+
+def _default_greeting_reply(lang: str) -> str:
+    if lang.startswith("ko"):
+        return "안녕하세요! 무엇을 도와드릴까요?"
+    return "Hello! How can I help?"
+
+
+def _build_intent_prompts(*, question: str, lang: str, context: Dict[str, Any]) -> tuple[str, str]:
+    system_prompt = (
+        "You are the SPICE AI Agent and an intent router for a data platform assistant. "
+        "Classify the user's intent and choose a route: chat, query, or plan. "
+        "Intent/route consistency: greeting/small_talk/help => route=chat with a friendly reply. "
+        "data_query => route=query. plan_request => route=plan. "
+        "If the intent is ambiguous or missing required context, set requires_clarification=true "
+        "and provide a short clarifying_question in the user's language. "
+        "When route=chat, provide a brief, friendly reply. "
+        "Do not use requires_clarification for simple greetings or small talk. "
+        "Always respond with strict JSON that matches the schema."
+    )
+    user_payload = {
+        "question": question,
+        "language": lang,
+        "context": context,
+        "available_routes": ["chat", "query", "plan"],
+        "intent_labels": [item.value for item in AIIntentType],
+        "examples": [
+            {
+                "question": "안녕",
+                "expected": {"intent": "greeting", "route": "chat", "requires_clarification": False},
+            },
+            {
+                "question": "감사합니다",
+                "expected": {"intent": "small_talk", "route": "chat", "requires_clarification": False},
+            },
+        ],
+    }
+    user_prompt = json.dumps(user_payload, ensure_ascii=True)
+    return system_prompt, user_prompt
+
+
+@router.post("/intent", response_model=AIIntentResponse)
+@rate_limit(**RateLimitPresets.STRICT)
+async def ai_intent(
+    body: AIIntentRequest,
+    request: Request,
+    *,
+    llm: LLMGatewayDep,
+    redis_service: RedisServiceDep,
+    audit_store: AuditLogStoreDep,
+) -> AIIntentResponse:
+    payload = sanitize_input(body.model_dump(exclude_none=True))
+    question = str(payload.get("question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="question is required")
+
+    lang_hint = str(body.language or get_accept_language(request) or "en").strip()
+    lang = normalize_language(lang_hint)
+    question_lang = detect_language_from_text(question)
+    if question_lang and question_lang != lang:
+        lang = question_lang
+    db_name = str(payload.get("db_name") or "").strip() or None
+    context = {
+        "db_name": db_name,
+        "project_name": payload.get("project_name"),
+        "pipeline_name": payload.get("pipeline_name"),
+        "context": payload.get("context") or {},
+    }
+
+    system_prompt, user_prompt = _build_intent_prompts(question=question, lang=lang, context=context)
+    try:
+        response, meta = await llm.complete_json(
+            task="INTENT_ROUTING",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=AIIntentDraft,
+            redis_service=redis_service,
+            audit_store=audit_store,
+            audit_partition_key="ai:intent",
+            audit_actor="bff",
+            audit_resource_id=f"ai:intent:{uuid4()}",
+            audit_metadata={"lang": lang},
+        )
+    except (LLMUnavailableError, LLMRequestError, LLMOutputValidationError, Exception):
+        return AIIntentResponse(
+            intent=AIIntentType.unknown,
+            route=AIIntentRoute.chat,
+            confidence=0.2,
+            requires_clarification=True,
+            clarifying_question=_default_help_reply(lang),
+        )
+
+    draft = AIIntentDraft.model_validate(response.model_dump(mode="json"))
+    intent = draft.intent or AIIntentType.unknown
+    route = draft.route or AIIntentRoute.chat
+    confidence = float(draft.confidence) if draft.confidence is not None else 0.2
+    confidence = max(0.0, min(confidence, 1.0))
+    requires_clarification = bool(draft.requires_clarification) if draft.requires_clarification is not None else False
+    clarifying_question = (draft.clarifying_question or "").strip() or None
+    reply = (draft.reply or "").strip() or None
+    missing_fields = [str(item).strip() for item in (draft.missing_fields or []) if str(item).strip()]
+
+    if intent in {AIIntentType.greeting, AIIntentType.small_talk, AIIntentType.help}:
+        route = AIIntentRoute.chat
+        requires_clarification = False
+        missing_fields = []
+        if not reply:
+            reply = _default_greeting_reply(lang) if intent == AIIntentType.greeting else _default_help_reply(lang)
+
+    if route in {AIIntentRoute.query, AIIntentRoute.plan} and not db_name:
+        requires_clarification = True
+        missing_fields = sorted(set(missing_fields + ["db_name"]))
+        if not clarifying_question:
+            clarifying_question = _default_clarifying_question(lang)
+
+    if route in {AIIntentRoute.query, AIIntentRoute.plan} and confidence < 0.55 and not requires_clarification:
+        requires_clarification = True
+        clarifying_question = clarifying_question or _default_help_reply(lang)
+
+    if route == AIIntentRoute.chat and not reply:
+        reply = _default_help_reply(lang)
+
+    result = AIIntentResponse(
+        intent=intent,
+        route=route,
+        confidence=confidence,
+        requires_clarification=requires_clarification,
+        clarifying_question=clarifying_question,
+        reply=reply,
+        missing_fields=missing_fields,
+    )
+    result.llm = {
+        "provider": meta.provider,
+        "model": meta.model,
+        "cache_hit": meta.cache_hit,
+        "latency_ms": meta.latency_ms,
+    }
+    return result
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -49,31 +209,6 @@ def _now_iso() -> str:
 
 def _cap_int(value: int, *, lo: int, hi: int) -> int:
     return max(lo, min(int(value), hi))
-
-
-def _wants_paths(question: str) -> bool:
-    """
-    Best-effort intent detection for "why/path" style questions.
-
-    We keep this deliberately simple and domain-neutral:
-    - Path questions often contain keywords like "경로", "path", "route".
-    - "왜/이유" alone is too broad, so we also look for graph-ish words like "연결/관계".
-    """
-    q = (question or "").strip()
-    if not q:
-        return False
-
-    q_lower = q.lower()
-    if any(token in q_lower for token in ("path", "route", "trace")) or "경로" in q:
-        return True
-
-    if ("왜" in q or "이유" in q) and ("연결" in q or "관계" in q):
-        return True
-
-    if "why" in q_lower and any(token in q_lower for token in ("connect", "linked", "relationship")):
-        return True
-
-    return False
 
 
 async def _load_schema_context(
@@ -309,19 +444,6 @@ def _validate_and_cap_plan(plan: AIQueryPlan, *, limit_cap: int) -> AIQueryPlan:
     return plan
 
 
-def _apply_rule_based_overrides(plan: AIQueryPlan, *, question: str) -> AIQueryPlan:
-    """
-    Deterministic post-processing to reduce dependence on perfect LLM planning.
-    """
-    if _wants_paths(question):
-        if plan.tool == AIQueryTool.graph_query and plan.graph_query:
-            plan.graph_query.include_paths = True
-            plan.graph_query.no_cycles = True
-        else:
-            plan.warnings.append("path_intent_detected(recommend_graph_query)")
-    return plan
-
-
 async def _execute_label_query(
     *,
     db_name: str,
@@ -492,7 +614,6 @@ async def translate_query_plan(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
     plan = _validate_and_cap_plan(plan_raw, limit_cap=limit_cap)
-    plan = _apply_rule_based_overrides(plan, question=body.question)
 
     return {
         "plan": plan.model_dump(mode="json"),
@@ -573,7 +694,6 @@ async def ai_query(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
     plan = _validate_and_cap_plan(plan_raw, limit_cap=limit_cap)
-    plan = _apply_rule_based_overrides(plan, question=body.question)
 
     if body.mode.value != "auto" and plan.tool.value != body.mode.value:
         raise HTTPException(

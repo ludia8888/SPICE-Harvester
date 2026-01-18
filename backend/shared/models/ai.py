@@ -11,6 +11,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, model_validator
+from pydantic import ConfigDict
 
 from shared.models.graph_query import GraphQueryRequest
 from shared.models.ontology import QueryInput
@@ -27,6 +28,58 @@ class AIQueryTool(str, Enum):
     graph_query = "graph_query"
     unsupported = "unsupported"
 
+
+class AIIntentType(str, Enum):
+    greeting = "greeting"
+    small_talk = "small_talk"
+    help = "help"
+    data_query = "data_query"
+    plan_request = "plan_request"
+    unknown = "unknown"
+
+
+class AIIntentRoute(str, Enum):
+    chat = "chat"
+    query = "query"
+    plan = "plan"
+
+
+class AIIntentRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=2000)
+    db_name: Optional[str] = Field(default=None, description="Selected project/db name (if any)")
+    project_name: Optional[str] = Field(default=None)
+    pipeline_name: Optional[str] = Field(default=None)
+    language: Optional[str] = Field(default=None, description="Preferred language hint (optional)")
+    context: Optional[Dict[str, Any]] = Field(default=None, description="Additional context hints")
+
+
+class AIIntentDraft(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    intent: Optional[AIIntentType] = None
+    route: Optional[AIIntentRoute] = None
+    confidence: Optional[float] = None
+    requires_clarification: Optional[bool] = None
+    clarifying_question: Optional[str] = None
+    reply: Optional[str] = None
+    missing_fields: Optional[List[str]] = None
+
+
+class AIIntentResponse(BaseModel):
+    intent: AIIntentType
+    route: AIIntentRoute
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    requires_clarification: bool = Field(default=False)
+    clarifying_question: Optional[str] = None
+    reply: Optional[str] = None
+    missing_fields: List[str] = Field(default_factory=list)
+    llm: Optional[Dict[str, Any]] = None
+
+    @model_validator(mode="after")
+    def _validate_reply(self) -> "AIIntentResponse":
+        if self.requires_clarification and not (self.clarifying_question or "").strip():
+            raise ValueError("clarifying_question required when requires_clarification is true")
+        return self
 
 class AIQueryPlan(BaseModel):
     """
@@ -77,4 +130,3 @@ class AIQueryResponse(BaseModel):
     execution: Dict[str, Any]
     llm: Dict[str, Any] = Field(default_factory=dict)
     warnings: List[str] = Field(default_factory=list)
-

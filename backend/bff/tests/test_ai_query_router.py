@@ -12,7 +12,7 @@ from shared.dependencies.providers import (
     get_llm_gateway,
     get_redis_service,
 )
-from shared.models.ai import AIAnswer, AIQueryPlan, AIQueryTool
+from shared.models.ai import AIAnswer, AIIntentResponse, AIIntentRoute, AIIntentType, AIQueryPlan, AIQueryTool
 from shared.services.llm_gateway import LLMCallMeta
 
 
@@ -37,12 +37,28 @@ class _FakeOMSClient:
 
 
 class _FakeGateway:
-    def __init__(self, *, plan: AIQueryPlan, answer: AIAnswer | None = None):
+    def __init__(
+        self,
+        *,
+        plan: AIQueryPlan | None = None,
+        answer: AIAnswer | None = None,
+        intent: AIIntentResponse | None = None,
+    ):
         self._plan = plan
         self._answer = answer
+        self._intent = intent
 
     async def complete_json(self, *, task: str, response_model, **kwargs):
+        if task == "INTENT_ROUTING":
+            assert self._intent is not None
+            return response_model.model_validate(self._intent.model_dump(mode="json")), LLMCallMeta(
+                provider="mock",
+                model="mock",
+                cache_hit=False,
+                latency_ms=1,
+            )
         if task == "QUERY_PLAN":
+            assert self._plan is not None
             return response_model.model_validate(self._plan.model_dump(mode="json")), LLMCallMeta(
                 provider="mock",
                 model="mock",
@@ -108,7 +124,7 @@ def test_translate_query_plan_returns_plan(client):
     assert "llm" in body
 
 
-def test_translate_query_plan_enables_paths_when_question_asks_for_path(client):
+def test_translate_query_plan_returns_graph_query_with_paths(client):
     plan = AIQueryPlan(
         tool=AIQueryTool.graph_query,
         interpretation="관계 경로를 포함해 탐색합니다.",
@@ -121,7 +137,7 @@ def test_translate_query_plan_enables_paths_when_question_asks_for_path(client):
             "offset": 0,
             "max_nodes": 100,
             "max_edges": 200,
-            "include_paths": False,
+            "include_paths": True,
             "path_depth_limit": 3,
             "include_documents": True,
             "include_provenance": True,
@@ -225,3 +241,46 @@ def test_ai_query_label_query_executes_and_answers(client):
     assert body["execution"]["total"] == 1
     assert body["execution"]["results"] == [{"Name": "Alice"}]
     assert body["answer"]["answer"] == "Name이 Alice인 Customer는 1건입니다."
+
+
+def test_ai_intent_requires_db_name_when_missing(client):
+    intent = AIIntentResponse(
+        intent=AIIntentType.data_query,
+        route=AIIntentRoute.query,
+        confidence=0.85,
+        requires_clarification=False,
+    )
+
+    _install_common_overrides(llm_gateway=_FakeGateway(intent=intent))
+    try:
+        res = client.post("/api/v1/ai/intent", json={"question": "고객 목록 보여줘"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["route"] == "query"
+    assert body["requires_clarification"] is True
+    assert "db_name" in (body.get("missing_fields") or [])
+    assert body.get("clarifying_question")
+
+
+def test_ai_intent_greeting_forces_chat_reply(client):
+    intent = AIIntentResponse(
+        intent=AIIntentType.greeting,
+        route=AIIntentRoute.query,
+        confidence=0.9,
+        requires_clarification=False,
+    )
+
+    _install_common_overrides(llm_gateway=_FakeGateway(intent=intent))
+    try:
+        res = client.post("/api/v1/ai/intent", json={"question": "안녕"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["route"] == "chat"
+    assert body["requires_clarification"] is False
+    assert body.get("reply")

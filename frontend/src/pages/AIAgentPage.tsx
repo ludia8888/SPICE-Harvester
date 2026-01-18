@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   attachAgentSessionContextItem,
+  aiIntent,
   aiQuery,
   createAgentSession,
   decideAgentSessionApproval,
@@ -12,6 +13,7 @@ import {
   listDatasets,
   postAgentSessionMessage,
   type AgentSessionEvent,
+  type AIIntentResponse,
   type DatasetRecord,
 } from '../api/bff'
 import { UploadFilesDialog } from '../components/UploadFilesDialog'
@@ -54,8 +56,6 @@ type ChatItem =
   | ({ kind: 'message' } & ChatMessage)
   | ({ kind: 'plan' } & PlanCard)
 
-type MessageMode = 'greeting' | 'query' | 'plan'
-
 const buildId = () => `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
 const defaultPrompts = [
@@ -66,49 +66,6 @@ const defaultPrompts = [
 
 const normalizeLabel = (value: string) => value.trim().toLowerCase()
 
-const greetingTokens = ['안녕', 'ㅎㅇ', '하이', 'hello', 'hi', 'hey']
-const planTokens = [
-  '파이프라인',
-  'pipeline',
-  '정제',
-  '클렌징',
-  '전처리',
-  '변환',
-  '조인',
-  'join',
-  'merge',
-  'union',
-  'aggregate',
-  '집계',
-  '필터',
-  'filter',
-  'drop',
-  '삭제',
-  'rename',
-  '리네임',
-  '노드',
-  'build',
-  'deploy',
-  '실행',
-  '배포',
-  '생성',
-  '만들',
-  '추가',
-  '연결',
-  '매핑',
-  'mapping',
-  'schema',
-  '컬럼',
-  'column',
-  '업로드',
-  'upload',
-  'ingest',
-  'import',
-  'export',
-]
-const actionTokens = ['해줘', '해주세요', '만들어', '생성', '적용', '추가', '삭제', '실행', '배포', '빌드', '구성']
-const queryTokens = ['어떤', '무엇', '뭐', '몇', '얼마나', '리스트', '목록', '보여', '찾아', '조회', '있는지', '알려', '?']
-
 const safeText = (value: unknown) => {
   if (typeof value === 'string') {
     return value
@@ -117,6 +74,16 @@ const safeText = (value: unknown) => {
     return ''
   }
   return String(value)
+}
+
+const resolveIntentReply = (intent: AIIntentResponse) => {
+  const text = intent.requires_clarification
+    ? safeText(intent.clarifying_question).trim()
+    : safeText(intent.reply).trim()
+  if (text) {
+    return text
+  }
+  return intent.requires_clarification ? 'Which project/database should I use?' : 'How can I help?'
 }
 
 const truncatePreview = (value: unknown, maxChars = 220) => {
@@ -235,27 +202,6 @@ const formatStatusLabel = (value?: string) => {
     return 'unknown'
   }
   return normalized.replace(/_/g, ' ').toLowerCase()
-}
-
-const inferMessageMode = (text: string): MessageMode => {
-  const normalized = normalizeLabel(text)
-  if (!normalized) {
-    return 'query'
-  }
-  const isGreeting = greetingTokens.some((token) => normalized.includes(token))
-  if (isGreeting && normalized.length <= 12) {
-    return 'greeting'
-  }
-  const hasPlanToken = planTokens.some((token) => normalized.includes(token))
-  const hasActionToken = actionTokens.some((token) => normalized.includes(token))
-  const hasQueryToken = queryTokens.some((token) => normalized.includes(token))
-  if (hasPlanToken && hasActionToken) {
-    return 'plan'
-  }
-  if (hasQueryToken) {
-    return 'query'
-  }
-  return hasPlanToken ? 'query' : 'query'
 }
 
 const extractAiAnswer = (payload: unknown) => {
@@ -702,38 +648,58 @@ export const AIAgentPage = () => {
     if (!text || isSending) {
       return
     }
-    const mode = inferMessageMode(text)
-    if (mode === 'greeting') {
+    setDraft('')
+    setIsSending(true)
+    const intentContext: Record<string, unknown> = {}
+    if (aiAgentContext.nodes.length > 0) {
+      intentContext.node_count = aiAgentContext.nodes.length
+    }
+    if (datasetIdsForNodes.length > 0) {
+      intentContext.dataset_count = datasetIdsForNodes.length
+    }
+    const preferredLanguage = typeof navigator !== 'undefined' ? navigator.language : null
+    let intent: AIIntentResponse
+    try {
+      intent = await aiIntent({
+        question: text,
+        db_name: activeDbName || null,
+        project_name: aiAgentContext.projectName || null,
+        pipeline_name: aiAgentContext.pipelineName || null,
+        language: preferredLanguage,
+        context: Object.keys(intentContext).length > 0 ? intentContext : null,
+      })
+    } catch (error) {
       const timestamp = new Date().toISOString()
-      setDraft('')
+      const message = error instanceof Error ? error.message : 'AI intent routing failed'
       setExtraItems((current) => [
         ...current,
         { kind: 'message', id: buildId(), role: 'user', text, timestamp },
-        {
-          kind: 'message',
-          id: buildId(),
-          role: 'assistant',
-          text: 'Hello! How can I help with your pipeline?',
-          timestamp,
-        },
+        { kind: 'message', id: buildId(), role: 'assistant', text: message, timestamp },
       ])
+      setIsSending(false)
       return
     }
-    if (mode === 'query') {
+
+    if (intent.requires_clarification || intent.route === 'chat') {
       const timestamp = new Date().toISOString()
-      setDraft('')
-      setIsSending(true)
+      const reply = resolveIntentReply(intent)
+      setExtraItems((current) => [
+        ...current,
+        { kind: 'message', id: buildId(), role: 'user', text, timestamp },
+        { kind: 'message', id: buildId(), role: 'assistant', text: reply, timestamp },
+      ])
+      setIsSending(false)
+      return
+    }
+
+    if (intent.route === 'query') {
+      const timestamp = new Date().toISOString()
       setExtraItems((current) => [...current, { kind: 'message', id: buildId(), role: 'user', text, timestamp }])
       if (!activeDbName) {
+        const reply = safeText(intent.clarifying_question).trim() || 'Select a project first to run a query.'
         setExtraItems((current) => [
           ...current,
-          {
-            kind: 'message',
-            id: buildId(),
-            role: 'assistant',
-            text: 'Select a project first to run a query.',
-            timestamp,
-          },
+          { kind: 'message', id: buildId(), role: 'assistant', text: reply, timestamp },
         ])
         setIsSending(false)
         return
@@ -773,8 +739,7 @@ export const AIAgentPage = () => {
       }
       return
     }
-    setDraft('')
-    setIsSending(true)
+
     try {
       const activeSession = await ensureSession()
       await syncDatasetContext(activeSession)
