@@ -5,11 +5,13 @@ Provides CRUD for pipelines + preview/build entrypoints.
 """
 
 import asyncio
+import base64
 import csv
 import hashlib
 import io
 import json
 import logging
+import mimetypes
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -839,6 +841,51 @@ def _default_dataset_name(filename: str) -> str:
     return base or "excel_dataset"
 
 
+def _convert_xls_to_xlsx_bytes(xls_bytes: bytes) -> bytes:
+    try:
+        import xlrd  # type: ignore
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="XLS support requires the 'xlrd' package.",
+        ) from exc
+
+    try:
+        from openpyxl import Workbook  # type: ignore
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="XLS support requires the 'openpyxl' package.",
+        ) from exc
+
+    try:
+        book = xlrd.open_workbook(file_contents=xls_bytes)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Failed to read .xls file: {exc}") from exc
+
+    workbook = Workbook()
+    if workbook.worksheets:
+        workbook.remove(workbook.worksheets[0])
+
+    for sheet in book.sheets():
+        title = (sheet.name or "Sheet1").strip() or "Sheet1"
+        worksheet = workbook.create_sheet(title=title[:31])
+        for row_idx in range(sheet.nrows):
+            for col_idx in range(sheet.ncols):
+                cell = sheet.cell(row_idx, col_idx)
+                value = cell.value
+                if cell.ctype == xlrd.XL_CELL_DATE:
+                    try:
+                        value = xlrd.xldate.xldate_as_datetime(value, book.datemode)
+                    except Exception:
+                        pass
+                worksheet.cell(row=row_idx + 1, column=col_idx + 1, value=value)
+
+    output = io.BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
 def _extract_node_ids(definition_json: Optional[Dict[str, Any]]) -> set[str]:
     if not isinstance(definition_json, dict):
         return set()
@@ -1318,6 +1365,30 @@ def _dataset_artifact_prefix(*, db_name: str, dataset_id: str, dataset_name: str
     return f"datasets/{db_name}/{dataset_id}/{safe_name}"
 
 
+def _select_sample_row(
+    sample_json: Dict[str, Any],
+    *,
+    filename: Optional[str],
+    file_index: Optional[int],
+) -> Optional[Dict[str, Any]]:
+    rows = sample_json.get("rows") if isinstance(sample_json, dict) else None
+    if not isinstance(rows, list):
+        return None
+    candidates = [row for row in rows if isinstance(row, dict)]
+    if not candidates:
+        return None
+    if file_index is not None:
+        if file_index < 0 or file_index >= len(candidates):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File index out of range")
+        return candidates[file_index]
+    if filename:
+        for row in candidates:
+            if str(row.get("filename") or "") == filename:
+                return row
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found in dataset")
+    return candidates[0]
+
+
 @router.get("", response_model=ApiResponse)
 @trace_endpoint("list_pipelines")
 async def list_pipelines(
@@ -1636,6 +1707,110 @@ async def list_datasets(
         raise
     except Exception as e:
         logger.error(f"Failed to list datasets: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/datasets/{dataset_id}/raw-file", response_model=ApiResponse)
+@trace_endpoint("get_dataset_raw_file")
+async def get_dataset_raw_file(
+    dataset_id: str,
+    file_name: Optional[str] = Query(default=None, description="Optional filename for media datasets"),
+    file_index: Optional[int] = Query(default=None, ge=0, description="Optional index for media datasets"),
+    request: Request = None,
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+) -> ApiResponse:
+    try:
+        dataset = await dataset_registry.get_dataset(dataset_id=dataset_id)
+        if not dataset:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+        try:
+            enforce_db_scope(request.headers, db_name=dataset.db_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+
+        version = await dataset_registry.get_latest_version(dataset_id=dataset_id)
+        if not version or not version.artifact_key:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset version not found")
+
+        actor_user_id = (request.headers.get("X-User-ID") or "").strip() if request else ""
+        lakefs_storage_service = await pipeline_registry.get_lakefs_storage(user_id=actor_user_id or None)
+
+        sample_json = version.sample_json if isinstance(version.sample_json, dict) else {}
+        dataset_source = str(dataset.source_type or "").lower()
+        row = None
+        if dataset_source == "media":
+            row = _select_sample_row(sample_json, filename=file_name, file_index=file_index)
+        target_uri = str(row.get("s3_uri") or "").strip() if row else ""
+        content_type = str(row.get("content_type") or "").strip() if row else ""
+        size_bytes = row.get("size_bytes") if row else None
+        if size_bytes is not None:
+            try:
+                size_bytes = int(size_bytes)
+            except Exception:
+                size_bytes = None
+
+        if not target_uri:
+            if str(dataset.source_type or "").lower() == "media":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Media dataset requires a file selection",
+                )
+            target_uri = str(version.artifact_key or "").strip()
+
+        parsed_target = parse_s3_uri(target_uri)
+        if not parsed_target:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="artifact_key must be an s3:// URI")
+        bucket, key = parsed_target
+        if row and row.get("s3_uri"):
+            parsed_prefix = parse_s3_uri(str(version.artifact_key or "").strip())
+            if not parsed_prefix:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="artifact_key must be an s3:// URI")
+            prefix_bucket, prefix_key = parsed_prefix
+            normalized_prefix = prefix_key.rstrip("/")
+            if bucket != prefix_bucket or not key.startswith(f"{normalized_prefix}/"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Requested file is outside dataset artifact prefix",
+                )
+
+        filename = str(row.get("filename") or "").strip() if row else ""
+        if not filename:
+            filename = key.split("/")[-1] or dataset.name
+        if not content_type:
+            guessed_type, _ = mimetypes.guess_type(filename)
+            content_type = guessed_type or "application/octet-stream"
+
+        blob = await lakefs_storage_service.load_bytes(bucket, key)
+        if size_bytes is None:
+            size_bytes = len(blob)
+
+        try:
+            content = blob.decode("utf-8")
+            encoding = "utf-8"
+        except UnicodeDecodeError:
+            content = base64.b64encode(blob).decode("ascii")
+            encoding = "base64"
+
+        return ApiResponse.success(
+            message="Dataset raw file",
+            data={
+                "file": {
+                    "dataset_id": dataset.dataset_id,
+                    "filename": filename,
+                    "content_type": content_type,
+                    "size_bytes": size_bytes,
+                    "artifact_key": version.artifact_key,
+                    "s3_uri": target_uri,
+                    "encoding": encoding,
+                    "content": content,
+                }
+            },
+        ).to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to load dataset raw file: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
@@ -4417,10 +4592,12 @@ async def upload_excel_dataset(
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
         filename = file.filename or "upload.xlsx"
-        if not filename.lower().endswith((".xlsx", ".xlsm")):
+        lower_filename = filename.lower()
+        is_xls = lower_filename.endswith(".xls")
+        if not lower_filename.endswith((".xlsx", ".xlsm", ".xls")):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Only .xlsx/.xlsm files are supported",
+                detail="Only .xls, .xlsx, or .xlsm files are supported",
             )
 
         sample_bytes = await asyncio.to_thread(file.file.read, 65536)
@@ -4430,6 +4607,19 @@ async def upload_excel_dataset(
             file.file.seek(0)
         except Exception:
             pass
+        upload_stream: Any = file.file
+        if is_xls:
+            raw_bytes = await asyncio.to_thread(file.file.read)
+            if not raw_bytes:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+            try:
+                file.file.seek(0)
+            except Exception:
+                pass
+            converted = await asyncio.to_thread(_convert_xls_to_xlsx_bytes, raw_bytes)
+            stem = filename.rsplit(".", 1)[0].strip() or "upload"
+            filename = f"{stem}.xlsx"
+            upload_stream = io.BytesIO(converted)
 
         resolved_name = (dataset_name or "").strip() or _default_dataset_name(filename)
         if not resolved_name:
@@ -4453,7 +4643,7 @@ async def upload_excel_dataset(
 
         async with FunnelClient() as funnel_client:
             result, content_hash = await funnel_client.excel_to_structure_preview_stream(
-                fileobj=file.file,
+                fileobj=upload_stream,
                 filename=filename,
                 sheet_name=sheet_name,
                 table_id=table_id,
@@ -4578,10 +4768,14 @@ async def upload_excel_dataset(
             prefix = _dataset_artifact_prefix(db_name=db_name, dataset_id=dataset.dataset_id, dataset_name=dataset.name)
             staging_prefix = _ingest_staging_prefix(prefix, ingest_request.ingest_request_id)
             object_key = f"{staging_prefix}/source.xlsx"
+            try:
+                upload_stream.seek(0)
+            except Exception:
+                pass
             await lakefs_storage_service.save_fileobj(
                 repo,
                 f"{dataset_branch}/{object_key}",
-                file.file,
+                upload_stream,
                 content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 metadata=_sanitize_s3_metadata(
                     {

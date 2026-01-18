@@ -2,12 +2,28 @@
 set -euo pipefail
 
 BFF_URL="${BFF_URL:-http://localhost:8002}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ADMIN_TOKEN="${ADMIN_TOKEN:?ADMIN_TOKEN is required}"
 DB_NAME="${DB_NAME:-demo_db}"
 BRANCH="${BRANCH:-main}"
 E2E_DIR="${E2E_DIR:-docs/platform_checklist/evidence/pipeline_artifact_e2e}"
+CLEANUP_OBJECT_STORE="${CLEANUP_OBJECT_STORE:-true}"
 
-RUN_ID=$(python - <<'PY'
+truthy() {
+  local v
+  v="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | xargs)"
+  [[ "${v}" == "1" || "${v}" == "true" || "${v}" == "yes" || "${v}" == "y" ]]
+}
+
+cleanup() {
+  if truthy "${CLEANUP_OBJECT_STORE}" && [[ -f "${SCRIPT_DIR}/dev_cleanup_object_store.py" ]]; then
+    "${PYTHON_BIN}" "${SCRIPT_DIR}/dev_cleanup_object_store.py" --yes --db "${DB_NAME}" --quiet || true
+  fi
+}
+trap cleanup EXIT
+
+RUN_ID=$("${PYTHON_BIN}" - <<'PY'
 import uuid
 print(uuid.uuid4().hex)
 PY
@@ -39,13 +55,13 @@ INGEST_JSON=$(curl -sS -X POST "${BFF_URL}/api/v1/pipelines/datasets/csv-upload?
   -F "file=@${CSV_PATH}")
 export INGEST_JSON
 
-DATASET_ID=$(python - <<'PY'
+DATASET_ID=$("${PYTHON_BIN}" - <<'PY'
 import json, os
 payload = json.loads(os.environ["INGEST_JSON"])
 print((payload.get("data") or {}).get("dataset", {}).get("dataset_id") or "")
 PY
 )
-DATASET_VERSION_ID=$(python - <<'PY'
+DATASET_VERSION_ID=$("${PYTHON_BIN}" - <<'PY'
 import json, os
 payload = json.loads(os.environ["INGEST_JSON"])
 print((payload.get("data") or {}).get("version", {}).get("version_id") or "")
@@ -107,7 +123,7 @@ JSON
 )
 export CREATE_PIPELINE_JSON
 
-PIPELINE_ID=$(python - <<'PY'
+PIPELINE_ID=$("${PYTHON_BIN}" - <<'PY'
 import json, os
 payload = json.loads(os.environ["CREATE_PIPELINE_JSON"])
 print((payload.get("data") or {}).get("pipeline", {}).get("pipeline_id") or "")
@@ -133,7 +149,7 @@ JSON
 )
 export PREVIEW_JSON
 
-PREVIEW_JOB_ID=$(python - <<'PY'
+PREVIEW_JOB_ID=$("${PYTHON_BIN}" - <<'PY'
 import json, os
 payload = json.loads(os.environ["PREVIEW_JSON"])
 print((payload.get("data") or {}).get("job_id") or "")
@@ -154,7 +170,7 @@ wait_run() {
       "${AUTH_HEADERS[@]}" \
       -G --data-urlencode "limit=200")
     export RUNS_JSON
-    STATUS=$(python - <<'PY'
+    STATUS=$("${PYTHON_BIN}" - <<'PY'
 import json, os
 payload = json.loads(os.environ["RUNS_JSON"])
 runs = (payload.get("data") or {}).get("runs") or []
@@ -183,7 +199,7 @@ PREVIEW_ARTIFACTS_JSON=$(curl -sS "${BFF_URL}/api/v1/pipelines/${PIPELINE_ID}/ar
   -G --data-urlencode "mode=preview" --data-urlencode "limit=1")
 export PREVIEW_ARTIFACTS_JSON
 
-PREVIEW_ARTIFACT_ID=$(python - <<'PY'
+PREVIEW_ARTIFACT_ID=$("${PYTHON_BIN}" - <<'PY'
 import json, os
 payload = json.loads(os.environ["PREVIEW_ARTIFACTS_JSON"])
 artifacts = (payload.get("data") or {}).get("artifacts") or []
@@ -208,7 +224,7 @@ JSON
 )
 export BUILD_JSON
 
-BUILD_JOB_ID=$(python - <<'PY'
+BUILD_JOB_ID=$("${PYTHON_BIN}" - <<'PY'
 import json, os
 payload = json.loads(os.environ["BUILD_JSON"])
 print((payload.get("data") or {}).get("job_id") or "")
@@ -230,7 +246,7 @@ BUILD_ARTIFACTS_JSON=$(curl -sS "${BFF_URL}/api/v1/pipelines/${PIPELINE_ID}/arti
   -G --data-urlencode "mode=build" --data-urlencode "limit=1")
 export BUILD_ARTIFACTS_JSON
 
-BUILD_ARTIFACT_ID=$(python - <<'PY'
+BUILD_ARTIFACT_ID=$("${PYTHON_BIN}" - <<'PY'
 import json, os
 payload = json.loads(os.environ["BUILD_ARTIFACTS_JSON"])
 artifacts = (payload.get("data") or {}).get("artifacts") or []
@@ -258,7 +274,7 @@ JSON
 )
 export DEPLOY_JSON
 
-DEPLOYED_COMMIT_ID=$(python - <<'PY'
+DEPLOYED_COMMIT_ID=$("${PYTHON_BIN}" - <<'PY'
 import json, os
 payload = json.loads(os.environ["DEPLOY_JSON"])
 print((payload.get("data") or {}).get("deployed_commit_id") or "")

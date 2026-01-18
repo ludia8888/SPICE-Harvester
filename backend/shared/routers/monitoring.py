@@ -17,13 +17,16 @@ import json
 import time
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 from fastapi.responses import JSONResponse
 from starlette.responses import RedirectResponse
 
 from shared.config.settings import ApplicationSettings
 from shared.dependencies import get_container, ServiceContainer
 from shared.config.settings import get_settings as get_settings_ssot
+from shared.errors.error_envelope import build_error_envelope
+from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.observability.request_context import get_correlation_id, get_request_id
 
 router = APIRouter(tags=["Monitoring"])
 
@@ -32,6 +35,14 @@ router = APIRouter(tags=["Monitoring"])
 async def get_settings() -> ApplicationSettings:
     """Get application settings for monitoring"""
     return get_settings_ssot()
+
+
+def _resolve_service_name(request: Optional[Request]) -> str:
+    if request is not None:
+        name = getattr(request.app.state, "service_name", None)
+        if name:
+            return str(name)
+    return get_settings_ssot().observability.service_name_effective
 
 
 async def _check_service_instance(instance: Any) -> Dict[str, Any]:
@@ -369,7 +380,8 @@ async def get_service_dependencies(
            summary="Background Task Metrics",
            description="Get metrics for background task execution")
 async def get_background_task_metrics(
-    container: ServiceContainer = Depends(get_container)
+    request: Request,
+    container: ServiceContainer = Depends(get_container),
 ):
     """
     Get background task execution metrics
@@ -416,13 +428,19 @@ async def get_background_task_metrics(
         }
         
     except Exception as e:
+        payload = build_error_envelope(
+            service_name=_resolve_service_name(request),
+            message="Failed to load background task metrics",
+            detail=str(e),
+            code=ErrorCode.INTERNAL_ERROR,
+            category=ErrorCategory.INTERNAL,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            request_id=get_request_id(),
+            correlation_id=get_correlation_id(),
+        )
         return JSONResponse(
-            content={
-                "status": "error",
-                "error": str(e),
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            },
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            content=payload,
+            status_code=payload.get("http_status", status.HTTP_500_INTERNAL_SERVER_ERROR),
         )
 
 
@@ -430,6 +448,7 @@ async def get_background_task_metrics(
            summary="Active Background Tasks",
            description="List all currently active background tasks")
 async def get_active_background_tasks(
+    request: Request,
     limit: int = Query(100, ge=1, le=1000, description="Maximum tasks to return"),
     container: ServiceContainer = Depends(get_container)
 ):
@@ -487,14 +506,20 @@ async def get_active_background_tasks(
         }
         
     except Exception as e:
+        payload = build_error_envelope(
+            service_name=_resolve_service_name(request),
+            message="Failed to list active background tasks",
+            detail=str(e),
+            code=ErrorCode.INTERNAL_ERROR,
+            category=ErrorCategory.INTERNAL,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            request_id=get_request_id(),
+            correlation_id=get_correlation_id(),
+            context={"tasks": []},
+        )
         return JSONResponse(
-            content={
-                "status": "error",
-                "error": str(e),
-                "tasks": [],
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            },
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            content=payload,
+            status_code=payload.get("http_status", status.HTTP_500_INTERNAL_SERVER_ERROR),
         )
 
 
@@ -502,7 +527,8 @@ async def get_active_background_tasks(
            summary="Background Task System Health",
            description="Check health of background task processing system")
 async def get_background_task_health(
-    container: ServiceContainer = Depends(get_container)
+    request: Request,
+    container: ServiceContainer = Depends(get_container),
 ):
     """
     Get health status of background task processing system
@@ -602,12 +628,18 @@ async def get_background_task_health(
         return JSONResponse(content=response_data, status_code=status_code)
         
     except Exception as e:
+        payload = build_error_envelope(
+            service_name=_resolve_service_name(request),
+            message="Failed to evaluate background task health",
+            detail=str(e),
+            code=ErrorCode.INTERNAL_ERROR,
+            category=ErrorCategory.INTERNAL,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            request_id=get_request_id(),
+            correlation_id=get_correlation_id(),
+            context={"healthy": False},
+        )
         return JSONResponse(
-            content={
-                "status": "error",
-                "healthy": False,
-                "error": str(e),
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            },
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            content=payload,
+            status_code=payload.get("http_status", status.HTTP_500_INTERNAL_SERVER_ERROR),
         )

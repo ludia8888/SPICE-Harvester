@@ -1,36 +1,30 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, DragEvent } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Button,
   Card,
   Dialog,
   FormGroup,
-  H3,
   Icon,
   InputGroup,
   Menu,
   MenuDivider,
   MenuItem,
   Popover,
-  Radio,
-  RadioGroup,
   Spinner,
   Text,
 } from '@blueprintjs/core'
 import type { IconName } from '@blueprintjs/icons'
+import { UploadFilesDialog } from '../components/UploadFilesDialog'
 import { useAppStore } from '../state/store'
 import {
   createDatabase,
   deleteDatabase,
+  getDatasetRawFile,
   listDatabases,
   listDatasets,
-  approveDatasetSchema,
-  uploadDataset,
   type DatabaseRecord,
   type DatasetRecord,
-  type DatasetUploadResult,
-  type UploadMode,
 } from '../api/bff'
 
 type DatasetFile = {
@@ -55,21 +49,6 @@ type FolderRecord = {
   shared?: boolean
   sharedWith?: string[]
 }
-
-type UploadFile = {
-  id: string
-  file: File
-  status: UploadStatus
-  datasetName?: string
-  error?: string
-  ingestRequestId?: string
-  schemaStatus?: string
-  schemaSuggestion?: Record<string, unknown>
-  approvalStatus?: 'idle' | 'pending' | 'error'
-  approvalError?: string
-}
-
-type UploadStatus = 'queued' | 'active' | 'complete' | 'error'
 
 type SortKey = 'name' | 'updated' | 'size'
 type ViewMode = 'grid' | 'list'
@@ -107,6 +86,12 @@ const normalizeDatabaseRecord = (record: DatabaseRecord | string): FolderRecord 
     return null
   }
 
+  const description = record.description
+  const nameLooksSlug = /^[a-z][a-z0-9_-]*$/.test(name)
+  const descriptionLooksLikeTitle = Boolean(description && /[A-Z\s]/.test(description))
+  const shouldUseDescriptionAsName = !record.display_name && !record.label && descriptionLooksLikeTitle && nameLooksSlug
+
+  const displayName = record.display_name || record.label || (shouldUseDescriptionAsName ? description : name)
   const datasetCount =
     record.dataset_count ??
     record.datasetCount ??
@@ -114,8 +99,8 @@ const normalizeDatabaseRecord = (record: DatabaseRecord | string): FolderRecord 
 
   return {
     id: name,
-    name: record.display_name || record.label || name,
-    description: record.description,
+    name: displayName || name,
+    description: shouldUseDescriptionAsName ? undefined : description,
     updatedAt: record.updated_at || record.created_at,
     datasetCount,
     ownerId: record.owner_id,
@@ -125,32 +110,6 @@ const normalizeDatabaseRecord = (record: DatabaseRecord | string): FolderRecord 
     sharedWith: record.shared_with ?? record.sharedWith,
   }
 }
-
-const uploadOptions: Array<{ value: UploadMode; title: string; description: string }> = [
-  {
-    value: 'structured',
-    title: 'Upload as individual structured datasets (recommended)',
-    description:
-      'Datasets are the most basic representation of tabular data. They can be used and transformed by many applications.',
-  },
-  {
-    value: 'media',
-    title: 'Upload to a new media set',
-    description:
-      'Media sets enable media-specific capabilities for audio, imagery, video, and documents.',
-  },
-  {
-    value: 'unstructured',
-    title: 'Upload to a new unstructured dataset',
-    description:
-      'Unstructured datasets can store arbitrary files for processing and analysis.',
-  },
-  {
-    value: 'raw',
-    title: 'Upload as individual raw files',
-    description: 'Raw files cannot be used in data pipelines, analyses, or models.',
-  },
-]
 
 const createOptions: CreateOption[] = [
   {
@@ -262,8 +221,6 @@ const formatRowCount = (value?: number) => {
   return value.toLocaleString()
 }
 
-const getResourceName = (fileName: string) => fileName.replace(/\.[^/.]+$/, '')
-
 const parseTimestamp = (value?: string) => {
   if (!value) {
     return 0
@@ -272,28 +229,65 @@ const parseTimestamp = (value?: string) => {
   return Number.isNaN(parsed) ? 0 : parsed
 }
 
-const getSchemaStatusLabel = (status?: string) => {
-  if (!status) {
-    return null
+const RECENTS_STORAGE_PREFIX = 'spice.recents.projects'
+const MAX_RECENTS = 20
+
+const normalizeRecentsPayload = (payload: unknown): Record<string, string> => {
+  if (!payload || typeof payload !== 'object') {
+    return {}
   }
-  const normalized = status.toUpperCase()
-  if (normalized === 'APPROVED') {
-    return 'Schema approved'
+  if (Array.isArray(payload)) {
+    return payload.reduce<Record<string, string>>((acc, item) => {
+      if (!item || typeof item !== 'object') {
+        return acc
+      }
+      const entry = item as { id?: unknown; lastViewed?: unknown }
+      const id = typeof entry.id === 'string' ? entry.id.trim() : ''
+      const lastViewed = typeof entry.lastViewed === 'string' ? entry.lastViewed : ''
+      if (id && lastViewed) {
+        acc[id] = lastViewed
+      }
+      return acc
+    }, {})
   }
-  if (normalized === 'PENDING') {
-    return 'Schema pending approval'
-  }
-  if (normalized === 'REJECTED') {
-    return 'Schema rejected'
-  }
-  return `Schema ${normalized.toLowerCase()}`
+  return Object.entries(payload).reduce<Record<string, string>>((acc, [id, ts]) => {
+    if (typeof ts === 'string' && ts) {
+      acc[id] = ts
+    }
+    return acc
+  }, {})
 }
 
-const getSchemaStatusClass = (status?: string) => {
-  if (!status) {
-    return ''
+const loadRecents = (storageKey: string): Record<string, string> => {
+  if (typeof window === 'undefined') {
+    return {}
   }
-  return `is-${status.toLowerCase()}`
+  try {
+    const raw = window.localStorage.getItem(storageKey)
+    if (!raw) {
+      return {}
+    }
+    return normalizeRecentsPayload(JSON.parse(raw))
+  } catch {
+    return {}
+  }
+}
+
+const saveRecents = (storageKey: string, recents: Record<string, string>) => {
+  if (typeof window === 'undefined') {
+    return
+  }
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(recents))
+  } catch {
+    // Ignore storage errors (quota/private mode).
+  }
+}
+
+const trimRecents = (recents: Record<string, string>, limit: number) => {
+  const entries = Object.entries(recents).filter(([, ts]) => Boolean(ts))
+  entries.sort((left, right) => parseTimestamp(right[1]) - parseTimestamp(left[1]))
+  return Object.fromEntries(entries.slice(0, limit))
 }
 
 const mapDatasetToFile = (dataset: DatasetRecord): DatasetFile => ({
@@ -312,12 +306,58 @@ type BreadcrumbSegment = {
   onClick?: () => void
 }
 
+const buildProjectId = (value: string) => {
+  let id = value.trim().toLowerCase()
+  if (!id) {
+    return ''
+  }
+  id = id.replace(/[^a-z0-9_-]+/g, '_')
+  id = id.replace(/[_-]{2,}/g, '_')
+  id = id.replace(/^[_-]+/, '').replace(/[_-]+$/, '')
+  if (!id) {
+    return ''
+  }
+  if (!/^[a-z]/.test(id)) {
+    id = `db_${id}`
+  }
+  if (id.length < 3) {
+    id = `${id}_db`
+  }
+  if (id.length > 50) {
+    id = id.slice(0, 50)
+  }
+  id = id.replace(/[_-]{2,}/g, '_')
+  id = id.replace(/[_-]+$/, '')
+  if (id.length < 3) {
+    id = id.padEnd(3, 'a')
+  }
+  return id
+}
+
+const isValidProjectId = (value: string) => {
+  if (!value || value.length < 3 || value.length > 50) {
+    return false
+  }
+  if (!/^[a-z][a-z0-9_-]*$/.test(value)) {
+    return false
+  }
+  if (/[_-]{2,}/.test(value)) {
+    return false
+  }
+  if (/[_-]$/.test(value)) {
+    return false
+  }
+  return true
+}
+
 export const DatasetsPage = () => {
   const queryClient = useQueryClient()
   const databasesQuery = useQuery({ queryKey: ['databases'], queryFn: listDatabases })
   const setActiveNav = useAppStore((state) => state.setActiveNav)
   const setPipelineContext = useAppStore((state) => state.setPipelineContext)
+  const setAiAgentOpen = useAppStore((state) => state.setAiAgentOpen)
   const currentUserId = (import.meta.env.VITE_USER_ID as string | undefined) ?? 'system'
+  const recentsStorageKey = `${RECENTS_STORAGE_PREFIX}.${currentUserId || 'system'}`
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null)
   const [activeFileId, setActiveFileId] = useState<string | null>(null)
   const [isCreateFolderOpen, setCreateFolderOpen] = useState(false)
@@ -331,19 +371,25 @@ export const DatasetsPage = () => {
   const [createMenuCategory, setCreateMenuCategory] = useState<CreateCategory>('All')
   const [createMenuSearch, setCreateMenuSearch] = useState('')
   const [isUploadOpen, setUploadOpen] = useState(false)
-  const [uploadMode, setUploadMode] = useState<UploadMode>(uploadOptions[0].value)
-  const [isUploading, setUploading] = useState(false)
-  const [isUploadComplete, setUploadComplete] = useState(false)
-  const [uploadError, setUploadError] = useState<string | null>(null)
   const [sortKey, setSortKey] = useState<SortKey>('name')
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [activeProjectTab, setActiveProjectTab] = useState<ProjectTab>('projects')
   const [favoriteFolderIds, setFavoriteFolderIds] = useState<string[]>([])
+  const [recentProjects, setRecentProjects] = useState<Record<string, string>>(() =>
+    loadRecents(recentsStorageKey),
+  )
   const [showAllProjects, setShowAllProjects] = useState(false)
   const [filesSearchQuery, setFilesSearchQuery] = useState('')
-  const [uploadFiles, setUploadFiles] = useState<UploadFile[]>([])
-  const [isDragActive, setDragActive] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const trimmedFolderName = newFolderName.trim()
+  const normalizedProjectId = buildProjectId(trimmedFolderName)
+  const projectIdIsValid = Boolean(trimmedFolderName) && isValidProjectId(normalizedProjectId)
+  const projectNameIssue = trimmedFolderName && !projectIdIsValid
+    ? 'Project IDs must start with a lowercase letter and use only letters, numbers, underscores, or hyphens (3-50 chars).'
+    : null
+  const projectNameHelper =
+    trimmedFolderName && normalizedProjectId
+      ? `Project ID will be "${normalizedProjectId}".`
+      : 'Use a short name (lowercase letters, numbers, underscores, hyphens).'
 
   const datasetsQuery = useQuery({
     queryKey: ['datasets', activeFolderId],
@@ -357,74 +403,13 @@ export const DatasetsPage = () => {
   )
 
   const files = useMemo(() => (datasetsQuery.data ?? []).map(mapDatasetToFile), [datasetsQuery.data])
+  const activeDataset = useMemo(
+    () => (datasetsQuery.data ?? []).find((dataset) => dataset.dataset_id === activeFileId) ?? null,
+    [datasetsQuery.data, activeFileId],
+  )
 
   const databaseErrorMessage = databasesQuery.error instanceof Error ? databasesQuery.error.message : null
   const datasetErrorMessage = datasetsQuery.error instanceof Error ? datasetsQuery.error.message : null
-
-  const applyUploadResult = (uploadFile: UploadFile, result: DatasetUploadResult) => {
-    return {
-      ...uploadFile,
-      status: 'complete' as const,
-      datasetName: result.dataset.name,
-      ingestRequestId: result.ingest_request_id,
-      schemaStatus: result.schema_status,
-      schemaSuggestion: result.schema_suggestion,
-      approvalStatus: 'idle' as const,
-      approvalError: undefined,
-    }
-  }
-
-  const handleApproveSchema = async (uploadFile: UploadFile) => {
-    if (!activeFolder || !uploadFile.ingestRequestId) {
-      return
-    }
-    setUploadFiles((current) =>
-      current.map((item) =>
-        item.id === uploadFile.id
-          ? {
-              ...item,
-              approvalStatus: 'pending',
-              approvalError: undefined,
-            }
-          : item,
-      ),
-    )
-    try {
-      const response = await approveDatasetSchema({
-        ingestRequestId: uploadFile.ingestRequestId,
-        dbName: activeFolder.id,
-        schemaJson:
-          uploadFile.schemaSuggestion && typeof uploadFile.schemaSuggestion === 'object'
-            ? uploadFile.schemaSuggestion
-            : undefined,
-      })
-      const updatedStatus = response.ingest_request?.schema_status ?? 'APPROVED'
-      setUploadFiles((current) =>
-        current.map((item) =>
-          item.id === uploadFile.id
-            ? {
-                ...item,
-                schemaStatus: updatedStatus,
-                approvalStatus: 'idle',
-              }
-            : item,
-        ),
-      )
-      await queryClient.invalidateQueries({ queryKey: ['datasets', activeFolder.id] })
-    } catch (error) {
-      setUploadFiles((current) =>
-        current.map((item) =>
-          item.id === uploadFile.id
-            ? {
-                ...item,
-                approvalStatus: 'error',
-                approvalError: error instanceof Error ? error.message : 'Schema approval failed',
-              }
-            : item,
-        ),
-      )
-    }
-  }
 
   useEffect(() => {
     if (!activeFolderId) {
@@ -449,37 +434,82 @@ export const DatasetsPage = () => {
     }
   }, [activeFolderId, folders])
 
+  useEffect(() => {
+    setRecentProjects(loadRecents(recentsStorageKey))
+  }, [recentsStorageKey])
+
+  useEffect(() => {
+    saveRecents(recentsStorageKey, recentProjects)
+  }, [recentProjects, recentsStorageKey])
+
+  useEffect(() => {
+    if (!activeFolderId || folders.length === 0) {
+      return
+    }
+    const exists = folders.some((folder) => folder.id === activeFolderId)
+    if (!exists) {
+      return
+    }
+    setRecentProjects((current) =>
+      trimRecents(
+        {
+          ...current,
+          [activeFolderId]: new Date().toISOString(),
+        },
+        MAX_RECENTS,
+      ),
+    )
+  }, [activeFolderId, folders])
+
+  useEffect(() => {
+    if (folders.length === 0) {
+      return
+    }
+    const validIds = new Set(folders.map((folder) => folder.id))
+    setRecentProjects((current) => {
+      const next = Object.fromEntries(Object.entries(current).filter(([id]) => validIds.has(id)))
+      return Object.keys(next).length === Object.keys(current).length ? current : next
+    })
+  }, [folders])
+
   const activeFolder = folders.find((folder) => folder.id === activeFolderId) ?? null
   const activeFile = files.find((file) => file.id === activeFileId) ?? null
+  const rawFileQuery = useQuery({
+    queryKey: ['dataset-raw-file', activeFolderId, activeFileId],
+    queryFn: () =>
+      getDatasetRawFile({
+        dbName: activeFolder?.id ?? '',
+        datasetId: activeFileId ?? '',
+        fileName:
+          activeDataset && String(activeDataset.source_type || '').toLowerCase() === 'media'
+            ? activeDataset.source_ref || undefined
+            : undefined,
+      }),
+    enabled: Boolean(activeFolder && activeFileId),
+  })
+  const rawFile = rawFileQuery.data ?? null
+  const rawFileError = rawFileQuery.error instanceof Error ? rawFileQuery.error.message : null
+  const rawFileSizeLabel =
+    rawFile && rawFile.size_bytes !== undefined ? formatFileSize(rawFile.size_bytes) : '-'
+  const rawFileEncodingLabel = rawFile
+    ? rawFile.encoding === 'base64'
+      ? 'base64 (binary)'
+      : 'utf-8'
+    : '-'
+  const rawFileContentType = rawFile?.content_type || '-'
+  const rawFileFilename = rawFile?.filename || activeFile?.name || '-'
+  const rawFileUri = rawFile?.s3_uri || '-'
   const canDeleteProject =
     !!activeFolder && (activeFolder.role?.toLowerCase() === 'owner' || activeFolder.ownerId === currentUserId)
   const isRootView = !activeFolder
   const isFilesView = !!activeFolder && !activeFile
   const isDatasetView = !!activeFile
-  const isCreateFolderDisabled = newFolderName.trim().length === 0
-  const totalUploads = uploadFiles.length
-  const completedCount = uploadFiles.filter((file) => file.status === 'complete' || file.status === 'error').length
-  const successfulUploads = uploadFiles.filter((file) => file.status === 'complete')
-  const failedUploads = uploadFiles.filter((file) => file.status === 'error')
-  const uploadStepLabel = totalUploads === 0 ? '0/0' : `${completedCount}/${totalUploads}`
-  const uploadProgressPercent = totalUploads === 0 ? 0 : (completedCount / totalUploads) * 100
-  const uploadProgressText = `Uploading files... (${uploadStepLabel})`
-  const resourceLabel = successfulUploads.length === 1 ? 'resource' : 'resources'
-  const uploadCompleteMessage = successfulUploads.length
-    ? `Successfully created ${successfulUploads.length} ${resourceLabel}`
-    : 'No resources were created'
-  const uploadFailureMessage = failedUploads.length
-    ? `${failedUploads.length} file${failedUploads.length === 1 ? '' : 's'} failed to upload.`
-    : null
-  const uploadDialogTitle = isUploading
-    ? 'Uploading...'
-    : isUploadComplete
-      ? 'Upload finished'
-      : 'Upload files'
-  const uploadDialogIcon = isUploading ? 'upload' : isUploadComplete ? 'tick-circle' : 'upload'
+  const isCreateFolderDisabled = !projectIdIsValid
   const normalizedSearchQuery = filesSearchQuery.trim().toLowerCase()
   const emptyProjectsMessage = normalizedSearchQuery
     ? 'No matching projects'
+    : activeProjectTab === 'recents' && folders.length > 0
+      ? 'No recent projects yet'
     : activeProjectTab === 'favorites' && folders.length > 0
       ? 'No favorites yet'
       : 'No projects yet'
@@ -495,9 +525,21 @@ export const DatasetsPage = () => {
 
   const getFolderSize = (folder: FolderRecord) => folder.datasetCount ?? 0
 
-  const getFolderUpdatedAt = (folder: FolderRecord) => folder.updatedAt ?? ''
+  const getFolderUpdatedAt = (folder: FolderRecord) => recentProjects[folder.id] || folder.updatedAt || ''
+
+  const getFolderLastViewedLabel = (folder: FolderRecord) => {
+    const lastViewed = getFolderUpdatedAt(folder)
+    return lastViewed ? formatRelativeTime(lastViewed) : '-'
+  }
 
   const sortedFolders = [...folders].sort((left, right) => {
+    if (activeProjectTab === 'recents') {
+      const leftViewed = parseTimestamp(getFolderUpdatedAt(left))
+      const rightViewed = parseTimestamp(getFolderUpdatedAt(right))
+      if (leftViewed !== rightViewed) {
+        return rightViewed - leftViewed
+      }
+    }
     if (sortKey === 'size') {
       return getFolderSize(right) - getFolderSize(left)
     }
@@ -506,6 +548,22 @@ export const DatasetsPage = () => {
     }
     return left.name.localeCompare(right.name)
   })
+
+  const hasProjectAccess = (folder: FolderRecord) => {
+    if (!folder.ownerId || folder.ownerId === currentUserId) {
+      return true
+    }
+    if (folder.role) {
+      return true
+    }
+    if (folder.shared) {
+      return true
+    }
+    if (folder.sharedWith?.includes(currentUserId)) {
+      return true
+    }
+    return false
+  }
 
   const visibleFolders = sortedFolders.filter((folder) => {
     if (normalizedSearchQuery) {
@@ -529,10 +587,10 @@ export const DatasetsPage = () => {
       if (showAllProjects) {
         return true
       }
-      if (!folder.ownerId) {
-        return true
-      }
-      return folder.ownerId === currentUserId
+      return hasProjectAccess(folder)
+    }
+    if (activeProjectTab === 'recents') {
+      return Boolean(recentProjects[folder.id])
     }
     return true
   })
@@ -554,89 +612,12 @@ export const DatasetsPage = () => {
     })
   }
 
-  const getUploadStatus = (uploadFile: UploadFile) => uploadFile.status
-
-  const addUploadFiles = (incomingFiles: FileList | File[]) => {
-    const normalized = Array.from(incomingFiles)
-    if (normalized.length === 0) {
-      return
-    }
-
-    setUploadFiles((current) => {
-      const existingIds = new Set(current.map((file) => file.id))
-      const additions = normalized
-        .map((file) => ({
-          id: `${file.name}-${file.size}-${file.lastModified}`,
-          file,
-          status: 'queued' as const,
-          approvalStatus: 'idle' as const,
-        }))
-        .filter((entry) => !existingIds.has(entry.id))
-      return [...current, ...additions]
-    })
-  }
-
-  const handleFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
-    if (isUploading) {
-      return
-    }
-    if (event.currentTarget.files) {
-      addUploadFiles(event.currentTarget.files)
-    }
-    event.currentTarget.value = ''
-  }
-
-  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault()
-    if (isUploading) {
-      setDragActive(false)
-      return
-    }
-    setDragActive(false)
-    addUploadFiles(event.dataTransfer.files)
-  }
-
-  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
-    if (isUploading) {
-      return
-    }
-    event.preventDefault()
-    setDragActive(true)
-  }
-
-  const handleDragLeave = () => {
-    setDragActive(false)
-  }
-
-  const handleOpenFilePicker = () => {
-    if (isUploading) {
-      return
-    }
-    fileInputRef.current?.click()
-  }
-
-  const handleRemoveUploadFile = (id: string) => {
-    if (isUploading) {
-      return
-    }
-    setUploadFiles((current) => current.filter((file) => file.id !== id))
-  }
-
   const handleCloseUploadDialog = () => {
     setUploadOpen(false)
-    setDragActive(false)
-    setUploading(false)
-    setUploadComplete(false)
-    setUploadError(null)
-    setUploadFiles([])
   }
 
   const handleOpenUploadDialog = () => {
     setUploadOpen(true)
-    setUploading(false)
-    setUploadComplete(false)
-    setUploadError(null)
-    setUploadFiles([])
   }
 
   const handleOpenCreateMenu = () => {
@@ -651,6 +632,7 @@ export const DatasetsPage = () => {
 
   const handleOpenCreateFolder = () => {
     setNewFolderName('')
+    setCreateFolderError(null)
     setCreateFolderOpen(true)
   }
 
@@ -684,6 +666,10 @@ export const DatasetsPage = () => {
         setDeleteProjectError(null)
         await deleteDatabase(activeFolder.id)
         setFavoriteFolderIds((current) => current.filter((id) => id !== activeFolder.id))
+        setRecentProjects((current) => {
+          const { [activeFolder.id]: _removed, ...rest } = current
+          return rest
+        })
         setActiveFolderId(null)
         setActiveFileId(null)
         await queryClient.invalidateQueries({ queryKey: ['databases'] })
@@ -703,12 +689,20 @@ export const DatasetsPage = () => {
     if (!trimmedName) {
       return
     }
+    const projectId = buildProjectId(trimmedName)
+    if (!isValidProjectId(projectId)) {
+      setCreateFolderError(
+        'Project IDs must start with a lowercase letter and use only letters, numbers, underscores, or hyphens (3-50 chars).',
+      )
+      return
+    }
+    const description = projectId === trimmedName ? undefined : trimmedName
 
     const create = async () => {
       try {
         setCreatingFolder(true)
         setCreateFolderError(null)
-        await createDatabase(trimmedName)
+        await createDatabase(projectId, description)
         await queryClient.invalidateQueries({ queryKey: ['databases'] })
         handleCloseCreateFolder()
         setCreateFolderError(null)
@@ -748,7 +742,7 @@ export const DatasetsPage = () => {
     }
     if (optionId === 'aip-agent') {
       setCreateMenuOpen(false)
-      setActiveNav('ai-agent')
+      setAiAgentOpen(true)
       return
     }
     if (optionId === 'aip-logic') {
@@ -756,66 +750,6 @@ export const DatasetsPage = () => {
       setActiveNav('workshop')
       return
     }
-  }
-
-  const handleStartUpload = () => {
-    if (uploadFiles.length === 0) {
-      return
-    }
-    if (!activeFolder) {
-      setUploadError('Select a project before uploading.')
-      return
-    }
-
-    const runUpload = async () => {
-      setDragActive(false)
-      setUploadError(null)
-      setUploading(true)
-
-      const results = await Promise.all(
-        uploadFiles.map(async (uploadFile) => {
-          setUploadFiles((current) =>
-            current.map((item) =>
-              item.id === uploadFile.id ? { ...item, status: 'active' } : item,
-            ),
-          )
-          try {
-            const result = await uploadDataset({
-              dbName: activeFolder.id,
-              file: uploadFile.file,
-              mode: uploadMode,
-            })
-            setUploadFiles((current) =>
-              current.map((item) =>
-                item.id === uploadFile.id ? applyUploadResult(item, result) : item,
-              ),
-            )
-            return result.dataset
-          } catch (error) {
-            setUploadFiles((current) =>
-              current.map((item) =>
-                item.id === uploadFile.id
-                  ? {
-                      ...item,
-                      status: 'error',
-                      error: error instanceof Error ? error.message : 'Upload failed',
-                    }
-                  : item,
-              ),
-            )
-            return null
-          }
-        }),
-      )
-
-      setUploading(false)
-      setUploadComplete(true)
-      if (results.some((dataset) => dataset)) {
-        await queryClient.invalidateQueries({ queryKey: ['datasets', activeFolder.id] })
-      }
-    }
-
-    void runUpload()
   }
 
   const actionsMenu = (
@@ -985,7 +919,6 @@ export const DatasetsPage = () => {
           </div>
         </section>
       ) : null}
-      {isDatasetView ? <H3>{activeFile?.datasetName ?? 'Dataset'}</H3> : null}
       {databasesQuery.isLoading ? <Spinner size={24} /> : null}
       {isRootView ? (
         <section className="files-panel files-projects">
@@ -1012,7 +945,7 @@ export const DatasetsPage = () => {
                   </div>
                   <div className="files-table-scroll">
                     <div className="files-table">
-                      {visibleFolders.map((folder, index) => {
+                      {visibleFolders.map((folder) => {
                         const isFavorite = favoriteFolderIds.includes(folder.id)
                         return (
                           <div
@@ -1062,7 +995,7 @@ export const DatasetsPage = () => {
                             <span className="files-table-col owner">
                               {folder.ownerName || folder.ownerId || 'Unknown'}
                             </span>
-                            <span className="files-table-col updated">{index === 0 ? 'Today' : 'Last week'}</span>
+                            <span className="files-table-col updated">{getFolderLastViewedLabel(folder)}</span>
                           </div>
                         )
                       })}
@@ -1150,191 +1083,63 @@ export const DatasetsPage = () => {
         </section>
       ) : (
         activeFile && (
-          <div className="grid">
-            <Card className="card">
-              <Text className="card-title">{activeFile.datasetName}</Text>
-              <Text className="card-meta">File: {activeFile.name}</Text>
-              <Text className="card-meta">Source: {activeFile.source}</Text>
-              <Text className="card-meta">Updated: {activeFile.updatedLabel || activeFile.updatedAt}</Text>
-            </Card>
-          </div>
+          <section className="files-detail">
+            <div className="files-detail-grid">
+              <Card className="card files-detail-card files-detail-summary">
+                <Text className="files-detail-title">{activeFile.datasetName}</Text>
+                <div className="files-detail-meta">
+                  <span className="files-detail-meta-label">File</span>
+                  <span className="files-detail-meta-value">{activeFile.name}</span>
+                  <span className="files-detail-meta-label">Source</span>
+                  <span className="files-detail-meta-value">{activeFile.source}</span>
+                  <span className="files-detail-meta-label">Rows</span>
+                  <span className="files-detail-meta-value">{formatRowCount(activeDataset?.row_count)}</span>
+                  <span className="files-detail-meta-label">Size</span>
+                  <span className="files-detail-meta-value">{rawFileSizeLabel}</span>
+                  <span className="files-detail-meta-label">Updated</span>
+                  <span className="files-detail-meta-value">
+                    {activeFile.updatedLabel || activeFile.updatedAt || '-'}
+                  </span>
+                </div>
+              </Card>
+              <Card className="card files-detail-card files-detail-raw">
+                <div className="files-detail-raw-header">
+                  <div>
+                    <Text className="files-detail-title">Raw file content</Text>
+                    <Text className="files-detail-subtitle">{rawFileFilename}</Text>
+                  </div>
+                </div>
+                <div className="files-detail-meta files-detail-meta-raw">
+                  <span className="files-detail-meta-label">Content type</span>
+                  <span className="files-detail-meta-value">{rawFileContentType}</span>
+                  <span className="files-detail-meta-label">Encoding</span>
+                  <span className="files-detail-meta-value">{rawFileEncodingLabel}</span>
+                  <span className="files-detail-meta-label">Storage</span>
+                  <span className="files-detail-meta-value">{rawFileUri}</span>
+                </div>
+                <div className="files-detail-raw-body">
+                  {rawFileQuery.isLoading ? (
+                    <div className="files-detail-loading">
+                      <Spinner size={24} />
+                    </div>
+                  ) : rawFileError ? (
+                    <Text className="card-meta">{rawFileError}</Text>
+                  ) : rawFile ? (
+                    <pre className="raw-file-content">{rawFile.content}</pre>
+                  ) : (
+                    <Text className="card-meta">No raw file content available.</Text>
+                  )}
+                </div>
+              </Card>
+            </div>
+          </section>
         )
       )}
-      <Dialog
+      <UploadFilesDialog
         isOpen={isUploadOpen}
         onClose={handleCloseUploadDialog}
-        title={uploadDialogTitle}
-        icon={uploadDialogIcon}
-        className="upload-dialog bp5-dark"
-      >
-        <div className="upload-dialog-body">
-          {isUploading ? (
-            <div className="upload-progress-view">
-              <div className="upload-file-list is-progress">
-                {uploadFiles.map((uploadFile) => {
-                  const status = getUploadStatus(uploadFile)
-                  return (
-                    <div key={uploadFile.id} className="upload-file-row">
-                      <div className="upload-file-meta">
-                        <span className={`upload-status ${status}`}>
-                          {status === 'complete' ? (
-                            <Icon icon="tick" size={12} />
-                          ) : status === 'error' ? (
-                            <Icon icon="error" size={12} />
-                          ) : (
-                            <span className="upload-status-dot" />
-                          )}
-                        </span>
-                        <Icon icon="document" className="upload-file-icon" />
-                        <Text className="upload-file-name">{uploadFile.file.name}</Text>
-                      </div>
-                      <div className="upload-file-actions">
-                        <Text className="upload-file-size">{formatFileSize(uploadFile.file.size)}</Text>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-              <div className="upload-progress">
-                <div className="upload-progress-bar">
-                  <span className="upload-progress-fill" style={{ width: `${uploadProgressPercent}%` }} />
-                </div>
-                <Text className="upload-progress-text">{uploadProgressText}</Text>
-              </div>
-            </div>
-          ) : isUploadComplete ? (
-            <div className="upload-complete-view">
-              <Text className="upload-complete-message">{uploadCompleteMessage}</Text>
-              {uploadFailureMessage ? (
-                <Text className="upload-complete-warning">{uploadFailureMessage}</Text>
-              ) : null}
-              <div className="upload-complete-list">
-                {uploadFiles
-                  .filter((uploadFile) => uploadFile.status === 'complete')
-                  .map((uploadFile) => (
-                    <div key={uploadFile.id} className="upload-complete-row">
-                      <Icon icon="document" className="upload-complete-icon" />
-                      <Text className="upload-complete-name">
-                        {uploadFile.datasetName || getResourceName(uploadFile.file.name)}
-                      </Text>
-                      <div className="upload-complete-actions">
-                        {getSchemaStatusLabel(uploadFile.schemaStatus) ? (
-                          <span
-                            className={`upload-schema-status ${getSchemaStatusClass(
-                              uploadFile.schemaStatus,
-                            )}`}
-                          >
-                            {getSchemaStatusLabel(uploadFile.schemaStatus)}
-                          </span>
-                        ) : null}
-                        {uploadFile.schemaStatus?.toUpperCase() === 'PENDING' &&
-                        uploadFile.ingestRequestId ? (
-                          <Button
-                            minimal
-                            small
-                            icon="endorsed"
-                            text={
-                              uploadFile.approvalStatus === 'pending'
-                                ? 'Approving...'
-                                : 'Approve schema'
-                            }
-                            onClick={() => {
-                              void handleApproveSchema(uploadFile)
-                            }}
-                            disabled={uploadFile.approvalStatus === 'pending'}
-                          />
-                        ) : null}
-                      </div>
-                      {uploadFile.approvalError ? (
-                        <Text className="upload-approval-error">{uploadFile.approvalError}</Text>
-                      ) : null}
-                    </div>
-                  ))}
-              </div>
-              <div className="upload-dialog-footer">
-                <Button intent="primary" text="Done" onClick={handleCloseUploadDialog} />
-              </div>
-            </div>
-          ) : (
-            <>
-              <div
-                className={`upload-dropzone ${isDragActive ? 'is-dragging' : ''}`}
-                onClick={handleOpenFilePicker}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-              >
-                <Icon icon="cloud-upload" size={40} className="upload-dropzone-icon" />
-                <Text className="upload-dropzone-text">
-                  Drop files here or{' '}
-                  <button
-                    type="button"
-                    className="upload-dropzone-link"
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      handleOpenFilePicker()
-                    }}
-                  >
-                    choose from your computer
-                  </button>
-                </Text>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  className="upload-file-input"
-                  onChange={handleFileInputChange}
-                />
-              </div>
-              {uploadFiles.length > 0 ? (
-                <div className="upload-file-list">
-                  {uploadFiles.map((uploadFile) => (
-                    <div key={uploadFile.id} className="upload-file-row">
-                      <div className="upload-file-meta">
-                        <Icon icon="document" className="upload-file-icon" />
-                        <Text className="upload-file-name">{uploadFile.file.name}</Text>
-                      </div>
-                      <div className="upload-file-actions">
-                        <Text className="upload-file-size">{formatFileSize(uploadFile.file.size)}</Text>
-                        <Button
-                          minimal
-                          icon="small-cross"
-                          aria-label={`Remove ${uploadFile.file.name}`}
-                          onClick={() => handleRemoveUploadFile(uploadFile.id)}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              {uploadError ? (
-                <Text className="upload-error">{uploadError}</Text>
-              ) : null}
-              <RadioGroup
-                className="upload-options"
-                selectedValue={uploadMode}
-                onChange={(event) => setUploadMode(event.currentTarget.value as UploadMode)}
-              >
-                {uploadOptions.map((option) => (
-                  <Radio
-                    key={option.value}
-                    value={option.value}
-                    labelElement={
-                      <div className="upload-option">
-                        <Text className="upload-option-title">{option.title}</Text>
-                        <Text className="upload-option-description">{option.description}</Text>
-                      </div>
-                    }
-                  />
-                ))}
-              </RadioGroup>
-              <div className="upload-dialog-footer">
-                <Button intent="primary" text="Upload" disabled={uploadFiles.length === 0} onClick={handleStartUpload} />
-              </div>
-            </>
-          )}
-        </div>
-      </Dialog>
+        activeFolderId={activeFolderId}
+      />
       <Dialog
         isOpen={isCreateMenuOpen}
         onClose={handleCloseCreateMenu}
@@ -1403,10 +1208,16 @@ export const DatasetsPage = () => {
                 placeholder="Enter project name"
                 value={newFolderName}
                 autoFocus
-                onChange={(event) => setNewFolderName(event.currentTarget.value)}
+                onChange={(event) => {
+                  setNewFolderName(event.currentTarget.value)
+                  setCreateFolderError(null)
+                }}
               />
             </FormGroup>
-            {createFolderError ? <Text className="upload-error">{createFolderError}</Text> : null}
+            <Text className="card-meta">{projectNameHelper}</Text>
+            {(projectNameIssue || createFolderError) ? (
+              <Text className="upload-error">{projectNameIssue || createFolderError}</Text>
+            ) : null}
             <div className="folder-dialog-footer">
               <Button minimal text="Cancel" onClick={handleCloseCreateFolder} />
               <Button

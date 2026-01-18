@@ -11,6 +11,7 @@ const apiMocks = {
   createDatabase: vi.fn(),
   deleteDatabase: vi.fn(),
   uploadDataset: vi.fn(),
+  approveDatasetSchema: vi.fn(),
 }
 
 vi.mock('../../src/api/bff', () => ({
@@ -19,6 +20,8 @@ vi.mock('../../src/api/bff', () => ({
   createDatabase: (name: string, description?: string) => apiMocks.createDatabase(name, description),
   deleteDatabase: (name: string) => apiMocks.deleteDatabase(name),
   uploadDataset: (params: { dbName: string; file: File; mode: string }) => apiMocks.uploadDataset(params),
+  approveDatasetSchema: (params: { ingestRequestId: string; dbName: string; schemaJson?: unknown }) =>
+    apiMocks.approveDatasetSchema(params),
 }))
 
 describe('DatasetsPage', () => {
@@ -46,7 +49,7 @@ describe('DatasetsPage', () => {
         updated_at: '2024-01-02T10:00:00Z',
       },
     ])
-    apiMocks.createDatabase.mockResolvedValue({ name: 'New Project' })
+    apiMocks.createDatabase.mockResolvedValue({ name: 'new_project', description: 'New Project' })
   })
 
   it('renders projects and filters by search', async () => {
@@ -127,7 +130,7 @@ describe('DatasetsPage', () => {
     fireEvent.click(createButton)
 
     await waitFor(() => {
-      expect(apiMocks.createDatabase).toHaveBeenCalledWith('New Project', undefined)
+      expect(apiMocks.createDatabase).toHaveBeenCalledWith('new_project', 'New Project')
     })
   })
 

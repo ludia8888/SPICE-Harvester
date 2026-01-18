@@ -27,6 +27,9 @@ from shared.dependencies.providers import (
     SettingsDep
 )
 from shared.config.settings import ApplicationSettings, get_settings
+from shared.errors.error_envelope import build_error_envelope
+from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.observability.request_context import get_correlation_id, get_request_id
 from shared.utils.label_mapper import LabelMapper
 from shared.utils.jsonld import JSONToJSONLDConverter
 from shared.services.elasticsearch_service import ElasticsearchService
@@ -41,6 +44,8 @@ from shared.models.config import ConnectionConfig
 
 # Import validation functions
 from shared.security.input_sanitizer import validate_db_name, validate_class_id
+
+SERVICE_NAME = "OMS"
 
 
 class OMSDependencyProvider:
@@ -344,8 +349,14 @@ async def check_oms_dependencies_health(
         }
         
     except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e),
-            "services": health_status
-        }
+        return build_error_envelope(
+            service_name=SERVICE_NAME,
+            message="OMS dependency health check failed",
+            detail=str(e),
+            code=ErrorCode.INTERNAL_ERROR,
+            category=ErrorCategory.INTERNAL,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            context={"services": health_status},
+            request_id=get_request_id(),
+            correlation_id=get_correlation_id(),
+        )

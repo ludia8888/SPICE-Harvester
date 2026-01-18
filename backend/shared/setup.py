@@ -57,6 +57,7 @@ setup(
         "pandas==2.1.3",
         "numpy==1.24.3",
         "openpyxl==3.1.2",
+        "xlrd==2.0.1",
         
         # 🔍 Validation
         "email-validator==2.0.0",

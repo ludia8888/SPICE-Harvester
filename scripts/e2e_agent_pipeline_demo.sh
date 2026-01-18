@@ -13,6 +13,7 @@ HOST="${HOST:-127.0.0.1}"
 BFF_URL="${BFF_URL:-http://${HOST}:8002}"
 API_BASE_URL="${API_BASE_URL:-${BFF_URL}/api/v1}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 DB_NAME="${DB_NAME:-demo}"
 BRANCH="${BRANCH:-main}"
@@ -68,6 +69,7 @@ CI_PROVIDER="${CI_PROVIDER:-demo_ci}"
 CI_STATUS="${CI_STATUS:-failure}" # queued|in_progress|success|failure|cancelled|skipped|unknown
 CI_DETAILS_URL="${CI_DETAILS_URL:-}"
 CI_SUMMARY="${CI_SUMMARY:-unit tests failed (demo)}"
+CLEANUP_OBJECT_STORE="${CLEANUP_OBJECT_STORE:-true}"
 
 require_cmd() {
   local cmd="$1"
@@ -96,6 +98,13 @@ truthy() {
   v="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | xargs)"
   [[ "${v}" == "1" || "${v}" == "true" || "${v}" == "yes" || "${v}" == "y" ]]
 }
+
+cleanup() {
+  if truthy "${CLEANUP_OBJECT_STORE}" && [[ -f "${SCRIPT_DIR}/dev_cleanup_object_store.py" ]]; then
+    "${PYTHON_BIN}" "${SCRIPT_DIR}/dev_cleanup_object_store.py" --yes --db "${DB_NAME}" --quiet || true
+  fi
+}
+trap cleanup EXIT
 
 RUN_ID="${RUN_ID:-$(uuid)}"
 export RUN_ID

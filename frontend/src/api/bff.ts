@@ -43,6 +43,17 @@ export type DatasetRecord = {
   version_created_at?: string
 }
 
+export type DatasetRawFile = {
+  dataset_id: string
+  filename: string
+  content_type?: string
+  size_bytes?: number
+  artifact_key?: string
+  s3_uri?: string
+  encoding: 'utf-8' | 'base64'
+  content: string
+}
+
 export type DatasetIngestRequestRecord = {
   ingest_request_id: string
   dataset_id: string
@@ -288,14 +299,17 @@ const buildUrl = (path: string) => {
   return `${normalizedBase}${normalizedPath}`
 }
 
-const parseApiResponse = <T>(payload: ApiResponse<T> | null, fallbackMessage: string) => {
+const parseApiResponse = <T>(payload: ApiResponse<T> | T | null, fallbackMessage: string) => {
   if (!payload || typeof payload !== 'object') {
     throw new Error(fallbackMessage)
   }
-  if (payload.status && payload.status !== 'error') {
-    return (payload.data ?? payload) as T
+  if ('status' in payload) {
+    if (payload.status && payload.status !== 'error') {
+      return (payload.data ?? payload) as T
+    }
+    throw new Error(payload.message || fallbackMessage)
   }
-  throw new Error(payload.message || fallbackMessage)
+  return payload as T
 }
 
 const requestApi = async <T>(
@@ -389,6 +403,33 @@ export const listDatasets = async (dbName: string) => {
     'Failed to load datasets',
   )
   return data.datasets ?? []
+}
+
+export const getDatasetRawFile = async (params: {
+  dbName: string
+  datasetId: string
+  fileName?: string
+  fileIndex?: number
+}) => {
+  const query = new URLSearchParams()
+  if (params.fileName) {
+    query.set('file_name', params.fileName)
+  }
+  if (params.fileIndex !== undefined) {
+    query.set('file_index', String(params.fileIndex))
+  }
+  const suffix = query.toString()
+  const data = await requestApi<{ file?: DatasetRawFile }>(
+    `/api/v1/pipelines/datasets/${encodeURIComponent(params.datasetId)}/raw-file${suffix ? `?${suffix}` : ''}`,
+    {
+      headers: {
+        'X-DB-Name': params.dbName,
+        'X-Project': params.dbName,
+      },
+    },
+    'Failed to load raw file content',
+  )
+  return data.file ?? null
 }
 
 export const listPipelines = async (dbName: string) => {
@@ -619,7 +660,7 @@ export const createPipeline = async (params: {
 export const uploadDataset = async (params: { dbName: string; file: File; mode: UploadMode }) => {
   const endpoint = inferUploadEndpoint(params.mode, params.file.name)
   if (!endpoint) {
-    throw new Error('Only .csv or .xlsx files are supported for structured uploads.')
+    throw new Error('Only .csv, .xls, .xlsx, or .xlsm files are supported for structured uploads.')
   }
 
   const datasetName = getDatasetBaseName(params.file.name)
@@ -868,6 +909,177 @@ export const executeAgentPlan = async (planId: string) => {
       body: JSON.stringify({}),
     },
     'Failed to execute agent plan',
+  )
+  return data
+}
+
+export const getAgentPlan = async (planId: string) => {
+  const data = await requestApi<{
+    plan?: Record<string, unknown>
+    plan_id?: string
+    status?: string
+    created_at?: string
+    updated_at?: string
+  }>(`/api/v1/agent-plans/${encodeURIComponent(planId)}`, undefined, 'Failed to load agent plan')
+  return data
+}
+
+export type AgentSessionRecord = {
+  session_id: string
+  tenant_id?: string
+  created_by?: string
+  status?: string
+  selected_model?: string | null
+  enabled_tools?: string[] | null
+  started_at?: string
+  terminated_at?: string | null
+  created_at?: string
+  updated_at?: string
+  metadata?: Record<string, unknown> | null
+}
+
+export type AgentSessionEvent = {
+  event_id: string
+  event_type: string
+  occurred_at: string
+  data?: Record<string, unknown>
+}
+
+export const createAgentSession = async (payload: {
+  selected_model?: string | null
+  enabled_tools?: string[] | null
+  metadata?: Record<string, unknown> | null
+}) => {
+  const data = await requestApi<{ session: AgentSessionRecord }>(
+    '/api/v1/agent-sessions',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+      },
+      body: JSON.stringify(payload),
+    },
+    'Failed to create agent session',
+  )
+  return data
+}
+
+export const postAgentSessionMessage = async (
+  sessionId: string,
+  payload: {
+    content: string
+    data_scope?: Record<string, unknown>
+    execute?: boolean
+    answers?: Record<string, unknown>
+  },
+) => {
+  const data = await requestApi<Record<string, unknown>>(
+    `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}/messages`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+      },
+      body: JSON.stringify(payload),
+    },
+    'Failed to send agent message',
+  )
+  return data
+}
+
+export const listAgentSessionEvents = async (
+  sessionId: string,
+  params?: {
+    limit?: number
+    include_messages?: boolean
+    include_jobs?: boolean
+    include_approvals?: boolean
+    include_agent_steps?: boolean
+    include_tool_calls?: boolean
+    include_llm_calls?: boolean
+    include_ci_results?: boolean
+  },
+) => {
+  const query = new URLSearchParams()
+  if (params?.limit) {
+    query.set('limit', String(params.limit))
+  }
+  if (typeof params?.include_messages === 'boolean') {
+    query.set('include_messages', String(params.include_messages))
+  }
+  if (typeof params?.include_jobs === 'boolean') {
+    query.set('include_jobs', String(params.include_jobs))
+  }
+  if (typeof params?.include_approvals === 'boolean') {
+    query.set('include_approvals', String(params.include_approvals))
+  }
+  if (typeof params?.include_agent_steps === 'boolean') {
+    query.set('include_agent_steps', String(params.include_agent_steps))
+  }
+  if (typeof params?.include_tool_calls === 'boolean') {
+    query.set('include_tool_calls', String(params.include_tool_calls))
+  }
+  if (typeof params?.include_llm_calls === 'boolean') {
+    query.set('include_llm_calls', String(params.include_llm_calls))
+  }
+  if (typeof params?.include_ci_results === 'boolean') {
+    query.set('include_ci_results', String(params.include_ci_results))
+  }
+  const suffix = query.toString()
+  const path = suffix
+    ? `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}/events?${suffix}`
+    : `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}/events`
+  const data = await requestApi<{ session_id: string; count: number; events: AgentSessionEvent[] }>(
+    path,
+    undefined,
+    'Failed to load agent session events',
+  )
+  return data
+}
+
+export const attachAgentSessionContextItem = async (
+  sessionId: string,
+  payload: {
+    item_type: string
+    include_mode?: string
+    ref?: Record<string, unknown>
+    metadata?: Record<string, unknown>
+    token_count?: number
+  },
+) => {
+  const data = await requestApi<Record<string, unknown>>(
+    `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}/context/items`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+      },
+      body: JSON.stringify(payload),
+    },
+    'Failed to attach agent context',
+  )
+  return data
+}
+
+export const decideAgentSessionApproval = async (
+  sessionId: string,
+  approvalRequestId: string,
+  payload: { decision: string; comment?: string; metadata?: Record<string, unknown> },
+) => {
+  const data = await requestApi<Record<string, unknown>>(
+    `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}/approvals/${encodeURIComponent(approvalRequestId)}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': createIdempotencyKey(),
+      },
+      body: JSON.stringify(payload),
+    },
+    'Failed to record approval',
   )
   return data
 }

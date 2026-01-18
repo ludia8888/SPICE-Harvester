@@ -108,6 +108,7 @@ def create_fastapi_service(
         lifespan=lifespan_func,
         openapi_tags=openapi_tags
     )
+    app.state.service_name = service_info.name
 
     if include_error_handlers:
         install_error_handlers(

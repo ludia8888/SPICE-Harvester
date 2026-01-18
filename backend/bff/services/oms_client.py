@@ -9,6 +9,9 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from shared.config.settings import build_client_ssl_config, get_settings
+from shared.errors.error_envelope import build_error_envelope
+from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.observability.request_context import get_correlation_id, get_request_id
 
 # shared 모델 import
 from shared.models.ontology import (
@@ -18,6 +21,8 @@ from shared.models.ontology import (
 )
 
 logger = logging.getLogger(__name__)
+
+SERVICE_NAME = "BFF"
 
 
 class OMSClient:
@@ -699,7 +704,17 @@ class OMSClient:
                 response.raise_for_status()
                 return response.json()
             
-            return {"status": "error", "message": "Unable to update metadata"}
+            return build_error_envelope(
+                service_name=SERVICE_NAME,
+                message="Unable to update metadata",
+                detail="Unexpected ontology metadata response",
+                code=ErrorCode.UPSTREAM_ERROR,
+                category=ErrorCategory.UPSTREAM,
+                status_code=502,
+                context={"db_name": db_name, "class_id": class_id},
+                request_id=get_request_id(),
+                correlation_id=get_correlation_id(),
+            )
         except Exception as e:
             logger.error(f"클래스 메타데이터 업데이트 실패: {e}")
             raise

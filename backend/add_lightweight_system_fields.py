@@ -16,8 +16,14 @@ import logging
 from typing import List, Dict, Any
 from datetime import datetime
 
+from shared.errors.error_envelope import build_error_envelope
+from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.observability.request_context import get_correlation_id, get_request_id
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+SERVICE_NAME = "OMS"
 
 # System fields required for lightweight graph federation
 LIGHTWEIGHT_SYSTEM_FIELDS = [
@@ -80,7 +86,17 @@ async def add_system_fields_to_ontology(
         
         if not ontologies:
             logger.error(f"❌ Ontology {class_id} not found")
-            return {"status": "error", "message": f"Ontology {class_id} not found"}
+            return build_error_envelope(
+                service_name=SERVICE_NAME,
+                message=f"Ontology {class_id} not found",
+                detail="Ontology not found",
+                code=ErrorCode.RESOURCE_NOT_FOUND,
+                category=ErrorCategory.RESOURCE,
+                status_code=404,
+                context={"db_name": db_name, "class_id": class_id},
+                request_id=get_request_id(),
+                correlation_id=get_correlation_id(),
+            )
         
         ontology = ontologies[0] if isinstance(ontologies, list) else ontologies
         
@@ -136,11 +152,17 @@ async def add_system_fields_to_ontology(
         logger.error(f"❌ Failed to add system fields to {class_id}: {e}")
         import traceback
         traceback.print_exc()
-        return {
-            "status": "error",
-            "message": str(e),
-            "class_id": class_id
-        }
+        return build_error_envelope(
+            service_name=SERVICE_NAME,
+            message="Failed to add system fields to ontology",
+            detail=str(e),
+            code=ErrorCode.INTERNAL_ERROR,
+            category=ErrorCategory.INTERNAL,
+            status_code=500,
+            context={"db_name": db_name, "class_id": class_id},
+            request_id=get_request_id(),
+            correlation_id=get_correlation_id(),
+        )
 
 
 async def add_system_fields_to_all_ontologies(db_name: str) -> Dict[str, Any]:
@@ -219,11 +241,17 @@ async def add_system_fields_to_all_ontologies(db_name: str) -> Dict[str, Any]:
         logger.error(f"❌ Failed to process database {db_name}: {e}")
         import traceback
         traceback.print_exc()
-        return {
-            "status": "error",
-            "message": str(e),
-            "database": db_name
-        }
+        return build_error_envelope(
+            service_name=SERVICE_NAME,
+            message="Failed to process database",
+            detail=str(e),
+            code=ErrorCode.INTERNAL_ERROR,
+            category=ErrorCategory.INTERNAL,
+            status_code=500,
+            context={"db_name": db_name},
+            request_id=get_request_id(),
+            correlation_id=get_correlation_id(),
+        )
     finally:
         await terminus_service.disconnect()
 

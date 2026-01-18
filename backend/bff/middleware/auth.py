@@ -20,6 +20,7 @@ from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.security.auth_utils import extract_presented_token, is_exempt_path
 from shared.security.user_context import UserPrincipal, UserTokenError, extract_bearer_token, verify_user_token
 from shared.services.agent_tool_registry import AgentToolPolicyRecord
+from shared.observability.request_context import get_correlation_id, get_request_id
 from shared.utils.llm_safety import digest_for_audit
 
 _EXEMPT_PATHS_DEFAULT = (
@@ -139,6 +140,28 @@ def _error_response(
         correlation_id=correlation_id,
     )
     return JSONResponse(status_code=int(status_code), content=payload, headers=headers)
+
+
+def _internal_error_payload(request: Request, *, message: str, detail: Optional[str] = None) -> dict[str, Any]:
+    request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Request-ID") or get_request_id()
+    correlation_id = (
+        request.headers.get("X-Correlation-Id") or request.headers.get("X-Correlation-ID") or get_correlation_id()
+    )
+    return build_error_envelope(
+        service_name="bff",
+        message=message,
+        detail=detail or message,
+        code=ErrorCode.INTERNAL_ERROR,
+        category=ErrorCategory.INTERNAL,
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        origin={
+            "service": "bff",
+            "method": request.method,
+            "path": request.url.path,
+        },
+        request_id=request_id,
+        correlation_id=correlation_id,
+    )
 
 
 def _set_scope_header(request: Request, name: str, value: str) -> None:
@@ -986,7 +1009,7 @@ async def _finalize_tool_idempotency_error(request: Request, exc: Exception) -> 
             tool_id=state["tool_id"],
             request_digest=state["request_digest"],
             response_status=500,
-            response_body={"status": "error", "message": "Internal error"},
+            response_body=_internal_error_payload(request, message="Internal error"),
             error=error_value or "Internal error",
         )
     except Exception:
@@ -1121,7 +1144,7 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
                         code=ErrorCode.INTERNAL_ERROR,
                         category=ErrorCategory.INTERNAL,
                     )
-                    request.state.agent_tool_response_body = {"status": "error", "message": "Internal error"}
+                    request.state.agent_tool_response_body = _internal_error_payload(request, message="Internal error")
                     await _finalize_session_tool_call(request, response, terminal_status="FAILED")
                 raise
             response = await _finalize_tool_idempotency(request, response)

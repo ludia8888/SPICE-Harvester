@@ -4,11 +4,13 @@ import type { IconName } from '@blueprintjs/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import ReactFlow, {
   addEdge,
+  MiniMap,
   type Connection,
   type Edge,
   type EdgeChange,
   type Node as FlowNode,
   type NodeChange,
+  Position,
   type ReactFlowInstance,
   useEdgesState,
   useNodesState,
@@ -141,34 +143,38 @@ const extractSampleRows = (sampleJson?: Record<string, unknown>): Record<string,
 const extractSampleColumns = (
   sampleJson: Record<string, unknown> | undefined,
   sampleRows: Record<string, unknown>[],
-) => {
+): SchemaColumn[] => {
   if (sampleJson && Array.isArray(sampleJson.columns)) {
     return sampleJson.columns
       .map((column) => {
         if (typeof column === 'string') {
-          return column
+          return { name: column }
         }
         if (isRecord(column) && typeof column.name === 'string') {
-          return column.name
+          const type = typeof column.type === 'string' ? column.type : undefined
+          return { name: column.name, type }
         }
-        return ''
+        return null
       })
-      .filter((column) => column)
+      .filter((column): column is SchemaColumn => Boolean(column && column.name))
   }
 
   if (sampleRows.length === 0) {
-    return []
+    return [] as SchemaColumn[]
   }
 
   const keys = new Set<string>()
   sampleRows.forEach((row) => {
     Object.keys(row).forEach((key) => keys.add(key))
   })
-  return Array.from(keys)
+  return Array.from(keys).map((name) => ({ name }))
 }
 
 const normalizeTypeLabel = (value: string) => {
   const lower = value.toLowerCase()
+  if (lower.includes('string') || lower.includes('text') || lower.includes('char')) {
+    return 'String'
+  }
   if (lower.includes('int')) {
     return 'Integer'
   }
@@ -185,6 +191,7 @@ const normalizeTypeLabel = (value: string) => {
 }
 
 const inferColumnType = (key: string, rows: Record<string, unknown>[]) => {
+  let sawString = false
   for (const row of rows) {
     const value = row[key]
     if (value === null || value === undefined) {
@@ -202,9 +209,11 @@ const inferColumnType = (key: string, rows: Record<string, unknown>[]) => {
     if (typeof value === 'object') {
       return 'Object'
     }
-    return 'String'
+    if (typeof value === 'string') {
+      sawString = true
+    }
   }
-  return 'String'
+  return sawString ? 'Unknown' : 'Unknown'
 }
 
 const selectColumnIcon = (type: string): IconName => {
@@ -232,11 +241,17 @@ const buildPreviewFromDataset = (dataset: DatasetRecord | null) => {
   const sampleRows = extractSampleRows(sampleJson)
   const schemaColumns = extractSchemaColumns(schemaJson)
   const sampleColumns = extractSampleColumns(sampleJson, sampleRows)
-  const schemaNames = new Set(schemaColumns.map((column) => column.name))
-  const mergedColumns = [...schemaColumns]
-  sampleColumns.forEach((name) => {
-    if (!schemaNames.has(name)) {
-      mergedColumns.push({ name })
+  const mergedColumns = schemaColumns.map((column) => ({ ...column }))
+  const columnIndex = new Map(mergedColumns.map((column, index) => [column.name, index]))
+  sampleColumns.forEach((column) => {
+    const index = columnIndex.get(column.name)
+    if (index === undefined) {
+      columnIndex.set(column.name, mergedColumns.length)
+      mergedColumns.push(column)
+      return
+    }
+    if (!mergedColumns[index].type && column.type) {
+      mergedColumns[index].type = column.type
     }
   })
   const columns = mergedColumns.map((column) => {
@@ -257,6 +272,173 @@ const buildPreviewFromDataset = (dataset: DatasetRecord | null) => {
     return formatted
   })
   return { columns, rows }
+}
+
+const buildDatasetInputNodes = (datasets: DatasetRecord[]) => {
+  const sortedDatasets = [...datasets].sort((left, right) => left.name.localeCompare(right.name))
+
+  return sortedDatasets.map((dataset, index): FlowNode => ({
+    id: dataset.dataset_id,
+    type: 'input',
+    sourcePosition: Position.Right,
+    targetPosition: Position.Left,
+    data: {
+      label: dataset.name,
+      metadata: {
+        datasetId: dataset.dataset_id,
+        datasetName: dataset.name,
+        dataset_name: dataset.name,
+      },
+    },
+    position: { x: 0, y: index * 120 },
+  }))
+}
+
+const mergeDatasetNodeData = (existingData: unknown, datasetData: unknown) => {
+  if (!isRecord(existingData)) {
+    return isRecord(datasetData) ? datasetData : existingData
+  }
+  if (!isRecord(datasetData)) {
+    return existingData
+  }
+  const next = { ...existingData }
+  if (typeof next.label !== 'string' || !next.label) {
+    if (typeof datasetData.label === 'string' && datasetData.label) {
+      next.label = datasetData.label
+    }
+  }
+  const existingMeta = isRecord(next.metadata) ? next.metadata : null
+  const datasetMeta = isRecord(datasetData.metadata) ? datasetData.metadata : null
+  if (existingMeta || datasetMeta) {
+    next.metadata = { ...(datasetMeta ?? {}), ...(existingMeta ?? {}) }
+  }
+  return next
+}
+
+const syncDatasetNodes = (currentNodes: FlowNode[], datasetNodes: FlowNode[]) => {
+  if (datasetNodes.length === 0) {
+    return []
+  }
+  if (currentNodes.length === 0) {
+    return layoutFlowNodes(datasetNodes, [])
+  }
+
+  const datasetById = new Map(datasetNodes.map((node) => [node.id, node]))
+  const nextNodes: FlowNode[] = []
+  const existingIds = new Set<string>()
+  let maxY = 0
+
+  currentNodes.forEach((node) => {
+    const datasetNode = datasetById.get(node.id)
+    if (!datasetNode) {
+      return
+    }
+    const position = node.position ?? datasetNode.position
+    maxY = Math.max(maxY, position?.y ?? 0)
+    nextNodes.push({
+      ...node,
+      type: datasetNode.type,
+      data: mergeDatasetNodeData(node.data, datasetNode.data),
+      sourcePosition: datasetNode.sourcePosition,
+      targetPosition: datasetNode.targetPosition,
+    })
+    existingIds.add(node.id)
+  })
+
+  let nextY = nextNodes.length === 0 ? 0 : maxY + 120
+  datasetNodes.forEach((node) => {
+    if (existingIds.has(node.id)) {
+      return
+    }
+    nextNodes.push({
+      ...node,
+      position: {
+        x: node.position?.x ?? 0,
+        y: nextY,
+      },
+    })
+    nextY += 120
+  })
+
+  return nextNodes
+}
+
+const mergeFlowWithDatasets = (flowNodes: FlowNode[], datasetNodes: FlowNode[]) => {
+  if (datasetNodes.length === 0) {
+    return flowNodes
+  }
+  if (flowNodes.length === 0) {
+    return layoutFlowNodes(datasetNodes, [])
+  }
+
+  const nextNodes = [...flowNodes]
+  const flowById = new Map(flowNodes.map((node) => [node.id, node]))
+  let maxY = flowNodes.reduce((max, node) => Math.max(max, node.position?.y ?? 0), 0)
+  let nextY = maxY + 120
+
+  datasetNodes.forEach((datasetNode) => {
+    const existing = flowById.get(datasetNode.id)
+    if (existing) {
+      const merged = {
+        ...existing,
+        type: existing.type ?? datasetNode.type,
+        data: mergeDatasetNodeData(existing.data, datasetNode.data),
+        sourcePosition: existing.sourcePosition ?? datasetNode.sourcePosition,
+        targetPosition: existing.targetPosition ?? datasetNode.targetPosition,
+      }
+      const index = nextNodes.findIndex((node) => node.id === datasetNode.id)
+      if (index >= 0) {
+        nextNodes[index] = merged
+      }
+      return
+    }
+    nextNodes.push({
+      ...datasetNode,
+      position: {
+        x: datasetNode.position?.x ?? 0,
+        y: nextY,
+      },
+    })
+    nextY += 120
+  })
+
+  return nextNodes
+}
+
+const resolveDatasetForNode = (node: FlowNode, datasets: DatasetRecord[]) => {
+  if (datasets.length === 0) {
+    return null
+  }
+  const data = isRecord(node.data) ? node.data : {}
+  const metadata = isRecord(data.metadata) ? data.metadata : {}
+  const candidateIds: string[] = []
+  const candidateNames: string[] = []
+  const pushUnique = (list: string[], value: unknown) => {
+    if (typeof value === 'string' && value && !list.includes(value)) {
+      list.push(value)
+    }
+  }
+
+  pushUnique(candidateIds, metadata.datasetId)
+  pushUnique(candidateIds, metadata.dataset_id)
+  pushUnique(candidateIds, node.id)
+  pushUnique(candidateNames, metadata.datasetName)
+  pushUnique(candidateNames, metadata.dataset_name)
+  pushUnique(candidateNames, data.label)
+
+  for (const id of candidateIds) {
+    const match = datasets.find((dataset) => dataset.dataset_id === id)
+    if (match) {
+      return match
+    }
+  }
+  for (const name of candidateNames) {
+    const match = datasets.find((dataset) => dataset.name === name)
+    if (match) {
+      return match
+    }
+  }
+  return null
 }
 
 const buildNodeLabel = (node: DefinitionNode) => {
@@ -364,10 +546,16 @@ const buildFlowFromDefinition = (definition: PipelineDetailRecord['definition_js
         return null
       }
       const typedNode = node as DefinitionNode
+      const data: Record<string, unknown> = { label: buildNodeLabel(typedNode) }
+      if (isRecord(typedNode.metadata)) {
+        data.metadata = typedNode.metadata
+      }
       const flowNode: FlowNode = {
         id: node.id,
-        data: { label: buildNodeLabel(typedNode) },
+        data,
         position: { x: 0, y: index * 120 },
+        sourcePosition: Position.Right,
+        targetPosition: Position.Left,
       }
       if (typedNode.type === 'input' || typedNode.type === 'output') {
         flowNode.type = typedNode.type
@@ -485,6 +673,9 @@ const buildDefinitionDraft = (
     if (node.type) {
       fresh.type = node.type
     }
+    if (isRecord(node.data) && isRecord(node.data.metadata)) {
+      fresh.metadata = node.data.metadata
+    }
     return fresh
   })
 
@@ -512,10 +703,12 @@ export const GraphPage = () => {
   const queryClient = useQueryClient()
   const pipelineContext = useAppStore((state) => state.pipelineContext)
   const setPipelineContext = useAppStore((state) => state.setPipelineContext)
+  const setAiAgentContext = useAppStore((state) => state.setAiAgentContext)
   const [activeTab, setActiveTab] = useState<'edit' | 'proposals' | 'history'>('edit')
   const [toolMode, setToolMode] = useState<ToolMode>('pointer')
-  const [isRightPanelOpen, setRightPanelOpen] = useState(true)
-  const [isBottomPanelOpen, setBottomPanelOpen] = useState(true)
+  const [isRightPanelOpen, setRightPanelOpen] = useState(false)
+  const [isBottomPanelOpen, setBottomPanelOpen] = useState(false)
+  const [previewDatasetId, setPreviewDatasetId] = useState<string>('')
   const [columnSearch, setColumnSearch] = useState('')
   const [previewColumns, setPreviewColumns] = useState<PreviewColumn[]>([])
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([])
@@ -564,9 +757,10 @@ export const GraphPage = () => {
       listPipelineArtifacts(primaryPipeline?.pipeline_id ?? '', { mode: 'build', limit: 50, dbName: activeDbName }),
     enabled: Boolean(primaryPipeline?.pipeline_id),
   })
-  const pipelineFolderLabel =
-    pipelineContext?.folderName || primaryPipeline?.db_name || pipelineDetail?.db_name || 'Pipeline Builder'
-  const pipelineDisplayName = primaryPipeline?.name || pipelineContext?.folderName || 'Pipeline Builder'
+  const pipelineFolderName = pipelineContext?.folderName || primaryPipeline?.db_name || pipelineDetail?.db_name
+  const pipelineFolderLabel = pipelineFolderName || 'No project selected'
+  const pipelineDisplayName = primaryPipeline?.name || 'Select a pipeline'
+  const pipelineContextName = primaryPipeline?.name || pipelineDetail?.name || ''
   const folderOptions = useMemo(
     () => {
       const options = (databases ?? []).map(normalizeFolder).filter(Boolean) as FolderOption[]
@@ -605,6 +799,12 @@ export const GraphPage = () => {
     !isDeploying
   const pipelineCount = primaryPipeline ? nodes.length : pipelines.length
   const previewDataset = useMemo(() => {
+    if (previewDatasetId) {
+      const selected = datasets.find((dataset) => dataset.dataset_id === previewDatasetId)
+      if (selected) {
+        return selected
+      }
+    }
     if (datasets.length === 0) {
       return null
     }
@@ -614,16 +814,43 @@ export const GraphPage = () => {
     }
     const withSchema = datasets.find((dataset) => extractSchemaColumns(dataset.schema_json).length > 0)
     return withSchema ?? datasets[0]
-  }, [datasets])
+  }, [datasets, previewDatasetId])
   const previewDatasetName = previewDataset?.name ?? 'No datasets available'
   const previewPayload = useMemo(() => buildPreviewFromDataset(previewDataset), [previewDataset])
+  const previewMenu = useMemo(() => {
+    const hasDatasets = datasets.length > 0
+    return (
+      <Menu>
+        <MenuItem icon="database" text={`Current: ${previewDatasetName}`} disabled />
+        <MenuDivider />
+        {hasDatasets
+          ? datasets.map((dataset) => {
+              const isActive = dataset.dataset_id === previewDataset?.dataset_id
+              return (
+                <MenuItem
+                  key={dataset.dataset_id}
+                  icon={isActive ? 'small-tick' : 'database'}
+                  text={dataset.name}
+                  disabled={isActive}
+                  onClick={() => {
+                    setPreviewDatasetId(dataset.dataset_id)
+                    setColumnSearch('')
+                  }}
+                />
+              )
+            })
+          : <MenuItem text="No datasets available" disabled />}
+      </Menu>
+    )
+  }, [datasets, previewDataset, previewDatasetName, setPreviewDatasetId, setColumnSearch])
   const datasetOutputs = useMemo(() => {
     return datasets.map((dataset) => {
       const sampleRows = extractSampleRows(dataset.sample_json ?? {})
       const schemaColumns = extractSchemaColumns(dataset.schema_json)
       const sampleColumns = extractSampleColumns(dataset.sample_json ?? {}, sampleRows)
       const schemaNames = new Set(schemaColumns.map((column) => column.name))
-      const extraColumns = schemaNames.size > 0 ? sampleColumns.filter((name) => !schemaNames.has(name)) : []
+      const sampleNames = sampleColumns.map((column) => column.name)
+      const extraColumns = schemaNames.size > 0 ? sampleNames.filter((name) => !schemaNames.has(name)) : []
       const columnCount = schemaColumns.length || sampleColumns.length
       const rowCount = dataset.row_count ?? sampleRows.length
       return {
@@ -634,6 +861,35 @@ export const GraphPage = () => {
       }
     })
   }, [datasets])
+  const datasetNodes = useMemo(() => buildDatasetInputNodes(datasets), [datasets])
+  const aiAgentNodes = useMemo(
+    () =>
+      nodes.map((node) => {
+        const data = isRecord(node.data) ? node.data : null
+        const label = data && typeof data['label'] === 'string' && data['label'] ? data['label'] : node.id
+        return { id: node.id, label, type: node.type }
+      }),
+    [nodes],
+  )
+
+  useEffect(() => {
+    setPreviewDatasetId('')
+  }, [activeDbName])
+
+  useEffect(() => {
+    setAiAgentContext({
+      projectName: pipelineFolderName ?? '',
+      pipelineName: pipelineContextName,
+      nodes: aiAgentNodes,
+    })
+  }, [pipelineFolderLabel, pipelineContextName, aiAgentNodes, setAiAgentContext])
+
+  useEffect(() => {
+    if (previewDatasetId && !datasets.some((dataset) => dataset.dataset_id === previewDatasetId)) {
+      setPreviewDatasetId('')
+    }
+  }, [datasets, previewDatasetId])
+
   const isPanMode = toolMode === 'pan'
   const isPointerMode = toolMode === 'pointer'
   const isSelectMode = toolMode === 'select'
@@ -690,8 +946,10 @@ export const GraphPage = () => {
 
   const handleNodeClick = useCallback((_: unknown, node: FlowNode) => {
     if (!isRemoveMode) {
-      if (!isSelectableMode) {
-        return
+      const dataset = resolveDatasetForNode(node, datasets)
+      if (dataset) {
+        setPreviewDatasetId(dataset.dataset_id)
+        setColumnSearch('')
       }
       setBottomPanelOpen(true)
       return
@@ -699,7 +957,7 @@ export const GraphPage = () => {
     setNodes((current) => current.filter((item) => item.id !== node.id))
     setEdges((current) => current.filter((item) => item.source !== node.id && item.target !== node.id))
     setDefinitionDirty(true)
-  }, [isRemoveMode, isSelectableMode, setNodes, setEdges])
+  }, [isRemoveMode, datasets, setPreviewDatasetId, setBottomPanelOpen, setColumnSearch, setNodes, setEdges])
 
   const handleEdgeClick = useCallback((_: unknown, edge: Edge) => {
     if (!isRemoveMode) {
@@ -784,7 +1042,7 @@ export const GraphPage = () => {
   }, [reactFlowInstance])
 
   const handleFitView = useCallback(() => {
-    reactFlowInstance?.fitView({ padding: 0.1 })
+    reactFlowInstance?.fitView({ padding: 0.1, minZoom: 0.1 })
   }, [reactFlowInstance])
 
   const handleCloseBottomPanel = useCallback(() => {
@@ -980,18 +1238,18 @@ export const GraphPage = () => {
   }, [previewPayload])
 
   useEffect(() => {
-    if (!pipelineDetail?.definition_json) {
-      setNodes([])
-      setEdges([])
+    const { nodes: flowNodes, edges: flowEdges } = buildFlowFromDefinition(pipelineDetail?.definition_json)
+    if (flowNodes.length > 0) {
+      const laidOutNodes = layoutFlowNodes(flowNodes, flowEdges)
+      setNodes(mergeFlowWithDatasets(laidOutNodes, datasetNodes))
+      setEdges(flowEdges)
       setDefinitionDirty(false)
       return
     }
-    const { nodes: flowNodes, edges: flowEdges } = buildFlowFromDefinition(pipelineDetail.definition_json)
-    const laidOutNodes = layoutFlowNodes(flowNodes, flowEdges)
-    setNodes(laidOutNodes)
-    setEdges(flowEdges)
+    setEdges([])
+    setNodes((current) => syncDatasetNodes(current, datasetNodes))
     setDefinitionDirty(false)
-  }, [pipelineDetail?.definition_json, setNodes, setEdges])
+  }, [pipelineDetail?.definition_json, datasetNodes, setNodes, setEdges])
 
   const topbar = (
     <div className="pipeline-topbar">
@@ -999,13 +1257,8 @@ export const GraphPage = () => {
         <div className="pipeline-header-details">
           <div className="pipeline-title-row">
             <div className="pipeline-breadcrumb">
-              <Icon icon="folder-close" size={14} className="pipeline-breadcrumb-icon" />
+              <Icon icon="flow-branch" size={14} className="pipeline-breadcrumb-icon" />
               <span className="pipeline-breadcrumb-text">{pipelineFolderLabel}</span>
-            </div>
-            <Icon icon="chevron-right" className="pipeline-breadcrumb-separator" size={14} />
-            <div className="pipeline-name-wrapper">
-              <span className="pipeline-name">{pipelineDisplayName}</span>
-              <Button minimal small icon="star-empty" className="pipeline-star" disabled />
             </div>
           </div>
 
@@ -1080,50 +1333,6 @@ export const GraphPage = () => {
         </div>
 
         <Button
-          className="pipeline-action-btn"
-          intent="success"
-          icon="floppy-disk"
-          text="Save"
-          small
-          disabled={!canSave}
-          loading={isSaving}
-          onClick={handleSave}
-        />
-        <Button
-          className="pipeline-action-btn"
-          intent="primary"
-          icon="git-pull"
-          text="Propose"
-          outlined
-          small
-          disabled={!canPropose}
-          loading={isProposing}
-          onClick={handlePropose}
-        />
-        <div className="pipeline-deploy-group">
-          <Button
-            className="pipeline-deploy-btn"
-            intent="primary"
-            text="Deploy"
-            small
-            disabled={!canDeploy}
-            loading={isDeploying}
-            onClick={handleDeploy}
-          />
-          <Button
-            className="pipeline-deploy-options"
-            intent="primary"
-            icon="settings"
-            small
-            disabled={!canDeploy}
-          />
-        </div>
-
-        <div className="pipeline-divider" />
-
-        <Button minimal icon="share" text="Share" small disabled />
-        <Button minimal icon="menu" small />
-        <Button
           minimal
           icon="grid-view"
           small
@@ -1159,7 +1368,7 @@ export const GraphPage = () => {
                 onNodeClick={handleNodeClick}
                 onEdgeClick={handleEdgeClick}
                 onInit={setReactFlowInstance}
-                panOnDrag={isPanMode}
+                panOnDrag
                 nodesDraggable={isPointerMode}
                 nodesConnectable={isPointerMode}
                 elementsSelectable={isSelectableMode}
@@ -1169,8 +1378,16 @@ export const GraphPage = () => {
                 multiSelectionKeyCode={isSelectMode ? ['Meta', 'Control'] : null}
                 deleteKeyCode={['Backspace', 'Delete']}
                 fitView
+                minZoom={0.1}
                 proOptions={{ hideAttribution: true }}
-              />
+              >
+                <MiniMap
+                  className="pipeline-minimap"
+                  position="bottom-right"
+                  style={{ right: 60, bottom: 8 }}
+                  maskColor="rgba(11, 18, 26, 0.6)"
+                />
+              </ReactFlow>
               <div className="pipeline-toolbox">
                 <div className="pipeline-toolbox-group">
                   <div className="pipeline-toolbox-button-group">
@@ -1221,7 +1438,7 @@ export const GraphPage = () => {
                     className="pipeline-tool-button"
                     onClick={handleLayout}
                   >
-                    <Icon icon="layout-hierarchy" size={16} />
+                    <Icon icon="layout-hierarchy" size={16} className="pipeline-layout-icon" />
                   </button>
                   <span className="pipeline-toolbox-label">Layout</span>
                 </div>
@@ -1274,13 +1491,15 @@ export const GraphPage = () => {
               <div className="pipeline-bottom-panel-body">
                 <div className="pipeline-preview">
                   <div className="pipeline-preview-sidebar">
-                    <button type="button" className="pipeline-preview-selector">
-                      <div className="pipeline-preview-selector-left">
-                        <Icon icon="database" size={14} />
-                        <span>{previewDatasetName}</span>
-                      </div>
-                      <Icon icon="chevron-down" size={14} />
-                    </button>
+                    <Popover content={previewMenu} position="bottom-left" usePortal={false}>
+                      <button type="button" className="pipeline-preview-selector">
+                        <div className="pipeline-preview-selector-left">
+                          <Icon icon="database" size={14} />
+                          <span>{previewDatasetName}</span>
+                        </div>
+                        <Icon icon="chevron-down" size={14} />
+                      </button>
+                    </Popover>
                     <label className="pipeline-preview-search">
                       <Icon icon="search" size={14} />
                       <input

@@ -35,10 +35,15 @@ from shared.services.dataset_registry import DatasetRegistry
 from shared.services.llm_quota import LLMQuotaExceededError
 from shared.config.settings import build_client_ssl_config, get_settings
 from shared.utils.json_patch import JsonPatchError, apply_json_patch
+from shared.errors.error_envelope import build_error_envelope
+from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.observability.request_context import get_correlation_id, get_request_id
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/agent-plans", tags=["Agent Plans"])
+
+SERVICE_NAME = "BFF"
 
 _AGENT_FORWARD_HEADER_ALLOWLIST = {
     "accept",
@@ -60,6 +65,14 @@ _AGENT_FORWARD_HEADER_ALLOWLIST = {
 }
 _APPROVED_DECISIONS = {"APPROVED", "APPROVE", "ALLOW", "YES"}
 _REJECTED_DECISIONS = {"REJECTED", "REJECT", "DENY", "NO"}
+
+
+def _resolve_upstream_code(status_code: int) -> ErrorCode:
+    if status_code == status.HTTP_504_GATEWAY_TIMEOUT:
+        return ErrorCode.UPSTREAM_TIMEOUT
+    if status_code in {status.HTTP_502_BAD_GATEWAY, status.HTTP_503_SERVICE_UNAVAILABLE}:
+        return ErrorCode.UPSTREAM_UNAVAILABLE
+    return ErrorCode.UPSTREAM_ERROR
 
 
 class _NullAgentModelRegistry:
@@ -162,13 +175,32 @@ async def _call_agent_create_run(*, request: Request, payload: Dict[str, Any]) -
 
     async with httpx.AsyncClient(timeout=timeout_seconds, verify=ssl_config.get("verify", True)) as client:
         resp = await client.post(url, headers=_forward_headers_to_agent(request), json=payload)
+    parse_failed = False
     try:
         body = resp.json()
     except Exception:
-        body = {"status": "error", "message": (resp.text or "").strip() or "Agent service error"}
+        parse_failed = True
+        raw_text = (resp.text or "").strip() or "Agent service error"
+        error_status = resp.status_code if resp.status_code >= 400 else status.HTTP_502_BAD_GATEWAY
+        body = build_error_envelope(
+            service_name=SERVICE_NAME,
+            message="Agent service returned invalid JSON",
+            detail=raw_text,
+            code=_resolve_upstream_code(error_status),
+            category=ErrorCategory.UPSTREAM,
+            status_code=error_status,
+            context={"upstream_url": url, "upstream_status": resp.status_code},
+            request_id=get_request_id(),
+            correlation_id=get_correlation_id(),
+        )
+
+    if parse_failed:
+        raise HTTPException(status_code=int(body.get("http_status", status.HTTP_502_BAD_GATEWAY)), detail=body)
 
     if resp.status_code >= 400:
-        raise HTTPException(status_code=int(resp.status_code), detail=body.get("detail") if isinstance(body, dict) else body)
+        if isinstance(body, dict):
+            raise HTTPException(status_code=int(resp.status_code), detail=body)
+        raise HTTPException(status_code=int(resp.status_code), detail=body)
     return body if isinstance(body, dict) else {"status": "success", "data": body}
 
 

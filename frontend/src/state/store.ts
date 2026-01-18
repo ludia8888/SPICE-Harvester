@@ -7,11 +7,27 @@ export type PipelineContext = {
   folderName: string
 }
 
+export type AiAgentContextNode = {
+  id: string
+  label: string
+  type?: string
+}
+
+export type AiAgentContext = {
+  projectName: string
+  pipelineName: string
+  nodes: AiAgentContextNode[]
+}
+
 type AppState = {
   activeNav: NavKey
   setActiveNav: (nav: NavKey) => void
   pipelineContext: PipelineContext | null
   setPipelineContext: (context: PipelineContext | null) => void
+  isAiAgentOpen: boolean
+  setAiAgentOpen: (isOpen: boolean) => void
+  aiAgentContext: AiAgentContext
+  setAiAgentContext: (context: AiAgentContext) => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -19,4 +35,8 @@ export const useAppStore = create<AppState>((set) => ({
   setActiveNav: (nav) => set({ activeNav: nav }),
   pipelineContext: null,
   setPipelineContext: (pipelineContext) => set({ pipelineContext }),
+  isAiAgentOpen: false,
+  setAiAgentOpen: (isAiAgentOpen) => set({ isAiAgentOpen }),
+  aiAgentContext: { projectName: '', pipelineName: '', nodes: [] },
+  setAiAgentContext: (aiAgentContext) => set({ aiAgentContext }),
 }))

@@ -54,6 +54,7 @@ vi.mock('reactflow', async () => {
       }, [onInit])
       return <div data-testid="reactflow" />
     },
+    MiniMap: () => <div data-testid="reactflow-minimap" />,
     addEdge: (connection: { source?: string; target?: string }, edges: Array<Record<string, unknown>>) => {
       if (!connection.source || !connection.target) {
         return edges
@@ -150,7 +151,7 @@ describe('GraphPage', () => {
   it('renders pipeline data and preview columns', async () => {
     renderWithClient(<GraphPage />)
 
-    expect(await screen.findByText('Orders Pipeline')).toBeInTheDocument()
+    expect(await screen.findByText('order_id')).toBeInTheDocument()
     expect(screen.getByTestId('reactflow')).toBeInTheDocument()
     expect(screen.getAllByText('order_id').length).toBeGreaterThan(0)
   })
@@ -158,8 +159,8 @@ describe('GraphPage', () => {
   it('runs readiness checks and proposals', async () => {
     renderWithClient(<GraphPage />)
 
-    await screen.findByText('Orders Pipeline')
-    const settingsButton = screen.getByRole('button', { name: 'Settings' })
+    const settingsButton = await screen.findByRole('button', { name: 'Settings' })
+    await waitFor(() => expect(settingsButton).toBeEnabled())
     fireEvent.click(settingsButton)
 
     await waitFor(() => {
@@ -183,6 +184,13 @@ describe('GraphPage', () => {
   it('filters preview columns and toggles panels', async () => {
     renderWithClient(<GraphPage />)
 
+    const bottomPanel = document.querySelector('.pipeline-bottom-panel') as HTMLElement | null
+    expect(bottomPanel?.className).not.toContain('is-open')
+
+    const bottomPanelToggle = document.querySelector('.pipeline-bottom-panel-toggle') as HTMLElement | null
+    expect(bottomPanelToggle).not.toBeNull()
+    fireEvent.click(bottomPanelToggle as HTMLElement)
+
     const searchInput = await screen.findByPlaceholderText(/Search .* columns/i)
     fireEvent.change(searchInput, { target: { value: 'missing' } })
     expect(screen.getByText('No matching columns.')).toBeInTheDocument()
@@ -190,7 +198,6 @@ describe('GraphPage', () => {
     fireEvent.change(searchInput, { target: { value: 'status' } })
     expect(screen.queryByText('No matching columns.')).not.toBeInTheDocument()
 
-    const bottomPanel = document.querySelector('.pipeline-bottom-panel') as HTMLElement | null
     expect(bottomPanel?.className).toContain('is-open')
 
     const panelToggle = screen.getByRole('button', { name: 'Close preview' })
@@ -230,7 +237,7 @@ describe('GraphPage', () => {
 
     renderWithClient(<GraphPage />)
 
-    expect(await screen.findByText('Orders Pipeline')).toBeInTheDocument()
+    expect(await screen.findByText('order_id')).toBeInTheDocument()
     expect(screen.getByText('true')).toBeInTheDocument()
     expect(screen.getByText('{"a":1}')).toBeInTheDocument()
     expect(screen.getAllByText('Integer').length).toBeGreaterThan(0)

@@ -1348,6 +1348,38 @@ class DatasetRegistry:
             )
         return output
 
+    async def count_datasets_by_db_names(
+        self,
+        *,
+        db_names: Iterable[str],
+        branch: Optional[str] = None,
+    ) -> Dict[str, int]:
+        if not self._pool:
+            raise RuntimeError("DatasetRegistry not connected")
+
+        names = [name for name in db_names if name]
+        if not names:
+            return {}
+
+        clause = "WHERE d.db_name = ANY($1)"
+        values: List[Any] = [names]
+        if branch:
+            clause += f" AND d.branch = ${len(values) + 1}"
+            values.append(branch)
+
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT d.db_name, COUNT(*) AS count
+                FROM {self._schema}.datasets d
+                {clause}
+                GROUP BY d.db_name
+                """,
+                *values,
+            )
+
+        return {str(row["db_name"]): int(row["count"] or 0) for row in rows or []}
+
     async def get_dataset(self, *, dataset_id: str) -> Optional[DatasetRecord]:
         if not self._pool:
             raise RuntimeError("DatasetRegistry not connected")

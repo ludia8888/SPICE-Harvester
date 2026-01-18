@@ -12,6 +12,8 @@ BRANCH="${BRANCH:-main}"
 RETRIES="${RETRIES:-60}"
 SLEEP_SECONDS="${SLEEP_SECONDS:-1}"
 export DB_NAME INSTANCE_COUNT BRANCH
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CLEANUP_OBJECT_STORE="${CLEANUP_OBJECT_STORE:-true}"
 
 ADMIN_TOKEN="${ADMIN_TOKEN:-}"
 if [[ -z "${ADMIN_TOKEN}" ]]; then
@@ -45,8 +47,17 @@ if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
 fi
 
 tmp_dir="$(mktemp -d)"
+truthy() {
+  local v
+  v="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | xargs)"
+  [[ "${v}" == "1" || "${v}" == "true" || "${v}" == "yes" || "${v}" == "y" ]]
+}
+
 cleanup() {
   rm -rf "${tmp_dir}"
+  if truthy "${CLEANUP_OBJECT_STORE}" && [[ -f "${SCRIPT_DIR}/dev_cleanup_object_store.py" ]]; then
+    "${PYTHON_BIN}" "${SCRIPT_DIR}/dev_cleanup_object_store.py" --yes --db "${DB_NAME}" --quiet || true
+  fi
 }
 trap cleanup EXIT
 

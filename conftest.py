@@ -4,6 +4,7 @@ import os
 import sys
 import warnings
 from pathlib import Path
+import subprocess
 
 
 ROOT_DIR = Path(__file__).resolve().parent
@@ -104,3 +105,27 @@ def pytest_configure(config) -> None:
         message=r"Deprecated call to `pkg_resources\.declare_namespace\\('sphinxcontrib'\\).*",
         category=DeprecationWarning,
     )
+
+
+def _truthy(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "y"}
+
+
+def pytest_sessionfinish(session, exitstatus) -> None:
+    if _truthy(os.getenv("SKIP_TEST_OBJECT_STORE_CLEANUP", "false")):
+        return
+    env = os.getenv("ENVIRONMENT", "development").strip().lower()
+    if env in {"production", "prod"}:
+        return
+
+    script = ROOT_DIR / "scripts" / "dev_cleanup_object_store.py"
+    if not script.exists():
+        return
+
+    try:
+        subprocess.run(
+            [sys.executable, str(script), "--yes", "--quiet"],
+            check=False,
+        )
+    except Exception as exc:
+        sys.stderr.write(f"[cleanup] object store cleanup failed: {exc}\n")

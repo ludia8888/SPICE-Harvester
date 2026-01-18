@@ -16,6 +16,9 @@ import httpx
 from fastapi import FastAPI
 
 from shared.config.settings import get_settings
+from shared.errors.error_envelope import build_error_envelope
+from shared.errors.error_types import ErrorCategory, ErrorCode
+from shared.observability.request_context import get_correlation_id, get_request_id
 from shared.observability.metrics import get_metrics_collector
 from shared.observability.logging import install_trace_context_filter
 from shared.observability.tracing import get_tracing_service
@@ -24,6 +27,8 @@ from shared.services.service_factory import ServiceInfo, create_fastapi_service
 from shared.utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
+
+SERVICE_NAME = "ingest-reconciler-worker"
 
 
 class IngestReconcilerWorker:
@@ -154,16 +159,28 @@ class IngestReconcilerWorker:
                     self.tracing.record_exception(exc)
                     self._record_error_metric()
                     if self.alert_on_error:
-                        await self._emit_alert(
-                            {
-                                "kind": "dataset_ingest_reconcile",
-                                "status": "error",
-                                "error": str(exc),
+                        error_payload = build_error_envelope(
+                            service_name=SERVICE_NAME,
+                            message="Ingest reconciler loop failed",
+                            detail=str(exc),
+                            code=ErrorCode.INTERNAL_ERROR,
+                            category=ErrorCategory.INTERNAL,
+                            status_code=500,
+                            request_id=get_request_id(),
+                            correlation_id=get_correlation_id(),
+                            context={
                                 "stale_after_seconds": self.stale_after_seconds,
                                 "limit": self.limit,
-                                "timestamp": utcnow().isoformat(),
-                            }
+                            },
                         )
+                        alert_payload = {
+                            **error_payload,
+                            "kind": "dataset_ingest_reconcile",
+                            "stale_after_seconds": self.stale_after_seconds,
+                            "limit": self.limit,
+                            "timestamp": utcnow().isoformat(),
+                        }
+                        await self._emit_alert(alert_payload)
                     logger.warning("Ingest reconciler loop failed: %s", exc)
 
             elapsed = time.monotonic() - started_at

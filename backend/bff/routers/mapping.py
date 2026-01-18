@@ -16,12 +16,17 @@ from pydantic import BaseModel, Field
 from bff.dependencies import LabelMapper, get_label_mapper, OMSClient, get_oms_client
 
 # Add shared path for common utilities
+from shared.errors.error_envelope import build_error_envelope
+from shared.errors.error_types import ErrorCategory, ErrorCode
 from shared.models.requests import ApiResponse
+from shared.observability.request_context import get_correlation_id, get_request_id
 from shared.security.input_sanitizer import SecurityViolationError, sanitize_input
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/databases/{db_name}/mappings", tags=["Label Mappings"])
+
+SERVICE_NAME = "BFF"
 
 
 class MappingImportPayload(BaseModel):
@@ -443,24 +448,35 @@ async def validate_mappings(
         try:
             db_exists = await oms_client.database_exists(db_name)
             if not db_exists:
-                return {
-                    "status": "error",
-                    "message": f"데이터베이스 '{db_name}'이 존재하지 않습니다",
-                    "data": {
-                        "validation_passed": False,
-                        "details": validation_details
-                    }
-                }
+                payload = build_error_envelope(
+                    service_name=SERVICE_NAME,
+                    message=f"데이터베이스 '{db_name}'이 존재하지 않습니다",
+                    detail="Database not found",
+                    code=ErrorCode.RESOURCE_NOT_FOUND,
+                    category=ErrorCategory.RESOURCE,
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    context={"validation_passed": False, "details": validation_details, "db_name": db_name},
+                    request_id=get_request_id(),
+                    correlation_id=get_correlation_id(),
+                )
+                return JSONResponse(content=payload, status_code=payload.get("http_status", status.HTTP_404_NOT_FOUND))
         except Exception as e:
             logger.error(f"Failed to check database existence: {e}")
-            return {
-                "status": "error", 
-                "message": "데이터베이스 연결 실패",
-                "data": {
-                    "validation_passed": False,
-                    "details": validation_details
-                }
-            }
+            payload = build_error_envelope(
+                service_name=SERVICE_NAME,
+                message="데이터베이스 연결 실패",
+                detail=str(e),
+                code=ErrorCode.OMS_UNAVAILABLE,
+                category=ErrorCategory.UPSTREAM,
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                context={"validation_passed": False, "details": validation_details, "db_name": db_name},
+                request_id=get_request_id(),
+                correlation_id=get_correlation_id(),
+            )
+            return JSONResponse(
+                content=payload,
+                status_code=payload.get("http_status", status.HTTP_503_SERVICE_UNAVAILABLE),
+            )
         
         # 실제 온톨로지 데이터 조회
         try:
@@ -469,14 +485,21 @@ async def validate_mappings(
             existing_property_ids = {ont.id for ont in ontologies if ont.type == "Property"}
         except Exception as e:
             logger.error(f"Failed to get ontologies: {e}")
-            return {
-                "status": "error",
-                "message": "온톨로지 데이터 조회 실패", 
-                "data": {
-                    "validation_passed": False,
-                    "details": validation_details
-                }
-            }
+            payload = build_error_envelope(
+                service_name=SERVICE_NAME,
+                message="온톨로지 데이터 조회 실패",
+                detail=str(e),
+                code=ErrorCode.UPSTREAM_ERROR,
+                category=ErrorCategory.UPSTREAM,
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                context={"validation_passed": False, "details": validation_details, "db_name": db_name},
+                request_id=get_request_id(),
+                correlation_id=get_correlation_id(),
+            )
+            return JSONResponse(
+                content=payload,
+                status_code=payload.get("http_status", status.HTTP_502_BAD_GATEWAY),
+            )
         
         # 클래스 매핑 검증
         for cls_mapping in mapping_request.classes:

@@ -196,6 +196,8 @@ def _normalize_subsystem(service_name: Optional[str]) -> EnterpriseSubsystem:
         return EnterpriseSubsystem.PIPELINE
     if name in {"pipeline-worker", "pipeline_worker", "pipeline"}:
         return EnterpriseSubsystem.PIPELINE
+    if "ingest-reconciler" in name or "ingest_reconciler" in name:
+        return EnterpriseSubsystem.PIPELINE
     if "projection" in name:
         return EnterpriseSubsystem.PROJECTION
     if name.startswith("connector-") or name.startswith("connector_") or "connector" in name:

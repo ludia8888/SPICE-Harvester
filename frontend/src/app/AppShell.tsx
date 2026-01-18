@@ -29,18 +29,34 @@ const navItems: NavItem[] = [
 export const AppShell = () => {
   const activeNav = useAppStore((state) => state.activeNav)
   const setActiveNav = useAppStore((state) => state.setActiveNav)
+  const isAiAgentOpen = useAppStore((state) => state.isAiAgentOpen)
+  const setAiAgentOpen = useAppStore((state) => state.setAiAgentOpen)
   const [isRailExpanded, setRailExpanded] = useState(false)
 
   const railItems = useMemo(
     () =>
-      navItems.map((item) => ({
-        id: item.key,
-        icon: item.icon,
-        label: item.label,
-        active: activeNav === item.key,
-        onClick: () => setActiveNav(item.key),
-      })),
-    [activeNav, setActiveNav],
+      navItems.map((item) => {
+        if (item.key === 'ai-agent') {
+          return {
+            id: item.key,
+            icon: item.icon,
+            label: item.label,
+            active: isAiAgentOpen,
+            onClick: () => setAiAgentOpen(!isAiAgentOpen),
+          }
+        }
+        return {
+          id: item.key,
+          icon: item.icon,
+          label: item.label,
+          active: activeNav === item.key,
+          onClick: () => {
+            setActiveNav(item.key)
+            setAiAgentOpen(false)
+          },
+        }
+      }),
+    [activeNav, isAiAgentOpen, setActiveNav, setAiAgentOpen],
   )
 
   const content = (() => {
@@ -66,8 +82,13 @@ export const AppShell = () => {
 
   return (
     <div className="app-shell">
-      <div className={`app-body ${isRailExpanded ? 'is-expanded' : ''}`}>
+      <div className={`app-body ${isRailExpanded ? 'is-expanded' : ''} ${isAiAgentOpen ? 'is-ai-open' : ''}`}>
         <SidebarRail items={railItems} onHoverChange={setRailExpanded} />
+        <div className={`ai-agent-panel ${isAiAgentOpen ? 'is-open' : ''}`}>
+          <div className="ai-agent-panel-inner">
+            <AIAgentPage />
+          </div>
+        </div>
         <main
           className={`main ${activeNav === 'pipeline' ? 'is-pipeline' : ''} ${activeNav === 'ontology' ? 'is-ontology' : ''} ${activeNav === 'datasets' ? 'is-files' : ''}`}
         >

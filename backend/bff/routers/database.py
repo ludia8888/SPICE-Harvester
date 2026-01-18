@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 # Modernized dependency injection imports
 from bff.dependencies import get_oms_client, OMSClientDep
 from bff.services.oms_client import OMSClient
+from shared.services.dataset_registry import DatasetRegistry
 from shared.models.requests import ApiResponse, DatabaseCreateRequest
 from shared.security.input_sanitizer import (
     SecurityViolationError,
@@ -32,6 +33,12 @@ from shared.utils.language import get_accept_language
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/databases", tags=["Database Management"])
+
+
+async def get_dataset_registry() -> DatasetRegistry:
+    from bff.main import get_dataset_registry as _get_dataset_registry
+
+    return await _get_dataset_registry()
 
 
 def _is_dev_mode() -> bool:
@@ -204,7 +211,11 @@ def _enrich_db_entry(
 
 
 @router.get("", response_model=ApiResponse)
-async def list_databases(request: Request, oms: OMSClient = OMSClientDep):
+async def list_databases(
+    request: Request,
+    oms: OMSClient = OMSClientDep,
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+):
     """데이터베이스 목록 조회"""
     try:
         # 기본 보안 검증 (관리자 권한 필요한 작업)
@@ -216,6 +227,11 @@ async def list_databases(request: Request, oms: OMSClient = OMSClientDep):
         actor_type, actor_id, actor_name = _resolve_actor(request)
         db_names = [entry.get("name") for entry in map(_coerce_db_entry, databases) if entry.get("name")]
         access_rows = await _fetch_database_access(db_names)
+        dataset_counts: Dict[str, int] = {}
+        try:
+            dataset_counts = await dataset_registry.count_datasets_by_db_names(db_names=db_names)
+        except Exception as exc:
+            logger.warning("Failed to load dataset counts: %s", exc)
         is_dev = _is_dev_mode()
         enriched = []
         for entry in databases:
@@ -228,6 +244,9 @@ async def list_databases(request: Request, oms: OMSClient = OMSClientDep):
             )
             if is_dev:
                 payload["role"] = "Owner"
+            db_key = payload.get("name") or payload.get("db_name") or payload.get("id")
+            if db_key and db_key in dataset_counts:
+                payload["dataset_count"] = dataset_counts[db_key]
             entry_rows = access_rows.get(payload.get("name") or payload.get("db_name") or payload.get("id"), [])
             actor_has_access = any(
                 row.get("principal_type") == actor_type and row.get("principal_id") == actor_id for row in entry_rows

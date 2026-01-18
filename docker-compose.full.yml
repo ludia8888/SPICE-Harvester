@@ -433,6 +433,39 @@ services:
     networks:
       - spice_network
 
+  registry-cleaner:
+    build:
+      context: ./backend
+      dockerfile: bff/Dockerfile
+    image: spice-harvester-bff
+    container_name: spice_registry_cleaner
+    command: ["python", "-m", "shared.tools.registry_cleanup", "--loop", "--yes", "--quiet"]
+    healthcheck:
+      disable: true
+    environment:
+      - ENVIRONMENT=development
+      - DOCKER_CONTAINER=true
+      - BFF_BASE_URL=http://bff:8002
+      - ADMIN_TOKEN=${ADMIN_TOKEN:?ADMIN_TOKEN is required}
+      - BFF_ADMIN_TOKEN=${BFF_ADMIN_TOKEN:-}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-spicepass123}
+      - POSTGRES_DB=${POSTGRES_DB:-spicedb}
+      - REGISTRY_CLEANUP_ENABLED=${REGISTRY_CLEANUP_ENABLED:-true}
+      - REGISTRY_CLEANUP_PREFIXES=${REGISTRY_CLEANUP_PREFIXES:-}
+      - REGISTRY_CLEANUP_NAMES=${REGISTRY_CLEANUP_NAMES:-}
+      - REGISTRY_CLEANUP_MIN_AGE_SECONDS=${REGISTRY_CLEANUP_MIN_AGE_SECONDS:-300}
+      - REGISTRY_CLEANUP_INTERVAL_SECONDS=${REGISTRY_CLEANUP_INTERVAL_SECONDS:-600}
+    depends_on:
+      bff:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - spice_network
+
 volumes:
   terminusdb_data:
   bff_data:
