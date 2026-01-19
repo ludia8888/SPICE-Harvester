@@ -139,6 +139,7 @@ async def ai_intent(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=AIIntentDraft,
+            use_native_tool_calling=True,
             redis_service=redis_service,
             audit_store=audit_store,
             audit_partition_key="ai:intent",

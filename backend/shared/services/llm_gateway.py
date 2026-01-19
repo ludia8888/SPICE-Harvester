@@ -308,6 +308,26 @@ def _tool_parameters_from_model(model: Type[BaseModel]) -> Dict[str, Any]:
     return parameters
 
 
+def _openai_max_tokens_params(model: str, max_tokens: int) -> Dict[str, Any]:
+    """
+    OpenAI compatibility: newer models (ex: gpt-5) require max_completion_tokens.
+    """
+    model_name = str(model or "").strip().lower()
+    if model_name.startswith("gpt-5"):
+        return {"max_completion_tokens": int(max_tokens)}
+    return {"max_tokens": int(max_tokens)}
+
+
+def _openai_temperature_params(model: str, temperature: float) -> Dict[str, Any]:
+    """
+    OpenAI compatibility: gpt-5 only supports the default temperature (1).
+    """
+    model_name = str(model or "").strip().lower()
+    if model_name.startswith("gpt-5"):
+        return {}
+    return {"temperature": float(temperature)}
+
+
 class LLMGateway:
     """
     A thin, safe wrapper around an LLM provider.
@@ -438,9 +458,9 @@ class LLMGateway:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
         }
+        body.update(_openai_temperature_params(model, temperature))
+        body.update(_openai_max_tokens_params(model, max_tokens))
         if self.enable_json_mode:
             body["response_format"] = {"type": "json_object"}
         if extra_body:
@@ -514,11 +534,11 @@ class LLMGateway:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
             "tools": tools,
             "tool_choice": {"type": "function", "function": {"name": safe_tool_name}},
         }
+        body.update(_openai_temperature_params(model, temperature))
+        body.update(_openai_max_tokens_params(model, max_tokens))
         if extra_body:
             for key, value in extra_body.items():
                 if str(key).strip():
