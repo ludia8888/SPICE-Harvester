@@ -111,6 +111,8 @@ async def run_pipeline_agent(request: Request, body: PipelineAgentRunRequest) ->
         "cleansing_inspector": final_state.get("cleansing_inspector"),
         "cleansing_actions": final_state.get("cleansing_actions"),
         "join_plan": final_state.get("join_hints"),
+        "join_evaluation": final_state.get("join_evaluation"),
+        "join_evaluation_warnings": final_state.get("join_evaluation_warnings"),
         "specs": final_state.get("specs"),
         "questions": final_state.get("questions"),
         "validation_errors": final_state.get("validation_errors"),

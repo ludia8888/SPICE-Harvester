@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from bff.services.pipeline_context_pack import build_pipeline_context_pack
 from bff.services.pipeline_cleansing_agent import apply_cleansing_plan
 from bff.services.pipeline_join_agent import select_join_keys
+from bff.services.pipeline_join_evaluator import evaluate_pipeline_joins
 from bff.services.pipeline_transform_agent import apply_transform_plan
 from bff.services.pipeline_plan_compiler import (
     PipelinePlanCompileResult,
@@ -204,6 +205,10 @@ class PipelinePlanTransformRequest(BaseModel):
     join_plan: list[dict[str, Any]] | None = Field(default=None)
     cleansing_hints: list[dict[str, Any]] | None = Field(default=None)
     context_pack: dict | None = Field(default=None)
+
+
+class PipelinePlanEvaluateJoinsRequest(BaseModel):
+    node_id: str | None = Field(default=None, max_length=200)
 
 
 @router.post("/compile", response_model=ApiResponse)
@@ -623,6 +628,73 @@ async def inspect_plan_preview(
             "inspector": inspector,
         },
     )
+
+
+@router.post("/{plan_id}/evaluate-joins", response_model=ApiResponse)
+async def evaluate_joins(
+    plan_id: str,
+    body: PipelinePlanEvaluateJoinsRequest,
+    request: Request,
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    plan_registry: PipelinePlanRegistry = Depends(get_pipeline_plan_registry),
+) -> ApiResponse:
+    try:
+        plan_id = str(UUID(plan_id))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="plan_id must be a UUID") from exc
+
+    tenant_id = _resolve_tenant_id(request)
+    record = await plan_registry.get_plan(plan_id=plan_id, tenant_id=tenant_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline plan not found")
+
+    try:
+        plan = PipelinePlan.model_validate(record.plan)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Stored plan invalid: {exc}") from exc
+    if not plan.data_scope.db_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plan missing db_name")
+
+    db_name = str(plan.data_scope.db_name or "").strip()
+    if not db_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plan missing db_name")
+    try:
+        enforce_db_scope(request.headers, db_name=db_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    validation = await validate_pipeline_plan(
+        plan=plan,
+        dataset_registry=dataset_registry,
+        db_name=db_name,
+        branch=str(plan.data_scope.branch or "") or None,
+        require_output=True,
+    )
+    if validation.errors:
+        return ApiResponse.warning(
+            message="Pipeline plan invalid",
+            data={
+                "validation_errors": validation.errors,
+                "validation_warnings": validation.warnings,
+                "preflight": validation.preflight,
+            },
+        )
+
+    evaluations, warnings = await evaluate_pipeline_joins(
+        definition_json=validation.plan.definition_json,
+        db_name=db_name,
+        dataset_registry=dataset_registry,
+        node_filter=str(body.node_id or "").strip() or None,
+    )
+
+    data = {
+        "plan_id": plan_id,
+        "evaluations": [item.__dict__ for item in evaluations],
+        "warnings": warnings,
+    }
+    if warnings:
+        return ApiResponse.partial(message="Join evaluation completed with warnings", data=data, errors=warnings)
+    return ApiResponse.success(message="Join evaluation completed", data=data)
 
 
 @router.post("/{plan_id}/repair", response_model=ApiResponse)

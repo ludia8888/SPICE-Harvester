@@ -43,6 +43,8 @@ class PipelineAgentState(TypedDict):
     preview: Optional[Dict[str, Any]]
     cleansing_inspector: Optional[Dict[str, Any]]
     cleansing_actions: Optional[List[Dict[str, Any]]]
+    join_evaluation: Optional[List[Dict[str, Any]]]
+    join_evaluation_warnings: Optional[List[str]]
     questions: List[Dict[str, Any]]
     specs: Optional[List[Dict[str, Any]]]
     status: str
@@ -228,7 +230,7 @@ async def _route_after_profile(state: PipelineAgentState) -> PipelineAgentState:
     if state.get("join_hints") is None:
         return {**state, "next_action": "join_keys"}
     if state.get("cleansing_hints") is None:
-        return {**state, "next_action": "cleanse"}
+        return {**state, "next_action": "cleanse_hints"}
     return {**state, "next_action": "plan"}
 
 
@@ -460,14 +462,38 @@ async def _preview_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
             "status": "failed",
         }
 
-    next_action = "specs"
-    if int(state.get("max_cleansing") or 0) > 0:
-        next_action = "inspect"
+    next_action = "evaluate"
     return {
         **state,
         "preflight": data.get("preflight") if isinstance(data.get("preflight"), dict) else None,
         "preview": data.get("preview") if isinstance(data.get("preview"), dict) else None,
         "next_action": next_action,
+    }
+
+
+async def _evaluate_joins(state: PipelineAgentState, runtime: AgentRuntime) -> PipelineAgentState:
+    plan_id = str(state.get("plan_id") or "").strip()
+    if not plan_id:
+        return {**state, "next_action": "inspect", "status": "running"}
+
+    result = await _call_bff(
+        runtime=runtime,
+        state=state,
+        step_id="pipeline_join_evaluate",
+        method="POST",
+        path=f"/api/v1/pipeline-plans/{plan_id}/evaluate-joins",
+        body={},
+    )
+    if result.get("status") != "success":
+        return {**state, "next_action": "inspect", "join_evaluation": None, "join_evaluation_warnings": []}
+
+    payload = result.get("payload")
+    data = _api_data(payload)
+    return {
+        **state,
+        "join_evaluation": data.get("evaluations") if isinstance(data.get("evaluations"), list) else None,
+        "join_evaluation_warnings": data.get("warnings") if isinstance(data.get("warnings"), list) else None,
+        "next_action": "inspect",
     }
 
 
@@ -674,7 +700,7 @@ def build_pipeline_agent_graph(runtime: AgentRuntime):
     async def join_keys(state: PipelineAgentState) -> PipelineAgentState:
         return await _collect_join_hints(state, runtime)
 
-    async def cleanse(state: PipelineAgentState) -> PipelineAgentState:
+    async def cleanse_hints(state: PipelineAgentState) -> PipelineAgentState:
         return await _collect_cleansing_hints(state)
 
     async def plan(state: PipelineAgentState) -> PipelineAgentState:
@@ -689,10 +715,13 @@ def build_pipeline_agent_graph(runtime: AgentRuntime):
     async def preview(state: PipelineAgentState) -> PipelineAgentState:
         return await _preview_plan(state, runtime)
 
+    async def evaluate(state: PipelineAgentState) -> PipelineAgentState:
+        return await _evaluate_joins(state, runtime)
+
     async def inspect(state: PipelineAgentState) -> PipelineAgentState:
         return await _inspect_preview(state, runtime)
 
-    async def cleanse(state: PipelineAgentState) -> PipelineAgentState:
+    async def cleanse_plan(state: PipelineAgentState) -> PipelineAgentState:
         return await _cleanse_plan(state, runtime)
 
     async def repair(state: PipelineAgentState) -> PipelineAgentState:
@@ -704,13 +733,14 @@ def build_pipeline_agent_graph(runtime: AgentRuntime):
     graph.add_node("profile", profile)
     graph.add_node("route", route)
     graph.add_node("join_keys", join_keys)
-    graph.add_node("cleanse", cleanse)
+    graph.add_node("cleanse_hints", cleanse_hints)
     graph.add_node("plan", plan)
     graph.add_node("transform", transform)
     graph.add_node("split_outputs", split_outputs)
     graph.add_node("preview", preview)
+    graph.add_node("evaluate", evaluate)
     graph.add_node("inspect", inspect)
-    graph.add_node("cleanse", cleanse)
+    graph.add_node("cleanse_plan", cleanse_plan)
     graph.add_node("repair", repair)
     graph.add_node("specs", specs)
 
@@ -723,10 +753,10 @@ def build_pipeline_agent_graph(runtime: AgentRuntime):
     graph.add_conditional_edges(
         "route",
         lambda state: state.get("next_action", "plan"),
-        {"join_keys": "join_keys", "cleanse": "cleanse", "plan": "plan", "end": END},
+        {"join_keys": "join_keys", "cleanse_hints": "cleanse_hints", "plan": "plan", "end": END},
     )
     graph.add_edge("join_keys", "route")
-    graph.add_edge("cleanse", "route")
+    graph.add_edge("cleanse_hints", "route")
     graph.add_conditional_edges(
         "plan",
         lambda state: state.get("next_action", "end"),
@@ -745,15 +775,20 @@ def build_pipeline_agent_graph(runtime: AgentRuntime):
     graph.add_conditional_edges(
         "preview",
         lambda state: state.get("next_action", "end"),
-        {"repair": "repair", "inspect": "inspect", "specs": "specs", "end": END},
+        {"repair": "repair", "evaluate": "evaluate", "inspect": "inspect", "specs": "specs", "end": END},
+    )
+    graph.add_conditional_edges(
+        "evaluate",
+        lambda state: state.get("next_action", "end"),
+        {"inspect": "inspect", "specs": "specs", "end": END},
     )
     graph.add_conditional_edges(
         "inspect",
         lambda state: state.get("next_action", "end"),
-        {"cleanse": "cleanse", "specs": "specs", "end": END},
+        {"cleanse": "cleanse_plan", "specs": "specs", "end": END},
     )
     graph.add_conditional_edges(
-        "cleanse",
+        "cleanse_plan",
         lambda state: state.get("next_action", "end"),
         {"preview": "preview", "specs": "specs", "end": END},
     )
@@ -826,6 +861,8 @@ def build_pipeline_agent_state(
         preview=None,
         cleansing_inspector=None,
         cleansing_actions=None,
+        join_evaluation=None,
+        join_evaluation_warnings=None,
         questions=[],
         specs=None,
         status="running",
