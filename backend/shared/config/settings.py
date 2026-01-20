@@ -1516,6 +1516,23 @@ class AgentPlanSettings(BaseSettings):
         return value or None
 
 
+class PipelinePlanSettings(BaseSettings):
+    """Pipeline plan planner settings (LLM-backed pipeline definition proposals)."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="PIPELINE_PLAN_",
+        env_file=_ENV_FILE,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    llm_enabled: bool = Field(
+        default=False,
+        description="Enable pipeline planner LLM (PIPELINE_PLAN_LLM_ENABLED)",
+    )
+
+
 class ClientSettings(BaseSettings):
     """Internal service-to-service client settings (BFF/OMS/etc)."""
 
@@ -4108,6 +4125,7 @@ class ApplicationSettings(BaseSettings):
     graph_query: GraphQuerySettings = Field(default_factory=GraphQuerySettings)
     features: FeatureFlagsSettings = Field(default_factory=FeatureFlagsSettings)
     pipeline: PipelineSettings = Field(default_factory=PipelineSettings)
+    pipeline_plan: PipelinePlanSettings = Field(default_factory=PipelinePlanSettings)
     ontology: OntologySettings = Field(default_factory=OntologySettings)
     agent: AgentRuntimeSettings = Field(default_factory=AgentRuntimeSettings)
     agent_plan: AgentPlanSettings = Field(default_factory=AgentPlanSettings)

@@ -53,6 +53,7 @@ from shared.dependencies.providers import (
 from shared.services.service_factory import create_fastapi_service, get_bff_service_info, run_service
 from shared.services.connector_registry import ConnectorRegistry
 from shared.services.dataset_registry import DatasetRegistry
+from shared.services.dataset_profile_registry import DatasetProfileRegistry
 from shared.services.agent_registry import AgentRegistry
 from shared.services.agent_model_registry import AgentModelRegistry
 from shared.services.agent_function_registry import AgentFunctionRegistry
@@ -62,6 +63,7 @@ from shared.services.agent_policy_registry import AgentPolicyRegistry
 from shared.services.agent_tool_registry import AgentToolRegistry
 from shared.services.agent_tool_allowlist import bootstrap_agent_tool_allowlist
 from shared.services.pipeline_registry import PipelineRegistry
+from shared.services.pipeline_plan_registry import PipelinePlanRegistry
 from shared.services.pipeline_executor import PipelineExecutor
 from shared.services.objectify_registry import ObjectifyRegistry
 
@@ -138,6 +140,7 @@ from bff.routers import (
     ontology_extensions,
     ops,
     pipeline,
+    pipeline_plans,
     query,
     summary,
     tasks,
@@ -196,13 +199,19 @@ class BFFServiceContainer:
         # 7. Initialize Dataset Registry (Postgres; pipeline artifacts)
         await self._initialize_dataset_registry()
 
-        # 8. Initialize Pipeline Registry (Postgres; pipeline definitions)
+        # 8. Initialize Dataset Profile Registry (derived stats/cache)
+        await self._initialize_dataset_profile_registry()
+
+        # 9. Initialize Pipeline Registry (Postgres; pipeline definitions)
         await self._initialize_pipeline_registry()
 
-        # 9. Initialize Objectify Registry (dataset -> ontology mapping)
+        # 9b. Initialize Pipeline Plan Registry (planner artifacts)
+        await self._initialize_pipeline_plan_registry()
+
+        # 10. Initialize Objectify Registry (dataset -> ontology mapping)
         await self._initialize_objectify_registry()
 
-        # 10. Initialize Agent Registry (plan/run/approval tracking)
+        # 11. Initialize Agent Registry (plan/run/approval tracking)
         await self._initialize_agent_registry()
 
         # 10b. Initialize Agent Session Registry (sessions/messages/jobs)
@@ -217,13 +226,13 @@ class BFFServiceContainer:
         # 10e. Initialize Agent Function Registry (registered function execution)
         await self._initialize_agent_function_registry()
 
-        # 11. Initialize Agent Tool Registry (allowlist/policy)
+        # 12. Initialize Agent Tool Registry (allowlist/policy)
         await self._initialize_agent_tool_registry()
 
-        # 12. Initialize Agent Plan Registry (compiled plan persistence)
+        # 13. Initialize Agent Plan Registry (compiled plan persistence)
         await self._initialize_agent_plan_registry()
 
-        # 12. Initialize Pipeline Executor (preview/build engine)
+        # 14. Initialize Pipeline Executor (preview/build engine)
         await self._initialize_pipeline_executor()
         
         # 13. Initialize Google Sheets Service (connector library)
@@ -333,6 +342,17 @@ class BFFServiceContainer:
         except Exception as e:
             logger.error(f"Failed to initialize DatasetRegistry: {e}")
 
+    async def _initialize_dataset_profile_registry(self) -> None:
+        """Initialize Postgres-backed dataset profile registry."""
+        try:
+            logger.info("Initializing DatasetProfileRegistry (Postgres)...")
+            registry = DatasetProfileRegistry()
+            await registry.initialize()
+            self._bff_services["dataset_profile_registry"] = registry
+            logger.info("DatasetProfileRegistry initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize DatasetProfileRegistry: {e}")
+
     async def _initialize_pipeline_registry(self) -> None:
         """Initialize Postgres-backed pipeline registry."""
         try:
@@ -343,6 +363,17 @@ class BFFServiceContainer:
             logger.info("PipelineRegistry initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize PipelineRegistry: {e}")
+
+    async def _initialize_pipeline_plan_registry(self) -> None:
+        """Initialize Postgres-backed pipeline plan registry."""
+        try:
+            logger.info("Initializing PipelinePlanRegistry (Postgres)...")
+            registry = PipelinePlanRegistry()
+            await registry.initialize()
+            self._bff_services["pipeline_plan_registry"] = registry
+            logger.info("PipelinePlanRegistry initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize PipelinePlanRegistry: {e}")
 
     async def _initialize_objectify_registry(self) -> None:
         """Initialize Postgres-backed objectify registry."""
@@ -540,12 +571,26 @@ class BFFServiceContainer:
             except Exception as e:
                 logger.error(f"Error closing DatasetRegistry: {e}")
 
+        if "dataset_profile_registry" in self._bff_services:
+            try:
+                await self._bff_services["dataset_profile_registry"].close()
+                logger.info("DatasetProfileRegistry closed")
+            except Exception as e:
+                logger.error(f"Error closing DatasetProfileRegistry: {e}")
+
         if "pipeline_registry" in self._bff_services:
             try:
                 await self._bff_services["pipeline_registry"].close()
                 logger.info("PipelineRegistry closed")
             except Exception as e:
                 logger.error(f"Error closing PipelineRegistry: {e}")
+
+        if "pipeline_plan_registry" in self._bff_services:
+            try:
+                await self._bff_services["pipeline_plan_registry"].close()
+                logger.info("PipelinePlanRegistry closed")
+            except Exception as e:
+                logger.error(f"Error closing PipelinePlanRegistry: {e}")
 
         if "objectify_registry" in self._bff_services:
             try:
@@ -625,11 +670,23 @@ class BFFServiceContainer:
             raise RuntimeError("DatasetRegistry not initialized")
         return self._bff_services["dataset_registry"]
 
+    def get_dataset_profile_registry(self) -> DatasetProfileRegistry:
+        """Get dataset profile registry instance"""
+        if "dataset_profile_registry" not in self._bff_services:
+            raise RuntimeError("DatasetProfileRegistry not initialized")
+        return self._bff_services["dataset_profile_registry"]
+
     def get_pipeline_registry(self) -> PipelineRegistry:
         """Get pipeline registry instance"""
         if "pipeline_registry" not in self._bff_services:
             raise RuntimeError("PipelineRegistry not initialized")
         return self._bff_services["pipeline_registry"]
+
+    def get_pipeline_plan_registry(self) -> PipelinePlanRegistry:
+        """Get pipeline plan registry instance"""
+        if "pipeline_plan_registry" not in self._bff_services:
+            raise RuntimeError("PipelinePlanRegistry not initialized")
+        return self._bff_services["pipeline_plan_registry"]
 
     def get_objectify_registry(self) -> ObjectifyRegistry:
         """Get objectify registry instance"""
@@ -951,6 +1008,16 @@ async def get_dataset_registry() -> DatasetRegistry:
     return _bff_container.get_dataset_registry()
 
 
+async def get_dataset_profile_registry() -> DatasetProfileRegistry:
+    """Get DatasetProfileRegistry from BFF container"""
+    if _bff_container is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="BFF services not initialized"
+        )
+    return _bff_container.get_dataset_profile_registry()
+
+
 async def get_pipeline_registry() -> PipelineRegistry:
     """Get PipelineRegistry from BFF container"""
     if _bff_container is None:
@@ -966,6 +1033,16 @@ async def get_pipeline_registry() -> PipelineRegistry:
         await registry.initialize()
         _bff_container._bff_services["pipeline_registry"] = registry
         return registry
+
+
+async def get_pipeline_plan_registry() -> PipelinePlanRegistry:
+    """Get PipelinePlanRegistry from BFF container"""
+    if _bff_container is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="BFF services not initialized"
+        )
+    return _bff_container.get_pipeline_plan_registry()
 
 
 async def get_objectify_registry() -> ObjectifyRegistry:
@@ -1061,6 +1138,7 @@ app.include_router(agent_sessions.router, prefix="/api/v1")
 app.include_router(agent_tools.router, prefix="/api/v1")
 app.include_router(summary.router, prefix="/api/v1")
 app.include_router(pipeline.router, prefix="/api/v1")
+app.include_router(pipeline_plans.router, prefix="/api/v1")
 app.include_router(objectify.router, prefix="/api/v1")
 app.include_router(governance.router, prefix="/api/v1")
 app.include_router(ops.router, prefix="/api/v1")

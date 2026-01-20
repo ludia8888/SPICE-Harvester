@@ -90,3 +90,11 @@ async def test_pipeline_context_pack_suggests_join_keys_and_masks_pii() -> None:
         for c in candidates
     )
 
+    pk_candidates = pack["selected_datasets"][0].get("pk_candidates") or []
+    assert any("customer_id" in (c.get("columns") or []) for c in pk_candidates)
+
+    fk_candidates = pack["integration_suggestions"].get("foreign_key_candidates") or []
+    assert any(
+        c.get("child_column") == "customerId" and c.get("parent_column") == "customer_id"
+        for c in fk_candidates
+    )

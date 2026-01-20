@@ -1309,11 +1309,11 @@ class DatasetRegistry:
                 f"""
                 SELECT d.dataset_id, d.db_name, d.name, d.description, d.source_type,
                        d.source_ref, d.branch, d.schema_json, d.created_at, d.updated_at,
-                       v.lakefs_commit_id AS latest_commit_id, v.artifact_key, v.row_count,
-                       v.sample_json, v.created_at AS version_created_at
+                       v.version_id AS dataset_version_id, v.lakefs_commit_id AS latest_commit_id,
+                       v.artifact_key, v.row_count, v.sample_json, v.created_at AS version_created_at
                 FROM {self._schema}.datasets d
                 LEFT JOIN LATERAL (
-                    SELECT lakefs_commit_id, artifact_key, row_count, sample_json, created_at
+                    SELECT version_id, lakefs_commit_id, artifact_key, row_count, sample_json, created_at
                     FROM {self._schema}.dataset_versions
                     WHERE dataset_id = d.dataset_id
                     ORDER BY created_at DESC
@@ -1339,6 +1339,7 @@ class DatasetRegistry:
                     "schema_json": coerce_json_dataset(row["schema_json"]),
                     "created_at": row["created_at"],
                     "updated_at": row["updated_at"],
+                    "dataset_version_id": str(row["dataset_version_id"]) if row["dataset_version_id"] else None,
                     "latest_commit_id": row["latest_commit_id"],
                     "artifact_key": row["artifact_key"],
                     "row_count": row["row_count"],

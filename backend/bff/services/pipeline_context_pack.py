@@ -7,14 +7,21 @@ to help an LLM propose cleansing/integration pipeline definitions.
 
 from __future__ import annotations
 
+import logging
 import re
+from itertools import combinations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID
 
 from shared.services.dataset_registry import DatasetRegistry
+from shared.services.dataset_profile_registry import DatasetProfileRegistry
 from shared.services.pipeline_profiler import compute_column_stats
 from shared.services.pipeline_transform_spec import SUPPORTED_TRANSFORMS
+from shared.utils.canonical_json import sha256_canonical_json_prefixed
 from shared.utils.llm_safety import mask_pii
+from shared.utils.schema_hash import compute_schema_hash
+
+logger = logging.getLogger(__name__)
 
 
 _NAME_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
@@ -176,6 +183,111 @@ def _key_quality(column_stats: dict[str, Any], sample_row_count: int) -> float:
     return max(0.0, min(1.0, distinct_ratio * (1.0 - missing_ratio)))
 
 
+def _looks_like_id(name: str) -> bool:
+    lowered = str(name or "").strip().lower()
+    if not lowered:
+        return False
+    if lowered == "id":
+        return True
+    if lowered.endswith("_id"):
+        return True
+    if lowered.endswith("id") and len(lowered) <= 6:
+        return True
+    return False
+
+
+def _score_pk_candidate(
+    column_name: str,
+    column_stats: dict[str, Any],
+    sample_row_count: int,
+) -> tuple[float, float, float, list[str]]:
+    if sample_row_count <= 0:
+        return 0.0, 0.0, 1.0, []
+    null_count = int(column_stats.get("null_count") or 0)
+    empty_count = int(column_stats.get("empty_count") or 0)
+    distinct_count = int(column_stats.get("distinct_count") or 0)
+    non_null = max(0, sample_row_count - null_count - empty_count)
+    if non_null <= 0:
+        return 0.0, 0.0, 1.0, []
+    distinct_ratio = float(distinct_count) / float(non_null)
+    missing_ratio = float(null_count + empty_count) / float(sample_row_count)
+    score = 0.65 * distinct_ratio + 0.35 * (1.0 - missing_ratio)
+    reasons: list[str] = []
+    if _looks_like_id(column_name):
+        score += 0.1
+        reasons.append("name looks like an id")
+    if distinct_ratio >= 0.95:
+        reasons.append("high distinct ratio in sample")
+    if missing_ratio <= 0.05:
+        reasons.append("low missingness in sample")
+    return min(1.0, round(score, 3)), round(distinct_ratio, 3), round(missing_ratio, 3), reasons
+
+
+def _suggest_primary_keys(
+    *,
+    columns: list[dict[str, Any]],
+    column_stats: dict[str, Any],
+    sample_rows: list[dict[str, Any]],
+    max_candidates: int,
+) -> list[dict[str, Any]]:
+    sample_row_count = int(column_stats.get("sample_row_count") or 0)
+    stats_by_col = column_stats.get("columns") if isinstance(column_stats.get("columns"), dict) else {}
+    candidates: list[dict[str, Any]] = []
+
+    for col in columns:
+        name = str(col.get("name") or "").strip()
+        if not name:
+            continue
+        col_stats = stats_by_col.get(name) if isinstance(stats_by_col, dict) else {}
+        score, distinct_ratio, missing_ratio, reasons = _score_pk_candidate(name, col_stats or {}, sample_row_count)
+        if score <= 0.0:
+            continue
+        candidates.append(
+            {
+                "columns": [name],
+                "score": score,
+                "distinct_ratio": distinct_ratio,
+                "missing_ratio": missing_ratio,
+                "reasons": reasons,
+            }
+        )
+
+    candidates.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
+    top_candidates = candidates[: max(0, int(max_candidates))]
+
+    if not sample_rows or len(top_candidates) < 2:
+        return top_candidates
+
+    combo_candidates: list[dict[str, Any]] = []
+    combo_cols = [item["columns"][0] for item in top_candidates[:4]]
+    for cols in combinations(combo_cols, 2):
+        non_null_rows = [
+            row for row in sample_rows
+            if all(str(row.get(col) or "").strip() not in ("", "None") for col in cols)
+        ]
+        if not non_null_rows:
+            continue
+        unique_count = len({tuple(row.get(col) for col in cols) for row in non_null_rows})
+        distinct_ratio = float(unique_count) / float(len(non_null_rows))
+        missing_ratio = 1.0 - (len(non_null_rows) / float(len(sample_rows)))
+        score = 0.65 * distinct_ratio + 0.35 * (1.0 - missing_ratio)
+        if score < 0.7:
+            continue
+        combo_candidates.append(
+            {
+                "columns": list(cols),
+                "score": round(score, 3),
+                "distinct_ratio": round(distinct_ratio, 3),
+                "missing_ratio": round(missing_ratio, 3),
+                "reasons": ["composite key improves distinctness"],
+            }
+        )
+
+    combined = top_candidates + combo_candidates
+    combined.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
+    return combined[: max(0, int(max_candidates))]
+
+
 def _suggest_join_keys(datasets: list[dict[str, Any]], *, max_candidates: int) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for i in range(len(datasets)):
@@ -282,10 +394,12 @@ async def build_pipeline_context_pack(
     branch: Optional[str],
     dataset_ids: Optional[Sequence[str]],
     dataset_registry: DatasetRegistry,
+    profile_registry: Optional[DatasetProfileRegistry] = None,
     max_datasets_overview: int = 20,
     max_selected_datasets: int = 6,
     max_sample_rows: int = 20,
     max_join_candidates: int = 10,
+    max_pk_candidates: int = 6,
 ) -> Dict[str, Any]:
     db_name = str(db_name or "").strip()
     if not db_name:
@@ -319,6 +433,7 @@ async def build_pipeline_context_pack(
         )
 
     selected: list[dict[str, Any]] = []
+    pk_scores: dict[tuple[str, str], float] = {}
     for item in raw:
         if not isinstance(item, dict):
             continue
@@ -330,9 +445,23 @@ async def build_pipeline_context_pack(
         masked_rows = mask_pii(raw_rows, max_string_chars=120)
         raw_stats = compute_column_stats(rows=raw_rows, columns=cols, max_top_values=5)
         masked_stats = mask_pii(raw_stats, max_string_chars=120)
+        pk_candidates = _suggest_primary_keys(
+            columns=cols,
+            column_stats=raw_stats,
+            sample_rows=raw_rows,
+            max_candidates=max_pk_candidates,
+        )
+        for candidate in pk_candidates:
+            cols_candidate = candidate.get("columns") or []
+            if len(cols_candidate) == 1:
+                col = str(cols_candidate[0])
+                pk_scores[(dataset_id, col)] = float(candidate.get("score") or 0.0)
+        schema_hash = compute_schema_hash(cols) if cols else None
+        dataset_version_id = _normalize_uuid(item.get("dataset_version_id"))
         selected.append(
             {
                 "dataset_id": dataset_id,
+                "dataset_version_id": dataset_version_id,
                 "name": item.get("name"),
                 "branch": item.get("branch"),
                 "source_type": item.get("source_type"),
@@ -342,14 +471,68 @@ async def build_pipeline_context_pack(
                 "columns": cols,
                 "sample_rows": masked_rows,
                 "column_stats": masked_stats,
+                "pk_candidates": pk_candidates,
+                "schema_hash": schema_hash,
                 "_raw_rows": raw_rows,
                 "_raw_column_stats": raw_stats,
             }
         )
+        if profile_registry and dataset_version_id:
+            profile_payload = {
+                "dataset_id": dataset_id,
+                "dataset_version_id": dataset_version_id,
+                "schema_hash": schema_hash,
+                "column_stats": raw_stats,
+                "pk_candidates": pk_candidates,
+                "dataset_signature": sha256_canonical_json_prefixed(
+                    {
+                        "name": item.get("name"),
+                        "schema_hash": schema_hash,
+                        "branch": item.get("branch"),
+                    }
+                ),
+            }
+            try:
+                await profile_registry.upsert_profile(
+                    dataset_id=dataset_id,
+                    dataset_version_id=dataset_version_id,
+                    db_name=db_name,
+                    branch=str(item.get("branch") or "").strip() or None,
+                    schema_hash=schema_hash,
+                    profile=profile_payload,
+                )
+            except Exception as exc:
+                logger.warning("Failed to persist dataset profile: %s", exc)
         if len(selected) >= max(0, int(max_selected_datasets)):
             break
 
     join_candidates = _suggest_join_keys(selected, max_candidates=max_join_candidates) if len(selected) >= 2 else []
+    fk_candidates: list[dict[str, Any]] = []
+    for candidate in join_candidates:
+        left_id = str(candidate.get("left_dataset_id") or "")
+        right_id = str(candidate.get("right_dataset_id") or "")
+        left_col = str(candidate.get("left_column") or "")
+        right_col = str(candidate.get("right_column") or "")
+        left_score = pk_scores.get((left_id, left_col), 0.0)
+        right_score = pk_scores.get((right_id, right_col), 0.0)
+        if left_score <= 0 and right_score <= 0:
+            continue
+        if left_score >= right_score:
+            parent_id, parent_col = left_id, left_col
+            child_id, child_col = right_id, right_col
+        else:
+            parent_id, parent_col = right_id, right_col
+            child_id, child_col = left_id, left_col
+        fk_candidates.append(
+            {
+                "child_dataset_id": child_id,
+                "child_column": child_col,
+                "parent_dataset_id": parent_id,
+                "parent_column": parent_col,
+                "score": round(float(candidate.get("score") or 0.0) * max(left_score, right_score), 3),
+                "reasons": candidate.get("reasons") or [],
+            }
+        )
     cleansing_suggestions: list[dict[str, Any]] = []
     for dataset in selected:
         for suggestion in _suggest_cleansing(dataset):
@@ -366,6 +549,7 @@ async def build_pipeline_context_pack(
         "selected_datasets": selected,
         "integration_suggestions": {
             "join_key_candidates": join_candidates,
+            "foreign_key_candidates": fk_candidates,
             "cleansing_suggestions": cleansing_suggestions,
         },
         "pipeline_definition_hints": {

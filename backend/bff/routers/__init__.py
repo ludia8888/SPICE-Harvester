@@ -27,6 +27,7 @@ from . import agent_plans
 from . import agent_tools
 from . import summary
 from . import pipeline
+from . import pipeline_plans
 from . import objectify
 from . import governance
 from . import object_types
@@ -57,6 +58,7 @@ __all__ = [
     "agent_tools",
     "summary",
     "pipeline",
+    "pipeline_plans",
     "objectify",
     "governance",
     "object_types",

@@ -1354,13 +1354,13 @@ export const GraphPage = () => {
                 onNodeClick={handleNodeClick}
                 onEdgeClick={handleEdgeClick}
                 onInit={setReactFlowInstance}
-                panOnDrag
+                panOnDrag={isPanMode}
                 nodesDraggable={isPointerMode}
                 nodesConnectable={isPointerMode}
                 elementsSelectable={isSelectableMode}
-                selectionOnDrag={isSelectMode}
+                selectionOnDrag={isSelectMode || isPointerMode}
                 selectNodesOnDrag={isSelectMode}
-                selectionKeyCode={isSelectMode ? 'Shift' : null}
+                selectionKeyCode={null}
                 multiSelectionKeyCode={isSelectMode ? ['Meta', 'Control'] : null}
                 deleteKeyCode={['Backspace', 'Delete']}
                 fitView
