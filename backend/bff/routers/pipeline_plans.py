@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -13,7 +13,10 @@ from bff.services.pipeline_plan_compiler import (
     compile_pipeline_plan,
     repair_pipeline_plan,
 )
+from bff.services.pipeline_output_splitter import split_pipeline_outputs
 from bff.services.pipeline_plan_validation import validate_pipeline_plan
+from bff.services.pipeline_spec_generator import generate_pipeline_specs
+from bff.dependencies import OMSClientDep
 from shared.config.settings import get_settings
 from shared.models.pipeline_plan import PipelinePlan, PipelinePlanDataScope
 from shared.models.responses import ApiResponse
@@ -26,6 +29,8 @@ from shared.services.pipeline_executor import PipelineExecutor
 from shared.services.pipeline_plan_registry import PipelinePlanRegistry
 from shared.dependencies.providers import AuditLogStoreDep, RedisServiceDep, LLMGatewayDep
 from shared.services.llm_quota import LLMQuotaExceededError
+from shared.services.objectify_registry import ObjectifyRegistry
+from bff.services.oms_client import OMSClient
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +59,12 @@ async def get_agent_policy_registry() -> AgentPolicyRegistry:
     from bff.main import get_agent_policy_registry as _get_agent_policy_registry
 
     return await _get_agent_policy_registry()
+
+
+async def get_objectify_registry() -> ObjectifyRegistry:
+    from bff.main import get_objectify_registry as _get_objectify_registry
+
+    return await _get_objectify_registry()
 
 
 def _resolve_tenant_id(request: Request) -> str:
@@ -110,6 +121,7 @@ class PipelinePlanCompileRequest(BaseModel):
     goal: str = Field(..., min_length=1, max_length=2000)
     data_scope: PipelinePlanDataScope | None = Field(default=None)
     answers: dict | None = Field(default=None)
+    planner_hints: dict | None = Field(default=None)
 
 
 class PipelinePlanPreviewRequest(BaseModel):
@@ -122,6 +134,47 @@ class PipelinePlanRepairRequest(BaseModel):
     validation_warnings: list[str] = Field(default_factory=list)
     preflight: dict | None = Field(default=None)
     preview: dict | None = Field(default=None)
+
+
+class PipelineContextPackRequest(BaseModel):
+    db_name: str = Field(..., min_length=1, max_length=200)
+    branch: str | None = Field(default=None, max_length=200)
+    dataset_ids: list[str] | None = Field(default=None)
+    max_datasets_overview: int = Field(default=20, ge=1, le=100)
+    max_selected_datasets: int = Field(default=6, ge=1, le=20)
+    max_sample_rows: int = Field(default=20, ge=1, le=200)
+    max_join_candidates: int = Field(default=10, ge=1, le=50)
+    max_pk_candidates: int = Field(default=6, ge=1, le=20)
+
+
+class PipelineOutputBinding(BaseModel):
+    dataset_id: str = Field(..., min_length=1, max_length=200)
+    dataset_version_id: str | None = Field(default=None, max_length=200)
+    dataset_branch: str | None = Field(default=None, max_length=200)
+    artifact_output_name: str | None = Field(default=None, max_length=200)
+    output_kind: str | None = Field(default=None, max_length=20)
+    target_class_id: str | None = Field(default=None, max_length=200)
+    source_class_id: str | None = Field(default=None, max_length=200)
+    link_type_id: str | None = Field(default=None, max_length=200)
+    predicate: str | None = Field(default=None, max_length=200)
+    cardinality: str | None = Field(default=None, max_length=40)
+    source_key_column: str | None = Field(default=None, max_length=200)
+    target_key_column: str | None = Field(default=None, max_length=200)
+    relationship_spec_type: str | None = Field(default=None, max_length=40)
+
+
+class PipelinePlanGenerateSpecsRequest(BaseModel):
+    apply: bool = Field(default=False)
+    output_bindings: Dict[str, PipelineOutputBinding] | None = Field(default=None)
+    output_previews: Dict[str, Dict[str, Any]] | None = Field(default=None)
+    auto_sync: bool = Field(default=True)
+    ontology_branch: str | None = Field(default=None, max_length=200)
+    dangling_policy: str = Field(default="FAIL")
+    dedupe_policy: str = Field(default="DEDUP")
+
+
+class PipelinePlanSplitOutputsRequest(BaseModel):
+    output_bindings: Dict[str, PipelineOutputBinding] | None = Field(default=None)
 
 
 @router.post("/compile", response_model=ApiResponse)
@@ -142,6 +195,7 @@ async def compile_plan(
     goal = str(payload.get("goal") or "").strip()
     data_scope = body.data_scope
     answers = payload.get("answers") if isinstance(payload.get("answers"), dict) else None
+    planner_hints = payload.get("planner_hints") if isinstance(payload.get("planner_hints"), dict) else None
     if not data_scope or not data_scope.db_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="data_scope.db_name is required")
 
@@ -179,6 +233,7 @@ async def compile_plan(
             data_scope=data_scope,
             answers=answers,
             context_pack=context_pack,
+            planner_hints=planner_hints,
             actor=actor,
             tenant_id=tenant_id,
             user_id=user_id,
@@ -235,6 +290,40 @@ async def compile_plan(
         )
 
     return ApiResponse.success(message="Pipeline plan compiled", data=response_data)
+
+
+@router.post("/context-pack", response_model=ApiResponse)
+async def build_context_pack(
+    body: PipelineContextPackRequest,
+    request: Request,
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    profile_registry: DatasetProfileRegistry = Depends(get_dataset_profile_registry),
+) -> ApiResponse:
+    payload = sanitize_input(body.model_dump(exclude_none=True))
+    db_name = validate_db_name(str(payload.get("db_name") or "").strip())
+    try:
+        enforce_db_scope(request.headers, db_name=db_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    try:
+        pack = await build_pipeline_context_pack(
+            db_name=db_name,
+            branch=str(payload.get("branch") or "").strip() or None,
+            dataset_ids=payload.get("dataset_ids"),
+            dataset_registry=dataset_registry,
+            profile_registry=profile_registry,
+            max_datasets_overview=int(payload.get("max_datasets_overview") or 20),
+            max_selected_datasets=int(payload.get("max_selected_datasets") or 6),
+            max_sample_rows=int(payload.get("max_sample_rows") or 20),
+            max_join_candidates=int(payload.get("max_join_candidates") or 10),
+            max_pk_candidates=int(payload.get("max_pk_candidates") or 6),
+        )
+    except Exception as exc:
+        logger.error("Failed to build pipeline context pack: %s", exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to build context pack") from exc
+
+    return ApiResponse.success(message="Pipeline context pack built", data=pack)
 
 
 @router.get("/{plan_id}", response_model=ApiResponse)
@@ -452,3 +541,205 @@ async def repair_plan(
         )
 
     return ApiResponse.success(message="Pipeline plan repaired", data=response_data)
+
+
+@router.post("/{plan_id}/split-outputs", response_model=ApiResponse)
+async def split_outputs(
+    plan_id: str,
+    body: PipelinePlanSplitOutputsRequest,
+    request: Request,
+    llm: LLMGatewayDep,
+    redis_service: RedisServiceDep,
+    audit_store: AuditLogStoreDep,
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    profile_registry: DatasetProfileRegistry = Depends(get_dataset_profile_registry),
+    plan_registry: PipelinePlanRegistry = Depends(get_pipeline_plan_registry),
+) -> ApiResponse:
+    try:
+        plan_id = str(UUID(plan_id))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="plan_id must be a UUID") from exc
+
+    if not bool(get_settings().pipeline_plan.llm_enabled):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pipeline planner is disabled")
+
+    tenant_id = _resolve_tenant_id(request)
+    actor = _resolve_actor(request)
+    user = getattr(request.state, "user", None)
+    user_id = str(getattr(user, "id", "") or "").strip() or None
+
+    record = await plan_registry.get_plan(plan_id=plan_id, tenant_id=tenant_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline plan not found")
+
+    try:
+        plan = PipelinePlan.model_validate(record.plan)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Stored plan invalid: {exc}") from exc
+
+    db_name = str(plan.data_scope.db_name or "").strip()
+    if not db_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plan missing db_name")
+    try:
+        enforce_db_scope(request.headers, db_name=db_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    selected_model, allowed_models, data_policies = await _resolve_tenant_policy(request)
+
+    context_pack = None
+    try:
+        dataset_ids = list(plan.data_scope.dataset_ids or [])
+        context_pack = await build_pipeline_context_pack(
+            db_name=str(plan.data_scope.db_name or ""),
+            branch=str(plan.data_scope.branch or "") or None,
+            dataset_ids=dataset_ids or None,
+            dataset_registry=dataset_registry,
+            profile_registry=profile_registry,
+        )
+    except Exception as exc:
+        logger.warning("Failed to build pipeline context pack: %s", exc)
+        context_pack = None
+
+    payload = sanitize_input(body.model_dump(exclude_none=True))
+    bindings_payload = payload.get("output_bindings") if isinstance(payload.get("output_bindings"), dict) else None
+
+    try:
+        result = await split_pipeline_outputs(
+            plan=plan,
+            output_bindings=bindings_payload,
+            context_pack=context_pack,
+            actor=actor,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            data_policies=data_policies,
+            selected_model=selected_model,
+            allowed_models=allowed_models,
+            llm_gateway=llm,
+            redis_service=redis_service,
+            audit_store=audit_store,
+        )
+    except LLMQuotaExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Pipeline output split failed: %s", exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to split outputs") from exc
+
+    updated_plan = plan.model_copy(update={"outputs": result.outputs})
+    validation = await validate_pipeline_plan(
+        plan=updated_plan,
+        dataset_registry=dataset_registry,
+        db_name=db_name,
+        branch=str(updated_plan.data_scope.branch or "") or None,
+        require_output=True,
+    )
+
+    status_value = "COMPILED" if not validation.errors else "DRAFT"
+    await plan_registry.upsert_plan(
+        plan_id=plan_id,
+        tenant_id=tenant_id,
+        status=status_value,
+        goal=str(updated_plan.goal or ""),
+        db_name=str(updated_plan.data_scope.db_name or "") if updated_plan.data_scope else None,
+        branch=str(updated_plan.data_scope.branch or "") if updated_plan.data_scope else None,
+        plan=updated_plan.model_dump(mode="json"),
+        created_by=actor,
+    )
+
+    response_data = {
+        "status": "success" if not validation.errors else "warning",
+        "plan_id": plan_id,
+        "plan": updated_plan.model_dump(mode="json"),
+        "validation_errors": list(validation.errors or []),
+        "validation_warnings": list(validation.warnings or []),
+        "planner": {
+            "confidence": result.confidence,
+            "notes": result.notes,
+            "warnings": result.warnings,
+        },
+        "llm": (
+            {
+                "provider": result.llm_meta.provider,
+                "model": result.llm_meta.model,
+                "cache_hit": result.llm_meta.cache_hit,
+                "latency_ms": result.llm_meta.latency_ms,
+            }
+            if result.llm_meta
+            else None
+        ),
+    }
+
+    if validation.errors:
+        return ApiResponse.partial(
+            message="Pipeline output split completed with issues",
+            data=response_data,
+            errors=list(validation.errors or []),
+        )
+
+    return ApiResponse.success(message="Pipeline outputs updated", data=response_data)
+
+
+@router.post("/{plan_id}/generate-specs", response_model=ApiResponse)
+async def generate_specs(
+    plan_id: str,
+    body: PipelinePlanGenerateSpecsRequest,
+    request: Request,
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    objectify_registry: ObjectifyRegistry = Depends(get_objectify_registry),
+    plan_registry: PipelinePlanRegistry = Depends(get_pipeline_plan_registry),
+    oms_client: OMSClient = OMSClientDep,
+) -> ApiResponse:
+    try:
+        plan_id = str(UUID(plan_id))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="plan_id must be a UUID") from exc
+
+    tenant_id = _resolve_tenant_id(request)
+    record = await plan_registry.get_plan(plan_id=plan_id, tenant_id=tenant_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline plan not found")
+
+    try:
+        plan = PipelinePlan.model_validate(record.plan)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Stored plan invalid: {exc}") from exc
+
+    db_name = str(plan.data_scope.db_name or "").strip()
+    if not db_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plan missing db_name")
+    try:
+        enforce_db_scope(request.headers, db_name=db_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    payload = sanitize_input(body.model_dump(exclude_none=True))
+    bindings_payload = payload.get("output_bindings") if isinstance(payload.get("output_bindings"), dict) else None
+    preview_payload = payload.get("output_previews") if isinstance(payload.get("output_previews"), dict) else None
+
+    results = await generate_pipeline_specs(
+        plan=plan,
+        dataset_registry=dataset_registry,
+        objectify_registry=objectify_registry,
+        oms_client=oms_client,
+        request=request,
+        preview_overrides=preview_payload,
+        output_bindings=bindings_payload,
+        apply_specs=bool(payload.get("apply")),
+        auto_sync=bool(payload.get("auto_sync", True)),
+        ontology_branch=str(payload.get("ontology_branch") or "").strip() or None,
+        dangling_policy=str(payload.get("dangling_policy") or "FAIL").strip().upper(),
+        dedupe_policy=str(payload.get("dedupe_policy") or "DEDUP").strip().upper(),
+    )
+
+    errors: List[str] = []
+    for item in results:
+        errors.extend(item.errors)
+
+    data = {
+        "plan_id": plan_id,
+        "specs": [item.__dict__ for item in results],
+    }
+
+    if errors:
+        return ApiResponse.partial(message="Pipeline specs generated with issues", data=data, errors=errors)
+    return ApiResponse.success(message="Pipeline specs generated", data=data)

@@ -32,7 +32,13 @@ class PipelinePlanOutput(BaseModel):
     output_name: str = Field(..., min_length=1, max_length=200)
     output_kind: PipelinePlanOutputKind = Field(default=PipelinePlanOutputKind.unknown)
     target_class_id: Optional[str] = Field(default=None, max_length=200)
+    source_class_id: Optional[str] = Field(default=None, max_length=200)
     link_type_id: Optional[str] = Field(default=None, max_length=200)
+    predicate: Optional[str] = Field(default=None, max_length=200)
+    cardinality: Optional[str] = Field(default=None, max_length=40)
+    source_key_column: Optional[str] = Field(default=None, max_length=200)
+    target_key_column: Optional[str] = Field(default=None, max_length=200)
+    relationship_spec_type: Optional[str] = Field(default=None, max_length=40)
     notes: Optional[str] = Field(default=None, max_length=2000)
 
 

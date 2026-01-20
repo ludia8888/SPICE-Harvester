@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from agent.routers.agent import router as agent_router
+from agent.routers.pipeline_agent import router as pipeline_agent_router
 from shared.config.settings import get_settings
 from shared.middleware.rate_limiter import RateLimiter
 from shared.services.audit_log_store import AuditLogStore
@@ -81,6 +82,7 @@ app = create_fastapi_service(
 )
 
 app.include_router(agent_router, prefix="/api/v1")
+app.include_router(pipeline_agent_router, prefix="/api/v1")
 
 
 if __name__ == "__main__":

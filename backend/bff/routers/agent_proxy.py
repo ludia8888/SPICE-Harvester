@@ -124,6 +124,11 @@ async def create_agent_run(request: Request) -> Response:
     return await _proxy_agent_request(request, "runs")
 
 
+@router.post("/pipeline-runs")
+async def create_pipeline_run(request: Request) -> Response:
+    return await _proxy_agent_request(request, "pipeline-runs")
+
+
 @router.get("/runs/{run_id}")
 async def get_agent_run(request: Request, run_id: str) -> Response:
     return await _proxy_agent_request(request, f"runs/{run_id}")

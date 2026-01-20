@@ -81,6 +81,9 @@ def _build_plan_system_prompt() -> str:
         "- output nodes MUST include metadata.outputName or metadata.datasetName.\n"
         "- Keep the graph minimal; prefer a linear join chain.\n"
         "- output_kind must be one of: object, link, unknown.\n"
+        "- object outputs MUST include target_class_id.\n"
+        "- link outputs MUST include link_type_id, source_class_id, target_class_id, predicate, cardinality,\n"
+        "  source_key_column, target_key_column, and relationship_spec_type (join_table or foreign_key).\n"
         "\n"
         "Output schema:\n"
         "{\n"
@@ -96,7 +99,18 @@ def _build_plan_system_prompt() -> str:
         "  \"data_scope\": {\"db_name\": string, \"branch\": string, \"dataset_ids\": []},\n"
         "  \"definition_json\": {\"nodes\": [], \"edges\": []},\n"
         "  \"outputs\": [\n"
-        "    {\"output_name\": string, \"output_kind\": \"object|link|unknown\", \"target_class_id\": string?, \"link_type_id\": string?}\n"
+        "    {\n"
+        "      \"output_name\": string,\n"
+        "      \"output_kind\": \"object|link|unknown\",\n"
+        "      \"target_class_id\": string?,\n"
+        "      \"source_class_id\": string?,\n"
+        "      \"link_type_id\": string?,\n"
+        "      \"predicate\": string?,\n"
+        "      \"cardinality\": string?,\n"
+        "      \"source_key_column\": string?,\n"
+        "      \"target_key_column\": string?,\n"
+        "      \"relationship_spec_type\": \"join_table|foreign_key\"?\n"
+        "    }\n"
         "  ],\n"
         "  \"warnings\": []\n"
         "}\n"
@@ -109,6 +123,7 @@ def _build_plan_user_prompt(
     data_scope: Optional[PipelinePlanDataScope],
     answers: Optional[Dict[str, Any]],
     context_pack: Optional[Dict[str, Any]],
+    planner_hints: Optional[Dict[str, Any]],
 ) -> str:
     scope_payload = data_scope.model_dump(mode="json") if data_scope else {}
     answers_payload = answers or {}
@@ -117,6 +132,7 @@ def _build_plan_user_prompt(
         f"Goal:\n{goal}\n\n"
         f"Data scope:\n{json.dumps(scope_payload, ensure_ascii=False)}\n\n"
         f"Clarification answers (if any):\n{json.dumps(answers_payload, ensure_ascii=False)}\n\n"
+        f"Planner hints (join/cleansing guidance):\n{json.dumps(planner_hints or {}, ensure_ascii=False)}\n\n"
         f"Pipeline context pack (safe summary):\n{json.dumps(context_payload, ensure_ascii=False)}\n"
     )
 
@@ -207,6 +223,7 @@ async def compile_pipeline_plan(
     data_scope: Optional[PipelinePlanDataScope],
     answers: Optional[Dict[str, Any]],
     context_pack: Optional[Dict[str, Any]],
+    planner_hints: Optional[Dict[str, Any]],
     actor: str,
     tenant_id: str,
     user_id: Optional[str],
@@ -225,6 +242,7 @@ async def compile_pipeline_plan(
         data_scope=data_scope,
         answers=answers,
         context_pack=context_pack,
+        planner_hints=planner_hints,
     )
     llm_meta: Optional[LLMCallMeta] = None
 

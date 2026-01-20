@@ -38,6 +38,36 @@ async def validate_pipeline_plan(
     errors: List[str] = []
     warnings: List[str] = []
 
+    for output in plan.outputs or []:
+        kind = str(output.output_kind or "unknown")
+        if kind == "object":
+            if not output.target_class_id:
+                errors.append(f"output {output.output_name}: target_class_id is required for object outputs")
+        elif kind == "link":
+            missing: List[str] = []
+            if not output.link_type_id:
+                missing.append("link_type_id")
+            if not output.source_class_id:
+                missing.append("source_class_id")
+            if not output.target_class_id:
+                missing.append("target_class_id")
+            if not output.predicate:
+                missing.append("predicate")
+            if not output.cardinality:
+                missing.append("cardinality")
+            if not output.source_key_column:
+                missing.append("source_key_column")
+            if not output.target_key_column:
+                missing.append("target_key_column")
+            if not output.relationship_spec_type:
+                missing.append("relationship_spec_type")
+            if missing:
+                errors.append(
+                    f"output {output.output_name}: missing required link metadata ({', '.join(missing)})"
+                )
+        else:
+            warnings.append(f"output {output.output_name}: output_kind is unknown")
+
     definition_json = dict(plan.definition_json or {})
     normalized = await pipeline_router._augment_definition_with_casts(
         definition_json=definition_json,
