@@ -229,12 +229,12 @@ async def _route_after_profile(state: PipelineAgentState) -> PipelineAgentState:
     if state.get("error"):
         return {**state, "next_action": "end", "status": "failed"}
     if not state.get("context_pack"):
-        return {**state, "next_action": "plan"}
+        return {**state, "next_action": "compile_plan"}
     if state.get("join_hints") is None:
         return {**state, "next_action": "join_keys"}
     if state.get("cleansing_hints") is None:
         return {**state, "next_action": "cleanse_hints"}
-    return {**state, "next_action": "plan"}
+    return {**state, "next_action": "compile_plan"}
 
 
 async def _collect_join_hints(state: PipelineAgentState, runtime: AgentRuntime) -> PipelineAgentState:
@@ -313,7 +313,7 @@ async def _compile_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
     plan = data.get("plan") if isinstance(data.get("plan"), dict) else None
     questions = data.get("questions") if isinstance(data.get("questions"), list) else []
 
-    next_action = "preview"
+    next_action = "preview_plan"
     status = "running"
     if plan_status == "clarification_required":
         if plan and _needs_output_split(plan) and _only_output_errors(list(data.get("validation_errors") or [])):
@@ -377,7 +377,7 @@ async def _split_outputs(state: PipelineAgentState, runtime: AgentRuntime) -> Pi
         "plan": updated_plan,
         "validation_errors": list(data.get("validation_errors") or []),
         "validation_warnings": list(data.get("validation_warnings") or []),
-        "next_action": "preview",
+        "next_action": "preview_plan",
     }
 
 
@@ -406,7 +406,7 @@ async def _transform_plan(state: PipelineAgentState, runtime: AgentRuntime) -> P
     data = _api_data(payload)
     updated_plan = data.get("plan") if isinstance(data.get("plan"), dict) else state.get("plan")
 
-    next_action = "preview"
+    next_action = "preview_plan"
     if _needs_output_split(updated_plan):
         next_action = "split_outputs"
 
@@ -547,7 +547,7 @@ async def _inspect_preview(state: PipelineAgentState, runtime: AgentRuntime) -> 
     max_cleansing = int(state.get("max_cleansing") or 0)
     attempts = int(state.get("cleansing_attempts") or 0)
 
-    next_action = "specs"
+    next_action = "generate_specs"
     if inspector and inspector.get("needs_cleansing") and attempts < max_cleansing:
         next_action = "cleanse"
 
@@ -601,7 +601,7 @@ async def _cleanse_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
             "plan": plan,
             "cleansing_actions": actions,
             "cleansing_attempts": attempts,
-            "next_action": "specs",
+            "next_action": "generate_specs",
         }
 
     return {
@@ -609,7 +609,7 @@ async def _cleanse_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
         "plan": plan,
         "cleansing_actions": actions,
         "cleansing_attempts": attempts,
-        "next_action": "preview",
+        "next_action": "preview_plan",
     }
 
 
@@ -642,7 +642,7 @@ async def _repair_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pipe
     plan = data.get("plan") if isinstance(data.get("plan"), dict) else None
     questions = data.get("questions") if isinstance(data.get("questions"), list) else []
 
-    next_action = "preview"
+    next_action = "preview_plan"
     status = "running"
     validation_errors = list(data.get("validation_errors") or [])
     if plan_status == "clarification_required":
@@ -733,7 +733,7 @@ def build_pipeline_agent_graph(runtime: AgentRuntime):
     async def cleanse_hints(state: PipelineAgentState) -> PipelineAgentState:
         return await _collect_cleansing_hints(state)
 
-    async def plan(state: PipelineAgentState) -> PipelineAgentState:
+    async def compile_plan(state: PipelineAgentState) -> PipelineAgentState:
         return await _compile_plan(state, runtime)
 
     async def split_outputs(state: PipelineAgentState) -> PipelineAgentState:
@@ -742,7 +742,7 @@ def build_pipeline_agent_graph(runtime: AgentRuntime):
     async def transform(state: PipelineAgentState) -> PipelineAgentState:
         return await _transform_plan(state, runtime)
 
-    async def preview(state: PipelineAgentState) -> PipelineAgentState:
+    async def preview_plan(state: PipelineAgentState) -> PipelineAgentState:
         return await _preview_plan(state, runtime)
 
     async def evaluate(state: PipelineAgentState) -> PipelineAgentState:
@@ -757,22 +757,22 @@ def build_pipeline_agent_graph(runtime: AgentRuntime):
     async def repair(state: PipelineAgentState) -> PipelineAgentState:
         return await _repair_plan(state, runtime)
 
-    async def specs(state: PipelineAgentState) -> PipelineAgentState:
+    async def generate_specs(state: PipelineAgentState) -> PipelineAgentState:
         return await _generate_specs(state, runtime)
 
     graph.add_node("profile", profile)
     graph.add_node("route", route)
     graph.add_node("join_keys", join_keys)
     graph.add_node("cleanse_hints", cleanse_hints)
-    graph.add_node("plan", plan)
+    graph.add_node("compile_plan", compile_plan)
     graph.add_node("transform", transform)
     graph.add_node("split_outputs", split_outputs)
-    graph.add_node("preview", preview)
+    graph.add_node("preview_plan", preview_plan)
     graph.add_node("evaluate", evaluate)
     graph.add_node("inspect", inspect)
     graph.add_node("cleanse_plan", cleanse_plan)
     graph.add_node("repair", repair)
-    graph.add_node("specs", specs)
+    graph.add_node("generate_specs", generate_specs)
 
     graph.set_entry_point("profile")
     graph.add_conditional_edges(
@@ -782,52 +782,64 @@ def build_pipeline_agent_graph(runtime: AgentRuntime):
     )
     graph.add_conditional_edges(
         "route",
-        lambda state: state.get("next_action", "plan"),
-        {"join_keys": "join_keys", "cleanse_hints": "cleanse_hints", "plan": "plan", "end": END},
+        lambda state: state.get("next_action", "compile_plan"),
+        {"join_keys": "join_keys", "cleanse_hints": "cleanse_hints", "compile_plan": "compile_plan", "end": END},
     )
     graph.add_edge("join_keys", "route")
     graph.add_edge("cleanse_hints", "route")
     graph.add_conditional_edges(
-        "plan",
+        "compile_plan",
         lambda state: state.get("next_action", "end"),
-        {"transform": "transform", "split_outputs": "split_outputs", "preview": "preview", "clarify": END, "end": END},
+        {
+            "transform": "transform",
+            "split_outputs": "split_outputs",
+            "preview_plan": "preview_plan",
+            "clarify": END,
+            "end": END,
+        },
     )
     graph.add_conditional_edges(
         "transform",
         lambda state: state.get("next_action", "end"),
-        {"split_outputs": "split_outputs", "preview": "preview", "end": END},
+        {"split_outputs": "split_outputs", "preview_plan": "preview_plan", "end": END},
     )
     graph.add_conditional_edges(
         "split_outputs",
         lambda state: state.get("next_action", "end"),
-        {"preview": "preview", "end": END},
+        {"preview_plan": "preview_plan", "end": END},
     )
     graph.add_conditional_edges(
-        "preview",
+        "preview_plan",
         lambda state: state.get("next_action", "end"),
-        {"repair": "repair", "evaluate": "evaluate", "inspect": "inspect", "specs": "specs", "end": END},
+        {
+            "repair": "repair",
+            "evaluate": "evaluate",
+            "inspect": "inspect",
+            "generate_specs": "generate_specs",
+            "end": END,
+        },
     )
     graph.add_conditional_edges(
         "evaluate",
         lambda state: state.get("next_action", "end"),
-        {"inspect": "inspect", "specs": "specs", "end": END},
+        {"inspect": "inspect", "generate_specs": "generate_specs", "end": END},
     )
     graph.add_conditional_edges(
         "inspect",
         lambda state: state.get("next_action", "end"),
-        {"cleanse": "cleanse_plan", "specs": "specs", "end": END},
+        {"cleanse": "cleanse_plan", "generate_specs": "generate_specs", "end": END},
     )
     graph.add_conditional_edges(
         "cleanse_plan",
         lambda state: state.get("next_action", "end"),
-        {"preview": "preview", "specs": "specs", "end": END},
+        {"preview_plan": "preview_plan", "generate_specs": "generate_specs", "end": END},
     )
     graph.add_conditional_edges(
         "repair",
         lambda state: state.get("next_action", "end"),
-        {"split_outputs": "split_outputs", "preview": "preview", "clarify": END, "end": END},
+        {"split_outputs": "split_outputs", "preview_plan": "preview_plan", "clarify": END, "end": END},
     )
-    graph.add_edge("specs", END)
+    graph.add_edge("generate_specs", END)
     return graph.compile()
 
 
@@ -901,5 +913,5 @@ def build_pipeline_agent_state(
         specs=None,
         status="running",
         error=None,
-        next_action="plan",
+        next_action="compile_plan",
     )

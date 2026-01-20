@@ -127,7 +127,7 @@ def _merge_output_binding(output: PipelinePlanOutput, binding: Optional[Dict[str
 
     updates: Dict[str, Any] = {}
     binding_kind = str(binding.get("output_kind") or "").strip().lower()
-    output_kind = str(output.output_kind or "unknown")
+    output_kind = str(getattr(output.output_kind, "value", output.output_kind) or "unknown").strip().lower()
     if binding_kind in {"object", "link", "unknown"}:
         updates["output_kind"] = binding_kind
     elif output_kind == "unknown":
@@ -561,7 +561,7 @@ async def generate_pipeline_specs(
         )
         binding = (output_bindings or {}).get(output.output_name)
         effective_output = _merge_output_binding(output, binding)
-        kind = str(effective_output.output_kind)
+        kind = str(getattr(effective_output.output_kind, "value", effective_output.output_kind) or "unknown").strip().lower()
         if kind == "object":
             results.append(
                 await _generate_object_spec(

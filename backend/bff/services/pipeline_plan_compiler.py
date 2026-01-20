@@ -456,7 +456,7 @@ async def repair_pipeline_plan(
             audit_partition_key=f"pipeline_plan:{plan_id}",
             audit_actor=actor,
             audit_resource_id=plan_id,
-            audit_metadata={\"kind\": \"pipeline_plan_repair\", \"schema\": \"PipelinePlan\", \"tenant_id\": tenant_id, \"user_id\": user_id},
+            audit_metadata={"kind": "pipeline_plan_repair", "schema": "PipelinePlan", "tenant_id": tenant_id, "user_id": user_id},
         )
         draft_plan_obj = dict(draft.plan or {})
     except (LLMUnavailableError, LLMRequestError, LLMOutputValidationError) as exc:

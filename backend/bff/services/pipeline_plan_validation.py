@@ -39,7 +39,7 @@ async def validate_pipeline_plan(
     warnings: List[str] = []
 
     for output in plan.outputs or []:
-        kind = str(output.output_kind or "unknown")
+        kind = str(getattr(output.output_kind, "value", output.output_kind) or "unknown").strip().lower()
         if kind == "object":
             if not output.target_class_id:
                 errors.append(f"output {output.output_name}: target_class_id is required for object outputs")
