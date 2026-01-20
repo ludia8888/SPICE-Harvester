@@ -1284,7 +1284,15 @@ def _eval_ast(node: ast.AST, variables: Dict[str, Any]) -> Any:
 
 def _parse_literal(raw: str) -> Any:
     if not raw:
-    return raw
+        return raw
+    if (raw.startswith("\"") and raw.endswith("\"")) or (raw.startswith("'") and raw.endswith("'")):
+        return raw[1:-1]
+    try:
+        if "." in raw:
+            return float(raw)
+        return int(raw)
+    except Exception:
+        return raw
 
 
 def _normalize_table(
@@ -1323,14 +1331,6 @@ def _normalize_table(
                 next_row[col] = text
         rows.append(next_row)
     return PipelineTable(columns=table.columns, rows=rows)
-    if (raw.startswith("\"") and raw.endswith("\"")) or (raw.startswith("'") and raw.endswith("'")):
-        return raw[1:-1]
-    try:
-        if "." in raw:
-            return float(raw)
-        return int(raw)
-    except Exception:
-        return raw
 
 
 def _parse_csv_bytes(raw_bytes: bytes) -> List[Dict[str, Any]]:
