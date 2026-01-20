@@ -414,7 +414,7 @@ def _validate_pipeline_definition(*, definition_json: Dict[str, Any], require_ou
             continue
         if operation in {"filter", "compute"} and not str(metadata.get("expression") or "").strip():
             errors.append(f"{operation} missing expression on node {node_id}")
-        if operation in {"select", "drop", "sort", "dedupe", "explode"}:
+        if operation in {"select", "drop", "sort", "dedupe", "explode", "normalize"}:
             columns = metadata.get("columns") or []
             if not columns:
                 errors.append(f"{operation} missing columns on node {node_id}")

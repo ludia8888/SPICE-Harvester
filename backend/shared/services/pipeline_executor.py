@@ -509,6 +509,18 @@ class PipelineExecutor:
             rename_map = metadata.get("rename") or {}
             if rename_map:
                 return _rename_columns(inputs[0], rename_map)
+        if operation == "normalize":
+            columns = metadata.get("columns") or []
+            if columns:
+                return _normalize_table(
+                    inputs[0],
+                    columns,
+                    trim=bool(metadata.get("trim", True)),
+                    empty_to_null=bool(metadata.get("emptyToNull", metadata.get("empty_to_null", True))),
+                    whitespace_to_null=bool(metadata.get("whitespaceToNull", metadata.get("whitespace_to_null", True))),
+                    lowercase=bool(metadata.get("lowercase", False)),
+                    uppercase=bool(metadata.get("uppercase", False)),
+                )
         if operation == "cast":
             casts = metadata.get("casts") or []
             if casts:
@@ -1272,7 +1284,45 @@ def _eval_ast(node: ast.AST, variables: Dict[str, Any]) -> Any:
 
 def _parse_literal(raw: str) -> Any:
     if not raw:
-        return raw
+    return raw
+
+
+def _normalize_table(
+    table: PipelineTable,
+    columns: List[str],
+    *,
+    trim: bool,
+    empty_to_null: bool,
+    whitespace_to_null: bool,
+    lowercase: bool,
+    uppercase: bool,
+) -> PipelineTable:
+    if not columns:
+        return table
+    selected = [str(col).strip() for col in columns if str(col).strip()]
+    selected = [col for col in selected if col in table.columns]
+    if not selected:
+        return table
+    rows: List[Dict[str, Any]] = []
+    for row in table.rows:
+        next_row = dict(row)
+        for col in selected:
+            value = next_row.get(col)
+            if isinstance(value, str):
+                text = value
+                if trim:
+                    text = text.strip()
+                if lowercase:
+                    text = text.lower()
+                if uppercase:
+                    text = text.upper()
+                if whitespace_to_null and text.strip() == "":
+                    text = None
+                if empty_to_null and text == "":
+                    text = None
+                next_row[col] = text
+        rows.append(next_row)
+    return PipelineTable(columns=table.columns, rows=rows)
     if (raw.startswith("\"") and raw.endswith("\"")) or (raw.startswith("'") and raw.endswith("'")):
         return raw[1:-1]
     try:

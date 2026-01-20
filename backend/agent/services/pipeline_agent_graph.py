@@ -23,6 +23,8 @@ class PipelineAgentState(TypedDict):
     preview_limit: int
     max_repairs: int
     repair_attempts: int
+    max_cleansing: int
+    cleansing_attempts: int
     apply_specs: bool
     auto_sync: bool
     ontology_branch: Optional[str]
@@ -37,6 +39,8 @@ class PipelineAgentState(TypedDict):
     validation_warnings: List[str]
     preflight: Optional[Dict[str, Any]]
     preview: Optional[Dict[str, Any]]
+    cleansing_inspector: Optional[Dict[str, Any]]
+    cleansing_actions: Optional[List[Dict[str, Any]]]
     questions: List[Dict[str, Any]]
     specs: Optional[List[Dict[str, Any]]]
     status: str
@@ -395,11 +399,102 @@ async def _preview_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
             "status": "failed",
         }
 
+    next_action = "specs"
+    if int(state.get("max_cleansing") or 0) > 0:
+        next_action = "inspect"
     return {
         **state,
         "preflight": data.get("preflight") if isinstance(data.get("preflight"), dict) else None,
         "preview": data.get("preview") if isinstance(data.get("preview"), dict) else None,
-        "next_action": "specs",
+        "next_action": next_action,
+    }
+
+
+async def _inspect_preview(state: PipelineAgentState, runtime: AgentRuntime) -> PipelineAgentState:
+    plan_id = str(state.get("plan_id") or "").strip()
+    if not plan_id:
+        return {**state, "next_action": "end", "status": "failed", "error": "plan_id missing"}
+
+    result = await _call_bff(
+        runtime=runtime,
+        state=state,
+        step_id="pipeline_plan_inspect_preview",
+        method="POST",
+        path=f"/api/v1/pipeline-plans/{plan_id}/inspect-preview",
+        body={"preview": state.get("preview")},
+    )
+    if result.get("status") != "success":
+        return {**state, "next_action": "end", "status": "failed", "error": result.get("error")}
+
+    payload = result.get("payload")
+    data = _api_data(payload)
+    inspector = data.get("inspector") if isinstance(data.get("inspector"), dict) else None
+    max_cleansing = int(state.get("max_cleansing") or 0)
+    attempts = int(state.get("cleansing_attempts") or 0)
+
+    next_action = "specs"
+    if inspector and inspector.get("needs_cleansing") and attempts < max_cleansing:
+        next_action = "cleanse"
+
+    return {
+        **state,
+        "cleansing_inspector": inspector,
+        "next_action": next_action,
+    }
+
+
+async def _cleanse_plan(state: PipelineAgentState, runtime: AgentRuntime) -> PipelineAgentState:
+    plan_id = str(state.get("plan_id") or "").strip()
+    if not plan_id:
+        return {**state, "next_action": "end", "status": "failed", "error": "plan_id missing"}
+
+    result = await _call_bff(
+        runtime=runtime,
+        state=state,
+        step_id="pipeline_plan_cleanse",
+        method="POST",
+        path=f"/api/v1/pipeline-plans/{plan_id}/cleanse",
+        body={
+            "preview": state.get("preview"),
+            "inspector": state.get("cleansing_inspector"),
+        },
+    )
+    if result.get("status") != "success":
+        return {**state, "next_action": "end", "status": "failed", "error": result.get("error")}
+
+    payload = result.get("payload")
+    api_status = _api_status(payload)
+    data = _api_data(payload)
+    if api_status == "partial":
+        return {
+            **state,
+            "cleansing_actions": list(data.get("actions_applied") or []),
+            "validation_errors": list(data.get("validation_errors") or []),
+            "validation_warnings": list(data.get("validation_warnings") or []),
+            "next_action": "end",
+            "status": "failed",
+            "error": "cleansing validation failed",
+        }
+
+    actions = list(data.get("actions_applied") or [])
+    plan = data.get("plan") if isinstance(data.get("plan"), dict) else state.get("plan")
+    attempts = int(state.get("cleansing_attempts") or 0) + 1
+
+    if not actions:
+        return {
+            **state,
+            "plan": plan,
+            "cleansing_actions": actions,
+            "cleansing_attempts": attempts,
+            "next_action": "specs",
+        }
+
+    return {
+        **state,
+        "plan": plan,
+        "cleansing_actions": actions,
+        "cleansing_attempts": attempts,
+        "next_action": "preview",
     }
 
 
@@ -528,6 +623,12 @@ def build_pipeline_agent_graph(runtime: AgentRuntime):
     async def preview(state: PipelineAgentState) -> PipelineAgentState:
         return await _preview_plan(state, runtime)
 
+    async def inspect(state: PipelineAgentState) -> PipelineAgentState:
+        return await _inspect_preview(state, runtime)
+
+    async def cleanse(state: PipelineAgentState) -> PipelineAgentState:
+        return await _cleanse_plan(state, runtime)
+
     async def repair(state: PipelineAgentState) -> PipelineAgentState:
         return await _repair_plan(state, runtime)
 
@@ -541,6 +642,8 @@ def build_pipeline_agent_graph(runtime: AgentRuntime):
     graph.add_node("plan", plan)
     graph.add_node("split_outputs", split_outputs)
     graph.add_node("preview", preview)
+    graph.add_node("inspect", inspect)
+    graph.add_node("cleanse", cleanse)
     graph.add_node("repair", repair)
     graph.add_node("specs", specs)
 
@@ -570,7 +673,17 @@ def build_pipeline_agent_graph(runtime: AgentRuntime):
     graph.add_conditional_edges(
         "preview",
         lambda state: state.get("next_action", "end"),
-        {"repair": "repair", "specs": "specs", "end": END},
+        {"repair": "repair", "inspect": "inspect", "specs": "specs", "end": END},
+    )
+    graph.add_conditional_edges(
+        "inspect",
+        lambda state: state.get("next_action", "end"),
+        {"cleanse": "cleanse", "specs": "specs", "end": END},
+    )
+    graph.add_conditional_edges(
+        "cleanse",
+        lambda state: state.get("next_action", "end"),
+        {"preview": "preview", "specs": "specs", "end": END},
     )
     graph.add_conditional_edges(
         "repair",
@@ -596,6 +709,7 @@ def build_pipeline_agent_state(
     preview_node_id: Optional[str],
     preview_limit: int,
     max_repairs: int,
+    max_cleansing: int,
     apply_specs: bool,
     auto_sync: bool,
     ontology_branch: Optional[str],
@@ -619,6 +733,8 @@ def build_pipeline_agent_state(
         preview_limit=int(preview_limit),
         max_repairs=int(max_repairs),
         repair_attempts=0,
+        max_cleansing=int(max_cleansing),
+        cleansing_attempts=0,
         apply_specs=bool(apply_specs),
         auto_sync=bool(auto_sync),
         ontology_branch=ontology_branch,
@@ -633,6 +749,8 @@ def build_pipeline_agent_state(
         validation_warnings=[],
         preflight=None,
         preview=None,
+        cleansing_inspector=None,
+        cleansing_actions=None,
         questions=[],
         specs=None,
         status="running",

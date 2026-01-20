@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from bff.services.pipeline_context_pack import build_pipeline_context_pack
+from bff.services.pipeline_cleansing_agent import apply_cleansing_plan
 from bff.services.pipeline_plan_compiler import (
     PipelinePlanCompileResult,
     compile_pipeline_plan,
@@ -26,6 +27,7 @@ from shared.services.agent_policy_registry import AgentPolicyRegistry
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.dataset_profile_registry import DatasetProfileRegistry
 from shared.services.pipeline_executor import PipelineExecutor
+from shared.services.pipeline_preview_inspector import inspect_preview
 from shared.services.pipeline_plan_registry import PipelinePlanRegistry
 from shared.dependencies.providers import AuditLogStoreDep, RedisServiceDep, LLMGatewayDep
 from shared.services.llm_quota import LLMQuotaExceededError
@@ -175,6 +177,18 @@ class PipelinePlanGenerateSpecsRequest(BaseModel):
 
 class PipelinePlanSplitOutputsRequest(BaseModel):
     output_bindings: Dict[str, PipelineOutputBinding] | None = Field(default=None)
+
+
+class PipelinePlanInspectPreviewRequest(BaseModel):
+    preview: Dict[str, Any] | None = Field(default=None)
+    node_id: str | None = Field(default=None, max_length=200)
+    limit: int = Field(default=200, ge=1, le=200)
+
+
+class PipelinePlanCleanseRequest(BaseModel):
+    preview: Dict[str, Any] | None = Field(default=None)
+    inspector: Dict[str, Any] | None = Field(default=None)
+    max_actions: int = Field(default=6, ge=0, le=20)
 
 
 @router.post("/compile", response_model=ApiResponse)
@@ -430,6 +444,84 @@ async def preview_plan(
     )
 
 
+@router.post("/{plan_id}/inspect-preview", response_model=ApiResponse)
+async def inspect_plan_preview(
+    plan_id: str,
+    body: PipelinePlanInspectPreviewRequest,
+    request: Request,
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    plan_registry: PipelinePlanRegistry = Depends(get_pipeline_plan_registry),
+) -> ApiResponse:
+    try:
+        plan_id = str(UUID(plan_id))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="plan_id must be a UUID") from exc
+
+    tenant_id = _resolve_tenant_id(request)
+    record = await plan_registry.get_plan(plan_id=plan_id, tenant_id=tenant_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline plan not found")
+
+    try:
+        plan = PipelinePlan.model_validate(record.plan)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Stored plan invalid: {exc}") from exc
+    if not plan.data_scope.db_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plan missing db_name")
+
+    db_name = str(plan.data_scope.db_name or "").strip()
+    if not db_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plan missing db_name")
+    try:
+        enforce_db_scope(request.headers, db_name=db_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    preview_payload = body.preview if isinstance(body.preview, dict) else None
+    preflight = None
+    if preview_payload is None:
+        validation = await validate_pipeline_plan(
+            plan=plan,
+            dataset_registry=dataset_registry,
+            db_name=db_name,
+            branch=str(plan.data_scope.branch or "") or None,
+            require_output=True,
+        )
+        preflight = validation.preflight
+        if validation.errors:
+            return ApiResponse.warning(
+                message="Pipeline plan invalid",
+                data={
+                    "validation_errors": validation.errors,
+                    "validation_warnings": validation.warnings,
+                    "preflight": validation.preflight,
+                },
+            )
+
+        node_id = str(body.node_id or "").strip() or None
+        limit = int(body.limit or 200)
+        preview_definition = dict(validation.plan.definition_json)
+        preview_meta = dict(preview_definition.get("__preview_meta__") or {})
+        preview_meta.setdefault("branch", str(plan.data_scope.branch or "") or "main")
+        preview_definition["__preview_meta__"] = preview_meta
+        executor = PipelineExecutor(dataset_registry)
+        preview_payload = await executor.preview(
+            definition=preview_definition,
+            db_name=db_name,
+            node_id=node_id,
+            limit=limit,
+        )
+
+    inspector = inspect_preview(preview_payload or {})
+    return ApiResponse.success(
+        message="Pipeline preview inspected",
+        data={
+            "preflight": preflight,
+            "inspector": inspector,
+        },
+    )
+
+
 @router.post("/{plan_id}/repair", response_model=ApiResponse)
 async def repair_plan(
     plan_id: str,
@@ -541,6 +633,166 @@ async def repair_plan(
         )
 
     return ApiResponse.success(message="Pipeline plan repaired", data=response_data)
+
+
+@router.post("/{plan_id}/cleanse", response_model=ApiResponse)
+async def cleanse_plan(
+    plan_id: str,
+    body: PipelinePlanCleanseRequest,
+    request: Request,
+    llm: LLMGatewayDep,
+    redis_service: RedisServiceDep,
+    audit_store: AuditLogStoreDep,
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    plan_registry: PipelinePlanRegistry = Depends(get_pipeline_plan_registry),
+) -> ApiResponse:
+    try:
+        plan_id = str(UUID(plan_id))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="plan_id must be a UUID") from exc
+
+    if not bool(get_settings().pipeline_plan.llm_enabled):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pipeline planner is disabled")
+
+    tenant_id = _resolve_tenant_id(request)
+    actor = _resolve_actor(request)
+    user = getattr(request.state, "user", None)
+    user_id = str(getattr(user, "id", "") or "").strip() or None
+
+    record = await plan_registry.get_plan(plan_id=plan_id, tenant_id=tenant_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline plan not found")
+
+    try:
+        plan = PipelinePlan.model_validate(record.plan)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Stored plan invalid: {exc}") from exc
+    if not plan.data_scope.db_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plan missing db_name")
+
+    db_name = str(plan.data_scope.db_name or "").strip()
+    if not db_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plan missing db_name")
+    try:
+        enforce_db_scope(request.headers, db_name=db_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    selected_model, allowed_models, data_policies = await _resolve_tenant_policy(request)
+
+    preview_payload = body.preview if isinstance(body.preview, dict) else None
+    inspector_payload = body.inspector if isinstance(body.inspector, dict) else None
+    preflight = None
+    if preview_payload is None:
+        validation = await validate_pipeline_plan(
+            plan=plan,
+            dataset_registry=dataset_registry,
+            db_name=db_name,
+            branch=str(plan.data_scope.branch or "") or None,
+            require_output=True,
+        )
+        preflight = validation.preflight
+        if validation.errors:
+            return ApiResponse.warning(
+                message="Pipeline plan invalid",
+                data={
+                    "validation_errors": validation.errors,
+                    "validation_warnings": validation.warnings,
+                    "preflight": validation.preflight,
+                },
+            )
+
+        preview_definition = dict(validation.plan.definition_json)
+        preview_meta = dict(preview_definition.get("__preview_meta__") or {})
+        preview_meta.setdefault("branch", str(plan.data_scope.branch or "") or "main")
+        preview_definition["__preview_meta__"] = preview_meta
+        executor = PipelineExecutor(dataset_registry)
+        preview_payload = await executor.preview(
+            definition=preview_definition,
+            db_name=db_name,
+            node_id=None,
+            limit=200,
+        )
+
+    if inspector_payload is None:
+        inspector_payload = inspect_preview(preview_payload or {})
+
+    if not bool(inspector_payload.get("needs_cleansing")):
+        return ApiResponse.success(
+            message="No cleansing actions required",
+            data={
+                "plan_id": plan_id,
+                "preflight": preflight,
+                "inspector": inspector_payload,
+                "plan": plan.model_dump(mode="json"),
+                "actions_applied": [],
+            },
+        )
+
+    try:
+        result = await apply_cleansing_plan(
+            plan=plan,
+            inspector=inspector_payload,
+            max_actions=int(body.max_actions or 0),
+            actor=actor,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            data_policies=data_policies,
+            selected_model=selected_model,
+            allowed_models=allowed_models,
+            llm_gateway=llm,
+            redis_service=redis_service,
+            audit_store=audit_store,
+            db_name=db_name,
+            branch=str(plan.data_scope.branch or "") or None,
+            dataset_registry=dataset_registry,
+        )
+    except LLMQuotaExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Pipeline cleanse failed: %s", exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to cleanse plan") from exc
+
+    if result.validation_errors:
+        return ApiResponse.partial(
+            message="Pipeline cleanse failed validation",
+            data={
+                "plan_id": plan_id,
+                "plan": result.plan.model_dump(mode="json"),
+                "preflight": preflight,
+                "inspector": inspector_payload,
+                "actions_applied": result.actions_applied,
+                "validation_errors": result.validation_errors,
+                "validation_warnings": result.validation_warnings,
+                "planner": {"confidence": result.confidence, "notes": result.notes, "warnings": result.warnings},
+            },
+            errors=result.validation_errors,
+        )
+
+    await plan_registry.upsert_plan(
+        plan_id=plan_id,
+        tenant_id=tenant_id,
+        status="COMPILED",
+        goal=str(result.plan.goal or ""),
+        db_name=str(result.plan.data_scope.db_name or "") if result.plan.data_scope else None,
+        branch=str(result.plan.data_scope.branch or "") if result.plan.data_scope else None,
+        plan=result.plan.model_dump(mode="json"),
+        created_by=actor,
+    )
+
+    return ApiResponse.success(
+        message="Pipeline plan cleansed",
+        data={
+            "plan_id": plan_id,
+            "plan": result.plan.model_dump(mode="json"),
+            "preflight": preflight,
+            "inspector": inspector_payload,
+            "actions_applied": result.actions_applied,
+            "validation_errors": result.validation_errors,
+            "validation_warnings": result.validation_warnings,
+            "planner": {"confidence": result.confidence, "notes": result.notes, "warnings": result.warnings},
+        },
+    )
 
 
 @router.post("/{plan_id}/split-outputs", response_model=ApiResponse)
