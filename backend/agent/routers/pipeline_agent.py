@@ -68,6 +68,7 @@ async def run_pipeline_agent(request: Request, body: PipelineAgentRunRequest) ->
         preview_limit=body.preview_limit,
         max_repairs=body.max_repairs,
         max_cleansing=body.max_cleansing,
+        max_transform=body.max_transform,
         apply_specs=body.apply_specs,
         auto_sync=body.auto_sync,
         ontology_branch=body.ontology_branch,
@@ -109,12 +110,14 @@ async def run_pipeline_agent(request: Request, body: PipelineAgentRunRequest) ->
         "preview": final_state.get("preview"),
         "cleansing_inspector": final_state.get("cleansing_inspector"),
         "cleansing_actions": final_state.get("cleansing_actions"),
+        "join_plan": final_state.get("join_hints"),
         "specs": final_state.get("specs"),
         "questions": final_state.get("questions"),
         "validation_errors": final_state.get("validation_errors"),
         "validation_warnings": final_state.get("validation_warnings"),
         "repair_attempts": final_state.get("repair_attempts"),
         "cleansing_attempts": final_state.get("cleansing_attempts"),
+        "transform_attempts": final_state.get("transform_attempts"),
     }
 
     await runtime.record_event(

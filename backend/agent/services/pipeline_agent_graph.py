@@ -25,6 +25,8 @@ class PipelineAgentState(TypedDict):
     repair_attempts: int
     max_cleansing: int
     cleansing_attempts: int
+    max_transform: int
+    transform_attempts: int
     apply_specs: bool
     auto_sync: bool
     ontology_branch: Optional[str]
@@ -230,11 +232,31 @@ async def _route_after_profile(state: PipelineAgentState) -> PipelineAgentState:
     return {**state, "next_action": "plan"}
 
 
-async def _collect_join_hints(state: PipelineAgentState) -> PipelineAgentState:
-    join_hints = _select_join_hints(state.get("context_pack"))
+async def _collect_join_hints(state: PipelineAgentState, runtime: AgentRuntime) -> PipelineAgentState:
+    body = {
+        "goal": state.get("goal"),
+        "data_scope": state.get("data_scope") or {},
+        "context_pack": state.get("context_pack") or {},
+    }
+    result = await _call_bff(
+        runtime=runtime,
+        state=state,
+        step_id="pipeline_join_keys",
+        method="POST",
+        path="/api/v1/pipeline-plans/join-keys",
+        body=body,
+    )
+    if result.get("status") != "success":
+        join_hints = _select_join_hints(state.get("context_pack"))
+        planner_hints = _merge_planner_hints(state.get("planner_hints"), {"join_plan": join_hints})
+        return {**state, "next_action": "route", "join_hints": join_hints, "planner_hints": planner_hints}
+
+    payload = result.get("payload")
+    data = _api_data(payload)
+    join_hints = data.get("joins") if isinstance(data.get("joins"), list) else []
     planner_hints = _merge_planner_hints(
         state.get("planner_hints"),
-        {"join_hints": join_hints},
+        {"join_plan": join_hints},
     )
     return {
         **state,
@@ -351,6 +373,45 @@ async def _split_outputs(state: PipelineAgentState, runtime: AgentRuntime) -> Pi
         "validation_errors": list(data.get("validation_errors") or []),
         "validation_warnings": list(data.get("validation_warnings") or []),
         "next_action": "preview",
+    }
+
+
+async def _transform_plan(state: PipelineAgentState, runtime: AgentRuntime) -> PipelineAgentState:
+    plan_id = str(state.get("plan_id") or "").strip()
+    if not plan_id:
+        return {**state, "next_action": "end", "status": "failed", "error": "plan_id missing"}
+
+    attempts = int(state.get("transform_attempts") or 0) + 1
+    result = await _call_bff(
+        runtime=runtime,
+        state=state,
+        step_id=f"pipeline_plan_transform_{attempts}",
+        method="POST",
+        path=f"/api/v1/pipeline-plans/{plan_id}/transform",
+        body={
+            "join_plan": state.get("join_hints") or [],
+            "cleansing_hints": state.get("cleansing_hints") or [],
+            "context_pack": state.get("context_pack") or {},
+        },
+    )
+    if result.get("status") != "success":
+        return {**state, "next_action": "end", "status": "failed", "error": result.get("error")}
+
+    payload = result.get("payload")
+    data = _api_data(payload)
+    updated_plan = data.get("plan") if isinstance(data.get("plan"), dict) else state.get("plan")
+
+    next_action = "preview"
+    if _needs_output_split(updated_plan):
+        next_action = "split_outputs"
+
+    return {
+        **state,
+        "plan": updated_plan,
+        "validation_errors": list(data.get("validation_errors") or []),
+        "validation_warnings": list(data.get("validation_warnings") or []),
+        "transform_attempts": attempts,
+        "next_action": next_action,
     }
 
 
@@ -541,6 +602,8 @@ async def _repair_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pipe
         status = "failed"
     elif _needs_output_split(plan):
         next_action = "split_outputs"
+    elif int(state.get("max_transform") or 0) > 0 and (state.get("join_hints") or state.get("planner_hints")):
+        next_action = "transform"
 
     return {
         **state,
@@ -609,7 +672,7 @@ def build_pipeline_agent_graph(runtime: AgentRuntime):
         return await _route_after_profile(state)
 
     async def join_keys(state: PipelineAgentState) -> PipelineAgentState:
-        return await _collect_join_hints(state)
+        return await _collect_join_hints(state, runtime)
 
     async def cleanse(state: PipelineAgentState) -> PipelineAgentState:
         return await _collect_cleansing_hints(state)
@@ -619,6 +682,9 @@ def build_pipeline_agent_graph(runtime: AgentRuntime):
 
     async def split_outputs(state: PipelineAgentState) -> PipelineAgentState:
         return await _split_outputs(state, runtime)
+
+    async def transform(state: PipelineAgentState) -> PipelineAgentState:
+        return await _transform_plan(state, runtime)
 
     async def preview(state: PipelineAgentState) -> PipelineAgentState:
         return await _preview_plan(state, runtime)
@@ -640,6 +706,7 @@ def build_pipeline_agent_graph(runtime: AgentRuntime):
     graph.add_node("join_keys", join_keys)
     graph.add_node("cleanse", cleanse)
     graph.add_node("plan", plan)
+    graph.add_node("transform", transform)
     graph.add_node("split_outputs", split_outputs)
     graph.add_node("preview", preview)
     graph.add_node("inspect", inspect)
@@ -663,7 +730,12 @@ def build_pipeline_agent_graph(runtime: AgentRuntime):
     graph.add_conditional_edges(
         "plan",
         lambda state: state.get("next_action", "end"),
-        {"split_outputs": "split_outputs", "preview": "preview", "clarify": END, "end": END},
+        {"transform": "transform", "split_outputs": "split_outputs", "preview": "preview", "clarify": END, "end": END},
+    )
+    graph.add_conditional_edges(
+        "transform",
+        lambda state: state.get("next_action", "end"),
+        {"split_outputs": "split_outputs", "preview": "preview", "end": END},
     )
     graph.add_conditional_edges(
         "split_outputs",
@@ -710,6 +782,7 @@ def build_pipeline_agent_state(
     preview_limit: int,
     max_repairs: int,
     max_cleansing: int,
+    max_transform: int,
     apply_specs: bool,
     auto_sync: bool,
     ontology_branch: Optional[str],
@@ -735,6 +808,8 @@ def build_pipeline_agent_state(
         repair_attempts=0,
         max_cleansing=int(max_cleansing),
         cleansing_attempts=0,
+        max_transform=int(max_transform),
+        transform_attempts=0,
         apply_specs=bool(apply_specs),
         auto_sync=bool(auto_sync),
         ontology_branch=ontology_branch,

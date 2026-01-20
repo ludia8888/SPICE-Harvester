@@ -33,6 +33,7 @@ class PipelineAgentRunRequest(BaseModel):
     preview_limit: int = Field(default=200, ge=1, le=500)
     max_repairs: int = Field(default=2, ge=0, le=5)
     max_cleansing: int = Field(default=1, ge=0, le=5)
+    max_transform: int = Field(default=1, ge=0, le=3)
     apply_specs: bool = Field(default=False)
     auto_sync: bool = Field(default=True)
     ontology_branch: Optional[str] = Field(default=None, max_length=200)
