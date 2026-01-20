@@ -175,15 +175,20 @@ async def _call_bff(
     step_id: str,
     method: str,
     path: str,
+    tool_id: Optional[str] = None,
     body: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    idempotency_key = f"{state['run_id']}:{step_id}"
     tool_call = AgentToolCall(
         step_id=step_id,
+        tool_id=tool_id,
         service="bff",
         method=method,
         path=path,
         body=body,
         query={},
+        headers={"Idempotency-Key": idempotency_key},
+        data_scope=state.get("data_scope") or {},
     )
     return await runtime.execute_tool_call(
         run_id=state["run_id"],
@@ -215,6 +220,7 @@ async def _build_context_pack(state: PipelineAgentState, runtime: AgentRuntime) 
         step_id="pipeline_context_pack",
         method="POST",
         path="/api/v1/pipeline-plans/context-pack",
+        tool_id="pipeline_plans.context_pack",
         body=body,
     )
     if result.get("status") != "success":
@@ -249,6 +255,7 @@ async def _collect_join_hints(state: PipelineAgentState, runtime: AgentRuntime) 
         step_id="pipeline_join_keys",
         method="POST",
         path="/api/v1/pipeline-plans/join-keys",
+        tool_id="pipeline_plans.join_keys",
         body=body,
     )
     if result.get("status") != "success":
@@ -301,6 +308,7 @@ async def _compile_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
         step_id="pipeline_plan_compile",
         method="POST",
         path="/api/v1/pipeline-plans/compile",
+        tool_id="pipeline_plans.compile",
         body=body,
     )
     if result.get("status") != "success":
@@ -351,6 +359,7 @@ async def _split_outputs(state: PipelineAgentState, runtime: AgentRuntime) -> Pi
         step_id="pipeline_plan_split_outputs",
         method="POST",
         path=f"/api/v1/pipeline-plans/{plan_id}/split-outputs",
+        tool_id="pipeline_plans.split_outputs",
         body={
             "output_bindings": state.get("output_bindings") or {},
         },
@@ -393,6 +402,7 @@ async def _transform_plan(state: PipelineAgentState, runtime: AgentRuntime) -> P
         step_id=f"pipeline_plan_transform_{attempts}",
         method="POST",
         path=f"/api/v1/pipeline-plans/{plan_id}/transform",
+        tool_id="pipeline_plans.transform",
         body={
             "join_plan": state.get("join_hints") or [],
             "cleansing_hints": state.get("cleansing_hints") or [],
@@ -431,6 +441,7 @@ async def _preview_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
         step_id="pipeline_plan_preview",
         method="POST",
         path=f"/api/v1/pipeline-plans/{plan_id}/preview",
+        tool_id="pipeline_plans.preview",
         body={
             "node_id": state.get("preview_node_id"),
             "limit": state.get("preview_limit"),
@@ -498,6 +509,7 @@ async def _evaluate_joins(state: PipelineAgentState, runtime: AgentRuntime) -> P
         step_id="pipeline_join_evaluate",
         method="POST",
         path=f"/api/v1/pipeline-plans/{plan_id}/evaluate-joins",
+        tool_id="pipeline_plans.evaluate_joins",
         body={
             "run_tables": state.get("run_tables"),
             "definition_digest": state.get("definition_digest"),
@@ -536,6 +548,7 @@ async def _inspect_preview(state: PipelineAgentState, runtime: AgentRuntime) -> 
         step_id="pipeline_plan_inspect_preview",
         method="POST",
         path=f"/api/v1/pipeline-plans/{plan_id}/inspect-preview",
+        tool_id="pipeline_plans.inspect_preview",
         body={"preview": state.get("preview")},
     )
     if result.get("status") != "success":
@@ -569,6 +582,7 @@ async def _cleanse_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
         step_id="pipeline_plan_cleanse",
         method="POST",
         path=f"/api/v1/pipeline-plans/{plan_id}/cleanse",
+        tool_id="pipeline_plans.cleanse",
         body={
             "preview": state.get("preview"),
             "inspector": state.get("cleansing_inspector"),
@@ -625,6 +639,7 @@ async def _repair_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pipe
         step_id=f"pipeline_plan_repair_{repair_attempts}",
         method="POST",
         path=f"/api/v1/pipeline-plans/{plan_id}/repair",
+        tool_id="pipeline_plans.repair",
         body={
             "validation_errors": state.get("validation_errors") or [],
             "validation_warnings": state.get("validation_warnings") or [],
@@ -695,6 +710,7 @@ async def _generate_specs(state: PipelineAgentState, runtime: AgentRuntime) -> P
         step_id="pipeline_plan_specs",
         method="POST",
         path=f"/api/v1/pipeline-plans/{plan_id}/generate-specs",
+        tool_id="pipeline_plans.generate_specs",
         body={
             "apply": state.get("apply_specs"),
             "output_bindings": state.get("output_bindings") or {},

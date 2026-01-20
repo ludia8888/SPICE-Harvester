@@ -7,12 +7,14 @@ machine-readable diagnostics for planners/repair loops.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from shared.models.agent_plan_report import PlanCompilationReport, PlanDiagnostic, PlanDiagnosticSeverity
 from shared.models.pipeline_plan import PipelinePlan
 from shared.services.dataset_registry import DatasetRegistry
+from shared.services.pipeline_graph_utils import normalize_edges, normalize_nodes
 from shared.utils.canonical_json import sha256_canonical_json_prefixed
 
 from bff.routers import pipeline as pipeline_router
@@ -25,6 +27,51 @@ class PipelinePlanValidationResult:
     warnings: List[str]
     preflight: Dict[str, Any]
     compilation_report: PlanCompilationReport
+
+
+def _ensure_output_nodes(definition_json: Dict[str, Any], outputs: List[Any]) -> Dict[str, Any]:
+    nodes_raw = definition_json.get("nodes")
+    if not isinstance(nodes_raw, list) or not nodes_raw:
+        return definition_json
+    nodes = [dict(node) for node in nodes_raw if isinstance(node, dict)]
+    if any(node.get("type") == "output" for node in nodes):
+        return definition_json
+    if not outputs:
+        return definition_json
+    edges = normalize_edges(definition_json.get("edges"))
+    node_by_id = normalize_nodes(nodes)
+    if not node_by_id:
+        return definition_json
+    existing_ids = set(node_by_id.keys())
+    outgoing = {edge["from"] for edge in edges}
+    sink_ids = [
+        node_id
+        for node_id, node in node_by_id.items()
+        if node.get("type") != "output" and node_id not in outgoing
+    ]
+    if not sink_ids:
+        sink_ids = [list(node_by_id.keys())[-1]]
+    if not sink_ids:
+        return definition_json
+
+    node_order = [node.get("id") for node in nodes if node.get("id")]
+    ordered_sinks = [node_id for node_id in node_order if node_id in set(sink_ids)] or sink_ids
+
+    for idx, output in enumerate(outputs):
+        output_name = str(getattr(output, "output_name", "") or "").strip()
+        if not output_name:
+            continue
+        base_id = re.sub(r"[^A-Za-z0-9_]+", "_", f"output_{output_name}").strip("_") or "output"
+        output_id = pipeline_router._unique_node_id(base_id, existing_ids)
+        existing_ids.add(output_id)
+        nodes.append({"id": output_id, "type": "output", "metadata": {"outputName": output_name}})
+        attach_to = ordered_sinks[idx] if idx < len(ordered_sinks) else ordered_sinks[-1]
+        edges.append({"from": attach_to, "to": output_id})
+
+    updated = dict(definition_json)
+    updated["nodes"] = nodes
+    updated["edges"] = edges
+    return updated
 
 
 async def validate_pipeline_plan(
@@ -81,6 +128,7 @@ async def validate_pipeline_plan(
         branch=branch,
         dataset_registry=dataset_registry,
     )
+    normalized = _ensure_output_nodes(normalized, plan.outputs or [])
     normalized = pipeline_router._augment_definition_with_canonical_contract(
         definition_json=normalized,
         branch=branch,

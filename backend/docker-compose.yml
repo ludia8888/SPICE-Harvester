@@ -416,6 +416,7 @@ services:
       - LLM_MOCK_JSON_AGENT_PLAN_COMPILE_V1=${LLM_MOCK_JSON_AGENT_PLAN_COMPILE_V1:-}
       - LLM_MOCK_JSON_AGENT_PLAN_CLARIFY_V1=${LLM_MOCK_JSON_AGENT_PLAN_CLARIFY_V1:-}
       - LLM_MOCK_DIR=${LLM_MOCK_DIR:-/app/llm_mocks}
+      - PIPELINE_PLAN_LLM_ENABLED=${PIPELINE_PLAN_LLM_ENABLED:-true}
       # Infra (needed for WebSocket notifications / search / rate limiting)
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432

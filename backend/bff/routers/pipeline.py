@@ -686,12 +686,14 @@ async def _augment_definition_with_casts(
 
 def _sys_compute_expressions(output_name: str) -> List[Dict[str, str]]:
     safe_name = str(output_name or "").replace("'", "''")
+    now_iso = utcnow().isoformat().replace("+00:00", "Z")
+    valid_to_iso = "9999-12-31T23:59:59Z"
     return [
         {"column": "_sys_source", "expr": f"'{safe_name}'"},
-        {"column": "_sys_ingested_at", "expr": "current_timestamp()"},
-        {"column": "_sys_is_deleted", "expr": "false"},
-        {"column": "_sys_valid_from", "expr": "coalesce(_sys_ingested_at, current_timestamp())"},
-        {"column": "_sys_valid_to", "expr": "cast(null as timestamp)"},
+        {"column": "_sys_ingested_at", "expr": f"'{now_iso}'"},
+        {"column": "_sys_is_deleted", "expr": "False"},
+        {"column": "_sys_valid_from", "expr": f"'{now_iso}'"},
+        {"column": "_sys_valid_to", "expr": f"'{valid_to_iso}'"},
         {"column": "_sys_record_hash", "expr": "sha2(to_json(struct(*)), 256)"},
     ]
 

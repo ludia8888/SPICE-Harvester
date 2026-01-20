@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import Any, Dict
 from uuid import uuid4
 
@@ -52,6 +53,8 @@ async def run_pipeline_agent(request: Request, body: PipelineAgentRunRequest) ->
         event_store=request.app.state.event_store,  # type: ignore[attr-defined]
         audit_store=request.app.state.audit_store,  # type: ignore[attr-defined]
     )
+    if request.headers.get("Authorization") or request.headers.get("X-Delegated-Authorization"):
+        runtime.config = replace(runtime.config, bff_token=None)
 
     request_id = request.headers.get("X-Request-Id")
     state = build_pipeline_agent_state(

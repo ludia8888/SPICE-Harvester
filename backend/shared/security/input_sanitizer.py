@@ -32,7 +32,8 @@ class InputSanitizer:
         r"(\bAND\b\s+\d+\s*=\s*\d+)",  # AND 1=1 pattern
         r"(--|#|/\*|\*/)",
         r"(\b(CHAR|NCHAR|VARCHAR|NVARCHAR|CAST|CONVERT|SUBSTRING)\s*\()",
-        r"(\b(INFORMATION_SCHEMA|SYS|MASTER|MSDB|TEMPDB)\b)",
+        r"(\b(INFORMATION_SCHEMA|MASTER|MSDB|TEMPDB)\b)",
+        r"(\bSYS\.[A-Za-z0-9_]+)",
         r"(\b(XP_|SP_)\w+)",
         r"(\b(LOAD_FILE|INTO\s+OUTFILE|INTO\s+DUMPFILE)\b)",
         r"(\b(WAITFOR\s+DELAY|BENCHMARK\s*\()\b)",

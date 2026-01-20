@@ -341,6 +341,127 @@
     "max_payload_bytes": 500000
   },
   {
+    "tool_id": "pipeline_plans.context_pack",
+    "method": "POST",
+    "path": "/api/v1/pipeline-plans/context-pack",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "pipeline_plans.join_keys",
+    "method": "POST",
+    "path": "/api/v1/pipeline-plans/join-keys",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "pipeline_plans.compile",
+    "method": "POST",
+    "path": "/api/v1/pipeline-plans/compile",
+    "risk_level": "write",
+    "requires_approval": false,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 500000
+  },
+  {
+    "tool_id": "pipeline_plans.split_outputs",
+    "method": "POST",
+    "path": "/api/v1/pipeline-plans/{plan_id}/split-outputs",
+    "risk_level": "write",
+    "requires_approval": false,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 500000
+  },
+  {
+    "tool_id": "pipeline_plans.transform",
+    "method": "POST",
+    "path": "/api/v1/pipeline-plans/{plan_id}/transform",
+    "risk_level": "write",
+    "requires_approval": false,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 500000
+  },
+  {
+    "tool_id": "pipeline_plans.preview",
+    "method": "POST",
+    "path": "/api/v1/pipeline-plans/{plan_id}/preview",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 500000
+  },
+  {
+    "tool_id": "pipeline_plans.evaluate_joins",
+    "method": "POST",
+    "path": "/api/v1/pipeline-plans/{plan_id}/evaluate-joins",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "pipeline_plans.inspect_preview",
+    "method": "POST",
+    "path": "/api/v1/pipeline-plans/{plan_id}/inspect-preview",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 200000
+  },
+  {
+    "tool_id": "pipeline_plans.cleanse",
+    "method": "POST",
+    "path": "/api/v1/pipeline-plans/{plan_id}/cleanse",
+    "risk_level": "write",
+    "requires_approval": false,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 500000
+  },
+  {
+    "tool_id": "pipeline_plans.repair",
+    "method": "POST",
+    "path": "/api/v1/pipeline-plans/{plan_id}/repair",
+    "risk_level": "write",
+    "requires_approval": false,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 500000
+  },
+  {
+    "tool_id": "pipeline_plans.generate_specs",
+    "method": "POST",
+    "path": "/api/v1/pipeline-plans/{plan_id}/generate-specs",
+    "risk_level": "write",
+    "requires_approval": false,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 500000
+  },
+  {
     "tool_id": "query.run",
     "method": "POST",
     "path": "/api/v1/databases/{db_name}/query",
