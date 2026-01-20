@@ -218,7 +218,7 @@ async def _generate_object_spec(
         warnings.append("preview columns missing; mapping may be incomplete")
 
     properties: Dict[str, Any] = {}
-    if target_class_id:
+    if target_class_id and apply_specs:
         try:
             ontology_payload = await oms_client.get_ontology(
                 str(plan.data_scope.db_name or "").strip(),
@@ -228,6 +228,9 @@ async def _generate_object_spec(
             properties, _ = objectify_router._extract_ontology_fields(ontology_payload)
         except Exception as exc:
             errors.append(f"failed to fetch ontology for {target_class_id}: {exc}")
+    elif target_class_id and preview_columns:
+        properties = {col: {} for col in preview_columns if col}
+        warnings.append("ontology lookup skipped; using column names for draft mappings")
 
     mappings = _match_columns_to_properties(preview_columns, properties)
     if not mappings:

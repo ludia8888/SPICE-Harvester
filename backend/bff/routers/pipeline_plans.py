@@ -363,10 +363,16 @@ async def join_keys(
     if not bool(get_settings().pipeline_plan.llm_enabled):
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pipeline planner is disabled")
 
-    payload = sanitize_input(body.model_dump(exclude_none=True))
+    payload = sanitize_input(
+        {
+            "goal": body.goal,
+            "data_scope": body.data_scope.model_dump(mode="json") if body.data_scope else None,
+            "max_joins": body.max_joins,
+        }
+    )
     goal = str(payload.get("goal") or "").strip()
     data_scope = body.data_scope
-    context_pack = payload.get("context_pack") if isinstance(payload.get("context_pack"), dict) else None
+    context_pack = body.context_pack if isinstance(body.context_pack, dict) else None
     if not data_scope or not data_scope.db_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="data_scope.db_name is required")
 

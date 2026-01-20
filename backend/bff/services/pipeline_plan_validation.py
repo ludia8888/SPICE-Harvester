@@ -69,6 +69,12 @@ async def validate_pipeline_plan(
             warnings.append(f"output {output.output_name}: output_kind is unknown")
 
     definition_json = dict(plan.definition_json or {})
+    canonical_output_names = {
+        output.output_name
+        for output in (plan.outputs or [])
+        if str(getattr(output.output_kind, "value", output.output_kind) or "").strip().lower() in {"object", "link"}
+        and str(output.output_name or "").strip()
+    }
     normalized = await pipeline_router._augment_definition_with_casts(
         definition_json=definition_json,
         db_name=db_name,
@@ -78,6 +84,7 @@ async def validate_pipeline_plan(
     normalized = pipeline_router._augment_definition_with_canonical_contract(
         definition_json=normalized,
         branch=branch,
+        canonical_output_names=canonical_output_names or None,
     )
     if normalized != definition_json:
         warnings.append("definition_json auto-augmented with casts/canonical contract")

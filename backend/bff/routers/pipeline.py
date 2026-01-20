@@ -537,9 +537,17 @@ def _output_name_for_node(node_id: str, node: Dict[str, Any]) -> str:
     ).strip()
 
 
-def _is_canonical_output(node_id: str, node: Dict[str, Any]) -> bool:
+def _is_canonical_output(
+    node_id: str,
+    node: Dict[str, Any],
+    canonical_output_names: Optional[set[str]] = None,
+) -> bool:
     name = _output_name_for_node(node_id, node)
-    return bool(name) and name.startswith(_CANONICAL_OUTPUT_PREFIX)
+    if not name:
+        return False
+    if canonical_output_names and name in canonical_output_names:
+        return True
+    return name.startswith(_CANONICAL_OUTPUT_PREFIX)
 
 
 def _sql_ident(name: str) -> str:
@@ -948,6 +956,7 @@ def _augment_definition_with_canonical_contract(
     *,
     definition_json: Dict[str, Any],
     branch: Optional[str],
+    canonical_output_names: Optional[set[str]] = None,
 ) -> Dict[str, Any]:
     nodes_raw = definition_json.get("nodes")
     if not isinstance(nodes_raw, list) or not nodes_raw:
@@ -965,7 +974,7 @@ def _augment_definition_with_canonical_contract(
     for node_id, node in list(node_by_id.items()):
         if node.get("type") != "output":
             continue
-        if not _is_canonical_output(node_id, node):
+        if not _is_canonical_output(node_id, node, canonical_output_names):
             continue
         metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
         if metadata.get("_canonical_contract_applied"):

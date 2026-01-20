@@ -53,6 +53,7 @@ def _build_split_system_prompt() -> str:
         "- object outputs MUST include target_class_id.\n"
         "- link outputs MUST include link_type_id, source_class_id, target_class_id, predicate, cardinality,\n"
         "  source_key_column, target_key_column, relationship_spec_type (join_table or foreign_key).\n"
+        "- If output_name starts with canonical_obj_ classify as object; canonical_lnk_ classify as link.\n"
         "- Use output_bindings as ground truth when provided.\n"
         "- If unsure, set output_kind to unknown and add a warning explaining why.\n"
         "\n"
