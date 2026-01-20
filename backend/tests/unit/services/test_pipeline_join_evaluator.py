@@ -110,3 +110,46 @@ async def test_join_evaluator_reports_coverage_and_explosion() -> None:
     assert metrics.left_coverage == pytest.approx(0.6667, rel=1e-3)
     assert metrics.right_coverage == pytest.approx(1.0, rel=1e-3)
     assert metrics.explosion_ratio == pytest.approx(1.0, rel=1e-3)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_join_evaluator_aligns_inputs_to_join_keys() -> None:
+    definition = {
+        "nodes": [
+            {"id": "l1", "type": "input"},
+            {"id": "r1", "type": "input"},
+            {
+                "id": "j1",
+                "type": "transform",
+                "metadata": {"operation": "join", "joinType": "inner", "leftKey": "left_id", "rightKey": "right_id"},
+            },
+            {"id": "out1", "type": "output"},
+        ],
+        "edges": [
+            {"from": "r1", "to": "j1"},
+            {"from": "l1", "to": "j1"},
+            {"from": "j1", "to": "out1"},
+        ],
+    }
+
+    run_tables = {
+        "l1": {"columns": ["left_id"], "rows": [{"left_id": "A"}, {"left_id": "B"}]},
+        "r1": {"columns": ["right_id"], "rows": [{"right_id": "A"}, {"right_id": "C"}]},
+        "j1": {"columns": ["left_id", "right_id"], "rows": [{"left_id": "A", "right_id": "A"}]},
+    }
+
+    evaluations, warnings = await evaluate_pipeline_joins(
+        definition_json=definition,
+        db_name="demo",
+        dataset_registry=None,
+        run_tables=run_tables,
+    )
+
+    assert warnings == []
+    assert len(evaluations) == 1
+    metrics = evaluations[0]
+    assert metrics.left_node_id == "l1"
+    assert metrics.right_node_id == "r1"
+    assert metrics.left_coverage == pytest.approx(0.5, rel=1e-3)
+    assert metrics.right_coverage == pytest.approx(0.5, rel=1e-3)

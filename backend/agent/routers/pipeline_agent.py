@@ -66,6 +66,7 @@ async def run_pipeline_agent(request: Request, body: PipelineAgentRunRequest) ->
         ),
         preview_node_id=body.preview_node_id,
         preview_limit=body.preview_limit,
+        include_run_tables=body.include_run_tables,
         max_repairs=body.max_repairs,
         max_cleansing=body.max_cleansing,
         max_transform=body.max_transform,

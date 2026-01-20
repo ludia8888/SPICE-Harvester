@@ -31,6 +31,7 @@ from shared.services.dataset_registry import DatasetRegistry
 from shared.services.dataset_profile_registry import DatasetProfileRegistry
 from shared.services.pipeline_executor import PipelineExecutor
 from shared.services.pipeline_preview_inspector import inspect_preview
+from shared.utils.canonical_json import sha256_canonical_json_prefixed
 from shared.services.pipeline_plan_registry import PipelinePlanRegistry
 from shared.dependencies.providers import AuditLogStoreDep, RedisServiceDep, LLMGatewayDep
 from shared.services.llm_quota import LLMQuotaExceededError
@@ -93,6 +94,25 @@ def _resolve_actor(request: Request) -> str:
     )
 
 
+def _serialize_run_tables(run_tables: Dict[str, Any], *, limit: int) -> Dict[str, Dict[str, Any]]:
+    payload: Dict[str, Dict[str, Any]] = {}
+    resolved_limit = max(0, int(limit))
+    for node_id, table in (run_tables or {}).items():
+        if not isinstance(node_id, str) or not node_id.strip():
+            continue
+        if not isinstance(table, dict):
+            continue
+        columns = table.get("columns")
+        rows = table.get("rows")
+        if not isinstance(columns, list) or not isinstance(rows, list):
+            continue
+        payload[node_id] = {
+            "columns": columns,
+            "rows": rows[:resolved_limit] if resolved_limit else rows,
+        }
+    return payload
+
+
 async def _resolve_tenant_policy(
     request: Request,
 ) -> tuple[Optional[str], Optional[list[str]], Optional[Dict[str, Any]]]:
@@ -139,6 +159,8 @@ class PipelineJoinKeysRequest(BaseModel):
 class PipelinePlanPreviewRequest(BaseModel):
     node_id: str | None = Field(default=None, max_length=200)
     limit: int = Field(default=200, ge=1, le=200)
+    include_run_tables: bool = Field(default=False)
+    run_table_limit: int = Field(default=200, ge=1, le=500)
 
 
 class PipelinePlanRepairRequest(BaseModel):
@@ -209,6 +231,8 @@ class PipelinePlanTransformRequest(BaseModel):
 
 class PipelinePlanEvaluateJoinsRequest(BaseModel):
     node_id: str | None = Field(default=None, max_length=200)
+    run_tables: Dict[str, Dict[str, Any]] | None = Field(default=None)
+    definition_digest: str | None = Field(default=None, max_length=200)
 
 
 @router.post("/compile", response_model=ApiResponse)
@@ -520,6 +544,8 @@ async def preview_plan(
 
     node_id = str(body.node_id or "").strip() or None
     limit = int(body.limit or 200)
+    include_run_tables = bool(body.include_run_tables)
+    run_table_limit = int(body.run_table_limit or limit)
 
     preview_definition = dict(validation.plan.definition_json)
     preview_meta = dict(preview_definition.get("__preview_meta__") or {})
@@ -527,13 +553,25 @@ async def preview_plan(
     preview_definition["__preview_meta__"] = preview_meta
 
     executor = PipelineExecutor(dataset_registry)
+    definition_digest = sha256_canonical_json_prefixed(preview_definition)
+    run_tables_payload: Dict[str, Dict[str, Any]] | None = None
     try:
-        preview = await executor.preview(
-            definition=preview_definition,
-            db_name=db_name,
-            node_id=node_id,
-            limit=limit,
-        )
+        if include_run_tables:
+            run_result = await executor.run(definition=preview_definition, db_name=db_name)
+            selected = executor._select_table(run_result, node_id)
+            preview = executor._table_to_sample(selected, limit=limit)
+            raw_tables = {
+                table_node_id: {"columns": table.columns, "rows": table.rows}
+                for table_node_id, table in run_result.tables.items()
+            }
+            run_tables_payload = _serialize_run_tables(raw_tables, limit=run_table_limit)
+        else:
+            preview = await executor.preview(
+                definition=preview_definition,
+                db_name=db_name,
+                node_id=node_id,
+                limit=limit,
+            )
     except ValueError as exc:
         return ApiResponse.warning(
             message="Pipeline preview failed",
@@ -543,13 +581,15 @@ async def preview_plan(
             },
         )
 
-    return ApiResponse.success(
-        message="Pipeline preview ready",
-        data={
-            "preflight": validation.preflight,
-            "preview": preview,
-        },
-    )
+    data: Dict[str, Any] = {
+        "preflight": validation.preflight,
+        "preview": preview,
+        "definition_digest": definition_digest,
+    }
+    if run_tables_payload is not None:
+        data["run_tables"] = run_tables_payload
+
+    return ApiResponse.success(message="Pipeline preview ready", data=data)
 
 
 @router.post("/{plan_id}/inspect-preview", response_model=ApiResponse)
@@ -680,13 +720,27 @@ async def evaluate_joins(
             },
         )
 
+    payload = sanitize_input(body.model_dump(exclude_none=True))
+    run_tables = payload.get("run_tables") if isinstance(payload.get("run_tables"), dict) else None
+    definition_digest = str(payload.get("definition_digest") or "").strip() or None
+    expected_digest = sha256_canonical_json_prefixed(validation.plan.definition_json)
+    digest_warnings: List[str] = []
+    if run_tables is not None and definition_digest:
+        if definition_digest != expected_digest:
+            digest_warnings.append("run_tables ignored due to definition_digest mismatch")
+            run_tables = None
+    elif run_tables is not None and not definition_digest:
+        digest_warnings.append("run_tables provided without definition_digest; skipping digest check")
+
     evaluations, warnings = await evaluate_pipeline_joins(
         definition_json=validation.plan.definition_json,
         db_name=db_name,
         dataset_registry=dataset_registry,
         node_filter=str(body.node_id or "").strip() or None,
+        run_tables=run_tables,
     )
 
+    warnings = digest_warnings + warnings
     data = {
         "plan_id": plan_id,
         "evaluations": [item.__dict__ for item in evaluations],

@@ -62,26 +62,109 @@ def _count_matches(
     return matched_left, len(matched_right)
 
 
+def _coerce_table(payload: Any) -> Optional[PipelineTable]:
+    if not isinstance(payload, dict):
+        return None
+    columns_raw = payload.get("columns")
+    rows_raw = payload.get("rows")
+    if not isinstance(columns_raw, list) or not isinstance(rows_raw, list):
+        return None
+    columns: List[str] = []
+    for col in columns_raw:
+        if isinstance(col, dict):
+            name = str(col.get("name") or "").strip()
+        else:
+            name = str(col or "").strip()
+        if name:
+            columns.append(name)
+    rows: List[Dict[str, Any]] = [dict(row) for row in rows_raw if isinstance(row, dict)]
+    return PipelineTable(columns=columns, rows=rows)
+
+
+def _coerce_tables(payload: Any) -> Tuple[Dict[str, PipelineTable], List[str]]:
+    tables: Dict[str, PipelineTable] = {}
+    warnings: List[str] = []
+    if not isinstance(payload, dict):
+        return tables, warnings
+    for node_id, table_payload in payload.items():
+        if not isinstance(node_id, str) or not node_id.strip():
+            continue
+        table = _coerce_table(table_payload)
+        if not table:
+            warnings.append(f"run_tables missing or invalid for node {node_id}")
+            continue
+        tables[node_id] = table
+    return tables, warnings
+
+
+def _choose_join_inputs(
+    inputs: List[str],
+    tables: Dict[str, PipelineTable],
+    left_key: Optional[str],
+    right_key: Optional[str],
+) -> Tuple[Optional[str], Optional[str], List[str]]:
+    warnings: List[str] = []
+    candidates = [item for item in inputs if isinstance(item, str) and item.strip()]
+    if len(candidates) < 2:
+        return None, None, warnings
+
+    ordered = sorted(candidates)
+    if not left_key and not right_key:
+        return ordered[0], ordered[1], warnings
+
+    scored: List[Tuple[int, str, str]] = []
+    for left_id in ordered:
+        for right_id in ordered:
+            if left_id == right_id:
+                continue
+            left_table = tables.get(left_id)
+            right_table = tables.get(right_id)
+            score = 0
+            if left_key and left_table and left_key in left_table.columns:
+                score += 2
+            if right_key and right_table and right_key in right_table.columns:
+                score += 2
+            if left_key and right_table and left_key in right_table.columns:
+                score -= 1
+            if right_key and left_table and right_key in left_table.columns:
+                score -= 1
+            scored.append((score, left_id, right_id))
+
+    if scored:
+        scored.sort(key=lambda item: (-item[0], item[1], item[2]))
+        best_score, left_id, right_id = scored[0]
+        if best_score <= 0:
+            warnings.append("join input order ambiguous; falling back to stable ordering")
+            return ordered[0], ordered[1], warnings
+        return left_id, right_id, warnings
+
+    return ordered[0], ordered[1], warnings
+
+
 async def evaluate_pipeline_joins(
     *,
     definition_json: Dict[str, Any],
     db_name: str,
     dataset_registry: Any,
     node_filter: Optional[str] = None,
+    run_tables: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[JoinEvaluation], List[str]]:
     nodes = normalize_nodes(definition_json.get("nodes"))
     edges = normalize_edges(definition_json.get("edges"))
     incoming = build_incoming(edges)
 
-    executor = PipelineExecutor(dataset_registry)
-    try:
-        run_result = await executor.run(definition=definition_json, db_name=db_name)
-    except Exception as exc:
-        return [], [f"preview run failed: {exc}"]
-
-    tables = run_result.tables
-    evaluations: List[JoinEvaluation] = []
     warnings: List[str] = []
+    if run_tables is not None:
+        tables, table_warnings = _coerce_tables(run_tables)
+        warnings.extend(table_warnings)
+    else:
+        executor = PipelineExecutor(dataset_registry)
+        try:
+            run_result = await executor.run(definition=definition_json, db_name=db_name)
+        except Exception as exc:
+            return [], [f"preview run failed: {exc}"]
+        tables = run_result.tables
+    evaluations: List[JoinEvaluation] = []
 
     for node_id, node in nodes.items():
         if node_filter and node_id != node_filter:
@@ -95,7 +178,17 @@ async def evaluate_pipeline_joins(
         if len(inputs) < 2:
             warnings.append(f"join node {node_id} missing inputs")
             continue
-        left_id, right_id = inputs[0], inputs[1]
+        join_spec = resolve_join_spec(metadata)
+        left_id, right_id, input_warnings = _choose_join_inputs(
+            inputs,
+            tables,
+            join_spec.left_key,
+            join_spec.right_key,
+        )
+        warnings.extend(input_warnings)
+        if not left_id or not right_id:
+            warnings.append(f"join node {node_id} missing inputs")
+            continue
         left_table = tables.get(left_id)
         right_table = tables.get(right_id)
         output_table = tables.get(node_id)
@@ -103,7 +196,6 @@ async def evaluate_pipeline_joins(
             warnings.append(f"join node {node_id} missing tables")
             continue
 
-        join_spec = resolve_join_spec(metadata)
         left_key = join_spec.left_key
         right_key = join_spec.right_key
         left_count = len(left_table.rows)

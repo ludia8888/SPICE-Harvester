@@ -21,6 +21,7 @@ class PipelineAgentState(TypedDict):
     output_bindings: Dict[str, Any] | None
     preview_node_id: Optional[str]
     preview_limit: int
+    include_run_tables: bool
     max_repairs: int
     repair_attempts: int
     max_cleansing: int
@@ -41,6 +42,8 @@ class PipelineAgentState(TypedDict):
     validation_warnings: List[str]
     preflight: Optional[Dict[str, Any]]
     preview: Optional[Dict[str, Any]]
+    run_tables: Optional[Dict[str, Any]]
+    definition_digest: Optional[str]
     cleansing_inspector: Optional[Dict[str, Any]]
     cleansing_actions: Optional[List[Dict[str, Any]]]
     join_evaluation: Optional[List[Dict[str, Any]]]
@@ -431,6 +434,8 @@ async def _preview_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
         body={
             "node_id": state.get("preview_node_id"),
             "limit": state.get("preview_limit"),
+            "include_run_tables": bool(state.get("include_run_tables")),
+            "run_table_limit": state.get("preview_limit"),
         },
     )
     if result.get("status") != "success":
@@ -450,6 +455,8 @@ async def _preview_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
                 "validation_warnings": list(data.get("validation_warnings") or []),
                 "preflight": data.get("preflight") if isinstance(data.get("preflight"), dict) else None,
                 "preview": data.get("preview") if isinstance(data.get("preview"), dict) else None,
+                "run_tables": data.get("run_tables") if isinstance(data.get("run_tables"), dict) else None,
+                "definition_digest": str(data.get("definition_digest") or "").strip() or None,
                 "next_action": "repair",
             }
         return {
@@ -458,6 +465,8 @@ async def _preview_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
             "validation_warnings": list(data.get("validation_warnings") or []),
             "preflight": data.get("preflight") if isinstance(data.get("preflight"), dict) else None,
             "preview": data.get("preview") if isinstance(data.get("preview"), dict) else None,
+            "run_tables": data.get("run_tables") if isinstance(data.get("run_tables"), dict) else None,
+            "definition_digest": str(data.get("definition_digest") or "").strip() or None,
             "next_action": "end",
             "status": "failed",
         }
@@ -467,6 +476,8 @@ async def _preview_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
         **state,
         "preflight": data.get("preflight") if isinstance(data.get("preflight"), dict) else None,
         "preview": data.get("preview") if isinstance(data.get("preview"), dict) else None,
+        "run_tables": data.get("run_tables") if isinstance(data.get("run_tables"), dict) else None,
+        "definition_digest": str(data.get("definition_digest") or "").strip() or None,
         "next_action": next_action,
     }
 
@@ -474,7 +485,12 @@ async def _preview_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
 async def _evaluate_joins(state: PipelineAgentState, runtime: AgentRuntime) -> PipelineAgentState:
     plan_id = str(state.get("plan_id") or "").strip()
     if not plan_id:
-        return {**state, "next_action": "inspect", "status": "running"}
+        return {
+            **state,
+            "next_action": "inspect",
+            "status": "running",
+            "run_tables": None,
+        }
 
     result = await _call_bff(
         runtime=runtime,
@@ -482,10 +498,20 @@ async def _evaluate_joins(state: PipelineAgentState, runtime: AgentRuntime) -> P
         step_id="pipeline_join_evaluate",
         method="POST",
         path=f"/api/v1/pipeline-plans/{plan_id}/evaluate-joins",
-        body={},
+        body={
+            "run_tables": state.get("run_tables"),
+            "definition_digest": state.get("definition_digest"),
+        },
     )
     if result.get("status") != "success":
-        return {**state, "next_action": "inspect", "join_evaluation": None, "join_evaluation_warnings": []}
+        return {
+            **state,
+            "next_action": "inspect",
+            "join_evaluation": None,
+            "join_evaluation_warnings": [],
+            "run_tables": None,
+            "definition_digest": None,
+        }
 
     payload = result.get("payload")
     data = _api_data(payload)
@@ -493,6 +519,8 @@ async def _evaluate_joins(state: PipelineAgentState, runtime: AgentRuntime) -> P
         **state,
         "join_evaluation": data.get("evaluations") if isinstance(data.get("evaluations"), list) else None,
         "join_evaluation_warnings": data.get("warnings") if isinstance(data.get("warnings"), list) else None,
+        "run_tables": None,
+        "definition_digest": None,
         "next_action": "inspect",
     }
 
@@ -642,6 +670,8 @@ async def _repair_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pipe
         "next_action": next_action,
         "status": status,
         "repair_attempts": repair_attempts,
+        "run_tables": None,
+        "definition_digest": None,
     }
 
 
@@ -815,6 +845,7 @@ def build_pipeline_agent_state(
     output_bindings: Optional[Dict[str, Any]],
     preview_node_id: Optional[str],
     preview_limit: int,
+    include_run_tables: bool,
     max_repairs: int,
     max_cleansing: int,
     max_transform: int,
@@ -839,6 +870,7 @@ def build_pipeline_agent_state(
         output_bindings=output_bindings,
         preview_node_id=preview_node_id,
         preview_limit=int(preview_limit),
+        include_run_tables=bool(include_run_tables),
         max_repairs=int(max_repairs),
         repair_attempts=0,
         max_cleansing=int(max_cleansing),
@@ -859,6 +891,8 @@ def build_pipeline_agent_state(
         validation_warnings=[],
         preflight=None,
         preview=None,
+        run_tables=None,
+        definition_digest=None,
         cleansing_inspector=None,
         cleansing_actions=None,
         join_evaluation=None,
