@@ -29,7 +29,7 @@ from shared.services.pipeline_graph_utils import normalize_edges, normalize_node
 
 
 class PipelineCleansingAction(BaseModel):
-    operation: str = Field(..., description="normalize|cast")
+    operation: str = Field(..., description="normalize|cast|dedupe")
     columns: Optional[List[str]] = Field(default=None)
     casts: Optional[List[Dict[str, str]]] = Field(default=None)
     trim: bool = Field(default=True)
@@ -63,7 +63,7 @@ def _build_cleansing_system_prompt() -> str:
         "You are a STRICT cleansing planner for SPICE-Harvester.\n"
         "Return ONLY JSON. No markdown.\n"
         "Choose cleansing actions ONLY from the inspector suggestions.\n"
-        "Supported operations: normalize, cast.\n"
+        "Supported operations: normalize, cast, dedupe.\n"
         "Prefer normalize (trim/empty->null) before cast.\n"
         "Do NOT invent columns.\n"
         "\n"
@@ -103,6 +103,7 @@ def _merge_actions(actions: List[PipelineCleansingAction]) -> List[Dict[str, Any
     normalize_columns: List[str] = []
     normalize_flags = {"trim": False, "emptyToNull": False, "whitespaceToNull": False, "lowercase": False, "uppercase": False}
     cast_map: Dict[str, str] = {}
+    dedupe_columns: Optional[List[str]] = None
     for action in actions:
         op = str(action.operation or "").strip().lower()
         if op == "normalize":
@@ -123,6 +124,16 @@ def _merge_actions(actions: List[PipelineCleansingAction]) -> List[Dict[str, Any
                     continue
                 if col not in cast_map:
                     cast_map[col] = target
+        elif op == "dedupe":
+            cols = [str(col).strip() for col in (action.columns or []) if str(col).strip()]
+            if dedupe_columns is None:
+                dedupe_columns = cols
+            elif not dedupe_columns:
+                continue
+            else:
+                for col in cols:
+                    if col not in dedupe_columns:
+                        dedupe_columns.append(col)
 
     transforms: List[Dict[str, Any]] = []
     if normalize_columns:
@@ -132,6 +143,8 @@ def _merge_actions(actions: List[PipelineCleansingAction]) -> List[Dict[str, Any
     if cast_map:
         casts = [{"column": col, "type": cast_map[col]} for col in sorted(cast_map.keys())]
         transforms.append({"operation": "cast", "casts": casts})
+    if dedupe_columns is not None:
+        transforms.append({"operation": "dedupe", "columns": dedupe_columns})
     return transforms
 
 

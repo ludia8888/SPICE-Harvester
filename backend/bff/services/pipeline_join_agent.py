@@ -58,6 +58,7 @@ def _build_join_system_prompt() -> str:
         "Return ONLY JSON. No markdown, no commentary.\n"
         "Choose join keys ONLY from the provided join candidates.\n"
         "Do NOT invent dataset ids or columns.\n"
+        "Use cardinality_hint when provided and set cardinality on selections.\n"
         "Keep the join chain minimal to satisfy the goal.\n"
         "\n"
         "Output schema:\n"
@@ -86,7 +87,7 @@ def _build_join_user_prompt(
     return (
         f"Goal:\n{goal}\n\n"
         f"Max joins:\n{max_joins}\n\n"
-        f"Join candidates:\n{json.dumps(payload, ensure_ascii=False)}\n"
+        f"Join candidates (include format/cardinality/containment signals):\n{json.dumps(payload, ensure_ascii=False)}\n"
     )
 
 

@@ -89,9 +89,14 @@ async def test_pipeline_context_pack_suggests_join_keys_and_masks_pii() -> None:
         c.get("left_column") == "customer_id" and c.get("right_column") == "customerId"
         for c in candidates
     )
+    assert any(c.get("cardinality_hint") == "1:1" for c in candidates)
 
     pk_candidates = pack["selected_datasets"][0].get("pk_candidates") or []
     assert any("customer_id" in (c.get("columns") or []) for c in pk_candidates)
+
+    profiles = pack["selected_datasets"][0].get("column_profiles") or {}
+    assert profiles.get("customer_id") is not None
+    assert profiles.get("customer_id", {}).get("format") is not None
 
     fk_candidates = pack["integration_suggestions"].get("foreign_key_candidates") or []
     assert any(

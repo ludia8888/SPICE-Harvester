@@ -79,6 +79,8 @@ def _build_plan_system_prompt() -> str:
         "- Use supported operations only; no UDF.\n"
         "- join requires leftKey/rightKey (or joinKey) and allowCrossJoin must be false.\n"
         "- output nodes MUST include metadata.outputName or metadata.datasetName.\n"
+        "- If you can infer primary keys, include output node metadata.pkColumns and metadata.pkSemantics.\n"
+        "- If you can infer data quality rules, include definition_json.expectations (not_null/unique).\n"
         "- Keep the graph minimal; prefer a linear join chain.\n"
         "- output_kind must be one of: object, link, unknown.\n"
         "- object outputs MUST include target_class_id.\n"

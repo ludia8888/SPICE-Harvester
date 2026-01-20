@@ -52,3 +52,22 @@ def test_preview_inspector_no_cleansing_needed_for_clean_columns() -> None:
     inspector = inspect_preview(preview)
     assert inspector.get("needs_cleansing") is False
     assert inspector.get("suggestions") == []
+
+
+@pytest.mark.unit
+def test_preview_inspector_suggests_dedupe_for_duplicate_rows() -> None:
+    columns = [{"name": "id", "type": "xsd:integer"}, {"name": "value", "type": "xsd:string"}]
+    rows = [{"id": idx + 1, "value": f"v{idx + 1}"} for idx in range(9)]
+    rows.append({"id": 1, "value": "v1"})
+    preview = {
+        "columns": columns,
+        "rows": rows,
+        "column_stats": compute_column_stats(rows=rows, columns=columns),
+    }
+
+    inspector = inspect_preview(preview)
+    suggestions = inspector.get("suggestions") or []
+
+    dedupe = next((item for item in suggestions if item.get("operation") == "dedupe"), None)
+    assert dedupe is not None
+    assert "id" in (dedupe.get("columns") or [])

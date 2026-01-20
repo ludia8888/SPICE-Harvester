@@ -14,6 +14,8 @@ from typing import Any, Dict, Iterable, List, Optional
 _CAST_THRESHOLD = 0.9
 _WHITESPACE_THRESHOLD = 0.05
 _EMPTY_THRESHOLD = 0.1
+_DUPLICATE_ROW_THRESHOLD = 0.1
+_CASE_VARIATION_THRESHOLD = 0.15
 
 
 def _iter_values(rows: Iterable[Dict[str, Any]], column: str) -> List[Any]:
@@ -86,6 +88,35 @@ def _is_datetime(value: Any) -> bool:
     return False
 
 
+def _looks_like_id(name: str) -> bool:
+    lowered = str(name or "").strip().lower()
+    if not lowered:
+        return False
+    if lowered == "id":
+        return True
+    if lowered.endswith("_id"):
+        return True
+    if lowered.endswith("id") and len(lowered) <= 6:
+        return True
+    return False
+
+
+def _row_key(row: Dict[str, Any], columns: List[str]) -> tuple:
+    return tuple(str(row.get(col)) for col in columns)
+
+
+def _case_variation_ratio(values: List[Any]) -> float:
+    originals = [str(v) for v in values if str(v).strip()]
+    if len(originals) <= 1:
+        return 0.0
+    lowered = [v.lower() for v in originals]
+    unique_originals = len(set(originals))
+    unique_lowered = len(set(lowered))
+    if unique_originals <= 0:
+        return 0.0
+    return round(1.0 - (unique_lowered / float(unique_originals)), 4)
+
+
 def _parseability(values: List[Any]) -> Dict[str, float]:
     total = len(values)
     if total <= 0:
@@ -149,9 +180,11 @@ def inspect_preview(preview: Dict[str, Any]) -> Dict[str, Any]:
             cast_failure = cast_stats[col_name].get("failure_rate")
 
         distinct_ratio = _ratio(distinct_count, non_null) if non_null else 0.0
+        duplicate_ratio = round(max(0.0, 1.0 - distinct_ratio), 4) if non_null else 0.0
         null_ratio = _ratio(null_count, sample_row_count)
         empty_ratio = _ratio(empty_count, sample_row_count)
         whitespace_ratio = _ratio(whitespace_count, sample_row_count)
+        case_variation = _case_variation_ratio(values) if inferred_type == "xsd:string" else 0.0
 
         report_columns[col_name] = {
             "type": inferred_type,
@@ -159,8 +192,10 @@ def inspect_preview(preview: Dict[str, Any]) -> Dict[str, Any]:
             "empty_ratio": empty_ratio,
             "whitespace_ratio": whitespace_ratio,
             "distinct_ratio": distinct_ratio,
+            "duplicate_ratio": duplicate_ratio,
             "parseability": parseability,
             "cast_failure_rate": cast_failure,
+            "case_variation_ratio": case_variation,
         }
 
         if whitespace_ratio >= _WHITESPACE_THRESHOLD or empty_ratio >= _EMPTY_THRESHOLD:
@@ -198,6 +233,57 @@ def inspect_preview(preview: Dict[str, Any]) -> Dict[str, Any]:
                         "target_type": best_type,
                         "confidence": best_score,
                         "reason": "high parseability for target type",
+                    }
+                )
+            if case_variation >= _CASE_VARIATION_THRESHOLD:
+                suggestions.append(
+                    {
+                        "column": col_name,
+                        "operation": "normalize",
+                        "lowercase": True,
+                        "reason": "case variations detected",
+                    }
+                )
+
+    if rows and columns:
+        column_names: List[str] = []
+        for col in columns:
+            if isinstance(col, dict):
+                name = str(col.get("name") or "").strip()
+            else:
+                name = str(col or "").strip()
+            if name:
+                column_names.append(name)
+        if column_names:
+            unique_rows = len({_row_key(row, column_names) for row in rows if isinstance(row, dict)})
+            duplicate_ratio = _ratio(len(rows) - unique_rows, len(rows))
+            if duplicate_ratio >= _DUPLICATE_ROW_THRESHOLD:
+                preferred = [
+                    name
+                    for name in column_names
+                    if _looks_like_id(name)
+                    and report_columns.get(name, {}).get("distinct_ratio", 0.0) >= 0.9
+                    and report_columns.get(name, {}).get("null_ratio", 1.0) <= 0.05
+                ]
+                candidates = preferred or [
+                    name
+                    for name in column_names
+                    if report_columns.get(name, {}).get("distinct_ratio", 0.0) >= 0.9
+                    and report_columns.get(name, {}).get("null_ratio", 1.0) <= 0.05
+                ]
+                suggestions.append(
+                    {
+                        "operation": "dedupe",
+                        "columns": candidates[:3] if candidates else [],
+                        "reason": "duplicate rows detected in preview",
+                        "duplicate_ratio": round(duplicate_ratio, 4),
+                    }
+                )
+                issues.append(
+                    {
+                        "issue": "duplicate_rows",
+                        "severity": "warning",
+                        "evidence": {"duplicate_ratio": round(duplicate_ratio, 4)},
                     }
                 )
 

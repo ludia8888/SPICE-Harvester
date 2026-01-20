@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import Counter
 from itertools import combinations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 _NAME_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 _STOP_TOKENS = {"id", "ids", "code", "key", "no", "num", "number", "value", "data", "info"}
+_PATTERN_KEEP = {"-", "_", "/", ":", "."}
 
 
 def _normalize_uuid(value: Any) -> Optional[str]:
@@ -156,17 +158,146 @@ def _normalize_cell(value: Any) -> Optional[str]:
     return raw or None
 
 
-def _value_overlap(rows_a: list[dict[str, Any]], col_a: str, rows_b: list[dict[str, Any]], col_b: str) -> float:
+def _pattern_signature(value: Any) -> Optional[str]:
+    if value in (None, ""):
+        return None
+    raw = str(value)
+    if not raw:
+        return None
+    tokens: list[str] = []
+    for ch in raw:
+        if ch.isdigit():
+            tokens.append("9")
+        elif ch.isalpha():
+            tokens.append("A")
+        elif ch in _PATTERN_KEEP:
+            tokens.append(ch)
+        else:
+            tokens.append("-")
+    signature = "".join(tokens)
+    signature = re.sub(r"-+", "-", signature).strip("-")
+    return signature or None
+
+
+def _column_format_profile(values: list[Any], *, max_patterns: int = 4) -> Dict[str, Any]:
+    patterns: Counter[str] = Counter()
+    lengths: list[int] = []
+    digit_count = 0
+    alpha_count = 0
+    total_chars = 0
+    for value in values:
+        if value in (None, ""):
+            continue
+        text = str(value).strip()
+        if not text:
+            continue
+        lengths.append(len(text))
+        total_chars += len(text)
+        digit_count += sum(1 for ch in text if ch.isdigit())
+        alpha_count += sum(1 for ch in text if ch.isalpha())
+        signature = _pattern_signature(text)
+        if signature:
+            patterns[signature] += 1
+    if not lengths:
+        return {}
+    avg_length = sum(lengths) / float(len(lengths))
+    pattern_samples = [
+        {"pattern": pattern, "count": int(count)}
+        for pattern, count in patterns.most_common(max(0, int(max_patterns)))
+    ]
+    digit_ratio = (digit_count / total_chars) if total_chars else 0.0
+    alpha_ratio = (alpha_count / total_chars) if total_chars else 0.0
+    return {
+        "pattern_samples": pattern_samples,
+        "avg_length": round(avg_length, 2),
+        "min_length": int(min(lengths)),
+        "max_length": int(max(lengths)),
+        "digit_ratio": round(digit_ratio, 3),
+        "alpha_ratio": round(alpha_ratio, 3),
+    }
+
+
+def _format_similarity(left_profile: Dict[str, Any], right_profile: Dict[str, Any]) -> float:
+    left_patterns = {
+        str(item.get("pattern"))
+        for item in left_profile.get("pattern_samples", [])
+        if isinstance(item, dict) and item.get("pattern")
+    }
+    right_patterns = {
+        str(item.get("pattern"))
+        for item in right_profile.get("pattern_samples", [])
+        if isinstance(item, dict) and item.get("pattern")
+    }
+    if not left_patterns or not right_patterns:
+        return 0.0
+    denom = len(left_patterns | right_patterns)
+    if denom <= 0:
+        return 0.0
+    return len(left_patterns & right_patterns) / float(denom)
+
+
+def _value_overlap_stats(
+    rows_a: list[dict[str, Any]],
+    col_a: str,
+    rows_b: list[dict[str, Any]],
+    col_b: str,
+) -> Dict[str, float]:
     set_a = {_normalize_cell(row.get(col_a)) for row in rows_a if isinstance(row, dict)}
     set_b = {_normalize_cell(row.get(col_b)) for row in rows_b if isinstance(row, dict)}
     set_a.discard(None)
     set_b.discard(None)
     if not set_a or not set_b:
-        return 0.0
+        return {
+            "overlap_ratio": 0.0,
+            "left_containment": 0.0,
+            "right_containment": 0.0,
+            "left_value_count": float(len(set_a)),
+            "right_value_count": float(len(set_b)),
+        }
+    intersection = set_a & set_b
     denom = min(len(set_a), len(set_b))
-    if denom <= 0:
+    overlap_ratio = (len(intersection) / float(denom)) if denom > 0 else 0.0
+    left_containment = len(intersection) / float(len(set_a)) if set_a else 0.0
+    right_containment = len(intersection) / float(len(set_b)) if set_b else 0.0
+    return {
+        "overlap_ratio": overlap_ratio,
+        "left_containment": left_containment,
+        "right_containment": right_containment,
+        "left_value_count": float(len(set_a)),
+        "right_value_count": float(len(set_b)),
+    }
+
+
+def _distinct_ratio(column_stats: dict[str, Any], sample_row_count: int) -> float:
+    if not isinstance(column_stats, dict) or sample_row_count <= 0:
         return 0.0
-    return len(set_a & set_b) / float(denom)
+    null_count = int(column_stats.get("null_count") or 0)
+    empty_count = int(column_stats.get("empty_count") or 0)
+    distinct_count = int(column_stats.get("distinct_count") or 0)
+    non_null = max(0, sample_row_count - null_count - empty_count)
+    if non_null <= 0:
+        return 0.0
+    return min(1.0, distinct_count / float(non_null))
+
+
+def _missing_ratio(column_stats: dict[str, Any], sample_row_count: int) -> float:
+    if not isinstance(column_stats, dict) or sample_row_count <= 0:
+        return 0.0
+    null_count = int(column_stats.get("null_count") or 0)
+    empty_count = int(column_stats.get("empty_count") or 0)
+    return (null_count + empty_count) / float(sample_row_count)
+
+
+def _estimate_cardinality(left_ratio: float, right_ratio: float, *, threshold: float = 0.95) -> str:
+    left_unique = left_ratio >= threshold
+    right_unique = right_ratio >= threshold
+    if left_unique and right_unique:
+        return "1:1"
+    if left_unique and not right_unique:
+        return "1:N"
+    if right_unique and not left_unique:
+        return "N:1"
+    return "N:N"
 
 
 def _key_quality(column_stats: dict[str, Any], sample_row_count: int) -> float:
@@ -248,6 +379,7 @@ def _suggest_primary_keys(
                 "score": score,
                 "distinct_ratio": distinct_ratio,
                 "missing_ratio": missing_ratio,
+                "duplicate_ratio": round(1.0 - distinct_ratio, 3),
                 "reasons": reasons,
             }
         )
@@ -320,13 +452,40 @@ def _suggest_join_keys(datasets: list[dict[str, Any]], *, max_candidates: int) -
             top_left = sorted(left_cols, key=lambda c: left_quality.get(c, 0.0), reverse=True)[:8]
             top_right = sorted(right_cols, key=lambda c: right_quality.get(c, 0.0), reverse=True)[:8]
 
+            left_profiles = left.get("column_profiles") if isinstance(left.get("column_profiles"), dict) else {}
+            right_profiles = right.get("column_profiles") if isinstance(right.get("column_profiles"), dict) else {}
+
             for col_a in top_left:
+                left_profile = left_profiles.get(col_a) if isinstance(left_profiles, dict) else {}
+                left_format = left_profile.get("format") if isinstance(left_profile, dict) else {}
+                left_distinct = _distinct_ratio(
+                    (left_stats.get("columns") or {}).get(col_a, {}) if isinstance(left_stats.get("columns"), dict) else {},
+                    left_sample_n,
+                )
+                left_missing = _missing_ratio(
+                    (left_stats.get("columns") or {}).get(col_a, {}) if isinstance(left_stats.get("columns"), dict) else {},
+                    left_sample_n,
+                )
                 for col_b in top_right:
+                    right_profile = right_profiles.get(col_b) if isinstance(right_profiles, dict) else {}
+                    right_format = right_profile.get("format") if isinstance(right_profile, dict) else {}
                     name_sim = _name_similarity(col_a, col_b)
-                    overlap = _value_overlap(left_rows, col_a, right_rows, col_b)
+                    overlap_stats = _value_overlap_stats(left_rows, col_a, right_rows, col_b)
+                    overlap = overlap_stats.get("overlap_ratio", 0.0)
+                    left_containment = overlap_stats.get("left_containment", 0.0)
+                    right_containment = overlap_stats.get("right_containment", 0.0)
                     quality = min(left_quality.get(col_a, 0.0), right_quality.get(col_b, 0.0))
-                    score = 0.45 * name_sim + 0.45 * overlap + 0.10 * quality
-                    if score < 0.55 or (overlap <= 0.0 and name_sim < 0.9):
+                    right_distinct = _distinct_ratio(
+                        (right_stats.get("columns") or {}).get(col_b, {}) if isinstance(right_stats.get("columns"), dict) else {},
+                        right_sample_n,
+                    )
+                    right_missing = _missing_ratio(
+                        (right_stats.get("columns") or {}).get(col_b, {}) if isinstance(right_stats.get("columns"), dict) else {},
+                        right_sample_n,
+                    )
+                    format_sim = _format_similarity(left_format or {}, right_format or {})
+                    score = 0.35 * name_sim + 0.35 * overlap + 0.20 * format_sim + 0.10 * quality
+                    if score < 0.5 or (overlap <= 0.0 and name_sim < 0.9 and format_sim < 0.7):
                         continue
                     reasons: list[str] = []
                     if name_sim >= 0.9:
@@ -337,8 +496,13 @@ def _suggest_join_keys(datasets: list[dict[str, Any]], *, max_candidates: int) -
                         reasons.append("many sample values overlap")
                     elif overlap > 0:
                         reasons.append("some sample values overlap")
+                    if format_sim >= 0.6:
+                        reasons.append("format patterns align")
                     if quality >= 0.7:
                         reasons.append("high distinctness / low missingness in sample")
+                    cardinality = _estimate_cardinality(left_distinct, right_distinct)
+                    if cardinality != "N:N":
+                        reasons.append(f"cardinality hint {cardinality}")
                     candidates.append(
                         {
                             "left_dataset_id": left.get("dataset_id"),
@@ -348,6 +512,14 @@ def _suggest_join_keys(datasets: list[dict[str, Any]], *, max_candidates: int) -
                             "score": round(float(score), 3),
                             "name_similarity": round(float(name_sim), 3),
                             "sample_value_overlap": round(float(overlap), 3),
+                            "format_similarity": round(float(format_sim), 3),
+                            "left_distinct_ratio": round(float(left_distinct), 3),
+                            "right_distinct_ratio": round(float(right_distinct), 3),
+                            "left_missing_ratio": round(float(left_missing), 3),
+                            "right_missing_ratio": round(float(right_missing), 3),
+                            "left_containment_ratio": round(float(left_containment), 3),
+                            "right_containment_ratio": round(float(right_containment), 3),
+                            "cardinality_hint": cardinality,
                             "reasons": reasons,
                         }
                     )
@@ -386,6 +558,35 @@ def _suggest_cleansing(dataset: dict[str, Any]) -> list[dict[str, Any]]:
         if sample_n > 3 and distinct_count <= 1 and missing < sample_n:
             suggestions.append({"column": col_name, "suggestion": "constant column; consider dropping", "evidence": {"distinct_count": distinct_count}})
     return suggestions
+
+
+def _build_column_profiles(
+    *,
+    columns: list[dict[str, Any]],
+    column_stats: dict[str, Any],
+    sample_rows: list[dict[str, Any]],
+) -> Dict[str, Any]:
+    profiles: Dict[str, Any] = {}
+    sample_row_count = int(column_stats.get("sample_row_count") or 0)
+    stats_by_col = column_stats.get("columns") if isinstance(column_stats.get("columns"), dict) else {}
+    for col in columns:
+        name = str(col.get("name") or "").strip()
+        if not name:
+            continue
+        col_stats = stats_by_col.get(name) if isinstance(stats_by_col, dict) else {}
+        values = [row.get(name) for row in sample_rows if isinstance(row, dict)]
+        distinct_ratio = _distinct_ratio(col_stats or {}, sample_row_count)
+        missing_ratio = _missing_ratio(col_stats or {}, sample_row_count)
+        null_count = int((col_stats or {}).get("null_count") or 0)
+        null_ratio = (null_count / float(sample_row_count)) if sample_row_count else 0.0
+        profiles[name] = {
+            "distinct_ratio": round(distinct_ratio, 3),
+            "missing_ratio": round(missing_ratio, 3),
+            "duplicate_ratio": round(max(0.0, 1.0 - distinct_ratio), 3),
+            "null_ratio": round(null_ratio, 3),
+            "format": _column_format_profile(values),
+        }
+    return profiles
 
 
 async def build_pipeline_context_pack(
@@ -445,6 +646,7 @@ async def build_pipeline_context_pack(
         masked_rows = mask_pii(raw_rows, max_string_chars=120)
         raw_stats = compute_column_stats(rows=raw_rows, columns=cols, max_top_values=5)
         masked_stats = mask_pii(raw_stats, max_string_chars=120)
+        column_profiles = _build_column_profiles(columns=cols, column_stats=raw_stats, sample_rows=raw_rows)
         pk_candidates = _suggest_primary_keys(
             columns=cols,
             column_stats=raw_stats,
@@ -471,6 +673,7 @@ async def build_pipeline_context_pack(
                 "columns": cols,
                 "sample_rows": masked_rows,
                 "column_stats": masked_stats,
+                "column_profiles": column_profiles,
                 "pk_candidates": pk_candidates,
                 "schema_hash": schema_hash,
                 "_raw_rows": raw_rows,
@@ -483,6 +686,7 @@ async def build_pipeline_context_pack(
                 "dataset_version_id": dataset_version_id,
                 "schema_hash": schema_hash,
                 "column_stats": raw_stats,
+                "column_profiles": column_profiles,
                 "pk_candidates": pk_candidates,
                 "dataset_signature": sha256_canonical_json_prefixed(
                     {
@@ -515,21 +719,32 @@ async def build_pipeline_context_pack(
         right_col = str(candidate.get("right_column") or "")
         left_score = pk_scores.get((left_id, left_col), 0.0)
         right_score = pk_scores.get((right_id, right_col), 0.0)
-        if left_score <= 0 and right_score <= 0:
+        left_containment = float(candidate.get("left_containment_ratio") or 0.0)
+        right_containment = float(candidate.get("right_containment_ratio") or 0.0)
+        containment_best = max(left_containment, right_containment)
+        if left_score <= 0 and right_score <= 0 and containment_best < 0.6:
             continue
-        if left_score >= right_score:
+        if left_score >= right_score and left_score > 0:
             parent_id, parent_col = left_id, left_col
             child_id, child_col = right_id, right_col
-        else:
+        elif right_score > 0:
             parent_id, parent_col = right_id, right_col
             child_id, child_col = left_id, left_col
+        elif left_containment >= right_containment:
+            parent_id, parent_col = right_id, right_col
+            child_id, child_col = left_id, left_col
+        else:
+            parent_id, parent_col = left_id, left_col
+            child_id, child_col = right_id, right_col
         fk_candidates.append(
             {
                 "child_dataset_id": child_id,
                 "child_column": child_col,
                 "parent_dataset_id": parent_id,
                 "parent_column": parent_col,
-                "score": round(float(candidate.get("score") or 0.0) * max(left_score, right_score), 3),
+                "score": round(float(candidate.get("score") or 0.0) * max(left_score, right_score, containment_best), 3),
+                "containment_ratio": round(containment_best, 3),
+                "cardinality_hint": candidate.get("cardinality_hint"),
                 "reasons": candidate.get("reasons") or [],
             }
         )
