@@ -58,7 +58,7 @@ class InputSanitizer:
         r"eval\s*\(",
         r"document\.",
         r"window\.",
-        r"location\.",
+        r"\blocation\.",
         r"cookie",
     ]
 
@@ -262,8 +262,8 @@ class InputSanitizer:
         if not isinstance(value, str):
             raise SecurityViolationError(f"Expected string, got {type(value)}")
 
-        # Allow limited "$" keys used by internal DSLs (e.g. action templates).
-        if value in {"$ref", "$now"}:
+        # Allow limited "$" keys and internal pipeline metadata keys.
+        if value in {"$ref", "$now", "_canonical_contract_applied"}:
             return value
 
         # JSON-LD 필드 (@id, @type, @context 등) 허용

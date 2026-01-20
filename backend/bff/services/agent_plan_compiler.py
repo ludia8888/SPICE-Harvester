@@ -121,22 +121,47 @@ def _build_plan_system_prompt() -> str:
         "You MUST output a single JSON object only (no markdown, no commentary).\n"
         "You MUST plan using ONLY tool_id values from the provided Tool Catalog.\n"
         "Do NOT invent tool_ids. Do NOT call any admin/debug endpoints.\n"
+        "Never use clarification.* tools; clarifications are handled by the server.\n"
         "\n"
         "You are NOT executing anything. You are producing a plan draft that the server will validate.\n"
         "\n"
         "Hard safety rules:\n"
         "- Any write method (POST/PUT/PATCH/DELETE) MUST include idempotency_key.\n"
+        "- idempotency_key MUST be a fresh UUID (uuid4) per step; never reuse across steps or plans.\n"
         "- Any write-capable plan MUST set requires_approval=true.\n"
+        "- The plan MUST include at least one step.\n"
         "- For action writeback submit, ALWAYS include a simulate step before submit for the same db_name + action_type_id.\n"
         "- For Pipeline Builder definition changes, include pipelines.simulate_definition before pipelines.create or pipelines.update (when sending definition_json).\n"
         "- For Pipeline Builder execution, include pipelines.preview before pipelines.build or pipelines.deploy (or use pipelines.simulate_definition if you are supplying definition_json).\n"
-        "- For multi-step plans, use stable step_id values matching [A-Za-z0-9._-]+.\n"
+        "- If a pipeline definition_json is required, include a VALID graph (nodes/edges) that passes server validation: at least one output node, transform nodes with required operation metadata, and joins with leftKey/rightKey (or joinKey).\n"
+        "- Keep pipeline definition_json MINIMAL: nodes should only include id, type, metadata; edges only from/to.\n"
+        "- Do NOT include UI/layout fields (position, x/y), labels, names, descriptions, or extra properties unless required for validation.\n"
+        "- Use short, stable node ids (e.g., in_orders, join_orders_items, out_canonical).\n"
+        "- For pipeline endpoints, the request body field is definition_json (NOT graph).\n"
+        "- For pipelines.simulate_definition, body MUST include db_name, branch, and definition_json.\n"
+        "- If data_scope.pipeline_id is provided, prefer pipelines.update with that pipeline_id (avoid pipelines.create).\n"
+        "- Pipeline edges MUST use from/to keys (NOT source/target).\n"
+        "- Use input nodes for datasets when dataset ids are provided; include metadata.datasetId and metadata.datasetName.\n"
+        "- For each input dataset, insert a cast transform node immediately after the input.\n"
+        "  Use casts for ALL columns from the provided schema (including xsd:string) to normalize trim/empty-to-null.\n"
+        "- If output dataset name starts with 'canonical_', include primaryKeys and any foreignKeys in the output metadata.\n"
+        "  foreignKeys format: [{columns:[\"col\"], reference:{datasetName|datasetId:\"...\", columns:[\"col\"], branch:\"main\"}, allow_nulls:true}].\n"
+        "- Keep graphs concise but executable; prefer a linear join chain over a sprawling DAG.\n"
+        "- Pipeline transform metadata schema (use exact keys):\n"
+        "  - join: {operation:\"join\", leftKey:\"col\", rightKey:\"col\", joinType:\"inner|left|right|full|cross\", allowCrossJoin:false}\n"
+        "  - groupBy: {operation:\"groupBy\", groupBy:[\"col\"], aggregates:[{\"column\":\"col\",\"op\":\"sum|count|avg|min|max\",\"alias\":\"name\"}]}\n"
+        "  - select/drop/sort/dedupe/explode: {operation:\"select|drop|sort|dedupe|explode\", columns:[\"col\"]}\n"
+        "  - rename: {operation:\"rename\", rename:{\"old\":\"new\"}}\n"
+        "  - cast: {operation:\"cast\", casts:[{\"column\":\"col\",\"type\":\"xsd:string|xsd:integer|xsd:decimal|xsd:date|xsd:dateTime|xsd:boolean\"}]}\n"
+        "- For multi-step plans, use stable step_id values (prefer snake_case; avoid dots to keep ${steps.<step_id>.*} references unambiguous).\n"
         "- You MAY reference prior step outputs using templates like ${steps.<step_id>.pipeline_id}.\n"
         "  Supported keys: pipeline_id, dataset_id, dataset_version_id, job_id, artifact_id, ingest_request_id, mapping_spec_id, action_log_id, simulation_id, command_id, deployed_commit_id, pipeline_run_status.\n"
         "- For complex JSON handoff between steps, declare produces/consumes artifacts and reference them with ${artifacts.<artifact_key>}.\n"
         "- Prefer server-generated IDs; do NOT invent UUIDs unless needed for idempotency_key or simulation_id.\n"
         "- Keep steps minimal; ask clarifying questions via notes/warnings only if needed.\n"
         "- When context includes dataset samples/schema, add integration/cleansing recommendations in notes (join keys, casts, dedupe strategy).\n"
+        "- Use ONLY step fields: step_id, tool_id, method, path_params, query, body, produces, consumes, requires_approval, idempotency_key.\n"
+        "- Do NOT use args/params/inputs fields.\n"
         "\n"
         "Output schema:\n"
         "{\n"
@@ -144,6 +169,30 @@ def _build_plan_system_prompt() -> str:
         '  \"confidence\": number (0..1),\n'
         '  \"notes\": string[],\n'
         '  \"warnings\": string[]\n'
+        "}\n"
+        "\n"
+        "AgentPlan JSON (minimum fields):\n"
+        "{\n"
+        '  \"goal\": string,\n'
+        '  \"requires_approval\": boolean,\n'
+        '  \"risk_level\": \"read|write|admin|destructive\",\n'
+        '  \"data_scope\": {\"db_name\": string, \"branch\": string},\n'
+        '  \"steps\": [\n'
+        "    {\n"
+        '      \"step_id\": string,\n'
+        '      \"tool_id\": string,\n'
+        '      \"method\": \"GET|POST|PUT|PATCH|DELETE\",\n'
+        '      \"path_params\": {},\n'
+        '      \"query\": {},\n'
+        '      \"body\": {},\n'
+        '      \"produces\": [],\n'
+        '      \"consumes\": [],\n'
+        '      \"requires_approval\": boolean,\n'
+        '      \"idempotency_key\": string\n'
+        "    }\n"
+        "  ],\n"
+        '  \"policy_notes\": [],\n'
+        '  \"warnings\": []\n'
         "}\n"
     )
 
@@ -161,11 +210,11 @@ def _build_plan_user_prompt(
     context_payload = context_pack or {}
     return (
         f"Goal:\n{goal}\n\n"
+        "Tool Catalog (use tool_id ONLY from this list):\n"
+        f"{tool_catalog_json}\n\n"
         f"Data scope hints (optional):\n{json.dumps(scope_payload, ensure_ascii=False)}\n\n"
         f"Clarification answers (if any):\n{json.dumps(answers_payload, ensure_ascii=False)}\n\n"
-        f"Operational Memory context pack (safe summary):\n{json.dumps(context_payload, ensure_ascii=False)}\n\n"
-        "Tool Catalog (use tool_id ONLY from this list):\n"
-        f"{tool_catalog_json}\n"
+        f"Operational Memory context pack (safe summary):\n{json.dumps(context_payload, ensure_ascii=False)}\n"
     )
 
 
@@ -280,6 +329,7 @@ async def compile_agent_plan(
     )
     if allowed_set is not None:
         policies = [p for p in policies if p.tool_id in allowed_set]
+    policies = [p for p in policies if str(p.tool_type or "").strip().lower() != "clarification"]
     if not policies:
         return AgentPlanCompileResult(
             status="error",

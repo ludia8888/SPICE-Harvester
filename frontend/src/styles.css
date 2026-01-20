@@ -126,6 +126,12 @@ body {
   font-weight: 600;
 }
 
+.ai-agent-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .ai-agent-context-toggle {
   display: inline-flex;
   align-items: center;
@@ -303,6 +309,28 @@ body {
   font-size: 12px;
   line-height: 1.4;
   white-space: pre-wrap;
+  position: relative;
+  display: flex;
+  gap: 8px;
+}
+
+.ai-agent-message-body {
+  flex: 1;
+}
+
+.ai-agent-pin-btn {
+  border: none;
+  background: transparent;
+  color: #8a9ba8;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ai-agent-pin-btn.is-pinned {
+  color: #48aff0;
 }
 
 .ai-agent-message.is-user {
@@ -333,6 +361,12 @@ body {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+}
+
+.ai-agent-plan-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .ai-agent-plan-title {
@@ -372,6 +406,125 @@ body {
   list-style: none;
   font-size: 11px;
   color: #bfccd6;
+}
+
+.ai-agent-outline {
+  border: 1px solid #293742;
+  border-radius: 10px;
+  background: #11181e;
+  padding: 8px 10px;
+  margin-bottom: 16px;
+}
+
+.ai-agent-outline summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 11px;
+  color: #bfccd6;
+}
+
+.ai-agent-outline summary::-webkit-details-marker {
+  display: none;
+}
+
+.ai-agent-outline-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-agent-outline-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  background: #0f1a22;
+  border: 1px solid #293742;
+  border-radius: 8px;
+}
+
+.ai-agent-outline-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ai-agent-outline-tool {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f5f8fa;
+}
+
+.ai-agent-outline-path {
+  font-size: 11px;
+  color: #8a9ba8;
+}
+
+.ai-agent-outline-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ai-agent-outline-status {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: #bfccd6;
+}
+
+.ai-agent-pins {
+  border-top: 1px solid #293742;
+  padding-top: 10px;
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-agent-pins-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8a9ba8;
+}
+
+.ai-agent-pins-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ai-agent-pin-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #0f1a22;
+  border: 1px solid #293742;
+  border-radius: 8px;
+}
+
+.ai-agent-pin-label {
+  font-size: 11px;
+  color: #bfccd6;
+}
+
+.ai-agent-pin-remove {
+  border: none;
+  background: transparent;
+  color: #8a9ba8;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ai-agent-pin-empty {
+  font-size: 11px;
+  color: #5c7080;
 }
 
 .ai-agent-plan-steps summary::-webkit-details-marker {

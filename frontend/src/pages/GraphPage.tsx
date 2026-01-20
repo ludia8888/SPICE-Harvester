@@ -363,46 +363,29 @@ const syncDatasetNodes = (currentNodes: FlowNode[], datasetNodes: FlowNode[]) =>
   return nextNodes
 }
 
-const mergeFlowWithDatasets = (flowNodes: FlowNode[], datasetNodes: FlowNode[]) => {
-  if (datasetNodes.length === 0) {
+const hydrateFlowNodesWithDatasets = (flowNodes: FlowNode[], datasets: DatasetRecord[]) => {
+  if (datasets.length === 0 || flowNodes.length === 0) {
     return flowNodes
   }
-  if (flowNodes.length === 0) {
-    return layoutFlowNodes(datasetNodes, [])
-  }
-
-  const nextNodes = [...flowNodes]
-  const flowById = new Map(flowNodes.map((node) => [node.id, node]))
-  let maxY = flowNodes.reduce((max, node) => Math.max(max, node.position?.y ?? 0), 0)
-  let nextY = maxY + 120
-
-  datasetNodes.forEach((datasetNode) => {
-    const existing = flowById.get(datasetNode.id)
-    if (existing) {
-      const merged = {
-        ...existing,
-        type: existing.type ?? datasetNode.type,
-        data: mergeDatasetNodeData(existing.data, datasetNode.data),
-        sourcePosition: existing.sourcePosition ?? datasetNode.sourcePosition,
-        targetPosition: existing.targetPosition ?? datasetNode.targetPosition,
-      }
-      const index = nextNodes.findIndex((node) => node.id === datasetNode.id)
-      if (index >= 0) {
-        nextNodes[index] = merged
-      }
-      return
+  return flowNodes.map((node) => {
+    if (node.type !== 'input') {
+      return node
     }
-    nextNodes.push({
-      ...datasetNode,
-      position: {
-        x: datasetNode.position?.x ?? 0,
-        y: nextY,
-      },
-    })
-    nextY += 120
+    const dataset = resolveDatasetForNode(node, datasets)
+    if (!dataset) {
+      return node
+    }
+    const data = isRecord(node.data) ? { ...node.data } : {}
+    const metadata = isRecord(data.metadata) ? { ...data.metadata } : {}
+    metadata.datasetId = dataset.dataset_id
+    metadata.datasetName = dataset.name
+    metadata.dataset_name = dataset.name
+    data.metadata = metadata
+    if (!data.label || data.label === node.id) {
+      data.label = dataset.name
+    }
+    return { ...node, data }
   })
-
-  return nextNodes
 }
 
 const resolveDatasetForNode = (node: FlowNode, datasets: DatasetRecord[]) => {
@@ -750,6 +733,7 @@ export const GraphPage = () => {
     queryKey: ['pipeline-detail', primaryPipeline?.pipeline_id],
     queryFn: () => getPipeline(primaryPipeline?.pipeline_id ?? '', { dbName: activeDbName }),
     enabled: Boolean(primaryPipeline?.pipeline_id),
+    refetchInterval: definitionDirty ? false : 2000,
   })
   const { data: pipelineArtifacts = [] } = useQuery({
     queryKey: ['pipeline-artifacts', primaryPipeline?.pipeline_id, 'build'],
@@ -1238,18 +1222,20 @@ export const GraphPage = () => {
   }, [previewPayload])
 
   useEffect(() => {
+    if (definitionDirty) {
+      return
+    }
     const { nodes: flowNodes, edges: flowEdges } = buildFlowFromDefinition(pipelineDetail?.definition_json)
     if (flowNodes.length > 0) {
-      const laidOutNodes = layoutFlowNodes(flowNodes, flowEdges)
-      setNodes(mergeFlowWithDatasets(laidOutNodes, datasetNodes))
+      const hydratedNodes = hydrateFlowNodesWithDatasets(flowNodes, datasets)
+      const laidOutNodes = layoutFlowNodes(hydratedNodes, flowEdges)
+      setNodes(laidOutNodes)
       setEdges(flowEdges)
-      setDefinitionDirty(false)
       return
     }
     setEdges([])
     setNodes((current) => syncDatasetNodes(current, datasetNodes))
-    setDefinitionDirty(false)
-  }, [pipelineDetail?.definition_json, datasetNodes, setNodes, setEdges])
+  }, [pipelineDetail?.definition_json, datasetNodes, datasets, definitionDirty, setNodes, setEdges])
 
   const topbar = (
     <div className="pipeline-topbar">

@@ -32,7 +32,21 @@ def normalize_schema_type(value: Any) -> str:
     if not raw:
         return ""
     if raw.startswith("xsd:"):
-        return raw
+        suffix = raw.split("xsd:", 1)[1]
+        xsd_mapping = {
+            "string": "xsd:string",
+            "boolean": "xsd:boolean",
+            "bool": "xsd:boolean",
+            "integer": "xsd:integer",
+            "int": "xsd:integer",
+            "long": "xsd:integer",
+            "decimal": "xsd:decimal",
+            "double": "xsd:decimal",
+            "float": "xsd:decimal",
+            "datetime": "xsd:dateTime",
+            "date": "xsd:date",
+        }
+        return xsd_mapping.get(suffix, f"xsd:{suffix}")
     mapping = {
         "string": "xsd:string",
         "text": "xsd:string",

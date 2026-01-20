@@ -1324,6 +1324,7 @@ async def list_sessions(
                     "terminated_at": r.terminated_at.isoformat() if r.terminated_at else None,
                     "created_at": r.created_at.isoformat(),
                     "updated_at": r.updated_at.isoformat(),
+                    "metadata": r.metadata,
                 }
                 for r in records
             ],

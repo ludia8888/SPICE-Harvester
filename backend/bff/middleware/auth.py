@@ -1073,7 +1073,12 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
                 extract_bearer_token(request.headers.get(_DELEGATED_AUTH_HEADER))
                 or extract_bearer_token(request.headers.get("Authorization"))
             )
-            if not delegated_raw:
+            dev_master = _dev_master_auth_enabled()
+            if not delegated_raw and dev_master:
+                _attach_dev_master_principal(request)
+                delegated_raw = None
+
+            if not delegated_raw and not dev_master:
                 return _error_response(
                     request=request,
                     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -1084,36 +1089,54 @@ def install_bff_auth_middleware(app: FastAPI) -> None:
                 )
 
             if auth.user_jwt_enabled:
-                try:
-                    principal = await verify_user_token(
-                        delegated_raw,
-                        jwt_enabled=bool(auth.user_jwt_enabled),
-                        jwt_issuer=auth.user_jwt_issuer,
-                        jwt_audience=auth.user_jwt_audience,
-                        jwt_jwks_url=auth.user_jwt_jwks_url,
-                        jwt_public_key=auth.user_jwt_public_key,
-                        jwt_hs256_secret=auth.user_jwt_hs256_secret,
-                        jwt_algorithms=auth.user_jwt_algorithms,
-                    )
-                    _attach_verified_principal(request, principal)
-                except UserTokenError as exc:
+                if delegated_raw:
+                    try:
+                        principal = await verify_user_token(
+                            delegated_raw,
+                            jwt_enabled=bool(auth.user_jwt_enabled),
+                            jwt_issuer=auth.user_jwt_issuer,
+                            jwt_audience=auth.user_jwt_audience,
+                            jwt_jwks_url=auth.user_jwt_jwks_url,
+                            jwt_public_key=auth.user_jwt_public_key,
+                            jwt_hs256_secret=auth.user_jwt_hs256_secret,
+                            jwt_algorithms=auth.user_jwt_algorithms,
+                        )
+                        _attach_verified_principal(request, principal)
+                    except UserTokenError as exc:
+                        if dev_master:
+                            _attach_dev_master_principal(request)
+                        else:
+                            return _error_response(
+                                request=request,
+                                status_code=status.HTTP_403_FORBIDDEN,
+                                message="Delegated user token invalid",
+                                detail=str(exc),
+                                code=ErrorCode.AUTH_INVALID,
+                                category=ErrorCategory.AUTH,
+                            )
+                elif dev_master:
+                    _attach_dev_master_principal(request)
+                else:
                     return _error_response(
                         request=request,
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        message="Delegated user token invalid",
-                        detail=str(exc),
-                        code=ErrorCode.AUTH_INVALID,
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        message=f"{_DELEGATED_AUTH_HEADER} required for agent calls",
+                        code=ErrorCode.AUTH_REQUIRED,
                         category=ErrorCategory.AUTH,
+                        headers={"WWW-Authenticate": "Bearer"},
                     )
             else:
-                return _error_response(
-                    request=request,
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    message="USER_JWT_ENABLED required for agent calls",
-                    code=ErrorCode.INTERNAL_ERROR,
-                    category=ErrorCategory.INTERNAL,
-                    context={"error": "user-jwt-required-for-agent"},
-                )
+                if dev_master:
+                    _attach_dev_master_principal(request)
+                else:
+                    return _error_response(
+                        request=request,
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        message="USER_JWT_ENABLED required for agent calls",
+                        code=ErrorCode.INTERNAL_ERROR,
+                        category=ErrorCategory.INTERNAL,
+                        context={"error": "user-jwt-required-for-agent"},
+                    )
 
             await _maybe_start_session_tool_call(request)
             denied = await _enforce_internal_agent_tool_policy(request)

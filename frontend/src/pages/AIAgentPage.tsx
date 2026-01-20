@@ -9,9 +9,12 @@ import {
   decideAgentSessionApproval,
   executeAgentPlan,
   getAgentPlan,
+  listAgentSessionContextItems,
   listAgentSessionEvents,
   listDatasets,
   postAgentSessionMessage,
+  removeAgentSessionContextItem,
+  type AgentSessionContextItem,
   type AgentSessionEvent,
   type AIIntentResponse,
   type DatasetRecord,
@@ -52,6 +55,17 @@ type PlanCard = {
   approvalDecision?: string
 }
 
+type ToolCallOutlineItem = {
+  toolRunId: string
+  toolId: string
+  method?: string
+  path?: string
+  status?: string
+  httpStatus?: number
+  startedAt?: string
+  finishedAt?: string
+}
+
 type ChatItem =
   | ({ kind: 'message' } & ChatMessage)
   | ({ kind: 'plan' } & PlanCard)
@@ -80,10 +94,7 @@ const resolveIntentReply = (intent: AIIntentResponse) => {
   const text = intent.requires_clarification
     ? safeText(intent.clarifying_question).trim()
     : safeText(intent.reply).trim()
-  if (text) {
-    return text
-  }
-  return intent.requires_clarification ? 'Which project/database should I use?' : 'How can I help?'
+  return text
 }
 
 const truncatePreview = (value: unknown, maxChars = 220) => {
@@ -108,6 +119,39 @@ const truncatePreview = (value: unknown, maxChars = 220) => {
     return trimmed
   }
   return `${trimmed.slice(0, maxChars - 1)}…`
+}
+
+const resolvePinnedLabel = (item: AgentSessionContextItem) => {
+  const ref = item.ref ?? {}
+  if (item.item_type === 'message') {
+    const role = safeText(ref['role']).trim() || 'message'
+    const content = truncatePreview(ref['content'] ?? '')
+    return content ? `${role}: ${content}` : role
+  }
+  if (item.item_type === 'tool_call') {
+    const toolId = safeText(ref['tool_id']).trim() || 'tool_call'
+    const method = safeText(ref['method']).trim()
+    const path = safeText(ref['path']).trim()
+    const suffix = [method, path].filter((part) => part).join(' ')
+    return suffix ? `${toolId} ${suffix}` : toolId
+  }
+  if (item.item_type === 'plan') {
+    const goal = safeText(ref['goal']).trim()
+    if (goal) {
+      return `plan: ${goal}`
+    }
+    const planId = safeText(ref['plan_id']).trim()
+    if (planId) {
+      return `plan: ${planId.slice(0, 8)}`
+    }
+    return 'plan'
+  }
+  const name =
+    safeText(ref['name']).trim() ||
+    safeText(ref['label']).trim() ||
+    safeText(ref['dataset_name']).trim() ||
+    safeText(ref['dataset_id']).trim()
+  return name ? `${item.item_type}: ${name}` : item.item_type
 }
 
 const buildStepSummariesFromPayload = (payload: Record<string, unknown> | null | undefined): PlanStepSummary[] => {
@@ -392,6 +436,52 @@ const buildChatItemsFromEvents = (events: AgentSessionEvent[]) => {
   return combined
 }
 
+const buildToolCallOutlineFromEvents = (events: AgentSessionEvent[]): ToolCallOutlineItem[] => {
+  const byRunId = new Map<string, ToolCallOutlineItem>()
+  events.forEach((event) => {
+    const data = event.data ?? {}
+    if (event.event_type === 'TOOL_CALL_STARTED') {
+      const toolRunId = safeText(data['tool_run_id']).trim()
+      if (!toolRunId) {
+        return
+      }
+      const current = byRunId.get(toolRunId) ?? { toolRunId, toolId: '' }
+      current.toolId = safeText(data['tool_id']).trim() || current.toolId
+      current.method = safeText(data['method']).trim() || current.method
+      current.path = safeText(data['path']).trim() || current.path
+      current.startedAt = event.occurred_at
+      byRunId.set(toolRunId, current)
+      return
+    }
+    if (event.event_type === 'TOOL_CALL_FINISHED') {
+      const toolRunId = safeText(data['tool_run_id']).trim()
+      if (!toolRunId) {
+        return
+      }
+      const current = byRunId.get(toolRunId) ?? { toolRunId, toolId: '' }
+      current.toolId = safeText(data['tool_id']).trim() || current.toolId
+      current.status = safeText(data['status']).trim() || current.status
+      const httpStatusRaw = data['http_status']
+      if (typeof httpStatusRaw === 'number') {
+        current.httpStatus = httpStatusRaw
+      } else if (typeof httpStatusRaw === 'string' && httpStatusRaw.trim()) {
+        const parsed = Number(httpStatusRaw)
+        current.httpStatus = Number.isNaN(parsed) ? current.httpStatus : parsed
+      }
+      current.finishedAt = event.occurred_at
+      byRunId.set(toolRunId, current)
+    }
+  })
+  return Array.from(byRunId.values()).sort((left, right) => {
+    const leftTs = Date.parse(left.startedAt || left.finishedAt || '') || 0
+    const rightTs = Date.parse(right.startedAt || right.finishedAt || '') || 0
+    if (leftTs !== rightTs) {
+      return leftTs - rightTs
+    }
+    return left.toolRunId.localeCompare(right.toolRunId)
+  })
+}
+
 export const AIAgentPage = () => {
   const activeNav = useAppStore((state) => state.activeNav)
   const pipelineContext = useAppStore((state) => state.pipelineContext)
@@ -427,9 +517,11 @@ export const AIAgentPage = () => {
     () => ({
       source: 'ui',
       project_name: aiAgentContext.projectName || null,
+      project_id: activeDbName || null,
       pipeline_name: aiAgentContext.pipelineName || null,
       node_count: aiAgentContext.nodes.length,
       db_name: activeDbName || null,
+      environment: import.meta.env.MODE || 'dev',
     }),
     [aiAgentContext, activeDbName],
   )
@@ -484,7 +576,7 @@ export const AIAgentPage = () => {
     () => ({
       limit: 500,
       include_agent_steps: false,
-      include_tool_calls: false,
+      include_tool_calls: true,
       include_llm_calls: false,
     }),
     [],
@@ -509,7 +601,65 @@ export const AIAgentPage = () => {
     refetchInterval: isAgentVisible && sessionId ? 2000 : false,
   })
 
-  const eventItems = useMemo(() => buildChatItemsFromEvents(eventsPayload?.events ?? []), [eventsPayload])
+  const events = eventsPayload?.events ?? []
+  const eventItems = useMemo(() => buildChatItemsFromEvents(events), [events])
+  const toolCallOutline = useMemo(() => buildToolCallOutlineFromEvents(events), [events])
+
+  const { data: contextItemsPayload, refetch: refreshContextItems } = useQuery({
+    queryKey: ['agent-session-context', sessionId],
+    queryFn: () => listAgentSessionContextItems(sessionId, { limit: 200, offset: 0 }),
+    enabled: Boolean(sessionId) && isAgentVisible,
+  })
+
+  const pinnedItems = useMemo(() => {
+    const items = contextItemsPayload?.context_items ?? []
+    return items.filter((item) => Boolean(item?.metadata && item.metadata['pin'] === true))
+  }, [contextItemsPayload])
+
+  const pinnedMessageIds = useMemo(() => {
+    const map = new Map<string, string>()
+    pinnedItems.forEach((item) => {
+      if (item.item_type !== 'message') {
+        return
+      }
+      const ref = item.ref ?? {}
+      const messageId = safeText(ref['message_id']).trim()
+      if (messageId) {
+        map.set(messageId, item.item_id)
+      }
+    })
+    return map
+  }, [pinnedItems])
+
+  const pinnedToolRunIds = useMemo(() => {
+    const map = new Map<string, string>()
+    pinnedItems.forEach((item) => {
+      if (item.item_type !== 'tool_call') {
+        return
+      }
+      const ref = item.ref ?? {}
+      const toolRunId = safeText(ref['tool_run_id']).trim()
+      if (toolRunId) {
+        map.set(toolRunId, item.item_id)
+      }
+    })
+    return map
+  }, [pinnedItems])
+
+  const pinnedPlanIds = useMemo(() => {
+    const map = new Map<string, string>()
+    pinnedItems.forEach((item) => {
+      if (item.item_type !== 'plan') {
+        return
+      }
+      const ref = item.ref ?? {}
+      const planId = safeText(ref['plan_id']).trim()
+      if (planId) {
+        map.set(planId, item.item_id)
+      }
+    })
+    return map
+  }, [pinnedItems])
   const items = useMemo(() => {
     if (extraItems.length === 0) {
       return eventItems
@@ -604,6 +754,30 @@ export const AIAgentPage = () => {
     return nextId
   }, [sessionMetadata])
 
+  const handleNewConversation = useCallback(async () => {
+    try {
+      const created = await createAgentSession({ metadata: sessionMetadata })
+      const nextId = created.session?.session_id
+      if (!nextId) {
+        throw new Error('Failed to create agent session')
+      }
+      sessionIdRef.current = nextId
+      attachedDatasetIdsRef.current = new Set()
+      setSessionId(nextId)
+      setExtraItems([])
+      setPlanDetails({})
+      setPlanActions({})
+      planFetchInFlightRef.current = new Set()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to create agent session'
+      const timestamp = new Date().toISOString()
+      setExtraItems((current) => [
+        ...current,
+        { kind: 'message', id: buildId(), role: 'assistant', text: message, timestamp },
+      ])
+    }
+  }, [sessionMetadata])
+
   const syncDatasetContext = useCallback(
     async (targetSessionId: string) => {
       if (!targetSessionId || datasetIdsForNodes.length === 0) {
@@ -643,6 +817,103 @@ export const AIAgentPage = () => {
     void syncDatasetContext(sessionId)
   }, [sessionId, isAgentVisible, syncDatasetContext])
 
+  const handleToggleMessagePin = useCallback(
+    async (item: ChatMessage) => {
+      if (!sessionId) {
+        return
+      }
+      const existingId = pinnedMessageIds.get(item.id)
+      if (existingId) {
+        await removeAgentSessionContextItem(sessionId, existingId)
+        await refreshContextItems()
+        return
+      }
+      await attachAgentSessionContextItem(sessionId, {
+        item_type: 'message',
+        include_mode: 'summary',
+        ref: {
+          message_id: item.id,
+          role: item.role,
+          content: item.text,
+          occurred_at: item.timestamp,
+        },
+        metadata: { pin: true, source: 'chat' },
+      })
+      await refreshContextItems()
+    },
+    [sessionId, pinnedMessageIds, refreshContextItems],
+  )
+
+  const handleToggleToolCallPin = useCallback(
+    async (call: ToolCallOutlineItem) => {
+      if (!sessionId || !call.toolRunId) {
+        return
+      }
+      const existingId = pinnedToolRunIds.get(call.toolRunId)
+      if (existingId) {
+        await removeAgentSessionContextItem(sessionId, existingId)
+        await refreshContextItems()
+        return
+      }
+      await attachAgentSessionContextItem(sessionId, {
+        item_type: 'tool_call',
+        include_mode: 'summary',
+        ref: {
+          tool_run_id: call.toolRunId,
+          tool_id: call.toolId,
+          method: call.method,
+          path: call.path,
+          status: call.status,
+          http_status: call.httpStatus,
+          started_at: call.startedAt,
+          finished_at: call.finishedAt,
+        },
+        metadata: { pin: true, source: 'outline' },
+      })
+      await refreshContextItems()
+    },
+    [sessionId, pinnedToolRunIds, refreshContextItems],
+  )
+
+  const handleTogglePlanPin = useCallback(
+    async (plan: PlanCard) => {
+      if (!sessionId || !plan.planId) {
+        return
+      }
+      const existingId = pinnedPlanIds.get(plan.planId)
+      if (existingId) {
+        await removeAgentSessionContextItem(sessionId, existingId)
+        await refreshContextItems()
+        return
+      }
+      await attachAgentSessionContextItem(sessionId, {
+        item_type: 'plan',
+        include_mode: 'summary',
+        ref: {
+          plan_id: plan.planId,
+          goal: plan.goal,
+          risk_level: plan.riskLevel,
+          approval_request_id: plan.approvalRequestId,
+          job_id: plan.jobId,
+        },
+        metadata: { pin: true, source: 'plan' },
+      })
+      await refreshContextItems()
+    },
+    [sessionId, pinnedPlanIds, refreshContextItems],
+  )
+
+  const handleTogglePinnedItemRemoval = useCallback(
+    async (item: AgentSessionContextItem) => {
+      if (!sessionId) {
+        return
+      }
+      await removeAgentSessionContextItem(sessionId, item.item_id)
+      await refreshContextItems()
+    },
+    [sessionId, refreshContextItems],
+  )
+
   const handleSend = async () => {
     const text = draft.trim()
     if (!text || isSending) {
@@ -650,6 +921,21 @@ export const AIAgentPage = () => {
     }
     setDraft('')
     setIsSending(true)
+    let activeSession: string
+    try {
+      activeSession = await ensureSession()
+      await syncDatasetContext(activeSession)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to create agent session'
+      const timestamp = new Date().toISOString()
+      setExtraItems((current) => [
+        ...current,
+        { kind: 'message', id: buildId(), role: 'user', text, timestamp },
+        { kind: 'message', id: buildId(), role: 'assistant', text: message, timestamp },
+      ])
+      setIsSending(false)
+      return
+    }
     const intentContext: Record<string, unknown> = {}
     if (aiAgentContext.nodes.length > 0) {
       intentContext.node_count = aiAgentContext.nodes.length
@@ -667,6 +953,7 @@ export const AIAgentPage = () => {
         pipeline_name: aiAgentContext.pipelineName || null,
         language: preferredLanguage,
         context: Object.keys(intentContext).length > 0 ? intentContext : null,
+        session_id: activeSession,
       })
     } catch (error) {
       const timestamp = new Date().toISOString()
@@ -683,6 +970,18 @@ export const AIAgentPage = () => {
     if (intent.requires_clarification || intent.route === 'chat') {
       const timestamp = new Date().toISOString()
       const reply = resolveIntentReply(intent)
+      if (!reply) {
+        const message = intent.requires_clarification
+          ? 'LLM intent response missing clarifying_question'
+          : 'LLM intent response missing reply'
+        setExtraItems((current) => [
+          ...current,
+          { kind: 'message', id: buildId(), role: 'user', text, timestamp },
+          { kind: 'message', id: buildId(), role: 'assistant', text: message, timestamp },
+        ])
+        setIsSending(false)
+        return
+      }
       setExtraItems((current) => [
         ...current,
         { kind: 'message', id: buildId(), role: 'user', text, timestamp },
@@ -696,7 +995,7 @@ export const AIAgentPage = () => {
       const timestamp = new Date().toISOString()
       setExtraItems((current) => [...current, { kind: 'message', id: buildId(), role: 'user', text, timestamp }])
       if (!activeDbName) {
-        const reply = safeText(intent.clarifying_question).trim() || 'Select a project first to run a query.'
+        const reply = 'Missing active project/database for query.'
         setExtraItems((current) => [
           ...current,
           { kind: 'message', id: buildId(), role: 'assistant', text: reply, timestamp },
@@ -710,8 +1009,12 @@ export const AIAgentPage = () => {
           mode: 'auto',
           include_documents: false,
           include_provenance: false,
+          session_id: activeSession,
         })
-        const answer = extractAiAnswer(response) || 'I could not find a grounded answer from the data.'
+        const answer = extractAiAnswer(response)
+        if (!answer) {
+          throw new Error('LLM answer response missing answer')
+        }
         setExtraItems((current) => [
           ...current,
           {
@@ -741,8 +1044,6 @@ export const AIAgentPage = () => {
     }
 
     try {
-      const activeSession = await ensureSession()
-      await syncDatasetContext(activeSession)
       await postAgentSessionMessage(activeSession, {
         content: text,
         data_scope: dataScope,
@@ -872,12 +1173,22 @@ export const AIAgentPage = () => {
   const renderedItems = useMemo(() => {
     return items.map((item) => {
       if (item.kind === 'message') {
+        const pinned = pinnedMessageIds.has(item.id)
         return (
           <div
             key={item.id}
             className={`ai-agent-message ${item.role === 'user' ? 'is-user' : 'is-assistant'}`}
           >
-            {item.text}
+            <div className="ai-agent-message-body">{item.text}</div>
+            <button
+              type="button"
+              className={`ai-agent-pin-btn ${pinned ? 'is-pinned' : ''}`}
+              onClick={() => handleToggleMessagePin(item)}
+              aria-label={pinned ? 'Unpin message' : 'Pin message'}
+              title={pinned ? 'Unpin message' : 'Pin message'}
+            >
+              <Icon icon="pin" size={12} />
+            </button>
           </div>
         )
       }
@@ -889,11 +1200,25 @@ export const AIAgentPage = () => {
       const canReject = Boolean(plan.approvalRequestId) && !hasDecision
       const canExecute = !plan.requiresApproval && plan.source === 'job'
       const steps = plan.steps ?? []
+      const planPinned = pinnedPlanIds.has(plan.planId)
       return (
         <div key={plan.id} className="ai-agent-plan-card">
           <div className="ai-agent-plan-header">
             <div className="ai-agent-plan-title">{plan.goal || 'Pipeline plan'}</div>
-            <span className={`ai-agent-plan-status is-${formatStatusLabel(plan.status)}`}>{formatStatusLabel(plan.status)}</span>
+            <div className="ai-agent-plan-header-actions">
+              <span className={`ai-agent-plan-status is-${formatStatusLabel(plan.status)}`}>
+                {formatStatusLabel(plan.status)}
+              </span>
+              <button
+                type="button"
+                className={`ai-agent-pin-btn ${planPinned ? 'is-pinned' : ''}`}
+                onClick={() => handleTogglePlanPin(plan)}
+                aria-label={planPinned ? 'Unpin plan' : 'Pin plan'}
+                title={planPinned ? 'Unpin plan' : 'Pin plan'}
+              >
+                <Icon icon="pin" size={12} />
+              </button>
+            </div>
           </div>
           <div className="ai-agent-plan-meta">
             <span>Risk: {plan.riskLevel || 'unknown'}</span>
@@ -942,7 +1267,18 @@ export const AIAgentPage = () => {
         </div>
       )
     })
-  }, [handleApprovePlan, handleExecutePlan, handleRejectPlan, items, planActions, resolvePlanCard])
+  }, [
+    handleApprovePlan,
+    handleExecutePlan,
+    handleRejectPlan,
+    handleToggleMessagePin,
+    handleTogglePlanPin,
+    items,
+    pinnedMessageIds,
+    pinnedPlanIds,
+    planActions,
+    resolvePlanCard,
+  ])
 
   return (
     <div className="ai-agent-panel-content">
@@ -951,15 +1287,26 @@ export const AIAgentPage = () => {
           <Icon icon="predictive-analysis" size={16} />
           <span>AI Agent</span>
         </div>
-        <button
-          type="button"
-          className={`ai-agent-context-toggle ${isContextOpen ? 'is-open' : ''}`}
-          onClick={() => setContextOpen((open) => !open)}
-          aria-expanded={isContextOpen}
-        >
-          <span>{contextLabel}</span>
-          <Icon icon={isContextOpen ? 'caret-up' : 'caret-down'} size={12} />
-        </button>
+        <div className="ai-agent-panel-actions">
+          <Button
+            small
+            minimal
+            icon="add"
+            onClick={handleNewConversation}
+            disabled={isSending}
+          >
+            New conversation
+          </Button>
+          <button
+            type="button"
+            className={`ai-agent-context-toggle ${isContextOpen ? 'is-open' : ''}`}
+            onClick={() => setContextOpen((open) => !open)}
+            aria-expanded={isContextOpen}
+          >
+            <span>{contextLabel}</span>
+            <Icon icon={isContextOpen ? 'caret-up' : 'caret-down'} size={12} />
+          </button>
+        </div>
       </div>
 
       <div className="ai-agent-panel-body" ref={chatRef}>
@@ -987,7 +1334,69 @@ export const AIAgentPage = () => {
             ) : (
               <div className="ai-agent-node-empty">No nodes on canvas.</div>
             )}
+            <div className="ai-agent-pins">
+              <div className="ai-agent-pins-title">Pinned</div>
+              {pinnedItems.length > 0 ? (
+                <div className="ai-agent-pins-list">
+                  {pinnedItems.map((item) => (
+                    <div key={item.item_id} className="ai-agent-pin-item">
+                      <span className="ai-agent-pin-label">{resolvePinnedLabel(item)}</span>
+                      <button
+                        type="button"
+                        className="ai-agent-pin-remove"
+                        onClick={() => handleTogglePinnedItemRemoval(item)}
+                        aria-label="Unpin item"
+                        title="Unpin item"
+                      >
+                        <Icon icon="cross" size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="ai-agent-pin-empty">No pinned items yet.</div>
+              )}
+            </div>
           </div>
+        ) : null}
+        {toolCallOutline.length > 0 ? (
+          <details className="ai-agent-outline" open>
+            <summary>Outline · Tool calls ({toolCallOutline.length})</summary>
+            <div className="ai-agent-outline-list">
+              {toolCallOutline.map((call) => {
+                const pinned = pinnedToolRunIds.has(call.toolRunId)
+                const method = call.method ? `${call.method} ` : ''
+                const path = call.path ? call.path : ''
+                const status = call.status ? call.status.toLowerCase() : ''
+                const httpStatus = call.httpStatus ? ` (${call.httpStatus})` : ''
+                return (
+                  <div key={call.toolRunId} className={`ai-agent-outline-item ${status ? `is-${status}` : ''}`}>
+                    <div className="ai-agent-outline-main">
+                      <span className="ai-agent-outline-tool">{call.toolId || 'tool'}</span>
+                      <span className="ai-agent-outline-path">
+                        {method}
+                        {path}
+                      </span>
+                    </div>
+                    <div className="ai-agent-outline-meta">
+                      <span className="ai-agent-outline-status">
+                        {status ? `${status}${httpStatus}` : 'running'}
+                      </span>
+                      <button
+                        type="button"
+                        className={`ai-agent-pin-btn ${pinned ? 'is-pinned' : ''}`}
+                        onClick={() => handleToggleToolCallPin(call)}
+                        aria-label={pinned ? 'Unpin tool call' : 'Pin tool call'}
+                        title={pinned ? 'Unpin tool call' : 'Pin tool call'}
+                      >
+                        <Icon icon="pin" size={12} />
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </details>
         ) : null}
         {items.length === 0 ? (
           <div className="ai-agent-empty">

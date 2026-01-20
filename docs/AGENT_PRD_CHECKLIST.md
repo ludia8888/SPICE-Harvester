@@ -11,6 +11,51 @@
 
 ---
 
+## 0) 목적/성공지표/UX/Chat
+
+### Objectives
+
+| ID | Status | Evidence (code/tests/docs) | Gap / Next |
+|---|---|---|---|
+| OBJ-001 | PARTIAL | `backend/bff/services/agent_plan_compiler.py`, `backend/agent/services/agent_runtime.py`, `backend/bff/routers/agent_sessions.py` | Artifacts/PR 연결 범위 확장 필요 |
+| OBJ-002 | DONE | `backend/bff/services/agent_plan_validation.py`, `backend/bff/routers/agent_sessions.py`, `backend/shared/services/agent_policy_registry.py` | |
+| OBJ-003 | DONE | `backend/shared/services/audit_log_store.py`, `backend/agent/services/agent_runtime.py`, `backend/bff/routers/agent_sessions.py` | |
+| OBJ-004 | PARTIAL | `backend/bff/routers/pipeline.py`, `backend/bff/routers/ontology_extensions.py`, `docs/API_REFERENCE.md` | 모든 변경에서 Proposal/PR 기본화 보장 필요 |
+
+### Success Metrics
+
+| ID | Status | Evidence (code/tests/docs) | Gap / Next |
+|---|---|---|---|
+| MET-001 | TODO |  | 정확한 정의/목표치 필요 |
+| MET-002 | PARTIAL | `backend/shared/services/audit_log_store.py`, `backend/bff/routers/agent_sessions.py` | 지표 집계/대시보드 노출 필요 |
+
+### Golden Path
+
+| ID | Status | Evidence (code/tests/docs) | Gap / Next |
+|---|---|---|---|
+| UX-001 | PARTIAL | `backend/bff/routers/agent_sessions.py`, `frontend/src/pages/AIAgentPage.tsx` | 영향도 요약/검증/PR 단계 UI 노출 부족 |
+| UX-002 | PARTIAL | `backend/bff/services/agent_plan_compiler.py`, `frontend/src/pages/AIAgentPage.tsx` | 실행 전 요약(impact) 표준화 필요 |
+| UX-003 | PARTIAL | `backend/shared/services/agent_session_registry.py` | Step 상태 머신 UI 노출 필요 |
+| UX-004 | TODO |  | 일시중지/취소/재시도 제어 미구현 |
+
+### Chat UI
+
+| ID | Status | Evidence (code/tests/docs) | Gap / Next |
+|---|---|---|---|
+| CHAT-001 | PARTIAL | `backend/shared/services/agent_session_registry.py`, `backend/bff/routers/agent_sessions.py`, `frontend/src/pages/AIAgentPage.tsx` | 세션 목록/필터 UI 필요 |
+| CHAT-002 | DONE | `backend/bff/routers/agent_sessions.py`, `frontend/src/pages/AIAgentPage.tsx` | |
+| CHAT-003 | PARTIAL | `backend/bff/routers/agent_sessions.py`, `frontend/src/pages/AIAgentPage.tsx` | PR/프로포절/CI 결과 핀 타입 추가 필요 |
+
+### Plan
+
+| ID | Status | Evidence (code/tests/docs) | Gap / Next |
+|---|---|---|---|
+| PLAN-002 | PARTIAL | `backend/bff/services/agent_plan_validation.py`, `backend/shared/models/agent_plan.py` | prod/main/dataset rebuild 위험도 매핑 명확화 필요 |
+| PLAN-003 | TODO |  | impact 요약 생성/표시 미구현 |
+| PLAN-004 | TODO |  | Plan 편집 UI/검증 흐름 미구현 |
+
+---
+
 ## 1) 인증·권한·테넌시
 
 | ID | Status | Evidence (code/tests/docs) | Gap / Next |
@@ -62,6 +107,26 @@
 
 ---
 
+## 4.1) Closed-loop 실행/검증
+
+### Loop Engine
+
+| ID | Status | Evidence (code/tests/docs) | Gap / Next |
+|---|---|---|---|
+| LOOP-001 | PARTIAL | `backend/agent/services/agent_graph.py`, `backend/agent/services/agent_runtime.py`, `backend/shared/services/event_store.py` | 관찰→재계획 루프 표준화 필요 |
+| LOOP-002 | PARTIAL | `backend/agent/routers/agent.py`, `backend/shared/config/settings.py` | time_budget/failure_budget 미구현 |
+| LOOP-003 | TODO |  | 실패 원인 요약/대안/선택 정책 미구현 |
+
+### Verification
+
+| ID | Status | Evidence (code/tests/docs) | Gap / Next |
+|---|---|---|---|
+| VER-001 | PARTIAL | `backend/bff/services/agent_plan_validation.py`, `backend/bff/routers/agent_plans.py` | 온톨로지/코드 생성 검증 강제 필요 |
+| VER-002 | PARTIAL | `backend/agent/services/agent_graph.py`, `backend/agent/services/agent_runtime.py`, `backend/bff/routers/agent_sessions.py` | 검증 실패 시 수정 루프 표준화 필요 |
+| VER-003 | PARTIAL | `backend/bff/services/agent_plan_validation.py`, `backend/shared/models/agent_plan.py`, `backend/bff/routers/agent_plans.py` | prod 반영 조건(검증+승인+리뷰) 강제 필요 |
+
+---
+
 ## 5) 툴 프레임워크 (레지스트리·스키마·실행)
 
 | ID | Status | Evidence (code/tests/docs) | Gap / Next |
@@ -93,10 +158,10 @@
 
 | ID | Status | Evidence (code/tests/docs) | Gap / Next |
 |---|---|---|---|
-| CHG-001 | DONE | `backend/bff/routers/pipeline.py`, `backend/bff/routers/ontology_extensions.py`, `backend/shared/config/settings.py`, `backend/bff/tests/test_pipeline_proposal_governance.py` | |
-| CHG-002 | DONE | `backend/bff/routers/pipeline.py`, `backend/bff/routers/ontology_extensions.py`, `docs/API_REFERENCE.md`, `backend/tests/test_openapi_contract_smoke.py` | |
-| CHG-003 | DONE | `backend/shared/services/agent_session_registry.py`, `backend/bff/middleware/auth.py`, `backend/bff/routers/agent_sessions.py`, `backend/bff/tests/test_agent_sessions_events.py` | |
-| CHG-004 | DONE | `backend/bff/routers/agent_sessions.py`, `backend/bff/routers/ci_webhooks.py`, `backend/shared/services/agent_session_registry.py`, `backend/bff/tests/test_agent_sessions_ci_results.py`, `backend/bff/tests/test_ci_webhooks_router.py` | |
+| CHG-001 | PARTIAL | `backend/bff/routers/pipeline.py`, `backend/bff/routers/ontology_extensions.py`, `backend/shared/config/settings.py`, `backend/bff/tests/test_pipeline_proposal_governance.py` | 모든 변경 경로에서 “제안 상태” 기본 강제 + 예외 정책 정리 필요 |
+| CHG-002 | PARTIAL | `backend/bff/routers/pipeline.py`, `backend/bff/routers/ontology_extensions.py`, `docs/API_REFERENCE.md` | diff/온톨로지/파이프라인/설정 통합 뷰 필요 |
+| CHG-003 | TODO |  | 자동 변경 설명(목표/접근/리스크/검증/롤백) 생성 미구현 |
+| CHG-004 | TODO |  | 리뷰 코멘트/수정요청/승인 + 코멘트 반영 PR 업데이트 미구현 |
 | CHG-005 | DONE | `backend/bff/routers/pipeline.py`, `backend/shared/services/action_simulation_registry.py`, `backend/bff/routers/agent_sessions.py`, `backend/bff/tests/test_pipeline_router_uploads.py` | |
 | CHG-006 | DONE | `backend/shared/policies/agent_tool_allowlist.json`, `backend/bff/routers/agent_sessions.py`, `docs/API_REFERENCE.md`, `backend/tests/test_openapi_contract_smoke.py` | |
 

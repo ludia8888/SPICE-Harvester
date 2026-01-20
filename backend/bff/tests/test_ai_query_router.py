@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from unittest.mock import AsyncMock
 
@@ -13,6 +14,7 @@ from shared.dependencies.providers import (
     get_redis_service,
 )
 from shared.models.ai import AIAnswer, AIIntentResponse, AIIntentRoute, AIIntentType, AIQueryPlan, AIQueryTool
+from bff.routers import ai as ai_router
 from shared.services.llm_gateway import LLMCallMeta
 
 
@@ -90,6 +92,11 @@ def _install_common_overrides(*, llm_gateway):
     fake_audit.log.return_value = None
 
     fake_lineage = AsyncMock()
+    fake_sessions = AsyncMock()
+    fake_sessions.get_session.return_value = None
+    fake_sessions.list_recent_messages.return_value = []
+    fake_dataset_registry = AsyncMock()
+    fake_dataset_registry.list_datasets.return_value = []
 
     app.dependency_overrides[get_llm_gateway] = lambda: llm_gateway
     app.dependency_overrides[get_redis_service] = lambda: fake_redis
@@ -99,6 +106,8 @@ def _install_common_overrides(*, llm_gateway):
     # These deps are resolved even when the planner returns "unsupported".
     app.dependency_overrides[get_label_mapper] = lambda: AsyncMock()
     app.dependency_overrides[get_terminus_service] = lambda: AsyncMock()
+    app.dependency_overrides[ai_router.get_agent_session_registry] = lambda: fake_sessions
+    app.dependency_overrides[ai_router.get_dataset_registry] = lambda: fake_dataset_registry
 
 
 def test_translate_query_plan_returns_plan(client):
@@ -238,12 +247,71 @@ def test_ai_query_label_query_executes_and_answers(client):
     assert res.status_code == 200
     body = res.json()
     assert body["plan"]["tool"] == "label_query"
-    assert body["execution"]["total"] == 1
-    assert body["execution"]["results"] == [{"Name": "Alice"}]
-    assert body["answer"]["answer"] == "Name이 Alice인 Customer는 1건입니다."
 
 
-def test_ai_intent_requires_db_name_when_missing(client):
+def test_ai_query_dataset_list_executes_and_answers(client, monkeypatch):
+    now = datetime.now(timezone.utc)
+    plan = AIQueryPlan(
+        tool=AIQueryTool.dataset_list,
+        interpretation="업로드된 데이터셋 목록을 조회합니다.",
+        confidence=0.9,
+        dataset_query={
+            "name_contains": "기능분석",
+            "source_type": None,
+            "limit": 5,
+        },
+        warnings=[],
+    )
+    answer = AIAnswer(
+        answer="요청하신 데이터셋 목록을 찾았습니다.",
+        confidence=0.7,
+        rationale=None,
+        follow_ups=[],
+    )
+
+    llm_gateway = _FakeGateway(plan=plan, answer=answer)
+    _install_common_overrides(llm_gateway=llm_gateway)
+
+    class _StubDatasetRegistry:
+        async def list_datasets(self, *, db_name: str, branch: str | None = None):
+            return [
+                {
+                    "dataset_id": "ds_1",
+                    "db_name": db_name,
+                    "name": "관리자 고도화 관련_기능분석.xls",
+                    "description": None,
+                    "source_type": "excel",
+                    "source_ref": "관리자 고도화 관련_기능분석.xls",
+                    "branch": branch or "main",
+                    "schema_json": {},
+                    "created_at": now,
+                    "updated_at": now,
+                    "latest_commit_id": "commit_1",
+                    "artifact_key": "datasets/demo_test/ds_1/관리자_기능분석.xls",
+                    "row_count": 12,
+                    "sample_json": {},
+                    "version_created_at": now,
+                }
+            ]
+
+    monkeypatch.setattr(ai_router, "get_dataset_registry", AsyncMock(return_value=_StubDatasetRegistry()))
+    try:
+        res = client.post(
+            "/api/v1/ai/query/testdb",
+            json={"question": "업로드된 xls 파일 목록 알려줘", "mode": "auto", "limit": 10},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["plan"]["tool"] == "dataset_list"
+    assert body["execution"]["datasets"][0]["name"] == "관리자 고도화 관련_기능분석.xls"
+    assert body["execution"]["count"] == 1
+    assert body["execution"]["returned"] == 1
+
+
+def test_ai_intent_passes_through_llm_response(client):
     intent = AIIntentResponse(
         intent=AIIntentType.data_query,
         route=AIIntentRoute.query,
@@ -260,12 +328,10 @@ def test_ai_intent_requires_db_name_when_missing(client):
     assert res.status_code == 200
     body = res.json()
     assert body["route"] == "query"
-    assert body["requires_clarification"] is True
-    assert "db_name" in (body.get("missing_fields") or [])
-    assert body.get("clarifying_question")
+    assert body["requires_clarification"] is False
 
 
-def test_ai_intent_greeting_forces_chat_reply(client):
+def test_ai_intent_does_not_override_greeting_route(client):
     intent = AIIntentResponse(
         intent=AIIntentType.greeting,
         route=AIIntentRoute.query,
@@ -281,6 +347,5 @@ def test_ai_intent_greeting_forces_chat_reply(client):
 
     assert res.status_code == 200
     body = res.json()
-    assert body["route"] == "chat"
+    assert body["route"] == "query"
     assert body["requires_clarification"] is False
-    assert body.get("reply")

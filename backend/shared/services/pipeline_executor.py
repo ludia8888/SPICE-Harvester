@@ -29,10 +29,15 @@ from shared.services.pipeline_definition_utils import (
     resolve_pk_columns,
     resolve_pk_semantics,
     validate_pk_semantics,
+    split_expectation_columns,
 )
 from shared.services.pipeline_schema_utils import normalize_number
 from shared.services.pipeline_dataset_utils import normalize_dataset_selection, resolve_dataset_version
-from shared.services.pipeline_type_utils import infer_xsd_type_from_values, normalize_cast_target
+from shared.services.pipeline_type_utils import (
+    infer_xsd_type_from_values,
+    normalize_cast_mode,
+    normalize_cast_target,
+)
 from shared.services.pipeline_transform_spec import (
     normalize_operation,
     normalize_union_mode,
@@ -98,6 +103,8 @@ class PipelineExecutor:
         self._pipeline_registry = pipeline_registry
         self._artifact_store = artifact_store
         self._storage_service = storage_service
+        self._cast_mode = normalize_cast_mode(get_settings().pipeline.cast_mode)
+        self._cast_stats: Dict[str, Dict[str, int]] = {}
 
     async def preview(
         self,
@@ -139,6 +146,7 @@ class PipelineExecutor:
         db_name: str,
         input_overrides: Optional[Dict[str, PipelineTable]] = None,
     ) -> PipelineRunResult:
+        self._cast_stats = {}
         nodes = normalize_nodes(definition.get("nodes"))
         edges = normalize_edges(definition.get("edges"))
         order = topological_sort(nodes, edges, include_unordered=True)
@@ -218,20 +226,25 @@ class PipelineExecutor:
             pk_columns=pk_columns,
             delete_column=delete_column,
         )
-        expectation_errors = pk_semantic_errors + validate_expectations(
-            output_ops,
-            build_expectations_with_pk(
-                definition=definition,
-                output_metadata=output_metadata,
-                output_name=output_name,
-                output_node_id=output_node_id,
-                declared_outputs=declared_outputs,
-                pk_semantics=pk_semantics,
-                delete_column=delete_column,
-                pk_columns=pk_columns,
-                available_columns=available_columns,
-            ),
+        expectations = build_expectations_with_pk(
+            definition=definition,
+            output_metadata=output_metadata,
+            output_name=output_name,
+            output_node_id=output_node_id,
+            declared_outputs=declared_outputs,
+            pk_semantics=pk_semantics,
+            delete_column=delete_column,
+            pk_columns=pk_columns,
+            available_columns=available_columns,
         )
+        expectation_errors = pk_semantic_errors + validate_expectations(output_ops, expectations)
+        fk_errors = await self._evaluate_fk_expectations(
+            expectations=expectations,
+            output_table=output_table,
+            db_name=db_name,
+            branch=preview_branch,
+        )
+        expectation_errors = expectation_errors + fk_errors
         if expectation_errors:
             raise PipelineExpectationError(f"Expectations failed: {expectation_errors}")
         return PipelineRunResult(tables=tables, output_nodes=output_nodes)
@@ -265,6 +278,16 @@ class PipelineExecutor:
             columns = _fallback_columns(node)
         if not rows:
             rows = _build_sample_rows(columns, 8)
+        schema_types = _extract_schema_types(dataset.schema_json if dataset else {})
+        if not schema_types and version is not None:
+            schema_types = _extract_schema_types(version.sample_json)
+        if schema_types:
+            rows = _apply_schema_casts(
+                rows,
+                schema_types=schema_types,
+                cast_mode=self._cast_mode,
+                cast_stats=self._cast_stats,
+            )
         return PipelineTable(columns=columns, rows=rows)
 
     async def _load_rows_from_artifact(self, artifact_key: Optional[str]) -> List[Dict[str, Any]]:
@@ -310,6 +333,141 @@ class PipelineExecutor:
                 return _parse_json_bytes(candidate_bytes)
         return []
 
+    async def _load_fk_reference_rows(
+        self,
+        *,
+        db_name: str,
+        dataset_id: Optional[str],
+        dataset_name: Optional[str],
+        branch: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        metadata = {}
+        if dataset_id:
+            metadata["datasetId"] = dataset_id
+        if dataset_name:
+            metadata["datasetName"] = dataset_name
+        if branch:
+            metadata["datasetBranch"] = branch
+        selection = normalize_dataset_selection(metadata, default_branch=branch or "main")
+        resolution = await resolve_dataset_version(
+            self._dataset_registry,
+            db_name=db_name,
+            selection=selection,
+        )
+        dataset = resolution.dataset
+        version = resolution.version
+        if not dataset or not version:
+            return []
+        rows = await self._load_rows_from_artifact(version.artifact_key) if version.artifact_key else []
+        if not rows:
+            rows = _extract_sample_rows(version.sample_json)
+        return rows
+
+    async def _evaluate_fk_expectations(
+        self,
+        *,
+        expectations: List[Dict[str, Any]],
+        output_table: PipelineTable,
+        db_name: str,
+        branch: Optional[str],
+    ) -> List[str]:
+        errors: List[str] = []
+        for exp in expectations or []:
+            if not isinstance(exp, dict):
+                continue
+            rule = str(exp.get("rule") or "").strip().lower()
+            if rule != "fk_exists":
+                continue
+            columns_value = exp.get("columns") or exp.get("column")
+            if isinstance(columns_value, list):
+                columns = [str(item).strip() for item in columns_value if str(item).strip()]
+            else:
+                columns = split_expectation_columns(str(columns_value or ""))
+            reference = exp.get("reference") if isinstance(exp.get("reference"), dict) else {}
+            ref_columns_value = (
+                reference.get("columns")
+                or reference.get("column")
+                or exp.get("ref_columns")
+                or exp.get("ref_column")
+            )
+            if isinstance(ref_columns_value, list):
+                ref_columns = [str(item).strip() for item in ref_columns_value if str(item).strip()]
+            else:
+                ref_columns = split_expectation_columns(str(ref_columns_value or ""))
+            if not ref_columns and columns:
+                ref_columns = list(columns)
+
+            dataset_id = (
+                reference.get("datasetId")
+                or reference.get("dataset_id")
+                or exp.get("datasetId")
+                or exp.get("dataset_id")
+            )
+            dataset_name = (
+                reference.get("datasetName")
+                or reference.get("dataset_name")
+                or exp.get("datasetName")
+                or exp.get("dataset_name")
+            )
+            ref_branch = (
+                reference.get("branch")
+                or exp.get("branch")
+                or branch
+                or "main"
+            )
+            allow_nulls = exp.get("allow_nulls") if "allow_nulls" in exp else exp.get("allowNulls")
+            allow_nulls = True if allow_nulls is None else bool(allow_nulls)
+
+            if not columns or not ref_columns:
+                errors.append("fk_exists missing columns or reference columns")
+                continue
+            if len(columns) != len(ref_columns):
+                errors.append(
+                    f"fk_exists column count mismatch: {columns} vs {ref_columns}"
+                )
+                continue
+            missing_cols = [col for col in columns if col not in output_table.columns]
+            if missing_cols:
+                errors.append(f"fk_exists missing column(s): {', '.join(missing_cols)}")
+                continue
+            ref_rows = await self._load_fk_reference_rows(
+                db_name=db_name,
+                dataset_id=str(dataset_id) if dataset_id else None,
+                dataset_name=str(dataset_name) if dataset_name else None,
+                branch=str(ref_branch) if ref_branch else None,
+            )
+            if not ref_rows:
+                errors.append("fk_exists reference dataset has no rows")
+                continue
+            ref_available_cols: set[str] = set()
+            for row in ref_rows:
+                ref_available_cols.update(str(key) for key in row.keys())
+            missing_ref_cols = [col for col in ref_columns if col not in ref_available_cols]
+            if missing_ref_cols:
+                errors.append(f"fk_exists reference missing column(s): {', '.join(missing_ref_cols)}")
+                continue
+
+            ref_keys: set[tuple[Any, ...]] = set()
+            for row in ref_rows:
+                key = tuple(row.get(col) for col in ref_columns)
+                if any(value is None for value in key):
+                    continue
+                ref_keys.add(key)
+
+            missing_count = 0
+            for row in output_table.rows:
+                key = tuple(row.get(col) for col in columns)
+                if allow_nulls and any(value is None for value in key):
+                    continue
+                if key not in ref_keys:
+                    missing_count += 1
+            if missing_count:
+                ref_label = dataset_name or dataset_id or "reference"
+                errors.append(
+                    f"fk_exists failed: {','.join(columns)} -> {ref_label}({','.join(ref_columns)}) missing={missing_count}"
+                )
+        return errors
+
     async def _apply_transform(
         self,
         metadata: Dict[str, Any],
@@ -354,7 +512,12 @@ class PipelineExecutor:
         if operation == "cast":
             casts = metadata.get("casts") or []
             if casts:
-                return _cast_columns(inputs[0], casts)
+                return _cast_columns(
+                    inputs[0],
+                    casts,
+                    cast_mode=self._cast_mode,
+                    cast_stats=self._cast_stats,
+                )
         if operation == "udf":
             return await self._apply_udf_transform(inputs[0], metadata)
         if operation == "dedupe":
@@ -426,7 +589,24 @@ class PipelineExecutor:
             "columns": columns,
             "rows": rows,
             "column_stats": compute_column_stats(rows=rows, columns=columns),
+            "cast_stats": self._summarize_cast_stats(table.columns),
         }
+
+    def _summarize_cast_stats(self, columns: List[str]) -> Dict[str, Dict[str, Any]]:
+        summary: Dict[str, Dict[str, Any]] = {}
+        for name in columns:
+            stats = self._cast_stats.get(name)
+            if not stats:
+                continue
+            attempted = int(stats.get("attempted") or 0)
+            failed = int(stats.get("failed") or 0)
+            failure_rate = (failed / attempted) if attempted else 0.0
+            summary[name] = {
+                "attempted": attempted,
+                "failed": failed,
+                "failure_rate": round(failure_rate, 4),
+            }
+        return summary
 
     def _select_table(self, result: PipelineRunResult, node_id: Optional[str]) -> PipelineTable:
         if node_id and node_id in result.tables:
@@ -454,6 +634,29 @@ def _extract_schema_columns(schema: Any) -> List[str]:
     if isinstance(schema.get("properties"), dict):
         return list(schema["properties"].keys())
     return []
+
+
+def _extract_schema_types(schema: Any) -> Dict[str, str]:
+    if not isinstance(schema, dict):
+        return {}
+    columns = schema.get("columns")
+    if not isinstance(columns, list):
+        columns = schema.get("fields")
+    if isinstance(columns, list):
+        output: Dict[str, str] = {}
+        for col in columns:
+            if isinstance(col, dict):
+                name = str(col.get("name") or "").strip()
+                if not name:
+                    continue
+                output[name] = normalize_cast_target(col.get("type") or col.get("data_type") or "xsd:string")
+            elif isinstance(col, str):
+                output[col] = "xsd:string"
+        return output
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        return {str(name): "xsd:string" for name in properties.keys() if name}
+    return {}
 
 
 def _extract_sample_rows(sample: Any) -> List[Dict[str, Any]]:
@@ -651,29 +854,114 @@ def _rename_columns(table: PipelineTable, rename_map: Dict[str, Any]) -> Pipelin
     return PipelineTable(columns=cols, rows=rows)
 
 
-def _cast_columns(table: PipelineTable, casts: List[Dict[str, Any]]) -> PipelineTable:
-    def cast_value(value: Any, target: str) -> Any:
-        if value is None:
-            return None
-        normalized = normalize_cast_target(target)
-        if normalized == "xsd:integer":
-            try:
-                return int(value)
-            except Exception:
-                return value
-        if normalized == "xsd:decimal":
-            try:
-                return float(value)
-            except Exception:
-                return value
-        if normalized == "xsd:boolean":
-            if isinstance(value, bool):
-                return value
-            if isinstance(value, str):
-                return value.strip().lower() in {"true", "1", "yes", "y"}
-        return value
+def _record_cast_stat(
+    cast_stats: Optional[Dict[str, Dict[str, int]]],
+    *,
+    column: str,
+    attempted: bool,
+    failed: bool,
+) -> None:
+    if not cast_stats or not attempted:
+        return
+    entry = cast_stats.setdefault(column, {"attempted": 0, "failed": 0})
+    entry["attempted"] = int(entry.get("attempted") or 0) + 1
+    if failed:
+        entry["failed"] = int(entry.get("failed") or 0) + 1
 
-    cast_map = {str(item.get("column")): str(item.get("type")) for item in casts if item.get("column") and item.get("type")}
+
+def _cast_value_with_status(value: Any, target: str, *, cast_mode: str) -> tuple[Any, bool, bool]:
+    normalized = normalize_cast_target(target)
+    if value is None:
+        return None, False, False
+    text = str(value).strip() if not isinstance(value, bool) else str(value)
+    if normalized == "xsd:string":
+        if cast_mode == "SAFE_NULL" and text == "":
+            return None, False, False
+        return text, False, False
+
+    if text == "":
+        if cast_mode == "SAFE_NULL":
+            return None, False, False
+        raise ValueError(f"invalid empty value for {normalized}")
+
+    attempted = True
+    if normalized == "xsd:boolean":
+        if isinstance(value, bool):
+            return value, attempted, False
+        lowered = text.lower()
+        if lowered in {"true", "t", "1", "yes", "y"}:
+            return True, attempted, False
+        if lowered in {"false", "f", "0", "no", "n"}:
+            return False, attempted, False
+        if cast_mode == "SAFE_NULL":
+            return None, attempted, True
+        raise ValueError(f"invalid boolean: {value}")
+
+    if normalized in {"xsd:integer", "xsd:decimal"}:
+        import re
+
+        cleaned = re.sub(r"[,_\s]", "", text)
+        if normalized == "xsd:decimal":
+            cleaned = re.sub(r"%$", "", cleaned)
+            pattern = r"^[+-]?(\d+\.?\d*|\d*\.\d+)$"
+        else:
+            pattern = r"^[+-]?\d+$"
+        if not re.match(pattern, cleaned or ""):
+            if cast_mode == "SAFE_NULL":
+                return None, attempted, True
+            raise ValueError(f"invalid numeric: {value}")
+        return (float(cleaned), attempted, False) if normalized == "xsd:decimal" else (int(cleaned), attempted, False)
+
+    if normalized in {"xsd:date", "xsd:dateTime"}:
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            return (parsed.date(), attempted, False) if normalized == "xsd:date" else (parsed, attempted, False)
+        except Exception:
+            if cast_mode == "SAFE_NULL":
+                return None, attempted, True
+            raise ValueError(f"invalid datetime: {value}")
+    return value, attempted, False
+
+
+def _cast_value(value: Any, target: str, *, cast_mode: str) -> Any:
+    casted, _, _ = _cast_value_with_status(value, target, cast_mode=cast_mode)
+    return casted
+
+
+def _apply_schema_casts(
+    rows: List[Dict[str, Any]],
+    *,
+    schema_types: Dict[str, str],
+    cast_mode: str,
+    cast_stats: Optional[Dict[str, Dict[str, int]]] = None,
+) -> List[Dict[str, Any]]:
+    if not rows or not schema_types:
+        return rows
+    cast_map = {name: schema_types.get(name) for name in schema_types}
+    output: List[Dict[str, Any]] = []
+    for row in rows:
+        new_row = dict(row)
+        for column, target in cast_map.items():
+            if column in new_row and target:
+                casted, attempted, failed = _cast_value_with_status(new_row[column], target, cast_mode=cast_mode)
+                _record_cast_stat(cast_stats, column=column, attempted=attempted, failed=failed)
+                new_row[column] = casted
+        output.append(new_row)
+    return output
+
+
+def _cast_columns(
+    table: PipelineTable,
+    casts: List[Dict[str, Any]],
+    *,
+    cast_mode: str,
+    cast_stats: Optional[Dict[str, Dict[str, int]]] = None,
+) -> PipelineTable:
+    cast_map = {
+        str(item.get("column")): str(item.get("type"))
+        for item in casts
+        if item.get("column") and item.get("type")
+    }
     if not cast_map:
         return table
     rows: List[Dict[str, Any]] = []
@@ -681,7 +969,9 @@ def _cast_columns(table: PipelineTable, casts: List[Dict[str, Any]]) -> Pipeline
         new_row = dict(row)
         for column, target in cast_map.items():
             if column in new_row:
-                new_row[column] = cast_value(new_row[column], target)
+                casted, attempted, failed = _cast_value_with_status(new_row[column], target, cast_mode=cast_mode)
+                _record_cast_stat(cast_stats, column=column, attempted=attempted, failed=failed)
+                new_row[column] = casted
         rows.append(new_row)
     return PipelineTable(columns=table.columns, rows=rows)
 

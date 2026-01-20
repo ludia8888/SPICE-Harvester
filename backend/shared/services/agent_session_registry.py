@@ -1007,6 +1007,41 @@ class AgentSessionRegistry:
             )
         return [self._row_to_message(row) for row in rows]
 
+    async def list_recent_messages(
+        self,
+        *,
+        session_id: str,
+        tenant_id: str,
+        limit: int = 50,
+        include_removed: bool = False,
+    ) -> List[AgentSessionMessageRecord]:
+        if not self._pool:
+            raise RuntimeError("AgentSessionRegistry not connected")
+        existing = await self.get_session(session_id=session_id, tenant_id=tenant_id)
+        if not existing:
+            raise ValueError("session not found")
+
+        where = "session_id = $1::uuid"
+        if not include_removed:
+            where += " AND is_removed = false"
+
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT message_id, session_id, role, content, content_digest,
+                       is_removed, removed_at, removed_by, removed_reason,
+                       token_count, cost_estimate, latency_ms, metadata, created_at
+                FROM {self._schema}.agent_session_messages
+                WHERE {where}
+                ORDER BY created_at DESC
+                LIMIT $2
+                """,
+                session_id,
+                int(limit),
+            )
+        ordered = list(reversed(rows or []))
+        return [self._row_to_message(row) for row in ordered]
+
     async def get_messages_by_ids(
         self,
         *,

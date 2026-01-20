@@ -1060,6 +1060,10 @@ class PipelineSettings(BaseSettings):
         default=True,
         description="Enable Spark ANSI mode (PIPELINE_SPARK_ANSI_ENABLED)",
     )
+    cast_mode: str = Field(
+        default="SAFE_NULL",
+        description="Casting policy: SAFE_NULL or STRICT (PIPELINE_CAST_MODE)",
+    )
     artifact_path: str = Field(
         default="data/pipeline_artifacts",
         description="Local pipeline artifact path root (PIPELINE_ARTIFACT_PATH)",

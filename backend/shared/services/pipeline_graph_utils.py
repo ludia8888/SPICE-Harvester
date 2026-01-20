@@ -24,8 +24,8 @@ def normalize_edges(edges_raw: Any) -> List[Dict[str, str]]:
     for edge in edges_raw:
         if not isinstance(edge, dict):
             continue
-        src = str(edge.get("from") or "")
-        dst = str(edge.get("to") or "")
+        src = str(edge.get("from") or edge.get("source") or "")
+        dst = str(edge.get("to") or edge.get("target") or "")
         if not src or not dst:
             continue
         edges.append({"from": src, "to": dst})

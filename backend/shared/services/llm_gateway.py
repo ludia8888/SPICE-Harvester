@@ -328,6 +328,68 @@ def _openai_temperature_params(model: str, temperature: float) -> Dict[str, Any]
     return {"temperature": float(temperature)}
 
 
+def _openai_reasoning_params(model: str) -> Dict[str, Any]:
+    """
+    OpenAI responses API: gpt-5 needs low reasoning effort to emit output tokens.
+    """
+    model_name = str(model or "").strip().lower()
+    if model_name.startswith("gpt-5"):
+        return {"reasoning": {"effort": "low"}}
+    return {}
+
+
+def _use_openai_responses_api(model: str) -> bool:
+    model_name = str(model or "").strip().lower()
+    return model_name.startswith("gpt-5")
+
+
+def _extract_openai_responses_text(data: Any) -> str:
+    if not isinstance(data, dict):
+        return ""
+    output_text = data.get("output_text")
+    if isinstance(output_text, str) and output_text.strip():
+        return output_text
+    output = data.get("output")
+    texts: list[str] = []
+    if isinstance(output, list):
+        for item in output:
+            if not isinstance(item, dict):
+                continue
+            item_type = item.get("type")
+            if item_type == "output_text" and item.get("text"):
+                texts.append(str(item.get("text")))
+                continue
+            if item_type != "message":
+                continue
+            content = item.get("content")
+            if not isinstance(content, list):
+                continue
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                if part.get("type") in {"output_text", "text"} and part.get("text"):
+                    texts.append(str(part.get("text")))
+    return "".join(texts)
+
+
+def _mask_payload(value: Any, *, max_chars: int) -> Any:
+    if isinstance(value, dict):
+        return {str(k): _mask_payload(v, max_chars=max_chars) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_mask_payload(v, max_chars=max_chars) for v in value]
+    if isinstance(value, str):
+        return mask_pii_text(value, max_chars=max_chars)
+    return value
+
+
+def _log_llm_event(event: str, payload: Dict[str, Any], *, max_chars: int = 1000) -> None:
+    try:
+        safe_payload = _mask_payload(payload, max_chars=max_chars)
+        logger.info("llm_event=%s payload=%s", event, json.dumps(safe_payload, ensure_ascii=True))
+    except Exception as exc:
+        logger.info("llm_event=%s payload_error=%s", event, exc)
+
+
 class LLMGateway:
     """
     A thin, safe wrapper around an LLM provider.
@@ -443,6 +505,20 @@ class LLMGateway:
         extra_body: Optional[Dict[str, Any]] = None,
     ) -> tuple[Dict[str, Any], dict[str, Any]]:
         url = f"{self.base_url}/chat/completions"
+        _log_llm_event(
+            "openai.request",
+            {
+                "mode": "json",
+                "task": task,
+                "model": model,
+                "prompt_hash": prompt_hash,
+                "system_prompt_chars": len(system_prompt),
+                "user_prompt_chars": len(user_prompt),
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "json_mode": bool(self.enable_json_mode),
+            },
+        )
         headers: Dict[str, str] = {
             "Content-Type": "application/json",
             "Idempotency-Key": sha256_hex(f"llm:{task}:{model}:{prompt_hash}"),
@@ -471,12 +547,33 @@ class LLMGateway:
         async with httpx.AsyncClient(timeout=self.timeout_s) as client:
             resp = await client.post(url, headers=headers, json=body)
         if resp.status_code >= 400:
+            _log_llm_event(
+                "openai.http_error",
+                {"mode": "json", "task": task, "model": model, "status_code": resp.status_code, "body": resp.text[:500]},
+            )
             raise LLMHTTPStatusError(status_code=resp.status_code, body_preview=resp.text[:500])
 
         data = resp.json()
         choice = (data.get("choices") or [{}])[0] if isinstance(data, dict) else {}
         message = (choice.get("message") or {}) if isinstance(choice, dict) else {}
         content = (message.get("content") or "") if isinstance(message, dict) else ""
+        fallback_text = choice.get("text") if isinstance(choice, dict) else None
+        if not content and isinstance(fallback_text, str):
+            content = fallback_text
+        _log_llm_event(
+            "openai.response",
+            {
+                "mode": "json",
+                "task": task,
+                "model": model,
+                "finish_reason": choice.get("finish_reason") if isinstance(choice, dict) else None,
+                "choice_keys": sorted(choice.keys()) if isinstance(choice, dict) else [],
+                "message_keys": sorted(message.keys()) if isinstance(message, dict) else [],
+                "text_len": len(str(fallback_text or "")),
+                "content_len": len(str(content or "")),
+                "content_preview": content,
+            },
+        )
 
         if not content and isinstance(message, dict):
             tool_calls = message.get("tool_calls")
@@ -489,6 +586,14 @@ class LLMGateway:
 
         obj = _extract_json_object(str(content or ""))
         usage = data.get("usage") if isinstance(data, dict) else {}
+        if isinstance(usage, dict) and ("input_tokens" in usage or "output_tokens" in usage):
+            prompt_tokens = int(usage.get("input_tokens") or 0)
+            completion_tokens = int(usage.get("output_tokens") or 0)
+            usage = {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            }
         return obj, usage if isinstance(usage, dict) else {}
 
     async def _call_openai_compat_tool_call(
@@ -507,6 +612,20 @@ class LLMGateway:
         extra_body: Optional[Dict[str, Any]] = None,
     ) -> tuple[Dict[str, Any], dict[str, Any]]:
         url = f"{self.base_url}/chat/completions"
+        _log_llm_event(
+            "openai.request",
+            {
+                "mode": "tool_call",
+                "task": task,
+                "model": model,
+                "prompt_hash": prompt_hash,
+                "tool_name": tool_name,
+                "system_prompt_chars": len(system_prompt),
+                "user_prompt_chars": len(user_prompt),
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            },
+        )
         headers: Dict[str, str] = {
             "Content-Type": "application/json",
             "Idempotency-Key": sha256_hex(f"llm:{task}:{model}:{prompt_hash}:tools"),
@@ -547,6 +666,16 @@ class LLMGateway:
         async with httpx.AsyncClient(timeout=self.timeout_s) as client:
             resp = await client.post(url, headers=headers, json=body)
         if resp.status_code >= 400:
+            _log_llm_event(
+                "openai.http_error",
+                {
+                    "mode": "tool_call",
+                    "task": task,
+                    "model": model,
+                    "status_code": resp.status_code,
+                    "body": resp.text[:500],
+                },
+            )
             raise LLMHTTPStatusError(status_code=resp.status_code, body_preview=resp.text[:500])
 
         data = resp.json()
@@ -554,20 +683,132 @@ class LLMGateway:
         message = (choice.get("message") or {}) if isinstance(choice, dict) else {}
 
         content = (message.get("content") or "") if isinstance(message, dict) else ""
+        fallback_text = choice.get("text") if isinstance(choice, dict) else None
+        if not content and isinstance(fallback_text, str):
+            content = fallback_text
+        tool_calls = message.get("tool_calls") if isinstance(message, dict) else None
         arguments = None
-        if isinstance(message, dict):
-            tool_calls = message.get("tool_calls")
-            if isinstance(tool_calls, list) and tool_calls:
-                first = tool_calls[0]
-                if isinstance(first, dict):
-                    func = first.get("function")
-                    if isinstance(func, dict):
-                        arguments = func.get("arguments")
+        if isinstance(tool_calls, list) and tool_calls:
+            first = tool_calls[0]
+            if isinstance(first, dict):
+                func = first.get("function")
+                if isinstance(func, dict):
+                    arguments = func.get("arguments")
+        if arguments is None and isinstance(message, dict):
+            legacy_call = message.get("function_call")
+            if isinstance(legacy_call, dict):
+                arguments = legacy_call.get("arguments")
+
+        _log_llm_event(
+            "openai.response",
+            {
+                "mode": "tool_call",
+                "task": task,
+                "model": model,
+                "finish_reason": choice.get("finish_reason") if isinstance(choice, dict) else None,
+                "choice_keys": sorted(choice.keys()) if isinstance(choice, dict) else [],
+                "message_keys": sorted(message.keys()) if isinstance(message, dict) else [],
+                "tool_calls_count": len(tool_calls) if isinstance(tool_calls, list) else 0,
+                "content_len": len(str(content or "")),
+                "arguments_len": len(str(arguments or "")) if arguments is not None else 0,
+                "content_preview": content,
+                "arguments_preview": arguments,
+            },
+        )
 
         if arguments is None:
             arguments = content
 
         obj = _extract_json_object(str(arguments or ""))
+        usage = data.get("usage") if isinstance(data, dict) else {}
+        return obj, usage if isinstance(usage, dict) else {}
+
+    async def _call_openai_compat_responses_json(
+        self,
+        *,
+        task: str,
+        system_prompt: str,
+        user_prompt: str,
+        model: str,
+        max_tokens: int,
+        prompt_hash: str,
+        extra_headers: Optional[Dict[str, str]] = None,
+        extra_body: Optional[Dict[str, Any]] = None,
+    ) -> tuple[Dict[str, Any], dict[str, Any]]:
+        url = f"{self.base_url}/responses"
+        _log_llm_event(
+            "openai.request",
+            {
+                "mode": "responses_json",
+                "task": task,
+                "model": model,
+                "prompt_hash": prompt_hash,
+                "system_prompt_chars": len(system_prompt),
+                "user_prompt_chars": len(user_prompt),
+                "max_output_tokens": max_tokens,
+            },
+        )
+        headers: Dict[str, str] = {
+            "Content-Type": "application/json",
+            "Idempotency-Key": sha256_hex(f"llm:{task}:{model}:{prompt_hash}:responses"),
+        }
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        if extra_headers:
+            headers.update({str(k): str(v) for k, v in extra_headers.items() if str(k).strip() and str(v).strip()})
+
+        body: Dict[str, Any] = {
+            "model": model,
+            "input": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "text": {"format": {"type": "json_object"}, "verbosity": "low"},
+            "max_output_tokens": int(max_tokens),
+        }
+        body.update(_openai_reasoning_params(model))
+        if extra_body:
+            for key, value in extra_body.items():
+                if str(key).strip():
+                    body[str(key)] = value
+
+        async with httpx.AsyncClient(timeout=self.timeout_s) as client:
+            resp = await client.post(url, headers=headers, json=body)
+        if resp.status_code >= 400:
+            _log_llm_event(
+                "openai.http_error",
+                {
+                    "mode": "responses_json",
+                    "task": task,
+                    "model": model,
+                    "status_code": resp.status_code,
+                    "body": resp.text[:500],
+                },
+            )
+            raise LLMHTTPStatusError(status_code=resp.status_code, body_preview=resp.text[:500])
+
+        data = resp.json()
+        content_text = _extract_openai_responses_text(data)
+        _log_llm_event(
+            "openai.response",
+            {
+                "mode": "responses_json",
+                "task": task,
+                "model": model,
+                "status": data.get("status") if isinstance(data, dict) else None,
+                "output_len": len(content_text or ""),
+                "output_preview": content_text,
+                "output_types": [
+                    item.get("type")
+                    for item in (data.get("output") or [])
+                    if isinstance(item, dict) and item.get("type")
+                ]
+                if isinstance(data, dict)
+                else [],
+            },
+        )
+
+        obj = _extract_json_object(str(content_text or ""))
         usage = data.get("usage") if isinstance(data, dict) else {}
         return obj, usage if isinstance(usage, dict) else {}
 
@@ -877,30 +1118,58 @@ class LLMGateway:
                             obj = _extract_json_object(raw)
                         usage = {}
                     elif provider == "openai_compat":
-                        tool_calls_supported = self._tool_calls_supported.get(model_to_use)
-                        want_native = bool(native_flag) and tool_calls_supported is not False
-                        if want_native:
-                            safe_task = re.sub(r"[^a-zA-Z0-9_]+", "_", (task or "task").strip().lower()).strip("_")
-                            tool_name = f"return_{safe_task}"[:64] if safe_task else "return_json"
-                            try:
-                                obj, usage = await self._call_openai_compat_tool_call(
-                                    task=task,
-                                    system_prompt=system_prompt,
-                                    user_prompt=user_prompt,
-                                    model=model_to_use,
-                                    temperature=temperature,
-                                    max_tokens=max_tokens,
-                                    prompt_hash=prompt_hash,
-                                    tool_name=tool_name,
-                                    tool_parameters=_tool_parameters_from_model(response_model),
-                                    extra_headers=provider_extra_headers,
-                                    extra_body=provider_extra_body,
-                                )
-                                self._tool_calls_supported[model_to_use] = True
-                            except LLMHTTPStatusError as exc:
-                                # If the upstream does not support tools/tool_choice, fall back to prompt-based JSON.
-                                if exc.status_code in {400, 404}:
-                                    self._tool_calls_supported[model_to_use] = False
+                        if _use_openai_responses_api(model_to_use):
+                            obj, usage = await self._call_openai_compat_responses_json(
+                                task=task,
+                                system_prompt=system_prompt,
+                                user_prompt=user_prompt,
+                                model=model_to_use,
+                                max_tokens=max_tokens,
+                                prompt_hash=prompt_hash,
+                                extra_headers=provider_extra_headers,
+                                extra_body=provider_extra_body,
+                            )
+                            self._tool_calls_supported[model_to_use] = False
+                        else:
+                            tool_calls_supported = self._tool_calls_supported.get(model_to_use)
+                            want_native = bool(native_flag) and tool_calls_supported is not False
+                            if want_native:
+                                safe_task = re.sub(r"[^a-zA-Z0-9_]+", "_", (task or "task").strip().lower()).strip("_")
+                                tool_name = f"return_{safe_task}"[:64] if safe_task else "return_json"
+                                try:
+                                    obj, usage = await self._call_openai_compat_tool_call(
+                                        task=task,
+                                        system_prompt=system_prompt,
+                                        user_prompt=user_prompt,
+                                        model=model_to_use,
+                                        temperature=temperature,
+                                        max_tokens=max_tokens,
+                                        prompt_hash=prompt_hash,
+                                        tool_name=tool_name,
+                                        tool_parameters=_tool_parameters_from_model(response_model),
+                                        extra_headers=provider_extra_headers,
+                                        extra_body=provider_extra_body,
+                                    )
+                                    self._tool_calls_supported[model_to_use] = True
+                                except LLMHTTPStatusError as exc:
+                                    # If the upstream does not support tools/tool_choice, fall back to prompt-based JSON.
+                                    if exc.status_code in {400, 404}:
+                                        self._tool_calls_supported[model_to_use] = False
+                                        obj, usage = await self._call_openai_compat_json(
+                                            task=task,
+                                            system_prompt=system_prompt,
+                                            user_prompt=user_prompt,
+                                            model=model_to_use,
+                                            temperature=temperature,
+                                            max_tokens=max_tokens,
+                                            prompt_hash=prompt_hash,
+                                            extra_headers=provider_extra_headers,
+                                            extra_body=provider_extra_body,
+                                        )
+                                    else:
+                                        raise
+                                except LLMOutputValidationError:
+                                    # Tool calls can be flaky; fall back to strict JSON mode.
                                     obj, usage = await self._call_openai_compat_json(
                                         task=task,
                                         system_prompt=system_prompt,
@@ -912,20 +1181,18 @@ class LLMGateway:
                                         extra_headers=provider_extra_headers,
                                         extra_body=provider_extra_body,
                                     )
-                                else:
-                                    raise
-                        else:
-                            obj, usage = await self._call_openai_compat_json(
-                                task=task,
-                                system_prompt=system_prompt,
-                                user_prompt=user_prompt,
-                                model=model_to_use,
-                                temperature=temperature,
-                                max_tokens=max_tokens,
-                                prompt_hash=prompt_hash,
-                                extra_headers=provider_extra_headers,
-                                extra_body=provider_extra_body,
-                            )
+                            else:
+                                obj, usage = await self._call_openai_compat_json(
+                                    task=task,
+                                    system_prompt=system_prompt,
+                                    user_prompt=user_prompt,
+                                    model=model_to_use,
+                                    temperature=temperature,
+                                    max_tokens=max_tokens,
+                                    prompt_hash=prompt_hash,
+                                    extra_headers=provider_extra_headers,
+                                    extra_body=provider_extra_body,
+                                )
                     elif provider == "anthropic":
                         obj, usage = await self._call_anthropic_json(
                             task=task,
@@ -977,8 +1244,16 @@ class LLMGateway:
                     self._record_circuit_success(circuit_key=circuit_key)
                     break
                 except (ValidationError, LLMOutputValidationError) as exc:
-                    # Model responded but produced invalid output; do not retry by default.
+                    # Model responded but produced invalid output; allow limited retries for responses API.
                     last_exc = exc
+                    if (
+                        provider == "openai_compat"
+                        and _use_openai_responses_api(model_to_use)
+                        and attempt < (max_attempts - 1)
+                    ):
+                        delay_s = self._retry_delay_s(prompt_hash=prompt_hash, attempt=attempt)
+                        await asyncio.sleep(delay_s)
+                        continue
                     raise
                 except Exception as exc:
                     last_exc = exc

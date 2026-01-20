@@ -210,14 +210,31 @@ services:
       - lakefs
       - minio-init
     environment:
+      - LAKEFS_INSTALLATION_USER_NAME=${LAKEFS_INSTALLATION_USER_NAME:-spice-admin}
       - LAKEFS_INSTALLATION_ACCESS_KEY_ID=${LAKEFS_DOCKER_ACCESS_KEY_ID:-spice-lakefs-admin}
       - LAKEFS_INSTALLATION_SECRET_ACCESS_KEY=${LAKEFS_DOCKER_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}
+      - LAKEFS_ARTIFACTS_REPOSITORY=${LAKEFS_ARTIFACTS_REPOSITORY:-pipeline-artifacts}
+      - LAKEFS_RAW_REPOSITORY=${LAKEFS_RAW_REPOSITORY:-raw-datasets}
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         set -eu
         echo "Waiting for lakeFS..."
-        until curl -fsS http://lakefs:8000/healthcheck >/dev/null 2>&1; do sleep 1; done
+        until curl -fsS http://lakefs:8000/api/v1/healthcheck >/dev/null 2>&1; do sleep 1; done
+        echo "Checking lakeFS setup state..."
+        state="$(curl -fsS http://lakefs:8000/api/v1/setup_lakefs || true)"
+        if echo "$$state" | grep -q "not_initialized"; then
+          echo "Bootstrapping lakeFS admin user..."
+          username="$${LAKEFS_INSTALLATION_USER_NAME:-spice-admin}"
+          auth_user="$${LAKEFS_INSTALLATION_ACCESS_KEY_ID:-spice-lakefs-admin}"
+          auth_pass="$${LAKEFS_INSTALLATION_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}"
+          curl -fsS -X POST http://lakefs:8000/api/v1/setup_lakefs \
+            -H 'Content-Type: application/json' \
+            -d "{\"username\":\"$$username\",\"key\":{\"access_key_id\":\"$$auth_user\",\"secret_access_key\":\"$$auth_pass\"}}" >/dev/null
+          curl -fsS -X POST http://lakefs:8000/api/v1/setup_comm_prefs \
+            -H 'Content-Type: application/json' \
+            -d '{"featureUpdates":false,"securityUpdates":false}' >/dev/null 2>&1 || true
+        fi
         echo "Ensuring repositories..."
         auth_user="$${LAKEFS_INSTALLATION_ACCESS_KEY_ID:-spice-lakefs-admin}"
         auth_pass="$${LAKEFS_INSTALLATION_SECRET_ACCESS_KEY:-spice-lakefs-admin-secret}"
@@ -232,8 +249,8 @@ services:
             exit 1
           fi
         }
-        create_repo "pipeline-artifacts" "s3://lakefs/pipeline-artifacts"
-        create_repo "raw-datasets" "s3://lakefs/raw-datasets"
+        create_repo "$${LAKEFS_ARTIFACTS_REPOSITORY:-pipeline-artifacts}" "s3://lakefs/$${LAKEFS_ARTIFACTS_REPOSITORY:-pipeline-artifacts}"
+        create_repo "$${LAKEFS_RAW_REPOSITORY:-raw-datasets}" "s3://lakefs/$${LAKEFS_RAW_REPOSITORY:-raw-datasets}"
         create_repo "ontology-writeback" "s3://lakefs/ontology-writeback"
         echo "lakeFS repositories ready."
         exit 0

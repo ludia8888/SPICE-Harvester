@@ -799,7 +799,7 @@ export const unregisterGoogleSheet = async (sheetId: string) => {
   return data
 }
 
-export type AIQueryMode = 'auto' | 'label_query' | 'graph_query'
+export type AIQueryMode = 'auto' | 'label_query' | 'graph_query' | 'dataset_list'
 
 export type AIQueryRequest = {
   question: string
@@ -808,6 +808,7 @@ export type AIQueryRequest = {
   limit?: number
   include_documents?: boolean
   include_provenance?: boolean
+  session_id?: string | null
 }
 
 export type AIIntentRoute = 'chat' | 'query' | 'plan'
@@ -820,6 +821,7 @@ export type AIIntentRequest = {
   pipeline_name?: string | null
   language?: string | null
   context?: Record<string, unknown> | null
+  session_id?: string | null
 }
 
 export type AIIntentResponse = {
@@ -984,6 +986,17 @@ export type AgentSessionEvent = {
   data?: Record<string, unknown>
 }
 
+export type AgentSessionContextItem = {
+  item_id: string
+  item_type: string
+  include_mode: string
+  ref: Record<string, unknown>
+  token_count?: number | null
+  metadata?: Record<string, unknown> | null
+  created_at: string
+  updated_at: string
+}
+
 export const createAgentSession = async (payload: {
   selected_model?: string | null
   enabled_tools?: string[] | null
@@ -1099,6 +1112,37 @@ export const attachAgentSessionContextItem = async (
       body: JSON.stringify(payload),
     },
     'Failed to attach agent context',
+  )
+  return data
+}
+
+export const listAgentSessionContextItems = async (
+  sessionId: string,
+  params?: { limit?: number; offset?: number },
+) => {
+  const query = new URLSearchParams()
+  if (typeof params?.limit === 'number') {
+    query.set('limit', String(params.limit))
+  }
+  if (typeof params?.offset === 'number') {
+    query.set('offset', String(params.offset))
+  }
+  const suffix = query.toString()
+  const data = await requestApi<{ context_items: AgentSessionContextItem[] }>(
+    `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}/context/items${suffix ? `?${suffix}` : ''}`,
+    {},
+    'Failed to fetch agent context items',
+  )
+  return data
+}
+
+export const removeAgentSessionContextItem = async (sessionId: string, itemId: string) => {
+  const data = await requestApi<Record<string, unknown>>(
+    `/api/v1/agent-sessions/${encodeURIComponent(sessionId)}/context/items/${encodeURIComponent(itemId)}`,
+    {
+      method: 'DELETE',
+    },
+    'Failed to remove agent context item',
   )
   return data
 }

@@ -400,6 +400,135 @@ async def validate_agent_plan(
             )
         )
 
+    def _normalize_pipeline_edges(definition: Dict[str, Any]) -> tuple[Dict[str, Any], bool]:
+        edges = definition.get("edges")
+        if not isinstance(edges, list):
+            return definition, False
+        normalized_edges: List[Any] = []
+        changed = False
+        for edge in edges:
+            if not isinstance(edge, dict):
+                normalized_edges.append(edge)
+                continue
+            from_value = edge.get("from")
+            to_value = edge.get("to")
+            source_value = edge.get("source")
+            target_value = edge.get("target")
+            if (from_value is None or to_value is None) and (source_value is not None or target_value is not None):
+                changed = True
+                updated_edge = dict(edge)
+                if from_value is None and source_value is not None:
+                    updated_edge["from"] = source_value
+                if to_value is None and target_value is not None:
+                    updated_edge["to"] = target_value
+                updated_edge.pop("source", None)
+                updated_edge.pop("target", None)
+                normalized_edges.append(updated_edge)
+                continue
+            normalized_edges.append(edge)
+        if not changed:
+            return definition, False
+        updated_definition = dict(definition)
+        updated_definition["edges"] = normalized_edges
+        return updated_definition, True
+
+    def _normalize_pipeline_nodes(definition: Dict[str, Any]) -> tuple[Dict[str, Any], bool]:
+        nodes = definition.get("nodes")
+        if not isinstance(nodes, list):
+            return definition, False
+        changed = False
+        normalized_nodes: List[Any] = []
+        for node in nodes:
+            if not isinstance(node, dict):
+                normalized_nodes.append(node)
+                continue
+            metadata = node.get("metadata")
+            if not isinstance(metadata, dict):
+                normalized_nodes.append(node)
+                continue
+            operation_raw = str(metadata.get("operation") or "").strip()
+            operation = operation_raw.lower()
+            updated_metadata = metadata
+            updated = False
+            if not operation:
+                if any(
+                    key in metadata
+                    for key in (
+                        "leftKey",
+                        "rightKey",
+                        "joinKey",
+                        "joinType",
+                        "allowCrossJoin",
+                        "left",
+                        "right",
+                    )
+                ):
+                    updated_metadata = dict(updated_metadata)
+                    updated_metadata["operation"] = "join"
+                    operation = "join"
+                    updated = True
+                elif any(key in metadata for key in ("aggregates", "aggregations", "groupBy", "groupKeys", "keys")):
+                    updated_metadata = dict(updated_metadata)
+                    updated_metadata["operation"] = "groupBy"
+                    operation = "groupby"
+                    updated = True
+                elif any(key in metadata for key in ("columns", "fields")):
+                    updated_metadata = dict(updated_metadata)
+                    updated_metadata["operation"] = "select"
+                    operation = "select"
+                    updated = True
+            if operation in {"groupby", "aggregate"}:
+                if not updated_metadata.get("groupBy"):
+                    for key in ("groupKeys", "group_by", "keys"):
+                        if isinstance(updated_metadata.get(key), list):
+                            updated_metadata = dict(updated_metadata)
+                            updated_metadata["groupBy"] = updated_metadata.get(key)
+                            updated = True
+                            break
+                source_aggregates = None
+                if isinstance(updated_metadata.get("aggregates"), list):
+                    source_aggregates = updated_metadata.get("aggregates")
+                elif isinstance(updated_metadata.get("aggregations"), list):
+                    source_aggregates = updated_metadata.get("aggregations")
+                if source_aggregates is not None:
+                    normalized_aggregates = []
+                    for agg in source_aggregates:
+                        if not isinstance(agg, dict):
+                            continue
+                        column = agg.get("column") or agg.get("field")
+                        op = agg.get("op") or agg.get("func")
+                        alias = agg.get("alias") or agg.get("as")
+                        if not column or not op:
+                            continue
+                        entry = {"column": column, "op": op}
+                        if alias:
+                            entry["alias"] = alias
+                        normalized_aggregates.append(entry)
+                    if normalized_aggregates:
+                        updated_metadata = dict(updated_metadata)
+                        updated_metadata["aggregates"] = normalized_aggregates
+                        updated_metadata.pop("aggregations", None)
+                        updated = True
+            if operation in {"select", "drop", "sort", "dedupe", "explode"}:
+                columns = updated_metadata.get("columns") if isinstance(updated_metadata.get("columns"), list) else []
+                if not columns and isinstance(updated_metadata.get("fields"), list):
+                    updated_metadata = dict(updated_metadata)
+                    updated_metadata["columns"] = updated_metadata.get("fields")
+                    updated_metadata.pop("fields", None)
+                    updated = True
+            if updated:
+                updated_node = dict(node)
+                updated_node["metadata"] = updated_metadata
+                normalized_nodes.append(updated_node)
+                changed = True
+            else:
+                normalized_nodes.append(node)
+        if not changed:
+            return definition, False
+        updated_definition = dict(definition)
+        updated_definition["nodes"] = normalized_nodes
+        return updated_definition, True
+
     all_policies = await tool_registry.list_tool_policies(status=None, limit=1000)
     policy_by_tool_id = {p.tool_id: p for p in all_policies if p.tool_id}
     active_policies = [p for p in all_policies if str(p.status or "").strip().upper() == "ACTIVE"]
@@ -455,6 +584,18 @@ async def validate_agent_plan(
                 message=msg,
                 step=step,
                 fix_hint="Activate the tool policy or choose another tool_id.",
+            )
+            risk_levels.append(AgentPlanRiskLevel.admin)
+            normalized_steps.append(step.model_copy(update={"requires_approval": True}))
+            continue
+
+        if str(policy.tool_type or "").strip().lower() == "clarification":
+            msg = f"tool_id={step.tool_id} is not allowed in agent plans (clarification tools are server-driven)"
+            _add_error(
+                code="tool_not_allowed",
+                message=msg,
+                step=step,
+                fix_hint="Remove clarification steps; the server will request clarifications directly.",
             )
             risk_levels.append(AgentPlanRiskLevel.admin)
             normalized_steps.append(step.model_copy(update={"requires_approval": True}))
@@ -563,6 +704,165 @@ async def validate_agent_plan(
                 "requires_approval": step_requires_approval,
             }
         )
+
+        if normalized_step.tool_id in {
+            _PIPELINE_SIMULATE_DEFINITION_TOOL_ID,
+            _PIPELINE_CREATE_TOOL_ID,
+            _PIPELINE_UPDATE_TOOL_ID,
+        }:
+            body_obj = normalized_step.body if isinstance(normalized_step.body, dict) else {}
+            definition_json = None
+            definition_key = None
+            if isinstance(body_obj.get("definition_json"), dict):
+                definition_json = body_obj.get("definition_json")
+                definition_key = "definition_json"
+            elif isinstance(body_obj.get("definitionJson"), dict):
+                definition_json = body_obj.get("definitionJson")
+                definition_key = "definitionJson"
+            graph_obj = body_obj.get("graph") if isinstance(body_obj.get("graph"), dict) else None
+            unwrap_body: Optional[Dict[str, Any]] = None
+            if isinstance(definition_json, dict) and isinstance(definition_json.get("graph"), dict):
+                has_nodes = isinstance(definition_json.get("nodes"), list) or isinstance(definition_json.get("edges"), list)
+                if not has_nodes:
+                    graph_payload = definition_json.get("graph")
+                    candidate_body = dict(body_obj)
+                    if not str(candidate_body.get("db_name") or "").strip():
+                        db_value = candidate_body.get("dbName") or definition_json.get("db_name") or definition_json.get("dbName")
+                        if db_value:
+                            candidate_body["db_name"] = db_value
+                    if not str(candidate_body.get("branch") or "").strip():
+                        branch_value = definition_json.get("branch")
+                        if branch_value:
+                            candidate_body["branch"] = branch_value
+                    if normalized_step.tool_id in {_PIPELINE_CREATE_TOOL_ID, _PIPELINE_UPDATE_TOOL_ID}:
+                        if not str(candidate_body.get("name") or "").strip():
+                            name_value = definition_json.get("name")
+                            if name_value:
+                                candidate_body["name"] = name_value
+                        if not str(candidate_body.get("description") or "").strip():
+                            desc_value = definition_json.get("description")
+                            if desc_value:
+                                candidate_body["description"] = desc_value
+                    candidate_body["definition_json"] = graph_payload
+                    unwrap_body = candidate_body
+                    definition_json = graph_payload
+                    definition_key = "definition_json"
+            if unwrap_body is not None:
+                patch_id = f"unwrap_definition_graph.{normalized_step.step_id}"
+                _add_error(
+                    code="pipeline_definition_wrapped",
+                    message=f"tool_id={normalized_step.tool_id} definition_json.graph should be body.definition_json",
+                    step=normalized_step,
+                    field="body.definition_json.graph",
+                    fix_hint="Move definition_json.graph into body.definition_json and lift db_name/branch/name.",
+                    patch_id=patch_id,
+                )
+                _maybe_add_patch(
+                    patch_id=patch_id,
+                    title=f"Unwrap definition_json.graph for step {normalized_step.step_id}",
+                    description="Moves definition_json.graph into body.definition_json and lifts common fields to body.",
+                    auto_applicable=True,
+                    operations=[PlanPatchOp(op="replace", path=f"/steps/{idx}/body", value=unwrap_body)],
+                )
+            if isinstance(definition_json, dict):
+                normalized_definition, edges_changed = _normalize_pipeline_edges(definition_json)
+                if edges_changed:
+                    field_name = f"body.{definition_key}.edges" if definition_key else "body.definition_json.edges"
+                    _add_warning(
+                        code="pipeline_edge_fields_normalized",
+                        message=f"tool_id={normalized_step.tool_id} pipeline edges normalized to from/to",
+                        step=normalized_step,
+                        field=field_name,
+                        fix_hint="Use edges[].from/to in future plans.",
+                    )
+                normalized_definition, nodes_changed = _normalize_pipeline_nodes(normalized_definition)
+                if nodes_changed:
+                    field_name = f"body.{definition_key}" if definition_key else "body.definition_json"
+                    _add_warning(
+                        code="pipeline_node_metadata_normalized",
+                        message=f"tool_id={normalized_step.tool_id} pipeline node metadata normalized",
+                        step=normalized_step,
+                        field=field_name,
+                        fix_hint="Use groupBy/aggregates/columns keys in future plans.",
+                    )
+                if edges_changed or nodes_changed:
+                    updated_body = dict(body_obj)
+                    key = definition_key or "definition_json"
+                    updated_body[key] = normalized_definition
+                    normalized_step = normalized_step.model_copy(update={"body": updated_body})
+                    body_obj = updated_body
+                definition_json = normalized_definition
+
+            if normalized_step.tool_id == _PIPELINE_SIMULATE_DEFINITION_TOOL_ID:
+                updated_body = dict(body_obj)
+                if not str(updated_body.get("db_name") or "").strip():
+                    db_value = str(updated_body.get("dbName") or getattr(plan.data_scope, "db_name", "") or "").strip()
+                    if db_value:
+                        updated_body["db_name"] = db_value
+                        _add_warning(
+                            code="pipeline_db_name_normalized",
+                            message=f"tool_id={normalized_step.tool_id} missing db_name; filled from plan data_scope",
+                            step=normalized_step,
+                            field="body.db_name",
+                            fix_hint="Include body.db_name in future plans.",
+                        )
+                if not str(updated_body.get("branch") or "").strip():
+                    branch_value = str(updated_body.get("branch") or getattr(plan.data_scope, "branch", "") or "").strip()
+                    if branch_value:
+                        updated_body["branch"] = branch_value
+                        _add_warning(
+                            code="pipeline_branch_normalized",
+                            message=f"tool_id={normalized_step.tool_id} missing branch; filled from plan data_scope",
+                            step=normalized_step,
+                            field="body.branch",
+                            fix_hint="Include body.branch in future plans.",
+                        )
+                if updated_body != body_obj:
+                    normalized_step = normalized_step.model_copy(update={"body": updated_body})
+                    body_obj = updated_body
+            if unwrap_body is None:
+                if not str(body_obj.get("db_name") or "").strip():
+                    db_value = body_obj.get("dbName")
+                    if isinstance(definition_json, dict):
+                        db_value = db_value or definition_json.get("db_name") or definition_json.get("dbName")
+                    if db_value:
+                        patch_id = f"lift_db_name.{normalized_step.step_id}"
+                        _add_error(
+                            code="pipeline_db_name_missing",
+                            message=f"tool_id={normalized_step.tool_id} missing body.db_name (found in definition_json)",
+                            step=normalized_step,
+                            field="body.db_name",
+                            fix_hint="Set body.db_name from definition_json.",
+                            patch_id=patch_id,
+                        )
+                        _maybe_add_patch(
+                            patch_id=patch_id,
+                            title=f"Lift db_name for step {normalized_step.step_id}",
+                            description="Adds body.db_name from definition_json/dbName.",
+                            auto_applicable=True,
+                            operations=[PlanPatchOp(op="add", path=f"/steps/{idx}/body/db_name", value=db_value)],
+                        )
+            elif isinstance(graph_obj, dict):
+                graph_obj, _ = _normalize_pipeline_edges(graph_obj)
+            if definition_json is None and graph_obj is not None:
+                patch_id = f"move_graph_to_definition.{normalized_step.step_id}"
+                _add_error(
+                    code="definition_json_required",
+                    message=f"tool_id={normalized_step.tool_id} requires body.definition_json (found body.graph)",
+                    step=normalized_step,
+                    field="body.definition_json",
+                    fix_hint="Move body.graph into body.definition_json.",
+                    patch_id=patch_id,
+                )
+                patched_body = {**body_obj, "definition_json": graph_obj}
+                patched_body.pop("graph", None)
+                _maybe_add_patch(
+                    patch_id=patch_id,
+                    title=f"Move graph to definition_json for step {normalized_step.step_id}",
+                    description="Rewrites body.graph into body.definition_json for pipeline definition endpoints.",
+                    auto_applicable=True,
+                    operations=[PlanPatchOp(op="replace", path=f"/steps/{idx}/body", value=patched_body)],
+                )
 
         if normalized_step.tool_id == _PIPELINE_CREATE_TOOL_ID:
             body_obj = normalized_step.body if isinstance(normalized_step.body, dict) else {}

@@ -40,7 +40,7 @@ from shared.services.pipeline_job_queue import PipelineJobQueue
 from shared.models.pipeline_job import PipelineJob
 from shared.models.objectify_job import ObjectifyJob
 from shared.services.pipeline_executor import PipelineExecutor
-from shared.services.pipeline_definition_utils import resolve_pk_columns
+from shared.services.pipeline_definition_utils import resolve_pk_columns, split_expectation_columns
 from shared.services.event_store import event_store
 from shared.services.pipeline_control_plane_events import emit_pipeline_control_plane_event
 from shared.dependencies.providers import AuditLogStoreDep, LineageStoreDep
@@ -461,6 +461,573 @@ def _validate_pipeline_definition(*, definition_json: Dict[str, Any], require_ou
                 errors.append(f"window missing orderBy on node {node_id}")
 
     return errors
+
+
+def _extract_schema_casts(schema_json: Any) -> List[Dict[str, str]]:
+    if not isinstance(schema_json, dict):
+        return []
+    columns = schema_json.get("columns")
+    if not isinstance(columns, list):
+        columns = schema_json.get("fields")
+    if isinstance(columns, list):
+        casts: List[Dict[str, str]] = []
+        for col in columns:
+            if isinstance(col, dict):
+                name = str(col.get("name") or "").strip()
+                if not name:
+                    continue
+                cast_type = normalize_schema_type(col.get("type") or col.get("data_type"))
+                casts.append({"column": name, "type": cast_type or "xsd:string"})
+            elif isinstance(col, str):
+                casts.append({"column": col, "type": "xsd:string"})
+        return casts
+    properties = schema_json.get("properties")
+    if isinstance(properties, dict):
+        return [{"column": name, "type": "xsd:string"} for name in properties.keys() if name]
+    return []
+
+
+def _is_cast_transform(node: Dict[str, Any]) -> bool:
+    if not isinstance(node, dict):
+        return False
+    if node.get("type") != "transform":
+        return False
+    metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+    if normalize_operation(metadata.get("operation")) != "cast":
+        return False
+    casts = metadata.get("casts")
+    return isinstance(casts, list) and len(casts) > 0
+
+
+def _unique_node_id(base: str, existing: set[str]) -> str:
+    if base not in existing:
+        return base
+    index = 1
+    while f"{base}_{index}" in existing:
+        index += 1
+    return f"{base}_{index}"
+
+
+_CANONICAL_OUTPUT_PREFIX = "canonical_"
+_SYS_COLUMN_SPECS = [
+    {"name": "_sys_source", "type": "xsd:string"},
+    {"name": "_sys_ingested_at", "type": "xsd:dateTime"},
+    {"name": "_sys_record_hash", "type": "xsd:string"},
+    {"name": "_sys_is_deleted", "type": "xsd:boolean"},
+    {"name": "_sys_valid_from", "type": "xsd:dateTime"},
+    {"name": "_sys_valid_to", "type": "xsd:dateTime"},
+]
+_SYS_NOT_NULL_COLUMNS = {
+    "_sys_source",
+    "_sys_ingested_at",
+    "_sys_record_hash",
+    "_sys_is_deleted",
+    "_sys_valid_from",
+}
+
+
+def _output_name_for_node(node_id: str, node: Dict[str, Any]) -> str:
+    metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+    return str(
+        metadata.get("outputName")
+        or metadata.get("datasetName")
+        or node.get("title")
+        or node_id
+        or ""
+    ).strip()
+
+
+def _is_canonical_output(node_id: str, node: Dict[str, Any]) -> bool:
+    name = _output_name_for_node(node_id, node)
+    return bool(name) and name.startswith(_CANONICAL_OUTPUT_PREFIX)
+
+
+def _sql_ident(name: str) -> str:
+    return f"`{str(name).replace('`', '``')}`"
+
+
+def _concat_expr(columns: List[str], *, null_if_any: bool = False) -> str:
+    col_exprs = [_sql_ident(col) for col in columns]
+    joined = f"concat_ws('||', {', '.join(col_exprs)})"
+    if not null_if_any or not col_exprs:
+        return joined
+    null_checks = " OR ".join(f"{expr} IS NULL" for expr in col_exprs)
+    return f"case when {null_checks} then null else {joined} end"
+
+
+def _normalize_fk_columns(value: Any) -> List[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return split_expectation_columns(str(value or ""))
+
+
+def _merge_schema_checks(
+    existing: Any,
+    additions: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    output: List[Dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in existing if isinstance(existing, list) else []:
+        if not isinstance(item, dict):
+            continue
+        rule = str(item.get("rule") or "").strip().lower()
+        column = str(item.get("column") or "").strip()
+        if rule and column:
+            seen.add((rule, column))
+        output.append(item)
+    for item in additions:
+        rule = str(item.get("rule") or "").strip().lower()
+        column = str(item.get("column") or "").strip()
+        if rule and column and (rule, column) in seen:
+            continue
+        if rule and column:
+            seen.add((rule, column))
+        output.append(item)
+    return output
+
+
+async def _augment_definition_with_casts(
+    *,
+    definition_json: Dict[str, Any],
+    db_name: str,
+    branch: Optional[str],
+    dataset_registry: DatasetRegistry,
+) -> Dict[str, Any]:
+    nodes_raw = definition_json.get("nodes")
+    if not isinstance(nodes_raw, list) or not nodes_raw:
+        return definition_json
+    edges_raw = definition_json.get("edges")
+    if not isinstance(edges_raw, list):
+        edges_raw = []
+
+    nodes = [dict(node) for node in nodes_raw if isinstance(node, dict)]
+    edges = normalize_edges(edges_raw)
+    node_by_id = {str(node.get("id")): node for node in nodes if node.get("id")}
+    existing_ids = set(node_by_id.keys())
+
+    def outgoing_targets(node_id: str) -> List[str]:
+        targets: List[str] = []
+        for edge in edges:
+            source = edge.get("from") or edge.get("source")
+            target = edge.get("to") or edge.get("target")
+            if source == node_id and target:
+                targets.append(str(target))
+        return targets
+
+    updated = False
+    for node_id, node in list(node_by_id.items()):
+        if node.get("type") != "input":
+            continue
+        targets = outgoing_targets(node_id)
+        if not targets:
+            continue
+        if all(_is_cast_transform(node_by_id.get(target_id, {})) for target_id in targets):
+            continue
+
+        selection = normalize_dataset_selection(node.get("metadata") or {}, default_branch=branch or "main")
+        try:
+            resolution = await resolve_dataset_version(
+                dataset_registry,
+                db_name=db_name,
+                selection=selection,
+            )
+        except Exception:
+            continue
+        dataset = resolution.dataset
+        version = resolution.version
+        schema_json = getattr(dataset, "schema_json", None) if dataset else None
+        if not schema_json and version is not None:
+            schema_json = getattr(version, "sample_json", None)
+        casts = _extract_schema_casts(schema_json)
+        if not casts:
+            continue
+
+        cast_node_id = _unique_node_id(f"cast_{node_id}", existing_ids)
+        existing_ids.add(cast_node_id)
+        cast_node = {
+            "id": cast_node_id,
+            "type": "transform",
+            "metadata": {
+                "operation": "cast",
+                "casts": casts,
+            },
+        }
+        nodes.append(cast_node)
+        node_by_id[cast_node_id] = cast_node
+        rewired_edges: List[Dict[str, Any]] = []
+        for edge in edges:
+            source = edge.get("from") or edge.get("source")
+            if source == node_id:
+                updated_edge = dict(edge)
+                updated_edge["from"] = cast_node_id
+                updated_edge.pop("source", None)
+                rewired_edges.append(updated_edge)
+            else:
+                rewired_edges.append(edge)
+        edges = rewired_edges
+        edges.append({"from": node_id, "to": cast_node_id})
+        updated = True
+
+    if not updated:
+        return definition_json
+    updated_definition = dict(definition_json)
+    updated_definition["nodes"] = nodes
+    updated_definition["edges"] = edges
+    return updated_definition
+
+
+def _sys_compute_expressions(output_name: str) -> List[Dict[str, str]]:
+    safe_name = str(output_name or "").replace("'", "''")
+    return [
+        {"column": "_sys_source", "expr": f"'{safe_name}'"},
+        {"column": "_sys_ingested_at", "expr": "current_timestamp()"},
+        {"column": "_sys_is_deleted", "expr": "false"},
+        {"column": "_sys_valid_from", "expr": "coalesce(_sys_ingested_at, current_timestamp())"},
+        {"column": "_sys_valid_to", "expr": "cast(null as timestamp)"},
+        {"column": "_sys_record_hash", "expr": "sha2(to_json(struct(*)), 256)"},
+    ]
+
+
+def _inject_sys_columns_chain(
+    *,
+    edges: List[Dict[str, Any]],
+    nodes: List[Dict[str, Any]],
+    node_by_id: Dict[str, Dict[str, Any]],
+    existing_ids: set[str],
+    source_id: str,
+    output_id: str,
+    output_name: str,
+) -> Optional[str]:
+    if not source_id:
+        return None
+    edges[:] = [edge for edge in edges if edge.get("to") != output_id]
+    prev_id = source_id
+    for spec in _sys_compute_expressions(output_name):
+        node_id = _unique_node_id(f"sys_{spec['column'].lstrip('_')}_{output_id}", existing_ids)
+        existing_ids.add(node_id)
+        node = {
+            "id": node_id,
+            "type": "transform",
+            "metadata": {
+                "operation": "compute",
+                "expression": f"{spec['column']} = {spec['expr']}",
+            },
+        }
+        nodes.append(node)
+        node_by_id[node_id] = node
+        edges.append({"from": prev_id, "to": node_id})
+        prev_id = node_id
+    edges.append({"from": prev_id, "to": output_id})
+    return prev_id
+
+
+def _inject_fk_join_check(
+    *,
+    edges: List[Dict[str, Any]],
+    nodes: List[Dict[str, Any]],
+    node_by_id: Dict[str, Dict[str, Any]],
+    existing_ids: set[str],
+    left_node_id: str,
+    output_id: str,
+    fk_index: int,
+    fk_spec: Dict[str, Any],
+    default_branch: Optional[str],
+) -> Optional[str]:
+    columns = _normalize_fk_columns(fk_spec.get("columns") or fk_spec.get("column"))
+    reference = fk_spec.get("reference") if isinstance(fk_spec.get("reference"), dict) else {}
+    ref_columns = _normalize_fk_columns(
+        reference.get("columns")
+        or reference.get("column")
+        or fk_spec.get("ref_columns")
+        or fk_spec.get("ref_column")
+    )
+    if not ref_columns and columns:
+        ref_columns = list(columns)
+    if not columns or not ref_columns:
+        return None
+    if len(columns) != len(ref_columns):
+        return None
+    allow_nulls = fk_spec.get("allow_nulls") if "allow_nulls" in fk_spec else fk_spec.get("allowNulls")
+    allow_nulls = True if allow_nulls is None else bool(allow_nulls)
+    ref_branch = (
+        reference.get("branch")
+        or fk_spec.get("branch")
+        or default_branch
+        or "main"
+    )
+    dataset_id = (
+        reference.get("datasetId")
+        or reference.get("dataset_id")
+        or fk_spec.get("datasetId")
+        or fk_spec.get("dataset_id")
+    )
+    dataset_name = (
+        reference.get("datasetName")
+        or reference.get("dataset_name")
+        or fk_spec.get("datasetName")
+        or fk_spec.get("dataset_name")
+    )
+
+    left_key = columns[0]
+    left_key_synthetic = False
+    current_left = left_node_id
+    if len(columns) > 1:
+        left_key = f"__fk_key_{fk_index}"
+        left_key_synthetic = True
+        expr = _concat_expr(columns, null_if_any=True)
+        left_compute_id = _unique_node_id(f"fk_key_left_{fk_index}", existing_ids)
+        existing_ids.add(left_compute_id)
+        left_compute = {
+            "id": left_compute_id,
+            "type": "transform",
+            "metadata": {
+                "operation": "compute",
+                "expression": f"{left_key} = {expr}",
+            },
+        }
+        nodes.append(left_compute)
+        node_by_id[left_compute_id] = left_compute
+        edges.append({"from": current_left, "to": left_compute_id})
+        current_left = left_compute_id
+
+    ref_input_id = _unique_node_id(f"fk_ref_input_{fk_index}", existing_ids)
+    existing_ids.add(ref_input_id)
+    ref_meta: Dict[str, Any] = {}
+    if dataset_id:
+        ref_meta["datasetId"] = dataset_id
+    if dataset_name:
+        ref_meta["datasetName"] = dataset_name
+    if ref_branch:
+        ref_meta["datasetBranch"] = ref_branch
+    ref_input = {"id": ref_input_id, "type": "input", "metadata": ref_meta}
+    nodes.append(ref_input)
+    node_by_id[ref_input_id] = ref_input
+
+    ref_key = f"__fk_ref_key_{fk_index}"
+    ref_current = ref_input_id
+    if len(ref_columns) > 1:
+        expr = _concat_expr(ref_columns, null_if_any=True)
+        ref_compute_id = _unique_node_id(f"fk_ref_key_{fk_index}", existing_ids)
+        existing_ids.add(ref_compute_id)
+        ref_compute = {
+            "id": ref_compute_id,
+            "type": "transform",
+            "metadata": {
+                "operation": "compute",
+                "expression": f"{ref_key} = {expr}",
+            },
+        }
+        nodes.append(ref_compute)
+        node_by_id[ref_compute_id] = ref_compute
+        edges.append({"from": ref_current, "to": ref_compute_id})
+        ref_current = ref_compute_id
+        ref_select_id = _unique_node_id(f"fk_ref_select_{fk_index}", existing_ids)
+        existing_ids.add(ref_select_id)
+        ref_select = {
+            "id": ref_select_id,
+            "type": "transform",
+            "metadata": {"operation": "select", "columns": [ref_key]},
+        }
+        nodes.append(ref_select)
+        node_by_id[ref_select_id] = ref_select
+        edges.append({"from": ref_current, "to": ref_select_id})
+        ref_current = ref_select_id
+    else:
+        ref_select_id = _unique_node_id(f"fk_ref_select_{fk_index}", existing_ids)
+        existing_ids.add(ref_select_id)
+        ref_select = {
+            "id": ref_select_id,
+            "type": "transform",
+            "metadata": {"operation": "select", "columns": [ref_columns[0]]},
+        }
+        nodes.append(ref_select)
+        node_by_id[ref_select_id] = ref_select
+        edges.append({"from": ref_current, "to": ref_select_id})
+        ref_current = ref_select_id
+        ref_rename_id = _unique_node_id(f"fk_ref_rename_{fk_index}", existing_ids)
+        existing_ids.add(ref_rename_id)
+        ref_rename = {
+            "id": ref_rename_id,
+            "type": "transform",
+            "metadata": {"operation": "rename", "rename": {ref_columns[0]: ref_key}},
+        }
+        nodes.append(ref_rename)
+        node_by_id[ref_rename_id] = ref_rename
+        edges.append({"from": ref_current, "to": ref_rename_id})
+        ref_current = ref_rename_id
+
+    ref_dedupe_id = _unique_node_id(f"fk_ref_dedupe_{fk_index}", existing_ids)
+    existing_ids.add(ref_dedupe_id)
+    ref_dedupe = {
+        "id": ref_dedupe_id,
+        "type": "transform",
+        "metadata": {"operation": "dedupe", "columns": [ref_key]},
+    }
+    nodes.append(ref_dedupe)
+    node_by_id[ref_dedupe_id] = ref_dedupe
+    edges.append({"from": ref_current, "to": ref_dedupe_id})
+    ref_current = ref_dedupe_id
+
+    marker_col = f"__fk_ref_hit_{fk_index}"
+    ref_marker_id = _unique_node_id(f"fk_ref_marker_{fk_index}", existing_ids)
+    existing_ids.add(ref_marker_id)
+    ref_marker = {
+        "id": ref_marker_id,
+        "type": "transform",
+        "metadata": {
+            "operation": "compute",
+            "expression": f"{marker_col} = 1",
+        },
+    }
+    nodes.append(ref_marker)
+    node_by_id[ref_marker_id] = ref_marker
+    edges.append({"from": ref_current, "to": ref_marker_id})
+    ref_current = ref_marker_id
+
+    edges[:] = [edge for edge in edges if edge.get("to") != output_id]
+    join_id = _unique_node_id(f"fk_join_{fk_index}", existing_ids)
+    existing_ids.add(join_id)
+    join_node = {
+        "id": join_id,
+        "type": "transform",
+        "metadata": {
+            "operation": "join",
+            "joinType": "left",
+            "leftKey": left_key,
+            "rightKey": ref_key,
+        },
+    }
+    nodes.append(join_node)
+    node_by_id[join_id] = join_node
+    edges.append({"from": current_left, "to": join_id})
+    edges.append({"from": ref_current, "to": join_id})
+
+    missing_col = f"__fk_missing_{fk_index}"
+    left_expr = _sql_ident(left_key)
+    marker_expr = _sql_ident(marker_col)
+    if allow_nulls:
+        missing_expr = (
+            f"{missing_col} = case when {left_expr} is null then 0 "
+            f"when {marker_expr} is null then 1 else 0 end"
+        )
+    else:
+        missing_expr = f"{missing_col} = case when {marker_expr} is null then 1 else 0 end"
+    missing_id = _unique_node_id(f"fk_missing_{fk_index}", existing_ids)
+    existing_ids.add(missing_id)
+    missing_node = {
+        "id": missing_id,
+        "type": "transform",
+        "metadata": {
+            "operation": "compute",
+            "expression": missing_expr,
+            "schemaChecks": [{"rule": "max", "column": missing_col, "value": 0}],
+        },
+    }
+    nodes.append(missing_node)
+    node_by_id[missing_id] = missing_node
+    edges.append({"from": join_id, "to": missing_id})
+
+    drop_columns = [missing_col, marker_col, ref_key]
+    if left_key_synthetic:
+        drop_columns.append(left_key)
+    drop_id = _unique_node_id(f"fk_drop_{fk_index}", existing_ids)
+    existing_ids.add(drop_id)
+    drop_node = {
+        "id": drop_id,
+        "type": "transform",
+        "metadata": {"operation": "drop", "columns": drop_columns},
+    }
+    nodes.append(drop_node)
+    node_by_id[drop_id] = drop_node
+    edges.append({"from": missing_id, "to": drop_id})
+    edges.append({"from": drop_id, "to": output_id})
+    return drop_id
+
+
+def _augment_definition_with_canonical_contract(
+    *,
+    definition_json: Dict[str, Any],
+    branch: Optional[str],
+) -> Dict[str, Any]:
+    nodes_raw = definition_json.get("nodes")
+    if not isinstance(nodes_raw, list) or not nodes_raw:
+        return definition_json
+    edges_raw = definition_json.get("edges")
+    if not isinstance(edges_raw, list):
+        edges_raw = []
+
+    nodes = [dict(node) for node in nodes_raw if isinstance(node, dict)]
+    edges = normalize_edges(edges_raw)
+    node_by_id = {str(node.get("id")): node for node in nodes if node.get("id")}
+    existing_ids = set(node_by_id.keys())
+    updated = False
+
+    for node_id, node in list(node_by_id.items()):
+        if node.get("type") != "output":
+            continue
+        if not _is_canonical_output(node_id, node):
+            continue
+        metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+        if metadata.get("_canonical_contract_applied"):
+            continue
+        output_name = _output_name_for_node(node_id, node)
+        if not metadata.get("pkSemantics") and not metadata.get("pk_semantics"):
+            metadata = dict(metadata)
+            metadata["pkSemantics"] = "snapshot"
+        checks: List[Dict[str, Any]] = []
+        for spec in _SYS_COLUMN_SPECS:
+            checks.append({"rule": "required", "column": spec["name"]})
+            checks.append({"rule": "type", "column": spec["name"], "value": spec["type"]})
+            if spec["name"] in _SYS_NOT_NULL_COLUMNS:
+                checks.append({"rule": "not_null", "column": spec["name"]})
+        metadata["schemaChecks"] = _merge_schema_checks(metadata.get("schemaChecks"), checks)
+        metadata["_canonical_contract_applied"] = True
+        node["metadata"] = metadata
+        node_by_id[node_id] = node
+
+        incoming_edges = [edge for edge in edges if edge.get("to") == node_id]
+        if not incoming_edges:
+            continue
+        source_id = str(incoming_edges[0].get("from") or "").strip()
+        if not source_id:
+            continue
+        tail_id = _inject_sys_columns_chain(
+            edges=edges,
+            nodes=nodes,
+            node_by_id=node_by_id,
+            existing_ids=existing_ids,
+            source_id=source_id,
+            output_id=node_id,
+            output_name=output_name,
+        )
+        if tail_id is None:
+            continue
+        foreign_keys = metadata.get("foreignKeys") or metadata.get("foreign_keys") or []
+        if isinstance(foreign_keys, list):
+            for idx, fk_spec in enumerate(foreign_keys):
+                if not isinstance(fk_spec, dict):
+                    continue
+                injected = _inject_fk_join_check(
+                    edges=edges,
+                    nodes=nodes,
+                    node_by_id=node_by_id,
+                    existing_ids=existing_ids,
+                    left_node_id=tail_id,
+                    output_id=node_id,
+                    fk_index=idx,
+                    fk_spec=fk_spec,
+                    default_branch=branch,
+                )
+                if injected:
+                    tail_id = injected
+        updated = True
+
+    if not updated:
+        return definition_json
+    updated_definition = dict(definition_json)
+    updated_definition["nodes"] = nodes
+    updated_definition["edges"] = edges
+    return updated_definition
 
 
 async def _maybe_enqueue_objectify_job(
@@ -1358,6 +1925,52 @@ def _extract_lakefs_ref_from_artifact_key(artifact_key: str) -> str:
     if len(parts) < 2:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="artifact_key must include lakeFS ref prefix")
     return parts[0]
+
+
+async def _commit_lakefs_with_predicate_fallback(
+    *,
+    lakefs_client: LakeFSClient,
+    lakefs_storage_service: Any,
+    repository: str,
+    branch: str,
+    message: str,
+    metadata: Optional[Dict[str, Any]],
+    object_key: str,
+    expected_checksum: Optional[str] = None,
+) -> str:
+    try:
+        return await lakefs_client.commit(
+            repository=repository,
+            branch=branch,
+            message=message,
+            metadata=metadata,
+        )
+    except LakeFSError as exc:
+        message_text = str(exc or "")
+        if "predicate failed" not in message_text.lower():
+            raise
+        head_commit_id = await lakefs_client.get_branch_head_commit_id(
+            repository=repository,
+            branch=branch,
+        )
+        try:
+            object_meta = await lakefs_storage_service.get_object_metadata(
+                bucket=repository,
+                key=f"{head_commit_id}/{object_key}",
+            )
+        except FileNotFoundError as meta_exc:
+            raise RuntimeError(f"lakeFS commit failed: {exc}") from meta_exc
+        if expected_checksum:
+            stored_checksum = (object_meta.get("metadata") or {}).get("checksum")
+            if not stored_checksum or stored_checksum != expected_checksum:
+                raise RuntimeError(f"lakeFS commit failed: {exc}") from exc
+        logger.warning(
+            "lakeFS commit predicate failed; using head commit %s for %s/%s",
+            head_commit_id,
+            repository,
+            object_key,
+        )
+        return head_commit_id
 
 
 def _dataset_artifact_prefix(*, db_name: str, dataset_id: str, dataset_name: str) -> str:
@@ -2276,6 +2889,17 @@ async def simulate_pipeline_definition(
         limit = int(sanitized.get("limit") or 200)
         limit = max(1, min(limit, 200))
 
+        definition_json = await _augment_definition_with_casts(
+            definition_json=definition_json,
+            db_name=db_name,
+            branch=branch,
+            dataset_registry=dataset_registry,
+        )
+        definition_json = _augment_definition_with_canonical_contract(
+            definition_json=definition_json,
+            branch=branch,
+        )
+
         preview_definition = dict(definition_json)
         preview_meta = dict(preview_definition.get("__preview_meta__") or {})
         preview_meta.setdefault("branch", branch)
@@ -2362,6 +2986,7 @@ async def create_pipeline(
     payload: Dict[str, Any],
     audit_store: AuditLogStoreDep,
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     request: Request = None,
 ) -> ApiResponse:
     sanitized: Dict[str, Any] = {}
@@ -2430,6 +3055,18 @@ async def create_pipeline(
         proposal_submitted_at = None if not proposal_submitted_at else proposal_submitted_at
         proposal_reviewed_at = None if not proposal_reviewed_at else proposal_reviewed_at
         proposal_review_comment = str(proposal_review_comment).strip() if proposal_review_comment else None
+
+        if isinstance(definition_json, dict) and definition_json:
+            definition_json = await _augment_definition_with_casts(
+                definition_json=definition_json,
+                db_name=db_name,
+                branch=branch,
+                dataset_registry=dataset_registry,
+            )
+            definition_json = _augment_definition_with_canonical_contract(
+                definition_json=definition_json,
+                branch=branch,
+            )
 
         record = await pipeline_registry.create_pipeline(
             db_name=db_name,
@@ -2552,6 +3189,7 @@ async def update_pipeline(
     payload: Dict[str, Any],
     audit_store: AuditLogStoreDep,
     pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
     request: Request = None,
 ) -> ApiResponse:
     try:
@@ -2581,10 +3219,15 @@ async def update_pipeline(
                 detail="Archived branch cannot be updated; restore the branch before making changes",
             )
         if pipeline.branch in _resolve_pipeline_protected_branches() and definition_json is not None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Protected branch cannot be updated directly; create a branch and submit a proposal",
-            )
+            settings = get_settings()
+            dev_bypass = bool(getattr(request.state, "dev_master_auth", False)) if request is not None else False
+            if settings.is_development and settings.auth.dev_master_auth_enabled and dev_bypass:
+                pass
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Protected branch cannot be updated directly; create a branch and submit a proposal",
+                )
         db_name = str(pipeline.db_name)
 
         dependencies_raw: Any = None
@@ -2643,6 +3286,18 @@ async def update_pipeline(
             definition_json = {**definition_json, "expectations": expectations}
         if schema_contract is not None:
             definition_json = {**definition_json, "schemaContract": schema_contract}
+
+        if isinstance(definition_json, dict) and definition_json:
+            definition_json = await _augment_definition_with_casts(
+                definition_json=definition_json,
+                db_name=db_name,
+                branch=branch or pipeline.branch,
+                dataset_registry=dataset_registry,
+            )
+            definition_json = _augment_definition_with_canonical_contract(
+                definition_json=definition_json,
+                branch=branch or pipeline.branch,
+            )
 
         update = await pipeline_registry.update_pipeline(
             pipeline_id=pipeline_id,
@@ -4295,7 +4950,7 @@ async def create_dataset_version(
                     db_name=dataset.db_name, dataset_id=dataset.dataset_id, dataset_name=dataset.name
                 )
                 object_key = f"{prefix}/data.json"
-                await lakefs_storage_service.save_json(
+                checksum = await lakefs_storage_service.save_json(
                     repo,
                     f"{dataset_branch}/{object_key}",
                     sample_json,
@@ -4308,7 +4963,9 @@ async def create_dataset_version(
                         }
                     ),
                 )
-                lakefs_commit_id = await lakefs_client.commit(
+                lakefs_commit_id = await _commit_lakefs_with_predicate_fallback(
+                    lakefs_client=lakefs_client,
+                    lakefs_storage_service=lakefs_storage_service,
                     repository=repo,
                     branch=dataset_branch,
                     message=f"Manual dataset version {dataset.db_name}/{dataset.name}",
@@ -4318,6 +4975,8 @@ async def create_dataset_version(
                         "dataset_name": dataset.name,
                         "source_type": str(dataset.source_type or "manual"),
                     },
+                    object_key=object_key,
+                    expected_checksum=checksum,
                 )
                 artifact_key = build_s3_uri(repo, f"{lakefs_commit_id}/{object_key}")
             version = await dataset_registry.add_version(
@@ -4400,7 +5059,7 @@ async def create_dataset_version(
             prefix = _dataset_artifact_prefix(db_name=dataset.db_name, dataset_id=dataset.dataset_id, dataset_name=dataset.name)
             staging_prefix = _ingest_staging_prefix(prefix, ingest_request.ingest_request_id)
             object_key = f"{staging_prefix}/data.json"
-            await lakefs_storage_service.save_json(
+            checksum = await lakefs_storage_service.save_json(
                 repo,
                 f"{dataset_branch}/{object_key}",
                 sample_json,
@@ -4414,7 +5073,9 @@ async def create_dataset_version(
                     }
                 ),
             )
-            lakefs_commit_id = await lakefs_client.commit(
+            lakefs_commit_id = await _commit_lakefs_with_predicate_fallback(
+                lakefs_client=lakefs_client,
+                lakefs_storage_service=lakefs_storage_service,
                 repository=repo,
                 branch=dataset_branch,
                 message=f"Manual dataset version {dataset.db_name}/{dataset.name}",
@@ -4426,6 +5087,8 @@ async def create_dataset_version(
                     "ingest_request_id": ingest_request.ingest_request_id,
                     "transaction_id": ingest_transaction.transaction_id if ingest_transaction else None,
                 },
+                object_key=object_key,
+                expected_checksum=checksum,
             )
             artifact_key = build_s3_uri(repo, f"{lakefs_commit_id}/{object_key}")
 
@@ -4787,7 +5450,9 @@ async def upload_excel_dataset(
                 ),
                 checksum=content_hash,
             )
-            commit_id = await lakefs_client.commit(
+            commit_id = await _commit_lakefs_with_predicate_fallback(
+                lakefs_client=lakefs_client,
+                lakefs_storage_service=lakefs_storage_service,
                 repository=repo,
                 branch=dataset_branch,
                 message=f"Excel dataset upload {db_name}/{resolved_name}",
@@ -4801,6 +5466,8 @@ async def upload_excel_dataset(
                     "transaction_id": ingest_transaction.transaction_id if ingest_transaction else None,
                     "content_sha256": content_hash,
                 },
+                object_key=object_key,
+                expected_checksum=content_hash,
             )
             artifact_key = build_s3_uri(repo, f"{commit_id}/{object_key}")
             ingest_request = await dataset_registry.mark_ingest_committed(
@@ -5163,7 +5830,9 @@ async def upload_csv_dataset(
                     content_type="text/csv",
                     metadata=metadata_payload,
                 )
-            commit_id = await lakefs_client.commit(
+            commit_id = await _commit_lakefs_with_predicate_fallback(
+                lakefs_client=lakefs_client,
+                lakefs_storage_service=lakefs_storage_service,
                 repository=repo,
                 branch=dataset_branch,
                 message=f"CSV dataset upload {db_name}/{resolved_name}",
@@ -5179,6 +5848,8 @@ async def upload_csv_dataset(
                     "transaction_id": ingest_transaction.transaction_id if ingest_transaction else None,
                     "content_sha256": content_hash,
                 },
+                object_key=object_key,
+                expected_checksum=content_hash,
             )
             artifact_key = build_s3_uri(repo, f"{commit_id}/{object_key}")
             ingest_request = await dataset_registry.mark_ingest_committed(
@@ -5566,11 +6237,16 @@ async def upload_media_dataset(
         artifact_key = ingest_request.artifact_key
         staging_prefix = _ingest_staging_prefix(prefix, ingest_request.ingest_request_id)
         if not commit_id or not artifact_key:
+            fallback_object_key = None
+            fallback_checksum = None
             for index, item in enumerate(uploaded):
                 filename = str(item.get("filename") or f"upload-{index}")
                 content_type = str(item.get("content_type") or "application/octet-stream")
                 blob = item.get("content") or b""
                 object_key = f"{staging_prefix}/{index:04d}_{filename}"
+                if index == 0:
+                    fallback_object_key = object_key
+                    fallback_checksum = str(item.get("content_sha256") or "").strip() or None
                 await lakefs_storage_service.save_bytes(
                     repo,
                     f"{dataset_branch}/{object_key}",
@@ -5588,7 +6264,9 @@ async def upload_media_dataset(
                     ),
                 )
 
-            commit_id = await lakefs_client.commit(
+            commit_id = await _commit_lakefs_with_predicate_fallback(
+                lakefs_client=lakefs_client,
+                lakefs_storage_service=lakefs_storage_service,
                 repository=repo,
                 branch=dataset_branch,
                 message=f"Media dataset upload {db_name}/{resolved_name}",
@@ -5601,6 +6279,8 @@ async def upload_media_dataset(
                     "ingest_request_id": ingest_request.ingest_request_id,
                     "transaction_id": ingest_transaction.transaction_id if ingest_transaction else None,
                 },
+                object_key=fallback_object_key or staging_prefix,
+                expected_checksum=fallback_checksum,
             )
 
             artifact_key = build_s3_uri(repo, f"{commit_id}/{staging_prefix}")

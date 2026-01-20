@@ -18,6 +18,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 _EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
 # Loose phone matcher (international/local); we mask long digit runs to reduce PII leakage.
 _LONG_DIGIT_RE = re.compile(r"\b\+?\d[\d\s().-]{7,}\d\b")
+_UUID_RE = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
 
 
 def sha256_hex(value: Union[str, bytes]) -> str:
@@ -51,6 +52,13 @@ def _mask_email(text: str) -> str:
 
 
 def _mask_long_digits(text: str) -> str:
+    placeholders: dict[str, str] = {}
+
+    def _protect_uuid(match: re.Match[str]) -> str:
+        key = f"__UUID_{len(placeholders)}__"
+        placeholders[key] = match.group(0)
+        return key
+
     def _repl(match: re.Match[str]) -> str:
         raw = match.group(0)
         digits = re.sub(r"\D+", "", raw)
@@ -59,7 +67,11 @@ def _mask_long_digits(text: str) -> str:
         digest = sha256_hex(digits)[:10]
         return f"<number:{digest}>"
 
-    return _LONG_DIGIT_RE.sub(_repl, text)
+    protected = _UUID_RE.sub(_protect_uuid, text)
+    masked = _LONG_DIGIT_RE.sub(_repl, protected)
+    for key, value in placeholders.items():
+        masked = masked.replace(key, value)
+    return masked
 
 
 def mask_pii_text(text: str, *, max_chars: Optional[int] = None) -> str:

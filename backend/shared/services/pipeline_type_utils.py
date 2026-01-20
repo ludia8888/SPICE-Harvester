@@ -5,6 +5,15 @@ from typing import Any, Iterable
 
 from shared.services.pipeline_schema_utils import normalize_schema_type
 
+_XSD_TO_SPARK_TYPE: dict[str, str] = {
+    "xsd:string": "string",
+    "xsd:boolean": "boolean",
+    "xsd:integer": "bigint",
+    "xsd:decimal": "double",
+    "xsd:dateTime": "timestamp",
+    "xsd:date": "date",
+}
+
 
 def infer_xsd_type_from_values(values: Iterable[Any]) -> str:
     sample = list(values)
@@ -68,6 +77,18 @@ def infer_xsd_type_from_values(values: Iterable[Any]) -> str:
 
 def normalize_cast_target(target: Any) -> str:
     return normalize_schema_type(target)
+
+
+def normalize_cast_mode(value: Any) -> str:
+    normalized = str(value or "").strip().upper()
+    if normalized in {"SAFE_NULL", "STRICT"}:
+        return normalized
+    return "SAFE_NULL"
+
+
+def xsd_to_spark_type(value: Any) -> str:
+    normalized = normalize_schema_type(value)
+    return _XSD_TO_SPARK_TYPE.get(normalized, "string")
 
 
 def spark_type_to_xsd(data_type: Any) -> str:

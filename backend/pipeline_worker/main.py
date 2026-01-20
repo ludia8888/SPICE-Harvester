@@ -15,6 +15,8 @@ import shutil
 import tempfile
 import time
 from datetime import datetime, timezone
+from functools import reduce
+import operator
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
@@ -65,6 +67,7 @@ from shared.services.pipeline_definition_utils import (
     resolve_pk_columns,
     resolve_pk_semantics,
     validate_pk_semantics,
+    split_expectation_columns,
 )
 from shared.services.pipeline_dataset_utils import normalize_dataset_selection, resolve_dataset_version
 from shared.services.pipeline_validation_utils import (
@@ -73,7 +76,8 @@ from shared.services.pipeline_validation_utils import (
     validate_schema_checks,
     validate_schema_contract,
 )
-from shared.services.pipeline_type_utils import spark_type_to_xsd
+from shared.services.pipeline_schema_utils import normalize_schema_type
+from shared.services.pipeline_type_utils import normalize_cast_mode, spark_type_to_xsd, xsd_to_spark_type
 from shared.services.pipeline_transform_spec import (
     SUPPORTED_TRANSFORMS,
     normalize_operation,
@@ -318,6 +322,7 @@ class PipelineWorker:
         self.lock_acquire_timeout_seconds = pipeline_settings.lock_acquire_timeout_seconds
 
         self.spark_ansi_enabled = pipeline_settings.spark_ansi_enabled
+        self.cast_mode = normalize_cast_mode(pipeline_settings.cast_mode)
         self.use_lakefs_diff = pipeline_settings.lakefs_diff_enabled
         self.processed_event_heartbeat_interval_seconds = settings.event_sourcing.processed_event_heartbeat_interval_seconds
         self.service_name = (settings.observability.service_name or "").strip() or None
@@ -844,6 +849,7 @@ class PipelineWorker:
         preview_meta = definition.get("__preview_meta__") or {}
         tables: Dict[str, DataFrame] = {}
         nodes = normalize_nodes(definition.get("nodes"))
+        self._normalize_nodes_metadata(nodes)
         edges = normalize_edges(definition.get("edges"))
         order = topological_sort(nodes, edges, include_unordered=False)
         incoming = build_incoming(edges)
@@ -1325,20 +1331,29 @@ class PipelineWorker:
                     pk_columns=pk_columns,
                     delete_column=delete_column,
                 )
+                expectations = build_expectations_with_pk(
+                    definition=definition,
+                    output_metadata=output_metadata,
+                    output_name=output_name,
+                    output_node_id=primary_id,
+                    declared_outputs=declared_outputs,
+                    pk_semantics=pk_semantics,
+                    delete_column=delete_column,
+                    pk_columns=pk_columns,
+                    available_columns=available_columns,
+                )
                 expectation_errors = pk_semantic_errors + validate_expectations(
                     output_ops,
-                    build_expectations_with_pk(
-                        definition=definition,
-                        output_metadata=output_metadata,
-                        output_name=output_name,
-                        output_node_id=primary_id,
-                        declared_outputs=declared_outputs,
-                        pk_semantics=pk_semantics,
-                        delete_column=delete_column,
-                        pk_columns=pk_columns,
-                        available_columns=available_columns,
-                    ),
+                    expectations,
                 )
+                fk_errors = await self._evaluate_fk_expectations(
+                    expectations=expectations,
+                    output_df=output_df,
+                    db_name=job.db_name,
+                    branch=job.branch or "main",
+                    temp_dirs=temp_dirs,
+                )
+                expectation_errors = expectation_errors + fk_errors
                 sample_rows = output_df.limit(preview_limit).collect()
                 output_sample = [row.asDict(recursive=True) for row in sample_rows]
                 column_stats = compute_column_stats(rows=output_sample, columns=schema_columns)
@@ -1501,20 +1516,29 @@ class PipelineWorker:
                         pk_columns=pk_columns,
                         delete_column=delete_column,
                     )
+                    expectations = build_expectations_with_pk(
+                        definition=definition,
+                        output_metadata=metadata,
+                        output_name=output_name,
+                        output_node_id=node_id,
+                        declared_outputs=declared_outputs,
+                        pk_semantics=pk_semantics,
+                        delete_column=delete_column,
+                        pk_columns=pk_columns,
+                        available_columns=available_columns,
+                    )
                     expectation_errors = pk_semantic_errors + validate_expectations(
                         output_ops,
-                        build_expectations_with_pk(
-                            definition=definition,
-                            output_metadata=metadata,
-                            output_name=output_name,
-                            output_node_id=node_id,
-                            declared_outputs=declared_outputs,
-                            pk_semantics=pk_semantics,
-                            delete_column=delete_column,
-                            pk_columns=pk_columns,
-                            available_columns=available_columns,
-                        ),
+                        expectations,
                     )
+                    fk_errors = await self._evaluate_fk_expectations(
+                        expectations=expectations,
+                        output_df=output_df,
+                        db_name=job.db_name,
+                        branch=job.branch or "main",
+                        temp_dirs=temp_dirs,
+                    )
+                    expectation_errors = expectation_errors + fk_errors
                     if expectation_errors:
                         expectation_payload = self._build_error_payload(
                             message="Pipeline expectations failed",
@@ -1841,20 +1865,29 @@ class PipelineWorker:
                     pk_columns=pk_columns,
                     delete_column=delete_column,
                 )
+                expectations = build_expectations_with_pk(
+                    definition=definition,
+                    output_metadata=metadata,
+                    output_name=output_name,
+                    output_node_id=node_id,
+                    declared_outputs=declared_outputs,
+                    pk_semantics=pk_semantics,
+                    delete_column=delete_column,
+                    pk_columns=pk_columns,
+                    available_columns=available_columns,
+                )
                 expectation_errors = pk_semantic_errors + validate_expectations(
                     output_ops,
-                    build_expectations_with_pk(
-                        definition=definition,
-                        output_metadata=metadata,
-                        output_name=output_name,
-                        output_node_id=node_id,
-                        declared_outputs=declared_outputs,
-                        pk_semantics=pk_semantics,
-                        delete_column=delete_column,
-                        pk_columns=pk_columns,
-                        available_columns=available_columns,
-                    ),
+                    expectations,
                 )
+                fk_errors = await self._evaluate_fk_expectations(
+                    expectations=expectations,
+                    output_df=output_df,
+                    db_name=job.db_name,
+                    branch=job.branch or "main",
+                    temp_dirs=temp_dirs,
+                )
+                expectation_errors = expectation_errors + fk_errors
                 if expectation_errors:
                     expectation_payload = self._build_error_payload(
                         message="Pipeline expectations failed",
@@ -2752,6 +2785,7 @@ class PipelineWorker:
                     temp_dirs=temp_dirs,
                     prefix=f"{current_commit_id}/{artifact_prefix}".rstrip("/"),
                 )
+                df = self._apply_schema_casts(df, dataset=dataset, version=version)
                 if snapshot is not None:
                     snapshot["diff_used"] = True
                     snapshot["diff_parquet_paths"] = len(parquet_paths)
@@ -2837,6 +2871,7 @@ class PipelineWorker:
             df = await self._load_media_prefix_dataframe(bucket, key, node_id=node_id)
         else:
             df = await self._load_artifact_dataframe(bucket, key, temp_dirs)
+        df = self._apply_schema_casts(df, dataset=dataset, version=version)
 
         resolved_watermark_column = str(watermark_column or "").strip()
         if resolved_watermark_column:
@@ -3196,6 +3231,48 @@ class PipelineWorker:
                 errors.append(f"{node_type} node {node_id} has no input")
         return errors
 
+    def _normalize_transform_metadata(self, metadata: Any) -> Dict[str, Any]:
+        if not isinstance(metadata, dict):
+            return {}
+        normalized = dict(metadata)
+        if not normalized.get("columns"):
+            fields = normalized.get("fields")
+            if isinstance(fields, list):
+                normalized["columns"] = fields
+        if not normalized.get("groupBy"):
+            for key in ("groupKeys", "keys"):
+                value = normalized.get(key)
+                if isinstance(value, list):
+                    normalized["groupBy"] = value
+                    break
+        if not normalized.get("aggregates"):
+            aggregations = normalized.get("aggregations")
+            if isinstance(aggregations, list):
+                normalized["aggregates"] = aggregations
+        aggregates = normalized.get("aggregates")
+        if isinstance(aggregates, list):
+            normalized_items: list[dict[str, Any]] = []
+            for item in aggregates:
+                if not isinstance(item, dict):
+                    continue
+                column = item.get("column") or item.get("field") or item.get("name")
+                op = item.get("op") or item.get("function") or item.get("agg")
+                alias = item.get("alias") or item.get("as")
+                updated = dict(item)
+                if column and not updated.get("column"):
+                    updated["column"] = column
+                if op and not updated.get("op"):
+                    updated["op"] = op
+                if alias and not updated.get("alias"):
+                    updated["alias"] = alias
+                normalized_items.append(updated)
+            normalized["aggregates"] = normalized_items
+        return normalized
+
+    def _normalize_nodes_metadata(self, nodes: Dict[str, Dict[str, Any]]) -> None:
+        for node in nodes.values():
+            node["metadata"] = self._normalize_transform_metadata(node.get("metadata"))
+
     def _validate_definition(self, definition: Dict[str, Any], *, require_output: bool = True) -> List[str]:
         errors: List[str] = []
         nodes_raw = definition.get("nodes")
@@ -3203,6 +3280,7 @@ class PipelineWorker:
             errors.append("Pipeline has no nodes")
             return errors
         nodes = normalize_nodes(nodes_raw)
+        self._normalize_nodes_metadata(nodes)
         edges = normalize_edges(definition.get("edges"))
         node_ids = set(nodes.keys())
         for edge in edges:
@@ -3407,6 +3485,242 @@ class PipelineWorker:
             in_set_mismatch=in_set_mismatch,
         )
 
+    def _extract_schema_casts(self, schema_json: Any) -> List[Dict[str, str]]:
+        if not isinstance(schema_json, dict):
+            return []
+        columns = schema_json.get("columns")
+        if not isinstance(columns, list):
+            columns = schema_json.get("fields")
+        if isinstance(columns, list):
+            casts: List[Dict[str, str]] = []
+            for col in columns:
+                if isinstance(col, dict):
+                    name = str(col.get("name") or "").strip()
+                    if not name:
+                        continue
+                    cast_type = normalize_schema_type(col.get("type") or col.get("data_type"))
+                    casts.append({"column": name, "type": cast_type or "xsd:string"})
+                elif isinstance(col, str):
+                    casts.append({"column": col, "type": "xsd:string"})
+            return casts
+        properties = schema_json.get("properties")
+        if isinstance(properties, dict):
+            return [{"column": name, "type": "xsd:string"} for name in properties.keys() if name]
+        return []
+
+    def _sql_ident(self, name: str) -> str:
+        return f"`{str(name).replace('`', '``')}`"
+
+    def _clean_string_column(self, column: "Column") -> "Column":
+        trimmed = F.trim(column.cast("string"))
+        return F.when((trimmed.isNull()) | (F.length(trimmed) == 0), F.lit(None)).otherwise(trimmed)
+
+    def _try_cast_column(self, column: str, spark_type: str) -> "Column":
+        ident = self._sql_ident(column)
+        cleaned = f"nullif(trim({ident}), '')"
+        if spark_type in {"bigint", "int", "long"}:
+            numeric = f"regexp_replace({cleaned}, '[,_\\s]', '')"
+            return F.expr(f"try_cast({numeric} as bigint)")
+        if spark_type in {"double", "decimal"}:
+            numeric = f"regexp_replace({cleaned}, '[,_\\s]', '')"
+            numeric = f"regexp_replace({numeric}, '%$', '')"
+            return F.expr(f"try_cast({numeric} as double)")
+        if spark_type == "boolean":
+            lowered = f"lower({cleaned})"
+            return F.expr(
+                "case "
+                f"when {lowered} in ('true','t','1','yes','y') then true "
+                f"when {lowered} in ('false','f','0','no','n') then false "
+                "else null end"
+            )
+        if spark_type == "timestamp":
+            return F.expr(f"to_timestamp({cleaned})")
+        if spark_type == "date":
+            return F.expr(f"to_date({cleaned})")
+        return F.expr(cleaned)
+
+    def _safe_cast_column(self, column: str, target_type: str) -> "Column":
+        spark_type = xsd_to_spark_type(target_type)
+        source = F.col(str(column))
+        if self.cast_mode == "STRICT":
+            if spark_type == "string":
+                return self._clean_string_column(source)
+            return source.cast(spark_type)
+        if spark_type == "string":
+            return self._clean_string_column(source)
+        return self._try_cast_column(column, spark_type)
+
+    def _apply_casts(self, df: DataFrame, casts: List[Dict[str, Any]]) -> DataFrame:
+        if not casts:
+            return df
+        output = df
+        for cast in casts:
+            column = str(cast.get("column") or "").strip()
+            if not column or column not in output.columns:
+                continue
+            data_type = normalize_schema_type(cast.get("type") or "xsd:string")
+            output = output.withColumn(column, self._safe_cast_column(column, data_type))
+        return output
+
+    def _apply_schema_casts(self, df: DataFrame, *, dataset: Any, version: Any) -> DataFrame:
+        schema_json = getattr(dataset, "schema_json", None)
+        casts = self._extract_schema_casts(schema_json)
+        if not casts and version is not None:
+            casts = self._extract_schema_casts(getattr(version, "sample_json", None))
+        if not casts:
+            return df
+        return self._apply_casts(df, casts)
+
+    def _normalize_fk_columns(self, value: Any) -> List[str]:
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return split_expectation_columns(str(value or ""))
+
+    def _parse_fk_expectation(
+        self,
+        expectation: Dict[str, Any],
+        *,
+        default_branch: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        rule = str(expectation.get("rule") or "").strip().lower()
+        if rule != "fk_exists":
+            return None
+        columns = self._normalize_fk_columns(expectation.get("columns") or expectation.get("column"))
+        reference = expectation.get("reference") if isinstance(expectation.get("reference"), dict) else {}
+        ref_columns = self._normalize_fk_columns(
+            reference.get("columns")
+            or reference.get("column")
+            or expectation.get("ref_columns")
+            or expectation.get("ref_column")
+        )
+        if not ref_columns and columns:
+            ref_columns = list(columns)
+        dataset_id = (
+            reference.get("datasetId")
+            or reference.get("dataset_id")
+            or expectation.get("datasetId")
+            or expectation.get("dataset_id")
+        )
+        dataset_name = (
+            reference.get("datasetName")
+            or reference.get("dataset_name")
+            or expectation.get("datasetName")
+            or expectation.get("dataset_name")
+        )
+        ref_branch = (
+            reference.get("branch")
+            or expectation.get("branch")
+            or default_branch
+            or "main"
+        )
+        allow_nulls = expectation.get("allow_nulls") if "allow_nulls" in expectation else expectation.get("allowNulls")
+        allow_nulls = True if allow_nulls is None else bool(allow_nulls)
+        return {
+            "columns": columns,
+            "ref_columns": ref_columns,
+            "dataset_id": str(dataset_id) if dataset_id else None,
+            "dataset_name": str(dataset_name) if dataset_name else None,
+            "branch": str(ref_branch) if ref_branch else None,
+            "allow_nulls": allow_nulls,
+        }
+
+    async def _load_fk_reference_dataframe(
+        self,
+        *,
+        db_name: str,
+        dataset_id: Optional[str],
+        dataset_name: Optional[str],
+        branch: Optional[str],
+        temp_dirs: list[str],
+    ) -> Optional[DataFrame]:
+        metadata: Dict[str, Any] = {}
+        if dataset_id:
+            metadata["datasetId"] = dataset_id
+        if dataset_name:
+            metadata["datasetName"] = dataset_name
+        if branch:
+            metadata["datasetBranch"] = branch
+        try:
+            return await self._load_input_dataframe(
+                db_name=db_name,
+                metadata=metadata,
+                temp_dirs=temp_dirs,
+                branch=branch or "main",
+                node_id=f"fk_ref_{dataset_name or dataset_id or 'dataset'}",
+                input_snapshots=None,
+                previous_commit_id=None,
+                use_lakefs_diff=False,
+            )
+        except Exception as exc:
+            logger.warning("Failed to load FK reference dataset: %s", exc)
+            return None
+
+    async def _evaluate_fk_expectations(
+        self,
+        *,
+        expectations: List[Dict[str, Any]],
+        output_df: DataFrame,
+        db_name: str,
+        branch: Optional[str],
+        temp_dirs: list[str],
+    ) -> List[str]:
+        errors: List[str] = []
+        for exp in expectations or []:
+            if not isinstance(exp, dict):
+                continue
+            spec = self._parse_fk_expectation(exp, default_branch=branch)
+            if not spec:
+                continue
+            columns = spec["columns"]
+            ref_columns = spec["ref_columns"]
+            if not columns or not ref_columns:
+                errors.append("fk_exists missing columns or reference columns")
+                continue
+            if len(columns) != len(ref_columns):
+                errors.append(f"fk_exists column count mismatch: {columns} vs {ref_columns}")
+                continue
+            missing_cols = [col for col in columns if col not in output_df.columns]
+            if missing_cols:
+                errors.append(f"fk_exists missing column(s): {', '.join(missing_cols)}")
+                continue
+
+            ref_df = await self._load_fk_reference_dataframe(
+                db_name=db_name,
+                dataset_id=spec["dataset_id"],
+                dataset_name=spec["dataset_name"],
+                branch=spec["branch"],
+                temp_dirs=temp_dirs,
+            )
+            if ref_df is None:
+                errors.append("fk_exists reference dataset not available")
+                continue
+            missing_ref_cols = [col for col in ref_columns if col not in ref_df.columns]
+            if missing_ref_cols:
+                errors.append(f"fk_exists reference missing column(s): {', '.join(missing_ref_cols)}")
+                continue
+            left = output_df.select(*columns)
+            if spec["allow_nulls"]:
+                for col in columns:
+                    left = left.filter(F.col(col).isNotNull())
+            right = ref_df.select(*ref_columns)
+            for col in ref_columns:
+                right = right.filter(F.col(col).isNotNull())
+            right = right.dropDuplicates()
+            if len(columns) == 1:
+                join_cond = left[columns[0]] == right[ref_columns[0]]
+            else:
+                join_cond = reduce(
+                    operator.and_,
+                    [left[col] == right[ref_col] for col, ref_col in zip(columns, ref_columns)],
+                )
+            missing_count = left.join(right, join_cond, how="left_anti").count()
+            if missing_count:
+                ref_label = spec["dataset_name"] or spec["dataset_id"] or "reference"
+                errors.append(
+                    f"fk_exists failed: {','.join(columns)} -> {ref_label}({','.join(ref_columns)}) missing={missing_count}"
+                )
+        return errors
+
     async def _load_artifact_dataframe(self, bucket: str, key: str, temp_dirs: list[str]) -> DataFrame:
         prefix = key.rstrip("/")
         has_extension = os.path.splitext(prefix)[1] != ""
@@ -3582,13 +3896,7 @@ class PipelineWorker:
         if operation == "cast":
             casts = metadata.get("casts") or []
             if casts:
-                df = inputs[0]
-                for cast in casts:
-                    column = cast.get("column")
-                    data_type = cast.get("type")
-                    if column and data_type:
-                        df = df.withColumn(str(column), F.col(str(column)).cast(str(data_type)))
-                return df
+                return self._apply_casts(inputs[0], casts)
         if operation == "dedupe":
             subset = metadata.get("columns") or []
             if subset:
