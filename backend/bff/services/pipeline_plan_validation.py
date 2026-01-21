@@ -189,6 +189,74 @@ def _reorder_edges_for_node(
     return updated
 
 
+def _schema_has_keys(schema: SchemaInfo, keys: List[str]) -> bool:
+    if not keys:
+        return False
+    return all(key in schema.columns for key in keys)
+
+
+def _replace_join_edges(
+    edges: List[Dict[str, Any]],
+    *,
+    node_id: str,
+    sources: List[str],
+) -> List[Dict[str, Any]]:
+    cleaned: List[Dict[str, Any]] = []
+    sources_set = set(sources)
+    for edge in edges:
+        if _edge_target(edge) == node_id:
+            continue
+        if _edge_source(edge) == node_id and _edge_target(edge) in sources_set:
+            continue
+        cleaned.append(edge)
+    for source in sources:
+        cleaned.append({"from": source, "to": node_id})
+    return cleaned
+
+
+def _is_acyclic(nodes: Dict[str, Dict[str, Any]], edges: List[Dict[str, Any]]) -> bool:
+    order = topological_sort(nodes, edges, include_unordered=False)
+    return len(order) == len(nodes)
+
+
+def _select_join_sources(
+    *,
+    node_id: str,
+    order: List[str],
+    nodes: Dict[str, Dict[str, Any]],
+    available_schemas: Dict[str, SchemaInfo],
+    incoming_ids: List[str],
+    left_keys: List[str],
+    right_keys: List[str],
+) -> Optional[List[str]]:
+    if not left_keys or not right_keys:
+        return None
+
+    candidates = [
+        cand_id
+        for cand_id in order
+        if cand_id != node_id
+        and cand_id in available_schemas
+        and str((nodes.get(cand_id) or {}).get("type") or "").strip().lower() != "output"
+    ]
+
+    def _pick_candidate(keys: List[str], *, exclude: Optional[set[str]] = None) -> Optional[str]:
+        exclude = exclude or set()
+        preferred = [cand_id for cand_id in incoming_ids if cand_id in available_schemas]
+        for cand_id in preferred + candidates:
+            if cand_id in exclude:
+                continue
+            if _schema_has_keys(available_schemas[cand_id], keys):
+                return cand_id
+        return None
+
+    left_source = _pick_candidate(left_keys)
+    right_source = _pick_candidate(right_keys, exclude={left_source} if left_source else set())
+    if not left_source or not right_source or left_source == right_source:
+        return None
+    return [left_source, right_source]
+
+
 async def _align_join_inputs(
     *,
     definition_json: Dict[str, Any],
@@ -204,8 +272,24 @@ async def _align_join_inputs(
     incoming = build_incoming(edges)
     order = topological_sort(nodes, edges, include_unordered=True)
     schema_by_node: Dict[str, SchemaInfo] = {}
+    input_schemas: Dict[str, SchemaInfo] = {}
     warnings: List[str] = []
     updated_edges = list(edges)
+
+    for node_id, node in nodes.items():
+        node_type = str(node.get("type") or "").strip().lower()
+        if node_type != "input":
+            continue
+        metadata = node.get("metadata") or {}
+        selection = normalize_dataset_selection(metadata, default_branch=branch or "main")
+        resolution = await resolve_dataset_version(
+            dataset_registry,
+            db_name=db_name,
+            selection=selection,
+        )
+        input_schemas[node_id] = _schema_for_input(resolution.dataset, resolution.version)
+
+    schema_by_node.update(input_schemas)
 
     for node_id in order:
         node = nodes.get(node_id) or {}
@@ -215,21 +299,16 @@ async def _align_join_inputs(
         inputs = [schema_by_node[in_id] for in_id in input_ids if in_id in schema_by_node]
 
         if node_type == "input":
-            selection = normalize_dataset_selection(metadata, default_branch=branch or "main")
-            resolution = await resolve_dataset_version(
-                dataset_registry,
-                db_name=db_name,
-                selection=selection,
-            )
-            schema_by_node[node_id] = _schema_for_input(resolution.dataset, resolution.version)
+            if node_id in input_schemas:
+                schema_by_node[node_id] = input_schemas[node_id]
             continue
 
         if node_type == "output":
             schema_by_node[node_id] = inputs[0] if inputs else SchemaInfo(columns=[], type_map={})
             continue
 
-        operation = normalize_operation(metadata.get("operation"))
-        if operation == "join" and len(inputs) >= 2:
+        operation = normalize_operation(metadata.get("operation") or node_type)
+        if operation == "join":
             join_spec = resolve_join_spec(metadata)
             if not (join_spec.allow_cross_join and join_spec.join_type == "cross"):
                 left_keys = list(join_spec.left_keys or [])
@@ -242,19 +321,51 @@ async def _align_join_inputs(
                     right_keys = [right_key]
 
                 if left_keys and right_keys:
-                    left_in_left = all(key in inputs[0].columns for key in left_keys)
-                    right_in_right = all(key in inputs[1].columns for key in right_keys)
-                    left_in_right = all(key in inputs[1].columns for key in left_keys)
-                    right_in_left = all(key in inputs[0].columns for key in right_keys)
-                    if not left_in_left and not right_in_right and left_in_right and right_in_left:
-                        ordered_sources = [str(input_ids[1]), str(input_ids[0])]
-                        updated_edges = _reorder_edges_for_node(updated_edges, str(node_id), ordered_sources)
-                        incoming = build_incoming(updated_edges)
-                        input_ids = incoming.get(node_id, [])
-                        inputs = [schema_by_node[in_id] for in_id in input_ids if in_id in schema_by_node]
-                        warnings.append(f"join inputs reordered for node {node_id}")
+                    selected = _select_join_sources(
+                        node_id=str(node_id),
+                        order=order,
+                        nodes=nodes,
+                        available_schemas=schema_by_node,
+                        incoming_ids=list(input_ids),
+                        left_keys=left_keys,
+                        right_keys=right_keys,
+                    )
+                    if selected and (len(input_ids) != 2 or input_ids != selected):
+                        candidate_edges = _replace_join_edges(updated_edges, node_id=str(node_id), sources=selected)
+                        if _is_acyclic(nodes, candidate_edges):
+                            updated_edges = candidate_edges
+                            incoming = build_incoming(updated_edges)
+                            input_ids = incoming.get(node_id, [])
+                            inputs = [schema_by_node[in_id] for in_id in input_ids if in_id in schema_by_node]
+                            warnings.append(f"join inputs rewired for node {node_id}")
 
-            schema_by_node[node_id] = _apply_join(inputs[0], inputs[1])
+            if len(inputs) >= 2:
+                if not (join_spec.allow_cross_join and join_spec.join_type == "cross"):
+                    left_keys = list(join_spec.left_keys or [])
+                    right_keys = list(join_spec.right_keys or [])
+                    left_key = join_spec.left_key or join_spec.right_key
+                    right_key = join_spec.right_key or join_spec.left_key
+                    if left_key and not left_keys:
+                        left_keys = [left_key]
+                    if right_key and not right_keys:
+                        right_keys = [right_key]
+
+                    if left_keys and right_keys:
+                        left_in_left = _schema_has_keys(inputs[0], left_keys)
+                        right_in_right = _schema_has_keys(inputs[1], right_keys)
+                        left_in_right = _schema_has_keys(inputs[1], left_keys)
+                        right_in_left = _schema_has_keys(inputs[0], right_keys)
+                        if not left_in_left and not right_in_right and left_in_right and right_in_left:
+                            ordered_sources = [str(input_ids[1]), str(input_ids[0])]
+                            updated_edges = _reorder_edges_for_node(updated_edges, str(node_id), ordered_sources)
+                            incoming = build_incoming(updated_edges)
+                            input_ids = incoming.get(node_id, [])
+                            inputs = [schema_by_node[in_id] for in_id in input_ids if in_id in schema_by_node]
+                            warnings.append(f"join inputs reordered for node {node_id}")
+
+                schema_by_node[node_id] = _apply_join(inputs[0], inputs[1])
+            else:
+                schema_by_node[node_id] = SchemaInfo(columns=[], type_map={})
             continue
 
         if operation == "union" and len(inputs) >= 2:
@@ -293,7 +404,6 @@ async def _align_join_inputs(
     updated_definition = dict(definition_json)
     updated_definition["edges"] = updated_edges
     return updated_definition, warnings
-
 
 async def validate_pipeline_plan(
     *,
