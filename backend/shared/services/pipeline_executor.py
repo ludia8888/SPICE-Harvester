@@ -37,6 +37,9 @@ from shared.services.pipeline_type_utils import (
     infer_xsd_type_from_values,
     normalize_cast_mode,
     normalize_cast_target,
+    parse_decimal_text,
+    parse_datetime_text,
+    parse_int_text,
 )
 from shared.services.pipeline_transform_spec import (
     normalize_operation,
@@ -947,28 +950,20 @@ def _cast_value_with_status(value: Any, target: str, *, cast_mode: str) -> tuple
         raise ValueError(f"invalid boolean: {value}")
 
     if normalized in {"xsd:integer", "xsd:decimal"}:
-        import re
-
-        cleaned = re.sub(r"[,_\s]", "", text)
-        if normalized == "xsd:decimal":
-            cleaned = re.sub(r"%$", "", cleaned)
-            pattern = r"^[+-]?(\d+\.?\d*|\d*\.\d+)$"
-        else:
-            pattern = r"^[+-]?\d+$"
-        if not re.match(pattern, cleaned or ""):
+        parsed = parse_decimal_text(text) if normalized == "xsd:decimal" else parse_int_text(text)
+        if parsed is None:
             if cast_mode == "SAFE_NULL":
                 return None, attempted, True
             raise ValueError(f"invalid numeric: {value}")
-        return (float(cleaned), attempted, False) if normalized == "xsd:decimal" else (int(cleaned), attempted, False)
+        return parsed, attempted, False
 
     if normalized in {"xsd:date", "xsd:dateTime"}:
-        try:
-            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-            return (parsed.date(), attempted, False) if normalized == "xsd:date" else (parsed, attempted, False)
-        except Exception:
+        parsed = parse_datetime_text(text, allow_ambiguous=True)
+        if parsed is None:
             if cast_mode == "SAFE_NULL":
                 return None, attempted, True
             raise ValueError(f"invalid datetime: {value}")
+        return (parsed.date(), attempted, False) if normalized == "xsd:date" else (parsed, attempted, False)
     return value, attempted, False
 
 
