@@ -452,6 +452,9 @@ async def _preview_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
     if not plan_id:
         return {**state, "next_action": "end", "status": "failed", "error": "plan_id missing"}
 
+    requested_limit = int(state.get("preview_limit") or 200)
+    preview_limit = min(requested_limit, 200)
+    run_table_limit = min(requested_limit, 1000)
     result = await _call_bff(
         runtime=runtime,
         state=state,
@@ -461,9 +464,9 @@ async def _preview_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
         tool_id="pipeline_plans.preview",
         body={
             "node_id": state.get("preview_node_id"),
-            "limit": state.get("preview_limit"),
+            "limit": preview_limit,
             "include_run_tables": bool(state.get("include_run_tables")),
-            "run_table_limit": state.get("preview_limit"),
+            "run_table_limit": run_table_limit,
         },
     )
     if result.get("status") != "success":
