@@ -362,6 +362,7 @@ class PipelinePlanTransformRequest(BaseModel):
     join_plan: list[dict[str, Any]] | None = Field(default=None)
     cleansing_hints: list[dict[str, Any]] | None = Field(default=None)
     context_pack: dict | None = Field(default=None)
+    planner_hints: dict | None = Field(default=None)
 
 
 class PipelinePlanEvaluateJoinsRequest(BaseModel):
@@ -1305,6 +1306,7 @@ async def transform_plan(
     payload = sanitize_input(raw_payload)
     join_plan = payload.get("join_plan") if isinstance(payload.get("join_plan"), list) else None
     cleansing_hints = payload.get("cleansing_hints") if isinstance(payload.get("cleansing_hints"), list) else None
+    planner_hints = payload.get("planner_hints") if isinstance(payload.get("planner_hints"), dict) else None
     context_pack = context_pack if isinstance(context_pack, dict) else None
 
     if context_pack is None:
@@ -1327,6 +1329,7 @@ async def transform_plan(
             join_plan=join_plan,
             cleansing_hints=cleansing_hints,
             context_pack=context_pack,
+            planner_hints=planner_hints,
             actor=actor,
             tenant_id=tenant_id,
             user_id=user_id,

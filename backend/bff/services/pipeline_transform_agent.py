@@ -58,6 +58,9 @@ def _build_transform_system_prompt() -> str:
         "For composite joins, ALWAYS use leftKeys/rightKeys arrays.\n"
         "Edge order matters for join: the first incoming edge is the LEFT input, the second is RIGHT.\n"
         "Ensure join keys align to the left/right input order; do not swap keys without swapping edges.\n"
+        "Respect planner_hints.multi_stage_mode: \n"
+        "- required: include multi-stage chaining if needed by the goal (filter/groupBy/join/compute).\n"
+        "- forbid: avoid extra stages beyond joins/cleansing unless the goal explicitly demands it.\n"
         "Prefer join/window/aggregate only when needed by the goal; follow join_plan hints.\n"
         "\n"
         f"Supported operations: {', '.join(sorted(SUPPORTED_TRANSFORMS))}\n"
@@ -81,6 +84,7 @@ def _build_transform_user_prompt(
     join_plan: Optional[List[Dict[str, Any]]],
     cleansing_hints: Optional[List[Dict[str, Any]]],
     context_pack: Optional[Dict[str, Any]],
+    planner_hints: Optional[Dict[str, Any]],
 ) -> str:
     return (
         f"Goal:\n{goal}\n\n"
@@ -89,6 +93,7 @@ def _build_transform_user_prompt(
         f"Outputs:\n{json.dumps(outputs or [], ensure_ascii=False)}\n\n"
         f"Join plan:\n{json.dumps(join_plan or [], ensure_ascii=False)}\n\n"
         f"Cleansing hints:\n{json.dumps(cleansing_hints or [], ensure_ascii=False)}\n\n"
+        f"Planner hints:\n{json.dumps(planner_hints or {}, ensure_ascii=False)}\n\n"
         f"Context pack:\n{json.dumps(context_pack or {}, ensure_ascii=False)}\n"
     )
 
@@ -99,6 +104,7 @@ async def apply_transform_plan(
     join_plan: Optional[List[Dict[str, Any]]],
     cleansing_hints: Optional[List[Dict[str, Any]]],
     context_pack: Optional[Dict[str, Any]],
+    planner_hints: Optional[Dict[str, Any]],
     actor: str,
     tenant_id: str,
     user_id: Optional[str],
@@ -121,6 +127,7 @@ async def apply_transform_plan(
         join_plan=join_plan,
         cleansing_hints=cleansing_hints,
         context_pack=context_pack,
+        planner_hints=planner_hints,
     )
     llm_meta: Optional[LLMCallMeta] = None
 

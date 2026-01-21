@@ -101,6 +101,8 @@ def _build_plan_system_prompt() -> str:
         "- For composite joins, ALWAYS use leftKeys/rightKeys arrays.\n"
         "- Edge order matters for join: the first incoming edge is the LEFT input, the second is RIGHT.\n"
         "- Ensure join keys align to the left/right input order; do not swap keys without swapping edges.\n"
+        "- Respect planner_hints.multi_stage_mode: required means use multi-stage chaining if needed; "
+        "forbid means avoid extra stages unless explicitly requested.\n"
         "- definition_json MUST include at least one output node with type \"output\".\n"
         "- output nodes MUST use type \"output\" (not write_output) and include metadata.outputName or metadata.datasetName.\n"
         "- output node metadata.outputName MUST match outputs[].output_name for the same dataset.\n"
