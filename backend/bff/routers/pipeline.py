@@ -436,9 +436,17 @@ def _validate_pipeline_definition(*, definition_json: Dict[str, Any], require_ou
             if len(incoming.get(node_id, [])) < 2:
                 errors.append(f"join requires two inputs on node {node_id}")
             join_spec = resolve_join_spec(metadata)
-            if not join_spec.allow_cross_join and not (join_spec.left_key and join_spec.right_key):
-                errors.append(f"join requires leftKey/rightKey (or joinKey) on node {node_id}")
-            if join_spec.allow_cross_join and not (join_spec.left_key and join_spec.right_key):
+            left_keys = list(join_spec.left_keys or [])
+            right_keys = list(join_spec.right_keys or [])
+            if join_spec.left_key and not left_keys:
+                left_keys = [join_spec.left_key]
+            if join_spec.right_key and not right_keys:
+                right_keys = [join_spec.right_key]
+            if not join_spec.allow_cross_join and (not left_keys or not right_keys):
+                errors.append(f"join requires leftKey/rightKey or leftKeys/rightKeys (or joinKey) on node {node_id}")
+            if left_keys and right_keys and len(left_keys) != len(right_keys):
+                errors.append(f"join requires leftKeys/rightKeys of the same length on node {node_id}")
+            if join_spec.allow_cross_join and not left_keys and not right_keys:
                 if join_spec.join_type != "cross":
                     errors.append(f"join allowCrossJoin requires joinType='cross' on node {node_id}")
         if operation == "union":
@@ -686,16 +694,40 @@ async def _augment_definition_with_casts(
 
 def _sys_compute_expressions(output_name: str) -> List[Dict[str, str]]:
     safe_name = str(output_name or "").replace("'", "''")
-    now_iso = utcnow().isoformat().replace("+00:00", "Z")
-    valid_to_iso = "9999-12-31T23:59:59Z"
+    now_value = utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    valid_to_value = "9999-12-31 23:59:59"
     return [
         {"column": "_sys_source", "expr": f"'{safe_name}'"},
-        {"column": "_sys_ingested_at", "expr": f"'{now_iso}'"},
-        {"column": "_sys_is_deleted", "expr": "False"},
-        {"column": "_sys_valid_from", "expr": f"'{now_iso}'"},
-        {"column": "_sys_valid_to", "expr": f"'{valid_to_iso}'"},
+        {"column": "_sys_ingested_at", "expr": f"to_timestamp('{now_value}')"},
+        {"column": "_sys_is_deleted", "expr": "false"},
+        {"column": "_sys_valid_from", "expr": f"to_timestamp('{now_value}')"},
+        {"column": "_sys_valid_to", "expr": f"to_timestamp('{valid_to_value}')"},
         {"column": "_sys_record_hash", "expr": "sha2(to_json(struct(*)), 256)"},
     ]
+
+
+def _refresh_sys_compute_nodes(
+    *,
+    node_by_id: Dict[str, Dict[str, Any]],
+    output_id: str,
+    output_name: str,
+) -> bool:
+    updated = False
+    for spec in _sys_compute_expressions(output_name):
+        node_id = f"sys_{spec['column'].lstrip('_')}_{output_id}"
+        node = node_by_id.get(node_id)
+        if not node:
+            continue
+        metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+        expression = f"{spec['column']} = {spec['expr']}"
+        if normalize_operation(metadata.get("operation")) != "compute" or metadata.get("expression") != expression:
+            metadata = dict(metadata)
+            metadata["operation"] = "compute"
+            metadata["expression"] = expression
+            node["metadata"] = metadata
+            node_by_id[node_id] = node
+            updated = True
+    return updated
 
 
 def _inject_sys_columns_chain(
@@ -979,28 +1011,43 @@ def _augment_definition_with_canonical_contract(
         if not _is_canonical_output(node_id, node, canonical_output_names):
             continue
         metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
-        if metadata.get("_canonical_contract_applied"):
-            continue
+        already_applied = bool(metadata.get("_canonical_contract_applied"))
         output_name = _output_name_for_node(node_id, node)
-        if not metadata.get("pkSemantics") and not metadata.get("pk_semantics"):
+        if not already_applied and not metadata.get("pkSemantics") and not metadata.get("pk_semantics"):
             metadata = dict(metadata)
             metadata["pkSemantics"] = "snapshot"
         checks: List[Dict[str, Any]] = []
-        for spec in _SYS_COLUMN_SPECS:
-            checks.append({"rule": "required", "column": spec["name"]})
-            checks.append({"rule": "type", "column": spec["name"], "value": spec["type"]})
-            if spec["name"] in _SYS_NOT_NULL_COLUMNS:
-                checks.append({"rule": "not_null", "column": spec["name"]})
-        metadata["schemaChecks"] = _merge_schema_checks(metadata.get("schemaChecks"), checks)
-        metadata["_canonical_contract_applied"] = True
-        node["metadata"] = metadata
-        node_by_id[node_id] = node
+        if not already_applied:
+            for spec in _SYS_COLUMN_SPECS:
+                checks.append({"rule": "required", "column": spec["name"]})
+                checks.append({"rule": "type", "column": spec["name"], "value": spec["type"]})
+                if spec["name"] in _SYS_NOT_NULL_COLUMNS:
+                    checks.append({"rule": "not_null", "column": spec["name"]})
+            metadata["schemaChecks"] = _merge_schema_checks(metadata.get("schemaChecks"), checks)
+            metadata["_canonical_contract_applied"] = True
+            node["metadata"] = metadata
+            node_by_id[node_id] = node
 
         incoming_edges = [edge for edge in edges if edge.get("to") == node_id]
+        refreshed = _refresh_sys_compute_nodes(
+            node_by_id=node_by_id,
+            output_id=node_id,
+            output_name=output_name,
+        )
+        if refreshed:
+            updated = True
         if not incoming_edges:
+            if refreshed:
+                updated = True
             continue
         source_id = str(incoming_edges[0].get("from") or "").strip()
         if not source_id:
+            continue
+        sys_ids = {f"sys_{spec['name'].lstrip('_')}_{node_id}" for spec in _SYS_COLUMN_SPECS}
+        missing_sys = any(sys_id not in node_by_id for sys_id in sys_ids)
+        if already_applied and not missing_sys:
+            if refreshed:
+                updated = True
             continue
         tail_id = _inject_sys_columns_chain(
             edges=edges,
@@ -1199,6 +1246,104 @@ async def _release_pipeline_publish_lock(redis_service: Any, lock_key: str, toke
         logger.warning("Failed to release pipeline publish lock (key=%s): %s", lock_key, exc)
     finally:
         await redis_service.disconnect()
+
+
+async def _acquire_lakefs_commit_lock(
+    *,
+    repository: str,
+    branch: str,
+    job_id: Optional[str] = None,
+) -> Optional[tuple[Any, str, str]]:
+    pipeline_settings = get_settings().pipeline
+    if not pipeline_settings.locks_enabled:
+        return None
+    redis_service = create_redis_service_legacy()
+    try:
+        await redis_service.connect()
+    except Exception as exc:
+        if pipeline_settings.locks_required:
+            raise
+        logger.warning("lakeFS commit locks disabled (redis unavailable): %s", exc)
+        return None
+    lock_key = f"lakefs-commit-lock:{repository}:{safe_lakefs_ref(branch)}"
+    ttl_seconds = pipeline_settings.lock_ttl_seconds
+    retry_seconds = pipeline_settings.lock_retry_seconds
+    timeout_seconds = pipeline_settings.publish_lock_acquire_timeout_seconds
+    token = f"{job_id or 'commit'}:{uuid4().hex}"
+    start = time.monotonic()
+    while True:
+        acquired = await redis_service.client.set(lock_key, token, nx=True, ex=ttl_seconds)
+        if acquired:
+            return redis_service, lock_key, token
+        if time.monotonic() - start >= timeout_seconds:
+            await redis_service.disconnect()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Dataset branch is busy; retry after the current upload completes",
+            )
+        await asyncio.sleep(retry_seconds)
+
+
+async def _release_lakefs_commit_lock(redis_service: Any, lock_key: str, token: str) -> None:
+    script = (
+        "if redis.call('GET', KEYS[1]) == ARGV[1] then "
+        "return redis.call('DEL', KEYS[1]) else return 0 end"
+    )
+    try:
+        await redis_service.client.eval(script, 1, lock_key, token)
+    except Exception as exc:
+        logger.warning("Failed to release lakeFS commit lock (key=%s): %s", lock_key, exc)
+    finally:
+        await redis_service.disconnect()
+
+
+def _lakefs_commit_retry_delay(attempt: int) -> float:
+    return min(2.0, 0.5 * max(1, attempt))
+
+
+async def _resolve_lakefs_commit_from_head(
+    *,
+    lakefs_client: LakeFSClient,
+    lakefs_storage_service: Any,
+    repository: str,
+    branch: str,
+    object_key: str,
+    expected_checksum: Optional[str],
+    attempts: int = 3,
+) -> Optional[str]:
+    head_commit_id = await lakefs_client.get_branch_head_commit_id(
+        repository=repository,
+        branch=branch,
+    )
+    object_path = f"{head_commit_id}/{object_key}"
+    for attempt in range(1, max(1, attempts) + 1):
+        try:
+            object_meta = await lakefs_storage_service.get_object_metadata(
+                bucket=repository,
+                key=object_path,
+            )
+        except FileNotFoundError:
+            if attempt < attempts:
+                await asyncio.sleep(_lakefs_commit_retry_delay(attempt))
+                continue
+            return None
+        except Exception as exc:
+            logger.warning(
+                "lakeFS head object metadata lookup failed (repo=%s, key=%s): %s",
+                repository,
+                object_path,
+                exc,
+            )
+            return None
+        if expected_checksum:
+            stored_checksum = (object_meta.get("metadata") or {}).get("checksum")
+            if not stored_checksum or stored_checksum != expected_checksum:
+                if attempt < attempts:
+                    await asyncio.sleep(_lakefs_commit_retry_delay(attempt))
+                    continue
+                return None
+        return head_commit_id
+    return None
 
 
 def _normalize_schema_column_type(value: Any) -> str:
@@ -1949,39 +2094,52 @@ async def _commit_lakefs_with_predicate_fallback(
     object_key: str,
     expected_checksum: Optional[str] = None,
 ) -> str:
+    lock = None
+    if repository == _resolve_lakefs_raw_repository():
+        job_id = None
+        if metadata:
+            job_id = str(metadata.get("ingest_request_id") or metadata.get("dataset_id") or "").strip() or None
+        lock = await _acquire_lakefs_commit_lock(repository=repository, branch=branch, job_id=job_id)
     try:
-        return await lakefs_client.commit(
-            repository=repository,
-            branch=branch,
-            message=message,
-            metadata=metadata,
-        )
-    except LakeFSError as exc:
-        message_text = str(exc or "")
-        if "predicate failed" not in message_text.lower():
-            raise
-        head_commit_id = await lakefs_client.get_branch_head_commit_id(
-            repository=repository,
-            branch=branch,
-        )
-        try:
-            object_meta = await lakefs_storage_service.get_object_metadata(
-                bucket=repository,
-                key=f"{head_commit_id}/{object_key}",
-            )
-        except FileNotFoundError as meta_exc:
-            raise RuntimeError(f"lakeFS commit failed: {exc}") from meta_exc
-        if expected_checksum:
-            stored_checksum = (object_meta.get("metadata") or {}).get("checksum")
-            if not stored_checksum or stored_checksum != expected_checksum:
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return await lakefs_client.commit(
+                    repository=repository,
+                    branch=branch,
+                    message=message,
+                    metadata=metadata,
+                )
+            except LakeFSError as exc:
+                message_text = str(exc or "")
+                lowered = message_text.lower()
+                if "predicate failed" not in lowered and "no changes" not in lowered:
+                    raise
+                head_commit_id = await _resolve_lakefs_commit_from_head(
+                    lakefs_client=lakefs_client,
+                    lakefs_storage_service=lakefs_storage_service,
+                    repository=repository,
+                    branch=branch,
+                    object_key=object_key,
+                    expected_checksum=expected_checksum,
+                )
+                if head_commit_id:
+                    logger.warning(
+                        "lakeFS commit %s; using head commit %s for %s/%s",
+                        message_text,
+                        head_commit_id,
+                        repository,
+                        object_key,
+                    )
+                    return head_commit_id
+                if attempt < max_attempts:
+                    await asyncio.sleep(_lakefs_commit_retry_delay(attempt))
+                    continue
                 raise RuntimeError(f"lakeFS commit failed: {exc}") from exc
-        logger.warning(
-            "lakeFS commit predicate failed; using head commit %s for %s/%s",
-            head_commit_id,
-            repository,
-            object_key,
-        )
-        return head_commit_id
+        raise RuntimeError("lakeFS commit failed after retries")
+    finally:
+        if lock:
+            await _release_lakefs_commit_lock(*lock)
 
 
 def _dataset_artifact_prefix(*, db_name: str, dataset_id: str, dataset_name: str) -> str:

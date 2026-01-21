@@ -456,6 +456,8 @@ async def validate_agent_plan(
                     for key in (
                         "leftKey",
                         "rightKey",
+                        "leftKeys",
+                        "rightKeys",
                         "joinKey",
                         "joinType",
                         "allowCrossJoin",

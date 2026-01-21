@@ -34,16 +34,13 @@ def _ensure_output_nodes(definition_json: Dict[str, Any], outputs: List[Any]) ->
     if not isinstance(nodes_raw, list) or not nodes_raw:
         return definition_json
     nodes = [dict(node) for node in nodes_raw if isinstance(node, dict)]
-    if any(node.get("type") == "output" for node in nodes):
-        return definition_json
-    if not outputs:
-        return definition_json
     edges = normalize_edges(definition_json.get("edges"))
     node_by_id = normalize_nodes(nodes)
     if not node_by_id:
         return definition_json
     existing_ids = set(node_by_id.keys())
-    outgoing = {edge["from"] for edge in edges}
+    output_nodes = [node for node in nodes if node.get("type") == "output"]
+    outgoing = {edge["from"] for edge in edges if edge.get("from")}
     sink_ids = [
         node_id
         for node_id, node in node_by_id.items()
@@ -56,22 +53,83 @@ def _ensure_output_nodes(definition_json: Dict[str, Any], outputs: List[Any]) ->
 
     node_order = [node.get("id") for node in nodes if node.get("id")]
     ordered_sinks = [node_id for node_id in node_order if node_id in set(sink_ids)] or sink_ids
+    updated = False
 
-    for idx, output in enumerate(outputs):
-        output_name = str(getattr(output, "output_name", "") or "").strip()
-        if not output_name:
+    def attach_output(output_id: str, *, index: int) -> None:
+        nonlocal updated
+        if not output_id:
+            return
+        if any(edge.get("to") == output_id for edge in edges):
+            return
+        attach_to = ordered_sinks[index] if index < len(ordered_sinks) else ordered_sinks[-1]
+        if attach_to and attach_to != output_id:
+            edges.append({"from": attach_to, "to": output_id})
+            updated = True
+
+    if output_nodes:
+        for idx, output_node in enumerate(output_nodes):
+            attach_output(str(output_node.get("id") or "").strip(), index=idx)
+
+        existing_names: set[str] = set()
+        for node in output_nodes:
+            node_id = str(node.get("id") or "").strip()
+            metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+            name = str(metadata.get("outputName") or node.get("title") or node_id or "").strip()
+            if name:
+                existing_names.add(name)
+
+        for idx, output in enumerate(outputs):
+            output_name = str(getattr(output, "output_name", "") or "").strip()
+            if not output_name or output_name in existing_names:
+                continue
+            base_id = re.sub(r"[^A-Za-z0-9_]+", "_", f"output_{output_name}").strip("_") or "output"
+            output_id = pipeline_router._unique_node_id(base_id, existing_ids)
+            existing_ids.add(output_id)
+            nodes.append({"id": output_id, "type": "output", "metadata": {"outputName": output_name}})
+            attach_output(output_id, index=idx)
+        if not updated:
+            return definition_json
+    else:
+        if not outputs:
+            return definition_json
+        for idx, output in enumerate(outputs):
+            output_name = str(getattr(output, "output_name", "") or "").strip()
+            if not output_name:
+                continue
+            base_id = re.sub(r"[^A-Za-z0-9_]+", "_", f"output_{output_name}").strip("_") or "output"
+            output_id = pipeline_router._unique_node_id(base_id, existing_ids)
+            existing_ids.add(output_id)
+            nodes.append({"id": output_id, "type": "output", "metadata": {"outputName": output_name}})
+            attach_output(output_id, index=idx)
+        if not updated:
+            return definition_json
+    updated_definition = dict(definition_json)
+    updated_definition["nodes"] = nodes
+    updated_definition["edges"] = edges
+    return updated_definition
+
+
+def _normalize_join_nodes(definition_json: Dict[str, Any]) -> Dict[str, Any]:
+    nodes_raw = definition_json.get("nodes")
+    if not isinstance(nodes_raw, list) or not nodes_raw:
+        return definition_json
+    nodes = [dict(node) for node in nodes_raw if isinstance(node, dict)]
+    updated = False
+    for node in nodes:
+        if str(node.get("type") or "").strip().lower() != "join":
             continue
-        base_id = re.sub(r"[^A-Za-z0-9_]+", "_", f"output_{output_name}").strip("_") or "output"
-        output_id = pipeline_router._unique_node_id(base_id, existing_ids)
-        existing_ids.add(output_id)
-        nodes.append({"id": output_id, "type": "output", "metadata": {"outputName": output_name}})
-        attach_to = ordered_sinks[idx] if idx < len(ordered_sinks) else ordered_sinks[-1]
-        edges.append({"from": attach_to, "to": output_id})
-
-    updated = dict(definition_json)
-    updated["nodes"] = nodes
-    updated["edges"] = edges
-    return updated
+        node["type"] = "transform"
+        metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+        if str(metadata.get("operation") or "").strip().lower() != "join":
+            metadata = dict(metadata)
+            metadata["operation"] = "join"
+            node["metadata"] = metadata
+        updated = True
+    if not updated:
+        return definition_json
+    updated_definition = dict(definition_json)
+    updated_definition["nodes"] = nodes
+    return updated_definition
 
 
 async def validate_pipeline_plan(
@@ -122,8 +180,9 @@ async def validate_pipeline_plan(
         if str(getattr(output.output_kind, "value", output.output_kind) or "").strip().lower() in {"object", "link"}
         and str(output.output_name or "").strip()
     }
+    normalized = _normalize_join_nodes(definition_json)
     normalized = await pipeline_router._augment_definition_with_casts(
-        definition_json=definition_json,
+        definition_json=normalized,
         db_name=db_name,
         branch=branch,
         dataset_registry=dataset_registry,

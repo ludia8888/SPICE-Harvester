@@ -164,7 +164,7 @@ class PipelineExecutor:
             node_type = str(node.get("type") or "transform")
             metadata = node.get("metadata") or {}
 
-            if node_type == "input":
+            if node_type in {"input", "read_dataset"}:
                 if input_overrides and node_id in input_overrides:
                     table = input_overrides[node_id]
                 else:
@@ -212,6 +212,7 @@ class PipelineExecutor:
         )
         output_ops = _build_table_ops(output_table)
         available_columns = output_ops.columns
+        preview_mode = bool(definition.get("__preview_meta__"))
 
         contract_errors = validate_schema_contract(
             output_ops,
@@ -226,6 +227,9 @@ class PipelineExecutor:
             pk_columns=pk_columns,
             delete_column=delete_column,
         )
+        if preview_mode:
+            pk_columns = [col for col in pk_columns if col in available_columns]
+            pk_semantic_errors = []
         expectations = build_expectations_with_pk(
             definition=definition,
             output_metadata=output_metadata,
@@ -479,16 +483,18 @@ class PipelineExecutor:
         operation = normalize_operation(metadata.get("operation"))
         if not operation and len(inputs) >= 2:
             raise ValueError("transform has multiple inputs but no operation")
-        if operation == "join" and len(inputs) >= 2:
-            join_spec = resolve_join_spec(metadata)
-            return _join_tables(
-                inputs[0],
-                inputs[1],
-                join_type=join_spec.join_type,
-                left_key=join_spec.left_key,
-                right_key=join_spec.right_key,
-                allow_cross_join=join_spec.allow_cross_join,
-            )
+            if operation == "join" and len(inputs) >= 2:
+                join_spec = resolve_join_spec(metadata)
+                return _join_tables(
+                    inputs[0],
+                    inputs[1],
+                    join_type=join_spec.join_type,
+                    left_key=join_spec.left_key,
+                    right_key=join_spec.right_key,
+                    left_keys=join_spec.left_keys,
+                    right_keys=join_spec.right_keys,
+                    allow_cross_join=join_spec.allow_cross_join,
+                )
         if operation == "filter":
             return _filter_table(inputs[0], str(metadata.get("expression") or ""), parameters)
         if operation == "compute":
@@ -1054,18 +1060,40 @@ def _join_tables(
     left_key: Optional[str] = None,
     right_key: Optional[str] = None,
     join_key: Optional[str] = None,
+    left_keys: Optional[List[str]] = None,
+    right_keys: Optional[List[str]] = None,
     allow_cross_join: bool = False,
 ) -> PipelineTable:
+    def _normalize_keys(value: Any) -> List[str]:
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if isinstance(value, tuple):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if isinstance(value, str) and value.strip():
+            return [value.strip()]
+        return []
+
     join_type = (join_type or "inner").lower()
-    candidate_key = join_key or left_key
-    left_join = candidate_key
-    right_join = right_key or candidate_key
-    if not left_join or not right_join:
+    if join_key and not left_key:
+        left_key = join_key
+    if join_key and not right_key:
+        right_key = join_key
+
+    resolved_left = _normalize_keys(left_keys)
+    resolved_right = _normalize_keys(right_keys)
+    if left_key and not resolved_left:
+        resolved_left = [left_key]
+    if right_key and not resolved_right:
+        resolved_right = [right_key]
+
+    if not resolved_left or not resolved_right:
         if allow_cross_join:
             if join_type != "cross":
                 raise ValueError("join allowCrossJoin requires joinType='cross'")
         else:
-            raise ValueError("join requires leftKey/rightKey (or joinKey)")
+            raise ValueError("join requires leftKey/rightKey or leftKeys/rightKeys (or joinKey)")
+    if resolved_left and resolved_right and len(resolved_left) != len(resolved_right):
+        raise ValueError("join requires leftKeys/rightKeys of the same length")
     right_column_map: List[Tuple[str, str]] = []
     for col in right.columns:
         mapped = f"right_{col}" if col in left.columns else col
@@ -1073,13 +1101,38 @@ def _join_tables(
     columns = left.columns + [mapped for _, mapped in right_column_map]
 
     rows: List[Dict[str, Any]] = []
-    if left_join and right_join:
-        right_index: Dict[Any, List[Tuple[int, Dict[str, Any]]]] = {}
+    if resolved_left and resolved_right:
+        if len(resolved_left) == 1:
+            left_join = resolved_left[0]
+            right_join = resolved_right[0]
+            right_index: Dict[Any, List[Tuple[int, Dict[str, Any]]]] = {}
+            for idx, row in enumerate(right.rows):
+                right_index.setdefault(row.get(right_join), []).append((idx, row))
+            matched_right: set[int] = set()
+            for row in left.rows:
+                key = row.get(left_join)
+                matches = right_index.get(key) or []
+                if matches:
+                    for idx, match in matches:
+                        rows.append(_merge_rows(row, match, right_column_map))
+                        matched_right.add(idx)
+                elif join_type in {"left", "full"}:
+                    rows.append(_merge_rows(row, None, right_column_map))
+            if join_type in {"right", "full"}:
+                for idx, row in enumerate(right.rows):
+                    if idx not in matched_right:
+                        rows.append(_merge_rows(None, row, right_column_map))
+            return PipelineTable(columns=columns, rows=rows)
+
+        def row_key(row: Dict[str, Any], keys: List[str]) -> Tuple[Any, ...]:
+            return tuple(row.get(key) for key in keys)
+
+        right_index: Dict[Tuple[Any, ...], List[Tuple[int, Dict[str, Any]]]] = {}
         for idx, row in enumerate(right.rows):
-            right_index.setdefault(row.get(right_join), []).append((idx, row))
+            right_index.setdefault(row_key(row, resolved_right), []).append((idx, row))
         matched_right: set[int] = set()
         for row in left.rows:
-            key = row.get(left_join)
+            key = row_key(row, resolved_left)
             matches = right_index.get(key) or []
             if matches:
                 for idx, match in matches:
@@ -1223,6 +1276,13 @@ def _safe_eval(expression: str, row: Dict[str, Any], parameters: Dict[str, Any])
     expression = expression.strip()
     if not expression:
         return None
+    lower_expr = expression.lower()
+    if lower_expr.startswith("to_timestamp(") and expression.endswith(")"):
+        inner = expression[len("to_timestamp(") : -1].strip()
+        return _parse_timestamp_literal(inner)
+    if lower_expr.startswith("timestamp(") and expression.endswith(")"):
+        inner = expression[len("timestamp(") : -1].strip()
+        return _parse_timestamp_literal(inner)
     if expression.startswith("$"):
         return parameters.get(expression[1:])
     variables = {**parameters, **row}
@@ -1285,6 +1345,11 @@ def _eval_ast(node: ast.AST, variables: Dict[str, Any]) -> Any:
 def _parse_literal(raw: str) -> Any:
     if not raw:
         return raw
+    lowered = raw.strip().lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
     if (raw.startswith("\"") and raw.endswith("\"")) or (raw.startswith("'") and raw.endswith("'")):
         return raw[1:-1]
     try:
@@ -1293,6 +1358,25 @@ def _parse_literal(raw: str) -> Any:
         return int(raw)
     except Exception:
         return raw
+
+
+def _parse_timestamp_literal(raw: str) -> Any:
+    literal = _parse_literal(raw)
+    if isinstance(literal, datetime):
+        return literal
+    if isinstance(literal, (int, float)):
+        try:
+            return datetime.fromtimestamp(literal, tz=timezone.utc)
+        except Exception:
+            return literal
+    if isinstance(literal, str):
+        candidate = literal.strip()
+        if candidate:
+            try:
+                return datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+            except Exception:
+                return literal
+    return literal
 
 
 def _normalize_table(

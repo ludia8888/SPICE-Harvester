@@ -17,6 +17,7 @@ from uuid import UUID
 from shared.services.dataset_registry import DatasetRegistry
 from shared.services.dataset_profile_registry import DatasetProfileRegistry
 from shared.services.pipeline_profiler import compute_column_stats
+from shared.services.pipeline_schema_utils import normalize_schema_type
 from shared.services.pipeline_transform_spec import SUPPORTED_TRANSFORMS
 from shared.utils.canonical_json import sha256_canonical_json_prefixed
 from shared.utils.llm_safety import mask_pii
@@ -268,6 +269,77 @@ def _value_overlap_stats(
     }
 
 
+def _composite_key_stats(rows: list[dict[str, Any]], cols: tuple[str, ...]) -> tuple[float, float]:
+    if not rows or not cols:
+        return 0.0, 1.0
+    total = len(rows)
+    non_null_rows: list[tuple[Any, ...]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        values: list[Any] = []
+        missing = False
+        for col in cols:
+            value = _normalize_cell(row.get(col))
+            if value is None:
+                missing = True
+                break
+            values.append(value)
+        if not missing:
+            non_null_rows.append(tuple(values))
+    if not non_null_rows:
+        return 0.0, 1.0
+    distinct_ratio = len(set(non_null_rows)) / float(len(non_null_rows))
+    missing_ratio = 1.0 - (len(non_null_rows) / float(total)) if total else 1.0
+    return min(1.0, distinct_ratio), min(1.0, missing_ratio)
+
+
+def _composite_overlap_stats(
+    rows_a: list[dict[str, Any]],
+    cols_a: tuple[str, ...],
+    rows_b: list[dict[str, Any]],
+    cols_b: tuple[str, ...],
+) -> Dict[str, float]:
+    def _collect(rows: list[dict[str, Any]], cols: tuple[str, ...]) -> set[tuple[str, ...]]:
+        output: set[tuple[str, ...]] = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            values: list[str] = []
+            for col in cols:
+                value = _normalize_cell(row.get(col))
+                if value is None:
+                    values = []
+                    break
+                values.append(value)
+            if values:
+                output.add(tuple(values))
+        return output
+
+    set_a = _collect(rows_a, cols_a)
+    set_b = _collect(rows_b, cols_b)
+    if not set_a or not set_b:
+        return {
+            "overlap_ratio": 0.0,
+            "left_containment": 0.0,
+            "right_containment": 0.0,
+            "left_value_count": float(len(set_a)),
+            "right_value_count": float(len(set_b)),
+        }
+    intersection = set_a & set_b
+    denom = min(len(set_a), len(set_b))
+    overlap_ratio = (len(intersection) / float(denom)) if denom > 0 else 0.0
+    left_containment = len(intersection) / float(len(set_a)) if set_a else 0.0
+    right_containment = len(intersection) / float(len(set_b)) if set_b else 0.0
+    return {
+        "overlap_ratio": overlap_ratio,
+        "left_containment": left_containment,
+        "right_containment": right_containment,
+        "left_value_count": float(len(set_a)),
+        "right_value_count": float(len(set_b)),
+    }
+
+
 def _distinct_ratio(column_stats: dict[str, Any], sample_row_count: int) -> float:
     if not isinstance(column_stats, dict) or sample_row_count <= 0:
         return 0.0
@@ -300,6 +372,20 @@ def _estimate_cardinality(left_ratio: float, right_ratio: float, *, threshold: f
     return "N:N"
 
 
+def _cardinality_confidence(sample_count: int) -> float:
+    if sample_count >= 2000:
+        return 0.9
+    if sample_count >= 1000:
+        return 0.8
+    if sample_count >= 500:
+        return 0.65
+    if sample_count >= 200:
+        return 0.5
+    if sample_count >= 50:
+        return 0.35
+    return 0.2
+
+
 def _key_quality(column_stats: dict[str, Any], sample_row_count: int) -> float:
     if not isinstance(column_stats, dict) or sample_row_count <= 0:
         return 0.0
@@ -312,6 +398,66 @@ def _key_quality(column_stats: dict[str, Any], sample_row_count: int) -> float:
     distinct_ratio = float(distinct_count) / float(non_null)
     missing_ratio = float(null_count + empty_count) / float(sample_row_count)
     return max(0.0, min(1.0, distinct_ratio * (1.0 - missing_ratio)))
+
+
+def _type_family(column_stats: dict[str, Any], profile: dict[str, Any]) -> str:
+    raw_type = normalize_schema_type(column_stats.get("type") if isinstance(column_stats, dict) else None)
+    if raw_type:
+        if raw_type in {"xsd:integer", "xsd:decimal"}:
+            return "number"
+        if raw_type in {"xsd:boolean"}:
+            return "boolean"
+        if raw_type in {"xsd:date", "xsd:dateTime"}:
+            return "date"
+        if raw_type in {"xsd:string"}:
+            return "string"
+
+    fmt = profile.get("format") if isinstance(profile, dict) else {}
+    digit_ratio = fmt.get("digit_ratio")
+    alpha_ratio = fmt.get("alpha_ratio")
+    if isinstance(digit_ratio, (int, float)) and isinstance(alpha_ratio, (int, float)):
+        if digit_ratio >= 0.9 and alpha_ratio <= 0.1:
+            return "number_like"
+        if alpha_ratio >= 0.6:
+            return "string_like"
+    return "unknown"
+
+
+def _type_compatibility(left_family: str, right_family: str) -> float:
+    if left_family == right_family:
+        return 0.4 if left_family == "unknown" else 1.0
+    numeric = {"number", "number_like"}
+    stringish = {"string", "string_like"}
+    if left_family in numeric and right_family in numeric:
+        return 0.8
+    if left_family in stringish and right_family in stringish:
+        return 0.8
+    if "unknown" in (left_family, right_family):
+        return 0.5
+    return 0.1
+
+
+def _select_candidate_columns(
+    columns: list[str],
+    quality_scores: dict[str, float],
+    *,
+    min_candidates: int = 4,
+    max_candidates: int = 12,
+) -> list[str]:
+    if not columns:
+        return []
+    ordered = sorted(columns, key=lambda c: quality_scores.get(c, 0.0), reverse=True)
+    if len(ordered) <= min_candidates:
+        return ordered
+    scores = [quality_scores.get(c, 0.0) for c in ordered]
+    median = sorted(scores)[len(scores) // 2]
+    threshold = max(0.2, min(0.9, median + 0.15))
+    selected = [col for col in ordered if quality_scores.get(col, 0.0) >= threshold]
+    if len(selected) < min_candidates:
+        selected = ordered[:min_candidates]
+    if len(selected) > max_candidates:
+        selected = selected[:max_candidates]
+    return selected
 
 
 def _looks_like_id(name: str) -> bool:
@@ -449,8 +595,8 @@ def _suggest_join_keys(datasets: list[dict[str, Any]], *, max_candidates: int) -
                 col_stats = (right_stats.get("columns") or {}).get(col) if isinstance(right_stats.get("columns"), dict) else None
                 right_quality[col] = _key_quality(col_stats or {}, right_sample_n)
 
-            top_left = sorted(left_cols, key=lambda c: left_quality.get(c, 0.0), reverse=True)[:8]
-            top_right = sorted(right_cols, key=lambda c: right_quality.get(c, 0.0), reverse=True)[:8]
+            top_left = _select_candidate_columns(left_cols, left_quality)
+            top_right = _select_candidate_columns(right_cols, right_quality)
 
             left_profiles = left.get("column_profiles") if isinstance(left.get("column_profiles"), dict) else {}
             right_profiles = right.get("column_profiles") if isinstance(right.get("column_profiles"), dict) else {}
@@ -465,6 +611,10 @@ def _suggest_join_keys(datasets: list[dict[str, Any]], *, max_candidates: int) -
                 left_missing = _missing_ratio(
                     (left_stats.get("columns") or {}).get(col_a, {}) if isinstance(left_stats.get("columns"), dict) else {},
                     left_sample_n,
+                )
+                left_type = _type_family(
+                    (left_stats.get("columns") or {}).get(col_a, {}) if isinstance(left_stats.get("columns"), dict) else {},
+                    left_profile if isinstance(left_profile, dict) else {},
                 )
                 for col_b in top_right:
                     right_profile = right_profiles.get(col_b) if isinstance(right_profiles, dict) else {}
@@ -483,9 +633,14 @@ def _suggest_join_keys(datasets: list[dict[str, Any]], *, max_candidates: int) -
                         (right_stats.get("columns") or {}).get(col_b, {}) if isinstance(right_stats.get("columns"), dict) else {},
                         right_sample_n,
                     )
+                    right_type = _type_family(
+                        (right_stats.get("columns") or {}).get(col_b, {}) if isinstance(right_stats.get("columns"), dict) else {},
+                        right_profile if isinstance(right_profile, dict) else {},
+                    )
                     format_sim = _format_similarity(left_format or {}, right_format or {})
-                    score = 0.35 * name_sim + 0.35 * overlap + 0.20 * format_sim + 0.10 * quality
-                    if score < 0.5 or (overlap <= 0.0 and name_sim < 0.9 and format_sim < 0.7):
+                    type_sim = _type_compatibility(left_type, right_type)
+                    score = 0.30 * name_sim + 0.30 * overlap + 0.20 * format_sim + 0.10 * type_sim + 0.10 * quality
+                    if score < 0.5 or (overlap <= 0.0 and name_sim < 0.9 and format_sim < 0.7 and type_sim < 0.6):
                         continue
                     reasons: list[str] = []
                     if name_sim >= 0.9:
@@ -498,21 +653,34 @@ def _suggest_join_keys(datasets: list[dict[str, Any]], *, max_candidates: int) -
                         reasons.append("some sample values overlap")
                     if format_sim >= 0.6:
                         reasons.append("format patterns align")
+                    if type_sim >= 0.8:
+                        reasons.append("type families align")
+                    elif type_sim <= 0.2:
+                        reasons.append("type mismatch; cast may be needed")
                     if quality >= 0.7:
                         reasons.append("high distinctness / low missingness in sample")
                     cardinality = _estimate_cardinality(left_distinct, right_distinct)
                     if cardinality != "N:N":
                         reasons.append(f"cardinality hint {cardinality}")
+                    sample_n = min(left_sample_n, right_sample_n)
+                    cardinality_conf = _cardinality_confidence(sample_n)
+                    if cardinality_conf < 0.6:
+                        reasons.append("cardinality estimated from sample; may differ on full data")
                     candidates.append(
                         {
                             "left_dataset_id": left.get("dataset_id"),
                             "right_dataset_id": right.get("dataset_id"),
                             "left_column": col_a,
                             "right_column": col_b,
+                            "left_columns": [col_a],
+                            "right_columns": [col_b],
                             "score": round(float(score), 3),
                             "name_similarity": round(float(name_sim), 3),
                             "sample_value_overlap": round(float(overlap), 3),
                             "format_similarity": round(float(format_sim), 3),
+                            "type_compatibility": round(float(type_sim), 3),
+                            "left_type_family": left_type,
+                            "right_type_family": right_type,
                             "left_distinct_ratio": round(float(left_distinct), 3),
                             "right_distinct_ratio": round(float(right_distinct), 3),
                             "left_missing_ratio": round(float(left_missing), 3),
@@ -520,6 +688,121 @@ def _suggest_join_keys(datasets: list[dict[str, Any]], *, max_candidates: int) -
                             "left_containment_ratio": round(float(left_containment), 3),
                             "right_containment_ratio": round(float(right_containment), 3),
                             "cardinality_hint": cardinality,
+                            "cardinality_confidence": round(float(cardinality_conf), 3),
+                            "cardinality_note": "estimated from sample; may differ at full scale",
+                            "sample_row_counts": {
+                                "left": int(left_sample_n),
+                                "right": int(right_sample_n),
+                            },
+                            "reasons": reasons,
+                        }
+                    )
+
+            # composite (2-column) candidates
+            left_pairs = list(combinations(top_left, 2))
+            right_pairs = list(combinations(top_right, 2))
+            for cols_a in left_pairs:
+                left_distinct, left_missing = _composite_key_stats(left_rows, cols_a)
+                left_quality_combo = min(left_quality.get(col, 0.0) for col in cols_a)
+                left_type_a = _type_family(
+                    (left_stats.get("columns") or {}).get(cols_a[0], {}) if isinstance(left_stats.get("columns"), dict) else {},
+                    left_profiles.get(cols_a[0], {}) if isinstance(left_profiles, dict) else {},
+                )
+                left_type_b = _type_family(
+                    (left_stats.get("columns") or {}).get(cols_a[1], {}) if isinstance(left_stats.get("columns"), dict) else {},
+                    left_profiles.get(cols_a[1], {}) if isinstance(left_profiles, dict) else {},
+                )
+                for cols_b in right_pairs:
+                    # align by best name similarity
+                    sim_direct = (
+                        _name_similarity(cols_a[0], cols_b[0]) + _name_similarity(cols_a[1], cols_b[1])
+                    ) / 2.0
+                    sim_swap = (
+                        _name_similarity(cols_a[0], cols_b[1]) + _name_similarity(cols_a[1], cols_b[0])
+                    ) / 2.0
+                    if sim_swap > sim_direct:
+                        aligned_b = (cols_b[1], cols_b[0])
+                        name_sim = sim_swap
+                    else:
+                        aligned_b = cols_b
+                        name_sim = sim_direct
+
+                    right_distinct, right_missing = _composite_key_stats(right_rows, aligned_b)
+                    right_quality_combo = min(right_quality.get(col, 0.0) for col in aligned_b)
+                    right_type_a = _type_family(
+                        (right_stats.get("columns") or {}).get(aligned_b[0], {}) if isinstance(right_stats.get("columns"), dict) else {},
+                        right_profiles.get(aligned_b[0], {}) if isinstance(right_profiles, dict) else {},
+                    )
+                    right_type_b = _type_family(
+                        (right_stats.get("columns") or {}).get(aligned_b[1], {}) if isinstance(right_stats.get("columns"), dict) else {},
+                        right_profiles.get(aligned_b[1], {}) if isinstance(right_profiles, dict) else {},
+                    )
+
+                    overlap_stats = _composite_overlap_stats(left_rows, cols_a, right_rows, aligned_b)
+                    overlap = overlap_stats.get("overlap_ratio", 0.0)
+                    left_containment = overlap_stats.get("left_containment", 0.0)
+                    right_containment = overlap_stats.get("right_containment", 0.0)
+                    format_left = left_profiles if isinstance(left_profiles, dict) else {}
+                    format_right = right_profiles if isinstance(right_profiles, dict) else {}
+                    format_sim = (
+                        _format_similarity(format_left.get(cols_a[0], {}).get("format", {}), format_right.get(aligned_b[0], {}).get("format", {}))
+                        + _format_similarity(format_left.get(cols_a[1], {}).get("format", {}), format_right.get(aligned_b[1], {}).get("format", {}))
+                    ) / 2.0
+                    quality = min(left_quality_combo, right_quality_combo)
+                    type_sim = (
+                        _type_compatibility(left_type_a, right_type_a) + _type_compatibility(left_type_b, right_type_b)
+                    ) / 2.0
+                    score = 0.30 * name_sim + 0.30 * overlap + 0.20 * format_sim + 0.10 * type_sim + 0.10 * quality
+                    if score < 0.5 or (overlap <= 0.0 and name_sim < 0.7 and format_sim < 0.6 and type_sim < 0.6):
+                        continue
+                    reasons: list[str] = ["composite key candidate"]
+                    if name_sim >= 0.8:
+                        reasons.append("column names align across pairs")
+                    if overlap >= 0.4:
+                        reasons.append("composite sample values overlap")
+                    if format_sim >= 0.6:
+                        reasons.append("format patterns align across pairs")
+                    if type_sim >= 0.8:
+                        reasons.append("type families align")
+                    elif type_sim <= 0.2:
+                        reasons.append("type mismatch; cast may be needed")
+                    if quality >= 0.7:
+                        reasons.append("high distinctness / low missingness in sample")
+                    cardinality = _estimate_cardinality(left_distinct, right_distinct)
+                    if cardinality != "N:N":
+                        reasons.append(f"cardinality hint {cardinality}")
+                    sample_n = min(left_sample_n, right_sample_n)
+                    cardinality_conf = _cardinality_confidence(sample_n)
+                    if cardinality_conf < 0.6:
+                        reasons.append("cardinality estimated from sample; may differ on full data")
+                    candidates.append(
+                        {
+                            "left_dataset_id": left.get("dataset_id"),
+                            "right_dataset_id": right.get("dataset_id"),
+                            "left_column": f"{cols_a[0]}+{cols_a[1]}",
+                            "right_column": f"{aligned_b[0]}+{aligned_b[1]}",
+                            "left_columns": list(cols_a),
+                            "right_columns": list(aligned_b),
+                            "score": round(float(score), 3),
+                            "name_similarity": round(float(name_sim), 3),
+                            "sample_value_overlap": round(float(overlap), 3),
+                            "format_similarity": round(float(format_sim), 3),
+                            "type_compatibility": round(float(type_sim), 3),
+                            "left_type_families": [left_type_a, left_type_b],
+                            "right_type_families": [right_type_a, right_type_b],
+                            "left_distinct_ratio": round(float(left_distinct), 3),
+                            "right_distinct_ratio": round(float(right_distinct), 3),
+                            "left_missing_ratio": round(float(left_missing), 3),
+                            "right_missing_ratio": round(float(right_missing), 3),
+                            "left_containment_ratio": round(float(left_containment), 3),
+                            "right_containment_ratio": round(float(right_containment), 3),
+                            "cardinality_hint": cardinality,
+                            "cardinality_confidence": round(float(cardinality_conf), 3),
+                            "cardinality_note": "estimated from sample; may differ at full scale",
+                            "sample_row_counts": {
+                                "left": int(left_sample_n),
+                                "right": int(right_sample_n),
+                            },
                             "reasons": reasons,
                         }
                     )
@@ -613,6 +896,10 @@ async def build_pipeline_context_pack(
     selected_ids = [_normalize_uuid(item) for item in _ensure_string_list(dataset_ids)]
     selected_ids = [item for item in selected_ids if item]
     selected_set = set(selected_ids)
+    requested_count = len(selected_ids)
+    max_selected = max(0, int(max_selected_datasets))
+    if requested_count:
+        max_selected = max(max_selected, requested_count)
 
     overview: list[dict[str, Any]] = []
     for item in raw[: max(0, int(max_datasets_overview))]:
@@ -707,7 +994,7 @@ async def build_pipeline_context_pack(
                 )
             except Exception as exc:
                 logger.warning("Failed to persist dataset profile: %s", exc)
-        if len(selected) >= max(0, int(max_selected_datasets)):
+        if len(selected) >= max_selected:
             break
 
     join_candidates = _suggest_join_keys(selected, max_candidates=max_join_candidates) if len(selected) >= 2 else []
@@ -717,6 +1004,14 @@ async def build_pipeline_context_pack(
         right_id = str(candidate.get("right_dataset_id") or "")
         left_col = str(candidate.get("left_column") or "")
         right_col = str(candidate.get("right_column") or "")
+        left_cols = candidate.get("left_columns") or []
+        right_cols = candidate.get("right_columns") or []
+        if len(left_cols) > 1 or len(right_cols) > 1:
+            continue
+        if not left_col and len(left_cols) == 1:
+            left_col = str(left_cols[0])
+        if not right_col and len(right_cols) == 1:
+            right_col = str(right_cols[0])
         left_score = pk_scores.get((left_id, left_col), 0.0)
         right_score = pk_scores.get((right_id, right_col), 0.0)
         left_containment = float(candidate.get("left_containment_ratio") or 0.0)
@@ -770,9 +1065,9 @@ async def build_pipeline_context_pack(
         "pipeline_definition_hints": {
             "supported_operations": sorted(SUPPORTED_TRANSFORMS),
             "input_node_metadata": {
-                "datasetId|dataset_id": "UUID of dataset",
-                "datasetName|dataset_name": "dataset name (fallback)",
-                "datasetBranch|dataset_branch": "lakeFS branch (default to plan scope branch/main)",
+                "dataset_id": "UUID of dataset (aka datasetId)",
+                "dataset_name": "dataset name (aka datasetName, fallback if id unavailable)",
+                "dataset_branch": "lakeFS branch (aka datasetBranch, default to plan scope branch/main)",
             },
             "transform_node_metadata": {
                 "operation": "one of supported_operations",

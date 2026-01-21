@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from bff.services.pipeline_plan_validation import validate_pipeline_plan
 from shared.models.agent_plan_report import PlanCompilationReport
@@ -50,6 +50,26 @@ class PipelinePlanDraftEnvelope(BaseModel):
     notes: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_envelope(cls, data: Any):  # noqa: ANN001
+        if not isinstance(data, dict):
+            return data
+        if "plan" in data:
+            return data
+        if not any(key in data for key in ("goal", "definition_json", "outputs", "data_scope")):
+            return data
+        normalized = dict(data)
+        plan_payload = {
+            key: normalized[key]
+            for key in list(normalized.keys())
+            if key not in ("confidence", "notes", "warnings")
+        }
+        for key in plan_payload.keys():
+            normalized.pop(key, None)
+        normalized["plan"] = plan_payload
+        return normalized
+
 
 @dataclass(frozen=True)
 class PipelinePlanCompileResult:
@@ -77,7 +97,7 @@ def _build_plan_system_prompt() -> str:
         "- nodes MUST only include {id,type,metadata}; edges MUST only include {from,to}.\n"
         "- Do NOT include UI/layout fields (position, x/y), labels, or extra properties.\n"
         "- Use supported operations only; no UDF.\n"
-        "- join requires leftKey/rightKey (or joinKey) and allowCrossJoin must be false.\n"
+        "- join requires leftKey/rightKey or leftKeys/rightKeys (or joinKey) and allowCrossJoin must be false.\n"
         "- definition_json MUST include at least one output node with type \"output\".\n"
         "- output nodes MUST use type \"output\" (not write_output) and include metadata.outputName or metadata.datasetName.\n"
         "- output node metadata.outputName MUST match outputs[].output_name for the same dataset.\n"
@@ -264,29 +284,49 @@ async def compile_pipeline_plan(
                 data_policies=data_policies,
             )
 
-    try:
-        draft, llm_meta = await llm_gateway.complete_json(
-            task="PIPELINE_PLAN_COMPILE_V1",
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=PipelinePlanDraftEnvelope,
-            model=selected_model,
-            allowed_models=allowed_models,
-            redis_service=redis_service,
-            audit_store=audit_store,
-            audit_partition_key=f"pipeline_plan:{plan_id}",
-            audit_actor=actor,
-            audit_resource_id=plan_id,
-            audit_metadata={"kind": "pipeline_plan_compile", "schema": "PipelinePlan", "tenant_id": tenant_id, "user_id": user_id},
-        )
-        draft_plan_obj = dict(draft.plan or {})
-    except (LLMUnavailableError, LLMRequestError, LLMOutputValidationError) as exc:
-        questions = _fallback_questions_from_errors([str(exc)])
+    draft = None
+    draft_plan_obj: Dict[str, Any] = {}
+    last_exc: Exception | None = None
+    for attempt in range(2):
+        try:
+            draft, llm_meta = await llm_gateway.complete_json(
+                task="PIPELINE_PLAN_COMPILE_V1",
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                response_model=PipelinePlanDraftEnvelope,
+                model=selected_model,
+                allowed_models=allowed_models,
+                redis_service=redis_service,
+                audit_store=audit_store,
+                audit_partition_key=f"pipeline_plan:{plan_id}",
+                audit_actor=actor,
+                audit_resource_id=plan_id,
+                audit_metadata={
+                    "kind": "pipeline_plan_compile",
+                    "schema": "PipelinePlan",
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "attempt": attempt + 1,
+                },
+            )
+            draft_plan_obj = dict(draft.plan or {})
+            last_exc = None
+            break
+        except LLMOutputValidationError as exc:
+            last_exc = exc
+            if attempt < 1:
+                continue
+            break
+        except (LLMUnavailableError, LLMRequestError) as exc:
+            last_exc = exc
+            break
+    if last_exc is not None:
+        questions = _fallback_questions_from_errors([str(last_exc)])
         return PipelinePlanCompileResult(
             status="clarification_required",
             plan_id=plan_id,
             plan=None,
-            validation_errors=[str(exc)],
+            validation_errors=[str(last_exc)],
             validation_warnings=[],
             questions=questions,
             llm_meta=llm_meta,
@@ -473,6 +513,16 @@ async def repair_pipeline_plan(
             questions=questions,
             llm_meta=llm_meta,
         )
+
+    base_plan = plan.model_dump(mode="json")
+    if draft_plan_obj:
+        merged = dict(base_plan)
+        for key, value in draft_plan_obj.items():
+            if value is not None:
+                merged[key] = value
+        draft_plan_obj = merged
+    else:
+        draft_plan_obj = base_plan
 
     try:
         repaired_plan = PipelinePlan.model_validate(draft_plan_obj)

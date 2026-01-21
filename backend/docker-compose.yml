@@ -69,7 +69,8 @@ services:
     container_name: spice_elasticsearch
     # On Apple Silicon / some ARM hypervisors, the bundled JDK can SIGILL at JVM bootstrap.
     # Force the amd64 image for stable local/dev runs (Docker will emulate if needed).
-    platform: linux/amd64
+    # Override with ELASTICSEARCH_PLATFORM=linux/arm64 if emulation is too slow.
+    platform: ${ELASTICSEARCH_PLATFORM:-linux/amd64}
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
@@ -92,8 +93,9 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
       interval: 30s
-      timeout: 10s
+      timeout: 30s
       retries: 5
+      start_period: 60s
 
   # Kafka
   kafka:
@@ -383,7 +385,7 @@ services:
       - OMS_CLIENT_TIMEOUT_SECONDS=${OMS_CLIENT_TIMEOUT_SECONDS:-60}
       - FUNNEL_BASE_URL=http://funnel:8003
       - AGENT_BASE_URL=http://agent:8004
-      - AGENT_PROXY_TIMEOUT_SECONDS=${AGENT_PROXY_TIMEOUT_SECONDS:-30}
+      - AGENT_PROXY_TIMEOUT_SECONDS=${AGENT_PROXY_TIMEOUT_SECONDS:-300}
       - BFF_AGENT_TOKEN=${BFF_AGENT_TOKEN:-spice-dev-agent-token}
       - MCP_CONFIG_PATH=/app/mcp-config.json
       - CONTEXT7_API_KEY=${CONTEXT7_API_KEY:-}
@@ -404,9 +406,10 @@ services:
       - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
       - LLM_BASE_URL=${LLM_BASE_URL:-https://api.openai.com/v1}
       - LLM_API_KEY=${LLM_API_KEY:-}
-      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-800}
+      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-2000}
       - LLM_MAX_PROMPT_CHARS=${LLM_MAX_PROMPT_CHARS:-20000}
       - LLM_TIMEOUT_SECONDS=${LLM_TIMEOUT_SECONDS:-20}
+      - LLM_NATIVE_TOOL_CALLING=${LLM_NATIVE_TOOL_CALLING:-true}
       # OpenAI env (supported via settings fallbacks)
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
@@ -518,6 +521,7 @@ services:
       - AGENT_BFF_BASE_URL=http://bff:8002
       - AGENT_REQUIRE_EVENT_STORE=true
       - AGENT_SERVICE_NAME=agent
+      - AGENT_TOOL_TIMEOUT_SECONDS=180
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_USER=${POSTGRES_USER:-spiceadmin}

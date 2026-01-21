@@ -12,6 +12,7 @@ from agent.services.agent_runtime import AgentRuntime
 class PipelineAgentState(TypedDict):
     run_id: str
     actor: str
+    session_id: Optional[str]
     goal: str
     data_scope: Dict[str, Any]
     answers: Dict[str, Any] | None
@@ -179,6 +180,10 @@ async def _call_bff(
     body: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     idempotency_key = f"{state['run_id']}:{step_id}"
+    headers = {"Idempotency-Key": idempotency_key}
+    session_id = state.get("session_id")
+    if session_id:
+        headers["X-Agent-Session-ID"] = str(session_id)
     tool_call = AgentToolCall(
         step_id=step_id,
         tool_id=tool_id,
@@ -187,7 +192,7 @@ async def _call_bff(
         path=path,
         body=body,
         query={},
-        headers={"Idempotency-Key": idempotency_key},
+        headers=headers,
         data_scope=state.get("data_scope") or {},
     )
     return await runtime.execute_tool_call(
@@ -323,6 +328,9 @@ async def _compile_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
 
     next_action = "preview_plan"
     status = "running"
+    should_transform = bool(state.get("join_hints") or state.get("planner_hints")) and int(
+        state.get("max_transform") or 0
+    ) > 0
     if plan_status == "clarification_required":
         if plan and _needs_output_split(plan) and _only_output_errors(list(data.get("validation_errors") or [])):
             next_action = "split_outputs"
@@ -334,6 +342,8 @@ async def _compile_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
         status = "failed"
     elif _needs_output_split(plan):
         next_action = "split_outputs"
+    elif should_transform:
+        next_action = "transform"
 
     return {
         **state,
@@ -381,12 +391,19 @@ async def _split_outputs(state: PipelineAgentState, runtime: AgentRuntime) -> Pi
             "error": "output metadata incomplete after split",
         }
 
+    next_action = "preview_plan"
+    should_transform = bool(state.get("join_hints") or state.get("planner_hints")) and int(
+        state.get("max_transform") or 0
+    ) > 0
+    if should_transform:
+        next_action = "transform"
+
     return {
         **state,
         "plan": updated_plan,
         "validation_errors": list(data.get("validation_errors") or []),
         "validation_warnings": list(data.get("validation_warnings") or []),
-        "next_action": "preview_plan",
+        "next_action": next_action,
     }
 
 
@@ -853,7 +870,13 @@ def build_pipeline_agent_graph(runtime: AgentRuntime):
     graph.add_conditional_edges(
         "repair",
         lambda state: state.get("next_action", "end"),
-        {"split_outputs": "split_outputs", "preview_plan": "preview_plan", "clarify": END, "end": END},
+        {
+            "split_outputs": "split_outputs",
+            "transform": "transform",
+            "preview_plan": "preview_plan",
+            "clarify": END,
+            "end": END,
+        },
     )
     graph.add_edge("generate_specs", END)
     return graph.compile()
@@ -868,6 +891,7 @@ def build_pipeline_agent_state(
     *,
     goal: str,
     data_scope: Dict[str, Any],
+    session_id: Optional[str],
     answers: Optional[Dict[str, Any]],
     planner_hints: Optional[Dict[str, Any]],
     output_bindings: Optional[Dict[str, Any]],
@@ -889,6 +913,7 @@ def build_pipeline_agent_state(
     return PipelineAgentState(
         run_id=str(uuid4()),
         actor=actor,
+        session_id=session_id,
         goal=goal,
         data_scope=data_scope,
         answers=answers,

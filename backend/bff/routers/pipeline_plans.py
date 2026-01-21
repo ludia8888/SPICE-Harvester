@@ -24,7 +24,7 @@ from bff.dependencies import OMSClientDep
 from shared.config.settings import get_settings
 from shared.models.pipeline_plan import PipelinePlan, PipelinePlanDataScope
 from shared.models.responses import ApiResponse
-from shared.security.input_sanitizer import sanitize_input, validate_db_name
+from shared.security.input_sanitizer import InputSanitizer, SecurityViolationError, sanitize_input, validate_db_name
 from shared.security.auth_utils import enforce_db_scope
 from shared.services.agent_policy_registry import AgentPolicyRegistry
 from shared.services.dataset_registry import DatasetRegistry
@@ -41,6 +41,8 @@ from bff.services.oms_client import OMSClient
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/pipeline-plans", tags=["Pipeline Plans"])
+
+_PREVIEW_SANITIZER = InputSanitizer()
 
 
 async def get_dataset_registry() -> DatasetRegistry:
@@ -111,6 +113,89 @@ def _serialize_run_tables(run_tables: Dict[str, Any], *, limit: int) -> Dict[str
             "rows": rows[:resolved_limit] if resolved_limit else rows,
         }
     return payload
+
+
+def _sanitize_label_dict_with_limits(payload: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise SecurityViolationError(f"Expected dict, got {type(payload)}")
+    if len(payload) > _PREVIEW_SANITIZER.max_dict_keys:
+        raise SecurityViolationError(
+            f"Too many keys in dict: {len(payload)} > {_PREVIEW_SANITIZER.max_dict_keys}"
+        )
+    return _PREVIEW_SANITIZER.sanitize_label_dict(payload)
+
+
+def _sanitize_preview_columns(columns: list[Any]) -> list[Any]:
+    if not isinstance(columns, list):
+        raise SecurityViolationError(f"Expected list, got {type(columns)}")
+    if len(columns) > _PREVIEW_SANITIZER.max_list_items:
+        raise SecurityViolationError(
+            f"Too many items in list: {len(columns)} > {_PREVIEW_SANITIZER.max_list_items}"
+        )
+    sanitized: list[Any] = []
+    for col in columns:
+        if isinstance(col, dict):
+            sanitized.append(sanitize_input(col))
+        elif isinstance(col, str):
+            sanitized.append(_PREVIEW_SANITIZER.sanitize_label_key(col))
+        else:
+            sanitized.append(_PREVIEW_SANITIZER.sanitize_any(col))
+    return sanitized
+
+
+def _sanitize_preview_rows(rows: list[Any]) -> list[Any]:
+    if not isinstance(rows, list):
+        raise SecurityViolationError(f"Expected list, got {type(rows)}")
+    if len(rows) > _PREVIEW_SANITIZER.max_list_items:
+        raise SecurityViolationError(
+            f"Too many items in list: {len(rows)} > {_PREVIEW_SANITIZER.max_list_items}"
+        )
+    sanitized: list[Any] = []
+    for row in rows:
+        if isinstance(row, dict):
+            sanitized.append(_sanitize_label_dict_with_limits(row))
+        else:
+            sanitized.append(_PREVIEW_SANITIZER.sanitize_any(row))
+    return sanitized
+
+
+def _sanitize_preview_table(table: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(table, dict):
+        raise SecurityViolationError(f"Expected dict, got {type(table)}")
+    if len(table) > _PREVIEW_SANITIZER.max_dict_keys:
+        raise SecurityViolationError(
+            f"Too many keys in dict: {len(table)} > {_PREVIEW_SANITIZER.max_dict_keys}"
+        )
+    sanitized: Dict[str, Any] = {}
+    for key, value in table.items():
+        if not isinstance(key, str):
+            raise SecurityViolationError("Table keys must be strings")
+        clean_key = _PREVIEW_SANITIZER.sanitize_field_name(key)
+        if key == "columns" and isinstance(value, list):
+            sanitized[clean_key] = _sanitize_preview_columns(value)
+        elif key == "rows" and isinstance(value, list):
+            sanitized[clean_key] = _sanitize_preview_rows(value)
+        elif key in {"column_stats", "cast_stats"} and isinstance(value, dict):
+            sanitized[clean_key] = _sanitize_label_dict_with_limits(value)
+        else:
+            sanitized[clean_key] = _PREVIEW_SANITIZER.sanitize_any(value)
+    return sanitized
+
+
+def _sanitize_preview_tables(payload: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    if not isinstance(payload, dict):
+        raise SecurityViolationError(f"Expected dict, got {type(payload)}")
+    if len(payload) > _PREVIEW_SANITIZER.max_dict_keys:
+        raise SecurityViolationError(
+            f"Too many keys in dict: {len(payload)} > {_PREVIEW_SANITIZER.max_dict_keys}"
+        )
+    sanitized: Dict[str, Dict[str, Any]] = {}
+    for key, value in payload.items():
+        if not isinstance(key, str):
+            raise SecurityViolationError("Preview table keys must be strings")
+        clean_key = _PREVIEW_SANITIZER.sanitize_label_key(key)
+        sanitized[clean_key] = _sanitize_preview_table(value)
+    return sanitized
 
 
 async def _resolve_tenant_policy(
@@ -235,6 +320,38 @@ class PipelinePlanEvaluateJoinsRequest(BaseModel):
     definition_digest: str | None = Field(default=None, max_length=200)
 
 
+def _plan_outputs_need_split(plan: PipelinePlan) -> bool:
+    outputs = list(plan.outputs or [])
+    if not outputs:
+        return True
+    for output in outputs:
+        kind = str(getattr(output.output_kind, "value", output.output_kind) or "unknown").strip().lower()
+        if kind == "object":
+            if not output.target_class_id:
+                return True
+            continue
+        if kind == "link":
+            missing = [
+                name
+                for name in (
+                    "link_type_id",
+                    "source_class_id",
+                    "target_class_id",
+                    "predicate",
+                    "cardinality",
+                    "source_key_column",
+                    "target_key_column",
+                    "relationship_spec_type",
+                )
+                if not getattr(output, name, None)
+            ]
+            if missing:
+                return True
+            continue
+        return True
+    return False
+
+
 @router.post("/compile", response_model=ApiResponse)
 async def compile_plan(
     body: PipelinePlanCompileRequest,
@@ -264,12 +381,12 @@ async def compile_plan(
 
     selected_model, allowed_models, data_policies = await _resolve_tenant_policy(request)
 
-    if data_scope and data_scope.db_name:
-        db_name = validate_db_name(str(data_scope.db_name))
-        try:
-            enforce_db_scope(request.headers, db_name=db_name)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    db_name = validate_db_name(str(data_scope.db_name))
+    try:
+        enforce_db_scope(request.headers, db_name=db_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    branch = str(data_scope.branch) if data_scope and data_scope.branch else None
 
     context_pack = None
     try:
@@ -309,12 +426,63 @@ async def compile_plan(
         logger.error("Pipeline plan compile failed: %s", exc)
         raise
 
+    compiled_plan = result.plan
+    validation_errors = list(result.validation_errors or [])
+    validation_warnings = list(result.validation_warnings or [])
+    response_status = result.status
+    output_split_info: dict | None = None
+
+    if compiled_plan and response_status == "success" and _plan_outputs_need_split(compiled_plan):
+        try:
+            split_result = await split_pipeline_outputs(
+                plan=compiled_plan,
+                output_bindings=None,
+                context_pack=context_pack,
+                actor=actor,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                data_policies=data_policies,
+                selected_model=selected_model,
+                allowed_models=allowed_models,
+                llm_gateway=llm,
+                redis_service=redis_service,
+                audit_store=audit_store,
+            )
+        except LLMQuotaExceededError as exc:
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.error("Pipeline output split failed: %s", exc)
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to split outputs") from exc
+
+        compiled_plan = compiled_plan.model_copy(update={"outputs": split_result.outputs})
+        validation = await validate_pipeline_plan(
+            plan=compiled_plan,
+            dataset_registry=dataset_registry,
+            db_name=db_name,
+            branch=branch,
+            require_output=True,
+        )
+        compiled_plan = validation.plan
+        validation_errors = list(validation.errors or [])
+        validation_warnings = list(validation.warnings or [])
+        if split_result.warnings:
+            validation_warnings.extend([f"output_split: {item}" for item in split_result.warnings])
+        if split_result.notes:
+            validation_warnings.extend([f"output_split_note: {item}" for item in split_result.notes])
+        output_split_info = {
+            "confidence": split_result.confidence,
+            "notes": split_result.notes,
+            "warnings": split_result.warnings,
+        }
+        if validation_errors:
+            response_status = "clarification_required"
+
     response_data = {
-        "status": result.status,
+        "status": response_status,
         "plan_id": result.plan_id,
-        "plan": result.plan.model_dump(mode="json") if result.plan else None,
-        "validation_errors": list(result.validation_errors or []),
-        "validation_warnings": list(result.validation_warnings or []),
+        "plan": compiled_plan.model_dump(mode="json") if compiled_plan else None,
+        "validation_errors": validation_errors,
+        "validation_warnings": validation_warnings,
         "questions": [q.model_dump(mode="json") for q in (result.questions or [])],
         "compilation_report": result.compilation_report.model_dump(mode="json") if result.compilation_report else None,
         "preflight": result.preflight,
@@ -332,18 +500,19 @@ async def compile_plan(
             if result.llm_meta
             else None
         ),
+        "output_split": output_split_info,
     }
 
-    if result.plan:
-        status_value = "COMPILED" if result.status == "success" else "DRAFT"
+    if compiled_plan:
+        status_value = "COMPILED" if response_status == "success" else "DRAFT"
         await plan_registry.upsert_plan(
             plan_id=result.plan_id,
             tenant_id=tenant_id,
             status=status_value,
-            goal=str(result.plan.goal or ""),
-            db_name=str(result.plan.data_scope.db_name or "") if result.plan.data_scope else None,
-            branch=str(result.plan.data_scope.branch or "") if result.plan.data_scope else None,
-            plan=result.plan.model_dump(mode="json"),
+            goal=str(compiled_plan.goal or ""),
+            db_name=str(compiled_plan.data_scope.db_name or "") if compiled_plan.data_scope else None,
+            branch=str(compiled_plan.data_scope.branch or "") if compiled_plan.data_scope else None,
+            plan=compiled_plan.model_dump(mode="json"),
             created_by=actor,
         )
 
@@ -726,8 +895,10 @@ async def evaluate_joins(
             },
         )
 
-    payload = sanitize_input(body.model_dump(exclude_none=True))
-    run_tables = payload.get("run_tables") if isinstance(payload.get("run_tables"), dict) else None
+    raw_payload = body.model_dump(exclude_none=True)
+    run_tables_raw = raw_payload.pop("run_tables", None)
+    payload = sanitize_input(raw_payload)
+    run_tables = _sanitize_preview_tables(run_tables_raw) if isinstance(run_tables_raw, dict) else None
     definition_digest = str(payload.get("definition_digest") or "").strip() or None
     expected_digest = sha256_canonical_json_prefixed(validation.plan.definition_json)
     digest_warnings: List[str] = []
@@ -1076,10 +1247,12 @@ async def transform_plan(
 
     selected_model, allowed_models, data_policies = await _resolve_tenant_policy(request)
 
-    payload = sanitize_input(body.model_dump(exclude_none=True))
+    raw_payload = body.model_dump(exclude_none=True)
+    context_pack = raw_payload.pop("context_pack", None)
+    payload = sanitize_input(raw_payload)
     join_plan = payload.get("join_plan") if isinstance(payload.get("join_plan"), list) else None
     cleansing_hints = payload.get("cleansing_hints") if isinstance(payload.get("cleansing_hints"), list) else None
-    context_pack = payload.get("context_pack") if isinstance(payload.get("context_pack"), dict) else None
+    context_pack = context_pack if isinstance(context_pack, dict) else None
 
     if context_pack is None:
         try:
@@ -1345,9 +1518,13 @@ async def generate_specs(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
-    payload = sanitize_input(body.model_dump(exclude_none=True))
+    raw_payload = body.model_dump(exclude_none=True)
+    preview_payload_raw = raw_payload.pop("output_previews", None)
+    payload = sanitize_input(raw_payload)
     bindings_payload = payload.get("output_bindings") if isinstance(payload.get("output_bindings"), dict) else None
-    preview_payload = payload.get("output_previews") if isinstance(payload.get("output_previews"), dict) else None
+    preview_payload = (
+        _sanitize_preview_tables(preview_payload_raw) if isinstance(preview_payload_raw, dict) else None
+    )
 
     results = await generate_pipeline_specs(
         plan=plan,

@@ -54,7 +54,7 @@ def _build_transform_system_prompt() -> str:
         "Do NOT change plan outputs or data_scope.\n"
         "Preserve pkSemantics/pkColumns/expectations unless you are fixing validation errors.\n"
         "Use only supported operations; no UDF.\n"
-        "join requires leftKey/rightKey (or joinKey) and allowCrossJoin must be false.\n"
+        "join requires leftKey/rightKey or leftKeys/rightKeys (or joinKey) and allowCrossJoin must be false.\n"
         "Prefer join/window/aggregate only when needed by the goal; follow join_plan hints.\n"
         "\n"
         f"Supported operations: {', '.join(sorted(SUPPORTED_TRANSFORMS))}\n"

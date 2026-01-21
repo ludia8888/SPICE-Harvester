@@ -337,15 +337,32 @@ async def compute_pipeline_preflight(
             if join_spec.allow_cross_join and join_spec.join_type == "cross":
                 schema_by_node[node_id] = _apply_join(inputs[0], inputs[1])
                 continue
+            left_keys = list(join_spec.left_keys or [])
+            right_keys = list(join_spec.right_keys or [])
             left_key = join_spec.left_key or join_spec.right_key
             right_key = join_spec.right_key or join_spec.left_key
-            if not left_key or not right_key:
+            if left_key and not left_keys:
+                left_keys = [left_key]
+            if right_key and not right_keys:
+                right_keys = [right_key]
+            if not left_keys or not right_keys:
                 issues.append(
                     {
                         "kind": "join_key_missing",
                         "severity": "error",
                         "node_id": node_id,
-                        "message": "join requires leftKey/rightKey (or joinKey)",
+                        "message": "join requires leftKey/rightKey or leftKeys/rightKeys (or joinKey)",
+                    }
+                )
+            elif len(left_keys) != len(right_keys):
+                issues.append(
+                    {
+                        "kind": "join_key_count_mismatch",
+                        "severity": "error",
+                        "node_id": node_id,
+                        "message": "join requires leftKeys/rightKeys of the same length",
+                        "left_keys": left_keys,
+                        "right_keys": right_keys,
                     }
                 )
             elif _schema_empty(inputs[0]) or _schema_empty(inputs[1]) or inputs[0].dynamic_columns or inputs[1].dynamic_columns:
@@ -360,8 +377,8 @@ async def compute_pipeline_preflight(
                     }
                 )
             else:
-                left_missing = left_key not in inputs[0].columns
-                right_missing = right_key not in inputs[1].columns
+                left_missing = [key for key in left_keys if key not in inputs[0].columns]
+                right_missing = [key for key in right_keys if key not in inputs[1].columns]
                 if left_missing or right_missing:
                     issues.append(
                         {
@@ -371,36 +388,60 @@ async def compute_pipeline_preflight(
                             "message": "join key missing in input schema",
                             "left": {
                                 "node_id": input_ids[0] if len(input_ids) > 0 else None,
-                                "key": left_key,
+                                "keys": left_keys,
                                 "missing": left_missing,
                             },
                             "right": {
                                 "node_id": input_ids[1] if len(input_ids) > 1 else None,
-                                "key": right_key,
+                                "keys": right_keys,
                                 "missing": right_missing,
                             },
                         }
                     )
                 else:
-                    left_type = _column_type(inputs[0], left_key)
-                    right_type = _column_type(inputs[1], right_key)
-                    if left_type and right_type and left_type != right_type:
-                        suggested_casts = [
-                            {
-                                "side": "left",
-                                "node_id": input_ids[0] if len(input_ids) > 0 else None,
-                                "column": left_key,
-                                "target_type": right_type,
-                                "operation": "cast",
-                            },
-                            {
-                                "side": "right",
-                                "node_id": input_ids[1] if len(input_ids) > 1 else None,
-                                "column": right_key,
-                                "target_type": left_type,
-                                "operation": "cast",
-                            },
-                        ]
+                    mismatches: List[Dict[str, Any]] = []
+                    unknowns: List[Dict[str, Any]] = []
+                    suggested_casts: List[Dict[str, Any]] = []
+                    for left_key_item, right_key_item in zip(left_keys, right_keys):
+                        left_type = _column_type(inputs[0], left_key_item)
+                        right_type = _column_type(inputs[1], right_key_item)
+                        if left_type and right_type and left_type != right_type:
+                            mismatches.append(
+                                {
+                                    "left_key": left_key_item,
+                                    "right_key": right_key_item,
+                                    "left_type": left_type,
+                                    "right_type": right_type,
+                                }
+                            )
+                            suggested_casts.extend(
+                                [
+                                    {
+                                        "side": "left",
+                                        "node_id": input_ids[0] if len(input_ids) > 0 else None,
+                                        "column": left_key_item,
+                                        "target_type": right_type,
+                                        "operation": "cast",
+                                    },
+                                    {
+                                        "side": "right",
+                                        "node_id": input_ids[1] if len(input_ids) > 1 else None,
+                                        "column": right_key_item,
+                                        "target_type": left_type,
+                                        "operation": "cast",
+                                    },
+                                ]
+                            )
+                        elif not left_type or not right_type:
+                            unknowns.append(
+                                {
+                                    "left_key": left_key_item,
+                                    "right_key": right_key_item,
+                                    "left_type": left_type,
+                                    "right_type": right_type,
+                                }
+                            )
+                    if mismatches:
                         issues.append(
                             {
                                 "kind": "join_key_type_mismatch",
@@ -409,18 +450,17 @@ async def compute_pipeline_preflight(
                                 "message": "join key types differ",
                                 "left": {
                                     "node_id": input_ids[0] if len(input_ids) > 0 else None,
-                                    "key": left_key,
-                                    "type": left_type,
+                                    "keys": left_keys,
                                 },
                                 "right": {
                                     "node_id": input_ids[1] if len(input_ids) > 1 else None,
-                                    "key": right_key,
-                                    "type": right_type,
+                                    "keys": right_keys,
                                 },
+                                "mismatches": mismatches,
                                 "suggested_casts": suggested_casts,
                             }
                         )
-                    elif not left_type or not right_type:
+                    elif unknowns:
                         issues.append(
                             {
                                 "kind": "join_key_type_unknown",
@@ -429,14 +469,13 @@ async def compute_pipeline_preflight(
                                 "message": "join key type unavailable for comparison",
                                 "left": {
                                     "node_id": input_ids[0] if len(input_ids) > 0 else None,
-                                    "key": left_key,
-                                    "type": left_type,
+                                    "keys": left_keys,
                                 },
                                 "right": {
                                     "node_id": input_ids[1] if len(input_ids) > 1 else None,
-                                    "key": right_key,
-                                    "type": right_type,
+                                    "keys": right_keys,
                                 },
+                                "unknowns": unknowns,
                             }
                         )
             schema_by_node[node_id] = _apply_join(inputs[0], inputs[1])

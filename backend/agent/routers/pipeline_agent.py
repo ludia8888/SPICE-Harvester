@@ -10,12 +10,28 @@ from fastapi import APIRouter, HTTPException, Request
 from agent.models_pipeline import PipelineAgentRunRequest
 from agent.services.agent_runtime import AgentRuntime
 from agent.services.pipeline_agent_graph import build_pipeline_agent_state, run_pipeline_agent_graph
+from shared.config.settings import get_settings
 from shared.models.responses import ApiResponse
+from shared.services.agent_session_registry import AgentSessionRegistry
 from shared.utils.llm_safety import digest_for_audit, mask_pii
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/agent", tags=["Agent"])
+
+PIPELINE_AGENT_TOOL_IDS = [
+    "pipeline_plans.context_pack",
+    "pipeline_plans.join_keys",
+    "pipeline_plans.compile",
+    "pipeline_plans.split_outputs",
+    "pipeline_plans.transform",
+    "pipeline_plans.preview",
+    "pipeline_plans.evaluate_joins",
+    "pipeline_plans.inspect_preview",
+    "pipeline_plans.cleanse",
+    "pipeline_plans.repair",
+    "pipeline_plans.generate_specs",
+]
 
 
 def _resolve_principal(request: Request) -> tuple[str, str]:
@@ -45,6 +61,21 @@ def _actor_label(principal_type: str, principal_id: str) -> str:
     return f"{principal_type}:{principal_id}"
 
 
+def _resolve_tenant_id(request: Request) -> str:
+    candidate = request.headers.get("X-Tenant-ID") or request.headers.get("X-Org-ID") or "default"
+    return str(candidate).strip() or "default"
+
+
+def _resolve_session_owner(request: Request, principal_id: str) -> str:
+    delegated = request.headers.get("Authorization") or request.headers.get("X-Delegated-Authorization")
+    if delegated:
+        return principal_id or "system"
+    dev_id = str(get_settings().auth.dev_master_user_id or "").strip()
+    if dev_id:
+        return dev_id
+    return principal_id or "system"
+
+
 @router.post("/pipeline-runs", response_model=ApiResponse)
 async def run_pipeline_agent(request: Request, body: PipelineAgentRunRequest) -> ApiResponse:
     principal_type, principal_id = _resolve_principal(request)
@@ -60,6 +91,7 @@ async def run_pipeline_agent(request: Request, body: PipelineAgentRunRequest) ->
     state = build_pipeline_agent_state(
         goal=body.goal,
         data_scope=body.data_scope.model_dump(mode="json"),
+        session_id=None,
         answers=body.answers,
         planner_hints=body.planner_hints,
         output_bindings=(
@@ -82,6 +114,25 @@ async def run_pipeline_agent(request: Request, body: PipelineAgentRunRequest) ->
         request_id=request_id,
         actor=actor,
     )
+
+    session_registry: AgentSessionRegistry | None = getattr(request.app.state, "agent_session_registry", None)
+    if session_registry is None:
+        raise HTTPException(status_code=500, detail="AgentSessionRegistry not initialized")
+    session_id = str(uuid4())
+    tenant_id = _resolve_tenant_id(request)
+    created_by = _resolve_session_owner(request, principal_id)
+    try:
+        await session_registry.create_session(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            created_by=created_by,
+            enabled_tools=PIPELINE_AGENT_TOOL_IDS,
+            metadata={"source": "pipeline_agent", "run_id": state["run_id"]},
+        )
+    except Exception as exc:
+        logger.error("Failed to create pipeline agent session: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to initialize agent session") from exc
+    state["session_id"] = session_id
 
     masked_scope = mask_pii(state.get("data_scope") or {}, max_string_chars=200)
     await runtime.record_event(
@@ -108,6 +159,7 @@ async def run_pipeline_agent(request: Request, body: PipelineAgentRunRequest) ->
     result_payload: Dict[str, Any] = {
         "run_id": final_state.get("run_id"),
         "status": status,
+        "session_id": final_state.get("session_id"),
         "plan_id": final_state.get("plan_id"),
         "plan": final_state.get("plan"),
         "preflight": final_state.get("preflight"),

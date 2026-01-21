@@ -1343,7 +1343,7 @@ class AgentRuntimeSettings(BaseSettings):
     )
 
     tool_timeout_seconds: float = Field(
-        default=30.0,
+        default=180.0,
         description="HTTP timeout for tool calls (AGENT_TOOL_TIMEOUT_SECONDS)",
     )
     tool_max_payload_bytes: int = Field(

@@ -3329,9 +3329,17 @@ class PipelineWorker:
                 if len(incoming.get(node_id, [])) < 2:
                     errors.append(f"join requires two inputs on node {node_id}")
                 join_spec = resolve_join_spec(metadata)
-                if not join_spec.allow_cross_join and not (join_spec.left_key and join_spec.right_key):
-                    errors.append(f"join requires leftKey/rightKey (or joinKey) on node {node_id}")
-                if join_spec.allow_cross_join and not (join_spec.left_key and join_spec.right_key):
+                left_keys = list(join_spec.left_keys or [])
+                right_keys = list(join_spec.right_keys or [])
+                if join_spec.left_key and not left_keys:
+                    left_keys = [join_spec.left_key]
+                if join_spec.right_key and not right_keys:
+                    right_keys = [join_spec.right_key]
+                if not join_spec.allow_cross_join and (not left_keys or not right_keys):
+                    errors.append(f"join requires leftKey/rightKey or leftKeys/rightKeys (or joinKey) on node {node_id}")
+                if left_keys and right_keys and len(left_keys) != len(right_keys):
+                    errors.append(f"join requires leftKeys/rightKeys of the same length on node {node_id}")
+                if join_spec.allow_cross_join and not left_keys and not right_keys:
                     if join_spec.join_type != "cross":
                         errors.append(f"join allowCrossJoin requires joinType='cross' on node {node_id}")
             if operation == "union":
@@ -3847,12 +3855,28 @@ class PipelineWorker:
             allow_cross_join = join_spec.allow_cross_join
             left_key = join_spec.left_key
             right_key = join_spec.right_key
+            left_keys = list(join_spec.left_keys or [])
+            right_keys = list(join_spec.right_keys or [])
+            if left_key and not left_keys:
+                left_keys = [left_key]
+            if right_key and not right_keys:
+                right_keys = [right_key]
             left = inputs[0]
             right = inputs[1]
-            if left_key and right_key:
-                if left_key == right_key:
-                    return left.join(right, on=[left_key], how=join_type)
-                return left.join(right, left[left_key] == right[right_key], how=join_type)
+            if left_keys and right_keys:
+                if len(left_keys) != len(right_keys):
+                    raise ValueError("Join requires leftKeys/rightKeys of the same length.")
+                if len(left_keys) == 1:
+                    left_key = left_keys[0]
+                    right_key = right_keys[0]
+                    if left_key == right_key:
+                        return left.join(right, on=[left_key], how=join_type)
+                    return left.join(right, left[left_key] == right[right_key], how=join_type)
+                conditions = [left[lkey] == right[rkey] for lkey, rkey in zip(left_keys, right_keys)]
+                join_expr = conditions[0]
+                for cond in conditions[1:]:
+                    join_expr = join_expr & cond
+                return left.join(right, join_expr, how=join_type)
             if allow_cross_join:
                 if join_type != "cross":
                     logger.warning("allowCrossJoin enabled but joinType=%s; forcing cross join", join_type)
@@ -3860,7 +3884,7 @@ class PipelineWorker:
                     return left.crossJoin(right)
                 except Exception:
                     return left.join(right, how="cross")
-            raise ValueError("Join requires leftKey/rightKey (or joinKey). Cross join requires allowCrossJoin=true.")
+            raise ValueError("Join requires leftKey/rightKey or leftKeys/rightKeys (or joinKey). Cross join requires allowCrossJoin=true.")
         if operation == "filter":
             expr = apply_parameters(str(metadata.get("expression") or ""), parameters)
             if expr:

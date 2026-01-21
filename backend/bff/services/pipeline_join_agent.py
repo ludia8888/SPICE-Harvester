@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from shared.services.audit_log_store import AuditLogStore
 from shared.services.llm_gateway import (
@@ -30,10 +30,58 @@ class PipelineJoinSelection(BaseModel):
     right_dataset_id: str = Field(..., min_length=1, max_length=200)
     left_column: str = Field(..., min_length=1, max_length=200)
     right_column: str = Field(..., min_length=1, max_length=200)
+    left_columns: Optional[List[str]] = None
+    right_columns: Optional[List[str]] = None
     join_type: str = Field(default="inner", max_length=40)
     cardinality: Optional[str] = Field(default=None, max_length=40)
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     reason: Optional[str] = Field(default=None, max_length=500)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_join_keys(cls, data: Any):  # noqa: ANN001
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        def _split_composite(value: Any) -> Optional[List[str]]:
+            if not isinstance(value, str):
+                return None
+            if "+" not in value:
+                return None
+            parts = [item.strip() for item in value.split("+") if item.strip()]
+            return parts if len(parts) > 1 else None
+
+        if not str(normalized.get("left_column") or "").strip():
+            left_on = normalized.get("left_on")
+            if isinstance(left_on, list) and left_on:
+                normalized["left_column"] = str(left_on[0])
+            elif isinstance(left_on, str) and left_on.strip():
+                normalized["left_column"] = left_on.strip()
+        left_cols = normalized.get("left_columns")
+        if not isinstance(left_cols, list) or not left_cols:
+            left_cols = normalized.get("left_on")
+        if not isinstance(left_cols, list) or not left_cols:
+            left_cols = _split_composite(normalized.get("left_column"))
+        if isinstance(left_cols, list) and left_cols:
+            normalized["left_columns"] = [str(item).strip() for item in left_cols if str(item).strip()]
+            if not str(normalized.get("left_column") or "").strip():
+                normalized["left_column"] = str(normalized["left_columns"][0])
+        if not str(normalized.get("right_column") or "").strip():
+            right_on = normalized.get("right_on")
+            if isinstance(right_on, list) and right_on:
+                normalized["right_column"] = str(right_on[0])
+            elif isinstance(right_on, str) and right_on.strip():
+                normalized["right_column"] = right_on.strip()
+        right_cols = normalized.get("right_columns")
+        if not isinstance(right_cols, list) or not right_cols:
+            right_cols = normalized.get("right_on")
+        if not isinstance(right_cols, list) or not right_cols:
+            right_cols = _split_composite(normalized.get("right_column"))
+        if isinstance(right_cols, list) and right_cols:
+            normalized["right_columns"] = [str(item).strip() for item in right_cols if str(item).strip()]
+            if not str(normalized.get("right_column") or "").strip():
+                normalized["right_column"] = str(normalized["right_columns"][0])
+        return normalized
 
 
 class PipelineJoinEnvelope(BaseModel):
@@ -60,6 +108,7 @@ def _build_join_system_prompt() -> str:
         "Do NOT invent dataset ids or columns.\n"
         "Use cardinality_hint when provided and set cardinality on selections.\n"
         "Keep the join chain minimal to satisfy the goal.\n"
+        "Use left_column/right_column for single-key joins; use left_columns/right_columns arrays for composite keys.\n"
         "\n"
         "Output schema:\n"
         "{\n"

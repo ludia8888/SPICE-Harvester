@@ -7,7 +7,7 @@ Computes join coverage, explosion ratio, and null-introduced ratios from sample 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Sequence
 
 from shared.services.pipeline_executor import PipelineExecutor, PipelineTable
 from shared.services.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes
@@ -22,6 +22,8 @@ class JoinEvaluation:
     join_type: str
     left_key: Optional[str]
     right_key: Optional[str]
+    left_keys: Optional[List[str]]
+    right_keys: Optional[List[str]]
     left_row_count: int
     right_row_count: int
     output_row_count: int
@@ -43,18 +45,37 @@ def _ratio(numerator: int, denominator: int) -> float:
 def _count_matches(
     left: PipelineTable,
     right: PipelineTable,
-    left_key: Optional[str],
-    right_key: Optional[str],
+    left_keys: Optional[Sequence[str]],
+    right_keys: Optional[Sequence[str]],
 ) -> Tuple[int, int]:
-    if not left_key or not right_key:
+    if not left_keys or not right_keys or len(left_keys) != len(right_keys):
         return 0, 0
-    right_index: Dict[Any, List[int]] = {}
+    if len(left_keys) == 1:
+        left_key = left_keys[0]
+        right_key = right_keys[0]
+        right_index: Dict[Any, List[int]] = {}
+        for idx, row in enumerate(right.rows):
+            right_index.setdefault(row.get(right_key), []).append(idx)
+        matched_right: set[int] = set()
+        matched_left = 0
+        for row in left.rows:
+            key = row.get(left_key)
+            matches = right_index.get(key) or []
+            if matches:
+                matched_left += 1
+                matched_right.update(matches)
+        return matched_left, len(matched_right)
+
+    def row_key(row: Dict[str, Any], keys: Sequence[str]) -> Tuple[Any, ...]:
+        return tuple(row.get(key) for key in keys)
+
+    right_index: Dict[Tuple[Any, ...], List[int]] = {}
     for idx, row in enumerate(right.rows):
-        right_index.setdefault(row.get(right_key), []).append(idx)
+        right_index.setdefault(row_key(row, right_keys), []).append(idx)
     matched_right: set[int] = set()
     matched_left = 0
     for row in left.rows:
-        key = row.get(left_key)
+        key = row_key(row, left_keys)
         matches = right_index.get(key) or []
         if matches:
             matched_left += 1
@@ -102,6 +123,8 @@ def _choose_join_inputs(
     tables: Dict[str, PipelineTable],
     left_key: Optional[str],
     right_key: Optional[str],
+    left_keys: Optional[Sequence[str]],
+    right_keys: Optional[Sequence[str]],
 ) -> Tuple[Optional[str], Optional[str], List[str]]:
     warnings: List[str] = []
     candidates = [item for item in inputs if isinstance(item, str) and item.strip()]
@@ -109,7 +132,14 @@ def _choose_join_inputs(
         return None, None, warnings
 
     ordered = sorted(candidates)
-    if not left_key and not right_key:
+    resolved_left = list(left_keys or [])
+    resolved_right = list(right_keys or [])
+    if left_key and not resolved_left:
+        resolved_left = [left_key]
+    if right_key and not resolved_right:
+        resolved_right = [right_key]
+
+    if not resolved_left and not resolved_right:
         return ordered[0], ordered[1], warnings
 
     scored: List[Tuple[int, str, str]] = []
@@ -120,13 +150,13 @@ def _choose_join_inputs(
             left_table = tables.get(left_id)
             right_table = tables.get(right_id)
             score = 0
-            if left_key and left_table and left_key in left_table.columns:
+            if resolved_left and left_table and all(key in left_table.columns for key in resolved_left):
                 score += 2
-            if right_key and right_table and right_key in right_table.columns:
+            if resolved_right and right_table and all(key in right_table.columns for key in resolved_right):
                 score += 2
-            if left_key and right_table and left_key in right_table.columns:
+            if resolved_left and right_table and all(key in right_table.columns for key in resolved_left):
                 score -= 1
-            if right_key and left_table and right_key in left_table.columns:
+            if resolved_right and left_table and all(key in left_table.columns for key in resolved_right):
                 score -= 1
             scored.append((score, left_id, right_id))
 
@@ -184,6 +214,8 @@ async def evaluate_pipeline_joins(
             tables,
             join_spec.left_key,
             join_spec.right_key,
+            join_spec.left_keys,
+            join_spec.right_keys,
         )
         warnings.extend(input_warnings)
         if not left_id or not right_id:
@@ -196,13 +228,19 @@ async def evaluate_pipeline_joins(
             warnings.append(f"join node {node_id} missing tables")
             continue
 
+        left_keys = list(join_spec.left_keys or [])
+        right_keys = list(join_spec.right_keys or [])
         left_key = join_spec.left_key
         right_key = join_spec.right_key
+        if left_key and not left_keys:
+            left_keys = [left_key]
+        if right_key and not right_keys:
+            right_keys = [right_key]
         left_count = len(left_table.rows)
         right_count = len(right_table.rows)
         output_count = len(output_table.rows)
 
-        matched_left, matched_right = _count_matches(left_table, right_table, left_key, right_key)
+        matched_left, matched_right = _count_matches(left_table, right_table, left_keys, right_keys)
         left_coverage = _ratio(matched_left, left_count)
         right_coverage = _ratio(matched_right, right_count)
         explosion_ratio = _ratio(output_count, max(left_count, right_count, 1))
@@ -219,6 +257,8 @@ async def evaluate_pipeline_joins(
                 join_type=join_spec.join_type,
                 left_key=left_key,
                 right_key=right_key,
+                left_keys=left_keys or None,
+                right_keys=right_keys or None,
                 left_row_count=left_count,
                 right_row_count=right_count,
                 output_row_count=output_count,

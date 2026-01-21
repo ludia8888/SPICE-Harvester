@@ -143,7 +143,7 @@ def _merge_actions(actions: List[PipelineCleansingAction]) -> List[Dict[str, Any
     if cast_map:
         casts = [{"column": col, "type": cast_map[col]} for col in sorted(cast_map.keys())]
         transforms.append({"operation": "cast", "casts": casts})
-    if dedupe_columns is not None:
+    if dedupe_columns:
         transforms.append({"operation": "dedupe", "columns": dedupe_columns})
     return transforms
 

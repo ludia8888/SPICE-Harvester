@@ -801,12 +801,13 @@ class AgentRuntime:
         bff_token = (agent_settings.bff_token or "").strip() or None
         allowed_services = ("bff",)
 
+        tool_timeout = max(float(agent_settings.tool_timeout_seconds), float(settings.llm.timeout_seconds))
         config = AgentRuntimeConfig(
             bff_url=bff_url,
             allowed_services=allowed_services,
             max_preview_chars=agent_settings.audit_max_preview_chars,
             max_payload_bytes=agent_settings.tool_max_payload_bytes,
-            timeout_s=agent_settings.tool_timeout_seconds,
+            timeout_s=tool_timeout,
             service_name=agent_settings.service_name,
             bff_token=bff_token,
             command_timeout_s=agent_settings.command_timeout_seconds,
@@ -1760,6 +1761,8 @@ class AgentRuntime:
                         error = f"pipeline job {pipeline_job_id} {pipeline_run_status}"
         except Exception as exc:
             error = str(exc)
+            if not error:
+                error = exc.__class__.__name__
         duration_ms = int((time.monotonic() - start_time) * 1000)
 
         output_size = self._payload_size(response_payload)

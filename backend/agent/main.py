@@ -14,6 +14,7 @@ from shared.config.settings import get_settings
 from shared.middleware.rate_limiter import RateLimiter
 from shared.services.audit_log_store import AuditLogStore
 from shared.services.agent_registry import AgentRegistry
+from shared.services.agent_session_registry import AgentSessionRegistry
 from shared.services.event_store import event_store
 from shared.services.service_factory import create_fastapi_service, get_agent_service_info, run_service
 from shared.utils.app_logger import get_logger
@@ -53,6 +54,15 @@ async def lifespan(app: FastAPI):
         logger.warning("AgentRegistry unavailable for agent service: %s", exc)
     app.state.agent_registry = agent_registry
 
+    session_registry = None
+    try:
+        session_registry = AgentSessionRegistry()
+        await session_registry.initialize()
+        logger.info("AgentSessionRegistry connected for agent service")
+    except Exception as exc:
+        logger.warning("AgentSessionRegistry unavailable for agent service: %s", exc)
+    app.state.agent_session_registry = session_registry
+
     app.state.agent_tasks = {}
 
     try:
@@ -71,6 +81,8 @@ async def lifespan(app: FastAPI):
         await app.state.audit_store.close()
     if getattr(app.state, "agent_registry", None):
         await app.state.agent_registry.close()
+    if getattr(app.state, "agent_session_registry", None):
+        await app.state.agent_session_registry.close()
 
 
 service_info = get_agent_service_info()
