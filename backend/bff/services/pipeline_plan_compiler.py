@@ -58,6 +58,12 @@ class PipelinePlanDraftEnvelope(BaseModel):
             return data
         if "plan" in data:
             return data
+        nested = data.get("definition_json")
+        if isinstance(nested, dict) and any(key in nested for key in ("goal", "data_scope", "outputs")):
+            normalized = dict(data)
+            normalized.pop("definition_json", None)
+            normalized["plan"] = nested
+            return normalized
         if not any(key in data for key in ("goal", "definition_json", "outputs", "data_scope")):
             return data
         normalized = dict(data)

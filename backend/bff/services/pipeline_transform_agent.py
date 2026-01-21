@@ -61,6 +61,8 @@ def _build_transform_system_prompt() -> str:
         "If planner_hints.multi_stage_mode is provided, respect it:\n"
         "- required: include multi-stage chaining if needed by the goal (filter/groupBy/join/compute).\n"
         "- forbid: avoid extra stages beyond joins/cleansing unless the goal explicitly demands it.\n"
+        "- If planner_hints.intent_feedback.missing_requirements is non-empty, you MUST address each requirement.\n"
+        "- If you cannot satisfy a requirement, explain why in warnings.\n"
         "Prefer join/window/aggregate only when needed by the goal; follow join_plan hints.\n"
         "\n"
         f"Supported operations: {', '.join(sorted(SUPPORTED_TRANSFORMS))}\n"

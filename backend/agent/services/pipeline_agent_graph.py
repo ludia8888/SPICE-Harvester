@@ -49,6 +49,10 @@ class PipelineAgentState(TypedDict):
     cleansing_actions: Optional[List[Dict[str, Any]]]
     join_evaluation: Optional[List[Dict[str, Any]]]
     join_evaluation_warnings: Optional[List[str]]
+    intent_status: Optional[str]
+    intent_issues: Optional[List[str]]
+    intent_actions: Optional[List[str]]
+    intent_warnings: Optional[List[str]]
     questions: List[Dict[str, Any]]
     specs: Optional[List[Dict[str, Any]]]
     status: str
@@ -165,6 +169,27 @@ def _only_output_errors(errors: List[str]) -> bool:
         return False
     for err in errors:
         if not str(err).strip().lower().startswith("output "):
+            return False
+    return True
+
+
+def _transformable_validation_errors(errors: List[str]) -> bool:
+    if not errors:
+        return False
+    fragments = (
+        "missing aggregates",
+        "missing expression",
+        "missing condition",
+        "missing join keys",
+        "missing join key",
+        "missing output",
+        "output missing",
+    )
+    for err in errors:
+        lowered = str(err or "").strip().lower()
+        if not lowered:
+            return False
+        if not any(fragment in lowered for fragment in fragments):
             return False
     return True
 
@@ -325,14 +350,23 @@ async def _compile_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
     plan_id = str(data.get("plan_id") or "").strip() or None
     plan = data.get("plan") if isinstance(data.get("plan"), dict) else None
     questions = data.get("questions") if isinstance(data.get("questions"), list) else []
+    validation_errors = list(data.get("validation_errors") or [])
+    updated_planner_hints = state.get("planner_hints")
 
-    next_action = "preview_plan"
+    next_action = "verify_intent"
     status = "running"
     should_transform = bool(state.get("join_hints") or state.get("planner_hints")) and int(
         state.get("max_transform") or 0
     ) > 0
     if plan_status == "clarification_required":
-        if plan and _needs_output_split(plan) and _only_output_errors(list(data.get("validation_errors") or [])):
+        if plan and should_transform and _transformable_validation_errors(validation_errors):
+            updated_planner_hints = _merge_planner_hints(
+                state.get("planner_hints"),
+                {"validation_errors": validation_errors},
+            )
+            next_action = "transform"
+            status = "running"
+        elif plan and _needs_output_split(plan) and _only_output_errors(validation_errors):
             next_action = "split_outputs"
         else:
             next_action = "clarify"
@@ -349,10 +383,11 @@ async def _compile_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
         **state,
         "plan_id": plan_id,
         "plan": plan,
-        "validation_errors": list(data.get("validation_errors") or []),
+        "validation_errors": validation_errors,
         "validation_warnings": list(data.get("validation_warnings") or []),
         "preflight": data.get("preflight") if isinstance(data.get("preflight"), dict) else None,
         "questions": questions,
+        "planner_hints": updated_planner_hints,
         "next_action": next_action,
         "status": status,
     }
@@ -391,7 +426,7 @@ async def _split_outputs(state: PipelineAgentState, runtime: AgentRuntime) -> Pi
             "error": "output metadata incomplete after split",
         }
 
-    next_action = "preview_plan"
+    next_action = "verify_intent"
     should_transform = bool(state.get("join_hints") or state.get("planner_hints")) and int(
         state.get("max_transform") or 0
     ) > 0
@@ -434,7 +469,7 @@ async def _transform_plan(state: PipelineAgentState, runtime: AgentRuntime) -> P
     data = _api_data(payload)
     updated_plan = data.get("plan") if isinstance(data.get("plan"), dict) else state.get("plan")
 
-    next_action = "preview_plan"
+    next_action = "verify_intent"
     if _needs_output_split(updated_plan):
         next_action = "split_outputs"
 
@@ -445,6 +480,99 @@ async def _transform_plan(state: PipelineAgentState, runtime: AgentRuntime) -> P
         "validation_warnings": list(data.get("validation_warnings") or []),
         "transform_attempts": attempts,
         "next_action": next_action,
+    }
+
+
+async def _verify_intent(state: PipelineAgentState, runtime: AgentRuntime) -> PipelineAgentState:
+    plan_id = str(state.get("plan_id") or "").strip()
+    if not plan_id:
+        return {**state, "next_action": "end", "status": "failed", "error": "plan_id missing"}
+
+    result = await _call_bff(
+        runtime=runtime,
+        state=state,
+        step_id="pipeline_plan_verify_intent",
+        method="POST",
+        path=f"/api/v1/pipeline-plans/{plan_id}/verify-intent",
+        tool_id="pipeline_plans.verify_intent",
+        body={
+            "join_plan": state.get("join_hints") or [],
+            "cleansing_hints": state.get("cleansing_hints") or [],
+            "context_pack": state.get("context_pack") or {},
+        },
+    )
+    if result.get("status") != "success":
+        return {**state, "next_action": "end", "status": "failed", "error": result.get("error")}
+
+    payload = result.get("payload")
+    data = _api_data(payload)
+    intent_status = str(data.get("status") or "").strip().lower()
+    missing = data.get("missing_requirements") if isinstance(data.get("missing_requirements"), list) else []
+    suggested = data.get("suggested_actions") if isinstance(data.get("suggested_actions"), list) else []
+    questions = data.get("questions") if isinstance(data.get("questions"), list) else []
+    warnings = data.get("warnings") if isinstance(data.get("warnings"), list) else []
+
+    if intent_status == "pass":
+        return {
+            **state,
+            "intent_status": intent_status,
+            "intent_issues": missing,
+            "intent_actions": suggested,
+            "intent_warnings": warnings,
+            "next_action": "preview_plan",
+        }
+
+    if intent_status == "needs_revision":
+        max_transform = int(state.get("max_transform") or 0)
+        attempts = int(state.get("transform_attempts") or 0)
+        if attempts < max_transform:
+            planner_hints = dict(state.get("planner_hints") or {})
+            planner_hints["intent_feedback"] = {
+                "missing_requirements": missing,
+                "suggested_actions": suggested,
+                "warnings": warnings,
+            }
+            return {
+                **state,
+                "planner_hints": planner_hints,
+                "intent_status": intent_status,
+                "intent_issues": missing,
+                "intent_actions": suggested,
+                "intent_warnings": warnings,
+                "next_action": "transform",
+            }
+        return {
+            **state,
+            "intent_status": intent_status,
+            "intent_issues": missing,
+            "intent_actions": suggested,
+            "intent_warnings": warnings,
+            "next_action": "end",
+            "status": "failed",
+            "error": "intent verification requires revision but max_transform reached",
+        }
+
+    if intent_status == "clarification_required":
+        return {
+            **state,
+            "intent_status": intent_status,
+            "intent_issues": missing,
+            "intent_actions": suggested,
+            "intent_warnings": warnings,
+            "questions": questions,
+            "next_action": "end",
+            "status": "clarification_required",
+        }
+
+    return {
+        **state,
+        "intent_status": intent_status or "unknown",
+        "intent_issues": missing,
+        "intent_actions": suggested,
+        "intent_warnings": warnings,
+        "next_action": "end",
+        "status": "failed",
+        "error": "intent verification returned unknown status",
     }
 
 
@@ -678,7 +806,7 @@ async def _repair_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pipe
     plan = data.get("plan") if isinstance(data.get("plan"), dict) else None
     questions = data.get("questions") if isinstance(data.get("questions"), list) else []
 
-    next_action = "preview_plan"
+    next_action = "verify_intent"
     status = "running"
     validation_errors = list(data.get("validation_errors") or [])
     if plan_status == "clarification_required":
@@ -779,6 +907,9 @@ def build_pipeline_agent_graph(runtime: AgentRuntime):
     async def transform(state: PipelineAgentState) -> PipelineAgentState:
         return await _transform_plan(state, runtime)
 
+    async def verify_intent(state: PipelineAgentState) -> PipelineAgentState:
+        return await _verify_intent(state, runtime)
+
     async def preview_plan(state: PipelineAgentState) -> PipelineAgentState:
         return await _preview_plan(state, runtime)
 
@@ -803,6 +934,7 @@ def build_pipeline_agent_graph(runtime: AgentRuntime):
     graph.add_node("cleanse_hints", cleanse_hints)
     graph.add_node("compile_plan", compile_plan)
     graph.add_node("transform", transform)
+    graph.add_node("verify_intent", verify_intent)
     graph.add_node("split_outputs", split_outputs)
     graph.add_node("preview_plan", preview_plan)
     graph.add_node("evaluate", evaluate)
@@ -830,7 +962,7 @@ def build_pipeline_agent_graph(runtime: AgentRuntime):
         {
             "transform": "transform",
             "split_outputs": "split_outputs",
-            "preview_plan": "preview_plan",
+            "verify_intent": "verify_intent",
             "clarify": END,
             "end": END,
         },
@@ -838,12 +970,17 @@ def build_pipeline_agent_graph(runtime: AgentRuntime):
     graph.add_conditional_edges(
         "transform",
         lambda state: state.get("next_action", "end"),
-        {"split_outputs": "split_outputs", "preview_plan": "preview_plan", "end": END},
+        {"split_outputs": "split_outputs", "verify_intent": "verify_intent", "end": END},
     )
     graph.add_conditional_edges(
         "split_outputs",
         lambda state: state.get("next_action", "end"),
-        {"preview_plan": "preview_plan", "end": END},
+        {"transform": "transform", "verify_intent": "verify_intent", "end": END},
+    )
+    graph.add_conditional_edges(
+        "verify_intent",
+        lambda state: state.get("next_action", "end"),
+        {"preview_plan": "preview_plan", "transform": "transform", "end": END},
     )
     graph.add_conditional_edges(
         "preview_plan",
@@ -877,7 +1014,7 @@ def build_pipeline_agent_graph(runtime: AgentRuntime):
         {
             "split_outputs": "split_outputs",
             "transform": "transform",
-            "preview_plan": "preview_plan",
+            "verify_intent": "verify_intent",
             "clarify": END,
             "end": END,
         },
@@ -954,6 +1091,10 @@ def build_pipeline_agent_state(
         cleansing_actions=None,
         join_evaluation=None,
         join_evaluation_warnings=None,
+        intent_status=None,
+        intent_issues=None,
+        intent_actions=None,
+        intent_warnings=None,
         questions=[],
         specs=None,
         status="running",

@@ -396,6 +396,17 @@
     "max_payload_bytes": 500000
   },
   {
+    "tool_id": "pipeline_plans.verify_intent",
+    "method": "POST",
+    "path": "/api/v1/pipeline-plans/{plan_id}/verify-intent",
+    "risk_level": "read",
+    "requires_approval": false,
+    "requires_idempotency_key": true,
+    "status": "ACTIVE",
+    "roles": [],
+    "max_payload_bytes": 500000
+  },
+  {
     "tool_id": "pipeline_plans.preview",
     "method": "POST",
     "path": "/api/v1/pipeline-plans/{plan_id}/preview",

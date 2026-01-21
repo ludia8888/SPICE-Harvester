@@ -13,6 +13,7 @@ from bff.services.pipeline_cleansing_agent import apply_cleansing_plan
 from bff.services.pipeline_join_agent import select_join_keys
 from bff.services.pipeline_join_evaluator import evaluate_pipeline_joins
 from bff.services.pipeline_transform_agent import apply_transform_plan
+from bff.services.pipeline_intent_verifier import verify_pipeline_intent
 from bff.services.pipeline_plan_compiler import (
     PipelinePlanCompileResult,
     compile_pipeline_plan,
@@ -25,7 +26,13 @@ from bff.dependencies import OMSClientDep
 from shared.config.settings import get_settings
 from shared.models.pipeline_plan import PipelinePlan, PipelinePlanDataScope
 from shared.models.responses import ApiResponse
-from shared.security.input_sanitizer import InputSanitizer, SecurityViolationError, sanitize_input, validate_db_name
+from shared.security.input_sanitizer import (
+    InputSanitizer,
+    SecurityViolationError,
+    sanitize_input,
+    sanitize_label_input,
+    validate_db_name,
+)
 from shared.security.auth_utils import enforce_db_scope
 from shared.services.agent_policy_registry import AgentPolicyRegistry
 from shared.services.dataset_registry import DatasetRegistry
@@ -365,6 +372,12 @@ class PipelinePlanTransformRequest(BaseModel):
     planner_hints: dict | None = Field(default=None)
 
 
+class PipelinePlanIntentCheckRequest(BaseModel):
+    join_plan: list[dict[str, Any]] | None = Field(default=None)
+    cleansing_hints: list[dict[str, Any]] | None = Field(default=None)
+    context_pack: dict | None = Field(default=None)
+
+
 class PipelinePlanEvaluateJoinsRequest(BaseModel):
     node_id: str | None = Field(default=None, max_length=200)
     run_tables: Dict[str, Dict[str, Any]] | None = Field(default=None)
@@ -417,10 +430,12 @@ async def compile_plan(
     if not bool(get_settings().pipeline_plan.llm_enabled):
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pipeline planner is disabled")
 
-    payload = sanitize_input(body.model_dump(exclude_none=True))
+    raw_payload = body.model_dump(exclude_none=True)
+    raw_answers = raw_payload.pop("answers", None)
+    payload = sanitize_input(raw_payload)
     goal = str(payload.get("goal") or "").strip()
     data_scope = body.data_scope
-    answers = payload.get("answers") if isinstance(payload.get("answers"), dict) else None
+    answers = sanitize_label_input(raw_answers) if isinstance(raw_answers, dict) else None
     planner_hints = payload.get("planner_hints") if isinstance(payload.get("planner_hints"), dict) else None
     if not data_scope or not data_scope.db_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="data_scope.db_name is required")
@@ -1403,6 +1418,117 @@ async def transform_plan(
             ),
         },
     )
+
+
+@router.post("/{plan_id}/verify-intent", response_model=ApiResponse)
+async def verify_intent(
+    plan_id: str,
+    body: PipelinePlanIntentCheckRequest,
+    request: Request,
+    llm: LLMGatewayDep,
+    redis_service: RedisServiceDep,
+    audit_store: AuditLogStoreDep,
+    dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    profile_registry: DatasetProfileRegistry = Depends(get_dataset_profile_registry),
+    plan_registry: PipelinePlanRegistry = Depends(get_pipeline_plan_registry),
+) -> ApiResponse:
+    try:
+        plan_id = str(UUID(plan_id))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="plan_id must be a UUID") from exc
+
+    if not bool(get_settings().pipeline_plan.llm_enabled):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Pipeline planner is disabled")
+
+    tenant_id = _resolve_tenant_id(request)
+    actor = _resolve_actor(request)
+    user = getattr(request.state, "user", None)
+    user_id = str(getattr(user, "id", "") or "").strip() or None
+
+    record = await plan_registry.get_plan(plan_id=plan_id, tenant_id=tenant_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pipeline plan not found")
+
+    try:
+        plan = PipelinePlan.model_validate(record.plan)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Stored plan invalid: {exc}") from exc
+    if not plan.data_scope.db_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plan missing db_name")
+
+    db_name = str(plan.data_scope.db_name or "").strip()
+    if not db_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plan missing db_name")
+    try:
+        enforce_db_scope(request.headers, db_name=db_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    selected_model, allowed_models, data_policies = await _resolve_tenant_policy(request)
+
+    raw_payload = body.model_dump(exclude_none=True)
+    context_pack = raw_payload.pop("context_pack", None)
+    payload = sanitize_input(raw_payload)
+    join_plan = payload.get("join_plan") if isinstance(payload.get("join_plan"), list) else None
+    cleansing_hints = payload.get("cleansing_hints") if isinstance(payload.get("cleansing_hints"), list) else None
+    context_pack = context_pack if isinstance(context_pack, dict) else None
+
+    if context_pack is None:
+        try:
+            dataset_ids = list(plan.data_scope.dataset_ids or [])
+            context_pack = await build_pipeline_context_pack(
+                db_name=str(plan.data_scope.db_name or ""),
+                branch=str(plan.data_scope.branch or "") or None,
+                dataset_ids=dataset_ids or None,
+                dataset_registry=dataset_registry,
+                profile_registry=profile_registry,
+            )
+        except Exception as exc:
+            logger.warning("Failed to build pipeline context pack: %s", exc)
+            context_pack = None
+
+    try:
+        result = await verify_pipeline_intent(
+            plan=plan,
+            join_plan=join_plan,
+            cleansing_hints=cleansing_hints,
+            context_pack=context_pack,
+            actor=actor,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            data_policies=data_policies,
+            selected_model=selected_model,
+            allowed_models=allowed_models,
+            llm_gateway=llm,
+            redis_service=redis_service,
+            audit_store=audit_store,
+        )
+    except LLMQuotaExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Pipeline intent verification failed: %s", exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to verify intent") from exc
+
+    response_data = {
+        "status": result.status,
+        "confidence": result.confidence,
+        "missing_requirements": result.missing_requirements,
+        "suggested_actions": result.suggested_actions,
+        "questions": [q.model_dump(mode="json") for q in (result.questions or [])],
+        "warnings": result.warnings,
+        "llm": (
+            {
+                "provider": result.llm_meta.provider,
+                "model": result.llm_meta.model,
+                "cache_hit": result.llm_meta.cache_hit,
+                "latency_ms": result.llm_meta.latency_ms,
+            }
+            if result.llm_meta
+            else None
+        ),
+    }
+
+    return ApiResponse.success(message="Pipeline intent verified", data=response_data)
 
 
 @router.post("/{plan_id}/split-outputs", response_model=ApiResponse)

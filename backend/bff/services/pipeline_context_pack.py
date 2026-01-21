@@ -460,6 +460,31 @@ def _select_candidate_columns(
     return selected
 
 
+def _extend_candidates_with_name_matches(
+    left_cols: list[str],
+    right_cols: list[str],
+    left_candidates: list[str],
+    right_candidates: list[str],
+    *,
+    threshold: float = 0.9,
+    max_pairs: int = 8,
+    max_candidates: int = 14,
+) -> tuple[list[str], list[str]]:
+    pairs: list[tuple[float, str, str]] = []
+    for col_a in left_cols:
+        for col_b in right_cols:
+            name_sim = _name_similarity(col_a, col_b)
+            if name_sim >= threshold:
+                pairs.append((name_sim, col_a, col_b))
+    pairs.sort(key=lambda item: item[0], reverse=True)
+    for _, col_a, col_b in pairs[: max(0, int(max_pairs))]:
+        if col_a not in left_candidates:
+            left_candidates.append(col_a)
+        if col_b not in right_candidates:
+            right_candidates.append(col_b)
+    return left_candidates[: max(0, int(max_candidates))], right_candidates[: max(0, int(max_candidates))]
+
+
 def _looks_like_id(name: str) -> bool:
     lowered = str(name or "").strip().lower()
     if not lowered:
@@ -597,6 +622,12 @@ def _suggest_join_keys(datasets: list[dict[str, Any]], *, max_candidates: int) -
 
             top_left = _select_candidate_columns(left_cols, left_quality)
             top_right = _select_candidate_columns(right_cols, right_quality)
+            top_left, top_right = _extend_candidates_with_name_matches(
+                left_cols,
+                right_cols,
+                top_left,
+                top_right,
+            )
 
             left_profiles = left.get("column_profiles") if isinstance(left.get("column_profiles"), dict) else {}
             right_profiles = right.get("column_profiles") if isinstance(right.get("column_profiles"), dict) else {}
