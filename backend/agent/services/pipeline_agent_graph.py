@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from typing import Any, Dict, List, Optional, TypedDict
 from uuid import uuid4
 
@@ -55,63 +54,6 @@ class PipelineAgentState(TypedDict):
     status: str
     error: Optional[str]
     next_action: str
-
-
-_MULTI_STAGE_REQUIRED_KEYWORDS = (
-    "aggregate",
-    "group by",
-    "groupby",
-    "window",
-    "rolling",
-    "moving average",
-    "summary",
-    "summarize",
-    "report",
-    "kpi",
-    "metric",
-    "analytics",
-    "trend",
-    "time series",
-    "daily",
-    "weekly",
-    "monthly",
-    "quarterly",
-    "yearly",
-    "avg",
-    "average",
-    "mean",
-    "median",
-    "count",
-    "sum",
-    "min",
-    "max",
-    "ratio",
-    "rate",
-    "percentile",
-    "top ",
-    "rank",
-    "cohort",
-)
-
-
-def _infer_multi_stage_mode(
-    goal: str,
-    answers: Optional[Dict[str, Any]],
-    planner_hints: Optional[Dict[str, Any]],
-) -> str:
-    if isinstance(planner_hints, dict):
-        mode = str(planner_hints.get("multi_stage_mode") or "").strip().lower()
-        if mode in {"required", "allowed", "forbid"}:
-            return mode
-    text = str(goal or "").strip().lower()
-    if answers:
-        try:
-            text = f"{text} {json.dumps(answers, ensure_ascii=False).lower()}"
-        except Exception:
-            text = f"{text} {str(answers).lower()}"
-    if any(keyword in text for keyword in _MULTI_STAGE_REQUIRED_KEYWORDS):
-        return "required"
-    return "forbid"
 
 
 def _api_data(payload: Any) -> Dict[str, Any]:
@@ -972,10 +914,6 @@ def build_pipeline_agent_state(
     request_id: Optional[str],
     actor: str,
 ) -> PipelineAgentState:
-    planner_hints = _merge_planner_hints(
-        planner_hints,
-        {"multi_stage_mode": _infer_multi_stage_mode(goal, answers, planner_hints)},
-    )
     return PipelineAgentState(
         run_id=str(uuid4()),
         actor=actor,

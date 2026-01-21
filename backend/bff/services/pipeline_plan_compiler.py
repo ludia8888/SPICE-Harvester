@@ -49,6 +49,7 @@ class PipelinePlanDraftEnvelope(BaseModel):
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     notes: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+    questions: List[PipelineClarificationQuestion] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -63,7 +64,7 @@ class PipelinePlanDraftEnvelope(BaseModel):
         plan_payload = {
             key: normalized[key]
             for key in list(normalized.keys())
-            if key not in ("confidence", "notes", "warnings")
+            if key not in ("confidence", "notes", "warnings", "questions")
         }
         for key in plan_payload.keys():
             normalized.pop(key, None)
@@ -101,8 +102,8 @@ def _build_plan_system_prompt() -> str:
         "- For composite joins, ALWAYS use leftKeys/rightKeys arrays.\n"
         "- Edge order matters for join: the first incoming edge is the LEFT input, the second is RIGHT.\n"
         "- Ensure join keys align to the left/right input order; do not swap keys without swapping edges.\n"
-        "- Respect planner_hints.multi_stage_mode: required means use multi-stage chaining if needed; "
-        "forbid means avoid extra stages unless explicitly requested.\n"
+        "- If you're unsure whether multi-stage transforms are needed (aggregate/window/groupBy), "
+        "ask a clarification question in questions and keep the plan minimal.\n"
         "- definition_json MUST include at least one output node with type \"output\".\n"
         "- output nodes MUST use type \"output\" (not write_output) and include metadata.outputName or metadata.datasetName.\n"
         "- output node metadata.outputName MUST match outputs[].output_name for the same dataset.\n"
@@ -120,7 +121,8 @@ def _build_plan_system_prompt() -> str:
         "  \"plan\": {PipelinePlan JSON},\n"
         "  \"confidence\": number (0..1),\n"
         "  \"notes\": string[],\n"
-        "  \"warnings\": string[]\n"
+        "  \"warnings\": string[],\n"
+        "  \"questions\": [PipelineClarificationQuestion] (optional)\n"
         "}\n"
         "\n"
         "PipelinePlan JSON:\n"
@@ -143,6 +145,16 @@ def _build_plan_system_prompt() -> str:
         "    }\n"
         "  ],\n"
         "  \"warnings\": []\n"
+        "}\n"
+        "\n"
+        "PipelineClarificationQuestion JSON:\n"
+        "{\n"
+        "  \"id\": string,\n"
+        "  \"question\": string,\n"
+        "  \"required\": boolean,\n"
+        "  \"type\": \"string|enum|boolean|number|object\",\n"
+        "  \"options\": [string]?,\n"
+        "  \"default\": any?\n"
         "}\n"
     )
 
@@ -335,6 +347,19 @@ async def compile_pipeline_plan(
             validation_warnings=[],
             questions=questions,
             llm_meta=llm_meta,
+        )
+
+    if draft is not None and draft.questions:
+        return PipelinePlanCompileResult(
+            status="clarification_required",
+            plan_id=plan_id,
+            plan=None,
+            validation_errors=["planner requested clarification"],
+            validation_warnings=[],
+            questions=list(draft.questions or []),
+            llm_meta=llm_meta,
+            planner_confidence=float(draft.confidence),
+            planner_notes=draft.notes if draft is not None else None,
         )
 
     try:

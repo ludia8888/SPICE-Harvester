@@ -58,7 +58,7 @@ def _build_transform_system_prompt() -> str:
         "For composite joins, ALWAYS use leftKeys/rightKeys arrays.\n"
         "Edge order matters for join: the first incoming edge is the LEFT input, the second is RIGHT.\n"
         "Ensure join keys align to the left/right input order; do not swap keys without swapping edges.\n"
-        "Respect planner_hints.multi_stage_mode: \n"
+        "If planner_hints.multi_stage_mode is provided, respect it:\n"
         "- required: include multi-stage chaining if needed by the goal (filter/groupBy/join/compute).\n"
         "- forbid: avoid extra stages beyond joins/cleansing unless the goal explicitly demands it.\n"
         "Prefer join/window/aggregate only when needed by the goal; follow join_plan hints.\n"
