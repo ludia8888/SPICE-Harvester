@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -43,6 +44,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pipeline-plans", tags=["Pipeline Plans"])
 
 _PREVIEW_SANITIZER = InputSanitizer()
+_SYS_TS_EXPR_RE = re.compile(r"^\s*(?P<col>_sys_ingested_at|_sys_valid_from)\s*=\s*to_timestamp\('.*'\)\s*$")
 
 
 async def get_dataset_registry() -> DatasetRegistry:
@@ -113,6 +115,54 @@ def _serialize_run_tables(run_tables: Dict[str, Any], *, limit: int) -> Dict[str
             "rows": rows[:resolved_limit] if resolved_limit else rows,
         }
     return payload
+
+
+def _normalize_definition_for_digest(definition_json: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(definition_json, dict):
+        return {}
+    normalized = dict(definition_json)
+    if "__preview_meta__" in normalized:
+        normalized.pop("__preview_meta__", None)
+    nodes_raw = normalized.get("nodes")
+    if not isinstance(nodes_raw, list):
+        return normalized
+    updated = False
+    nodes: List[Any] = []
+    for node in nodes_raw:
+        if not isinstance(node, dict):
+            nodes.append(node)
+            continue
+        metadata = node.get("metadata")
+        if not isinstance(metadata, dict):
+            nodes.append(node)
+            continue
+        operation = str(metadata.get("operation") or "").strip().lower()
+        if operation != "compute":
+            nodes.append(node)
+            continue
+        expression = metadata.get("expression")
+        if not isinstance(expression, str):
+            nodes.append(node)
+            continue
+        match = _SYS_TS_EXPR_RE.match(expression)
+        if not match:
+            nodes.append(node)
+            continue
+        col = match.group("col")
+        next_metadata = dict(metadata)
+        next_metadata["expression"] = f"{col} = to_timestamp('__SYS_TIME__')"
+        next_node = dict(node)
+        next_node["metadata"] = next_metadata
+        nodes.append(next_node)
+        updated = True
+    if updated:
+        normalized["nodes"] = nodes
+    return normalized
+
+
+def _definition_digest(definition_json: Dict[str, Any]) -> str:
+    normalized = _normalize_definition_for_digest(definition_json)
+    return sha256_canonical_json_prefixed(normalized)
 
 
 def _sanitize_label_dict_with_limits(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -245,7 +295,7 @@ class PipelinePlanPreviewRequest(BaseModel):
     node_id: str | None = Field(default=None, max_length=200)
     limit: int = Field(default=200, ge=1, le=200)
     include_run_tables: bool = Field(default=False)
-    run_table_limit: int = Field(default=200, ge=1, le=500)
+    run_table_limit: int = Field(default=200, ge=1, le=1000)
 
 
 class PipelinePlanRepairRequest(BaseModel):
@@ -725,10 +775,13 @@ async def preview_plan(
     preview_definition = dict(validation.plan.definition_json)
     preview_meta = dict(preview_definition.get("__preview_meta__") or {})
     preview_meta.setdefault("branch", str(plan.data_scope.branch or "") or "main")
+    sample_limit = max(limit, run_table_limit) if include_run_tables else limit
+    if sample_limit:
+        preview_meta["sample_limit"] = sample_limit
     preview_definition["__preview_meta__"] = preview_meta
 
     executor = PipelineExecutor(dataset_registry)
-    definition_digest = sha256_canonical_json_prefixed(preview_definition)
+    definition_digest = _definition_digest(preview_definition)
     run_tables_payload: Dict[str, Dict[str, Any]] | None = None
     try:
         if include_run_tables:
@@ -900,7 +953,7 @@ async def evaluate_joins(
     payload = sanitize_input(raw_payload)
     run_tables = _sanitize_preview_tables(run_tables_raw) if isinstance(run_tables_raw, dict) else None
     definition_digest = str(payload.get("definition_digest") or "").strip() or None
-    expected_digest = sha256_canonical_json_prefixed(validation.plan.definition_json)
+    expected_digest = _definition_digest(validation.plan.definition_json)
     digest_warnings: List[str] = []
     if run_tables is not None and definition_digest:
         if definition_digest != expected_digest:

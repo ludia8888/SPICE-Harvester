@@ -153,6 +153,14 @@ class PipelineExecutor:
         parameters = normalize_parameters(definition.get("parameters"))
         preview_meta = definition.get("__preview_meta__") or {}
         preview_branch = preview_meta.get("branch")
+        sample_limit = None
+        if "sample_limit" in preview_meta:
+            try:
+                sample_limit = int(preview_meta.get("sample_limit") or 0)
+            except (TypeError, ValueError):
+                sample_limit = None
+        if sample_limit is not None and sample_limit <= 0:
+            sample_limit = None
 
         tables: Dict[str, PipelineTable] = {}
         incoming_map = build_incoming(edges)
@@ -168,7 +176,12 @@ class PipelineExecutor:
                 if input_overrides and node_id in input_overrides:
                     table = input_overrides[node_id]
                 else:
-                    table = await self._load_input(node, db_name, preview_branch)
+                    table = await self._load_input(
+                        node,
+                        db_name,
+                        preview_branch,
+                        sample_limit=sample_limit,
+                    )
             elif node_type == "output":
                 table = incoming_tables[0] if incoming_tables else PipelineTable([], [])
             else:
@@ -258,6 +271,7 @@ class PipelineExecutor:
         node: Dict[str, Any],
         db_name: str,
         branch: Optional[str] = None,
+        sample_limit: Optional[int] = None,
     ) -> PipelineTable:
         metadata = node.get("metadata") or {}
         selection = normalize_dataset_selection(metadata, default_branch=branch or "main")
@@ -273,9 +287,15 @@ class PipelineExecutor:
         rows: List[Dict[str, Any]] = []
         if dataset:
             if version:
-                rows = await self._load_rows_from_artifact(version.artifact_key) if version.artifact_key else []
+                rows = (
+                    await self._load_rows_from_artifact(version.artifact_key, max_rows=sample_limit)
+                    if version.artifact_key
+                    else []
+                )
                 if not rows:
                     rows = _extract_sample_rows(version.sample_json)
+                if sample_limit and rows:
+                    rows = rows[:sample_limit]
                 if not columns:
                     columns = _extract_schema_columns(version.sample_json)
         if not columns:
@@ -294,24 +314,35 @@ class PipelineExecutor:
             )
         return PipelineTable(columns=columns, rows=rows)
 
-    async def _load_rows_from_artifact(self, artifact_key: Optional[str]) -> List[Dict[str, Any]]:
+    async def _load_rows_from_artifact(
+        self,
+        artifact_key: Optional[str],
+        *,
+        max_rows: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
         if not artifact_key:
             return []
         parsed = parse_s3_uri(artifact_key)
         if not parsed or not self._storage_service:
             return []
         bucket, key = parsed
+        resolved_limit = 200
+        if max_rows is not None:
+            try:
+                resolved_limit = max(1, int(max_rows))
+            except (TypeError, ValueError):
+                resolved_limit = 200
         try:
             raw_bytes = await self._storage_service.load_bytes(bucket, key)
         except Exception:
             return []
         extension = os.path.splitext(key)[1].lower()
         if extension == ".csv":
-            return _parse_csv_bytes(raw_bytes)
+            return _parse_csv_bytes(raw_bytes, max_rows=resolved_limit)
         if extension in {".xlsx", ".xlsm"}:
-            return _parse_excel_bytes(raw_bytes)
+            return _parse_excel_bytes(raw_bytes, max_rows=resolved_limit)
         if extension == ".json":
-            return _parse_json_bytes(raw_bytes)
+            return _parse_json_bytes(raw_bytes, max_rows=resolved_limit)
         prefix = key.rstrip("/")
         if not prefix:
             return []
@@ -330,11 +361,11 @@ class PipelineExecutor:
             except Exception:
                 continue
             if ext == ".csv":
-                return _parse_csv_bytes(candidate_bytes)
+                return _parse_csv_bytes(candidate_bytes, max_rows=resolved_limit)
             if ext in {".xlsx", ".xlsm"}:
-                return _parse_excel_bytes(candidate_bytes)
+                return _parse_excel_bytes(candidate_bytes, max_rows=resolved_limit)
             if ext == ".json":
-                return _parse_json_bytes(candidate_bytes)
+                return _parse_json_bytes(candidate_bytes, max_rows=resolved_limit)
         return []
 
     async def _load_fk_reference_rows(
@@ -1417,7 +1448,7 @@ def _normalize_table(
     return PipelineTable(columns=table.columns, rows=rows)
 
 
-def _parse_csv_bytes(raw_bytes: bytes) -> List[Dict[str, Any]]:
+def _parse_csv_bytes(raw_bytes: bytes, *, max_rows: int = 200) -> List[Dict[str, Any]]:
     try:
         text = raw_bytes.decode("utf-8", errors="replace")
     except Exception:
@@ -1433,7 +1464,8 @@ def _parse_csv_bytes(raw_bytes: bytes) -> List[Dict[str, Any]]:
         delimiter = ";"
     header = [cell.strip() or f"column_{idx + 1}" for idx, cell in enumerate(sample.split(delimiter))]
     rows: List[Dict[str, Any]] = []
-    for line in lines[1:201]:
+    resolved_limit = max(1, int(max_rows))
+    for line in lines[1 : 1 + resolved_limit]:
         cells = line.split(delimiter)
         row: Dict[str, Any] = {}
         for idx, key in enumerate(header):
@@ -1442,23 +1474,25 @@ def _parse_csv_bytes(raw_bytes: bytes) -> List[Dict[str, Any]]:
     return rows
 
 
-def _parse_excel_bytes(raw_bytes: bytes) -> List[Dict[str, Any]]:
+def _parse_excel_bytes(raw_bytes: bytes, *, max_rows: int = 200) -> List[Dict[str, Any]]:
     try:
         import pandas as pd
         from io import BytesIO
 
         frame = pd.read_excel(BytesIO(raw_bytes))
-        return frame.fillna("").to_dict(orient="records")[:200]
+        resolved_limit = max(1, int(max_rows))
+        return frame.fillna("").to_dict(orient="records")[:resolved_limit]
     except Exception:
         return []
 
 
-def _parse_json_bytes(raw_bytes: bytes) -> List[Dict[str, Any]]:
+def _parse_json_bytes(raw_bytes: bytes, *, max_rows: int = 200) -> List[Dict[str, Any]]:
     try:
         payload = json.loads(raw_bytes.decode("utf-8"))
     except Exception:
         text = raw_bytes.decode("utf-8", errors="replace")
         rows: List[Dict[str, Any]] = []
+        resolved_limit = max(1, int(max_rows))
         for line in text.splitlines():
             if not line.strip():
                 continue
@@ -1468,21 +1502,22 @@ def _parse_json_bytes(raw_bytes: bytes) -> List[Dict[str, Any]]:
                 continue
             if isinstance(item, dict):
                 rows.append(item)
-            if len(rows) >= 200:
+            if len(rows) >= resolved_limit:
                 break
         return rows
     if isinstance(payload, dict):
         rows = payload.get("rows") or payload.get("data")
         if isinstance(rows, list) and rows and isinstance(rows[0], dict):
-            return rows[:200]
+            return rows[: max(1, int(max_rows))]
         if isinstance(rows, list) and rows and isinstance(rows[0], list):
             columns = _extract_schema_columns(payload)
             output = []
-            for row in rows[:200]:
+            resolved_limit = max(1, int(max_rows))
+            for row in rows[:resolved_limit]:
                 output.append({columns[idx] if idx < len(columns) else f"col_{idx}": value for idx, value in enumerate(row)})
             return output
     if isinstance(payload, list) and payload and isinstance(payload[0], dict):
-        return payload[:200]
+        return payload[: max(1, int(max_rows))]
     return []
 
 
