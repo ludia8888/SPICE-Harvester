@@ -1400,7 +1400,7 @@ async def compile_pipeline_plan_mcp(
         allow_join = True if task_spec_model is None else bool(task_spec_model.allow_join)
         allow_advanced = True if task_spec_model is None else bool(task_spec_model.allow_advanced_transforms)
         join_plan_hint = effective_planner_hints.get("join_plan") if isinstance(effective_planner_hints, dict) else None
-        if allow_join and not allow_advanced and isinstance(join_plan_hint, list) and len(dataset_ids) == 2 and join_plan_hint:
+        if allow_join and not allow_advanced and isinstance(join_plan_hint, list) and dataset_ids and join_plan_hint:
             selected = {str(item).strip() for item in dataset_ids if str(item).strip()}
 
             chosen_edge: Optional[Dict[str, Any]] = None
@@ -1409,11 +1409,11 @@ async def compile_pipeline_plan_mcp(
                     continue
                 left_id = str(edge.get("left_dataset_id") or "").strip()
                 right_id = str(edge.get("right_dataset_id") or "").strip()
-                if left_id and right_id and {left_id, right_id} == selected:
+                if len(selected) == 2 and left_id and right_id and {left_id, right_id} == selected:
                     chosen_edge = edge
                     break
 
-            if chosen_edge is not None:
+            if chosen_edge is not None and len(selected) == 2:
                 plan_obj = new_plan(goal=goal, db_name=scope_db, branch=scope_branch, dataset_ids=dataset_ids)
                 dataset_to_node: Dict[str, str] = {}
                 for idx, dataset_id in enumerate(dataset_ids):
@@ -1485,7 +1485,7 @@ async def compile_pipeline_plan_mcp(
                         branch=scope_branch,
                         require_output=True,
                         context_pack=context_pack,
-                    )
+                        )
                     if not validation.errors:
                         return PipelinePlanCompileResult(
                             status="success",
@@ -1498,6 +1498,152 @@ async def compile_pipeline_plan_mcp(
                             llm_meta=None,
                             planner_confidence=1.0,
                             planner_notes=["deterministic join fast-path"],
+                            preflight=validation.preflight,
+                        )
+
+            # Multi-join deterministic fast-path (3+ datasets): build a left-deep join tree
+            # from join_plan_hint (treated as a join graph). This avoids LLM node-id drift.
+            if len(selected) >= 3:
+                plan_obj = new_plan(goal=goal, db_name=scope_db, branch=scope_branch, dataset_ids=dataset_ids)
+                dataset_to_node = {}
+                for idx, dataset_id in enumerate(dataset_ids):
+                    dataset_name, dataset_branch, _dataset_obj = _dataset_info(dataset_id)
+                    node_id = f"input_{idx + 1}"
+                    add_input(
+                        plan_obj,
+                        dataset_id=dataset_id,
+                        dataset_name=dataset_name,
+                        dataset_branch=dataset_branch or scope_branch,
+                        node_id=node_id,
+                    )
+                    dataset_to_node[str(dataset_id).strip()] = node_id
+
+                # Filter edges to only those between selected datasets.
+                edges: List[Dict[str, Any]] = []
+                for edge in join_plan_hint:
+                    if not isinstance(edge, dict):
+                        continue
+                    left_id = str(edge.get("left_dataset_id") or "").strip()
+                    right_id = str(edge.get("right_dataset_id") or "").strip()
+                    if not left_id or not right_id or left_id == right_id:
+                        continue
+                    if left_id not in selected or right_id not in selected:
+                        continue
+                    edges.append(edge)
+
+                visited: set[str] = set()
+                root_id = str(dataset_ids[0]).strip()
+                if root_id:
+                    visited.add(root_id)
+                current_node_id = dataset_to_node.get(root_id)
+                used_edges: List[Dict[str, Any]] = []
+                join_idx = 1
+
+                def _edge_conf(edge: Dict[str, Any]) -> float:
+                    try:
+                        return float(edge.get("confidence") or 0.0)
+                    except (TypeError, ValueError):
+                        return 0.0
+
+                while current_node_id and visited != selected:
+                    candidates: List[tuple[float, str, str, Dict[str, Any]]] = []
+                    for edge in edges:
+                        left_id = str(edge.get("left_dataset_id") or "").strip()
+                        right_id = str(edge.get("right_dataset_id") or "").strip()
+                        if left_id in visited and right_id not in visited:
+                            candidates.append((_edge_conf(edge), right_id, "lr", edge))
+                        elif right_id in visited and left_id not in visited:
+                            candidates.append((_edge_conf(edge), left_id, "rl", edge))
+                    if not candidates:
+                        break
+
+                    # Prefer higher confidence; stable tie-breaker on next dataset id.
+                    candidates.sort(key=lambda item: (-item[0], item[1]))
+                    _, next_dataset_id, direction, edge = candidates[0]
+
+                    join_type = str(edge.get("join_type") or "inner").strip().lower() or "inner"
+                    if direction == "lr":
+                        left_keys = edge.get("left_keys") if isinstance(edge.get("left_keys"), list) else None
+                        right_keys = edge.get("right_keys") if isinstance(edge.get("right_keys"), list) else None
+                        if not left_keys:
+                            left_col = str(edge.get("left_column") or "").strip()
+                            left_keys = [left_col] if left_col else None
+                        if not right_keys:
+                            right_col = str(edge.get("right_column") or "").strip()
+                            right_keys = [right_col] if right_col else None
+                    else:
+                        # Swap keys when the visited side is edge.right_dataset_id and the new side is edge.left_dataset_id.
+                        left_keys = edge.get("right_keys") if isinstance(edge.get("right_keys"), list) else None
+                        right_keys = edge.get("left_keys") if isinstance(edge.get("left_keys"), list) else None
+                        if not left_keys:
+                            left_col = str(edge.get("right_column") or "").strip()
+                            left_keys = [left_col] if left_col else None
+                        if not right_keys:
+                            right_col = str(edge.get("left_column") or "").strip()
+                            right_keys = [right_col] if right_col else None
+
+                    right_node_id = dataset_to_node.get(next_dataset_id)
+                    if not right_node_id or not left_keys or not right_keys or len(left_keys) != len(right_keys):
+                        break
+
+                    join_node_id = "join" if join_idx == 1 else f"join_{join_idx}"
+                    add_join(
+                        plan_obj,
+                        left_node_id=current_node_id,
+                        right_node_id=right_node_id,
+                        left_keys=[str(k).strip() for k in left_keys if str(k).strip()],
+                        right_keys=[str(k).strip() for k in right_keys if str(k).strip()],
+                        join_type=join_type,
+                        node_id=join_node_id,
+                    )
+                    current_node_id = join_node_id
+                    visited.add(next_dataset_id)
+                    used_edges.append(edge)
+                    join_idx += 1
+
+                if current_node_id and visited == selected:
+                    output_input_id = current_node_id
+                    required_cols = _extract_explicit_output_columns_from_goal(goal)
+                    if required_cols:
+                        add_select(plan_obj, input_node_id=output_input_id, columns=list(required_cols), node_id="select_1")
+                        output_input_id = "select_1"
+                    output_name = _extract_explicit_output_name_from_goal(goal) or "output"
+                    add_output(plan_obj, input_node_id=output_input_id, output_name=output_name, output_kind="unknown")
+
+                    plan_model = PipelinePlan.model_validate(plan_obj)
+                    plan_model = plan_model.model_copy(
+                        update={
+                            "plan_id": plan_model.plan_id or plan_id,
+                            "created_by": plan_model.created_by or actor,
+                            "data_scope": data_scope or plan_model.data_scope,
+                            "task_spec": task_spec_model,
+                        }
+                    )
+                    if not plan_model.associations and (task_spec_model is None or bool(task_spec_model.allow_join)):
+                        derived = _associations_from_join_plan(used_edges)
+                        if derived:
+                            plan_model = plan_model.model_copy(update={"associations": derived})
+
+                    validation = await validate_pipeline_plan(
+                        plan=plan_model,
+                        dataset_registry=dataset_registry,
+                        db_name=scope_db,
+                        branch=scope_branch,
+                        require_output=True,
+                        context_pack=context_pack,
+                    )
+                    if not validation.errors:
+                        return PipelinePlanCompileResult(
+                            status="success",
+                            plan_id=plan_id,
+                            plan=validation.plan,
+                            validation_errors=[],
+                            validation_warnings=["compiler: deterministic join-tree fast-path"] + list(validation.warnings or []),
+                            questions=[],
+                            compilation_report=validation.compilation_report,
+                            llm_meta=None,
+                            planner_confidence=1.0,
+                            planner_notes=["deterministic join-tree fast-path"],
                             preflight=validation.preflight,
                         )
     except Exception:

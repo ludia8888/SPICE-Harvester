@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Sequence
 
 from shared.services.pipeline_executor import PipelineExecutor, PipelineTable
+from shared.services.storage_service import StorageService
 from shared.services.pipeline_graph_utils import build_incoming, normalize_edges, normalize_nodes
 from shared.services.pipeline_transform_spec import resolve_join_spec, normalize_operation
 
@@ -34,6 +35,9 @@ class JoinEvaluation:
     right_missing_ratio: float
     left_null_introduced_ratio: float
     right_null_introduced_ratio: float
+
+
+_JOIN_EVAL_SAMPLE_MIN_ROWS = 800
 
 
 def _ratio(numerator: int, denominator: int) -> float:
@@ -178,19 +182,43 @@ async def evaluate_pipeline_joins(
     dataset_registry: Any,
     node_filter: Optional[str] = None,
     run_tables: Optional[Dict[str, Any]] = None,
+    storage_service: Optional[StorageService] = None,
 ) -> Tuple[List[JoinEvaluation], List[str]]:
     nodes = normalize_nodes(definition_json.get("nodes"))
     edges = normalize_edges(definition_json.get("edges"))
     incoming = build_incoming(edges)
+
+    has_join = False
+    for node in nodes.values():
+        if not isinstance(node, dict):
+            continue
+        if node.get("type") != "transform":
+            continue
+        metadata = node.get("metadata") or {}
+        if normalize_operation(metadata.get("operation")) == "join":
+            has_join = True
+            break
 
     warnings: List[str] = []
     if run_tables is not None:
         tables, table_warnings = _coerce_tables(run_tables)
         warnings.extend(table_warnings)
     else:
-        executor = PipelineExecutor(dataset_registry)
+        executor = PipelineExecutor(dataset_registry, storage_service=storage_service)
+        definition_for_run = dict(definition_json) if isinstance(definition_json, dict) else {}
+        if has_join:
+            preview_meta = dict(definition_for_run.get("__preview_meta__") or {})
+            current_limit = None
+            if "sample_limit" in preview_meta:
+                try:
+                    current_limit = int(preview_meta.get("sample_limit") or 0)
+                except (TypeError, ValueError):
+                    current_limit = None
+            if current_limit is None or current_limit < _JOIN_EVAL_SAMPLE_MIN_ROWS:
+                preview_meta["sample_limit"] = _JOIN_EVAL_SAMPLE_MIN_ROWS
+            definition_for_run["__preview_meta__"] = preview_meta
         try:
-            run_result = await executor.run(definition=definition_json, db_name=db_name)
+            run_result = await executor.run(definition=definition_for_run, db_name=db_name)
         except Exception as exc:
             return [], [f"preview run failed: {exc}"]
         tables = run_result.tables

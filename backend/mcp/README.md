@@ -38,6 +38,7 @@ Custom MCP server exposing TerminusDB functionality:
 Custom MCP server exposing deterministic pipeline tools:
 - Build pipeline context packs (safe dataset/schema/sample summaries + join/pk/fk/cast/cleansing hints)
 - Assemble PipelinePlan artifacts via small plan-builder tool calls (add_input/add_join/add_cast/etc)
+- Patch existing plans deterministically (update_node_metadata/set_node_inputs/delete_node/delete_edge/update_output)
 - Preview a plan using the deterministic PipelineExecutor (sample-safe)
 - Inspect a preview sample to generate cleansing suggestions (preview_inspect)
 - Evaluate join quality (coverage/explosion) on sample-safe runs (plan_evaluate_joins)
@@ -88,6 +89,11 @@ CONTEXT7_WORKSPACE=your_workspace_name
 MCP_CONFIG_PATH=./mcp-config.json
 MCP_LOG_LEVEL=info
 MCP_TIMEOUT=30000
+
+# Pipeline planner (MCP)
+PIPELINE_PLAN_MCP_PLANNER_ENABLED=true
+PIPELINE_PLAN_MCP_TRANSFORM_ENABLED=true
+PIPELINE_PLAN_MCP_REPAIR_ENABLED=true
 ```
 
 Docker 환경에서는 `MCP_CONFIG_PATH=/app/mcp-config.json` 처럼 컨테이너 내부 경로를 사용하세요.

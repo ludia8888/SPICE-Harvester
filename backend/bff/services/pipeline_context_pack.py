@@ -655,7 +655,9 @@ def _suggest_join_keys(datasets: list[dict[str, Any]], *, max_candidates: int) -
                     overlap = overlap_stats.get("overlap_ratio", 0.0)
                     left_containment = overlap_stats.get("left_containment", 0.0)
                     right_containment = overlap_stats.get("right_containment", 0.0)
-                    quality = min(left_quality.get(col_a, 0.0), right_quality.get(col_b, 0.0))
+                    # For PK->FK style joins (1:N), the join key is often unique on only one side.
+                    # Using min() here drops common fact-to-dimension candidates (e.g., order_id).
+                    quality = max(left_quality.get(col_a, 0.0), right_quality.get(col_b, 0.0))
                     right_distinct = _distinct_ratio(
                         (right_stats.get("columns") or {}).get(col_b, {}) if isinstance(right_stats.get("columns"), dict) else {},
                         right_sample_n,
@@ -781,7 +783,8 @@ def _suggest_join_keys(datasets: list[dict[str, Any]], *, max_candidates: int) -
                         _format_similarity(format_left.get(cols_a[0], {}).get("format", {}), format_right.get(aligned_b[0], {}).get("format", {}))
                         + _format_similarity(format_left.get(cols_a[1], {}).get("format", {}), format_right.get(aligned_b[1], {}).get("format", {}))
                     ) / 2.0
-                    quality = min(left_quality_combo, right_quality_combo)
+                    # Same rationale as the single-column case: composite PK/FK joins can be unique on only one side.
+                    quality = max(left_quality_combo, right_quality_combo)
                     type_sim = (
                         _type_compatibility(left_type_a, right_type_a) + _type_compatibility(left_type_b, right_type_b)
                     ) / 2.0

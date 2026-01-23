@@ -7,6 +7,8 @@ Executes a pipeline definition against dataset samples to produce preview/output
 from __future__ import annotations
 
 import ast
+import csv
+import io
 import json
 import os
 import re
@@ -109,6 +111,9 @@ class PipelineExecutor:
         self._storage_service = storage_service
         self._cast_mode = normalize_cast_mode(get_settings().pipeline.cast_mode)
         self._cast_stats: Dict[str, Dict[str, int]] = {}
+        # Preview settings are derived from definition["__preview_meta__"] per-run.
+        self._preview_mode: bool = False
+        self._preview_max_output_rows: Optional[int] = None
 
     async def preview(
         self,
@@ -157,6 +162,15 @@ class PipelineExecutor:
         parameters = normalize_parameters(definition.get("parameters"))
         preview_meta = definition.get("__preview_meta__") or {}
         preview_branch = preview_meta.get("branch")
+        self._preview_mode = bool(definition.get("__preview_meta__"))
+        self._preview_max_output_rows = None
+        if self._preview_mode and "max_output_rows" in preview_meta:
+            try:
+                max_rows = int(preview_meta.get("max_output_rows") or 0)
+            except (TypeError, ValueError):
+                max_rows = 0
+            if max_rows > 0:
+                self._preview_max_output_rows = max_rows
         sample_limit = None
         if "sample_limit" in preview_meta:
             try:
@@ -337,10 +351,20 @@ class PipelineExecutor:
             except (TypeError, ValueError):
                 resolved_limit = 200
         try:
-            raw_bytes = await self._storage_service.load_bytes(bucket, key)
+            extension = os.path.splitext(key)[1].lower()
+            if extension == ".csv":
+                # Avoid loading the full CSV into memory; only read enough lines for the requested sample.
+                estimated_bytes = max(64 * 1024, resolved_limit * 512)
+                raw_bytes = await self._storage_service.load_bytes_lines(
+                    bucket,
+                    key,
+                    max_lines=resolved_limit + 1,  # header + rows
+                    max_bytes=estimated_bytes,
+                )
+            else:
+                raw_bytes = await self._storage_service.load_bytes(bucket, key)
         except Exception:
             return []
-        extension = os.path.splitext(key)[1].lower()
         if extension == ".csv":
             return _parse_csv_bytes(raw_bytes, max_rows=resolved_limit)
         if extension in {".xlsx", ".xlsm"}:
@@ -529,6 +553,7 @@ class PipelineExecutor:
                 left_keys=join_spec.left_keys,
                 right_keys=join_spec.right_keys,
                 allow_cross_join=join_spec.allow_cross_join,
+                max_output_rows=self._preview_max_output_rows if self._preview_mode else None,
             )
         if operation == "filter":
             return _filter_table(inputs[0], str(metadata.get("expression") or ""), parameters)
@@ -1100,7 +1125,17 @@ def _join_tables(
     left_keys: Optional[List[str]] = None,
     right_keys: Optional[List[str]] = None,
     allow_cross_join: bool = False,
+    max_output_rows: Optional[int] = None,
 ) -> PipelineTable:
+    limit: Optional[int] = None
+    if max_output_rows is not None:
+        try:
+            limit = int(max_output_rows)
+        except (TypeError, ValueError):
+            limit = None
+        if limit is not None and limit <= 0:
+            limit = None
+
     def _normalize_keys(value: Any) -> List[str]:
         if isinstance(value, list):
             return [str(item).strip() for item in value if str(item).strip()]
@@ -1153,12 +1188,18 @@ def _join_tables(
                     for idx, match in matches:
                         rows.append(_merge_rows(row, match, right_column_map))
                         matched_right.add(idx)
+                        if limit is not None and len(rows) >= limit:
+                            return PipelineTable(columns=columns, rows=rows)
                 elif join_type in {"left", "full"}:
                     rows.append(_merge_rows(row, None, right_column_map))
+                    if limit is not None and len(rows) >= limit:
+                        return PipelineTable(columns=columns, rows=rows)
             if join_type in {"right", "full"}:
                 for idx, row in enumerate(right.rows):
                     if idx not in matched_right:
                         rows.append(_merge_rows(None, row, right_column_map))
+                        if limit is not None and len(rows) >= limit:
+                            return PipelineTable(columns=columns, rows=rows)
             return PipelineTable(columns=columns, rows=rows)
 
         def row_key(row: Dict[str, Any], keys: List[str]) -> Tuple[Any, ...]:
@@ -1175,17 +1216,25 @@ def _join_tables(
                 for idx, match in matches:
                     rows.append(_merge_rows(row, match, right_column_map))
                     matched_right.add(idx)
+                    if limit is not None and len(rows) >= limit:
+                        return PipelineTable(columns=columns, rows=rows)
             elif join_type in {"left", "full"}:
                 rows.append(_merge_rows(row, None, right_column_map))
+                if limit is not None and len(rows) >= limit:
+                    return PipelineTable(columns=columns, rows=rows)
         if join_type in {"right", "full"}:
             for idx, row in enumerate(right.rows):
                 if idx not in matched_right:
                     rows.append(_merge_rows(None, row, right_column_map))
+                    if limit is not None and len(rows) >= limit:
+                        return PipelineTable(columns=columns, rows=rows)
         return PipelineTable(columns=columns, rows=rows)
 
     for left_row in left.rows:
         for right_row in right.rows:
             rows.append(_merge_rows(left_row, right_row, right_column_map))
+            if limit is not None and len(rows) >= limit:
+                return PipelineTable(columns=columns, rows=rows)
     return PipelineTable(columns=columns, rows=rows)
 
 
@@ -1536,27 +1585,52 @@ def _regex_replace_table(table: PipelineTable, rules: List[Dict[str, Any]]) -> P
 
 
 def _parse_csv_bytes(raw_bytes: bytes, *, max_rows: int = 200) -> List[Dict[str, Any]]:
+    """
+    Parse a CSV payload into row dicts.
+
+    NOTE: Must handle quoted headers/fields (common in lakeFS-ingested CSVs),
+    otherwise join keys become missing and joins degrade into cross-joins.
+    """
     try:
         text = raw_bytes.decode("utf-8", errors="replace")
     except Exception:
         return []
-    lines = [line for line in text.splitlines() if line.strip()]
-    if not lines:
+    if not text.strip():
+        return []
+
+    # Detect delimiter from the first non-empty line.
+    first_line = next((line for line in text.splitlines() if line.strip()), "")
+    if not first_line:
         return []
     delimiter = ","
-    sample = lines[0]
-    if "\t" in sample:
+    if "\t" in first_line and first_line.count("\t") >= first_line.count(","):
         delimiter = "\t"
-    elif ";" in sample:
+    elif ";" in first_line and first_line.count(";") >= first_line.count(","):
         delimiter = ";"
-    header = [cell.strip() or f"column_{idx + 1}" for idx, cell in enumerate(sample.split(delimiter))]
+
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    try:
+        raw_header = next(reader)
+    except StopIteration:
+        return []
+
+    header = []
+    for idx, cell in enumerate(raw_header):
+        name = (str(cell or "").strip() or f"column_{idx + 1}").lstrip("\ufeff")
+        header.append(name)
+
     rows: List[Dict[str, Any]] = []
     resolved_limit = max(1, int(max_rows))
-    for line in lines[1 : 1 + resolved_limit]:
-        cells = line.split(delimiter)
+    for record in reader:
+        if len(rows) >= resolved_limit:
+            break
+        if not record:
+            continue
+        if not any(str(cell or "").strip() for cell in record):
+            continue
         row: Dict[str, Any] = {}
         for idx, key in enumerate(header):
-            row[key] = cells[idx].strip() if idx < len(cells) else ""
+            row[key] = str(record[idx]).strip() if idx < len(record) else ""
         rows.append(row)
     return rows
 

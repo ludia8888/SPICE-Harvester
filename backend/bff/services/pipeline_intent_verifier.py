@@ -195,6 +195,11 @@ def _extract_goal_output_columns(goal: str) -> List[str]:
 
 
 def _extract_selected_columns(definition_json: Dict[str, Any]) -> List[str]:
+    # Prefer "final" projection semantics: a select/project feeding an output node.
+    cols = _extract_output_selected_columns(definition_json)
+    if cols:
+        return cols
+
     cols: List[str] = []
     if not isinstance(definition_json, dict):
         return cols
@@ -229,6 +234,71 @@ def _extract_selected_columns(definition_json: Dict[str, Any]) -> List[str]:
     return out
 
 
+def _extract_output_selected_columns(definition_json: Dict[str, Any]) -> List[str]:
+    cols: List[str] = []
+    if not isinstance(definition_json, dict):
+        return cols
+    nodes = definition_json.get("nodes")
+    edges = definition_json.get("edges")
+    if not isinstance(nodes, list) or not isinstance(edges, list):
+        return cols
+
+    node_by_id: Dict[str, Dict[str, Any]] = {}
+    output_ids: List[str] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_id = str(node.get("id") or "").strip()
+        if not node_id:
+            continue
+        node_by_id[node_id] = node
+        if str(node.get("type") or "").strip().lower() == "output":
+            output_ids.append(node_id)
+
+    if not output_ids:
+        return cols
+
+    # Collect the columns list from select/project nodes that directly feed output nodes.
+    for output_id in output_ids:
+        upstream_ids: List[str] = []
+        for edge in edges:
+            if not isinstance(edge, dict):
+                continue
+            if str(edge.get("to") or "").strip() != output_id:
+                continue
+            upstream_id = str(edge.get("from") or "").strip()
+            if upstream_id:
+                upstream_ids.append(upstream_id)
+        for upstream_id in upstream_ids:
+            upstream = node_by_id.get(upstream_id)
+            if not isinstance(upstream, dict):
+                continue
+            metadata = upstream.get("metadata")
+            if not isinstance(metadata, dict):
+                continue
+            op = str(metadata.get("operation") or "").strip().lower()
+            if op not in {"select", "project"}:
+                continue
+            values = metadata.get("columns")
+            if not isinstance(values, list):
+                continue
+            for v in values:
+                name = str(v or "").strip()
+                if name:
+                    cols.append(name)
+
+    # preserve order, dedupe (case-insensitive)
+    seen: set[str] = set()
+    out: List[str] = []
+    for col in cols:
+        lowered = col.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        out.append(col)
+    return out
+
+
 def _extract_mentioned_columns(message: str) -> List[str]:
     """
     Best-effort extraction of column identifiers from LLM messages.
@@ -236,6 +306,23 @@ def _extract_mentioned_columns(message: str) -> List[str]:
     """
     text = str(message or "")
     cols: List[str] = []
+
+    # Some models return bare column identifiers as missing requirements (e.g. "customer_city").
+    bare = text.strip()
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", bare):
+        return [bare]
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\\s*,\\s*[A-Za-z_][A-Za-z0-9_]*)+", bare):
+        parts = [part.strip() for part in bare.split(",") if part.strip()]
+        # preserve order, dedupe (case-insensitive)
+        seen: set[str] = set()
+        out: List[str] = []
+        for col in parts:
+            lowered = col.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            out.append(col)
+        return out
 
     for match in re.finditer(r"(?:'([^']+)'|\"([^\"]+)\"|`([^`]+)`)", text):
         value = next((g for g in match.groups() if g), "")
@@ -257,9 +344,13 @@ def _extract_mentioned_columns(message: str) -> List[str]:
 
     # Fallback: parse simple comma-separated identifiers after "include" / "columns"
     lowered = text.lower()
-    if "column" not in lowered and "columns" not in lowered:
+    has_column_word = ("column" in lowered) or ("columns" in lowered) or ("컬럼" in text)
+    has_output_context = any(token in lowered for token in ("output", "select", "result"))
+    if not has_column_word and not has_output_context:
         return []
-    if "include" not in lowered and "contain" not in lowered:
+    includeish = ("include" in lowered) or ("contain" in lowered)
+    missingish = any(token in lowered for token in ("missing", "not present", "absent", "not in the output"))
+    if not (includeish or missingish):
         return []
     candidates = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", text)
     stop = {
@@ -268,10 +359,25 @@ def _extract_mentioned_columns(message: str) -> List[str]:
         "an",
         "and",
         "or",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "not",
         "to",
         "of",
+        "from",
         "in",
         "on",
+        "dataset",
+        "datasets",
+        "table",
+        "tables",
+        "field",
+        "fields",
         "output",
         "outputs",
         "column",
@@ -279,12 +385,24 @@ def _extract_mentioned_columns(message: str) -> List[str]:
         "include",
         "includes",
         "including",
+        "included",
         "contain",
         "contains",
+        "only",
+        "exactly",
+        "specified",
+        "specify",
+        "add",
+        "added",
+        "adding",
+        "ensure",
         "must",
         "should",
         "need",
         "needs",
+        "missing",
+        "present",
+        "absent",
     }
     out: List[str] = []
     seen: set[str] = set()
@@ -304,12 +422,20 @@ def _looks_like_output_column_requirement(message: str) -> bool:
     if not text:
         return False
     lowered = text.lower()
-    if "column" not in lowered and "columns" not in lowered:
-        return False
     includeish = any(token in lowered for token in ("must include", "needs to include", "should include", "include", "includes", "including"))
     containish = any(token in lowered for token in ("contain", "contains"))
     missingish = any(token in lowered for token in ("missing", "not present", "absent", "not in the output", "not in the output definition"))
-    return includeish or containish or missingish
+    if not (includeish or containish or missingish):
+        return False
+    if "column" in lowered or "columns" in lowered or "컬럼" in text:
+        return True
+    # Some models return output-column requirements without explicitly saying "column(s)".
+    if any(token in lowered for token in ("output", "select", "result")):
+        if re.search(r"(?:'[^']+'|\"[^\"]+\"|`[^`]+`)", text):
+            return True
+        if re.search(r"[A-Za-z_][A-Za-z0-9_]*\s*,\s*[A-Za-z_][A-Za-z0-9_]*", text):
+            return True
+    return False
 
 
 def _columns_satisfied(required: List[str], selected: List[str]) -> bool:
@@ -411,7 +537,7 @@ async def verify_pipeline_intent(
                 continue
 
             # Guardrail: if the plan already selects the columns that the verifier claims are missing, suppress.
-            if selected_cols and _looks_like_output_column_requirement(msg):
+            if selected_cols:
                 required_cols = _extract_mentioned_columns(msg)
                 if required_cols and _columns_satisfied(required_cols, selected_cols):
                     suppressed_missing.append(f"Verifier false-positive suppressed: {msg}")
@@ -434,7 +560,7 @@ async def verify_pipeline_intent(
                 ):
                     suppressed_actions.append(f"Optional (not required by goal): {msg}")
                     continue
-                if selected_cols and _looks_like_output_column_requirement(msg):
+                if selected_cols:
                     required_cols = _extract_mentioned_columns(msg)
                     if required_cols and _columns_satisfied(required_cols, selected_cols):
                         suppressed_actions.append(f"Verifier false-positive suppressed: {msg}")

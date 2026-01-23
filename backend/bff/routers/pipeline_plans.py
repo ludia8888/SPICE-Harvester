@@ -45,6 +45,7 @@ from shared.services.pipeline_executor import PipelineExecutor
 from shared.services.pipeline_preview_inspector import inspect_preview
 from shared.utils.canonical_json import sha256_canonical_json_prefixed
 from shared.services.pipeline_plan_registry import PipelinePlanRegistry
+from shared.services.pipeline_registry import PipelineRegistry
 from shared.dependencies.providers import AuditLogStoreDep, RedisServiceDep, LLMGatewayDep
 from shared.services.llm_quota import LLMQuotaExceededError
 from shared.services.objectify_registry import ObjectifyRegistry
@@ -58,6 +59,46 @@ _PREVIEW_SANITIZER = InputSanitizer()
 _SYS_TS_EXPR_RE = re.compile(r"^\s*(?P<col>_sys_ingested_at|_sys_valid_from)\s*=\s*to_timestamp\('.*'\)\s*$")
 _CONTEXT_PACK_CACHE_PREFIX = "pipeline-context-pack"
 _CONTEXT_PACK_CACHE_TTL_SECONDS = 120
+# Join sampling needs to be large enough to avoid false "empty join" results,
+# but small enough to keep preview runs lightweight in dev.
+_JOIN_SAMPLE_MIN_ROWS = 800
+_JOIN_SAMPLE_MULTI_MIN_ROWS = 5000
+_PREVIEW_MAX_OUTPUT_ROWS = 20000
+
+
+def _definition_has_join(definition_json: Dict[str, Any]) -> bool:
+    nodes = definition_json.get("nodes")
+    if not isinstance(nodes, list):
+        return False
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        if str(node.get("type") or "").strip().lower() != "transform":
+            continue
+        metadata = node.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+        if str(metadata.get("operation") or "").strip().lower() == "join":
+            return True
+    return False
+
+
+def _definition_join_count(definition_json: Dict[str, Any]) -> int:
+    nodes = definition_json.get("nodes")
+    if not isinstance(nodes, list):
+        return 0
+    count = 0
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        if str(node.get("type") or "").strip().lower() != "transform":
+            continue
+        metadata = node.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+        if str(metadata.get("operation") or "").strip().lower() == "join":
+            count += 1
+    return count
 
 
 async def get_dataset_registry() -> DatasetRegistry:
@@ -70,6 +111,12 @@ async def get_dataset_profile_registry() -> DatasetProfileRegistry:
     from bff.main import get_dataset_profile_registry as _get_dataset_profile_registry
 
     return await _get_dataset_profile_registry()
+
+
+async def get_pipeline_registry() -> PipelineRegistry:
+    from bff.main import get_pipeline_registry as _get_pipeline_registry
+
+    return await _get_pipeline_registry()
 
 
 async def get_pipeline_plan_registry() -> PipelinePlanRegistry:
@@ -989,6 +1036,7 @@ async def preview_plan(
     body: PipelinePlanPreviewRequest,
     request: Request,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
     plan_registry: PipelinePlanRegistry = Depends(get_pipeline_plan_registry),
 ) -> ApiResponse:
     try:
@@ -1043,11 +1091,34 @@ async def preview_plan(
     preview_meta = dict(preview_definition.get("__preview_meta__") or {})
     preview_meta.setdefault("branch", str(plan.data_scope.branch or "") or "main")
     sample_limit = max(limit, run_table_limit) if include_run_tables else limit
+    # Join previews are prone to "empty join" false-negatives when sampling the
+    # first N rows from each input independently. Use a larger input sample so
+    # join coverage evaluation is meaningful for typical PK/FK joins.
+    join_count = _definition_join_count(preview_definition)
+    if join_count:
+        sample_limit = max(int(sample_limit or 0), _JOIN_SAMPLE_MIN_ROWS)
+        if join_count > 1:
+            # Multi-join pipelines amplify the independent-sampling problem; bump the input sample
+            # to make it more likely that chained joins produce non-empty previews.
+            #
+            # Scale with the number of joins (join chain length). Cap to keep previews bounded.
+            target = _JOIN_SAMPLE_MULTI_MIN_ROWS * max(1, join_count - 1)
+            sample_limit = max(int(sample_limit or 0), min(target, 20000))
+        # Safety valve: cap join outputs during preview to avoid OOM on bad join keys.
+        preview_meta.setdefault("max_output_rows", _PREVIEW_MAX_OUTPUT_ROWS)
     if sample_limit:
         preview_meta["sample_limit"] = sample_limit
     preview_definition["__preview_meta__"] = preview_meta
 
-    executor = PipelineExecutor(dataset_registry)
+    actor_user_id = (request.headers.get("X-User-ID") or "").strip() or None
+    storage_service = None
+    try:
+        storage_service = await pipeline_registry.get_lakefs_storage(user_id=actor_user_id)
+    except Exception as exc:
+        logger.warning("Failed to init lakeFS storage for pipeline preview: %s", exc)
+        storage_service = None
+
+    executor = PipelineExecutor(dataset_registry, pipeline_registry=pipeline_registry, storage_service=storage_service)
     definition_digest = _definition_digest(preview_definition)
     run_tables_payload: Dict[str, Dict[str, Any]] | None = None
     try:
@@ -1093,6 +1164,7 @@ async def inspect_plan_preview(
     body: PipelinePlanInspectPreviewRequest,
     request: Request,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
     plan_registry: PipelinePlanRegistry = Depends(get_pipeline_plan_registry),
 ) -> ApiResponse:
     try:
@@ -1146,8 +1218,17 @@ async def inspect_plan_preview(
         preview_definition = dict(validation.plan.definition_json)
         preview_meta = dict(preview_definition.get("__preview_meta__") or {})
         preview_meta.setdefault("branch", str(plan.data_scope.branch or "") or "main")
+        if _definition_has_join(preview_definition):
+            preview_meta["sample_limit"] = max(limit, _JOIN_SAMPLE_MIN_ROWS)
         preview_definition["__preview_meta__"] = preview_meta
-        executor = PipelineExecutor(dataset_registry)
+        actor_user_id = (request.headers.get("X-User-ID") or "").strip() or None
+        storage_service = None
+        try:
+            storage_service = await pipeline_registry.get_lakefs_storage(user_id=actor_user_id)
+        except Exception as exc:
+            logger.warning("Failed to init lakeFS storage for pipeline preview inspection: %s", exc)
+            storage_service = None
+        executor = PipelineExecutor(dataset_registry, pipeline_registry=pipeline_registry, storage_service=storage_service)
         preview_payload = await executor.preview(
             definition=preview_definition,
             db_name=db_name,
@@ -1171,6 +1252,7 @@ async def evaluate_joins(
     body: PipelinePlanEvaluateJoinsRequest,
     request: Request,
     dataset_registry: DatasetRegistry = Depends(get_dataset_registry),
+    pipeline_registry: PipelineRegistry = Depends(get_pipeline_registry),
     plan_registry: PipelinePlanRegistry = Depends(get_pipeline_plan_registry),
 ) -> ApiResponse:
     try:
@@ -1229,12 +1311,27 @@ async def evaluate_joins(
     elif run_tables is not None and not definition_digest:
         digest_warnings.append("run_tables provided without definition_digest; skipping digest check")
 
+    actor_user_id = (request.headers.get("X-User-ID") or "").strip() or None
+    storage_service = None
+    try:
+        storage_service = await pipeline_registry.get_lakefs_storage(user_id=actor_user_id)
+    except Exception as exc:
+        logger.warning("Failed to init lakeFS storage for join evaluation: %s", exc)
+        storage_service = None
+
     evaluations, warnings = await evaluate_pipeline_joins(
-        definition_json=validation.plan.definition_json,
+        definition_json={
+            **dict(validation.plan.definition_json),
+            "__preview_meta__": {
+                **dict((validation.plan.definition_json or {}).get("__preview_meta__") or {}),
+                "branch": str(plan.data_scope.branch or "") or "main",
+            },
+        },
         db_name=db_name,
         dataset_registry=dataset_registry,
         node_filter=str(body.node_id or "").strip() or None,
         run_tables=run_tables,
+        storage_service=storage_service,
     )
 
     warnings = digest_warnings + warnings

@@ -28,6 +28,10 @@ class PipelineAgentState(TypedDict):
     repair_attempts: int
     max_cleansing: int
     cleansing_attempts: int
+    verify_intent_attempts: int
+    preview_attempts: int
+    join_eval_attempts: int
+    preview_inspect_attempts: int
     max_transform: int
     transform_attempts: int
     apply_specs: bool
@@ -372,10 +376,24 @@ def _needs_join_revision(join_evaluation: Any, warnings: Any) -> bool:
             left_coverage = float(item.get("left_coverage") or 0.0)
             right_coverage = float(item.get("right_coverage") or 0.0)
             explosion_ratio = float(item.get("explosion_ratio") or 0.0)
+            output_row_count = int(item.get("output_row_count") or 0)
+            left_row_count = int(item.get("left_row_count") or 0)
+            right_row_count = int(item.get("right_row_count") or 0)
         except (TypeError, ValueError):
             continue
-        # Extremely low match rates suggest key mismatch; extreme explosion suggests many-to-many blowup.
-        if min(left_coverage, right_coverage) <= 0.05:
+        # Join evaluation runs on independently sampled inputs, so match-rate based signals are
+        # very noisy for high-cardinality keys (e.g., order_id). Avoid "fixing" correct joins.
+        #
+        # Trigger revision only when we see a strong failure signal:
+        # - zero matches in the sampled join output, or
+        # - extreme blow-up (many-to-many / wrong key).
+        # If one side is already a tiny intermediate table, zero matches is expected with independent sampling.
+        # Only treat "zero matches" as actionable when both inputs are reasonably sized.
+        if (
+            output_row_count <= 0
+            and min(left_row_count, right_row_count) >= 200
+            and min(left_coverage, right_coverage) <= 0.001
+        ):
             return True
         if explosion_ratio >= 10.0:
             return True
@@ -386,6 +404,7 @@ def _needs_join_revision(join_evaluation: Any, warnings: Any) -> bool:
         if not text:
             continue
         if "join input order ambiguous" in text:
+            # This can lead to a wrong join when left/right keys differ. Allow a single retry.
             return True
     return False
 
@@ -945,10 +964,11 @@ async def _verify_intent(state: PipelineAgentState, runtime: AgentRuntime) -> Pi
     if not plan_id:
         return {**state, "next_action": "end", "status": "failed", "error": "plan_id missing"}
 
+    verify_attempts = int(state.get("verify_intent_attempts") or 0) + 1
     result = await _call_bff(
         runtime=runtime,
         state=state,
-        step_id="pipeline_plan_verify_intent",
+        step_id=f"pipeline_plan_verify_intent_{verify_attempts}",
         method="POST",
         path=f"/api/v1/pipeline-plans/{plan_id}/verify-intent",
         tool_id="pipeline_plans.verify_intent",
@@ -959,7 +979,13 @@ async def _verify_intent(state: PipelineAgentState, runtime: AgentRuntime) -> Pi
         },
     )
     if result.get("status") != "success":
-        return {**state, "next_action": "end", "status": "failed", "error": result.get("error")}
+        return {
+            **state,
+            "verify_intent_attempts": verify_attempts,
+            "next_action": "end",
+            "status": "failed",
+            "error": result.get("error"),
+        }
 
     payload = result.get("payload")
     data = _api_data(payload)
@@ -972,6 +998,7 @@ async def _verify_intent(state: PipelineAgentState, runtime: AgentRuntime) -> Pi
     if intent_status == "pass":
         return {
             **state,
+            "verify_intent_attempts": verify_attempts,
             "intent_status": intent_status,
             "intent_issues": missing,
             "intent_actions": suggested,
@@ -991,6 +1018,7 @@ async def _verify_intent(state: PipelineAgentState, runtime: AgentRuntime) -> Pi
             }
             return {
                 **state,
+                "verify_intent_attempts": verify_attempts,
                 "planner_hints": planner_hints,
                 "intent_status": intent_status,
                 "intent_issues": missing,
@@ -1021,6 +1049,7 @@ async def _verify_intent(state: PipelineAgentState, runtime: AgentRuntime) -> Pi
             if result.get("status") != "success":
                 return {
                     **state,
+                    "verify_intent_attempts": verify_attempts,
                     "intent_status": intent_status,
                     "intent_issues": missing,
                     "intent_actions": suggested,
@@ -1035,6 +1064,7 @@ async def _verify_intent(state: PipelineAgentState, runtime: AgentRuntime) -> Pi
             questions = data.get("questions") if isinstance(data.get("questions"), list) else []
             return {
                 **state,
+                "verify_intent_attempts": verify_attempts,
                 "intent_status": intent_status,
                 "intent_issues": missing,
                 "intent_actions": suggested,
@@ -1057,6 +1087,7 @@ async def _verify_intent(state: PipelineAgentState, runtime: AgentRuntime) -> Pi
     if intent_status == "clarification_required":
         return {
             **state,
+            "verify_intent_attempts": verify_attempts,
             "intent_status": intent_status,
             "intent_issues": missing,
             "intent_actions": suggested,
@@ -1068,6 +1099,7 @@ async def _verify_intent(state: PipelineAgentState, runtime: AgentRuntime) -> Pi
 
     return {
         **state,
+        "verify_intent_attempts": verify_attempts,
         "intent_status": intent_status or "unknown",
         "intent_issues": missing,
         "intent_actions": suggested,
@@ -1086,10 +1118,11 @@ async def _preview_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
     requested_limit = int(state.get("preview_limit") or 200)
     preview_limit = min(requested_limit, 200)
     run_table_limit = min(requested_limit, 1000)
+    preview_attempts = int(state.get("preview_attempts") or 0) + 1
     result = await _call_bff(
         runtime=runtime,
         state=state,
-        step_id="pipeline_plan_preview",
+        step_id=f"pipeline_plan_preview_{preview_attempts}",
         method="POST",
         path=f"/api/v1/pipeline-plans/{plan_id}/preview",
         tool_id="pipeline_plans.preview",
@@ -1101,7 +1134,13 @@ async def _preview_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
         },
     )
     if result.get("status") != "success":
-        return {**state, "next_action": "end", "status": "failed", "error": result.get("error")}
+        return {
+            **state,
+            "preview_attempts": preview_attempts,
+            "next_action": "end",
+            "status": "failed",
+            "error": result.get("error"),
+        }
 
     payload = result.get("payload")
     api_status = _api_status(payload)
@@ -1113,6 +1152,7 @@ async def _preview_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
         if repair_attempts < max_repairs:
             return {
                 **state,
+                "preview_attempts": preview_attempts,
                 "validation_errors": list(data.get("validation_errors") or []),
                 "validation_warnings": list(data.get("validation_warnings") or []),
                 "preflight": data.get("preflight") if isinstance(data.get("preflight"), dict) else None,
@@ -1123,6 +1163,7 @@ async def _preview_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
             }
         return {
             **state,
+            "preview_attempts": preview_attempts,
             "validation_errors": list(data.get("validation_errors") or []),
             "validation_warnings": list(data.get("validation_warnings") or []),
             "preflight": data.get("preflight") if isinstance(data.get("preflight"), dict) else None,
@@ -1137,6 +1178,7 @@ async def _preview_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
     next_action = "evaluate" if bool(task_spec.get("allow_join")) else "inspect"
     return {
         **state,
+        "preview_attempts": preview_attempts,
         "preflight": data.get("preflight") if isinstance(data.get("preflight"), dict) else None,
         "preview": data.get("preview") if isinstance(data.get("preview"), dict) else None,
         "run_tables": data.get("run_tables") if isinstance(data.get("run_tables"), dict) else None,
@@ -1155,10 +1197,11 @@ async def _evaluate_joins(state: PipelineAgentState, runtime: AgentRuntime) -> P
             "run_tables": None,
         }
 
+    join_eval_attempts = int(state.get("join_eval_attempts") or 0) + 1
     result = await _call_bff(
         runtime=runtime,
         state=state,
-        step_id="pipeline_join_evaluate",
+        step_id=f"pipeline_join_evaluate_{join_eval_attempts}",
         method="POST",
         path=f"/api/v1/pipeline-plans/{plan_id}/evaluate-joins",
         tool_id="pipeline_plans.evaluate_joins",
@@ -1170,6 +1213,7 @@ async def _evaluate_joins(state: PipelineAgentState, runtime: AgentRuntime) -> P
     if result.get("status") != "success":
         return {
             **state,
+            "join_eval_attempts": join_eval_attempts,
             "next_action": "inspect",
             "join_evaluation": None,
             "join_evaluation_warnings": [],
@@ -1234,6 +1278,7 @@ async def _evaluate_joins(state: PipelineAgentState, runtime: AgentRuntime) -> P
                 planner_hints["join_revision_feedback"] = feedback
                 return {
                     **state,
+                    "join_eval_attempts": join_eval_attempts,
                     "join_hints": revised,
                     "planner_hints": planner_hints,
                     "join_evaluation": join_evaluation,
@@ -1248,6 +1293,7 @@ async def _evaluate_joins(state: PipelineAgentState, runtime: AgentRuntime) -> P
 
     return {
         **state,
+        "join_eval_attempts": join_eval_attempts,
         "planner_hints": planner_hints,
         "join_evaluation": join_evaluation,
         "join_evaluation_warnings": join_eval_warnings,
@@ -1262,17 +1308,24 @@ async def _inspect_preview(state: PipelineAgentState, runtime: AgentRuntime) -> 
     if not plan_id:
         return {**state, "next_action": "end", "status": "failed", "error": "plan_id missing"}
 
+    inspect_attempts = int(state.get("preview_inspect_attempts") or 0) + 1
     result = await _call_bff(
         runtime=runtime,
         state=state,
-        step_id="pipeline_plan_inspect_preview",
+        step_id=f"pipeline_plan_inspect_preview_{inspect_attempts}",
         method="POST",
         path=f"/api/v1/pipeline-plans/{plan_id}/inspect-preview",
         tool_id="pipeline_plans.inspect_preview",
         body={"preview": state.get("preview")},
     )
     if result.get("status") != "success":
-        return {**state, "next_action": "end", "status": "failed", "error": result.get("error")}
+        return {
+            **state,
+            "preview_inspect_attempts": inspect_attempts,
+            "next_action": "end",
+            "status": "failed",
+            "error": result.get("error"),
+        }
 
     payload = result.get("payload")
     data = _api_data(payload)
@@ -1290,6 +1343,7 @@ async def _inspect_preview(state: PipelineAgentState, runtime: AgentRuntime) -> 
 
     return {
         **state,
+        "preview_inspect_attempts": inspect_attempts,
         "cleansing_inspector": inspector,
         "next_action": next_action,
         "status": "success" if next_action == "end" else state.get("status"),
@@ -1301,10 +1355,11 @@ async def _cleanse_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
     if not plan_id:
         return {**state, "next_action": "end", "status": "failed", "error": "plan_id missing"}
 
+    cleanse_attempts = int(state.get("cleansing_attempts") or 0) + 1
     result = await _call_bff(
         runtime=runtime,
         state=state,
-        step_id="pipeline_plan_cleanse",
+        step_id=f"pipeline_plan_cleanse_{cleanse_attempts}",
         method="POST",
         path=f"/api/v1/pipeline-plans/{plan_id}/cleanse",
         tool_id="pipeline_plans.cleanse",
@@ -1315,7 +1370,13 @@ async def _cleanse_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
         },
     )
     if result.get("status") != "success":
-        return {**state, "next_action": "end", "status": "failed", "error": result.get("error")}
+        return {
+            **state,
+            "cleansing_attempts": cleanse_attempts,
+            "next_action": "end",
+            "status": "failed",
+            "error": result.get("error"),
+        }
 
     payload = result.get("payload")
     api_status = _api_status(payload)
@@ -1346,7 +1407,7 @@ async def _cleanse_plan(state: PipelineAgentState, runtime: AgentRuntime) -> Pip
 
     actions = list(data.get("actions_applied") or [])
     plan = data.get("plan") if isinstance(data.get("plan"), dict) else state.get("plan")
-    attempts = int(state.get("cleansing_attempts") or 0) + 1
+    attempts = cleanse_attempts
 
     if not actions:
         return {
@@ -1694,6 +1755,10 @@ def build_pipeline_agent_state(
         repair_attempts=0,
         max_cleansing=int(max_cleansing),
         cleansing_attempts=0,
+        verify_intent_attempts=0,
+        preview_attempts=0,
+        join_eval_attempts=0,
+        preview_inspect_attempts=0,
         max_transform=int(max_transform),
         transform_attempts=0,
         apply_specs=bool(apply_specs),
